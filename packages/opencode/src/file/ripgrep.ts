@@ -1,4 +1,6 @@
+import nodeFs from "fs"
 import path from "path"
+import { promisify } from "util"
 import z from "zod"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { Cause, Context, Effect, Fiber, Layer, Queue, Stream } from "effect"
@@ -6,6 +8,9 @@ import type { PlatformError } from "effect/PlatformError"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+
+const readdir = promisify(nodeFs.readdir)
+const nodeStat = promisify(nodeFs.stat)
 
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { Global } from "@/global"
@@ -261,7 +266,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            `$global:ProgressPreference = 'SilentlyContinue'; Expand-Archive -LiteralPath '${archive.replaceAll("'", "''")}' -DestinationPath '${dir.replaceAll("'", "''")}' -Force`,
+            `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('${archive.replaceAll("'", "''")}', '${dir.replaceAll("'", "''")}')`,
           ])
           if (result.code !== 0) {
             return yield* Effect.fail(error(result.stderr || result.stdout, result.code))
@@ -313,10 +318,24 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           const bytes = yield* HttpClientRequest.get(url).pipe(
             http.execute,
             Effect.flatMap((response) => response.arrayBuffer),
-            Effect.mapError((cause) => (cause instanceof Error ? cause : new Error(String(cause)))),
+            Effect.mapError((cause) => {
+              const msg = cause instanceof Error ? cause.message : String(cause)
+              if (msg.includes("ENOTFOUND") || msg.includes("ECONNREFUSED") || msg.includes("fetch")) {
+                return new Error(
+                  `Cannot download ripgrep: network unavailable (${msg}). ` +
+                    `Please install ripgrep manually: https://github.com/BurntSushi/ripgrep#installation`,
+                )
+              }
+              return cause instanceof Error ? cause : new Error(String(cause))
+            }),
           )
           if (bytes.byteLength === 0) {
-            return yield* Effect.fail(new Error(`failed to download ripgrep from ${url}`))
+            return yield* Effect.fail(
+              new Error(
+                `Failed to download ripgrep from ${url}. ` +
+                  `If you are in a restricted network, please install ripgrep manually.`,
+              ),
+            )
           }
 
           yield* fs.writeWithDirs(archive, new Uint8Array(bytes))
@@ -347,13 +366,93 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
         })
       })
 
+      async function* walkDir(
+        dir: string,
+        options: { follow: boolean; hidden: boolean; maxDepth?: number; glob?: string[] },
+        currentDepth = 0,
+      ): AsyncGenerator<string> {
+        if (options.maxDepth !== undefined && currentDepth > options.maxDepth) return
+
+        let entries: nodeFs.Dirent[]
+        try {
+          entries = await readdir(dir, { withFileTypes: true })
+        } catch {
+          return
+        }
+
+        for (const entry of entries) {
+          const name = entry.name
+          if (!options.hidden && name.startsWith(".")) continue
+          if (name === ".git") continue
+
+          const fullPath = path.join(dir, name)
+          const relPath = path.relative(dir, fullPath)
+
+          if (entry.isDirectory()) {
+            if (!options.follow) {
+              let isSymlink = false
+              try {
+                const s = await nodeStat(fullPath)
+                isSymlink = s.isSymbolicLink?.() ?? false
+              } catch {}
+              if (isSymlink) continue
+            }
+            yield* walkDir(fullPath, options, currentDepth + 1)
+          } else if (entry.isFile()) {
+            yield relPath
+          }
+        }
+      }
+
+      const filesFallback = Effect.fnUntraced(function* (input: FilesInput) {
+        yield* check(input.cwd)
+        return Stream.async<string, PlatformError | Error>((queue) => {
+          const ac = new AbortController()
+          input.signal?.addEventListener("abort", () => ac.abort())
+
+          ;(async () => {
+            try {
+              for await (const file of walkDir(input.cwd, {
+                follow: input.follow ?? false,
+                hidden: input.hidden !== false,
+                maxDepth: input.maxDepth,
+                glob: input.glob,
+              })) {
+                if (ac.signal.aborted) break
+                Queue.offerUnsafe(queue, clean(file))
+              }
+              Queue.endUnsafe(queue)
+            } catch (err) {
+              fail(queue, err instanceof Error ? err : new Error(String(err)))
+            }
+          })()
+
+          return Effect.sync(() => ac.abort())
+        })
+      })
+
       const files: Interface["files"] = (input) =>
         Stream.callback<string, PlatformError | Error>((queue) =>
           Effect.gen(function* () {
             yield* Effect.forkScoped(
               Effect.gen(function* () {
                 yield* check(input.cwd)
-                const handle = yield* spawner.spawn(yield* command(input.cwd, filesArgs(input)))
+                const binary = yield* filepath.pipe(Effect.catch(() => Effect.succeed(undefined)))
+                if (!binary) {
+                  log.info("ripgrep not available, using fallback for file listing")
+                  const fallback = yield* filesFallback(input)
+                  yield* Stream.runForEach(fallback, (line) => Effect.sync(() => Queue.offerUnsafe(queue, line)))
+                  Queue.endUnsafe(queue)
+                  return
+                }
+                const handle = yield* spawner.spawn(
+                  ChildProcess.make(binary, filesArgs(input), {
+                    cwd: input.cwd,
+                    env: env(),
+                    extendEnv: true,
+                    stdin: "ignore",
+                  }),
+                )
                 const stderr = yield* Stream.mkString(Stream.decodeText(handle.stderr)).pipe(Effect.forkScoped)
                 const stdout = yield* Stream.decodeText(handle.stdout).pipe(
                   Stream.splitLines,
