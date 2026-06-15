@@ -2775,7 +2775,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
             const maxModeCfg = (yield* config.get()).experimental?.maxMode
             const useMaxMode =
-              agent.name === MaxMode.MAX_MODE_AGENT && maxModeCfg !== undefined && format.type !== "json_schema"
+              (agent.name === MaxMode.MAX_MODE_AGENT || agent.maxMode === true) &&
+              maxModeCfg !== undefined &&
+              format.type !== "json_schema"
 
             const processArgs = {
               user: lastUser,

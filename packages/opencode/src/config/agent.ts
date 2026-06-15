@@ -61,6 +61,10 @@ const AgentSchema = Schema.StructWithRest(
     }),
     maxSteps: Schema.optional(PositiveInt).annotate({ description: "@deprecated Use 'steps' field instead." }),
     permission: Schema.optional(PermissionRef),
+    maxMode: Schema.optional(Schema.Boolean).annotate({
+      description:
+        "Enable max mode for this agent: run N parallel reasoning candidates each step, pick the best via a judge call, and execute only the winner. Requires experimental.maxMode to be configured.",
+    }),
   }),
   [Schema.Record(Schema.String, Schema.Any)],
 )
@@ -83,6 +87,7 @@ const KNOWN_KEYS = new Set([
   "disable",
   "tools",
   "tool_allowlist",
+  "maxMode",
 ])
 
 // Post-parse normalisation:

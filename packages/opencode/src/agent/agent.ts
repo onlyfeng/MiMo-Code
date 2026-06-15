@@ -49,6 +49,7 @@ export const Info = z
     options: z.record(z.string(), z.any()),
     steps: z.number().int().positive().optional(),
     toolAllowlist: z.array(z.string()).optional(),
+    maxMode: z.boolean().optional(),
   })
   .meta({
     ref: "Agent",
@@ -397,6 +398,7 @@ export const layer = Layer.effect(
           item.name = value.name ?? item.name
           item.steps = value.steps ?? item.steps
           item.toolAllowlist = value.tool_allowlist ?? item.toolAllowlist
+          item.maxMode = value.maxMode ?? item.maxMode
           item.options = mergeDeep(item.options, value.options ?? {})
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
         }
