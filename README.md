@@ -106,7 +106,7 @@ MiMoCode is configured via `.mimocode/mimocode.json` in the project directory (o
 - MCP server connections
 - Keybindings and theme
 
-Max Mode (parallel best-of-N reasoning with judge selection) can be enabled via `experimental.maxMode` in the config.
+Max Mode (parallel best-of-N reasoning with judge selection) can be enabled via `experimental.maxMode` in the config. Any agent can opt-in by setting `maxMode: true` in its agent config.
 
 ---
 
