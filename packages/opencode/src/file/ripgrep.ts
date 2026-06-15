@@ -406,29 +406,32 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 
       const filesFallback = Effect.fnUntraced(function* (input: FilesInput) {
         yield* check(input.cwd)
-        return Stream.async<string, PlatformError | Error>((queue) => {
-          const ac = new AbortController()
-          input.signal?.addEventListener("abort", () => ac.abort())
+        return Stream.callback<string, PlatformError | Error>((queue) =>
+          Effect.gen(function* () {
+            const ac = new AbortController()
+            input.signal?.addEventListener("abort", () => ac.abort())
 
-          ;(async () => {
-            try {
-              for await (const file of walkDir(input.cwd, {
-                follow: input.follow ?? false,
-                hidden: input.hidden !== false,
-                maxDepth: input.maxDepth,
-                glob: input.glob,
-              })) {
-                if (ac.signal.aborted) break
-                Queue.offerUnsafe(queue, clean(file))
-              }
-              Queue.endUnsafe(queue)
-            } catch (err) {
-              fail(queue, err instanceof Error ? err : new Error(String(err)))
-            }
-          })()
+            yield* Effect.forkScoped(
+              Effect.tryPromise({
+                try: async () => {
+                  for await (const file of walkDir(input.cwd, {
+                    follow: input.follow ?? false,
+                    hidden: input.hidden !== false,
+                    maxDepth: input.maxDepth,
+                    glob: input.glob,
+                  })) {
+                    if (ac.signal.aborted) break
+                    Queue.offerUnsafe(queue, clean(file))
+                  }
+                  Queue.endUnsafe(queue)
+                },
+                catch: (err) => (err instanceof Error ? err : new Error(String(err))),
+              }),
+            )
 
-          return Effect.sync(() => ac.abort())
-        })
+            return Effect.sync(() => ac.abort())
+          }),
+        )
       })
 
       const files: Interface["files"] = (input) =>
