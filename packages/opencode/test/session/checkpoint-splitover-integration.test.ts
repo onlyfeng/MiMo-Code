@@ -8,6 +8,7 @@ import { Bus } from "../../src/bus"
 import { Log } from "../../src/util"
 import { AppRuntime } from "../../src/effect/app-runtime"
 import { Actor } from "../../src/actor/spawn"
+import { spawnRef } from "../../src/actor/spawn-ref"
 import { Session } from "../../src/session"
 import { checkpointPath, metaDir } from "../../src/session/checkpoint-paths"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
@@ -318,6 +319,11 @@ describe("CheckpointContext producer (tryStartCheckpointWriter)", () => {
                 )
               })
 
+              // tryStartCheckpointWriter spawns the writer via the module-global
+              // spawnRef. Other suites that build their own Actor layer null it out
+              // when their scope closes, so re-establish it from the live AppRuntime
+              // impl before the call to keep this test order-independent.
+              spawnRef.current = yield* Actor.Service
               const svc = yield* SessionCheckpoint.Service
               const status = yield* svc.tryStartCheckpointWriter({
                 sessionID: sess.id,
@@ -486,6 +492,12 @@ describe("parentSessionID end-to-end (Axis A wiring)", () => {
               // a child session and spawns the writer in it. The wiring under
               // test: actor.spawn must receive parentSessionID = parent.id,
               // forkWork must propagate it, plugin must see it.
+              //
+              // Re-establish spawnRef from the live AppRuntime Actor impl first:
+              // other suites that build their own Actor layer null it out on scope
+              // close, which would make tryStartCheckpointWriter short-circuit to
+              // "skipped" depending on test order.
+              spawnRef.current = yield* Actor.Service
               const svc = yield* SessionCheckpoint.Service
               const status = yield* svc.tryStartCheckpointWriter({
                 sessionID: parent.id,

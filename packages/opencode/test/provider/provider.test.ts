@@ -2573,7 +2573,10 @@ test("plugin config providers persist after instance dispose", async () => {
   })
   expect(second[ProviderID.make("demo")]).toBeDefined()
   expect(second[ProviderID.make("demo")].models[ModelID.make("chat")]).toBeDefined()
-})
+  // plugin.init() loads/transpiles the plugin and provider.list() resolves its npm
+  // SDK; under CI load this exceeded the 30s global timeout. 60s gives headroom
+  // (it completes well under that locally) without masking a real hang.
+}, 60000)
 
 test("plugin config enabled and disabled providers are honored", async () => {
   await using tmp = await tmpdir({
@@ -2610,7 +2613,9 @@ test("plugin config enabled and disabled providers are honored", async () => {
       expect(providers[ProviderID.openai]).toBeUndefined()
     },
   })
-})
+  // Same plugin-init + provider-resolution cost as the test above; raise the
+  // timeout so CI load doesn't flake it.
+}, 60000)
 
 test("opencode and opencode-go providers are disabled by MimoFreeAuthPlugin", async () => {
   await using base = await tmpdir({

@@ -49,15 +49,45 @@ async function stop(dir: string) {
   await $`git fsmonitor--daemon stop`.cwd(dir).quiet().nothrow()
 }
 
+// The server security middleware rejects directories outside cwd on
+// unauthenticated servers, so HTTP route tests must root their fixtures under
+// cwd. node_modules is gitignored, and a git:true fixture carries its own .git
+// so VCS detection stops at the fixture instead of walking up to this repo.
+const cwdFixtureRoot = () => path.join(process.cwd(), "node_modules", ".mimocode-cwd-fixtures")
+
+// "home" roots a fixture outside cwd yet outside the SYSTEM_PATHS blocklist that
+// isValidProjectDirectory rejects before it checks project markers (see
+// middleware.ts) — used to exercise the marker branch, since the os.tmpdir()
+// default sits under /tmp on Linux. Prefer os.homedir() (/home/runner on CI,
+// /Users/x on macOS), but it is /root under a root user — itself a SYSTEM_PATH —
+// so pick the first non-system candidate between it and cwd's parent. If the
+// whole tree sits under a system path (e.g. the repo checked out directly under
+// /root), no non-system location exists; fall back to cwd's parent so the result
+// is at least deterministic — the marker branch simply isn't reachable there.
+const SYSTEM_PREFIXES = ["/etc", "/proc", "/sys", "/var", "/boot", "/root", "/dev", "/usr", "/bin", "/sbin", "/lib", "/tmp"]
+const underSystemPath = (p: string) => SYSTEM_PREFIXES.some((s) => p === s || p.startsWith(s + "/"))
+function homeFixtureRoot() {
+  const parent = path.dirname(process.cwd())
+  const base = [os.homedir(), parent].find((c) => !underSystemPath(c)) ?? parent
+  return path.join(base, ".mimocode-home-fixtures")
+}
+
+function tmpdirBase(root?: "cwd" | "tmp" | "home") {
+  if (root === "cwd") return cwdFixtureRoot()
+  if (root === "home") return homeFixtureRoot()
+  return process.env["MIMOCODE_TEST_TMPDIR_ROOT"] ?? os.tmpdir()
+}
+
 type TmpDirOptions<T> = {
   git?: boolean
   config?: Partial<Config.Info>
   init?: (dir: string) => Promise<T>
   dispose?: (dir: string) => Promise<T>
+  root?: "cwd" | "tmp" | "home"
 }
 export async function tmpdir<T>(options?: TmpDirOptions<T>) {
   const dirpath = sanitizePath(
-    path.join(process.env["MIMOCODE_TEST_TMPDIR_ROOT"] ?? os.tmpdir(), "mimocode-test-" + Math.random().toString(36).slice(2)),
+    path.join(tmpdirBase(options?.root), "mimocode-test-" + Math.random().toString(36).slice(2)),
   )
   await fs.mkdir(dirpath, { recursive: true })
   if (options?.git) {
@@ -95,11 +125,11 @@ export async function tmpdir<T>(options?: TmpDirOptions<T>) {
 }
 
 /** Effectful scoped tmpdir. Cleaned up when the scope closes. Make sure these stay in sync */
-export function tmpdirScoped(options?: { git?: boolean; config?: Partial<Config.Info> }) {
+export function tmpdirScoped(options?: { git?: boolean; config?: Partial<Config.Info>; root?: "cwd" | "tmp" }) {
   return Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const dirpath = sanitizePath(
-      path.join(process.env["MIMOCODE_TEST_TMPDIR_ROOT"] ?? os.tmpdir(), "mimocode-test-" + Math.random().toString(36).slice(2)),
+      path.join(tmpdirBase(options?.root), "mimocode-test-" + Math.random().toString(36).slice(2)),
     )
     yield* Effect.promise(() => fs.mkdir(dirpath, { recursive: true }))
     const dir = sanitizePath(yield* Effect.promise(() => fs.realpath(dirpath)))
@@ -150,7 +180,7 @@ export const provideInstance =
 
 export function provideTmpdirInstance<A, E, R>(
   self: (path: string) => Effect.Effect<A, E, R>,
-  options?: { git?: boolean; config?: Partial<Config.Info> },
+  options?: { git?: boolean; config?: Partial<Config.Info>; root?: "cwd" | "tmp" },
 ) {
   return Effect.gen(function* () {
     const path = yield* tmpdirScoped(options)
@@ -174,7 +204,7 @@ export function provideTmpdirInstance<A, E, R>(
 
 export function provideTmpdirServer<A, E, R>(
   self: (input: { dir: string; llm: TestLLMServer["Service"] }) => Effect.Effect<A, E, R>,
-  options?: { git?: boolean; config?: (url: string) => Partial<Config.Info> },
+  options?: { git?: boolean; config?: (url: string) => Partial<Config.Info>; root?: "cwd" | "tmp" },
 ): Effect.Effect<
   A,
   E | PlatformError.PlatformError,
@@ -185,6 +215,7 @@ export function provideTmpdirServer<A, E, R>(
     return yield* provideTmpdirInstance((dir) => self({ dir, llm }), {
       git: options?.git,
       config: options?.config?.(llm.url),
+      root: options?.root,
     })
   })
 }
