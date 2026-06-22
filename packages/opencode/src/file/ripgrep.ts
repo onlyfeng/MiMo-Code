@@ -178,6 +178,24 @@ function clean(file: string) {
   return path.normalize(file.replace(/^\.[\\/]/, ""))
 }
 
+// Approximate `rg --glob` for the no-rg fallback, following .gitignore glob rules:
+// a leading "!" excludes, later patterns win (last match decides), and any positive
+// pattern flips matching to allowlist mode. A pattern without a slash matches at any
+// depth (against the basename, so `*.ts` still hits `src/a.ts`); a pattern with a slash
+// matches the full cwd-relative path.
+function matchesGlobs(rel: string, globs: string[]) {
+  const posix = rel.split(path.sep).join("/")
+  const base = posix.slice(posix.lastIndexOf("/") + 1)
+  return globs.reduce(
+    (included, glob) => {
+      const negated = glob.startsWith("!")
+      const pattern = negated ? glob.slice(1) : glob
+      return Glob.match(pattern, pattern.includes("/") ? posix : base) ? !negated : included
+    },
+    !globs.some((g) => !g.startsWith("!")),
+  )
+}
+
 function row(data: Row): Row {
   return {
     ...data,
@@ -395,18 +413,19 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                 if (!binary) {
                   log.info("ripgrep not available, using fallback for file listing")
                   yield* Effect.tryPromise({
-                    try: async () => {
+                    // `signal` aborts when the Stream scope closes (e.g. a consumer using
+                    // Stream.take stops early), so the walk doesn't keep scanning the whole
+                    // tree after the reader is done.
+                    try: async (signal) => {
                       for await (const file of walkDir(input.cwd, {
                         hidden: input.hidden !== false,
                         maxDepth: input.maxDepth,
                       })) {
-                        if (input.signal?.aborted) break
+                        if (signal.aborted || input.signal?.aborted) break
                         // walkDir yields absolute paths; emit cwd-relative ones so the output
                         // matches `rg --files` (consumers like tree() split on path.sep).
                         const rel = path.relative(input.cwd, file)
-                        // Best-effort glob filtering (rg is absent). minimatch needs posix
-                        // separators; semantics approximate rg's --glob in this degraded path.
-                        if (input.glob && !input.glob.some((g) => Glob.match(g, rel.split(path.sep).join("/")))) continue
+                        if (input.glob && !matchesGlobs(rel, input.glob)) continue
                         Queue.offerUnsafe(queue, clean(rel))
                       }
                     },
