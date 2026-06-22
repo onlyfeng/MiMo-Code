@@ -1,7 +1,8 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, beforeEach, describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import * as fs from "fs/promises"
 import path from "path"
+import { Global } from "../../src/global"
 import { Bus } from "../../src/bus"
 import { Config } from "../../src/config"
 import { Memory } from "../../src/memory"
@@ -13,6 +14,14 @@ import { Instance } from "../../src/project/instance"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+
+// Memory lives under a single process-wide data dir (XDG_DATA_HOME, set in
+// preload), so memory written by other test files leaks into renderRebuildContext,
+// which reads project/global memory. Clear it before each test so these assertions
+// see only what the test itself sets up.
+beforeEach(async () => {
+  await fs.rm(path.join(Global.Path.data, "memory"), { recursive: true, force: true })
+})
 
 afterEach(async () => {
   await Instance.disposeAll()

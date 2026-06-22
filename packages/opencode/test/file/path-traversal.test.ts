@@ -231,7 +231,11 @@ describe("isValidProjectDirectory", () => {
   })
 
   test("allows directories with project markers", async () => {
+    // root: "home" puts the fixture outside cwd but outside the SYSTEM_PATHS
+    // blocklist, so the .git marker is what makes it valid. The os.tmpdir()
+    // default lands under /tmp on Linux, which is rejected before markers run.
     await using tmp = await tmpdir({
+      root: "home",
       init: async (dir) => {
         await fs.mkdir(path.join(dir, ".git"))
       },

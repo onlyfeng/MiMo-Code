@@ -225,7 +225,10 @@ describe("workflows routes — live runtime", () => {
           resumed: false,
         })
       }),
-      { git: true, config: providerCfg },
+      // root: "cwd" keeps the fixture inside cwd so the server security middleware
+      // (which rejects directories outside cwd on unauthenticated servers) serves it;
+      // git: true gives it its own .git so VCS detection stays scoped to the fixture.
+      { git: true, config: providerCfg, root: "cwd" },
     ),
   )
 
@@ -269,7 +272,10 @@ describe("workflows routes — live runtime", () => {
         expect(row!.status).toBe("completed")
         expect(row!.succeeded).toBeGreaterThanOrEqual(1)
       }),
-      { git: true, config: providerCfg },
+      // root: "cwd" keeps the fixture inside cwd so the server security middleware
+      // (which rejects directories outside cwd on unauthenticated servers) serves it;
+      // git: true gives it its own .git so VCS detection stays scoped to the fixture.
+      { git: true, config: providerCfg, root: "cwd" },
     ),
     // Headroom over the default 5s: this exercises a full Instance bootstrap +
     // a real runtime run + an HTTP round-trip, and runs alongside the heavy

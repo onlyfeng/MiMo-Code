@@ -33,7 +33,10 @@ describe("ErrorMiddleware → BusyError mapping", () => {
 
 describe("POST /session/:sessionID/message busy-runner behavior", () => {
   test("returns 409 when session main runner is already busy", async () => {
-    await using tmp = await tmpdir({})
+    // root: "cwd" + git keep the fixture inside cwd with its own .git so the server
+    // security middleware serves it (it rejects out-of-cwd dirs on unauthenticated
+    // servers) while VCS detection stays scoped to the fixture, not this repo.
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
 
     const status = await Instance.provide({
       directory: tmp.path,
@@ -84,7 +87,10 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
   })
 
   test("POST /:sessionID/abort frees runner; subsequent POST is no longer rejected with 409", async () => {
-    await using tmp = await tmpdir({})
+    // root: "cwd" + git keep the fixture inside cwd with its own .git so the server
+    // security middleware serves it (it rejects out-of-cwd dirs on unauthenticated
+    // servers) while VCS detection stays scoped to the fixture, not this repo.
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
 
     const result = await Instance.provide({
       directory: tmp.path,
