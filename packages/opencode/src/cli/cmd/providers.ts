@@ -16,6 +16,7 @@ import { t } from "../i18n"
 import { Instance } from "../../project/instance"
 import type { Hooks } from "@mimo-ai/plugin"
 import { Process } from "../../util"
+import { PROVIDER_PRIORITY } from "../../util/provider-priority"
 import { text } from "node:stream/consumers"
 import { Effect } from "effect"
 import * as readline from "readline"
@@ -216,11 +217,11 @@ export function resolvePluginProviders(input: {
   return result
 }
 
-// Dynamically load the optional private free-login entry (src/private/free-login.ts).
-// Present in the full build → returns its handler; absent in the open-source build
-// → returns undefined. Computed path so the open-source build doesn't fail to resolve it.
+// Dynamically load the optional free-login entry (src/ext/free-login.ts), if
+// present. Returns its handler when available, otherwise undefined. Computed
+// path so builds without the extension still resolve cleanly.
 async function loadFreeLogin(): Promise<(() => Promise<void>) | undefined> {
-  const file = path.join(import.meta.dir, "..", "..", "private", "free-login.ts")
+  const file = path.join(import.meta.dir, "..", "..", "ext", "free-login.ts")
   if (!fs.existsSync(file)) return undefined
   try {
     const mod = await import(/* @vite-ignore */ pathToFileURL(file).href)
@@ -467,15 +468,7 @@ export const ProvidersLoginCommand = cmd({
           }),
         )
 
-        const priority: Record<string, number> = {
-          opencode: 0,
-          openai: 1,
-          "github-copilot": 2,
-          google: 3,
-          anthropic: 4,
-          openrouter: 5,
-          vercel: 6,
-        }
+        const priority = PROVIDER_PRIORITY
         const pluginProviders = resolvePluginProviders({
           hooks,
           existingProviders: providers,
@@ -495,7 +488,6 @@ export const ProvidersLoginCommand = cmd({
               label: x.name,
               value: x.id,
               hint: {
-                opencode: "recommended",
                 openai: "ChatGPT Plus/Pro or API key",
               }[x.id],
             })),

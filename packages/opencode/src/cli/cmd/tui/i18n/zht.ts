@@ -176,6 +176,14 @@ export const dict = {
   "tui.command.category.internal": "內建",
   "tui.command.category.external": "第三方",
 
+  // Built-in slash command descriptions
+  "tui.slash.init.description": "引導式 AGENTS.md 設定",
+  "tui.slash.review.description": "審查變更 [commit|branch|pr]，預設未提交的變更",
+  "tui.slash.dream.description": "從 memory 檔案與原始軌跡中手動整合專案記憶",
+  "tui.slash.distill.description": "在最近工作中發現重複流程，打包為 skill、子智慧代理或命令",
+  "tui.slash.goal.description": "設定終止條件目標；執行直到判定達成。使用 /goal clear 中止",
+  "tui.slash.deep-research.description": "深度多來源、事實核查的研究報告（執行 deep-research 工作流程）",
+
   // Language switching
   "tui.command.language.switch.title": "切換語言",
   "tui.command.language.switch.description": "變更顯示語言",
@@ -348,7 +356,12 @@ export const dict = {
   "tui.command.voice.control.title": "切換語音控制（多模態）",
   "tui.command.voice.control.title_on": "語音控制：已開啟（多模態） — 點擊關閉",
   "tui.command.voice.control.title_off": "語音控制：已關閉（快速 ASR） — 點擊開啟",
-  "tui.voice.error.no_auth": "請先登入 MiMo 帳號",
+  "tui.voice.error.no_auth": "請先用 /connect 連接 MiMo 帳號，或配置 voice.asr_model 指定其他 provider",
+  "tui.voice.error.no_auth_provider": "語音 provider「{{provider}}」未認證，請檢查其 apiKey 配置",
+  "tui.voice.error.provider_not_found": "provider「{{provider}}」不可用 — 請 /connect 連接，自定義端點需在配置中聲明 models",
+  "tui.voice.error.no_url": "provider「{{provider}}」未配置 baseURL，請在 options.baseURL 中指定",
+  "tui.voice.error.no_device": "未偵測到麥克風/音訊裝置 — 請檢查系統音訊設定",
+  "tui.voice.error.recorder_failed": "錄音失敗",
   "tui.voice.error.no_recorder": "未偵測到錄音工具，請安裝 sox",
   "tui.voice.error.too_short": "錄音時間過短",
   "tui.voice.error.network": "轉寫失敗，請檢查網路",

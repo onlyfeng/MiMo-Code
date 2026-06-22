@@ -247,6 +247,18 @@ export const dict = {
   "tui.command.category.internal": "Interne",
   "tui.command.category.external": "Externe",
 
+  // Built-in slash command descriptions
+  "tui.slash.init.description": "configuration guidée de AGENTS.md",
+  "tui.slash.review.description": "revoir les changements [commit|branch|pr], par défaut non commités",
+  "tui.slash.dream.description":
+    "consolider manuellement la mémoire du projet à partir des fichiers memory et de la trajectoire brute",
+  "tui.slash.distill.description":
+    "trouver les workflows répétés dans le travail récent et les empaqueter en skills, sous-agents ou commandes",
+  "tui.slash.goal.description":
+    "définir un objectif avec condition d'arrêt ; s'exécute jusqu'à ce qu'un juge confirme. /goal clear pour annuler",
+  "tui.slash.deep-research.description":
+    "rapport de recherche approfondi multi-sources et vérifié (exécute le workflow deep-research)",
+
   // Language switching
   "tui.command.language.switch.title": "Changer de langue",
   "tui.command.language.switch.description": "Modifier la langue d'affichage",
@@ -410,7 +422,12 @@ export const dict = {
   "tui.command.voice.control.title": "Basculer le contrôle vocal (multimodal)",
   "tui.command.voice.control.title_on": "Contrôle vocal : activé (multimodal) — cliquer pour désactiver",
   "tui.command.voice.control.title_off": "Contrôle vocal : désactivé (ASR rapide) — cliquer pour activer",
-  "tui.voice.error.no_auth": "Veuillez d'abord vous connecter à MiMo",
+  "tui.voice.error.no_auth": "Utilisez /connect pour vous connecter à MiMo, ou configurez voice.asr_model pour un autre fournisseur",
+  "tui.voice.error.no_auth_provider": "Le fournisseur vocal \"{{provider}}\" n'est pas authentifié, vérifiez son apiKey",
+  "tui.voice.error.provider_not_found": "Fournisseur \"{{provider}}\" indisponible — /connect pour s'authentifier, ou déclarez models dans la config pour les endpoints personnalisés",
+  "tui.voice.error.no_url": "Le fournisseur \"{{provider}}\" n'a pas de baseURL configuré — définissez options.baseURL dans la configuration",
+  "tui.voice.error.no_device": "Aucun microphone/appareil audio trouvé — vérifiez les paramètres audio du système",
+  "tui.voice.error.recorder_failed": "L'enregistrement a échoué",
   "tui.voice.error.no_recorder": "Aucun outil d'enregistrement trouvé, installez sox",
   "tui.voice.error.too_short": "Enregistrement trop court",
   "tui.voice.error.network": "La transcription a échoué, vérifiez votre réseau",

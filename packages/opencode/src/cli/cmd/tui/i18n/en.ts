@@ -183,6 +183,18 @@ export const dict: Record<string, string> = {
   "tui.command.category.internal": "Internal",
   "tui.command.category.external": "External",
 
+  // Built-in slash command descriptions
+  "tui.slash.init.description": "guided AGENTS.md setup",
+  "tui.slash.review.description": "review changes [commit|branch|pr], defaults to uncommitted",
+  "tui.slash.dream.description":
+    "manually consolidate project memory from memory files and raw trajectory",
+  "tui.slash.distill.description":
+    "find repeated workflows in recent work and package them into skills, subagents, or commands",
+  "tui.slash.goal.description":
+    "set a stop-condition goal; runs until a judge says it's met. /goal clear to abort",
+  "tui.slash.deep-research.description":
+    "deep multi-source, fact-checked research report (runs the deep-research workflow)",
+
   // Language switching
   "tui.command.language.switch.title": "Switch language",
   "tui.command.language.switch.description": "Change the display language",
@@ -355,7 +367,12 @@ export const dict: Record<string, string> = {
   "tui.command.voice.control.title": "Toggle voice control (multimodal)",
   "tui.command.voice.control.title_on": "Voice control: ON (multimodal) — click to turn off",
   "tui.command.voice.control.title_off": "Voice control: OFF (fast ASR) — click to turn on",
-  "tui.voice.error.no_auth": "Please log in to MiMo first",
+  "tui.voice.error.no_auth": "Use /connect to sign in to MiMo, or configure voice.asr_model for another provider",
+  "tui.voice.error.no_auth_provider": "Voice provider \"{{provider}}\" is not authenticated, check its apiKey",
+  "tui.voice.error.provider_not_found": "Provider \"{{provider}}\" not available — /connect to authenticate, or declare models in config for custom endpoints",
+  "tui.voice.error.no_url": "Provider \"{{provider}}\" has no baseURL configured — set options.baseURL in the provider config",
+  "tui.voice.error.no_device": "No microphone/audio device found — please check your system audio settings",
+  "tui.voice.error.recorder_failed": "Recording failed",
   "tui.voice.error.no_recorder": "No recording tool found, please install sox",
   "tui.voice.error.too_short": "Recording too short",
   "tui.voice.error.network": "Transcription failed, please check your network",

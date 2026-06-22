@@ -262,6 +262,18 @@ export const dict = {
   "tui.command.category.internal": "Внутренние",
   "tui.command.category.external": "Внешние",
 
+  // Built-in slash command descriptions
+  "tui.slash.init.description": "пошаговая настройка AGENTS.md",
+  "tui.slash.review.description": "просмотр изменений [commit|branch|pr], по умолчанию незакоммиченные",
+  "tui.slash.dream.description":
+    "вручную консолидировать память проекта из memory-файлов и сырой траектории",
+  "tui.slash.distill.description":
+    "найти повторяющиеся workflow в недавней работе и упаковать их в skills, субагентов или команды",
+  "tui.slash.goal.description":
+    "задать цель с условием остановки; выполняется, пока судья не подтвердит. /goal clear для отмены",
+  "tui.slash.deep-research.description":
+    "глубокий многоисточниковый проверенный отчёт (запускает workflow deep-research)",
+
   // Language switching
   "tui.command.language.switch.title": "Сменить язык",
   "tui.command.language.switch.description": "Изменить язык интерфейса",
@@ -422,7 +434,12 @@ export const dict = {
   "tui.command.voice.control.title": "Переключить голосовое управление (мультимодальное)",
   "tui.command.voice.control.title_on": "Голосовое управление: включено (мультимодальное) — нажмите для отключения",
   "tui.command.voice.control.title_off": "Голосовое управление: отключено (быстрый ASR) — нажмите для включения",
-  "tui.voice.error.no_auth": "Сначала войдите в аккаунт MiMo",
+  "tui.voice.error.no_auth": "Используйте /connect для подключения к MiMo или настройте voice.asr_model для другого провайдера",
+  "tui.voice.error.no_auth_provider": "Голосовой провайдер \"{{provider}}\" не авторизован, проверьте его apiKey",
+  "tui.voice.error.provider_not_found": "Провайдер \"{{provider}}\" недоступен — /connect для аутентификации, или объявите models в конфигурации для пользовательских эндпоинтов",
+  "tui.voice.error.no_url": "У провайдера \"{{provider}}\" не настроен baseURL — укажите options.baseURL в конфигурации",
+  "tui.voice.error.no_device": "Микрофон/аудиоустройство не найдено — проверьте настройки звука системы",
+  "tui.voice.error.recorder_failed": "Ошибка записи",
   "tui.voice.error.no_recorder": "Инструмент записи не найден, установите sox",
   "tui.voice.error.too_short": "Запись слишком короткая",
   "tui.voice.error.network": "Ошибка транскрипции, проверьте сеть",
