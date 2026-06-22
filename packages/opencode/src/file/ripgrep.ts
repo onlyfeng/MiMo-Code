@@ -2,6 +2,7 @@ import nodeFs from "fs"
 import path from "path"
 import z from "zod"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { Glob } from "@mimo-ai/shared/util/glob"
 import { Cause, Context, Effect, Fiber, Layer, Queue, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
@@ -379,7 +380,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           if (entry.isDirectory()) {
             yield* walkDir(fullPath, options, currentDepth + 1)
           } else if (entry.isFile()) {
-            yield path.relative(dir, fullPath)
+            yield fullPath
           }
         }
       }
@@ -400,7 +401,13 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                         maxDepth: input.maxDepth,
                       })) {
                         if (input.signal?.aborted) break
-                        Queue.offerUnsafe(queue, clean(file))
+                        // walkDir yields absolute paths; emit cwd-relative ones so the output
+                        // matches `rg --files` (consumers like tree() split on path.sep).
+                        const rel = path.relative(input.cwd, file)
+                        // Best-effort glob filtering (rg is absent). minimatch needs posix
+                        // separators; semantics approximate rg's --glob in this degraded path.
+                        if (input.glob && !input.glob.some((g) => Glob.match(g, rel.split(path.sep).join("/")))) continue
+                        Queue.offerUnsafe(queue, clean(rel))
                       }
                     },
                     catch: (err) => (err instanceof Error ? err : new Error(String(err))),
