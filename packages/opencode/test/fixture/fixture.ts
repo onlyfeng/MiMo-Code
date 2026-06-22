@@ -58,13 +58,17 @@ const cwdFixtureRoot = () => path.join(process.cwd(), "node_modules", ".mimocode
 // "home" roots a fixture outside cwd yet outside the SYSTEM_PATHS blocklist that
 // isValidProjectDirectory rejects before it checks project markers (see
 // middleware.ts) — used to exercise the marker branch, since the os.tmpdir()
-// default sits under /tmp on Linux. os.homedir() is normally fine (/home/runner
-// on CI, /Users/x on macOS) but is /root under a root user, which is itself a
-// SYSTEM_PATH; fall back to cwd's parent (outside cwd, normally non-system) then.
+// default sits under /tmp on Linux. Prefer os.homedir() (/home/runner on CI,
+// /Users/x on macOS), but it is /root under a root user — itself a SYSTEM_PATH —
+// so pick the first non-system candidate between it and cwd's parent. If the
+// whole tree sits under a system path (e.g. the repo checked out directly under
+// /root), no non-system location exists; fall back to cwd's parent so the result
+// is at least deterministic — the marker branch simply isn't reachable there.
 const SYSTEM_PREFIXES = ["/etc", "/proc", "/sys", "/var", "/boot", "/root", "/dev", "/usr", "/bin", "/sbin", "/lib", "/tmp"]
 const underSystemPath = (p: string) => SYSTEM_PREFIXES.some((s) => p === s || p.startsWith(s + "/"))
 function homeFixtureRoot() {
-  const base = [os.homedir(), path.dirname(process.cwd())].find((c) => !underSystemPath(c)) ?? os.homedir()
+  const parent = path.dirname(process.cwd())
+  const base = [os.homedir(), parent].find((c) => !underSystemPath(c)) ?? parent
   return path.join(base, ".mimocode-home-fixtures")
 }
 
