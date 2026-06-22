@@ -46,6 +46,11 @@ export const Flag = {
 
   MIMOCODE_DISABLE_AUTOUPDATE: truthy("MIMOCODE_DISABLE_AUTOUPDATE"),
 
+  // Defaults to false (rotation enabled). When enabled, the active log file is
+  // never archived to <name>.log.<stamp> on hitting MAX_FILE_SIZE — it grows in
+  // place. Useful when an external tool tails/manages the single log file.
+  MIMOCODE_DISABLE_LOG_ROTATION: truthy("MIMOCODE_DISABLE_LOG_ROTATION"),
+
   // Defaults to true (analytics enabled). Set MIMOCODE_ENABLE_ANALYSIS=false
   // to opt out of POSTing model_call/tool_call/agent_request metrics.
   MIMOCODE_ENABLE_ANALYSIS: !falsy("MIMOCODE_ENABLE_ANALYSIS"),
@@ -62,6 +67,13 @@ export const Flag = {
   MIMOCODE_DISABLE_MOUSE: truthy("MIMOCODE_DISABLE_MOUSE"),
   MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT: number("MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT") ?? 3,
   MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT: number("MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT") ?? 2,
+
+  // Sliding-window n-gram repetition detection for streamed reasoning + text.
+  // An n-gram of size N appearing REPEAT_THRESHOLD times within the last
+  // WINDOW_TOKENS tokens triggers recovery (remind → replan → terminate).
+  MIMOCODE_TEXT_NGRAM_N: number("MIMOCODE_TEXT_NGRAM_N") ?? 6,
+  MIMOCODE_TEXT_REPEAT_THRESHOLD: number("MIMOCODE_TEXT_REPEAT_THRESHOLD") ?? 3,
+  MIMOCODE_TEXT_WINDOW_TOKENS: number("MIMOCODE_TEXT_WINDOW_TOKENS") ?? 500,
 
   // Caps applied to image attachments before a prompt is sent. Both default to
   // undefined (no limit). MIMOCODE_MAX_PROMPT_IMAGES bounds how many images may

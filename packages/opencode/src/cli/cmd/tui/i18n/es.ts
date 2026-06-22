@@ -259,6 +259,18 @@ export const dict = {
   "tui.command.category.internal": "Interno",
   "tui.command.category.external": "Externo",
 
+  // Built-in slash command descriptions
+  "tui.slash.init.description": "configuración guiada de AGENTS.md",
+  "tui.slash.review.description": "revisar cambios [commit|branch|pr], por defecto sin confirmar",
+  "tui.slash.dream.description":
+    "consolidar manualmente la memoria del proyecto desde archivos memory y la trayectoria en bruto",
+  "tui.slash.distill.description":
+    "encontrar flujos repetidos en el trabajo reciente y empaquetarlos en skills, subagentes o comandos",
+  "tui.slash.goal.description":
+    "definir un objetivo con condición de parada; se ejecuta hasta que un juez confirme. /goal clear para abortar",
+  "tui.slash.deep-research.description":
+    "informe de investigación profunda multi-fuente y verificado (ejecuta el workflow deep-research)",
+
   // Language switching
   "tui.command.language.switch.title": "Cambiar idioma",
   "tui.command.language.switch.description": "Cambiar el idioma de la interfaz",
@@ -421,7 +433,12 @@ export const dict = {
   "tui.command.voice.control.title": "Alternar control de voz (multimodal)",
   "tui.command.voice.control.title_on": "Control de voz: activado (multimodal) — clic para desactivar",
   "tui.command.voice.control.title_off": "Control de voz: desactivado (ASR rápido) — clic para activar",
-  "tui.voice.error.no_auth": "Inicia sesión en MiMo primero",
+  "tui.voice.error.no_auth": "Usa /connect para conectar tu cuenta MiMo, o configura voice.asr_model para otro proveedor",
+  "tui.voice.error.no_auth_provider": "El proveedor de voz \"{{provider}}\" no está autenticado, revisa su apiKey",
+  "tui.voice.error.provider_not_found": "Proveedor \"{{provider}}\" no disponible — /connect para autenticarte, o declara models en la config para endpoints personalizados",
+  "tui.voice.error.no_url": "El proveedor \"{{provider}}\" no tiene baseURL configurada — configura options.baseURL",
+  "tui.voice.error.no_device": "No se encontró micrófono/dispositivo de audio — verifica la configuración de audio del sistema",
+  "tui.voice.error.recorder_failed": "Error de grabación",
   "tui.voice.error.no_recorder": "No se encontró herramienta de grabación, instala sox",
   "tui.voice.error.too_short": "Grabación demasiado corta",
   "tui.voice.error.network": "La transcripción falló, verifica tu red",

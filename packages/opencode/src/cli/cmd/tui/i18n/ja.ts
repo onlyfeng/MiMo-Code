@@ -200,6 +200,14 @@ export const dict = {
   "tui.command.category.internal": "組み込み",
   "tui.command.category.external": "外部",
 
+  // Built-in slash command descriptions
+  "tui.slash.init.description": "AGENTS.md をガイド付きでセットアップ",
+  "tui.slash.review.description": "変更をレビュー [commit|branch|pr]、デフォルトは未コミット",
+  "tui.slash.dream.description": "memory ファイルと生の軌跡からプロジェクトメモリを手動で統合",
+  "tui.slash.distill.description": "最近の作業から繰り返しワークフローを見つけ、skill・サブエージェント・コマンドにパッケージ化",
+  "tui.slash.goal.description": "停止条件付きゴールを設定；判定が達成と言うまで実行。/goal clear で中止",
+  "tui.slash.deep-research.description": "深い多ソース・ファクトチェック済み調査レポート（deep-research ワークフローを実行）",
+
   // Language switching
   "tui.command.language.switch.title": "言語を切り替え",
   "tui.command.language.switch.description": "表示言語を変更します",
@@ -362,7 +370,12 @@ export const dict = {
   "tui.command.voice.control.title": "音声制御を切り替え（マルチモーダル）",
   "tui.command.voice.control.title_on": "音声制御：有効（マルチモーダル） — クリックで無効化",
   "tui.command.voice.control.title_off": "音声制御：無効（高速ASR） — クリックで有効化",
-  "tui.voice.error.no_auth": "まず MiMo アカウントにログインしてください",
+  "tui.voice.error.no_auth": "/connect で MiMo アカウントに接続するか、voice.asr_model で別のプロバイダーを設定してください",
+  "tui.voice.error.no_auth_provider": "音声プロバイダー「{{provider}}」が認証されていません。apiKey を確認してください",
+  "tui.voice.error.provider_not_found": "プロバイダー「{{provider}}」が利用できません — /connect で接続するか、カスタムエンドポイントの場合は設定で models を宣言してください",
+  "tui.voice.error.no_url": "プロバイダー「{{provider}}」に baseURL が設定されていません — options.baseURL を指定してください",
+  "tui.voice.error.no_device": "マイク/オーディオデバイスが見つかりません — システムのオーディオ設定を確認してください",
+  "tui.voice.error.recorder_failed": "録音に失敗しました",
   "tui.voice.error.no_recorder": "録音ツールが見つかりません。sox をインストールしてください",
   "tui.voice.error.too_short": "録音時間が短すぎます",
   "tui.voice.error.network": "文字起こしに失敗しました。ネットワークを確認してください",

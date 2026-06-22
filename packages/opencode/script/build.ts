@@ -168,19 +168,26 @@ const targets = singleFlag
 
 await $`rm -rf dist`
 
-// Optional private overlay (internal-only, e.g. the free "mimo-auto" channel).
-// The open-source tree has no src/private/. When present (injected by the
-// internal build), its files are loaded at runtime via dynamic import, so they
-// must be added as build entrypoints — otherwise the bundler can't statically
-// see them and they'd be dropped from the compiled binary. Absent → no-op.
-const privateDir = path.join(dir, "src", "private")
-const privateEntrypoints = fs.existsSync(privateDir)
-  ? fs.readdirSync(privateDir)
+const extDir = path.join(dir, "src", "ext")
+if (!fs.existsSync(extDir)) {
+  const overlaySrc = path.resolve(dir, "../../mimoapi/packages/opencode/src/ext")
+  if (fs.existsSync(overlaySrc)) {
+    console.log(`Staging overlay entrypoints from ${overlaySrc}`)
+    fs.cpSync(overlaySrc, extDir, { recursive: true })
+    process.on("exit", () => {
+      try {
+        fs.rmSync(extDir, { recursive: true, force: true })
+      } catch {}
+    })
+  }
+}
+const extEntrypoints = fs.existsSync(extDir)
+  ? fs.readdirSync(extDir)
       .filter((f) => f.endsWith(".ts") && !f.endsWith(".d.ts"))
-      .map((f) => `./src/private/${f}`)
+      .map((f) => `./src/ext/${f}`)
   : []
-if (privateEntrypoints.length) {
-  console.log(`Including private overlay entrypoints: ${privateEntrypoints.join(", ")}`)
+if (extEntrypoints.length) {
+  console.log(`Including overlay entrypoints: ${extEntrypoints.join(", ")}`)
 }
 
 const binaries: Record<string, string> = {}
@@ -230,7 +237,7 @@ for (const item of targets) {
       windows: {},
     },
     files: embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap } : {},
-    entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : []), ...privateEntrypoints],
+    entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : []), ...extEntrypoints],
     define: {
       MIMOCODE_VERSION: `'${Script.version}'`,
       OPENCODE_MIGRATIONS: JSON.stringify(migrations),
@@ -266,7 +273,7 @@ for (const item of targets) {
         description: "Platform-specific binary for @mimo-ai/cli.",
         license: "MIT",
         author: "Xiaomi MiMo Team",
-        homepage: "https://mimo.xiaomi.com/en/mimocode",
+        homepage: "https://mimo.xiaomi.com/coder",
         repository: {
           type: "git",
           url: "git+https://github.com/XiaomiMiMo/MiMo-Code.git",
