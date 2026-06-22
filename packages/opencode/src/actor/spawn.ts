@@ -716,10 +716,16 @@ export const layer = Layer.effect(
     const impl = Service.of({ spawn, cancel, getForkContext })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it
     // without forming a layer cycle. See spawn-ref.ts for rationale.
+    //
+    // Save/restore the prior ref rather than clearing to undefined: production
+    // builds construct a single Actor layer (prev is undefined, so this is a
+    // no-op), but tests build nested/parallel layers, and clearing would strip a
+    // still-live outer impl when an inner layer's scope closes.
+    const prev = spawnRef.current
     spawnRef.current = impl
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
-        if (spawnRef.current === impl) spawnRef.current = undefined
+        if (spawnRef.current === impl) spawnRef.current = prev
       }),
     )
     return impl
