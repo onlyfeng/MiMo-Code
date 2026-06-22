@@ -55,13 +55,22 @@ async function stop(dir: string) {
 // so VCS detection stops at the fixture instead of walking up to this repo.
 const cwdFixtureRoot = () => path.join(process.cwd(), "node_modules", ".mimocode-cwd-fixtures")
 
-// "home" roots a fixture under the real home dir — outside cwd yet outside the
-// SYSTEM_PATHS blocklist (/tmp, /var, …) that isValidProjectDirectory rejects
-// before it checks project markers. Used to test the marker branch on Linux,
-// where the os.tmpdir() default sits under /tmp.
+// "home" roots a fixture outside cwd yet outside the SYSTEM_PATHS blocklist that
+// isValidProjectDirectory rejects before it checks project markers (see
+// middleware.ts) — used to exercise the marker branch, since the os.tmpdir()
+// default sits under /tmp on Linux. os.homedir() is normally fine (/home/runner
+// on CI, /Users/x on macOS) but is /root under a root user, which is itself a
+// SYSTEM_PATH; fall back to cwd's parent (outside cwd, normally non-system) then.
+const SYSTEM_PREFIXES = ["/etc", "/proc", "/sys", "/var", "/boot", "/root", "/dev", "/usr", "/bin", "/sbin", "/lib", "/tmp"]
+const underSystemPath = (p: string) => SYSTEM_PREFIXES.some((s) => p === s || p.startsWith(s + "/"))
+function homeFixtureRoot() {
+  const base = [os.homedir(), path.dirname(process.cwd())].find((c) => !underSystemPath(c)) ?? os.homedir()
+  return path.join(base, ".mimocode-home-fixtures")
+}
+
 function tmpdirBase(root?: "cwd" | "tmp" | "home") {
   if (root === "cwd") return cwdFixtureRoot()
-  if (root === "home") return path.join(os.homedir(), ".mimocode-home-fixtures")
+  if (root === "home") return homeFixtureRoot()
   return process.env["MIMOCODE_TEST_TMPDIR_ROOT"] ?? os.tmpdir()
 }
 
