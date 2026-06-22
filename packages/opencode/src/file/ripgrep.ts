@@ -463,20 +463,20 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
       const search: Interface["search"] = Effect.fn("Ripgrep.search")(function* (input: SearchInput) {
         yield* check(input.cwd)
 
-        // Unlike files(), search has no JS fallback; surface a clear, actionable error
-        // instead of a raw spawn/download failure when ripgrep can't be obtained.
-        const binary = yield* filepath.pipe(Effect.catch(() => Effect.succeed(undefined)))
-        if (!binary)
-          return yield* Effect.fail(
-            new Error(
-              "Search requires ripgrep, which is unavailable and could not be downloaded. " +
-                "If you are in a restricted network, install ripgrep manually: " +
-                "https://github.com/BurntSushi/ripgrep#installation",
-            ),
-          )
-
         const program = Effect.scoped(
           Effect.gen(function* () {
+            // Unlike files(), search has no JS fallback; surface a clear, actionable error
+            // instead of a raw spawn/download failure when ripgrep can't be obtained.
+            // Resolve inside the raced program so input.signal can abort a slow download.
+            const binary = yield* filepath.pipe(Effect.catch(() => Effect.succeed(undefined)))
+            if (!binary)
+              return yield* Effect.fail(
+                new Error(
+                  "Search requires ripgrep, which is unavailable and could not be downloaded. " +
+                    "If you are in a restricted network, install ripgrep manually: " +
+                    "https://github.com/BurntSushi/ripgrep#installation",
+                ),
+              )
             const handle = yield* spawner.spawn(yield* command(input.cwd, searchArgs(input)))
 
             const [items, stderr, code] = yield* Effect.all(
