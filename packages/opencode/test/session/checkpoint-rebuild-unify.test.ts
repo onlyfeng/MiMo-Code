@@ -1,5 +1,8 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, beforeEach, describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
+import * as fs from "fs/promises"
+import path from "path"
+import { Global } from "../../src/global"
 import { Bus } from "../../src/bus"
 import { Config } from "../../src/config"
 import { Memory } from "../../src/memory"
@@ -22,6 +25,13 @@ const ref = {
   providerID: ProviderID.make("test"),
   modelID: ModelID.make("test-model"),
 }
+
+// Rebuild context reads process-global project/global memory; other test files
+// leave memory under the shared data dir, which makes the "empty context" cases
+// non-empty. Clear it before each test so these assertions see only their own setup.
+beforeEach(async () => {
+  await fs.rm(path.join(Global.Path.data, "memory"), { recursive: true, force: true })
+})
 
 afterEach(async () => {
   await Instance.disposeAll()

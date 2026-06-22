@@ -1023,7 +1023,9 @@ describe("Actor.spawn return-format injection (F21)", () => {
 
         yield* Deferred.await(result.outcome)
 
-        const msgs = yield* session.messages({ sessionID: result.sessionID })
+        // The subagent's messages live in its own actorID slice; session.messages
+        // defaults to the "main" slice, so scope the query to the subagent.
+        const msgs = yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })
         const subAgentUser = msgs.find((m) => m.info.role === "user" && m.info.agentID === result.actorID)
         expect(subAgentUser).toBeDefined()
         const text = subAgentUser?.parts.find((p) => p.type === "text")?.text ?? ""
