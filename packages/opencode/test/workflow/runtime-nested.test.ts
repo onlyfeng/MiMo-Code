@@ -256,7 +256,10 @@ describe("WorkflowRuntime workflow() journal (two-level resume)", () => {
       }),
       { git: true, config: providerCfg },
     ),
-    25000,
+    // Two-level resume forks a fresh evalScript whose teardown is slow under CI CPU
+    // load; 25s occasionally timed out on a busy runner. 60s keeps it deterministic
+    // (it completes well under that locally) without masking a real hang.
+    60000,
   )
 })
 

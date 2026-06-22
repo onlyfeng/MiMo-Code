@@ -286,9 +286,10 @@ describe("WorkflowRuntime cancel cascade", () => {
       { git: true, config: providerCfg },
     ),
     // Headroom over the default 5s: this cancel test can run concurrently with the
-    // heavyweight real-Instance worktree-isolation tests, where CI load occasionally
-    // pushed it past 5s. Generous margin keeps it deterministic without masking hangs.
-    15000,
+    // heavyweight real-Instance worktree-isolation tests, where CI load pushed it
+    // past 15s on a busy runner. 60s keeps it deterministic without masking hangs
+    // (it completes well under that locally even with the full suite warmed up).
+    60000,
   )
 
   // MR104 #2 — orphan-on-cancel race. The bug: spawnShared added the child's
@@ -659,7 +660,9 @@ describe("WorkflowRuntime list + resume", () => {
       }),
       { git: true, config: providerCfg },
     ),
-    15000,
+    // Same resume-teardown family as the cases above; 15s occasionally timed out
+    // under CI load. 60s keeps it deterministic without masking a real hang.
+    60000,
   )
 })
 
