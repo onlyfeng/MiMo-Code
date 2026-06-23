@@ -10,9 +10,11 @@ import { afterAll } from "bun:test"
 const dir = path.join(os.tmpdir(), "mimocode-test-data-" + process.pid)
 await fs.mkdir(dir, { recursive: true })
 
-// Route fixture tmpdirs under cwd so they pass the InstanceMiddleware cwd
-// containment check (security: unauthenticated servers restrict directory to cwd subtree).
-const fixtureRoot = path.join(process.cwd(), ".mimocode-test-fixtures-" + process.pid)
+// Route default fixture tmpdirs outside both the repository checkout and
+// protected system paths. HTTP route tests that must pass the
+// InstanceMiddleware cwd containment check opt into root: "cwd" in the fixture
+// helper.
+const fixtureRoot = path.join(os.homedir(), ".mimocode-test-fixtures-" + process.pid)
 await fs.mkdir(fixtureRoot, { recursive: true })
 process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = fixtureRoot
 afterAll(async () => {
