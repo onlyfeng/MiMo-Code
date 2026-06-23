@@ -12,6 +12,7 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { Global } from "@/global"
 import { Log } from "@/util"
+import { windowsZipExtractCommand } from "@/util/archive"
 import { sanitizedProcessEnv } from "@/util/mimo-process"
 import { which } from "@/util/which"
 
@@ -281,7 +282,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('${archive.replaceAll("'", "''")}', '${dir.replaceAll("'", "''")}')`,
+            windowsZipExtractCommand(archive, dir),
           ])
           if (result.code !== 0) {
             return yield* Effect.fail(error(result.stderr || result.stdout, result.code))
