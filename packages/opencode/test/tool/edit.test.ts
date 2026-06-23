@@ -13,6 +13,7 @@ import { Bus } from "../../src/bus"
 import { BusEvent } from "../../src/bus/bus-event"
 import { Truncate } from "../../src/tool"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { clearReadState, markFileRead } from "../../src/tool/read-state"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-edit-session"),
@@ -26,6 +27,7 @@ const ctx = {
 }
 
 afterEach(async () => {
+  clearReadState(ctx.sessionID)
   await Instance.disposeAll()
 })
 
@@ -54,6 +56,8 @@ const resolve = () =>
 
 const subscribeBus = <D extends BusEvent.Definition>(def: D, callback: () => unknown) =>
   runtime.runPromise(Bus.Service.use((bus) => bus.subscribeCallback(def, callback)))
+
+const markRead = (filePath: string) => markFileRead(ctx, filePath)
 
 async function onceBus<D extends BusEvent.Definition>(def: D) {
   const result = Promise.withResolvers<void>()
@@ -159,6 +163,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "existing.txt")
       await fs.writeFile(filepath, "old content here", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -186,6 +191,9 @@ describe("tool.edit", () => {
     test("throws error when file does not exist", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "nonexistent.txt")
+      await fs.writeFile(filepath, "old", "utf-8")
+      markRead(filepath)
+      await fs.unlink(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -236,6 +244,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "actual content", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -261,6 +270,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "foo bar foo baz foo", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -288,6 +298,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "original", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -323,6 +334,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "line1\nline2\nline3", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -349,6 +361,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "line1\r\nold\r\nline3", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -400,6 +413,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const dirpath = path.join(tmp.path, "adir")
       await fs.mkdir(dirpath)
+      markRead(dirpath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -425,6 +439,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "line1\nline2\nline3", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -500,6 +515,7 @@ describe("tool.edit", () => {
         fn: async () => {
           const edit = await resolve()
           const filePath = path.join(tmp.path, "test.txt")
+          markRead(filePath)
           await Effect.runPromise(
             edit.execute(
               {
@@ -638,6 +654,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "top = 0\nmiddle = keep\nbottom = 0\n", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
