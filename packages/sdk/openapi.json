@@ -1509,6 +1509,16 @@
             }
           },
           {
+            "name": "x-mimocode-ticket",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["1"]
+            },
+            "description": "CSRF guard. Must be sent with the value '1'; the request is rejected with 403 otherwise. Browsers cannot set custom headers on simple cross-origin requests, so requiring it blocks drive-by access."
+          },
+          {
             "in": "path",
             "name": "ptyID",
             "schema": {

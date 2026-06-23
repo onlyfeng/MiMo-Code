@@ -1347,6 +1347,7 @@ export class Pty extends HeyApiClient {
    */
   public connectToken<ThrowOnError extends boolean = false>(
     parameters: {
+      "x-mimocode-ticket": "1"
       ptyID: string
       directory?: string
       workspace?: string
@@ -1358,6 +1359,7 @@ export class Pty extends HeyApiClient {
       [
         {
           args: [
+            { in: "headers", key: "x-mimocode-ticket" },
             { in: "path", key: "ptyID" },
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },

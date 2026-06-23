@@ -3558,6 +3558,12 @@ export type PtyUpdateResponse = PtyUpdateResponses[keyof PtyUpdateResponses]
 
 export type PtyConnectTokenData = {
   body?: never
+  headers: {
+    /**
+     * CSRF guard. Must be sent with the value '1'; the request is rejected with 403 otherwise. Browsers cannot set custom headers on simple cross-origin requests, so requiring it blocks drive-by access.
+     */
+    "x-mimocode-ticket": "1"
+  }
   path: {
     ptyID: string
   }

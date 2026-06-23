@@ -161,6 +161,17 @@ export function PtyRoutes(upgradeWebSocket: UpgradeWebSocket) {
           "Issue a one-time ticket for authenticating a WebSocket connection to a PTY session. " +
           "The ticket must be passed as the 'ticket' query parameter on the /connect WebSocket URL.",
         operationId: "pty.connectToken",
+        parameters: [
+          {
+            name: PTY_CONNECT_TOKEN_HEADER,
+            in: "header",
+            required: true,
+            schema: { type: "string", enum: [PTY_CONNECT_TOKEN_HEADER_VALUE] },
+            description:
+              `CSRF guard. Must be sent with the value '${PTY_CONNECT_TOKEN_HEADER_VALUE}'; the request is rejected with 403 otherwise. ` +
+              "Browsers cannot set custom headers on simple cross-origin requests, so requiring it blocks drive-by access.",
+          },
+        ],
         responses: {
           200: {
             description: "Issued ticket",
