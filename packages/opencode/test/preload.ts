@@ -2,6 +2,7 @@
 // xdg-basedir reads env vars at import time, so we must set these first
 import os from "os"
 import path from "path"
+import { constants as fsConstants } from "fs"
 import fs from "fs/promises"
 import { setTimeout as sleep } from "node:timers/promises"
 import { afterAll } from "bun:test"
@@ -10,9 +11,79 @@ import { afterAll } from "bun:test"
 const dir = path.join(os.tmpdir(), "mimocode-test-data-" + process.pid)
 await fs.mkdir(dir, { recursive: true })
 
-// Route fixture tmpdirs under cwd so they pass the InstanceMiddleware cwd
-// containment check (security: unauthenticated servers restrict directory to cwd subtree).
-const fixtureRoot = path.join(process.cwd(), ".mimocode-test-fixtures-" + process.pid)
+const forbiddenFixtureRoots = [
+  "/etc",
+  "/proc",
+  "/sys",
+  "/dev",
+  "/boot",
+  "/root",
+  "/var",
+  "/private/etc",
+  "/private/var",
+]
+
+function containsPath(parent: string, child: string) {
+  const relative = path.relative(path.resolve(parent), path.resolve(child))
+  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative))
+}
+
+async function findGitRoot(directory: string): Promise<string | undefined> {
+  const current = path.resolve(directory)
+  const hasGitDir = await fs
+    .stat(path.join(current, ".git"))
+    .then(() => true)
+    .catch(() => false)
+  if (hasGitDir) return current
+  const parent = path.dirname(current)
+  if (parent === current) return undefined
+  return findGitRoot(parent)
+}
+
+async function gitFreeParent(directory: string): Promise<string> {
+  const root = await findGitRoot(directory)
+  if (!root) return path.resolve(directory)
+  const parent = path.dirname(root)
+  if (parent === root) return parent
+  return gitFreeParent(parent)
+}
+
+async function isWritableDirectory(directory: string) {
+  const isDirectory = await fs
+    .stat(directory)
+    .then((stat) => stat.isDirectory())
+    .catch(() => false)
+  if (!isDirectory) return false
+  return fs
+    .access(directory, fsConstants.W_OK)
+    .then(() => true)
+    .catch(() => false)
+}
+
+async function isFixtureBaseBlocked(candidate: string) {
+  const resolved = path.resolve(candidate)
+  if (resolved === path.parse(resolved).root) return true
+  if (await findGitRoot(resolved)) return true
+  if (forbiddenFixtureRoots.some((forbidden) => containsPath(forbidden, resolved))) return true
+  return !(await isWritableDirectory(resolved))
+}
+
+async function fixtureBase() {
+  const candidates = await Promise.all(
+    [os.homedir(), await gitFreeParent(process.cwd()), os.tmpdir()].map(async (candidate) => ({
+      candidate,
+      blocked: await isFixtureBaseBlocked(candidate),
+    })),
+  )
+  const selected = candidates.find((candidate) => !candidate.blocked)
+  return selected?.candidate ?? os.tmpdir()
+}
+
+// Route default fixture tmpdirs outside both the repository checkout and
+// protected system paths. HTTP route tests that must pass the
+// InstanceMiddleware cwd containment check opt into root: "cwd" in the fixture
+// helper.
+const fixtureRoot = path.join(await fixtureBase(), ".mimocode-test-fixtures-" + process.pid)
 await fs.mkdir(fixtureRoot, { recursive: true })
 process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = fixtureRoot
 afterAll(async () => {
