@@ -38,6 +38,7 @@ import { Shell } from "../../src/shell/shell"
 import { Snapshot } from "../../src/snapshot"
 import { ToolRegistry } from "../../src/tool"
 import { Truncate } from "../../src/tool"
+import { Actor } from "../../src/actor/spawn"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
 import { Memory } from "../../src/memory"
@@ -162,7 +163,7 @@ const lsp = Layer.succeed(
 const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
 const run = SessionRunState.layer.pipe(Layer.provide(status))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
-function makeHttp() {
+function makeHttp(input?: { actor?: boolean }) {
   const taskRegistry = ActorRegistry.defaultLayer
   const deps = Layer.mergeAll(
     Session.defaultLayer,
@@ -225,32 +226,38 @@ function makeHttp() {
     Layer.provideMerge(deps),
   )
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
-  return Layer.mergeAll(
-    TestLLMServer.layer,
-    SessionPrompt.layer.pipe(
+  const prompt = SessionPrompt.layer.pipe(
     Layer.provide(Goal.defaultLayer),
-      Layer.provide(TaskGateState.defaultLayer),
-      Layer.provide(TaskRegistry.defaultLayer),
-      Layer.provide(SessionRevert.defaultLayer),
-      Layer.provide(summary),
-      Layer.provide(checkpoint),
-      Layer.provide(team),
-      Layer.provide(taskRegistry),
-      Layer.provideMerge(run),
-      Layer.provideMerge(prune),
-      Layer.provideMerge(compaction),
-      Layer.provideMerge(proc),
-      Layer.provideMerge(registry),
-      Layer.provideMerge(trunc),
-      Layer.provide(Instruction.defaultLayer),
-      Layer.provide(SystemPrompt.defaultLayer),
-      Layer.provide(Inbox.defaultLayer),
-      Layer.provideMerge(deps),
-    ),
-  ).pipe(Layer.provide(summary))
+    Layer.provide(TaskGateState.defaultLayer),
+    Layer.provide(TaskRegistry.defaultLayer),
+    Layer.provide(SessionRevert.defaultLayer),
+    Layer.provide(summary),
+    Layer.provide(checkpoint),
+    Layer.provide(team),
+    Layer.provide(taskRegistry),
+    Layer.provideMerge(run),
+    Layer.provideMerge(prune),
+    Layer.provideMerge(compaction),
+    Layer.provideMerge(proc),
+    Layer.provideMerge(registry),
+    Layer.provideMerge(trunc),
+    Layer.provide(Instruction.defaultLayer),
+    Layer.provide(SystemPrompt.defaultLayer),
+    Layer.provide(Inbox.defaultLayer),
+    Layer.provideMerge(deps),
+  )
+  const actor = Actor.layer.pipe(
+    Layer.provideMerge(prompt),
+    Layer.provideMerge(taskRegistry),
+    Layer.provide(TaskRegistry.defaultLayer),
+    Layer.provideMerge(Inbox.defaultLayer),
+  )
+  if (input?.actor) return Layer.mergeAll(TestLLMServer.layer, prompt, actor).pipe(Layer.provide(summary))
+  return Layer.mergeAll(TestLLMServer.layer, prompt).pipe(Layer.provide(summary))
 }
 
 const it = testEffect(makeHttp())
+const itActor = testEffect(makeHttp({ actor: true }))
 const unix = process.platform !== "win32" ? it.live : it.live.skip
 
 // Config that registers a custom "test" provider with a "test-model" model
@@ -593,7 +600,7 @@ it.live("loop continues when finish is stop but assistant has tool parts", () =>
   ),
 )
 
-it.live("failed subtask preserves metadata on error tool state", () =>
+itActor.live("failed subtask preserves metadata on error tool state", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
       const prompt = yield* SessionPrompt.Service
