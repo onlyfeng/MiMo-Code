@@ -5,12 +5,34 @@ import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { RecoverableError } from "./recoverable"
 import type { SessionID } from "../session/schema"
 
-// Same normalization both sides of the comparison go through so a Read on
-// a relative path lines up with an Edit on the absolute one.
+const readState = new Map<SessionID, Set<string>>()
+
 function canon(sessionID: SessionID, p: string): string {
   const abs = path.isAbsolute(p) ? p : path.resolve(SessionCwd.get(sessionID), p)
-  if (process.platform === "win32") return AppFileSystem.normalizePath(abs).toLowerCase()
-  return abs
+  const resolved = AppFileSystem.resolve(abs)
+  if (process.platform === "win32") return resolved.toLowerCase()
+  return resolved
+}
+
+function sessionReads(sessionID: SessionID) {
+  const existing = readState.get(sessionID)
+  if (existing) return existing
+
+  const next = new Set<string>()
+  readState.set(sessionID, next)
+  return next
+}
+
+export function markFileRead(ctx: Pick<Tool.Context, "sessionID">, targetPath: string): void {
+  sessionReads(ctx.sessionID).add(canon(ctx.sessionID, targetPath))
+}
+
+export function clearReadState(sessionID?: SessionID): void {
+  if (!sessionID) {
+    readState.clear()
+    return
+  }
+  readState.delete(sessionID)
 }
 
 /**
@@ -25,6 +47,7 @@ function canon(sessionID: SessionID, p: string): string {
  */
 export function assertFileRead(ctx: Tool.Context, targetPath: string, toolId: string): void {
   const target = canon(ctx.sessionID, targetPath)
+  if (readState.get(ctx.sessionID)?.has(target)) return
 
   for (const msg of ctx.messages) {
     for (const part of msg.parts) {
