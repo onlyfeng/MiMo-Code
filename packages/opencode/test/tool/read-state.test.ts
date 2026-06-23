@@ -105,4 +105,22 @@ describe("tool.read-state", () => {
       },
     })
   })
+
+  test("keeps runtime read state scoped to the actor", async () => {
+    await using tmp = await tmpdir()
+    const filePath = path.join(tmp.path, "file.txt")
+    await Bun.write(filePath, "old")
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const readerCtx = { ...ctx, actorID: "explore-1" }
+        markFileRead(readerCtx, filePath)
+
+        expect(() => assertFileRead(readerCtx, filePath, "edit")).not.toThrow()
+        expect(() => assertFileRead({ ...ctx, actorID: "writer-1" }, filePath, "edit")).toThrow("has not been read")
+        expect(() => assertFileRead(ctx, filePath, "edit")).toThrow("has not been read")
+      },
+    })
+  })
 })
