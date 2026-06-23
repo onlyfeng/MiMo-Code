@@ -5,7 +5,10 @@ import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { RecoverableError } from "./recoverable"
 import type { SessionID } from "../session/schema"
 
-const readState = new Map<SessionID, Set<string>>()
+const MAIN_ACTOR_ID = "main"
+type ReadContext = Pick<Tool.Context, "sessionID" | "actorID">
+
+const readState = new Map<SessionID, Map<string, Set<string>>>()
 
 function canon(sessionID: SessionID, p: string): string {
   const abs = path.isAbsolute(p) ? p : path.resolve(SessionCwd.get(sessionID), p)
@@ -14,17 +17,31 @@ function canon(sessionID: SessionID, p: string): string {
   return resolved
 }
 
-function sessionReads(sessionID: SessionID) {
+function actorID(ctx: ReadContext) {
+  return ctx.actorID ?? MAIN_ACTOR_ID
+}
+
+function sessionActors(sessionID: SessionID) {
   const existing = readState.get(sessionID)
   if (existing) return existing
 
-  const next = new Set<string>()
+  const next = new Map<string, Set<string>>()
   readState.set(sessionID, next)
   return next
 }
 
-export function markFileRead(ctx: Pick<Tool.Context, "sessionID">, targetPath: string): void {
-  sessionReads(ctx.sessionID).add(canon(ctx.sessionID, targetPath))
+function actorReads(ctx: ReadContext) {
+  const actors = sessionActors(ctx.sessionID)
+  const existing = actors.get(actorID(ctx))
+  if (existing) return existing
+
+  const next = new Set<string>()
+  actors.set(actorID(ctx), next)
+  return next
+}
+
+export function markFileRead(ctx: ReadContext, targetPath: string): void {
+  actorReads(ctx).add(canon(ctx.sessionID, targetPath))
 }
 
 export function clearReadState(sessionID?: SessionID): void {
@@ -47,7 +64,7 @@ export function clearReadState(sessionID?: SessionID): void {
  */
 export function assertFileRead(ctx: Tool.Context, targetPath: string, toolId: string): void {
   const target = canon(ctx.sessionID, targetPath)
-  if (readState.get(ctx.sessionID)?.has(target)) return
+  if (readState.get(ctx.sessionID)?.get(actorID(ctx))?.has(target)) return
 
   for (const msg of ctx.messages) {
     for (const part of msg.parts) {
