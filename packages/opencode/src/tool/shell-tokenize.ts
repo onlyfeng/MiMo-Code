@@ -156,12 +156,20 @@ function extractHeredocs(script: string): HeredocResult {
         }
 
         if (!closed) {
+          // Teaching error: the most common way a model produces an unclosed
+          // heredoc is appending flags to the closing marker (`EOF --timeout ...`),
+          // which no longer trims to exactly `marker` so it never closes. Detect
+          // that shape and point at the fix instead of just reporting "unclosed".
+          const trailing = bodyLines.find((l) => l.trim().split(/\s+/)[0] === marker)
+          const hint = trailing
+            ? ` — flags must precede <<${marker}; the closing ${marker} must stand alone on its own line (found "${trailing.trim()}")`
+            : ""
           return {
             ok: false,
             error: {
               kind: "unclosed-heredoc",
               line: openLine,
-              detail: `unclosed heredoc <<${marker}`,
+              detail: `unclosed heredoc <<${marker}${hint}`,
             },
           }
         }

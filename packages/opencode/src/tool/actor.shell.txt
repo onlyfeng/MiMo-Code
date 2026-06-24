@@ -7,7 +7,9 @@ appends them at request time per-agent).
 #   - Multi-line: one command per non-blank line, set-e on first failure
 #   - "double" quotes preserve literal LF and process \" \\ escapes
 #   - 'single' quotes are verbatim
-#   - <<EOF heredoc body is fully verbatim (no escape, no $vars)
+#   - <<EOF heredoc body is fully verbatim (no escape, no $vars). The heredoc IS
+#     the final positional (the prompt): put every flag BEFORE <<EOF; flags on or
+#     after the closing EOF marker are a parse error, not a silent no-op.
 #   - # starts a line comment to end-of-line (quoted # is literal text)
 #   - $vars are preserved as literal text (no expansion)
 
@@ -45,13 +47,24 @@ Examples:
 # An unknown or malformed TID is ignored and the subagent runs ad-hoc:
     actor spawn general "Implement auth" "build the login flow" --task T1
 
-# any multi-line prompt — heredoc body is verbatim (no escape needed for " \ $ #):
-    actor run general "Type checker review" <<EOF
+# any multi-line prompt — heredoc body is verbatim (no escape needed for " \ $ #).
+# When using a heredoc prompt, put all actor flags before <<EOF; never append
+# flags after the closing EOF marker. The heredoc must be the LAST token on the
+# opener line and the closing EOF must stand alone on its own line.
+    actor run general "Type checker review" --timeout 120000 --context state <<EOF
     Read docs/spec.md §3 then src/types.ts.
     Report missing implementations + coverage gaps.
     Regex check: /\bnew \w+Provider\b/  (paths like C:\Users\... are fine)
     Format: { missing_implementation: [...], coverage_gaps: [...] }.
     EOF
+
+# INVALID — flags after the closing EOF fail before the tool ever runs:
+#     actor run general "Type checker review" <<EOF
+#     ...body...
+#     EOF --timeout 120000      # -> parse error: unclosed heredoc <<EOF
+#   and a flag on the line AFTER EOF is read as a separate, non-actor command:
+#     EOF
+#     --timeout 120000          # -> error: every command must start with 'actor'
 
 # parallel investigations: spawn three, then optionally wait or let notifications deliver:
     actor spawn explore "Q1" "search for catch blocks"
