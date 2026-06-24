@@ -199,6 +199,17 @@ export const layer = Layer.effect(
     // (contextMode = "full"). Read by fork's runLoop (see prompt.ts) and
     // cleared on terminal status. Fiber tracking moved to SessionRunState.
     const forkContexts = new Map<string, ForkContext>()
+    const cancelledActors = new Set<string>()
+    const actorKey = (sessionID: SessionID, actorID: string) => `${sessionID}:${actorID}`
+    const isCancelled = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => cancelledActors.has(actorKey(sessionID, actorID)))
+    const markCancelled = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => cancelledActors.add(actorKey(sessionID, actorID)))
+    const clearActorState = (key: string, actorID: string) =>
+      Effect.sync(() => {
+        forkContexts.delete(actorID)
+        cancelledActors.delete(key)
+      })
 
     // Real agent loop: marks the actor running, then drives a SessionPrompt.prompt
     // turn. The user message persisted by SessionPrompt carries the actor's
@@ -263,6 +274,7 @@ export const layer = Layer.effect(
       format?: MessageV2.OutputFormat
     }) =>
       Effect.gen(function* () {
+        const key = actorKey(input.sessionID, input.actorID)
         const outcome = yield* Deferred.make<AgentOutcome>()
         const description = input.description ?? input.agentType
         // Auto-start the bound task: spawning an actor for a task IS that task
@@ -344,6 +356,7 @@ export const layer = Layer.effect(
                     }
                   : undefined,
               }),
+              { isCancelled: isCancelled(input.sessionID, input.actorID) },
             )
             finalText = turn.finalText
             structured = turn.structured
@@ -428,6 +441,7 @@ export const layer = Layer.effect(
                         source: "hook",
                         provenance: { hookPhase: "post", hookIteration: gateIter, pluginNames: [], hookIDs: [] },
                       }),
+                      { isCancelled: isCancelled(input.sessionID, input.actorID) },
                     ).pipe(
                       Effect.catch(() =>
                         Effect.gen(function* () {
@@ -557,6 +571,7 @@ export const layer = Layer.effect(
                         hookIDs: postReentry.contributingHookIDs,
                       },
                     }),
+                    { isCancelled: isCancelled(input.sessionID, input.actorID) },
                   ).pipe(
                     // postStop LLM failure: log + break loop, do NOT propagate
                     Effect.catch(() =>
@@ -574,7 +589,7 @@ export const layer = Layer.effect(
                   lastFinalText = newTurn.finalText
                 }
 
-                yield* Effect.sync(() => forkContexts.delete(input.actorID))
+                yield* clearActorState(key, input.actorID)
               }),
             onFailure: (cause) =>
               Effect.gen(function* () {
@@ -585,7 +600,7 @@ export const layer = Layer.effect(
                   outcome,
                   cancelled ? { status: "cancelled" as const } : { status: "failure" as const, error },
                 )
-                yield* Effect.sync(() => forkContexts.delete(input.actorID))
+                yield* clearActorState(key, input.actorID)
               }),
           }),
         )
@@ -697,6 +712,7 @@ export const layer = Layer.effect(
 
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
+        if (mode === "graceful") yield* markCancelled(sessionID, actorID)
         const children = yield* actorReg.listByParent(sessionID, actorID)
         yield* Effect.forEach(children, (c) => cancel(sessionID, c.actorID, mode), {
           concurrency: "unbounded",
