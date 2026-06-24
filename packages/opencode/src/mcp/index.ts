@@ -18,7 +18,6 @@ import { Installation } from "../installation"
 import { InstallationVersion } from "../installation/version"
 import { withTimeout } from "@/util/timeout"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
-import { assertSafeUrl } from "@/util/ssrf"
 import { McpOAuthProvider } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
@@ -133,6 +132,12 @@ type McpEntry = NonNullable<Config.Info["mcp"]>[string]
 
 function isMcpConfigured(entry: McpEntry): entry is ConfigMCP.Info {
   return typeof entry === "object" && entry !== null && "type" in entry
+}
+
+function remoteURL(value: string) {
+  if (!URL.canParse(value)) return
+  const url = new URL(value)
+  if (url.protocol === "http:" || url.protocol === "https:") return url
 }
 
 const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_")
@@ -288,10 +293,10 @@ export const layer = Layer.effect(
       key: string,
       mcp: ConfigMCP.Info & { type: "remote" },
     ) {
-      yield* Effect.tryPromise({
-        try: () => assertSafeUrl(mcp.url),
-        catch: (e) => new Error(e instanceof Error ? e.message : String(e)),
-      }).pipe(Effect.orDie)
+      const url = remoteURL(mcp.url)
+      if (!url) {
+        return { client: undefined, status: { status: "failed", error: `Invalid MCP URL for "${key}"` } as Status }
+      }
 
       const oauthDisabled = mcp.oauth === false
       const oauthConfig = typeof mcp.oauth === "object" ? mcp.oauth : undefined
@@ -319,14 +324,14 @@ export const layer = Layer.effect(
       const transports: Array<{ name: string; transport: TransportWithAuth }> = [
         {
           name: "StreamableHTTP",
-          transport: new StreamableHTTPClientTransport(new URL(mcp.url), {
+          transport: new StreamableHTTPClientTransport(url, {
             authProvider,
             requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
           }),
         },
         {
           name: "SSE",
-          transport: new SSEClientTransport(new URL(mcp.url), {
+          transport: new SSEClientTransport(url, {
             authProvider,
             requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
           }),
@@ -755,11 +760,8 @@ export const layer = Layer.effect(
       if (!mcpConfig) throw new Error(`MCP server ${mcpName} not found or disabled`)
       if (mcpConfig.type !== "remote") throw new Error(`MCP server ${mcpName} is not a remote server`)
       if (mcpConfig.oauth === false) throw new Error(`MCP server ${mcpName} has OAuth explicitly disabled`)
-
-      yield* Effect.tryPromise({
-        try: () => assertSafeUrl(mcpConfig.url),
-        catch: (e) => new Error(e instanceof Error ? e.message : String(e)),
-      }).pipe(Effect.orDie)
+      const url = remoteURL(mcpConfig.url)
+      if (!url) throw new Error(`Invalid MCP URL for "${mcpName}"`)
 
       // OAuth config is optional - if not provided, we'll use auto-discovery
       const oauthConfig = typeof mcpConfig.oauth === "object" ? mcpConfig.oauth : undefined
@@ -789,7 +791,7 @@ export const layer = Layer.effect(
         auth,
       )
 
-      const transport = new StreamableHTTPClientTransport(new URL(mcpConfig.url), { authProvider })
+      const transport = new StreamableHTTPClientTransport(url, { authProvider })
 
       return yield* Effect.tryPromise({
         try: () => {
