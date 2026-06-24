@@ -26,7 +26,9 @@ const FORBIDDEN_PREFIXES = [
   "/dev",
   "/boot",
   "/root",
+  "/var",
   "/private/etc",
+  "/private/var",
 ] as const
 
 function assertSafeDirectory(directory: string): void {
