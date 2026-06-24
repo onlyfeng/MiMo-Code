@@ -206,10 +206,16 @@ export function parseActorScript(
     for (const argv of argvList) {
       const [head, verb, ...rest] = argv.tokens
       if (head !== "actor") {
+        // Teaching error: a command starting with a flag is almost always a flag
+        // that trailed a heredoc onto its own line (after the closing EOF). Point
+        // back at the run/spawn line so the model moves it before <<EOF.
+        const flagHint = head?.startsWith("--")
+          ? " — a flag can't start a command; if it followed a heredoc, move it before <<EOF on the run/spawn line"
+          : ""
         return yield* Effect.fail({
           kind: "unknown-verb",
           line: argv.line,
-          detail: `actor: every command must start with 'actor' (got '${head ?? ""}')`,
+          detail: `actor: every command must start with 'actor' (got '${head ?? ""}')${flagHint}`,
         })
       }
       const parsed = yield* mapActorVerb(verb, rest, argv.line)
