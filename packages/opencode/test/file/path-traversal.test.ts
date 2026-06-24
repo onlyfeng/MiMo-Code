@@ -221,6 +221,8 @@ describe("Instance.provide directory safety", () => {
       "/dev",
       "/root",
       "/boot",
+      "/var",
+      "/private/var",
       "/var/log",
       "/private/var/log",
     ]
@@ -229,6 +231,12 @@ describe("Instance.provide directory safety", () => {
         Instance.provide({ directory: dir, fn: () => {} }),
       ).rejects.toThrow("Access denied")
     }
+  })
+
+  test("allows non-log subdirectories under var", async () => {
+    await expect(
+      Instance.provide({ directory: "/var/tmp", fn: () => Instance.directory }),
+    ).resolves.toBe(await fs.realpath("/var/tmp"))
   })
 
   test("rejects filesystem root", async () => {
