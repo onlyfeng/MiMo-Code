@@ -96,6 +96,9 @@ describe("actor.shell.parse: spawn variants", () => {
     const err = fail.error ?? fail
     expect(err.kind).toBe("unclosed-heredoc")
     expect(err.detail).toContain("unclosed heredoc <<EOF")
+    // teaching error: name the cause + offending line so a model can self-correct
+    expect(err.detail).toContain("flags must precede <<EOF")
+    expect(err.detail).toContain("EOF --timeout 30000")
   })
 
   test("a flag on the line after the closing EOF is parsed as a new (non-actor) command", async () => {
