@@ -235,6 +235,52 @@ test(
   ),
 )
 
+test(
+  "remote MCP private network URL connects as configured",
+  withInstance({}, (mcp) =>
+    Effect.gen(function* () {
+      lastCreatedClientName = "private-remote"
+      getOrCreateClientState("private-remote")
+
+      const addResult = yield* mcp.add("private-remote", {
+        type: "remote",
+        url: "http://10.0.0.5/mcp",
+        oauth: false,
+      })
+
+      const serverStatus = (addResult.status as any)["private-remote"] ?? addResult.status
+      expect(serverStatus.status).toBe("connected")
+      expect(clientCreateCount).toBe(1)
+    }),
+  ),
+)
+
+test(
+  "remote MCP rejects invalid URLs before creating a client",
+  withInstance({}, (mcp) =>
+    Effect.gen(function* () {
+      const unsupportedResult = yield* mcp.add("unsupported-remote", {
+        type: "remote",
+        url: "file:///tmp/mcp.sock",
+        oauth: false,
+      })
+      const unsupportedStatus = (unsupportedResult.status as any)["unsupported-remote"] ?? unsupportedResult.status
+      expect(unsupportedStatus.status).toBe("failed")
+      expect(unsupportedStatus.error).toBe('Invalid MCP URL for "unsupported-remote"')
+
+      const invalidResult = yield* mcp.add("invalid-remote", {
+        type: "remote",
+        url: "not a url",
+        oauth: false,
+      })
+      const invalidStatus = (invalidResult.status as any)["invalid-remote"] ?? invalidResult.status
+      expect(invalidStatus.status).toBe("failed")
+      expect(invalidStatus.error).toBe('Invalid MCP URL for "invalid-remote"')
+      expect(clientCreateCount).toBe(0)
+    }),
+  ),
+)
+
 test("Claude Code local MCP server is pending until explicitly connected", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {
