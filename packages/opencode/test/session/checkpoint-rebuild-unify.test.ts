@@ -85,6 +85,14 @@ describe("SessionCheckpoint.insertRebuildBoundary", () => {
         Effect.gen(function* () {
           const ssn = yield* SessionNs.Service
           const cp = yield* SessionCheckpoint.Service
+          const memory = yield* Memory.Service
+          const root = yield* memory.root()
+          yield* Effect.promise(() =>
+            Promise.all([
+              fs.rm(path.join(root, "global"), { recursive: true, force: true }).catch(() => undefined),
+              fs.rm(path.join(root, "projects"), { recursive: true, force: true }).catch(() => undefined),
+            ]),
+          )
           const info = yield* ssn.create({})
 
           const m1 = yield* Effect.promise(() => seedUserMessage(info.id, "turn one"))
@@ -109,7 +117,7 @@ describe("SessionCheckpoint.insertRebuildBoundary", () => {
           expect(after.some((m) => m.info.id === m3.id)).toBe(true)
           expect(after.length).toBe(3)
         }),
-      { config: { checkpoint: { push_caps: { recent_user: 0 } } } },
+      { outsideGit: true, config: { checkpoint: { push_caps: { recent_user: 0 } } } },
     ),
   )
 })
