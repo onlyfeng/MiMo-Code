@@ -6,6 +6,7 @@ export interface Runner<A, E = never> {
   readonly ensureRunning: (work: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly startShell: (work: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly cancel: Effect.Effect<void>
+  readonly cancelDetached: Effect.Effect<void>
 }
 
 export class Cancelled extends Schema.TaggedErrorClass<Cancelled>()("RunnerCancelled", {}) {}
@@ -196,6 +197,39 @@ export const make = <A, E = never>(
     }
   }).pipe(Effect.flatten)
 
+  const cancelDetached = SynchronizedRef.modify(ref, (st) => {
+    switch (st._tag) {
+      case "Idle":
+        return [Effect.void, st] as const
+      case "Running":
+        return [
+          Effect.gen(function* () {
+            yield* Fiber.interrupt(st.run.fiber).pipe(Effect.forkDetach)
+            yield* idleIfCurrent()
+          }),
+          { _tag: "Idle" } as const,
+        ] as const
+      case "Shell":
+        return [
+          Effect.gen(function* () {
+            yield* stopShell(st.shell).pipe(Effect.forkDetach)
+            yield* idleIfCurrent()
+          }),
+          { _tag: "Idle" } as const,
+        ] as const
+      case "ShellThenRun":
+        return [
+          Effect.gen(function* () {
+            yield* Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.asVoid)
+            yield* stopShell(st.shell).pipe(Effect.forkDetach)
+            yield* idleIfCurrent()
+          }),
+          { _tag: "Idle" } as const,
+        ] as const
+    }
+    return [Effect.void, st] as const
+  }).pipe(Effect.flatten)
+
   return {
     get state() {
       return state()
@@ -206,5 +240,6 @@ export const make = <A, E = never>(
     ensureRunning,
     startShell,
     cancel,
+    cancelDetached,
   }
 }

@@ -702,7 +702,7 @@ export const layer = Layer.effect(
           concurrency: "unbounded",
           discard: true,
         })
-        yield* state.cancelActor(sessionID, actorID)
+        yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
         yield* actorReg
           .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
           .pipe(Effect.ignore)

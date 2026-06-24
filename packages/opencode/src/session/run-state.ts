@@ -10,6 +10,7 @@ export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly cancelActor: (sessionID: SessionID, agentID: string) => Effect.Effect<void>
+  readonly cancelActorDetached: (sessionID: SessionID, agentID: string) => Effect.Effect<void>
   readonly ensureRunning: (
     sessionID: SessionID,
     agentID: string,
@@ -109,6 +110,17 @@ export const layer = Layer.effect(
       yield* existing.cancel
     })
 
+    const cancelActorDetached = Effect.fn("SessionRunState.cancelActorDetached")(function* (
+      sessionID: SessionID,
+      agentID: string,
+    ) {
+      const key = runnerKey(sessionID, agentID)
+      const data = yield* InstanceState.get(state)
+      const existing = data.runners.get(key)
+      if (!existing || !existing.busy) return
+      yield* existing.cancelDetached
+    })
+
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (
       sessionID: SessionID,
       agentID: string,
@@ -126,7 +138,7 @@ export const layer = Layer.effect(
       return yield* (yield* runner(sessionID, "main", onInterrupt)).startShell(work)
     })
 
-    return Service.of({ assertNotBusy, cancel, cancelActor, ensureRunning, startShell })
+    return Service.of({ assertNotBusy, cancel, cancelActor, cancelActorDetached, ensureRunning, startShell })
   }),
 )
 
