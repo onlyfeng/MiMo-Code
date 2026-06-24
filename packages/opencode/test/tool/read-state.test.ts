@@ -54,7 +54,7 @@ const read = (filePath: string) =>
       Effect.gen(function* () {
         const info = yield* ReadTool
         const tool = yield* info.init()
-        return yield* tool.execute({ filePath }, ctx)
+        return yield* tool.execute({ file_path: filePath }, ctx)
       }),
     ),
   )
@@ -64,7 +64,7 @@ const edit = (filePath: string) =>
     Effect.gen(function* () {
       const info = yield* EditTool
       const tool = yield* info.init()
-      return yield* tool.execute({ filePath, oldString: "old", newString: "new" }, ctx)
+      return yield* tool.execute({ file_path: filePath, old_string: "old", new_string: "new" }, ctx)
     }),
   )
 

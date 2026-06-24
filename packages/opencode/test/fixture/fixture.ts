@@ -44,6 +44,21 @@ export async function cleanupTmpdir(dir: string, cleanup = clean) {
   })
 }
 
+function outsideGitTmpRoot() {
+  if (process.platform === "win32") return os.tmpdir()
+  return "/tmp"
+}
+
+/** Tmpdirs under cwd inherit the parent repo's worktree; use this when tests need a non-git project. */
+export function withTmpdirOutsideGit<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = process.env["MIMOCODE_TEST_TMPDIR_ROOT"]
+  process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = outsideGitTmpRoot()
+  return fn().finally(() => {
+    if (prev !== undefined) process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = prev
+    else delete process.env["MIMOCODE_TEST_TMPDIR_ROOT"]
+  })
+}
+
 async function stop(dir: string) {
   if (!(await exists(dir))) return
   await $`git fsmonitor--daemon stop`.cwd(dir).quiet().nothrow()
@@ -124,9 +139,27 @@ export async function tmpdir<T>(options?: TmpDirOptions<T>) {
   return result
 }
 
+type ScopedTmpDirOptions = {
+  git?: boolean
+  config?: Partial<Config.Info>
+  root?: "cwd" | "tmp" | "home"
+  outsideGit?: boolean
+}
+
 /** Effectful scoped tmpdir. Cleaned up when the scope closes. Make sure these stay in sync */
-export function tmpdirScoped(options?: { git?: boolean; config?: Partial<Config.Info>; root?: "cwd" | "tmp" }) {
+export function tmpdirScoped(options?: ScopedTmpDirOptions) {
   return Effect.gen(function* () {
+    const prevRoot = options?.outsideGit ? process.env["MIMOCODE_TEST_TMPDIR_ROOT"] : undefined
+    if (options?.outsideGit) process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = outsideGitTmpRoot()
+    if (options?.outsideGit) {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (prevRoot !== undefined) process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = prevRoot
+          else delete process.env["MIMOCODE_TEST_TMPDIR_ROOT"]
+        }),
+      )
+    }
+
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const dirpath = sanitizePath(
       path.join(tmpdirBase(options?.root), "mimocode-test-" + Math.random().toString(36).slice(2)),
@@ -180,7 +213,7 @@ export const provideInstance =
 
 export function provideTmpdirInstance<A, E, R>(
   self: (path: string) => Effect.Effect<A, E, R>,
-  options?: { git?: boolean; config?: Partial<Config.Info>; root?: "cwd" | "tmp" },
+  options?: ScopedTmpDirOptions,
 ) {
   return Effect.gen(function* () {
     const path = yield* tmpdirScoped(options)
@@ -204,7 +237,7 @@ export function provideTmpdirInstance<A, E, R>(
 
 export function provideTmpdirServer<A, E, R>(
   self: (input: { dir: string; llm: TestLLMServer["Service"] }) => Effect.Effect<A, E, R>,
-  options?: { git?: boolean; config?: (url: string) => Partial<Config.Info>; root?: "cwd" | "tmp" },
+  options?: { git?: boolean; config?: (url: string) => Partial<Config.Info>; root?: "cwd" | "tmp" | "home"; outsideGit?: boolean },
 ): Effect.Effect<
   A,
   E | PlatformError.PlatformError,
@@ -216,6 +249,7 @@ export function provideTmpdirServer<A, E, R>(
       git: options?.git,
       config: options?.config?.(llm.url),
       root: options?.root,
+      outsideGit: options?.outsideGit,
     })
   })
 }

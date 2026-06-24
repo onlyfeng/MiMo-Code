@@ -6,6 +6,7 @@ import { Cause, Effect, Exit, Layer } from "effect"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { Instance } from "../../src/project/instance"
 import { Worktree } from "../../src/worktree"
+import { GlobalBus } from "../../src/bus/global"
 import { provideInstance, provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -16,20 +17,27 @@ function normalize(input: string) {
   return input.replace(/\\/g, "/").toLowerCase()
 }
 
-async function waitReady() {
-  const { GlobalBus } = await import("../../src/bus/global")
-
-  return await new Promise<{ name: string; branch: string }>((resolve, reject) => {
+function waitReady() {
+  return new Promise<{ name: string; branch: string }>((resolve, reject) => {
     const timer = setTimeout(() => {
       GlobalBus.off("event", on)
       reject(new Error("timed out waiting for worktree.ready"))
     }, 10_000)
 
-    function on(evt: { directory?: string; payload: { type: string; properties: { name: string; branch: string } } }) {
+    function on(evt: { directory?: string; payload: { type: string; properties: { name?: string; branch?: string; message?: string } } }) {
+      if (evt.payload.type === Worktree.Event.Failed.type) {
+        clearTimeout(timer)
+        GlobalBus.off("event", on)
+        reject(new Error(evt.payload.properties.message ?? "worktree.failed"))
+        return
+      }
       if (evt.payload.type !== Worktree.Event.Ready.type) return
       clearTimeout(timer)
       GlobalBus.off("event", on)
-      resolve(evt.payload.properties)
+      resolve({
+        name: evt.payload.properties.name ?? "",
+        branch: evt.payload.properties.branch ?? "",
+      })
     }
 
     GlobalBus.on("event", on)
@@ -84,14 +92,16 @@ describe("Worktree", () => {
     )
 
     it.live("throws NotGitError for non-git directories", () =>
-      provideTmpdirInstance(() =>
-        Effect.gen(function* () {
-          const svc = yield* Worktree.Service
-          const exit = yield* Effect.exit(svc.makeWorktreeInfo())
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const svc = yield* Worktree.Service
+            const exit = yield* Effect.exit(svc.makeWorktreeInfo())
 
-          expect(Exit.isFailure(exit)).toBe(true)
-          if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Worktree.NotGitError)
-        }),
+            expect(Exit.isFailure(exit)).toBe(true)
+            if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Worktree.NotGitError)
+          }),
+        { outsideGit: true },
       ),
     )
   })
