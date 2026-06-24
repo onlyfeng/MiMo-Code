@@ -56,6 +56,64 @@ describe("actor.shell.parse: spawn variants", () => {
       "Add submodule fields to workspace_repos.\nColumns: parent_workspace_repo_id, submodule_path.",
     )
   })
+
+  // Heredoc + flags contract: the heredoc body is the LAST positional (the
+  // prompt), so every flag must precede <<EOF. A heredoc must be the final
+  // payload of an actor command — flags appended to/after the closing marker are
+  // a parse error, not a silent no-op. These lock in the teaching errors so any
+  // model that writes "EOF --flag" or "EOF\n--flag" gets a clear failure.
+  test("run with flags before <<EOF parses; heredoc body lands in prompt", async () => {
+    const script = [
+      `actor run explore "d" --timeout 30000 --context state <<EOF`,
+      `prompt body`,
+      `EOF`,
+    ].join("\n")
+    const out = await parse(script)
+    expect(out).toEqual([
+      {
+        operation: {
+          action: "run",
+          subagent_type: "explore",
+          description: "d",
+          prompt: "prompt body",
+          timeout_ms: 30000,
+          context: "state",
+        },
+      },
+    ])
+  })
+
+  test("flags appended to the closing EOF marker fail as unclosed-heredoc", async () => {
+    const script = [
+      `actor run explore "d" <<EOF`,
+      `prompt body`,
+      `EOF --timeout 30000`,
+    ].join("\n")
+    const exit = await Effect.runPromise(Effect.exit(parseActorScript(script)))
+    expect(exit._tag).toBe("Failure")
+    const cause: any = (exit as any).cause
+    const fail = cause.reasons?.find?.((r: any) => r._tag === "Fail") ?? cause
+    const err = fail.error ?? fail
+    expect(err.kind).toBe("unclosed-heredoc")
+    expect(err.detail).toContain("unclosed heredoc <<EOF")
+  })
+
+  test("a flag on the line after the closing EOF is parsed as a new (non-actor) command", async () => {
+    const script = [
+      `actor run explore "d" <<EOF`,
+      `prompt body`,
+      `EOF`,
+      `--timeout 30000`,
+    ].join("\n")
+    const exit = await Effect.runPromise(Effect.exit(parseActorScript(script)))
+    expect(exit._tag).toBe("Failure")
+    const cause: any = (exit as any).cause
+    const fail = cause.reasons?.find?.((r: any) => r._tag === "Fail") ?? cause
+    const err = fail.error ?? fail
+    expect(err.kind).toBe("unknown-verb")
+    expect(err.detail).toContain("every command must start with 'actor'")
+    expect(err.detail).toContain("--timeout")
+  })
 })
 
 describe("actor.shell.parse: --model flag", () => {
