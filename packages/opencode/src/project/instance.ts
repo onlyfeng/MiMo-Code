@@ -19,14 +19,21 @@ const context = LocalContext.create<InstanceContext>("instance")
 const cache = new Map<string, Promise<InstanceContext>>()
 const project = makeRuntime(Project.Service, Project.defaultLayer)
 
+const FORBIDDEN_EXACT_PATHS = [
+  "/private",
+  "/var",
+  "/private/var",
+] as const
+
 const FORBIDDEN_PREFIXES = [
   "/etc",
   "/proc",
   "/sys",
   "/dev",
   "/boot",
-  "/root",
   "/private/etc",
+  "/var/log",
+  "/private/var/log",
 ] as const
 
 function assertSafeDirectory(directory: string): void {
@@ -34,9 +41,14 @@ function assertSafeDirectory(directory: string): void {
   if (resolved === pathParse(resolved).root) {
     throw new Error("Access denied: filesystem root is not a valid project directory")
   }
-  for (const prefix of FORBIDDEN_PREFIXES) {
-    if (resolved === prefix || resolved.startsWith(`${prefix}/`)) {
+  if (process.platform !== "win32") {
+    if (FORBIDDEN_EXACT_PATHS.some((prefix) => resolved === prefix)) {
       throw new Error("Access denied: target is a protected system directory")
+    }
+    for (const prefix of FORBIDDEN_PREFIXES) {
+      if (resolved === prefix || resolved.startsWith(`${prefix}/`)) {
+        throw new Error("Access denied: target is a protected system directory")
+      }
     }
   }
 }

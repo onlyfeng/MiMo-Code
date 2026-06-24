@@ -70,15 +70,14 @@ async function stop(dir: string) {
 // so VCS detection stops at the fixture instead of walking up to this repo.
 const cwdFixtureRoot = () => path.join(process.cwd(), "node_modules", ".mimocode-cwd-fixtures")
 
-// "home" roots a fixture outside cwd yet outside the SYSTEM_PATHS blocklist that
-// isValidProjectDirectory rejects before it checks project markers (see
-// middleware.ts) — used to exercise the marker branch, since the os.tmpdir()
-// default sits under /tmp on Linux. Prefer os.homedir() (/home/runner on CI,
-// /Users/x on macOS), but it is /root under a root user — itself a SYSTEM_PATH —
-// so pick the first non-system candidate between it and cwd's parent. If the
-// whole tree sits under a system path (e.g. the repo checked out directly under
-// /root), no non-system location exists; fall back to cwd's parent so the result
-// is at least deterministic — the marker branch simply isn't reachable there.
+// "home" roots a fixture outside cwd and away from conservative system fixture
+// roots. That lets tests exercise the non-git/project-marker path without using
+// os.tmpdir(), which sits under /tmp on Linux and can trigger server/middleware
+// assumptions unrelated to the behavior under test.
+// Prefer os.homedir() (/home/runner on CI, /Users/x on macOS), but it is often
+// /root under root containers, so pick the first non-system candidate between it
+// and cwd's parent. If the whole tree sits under a system path, fall back to
+// cwd's parent so the result is at least deterministic.
 const SYSTEM_PREFIXES = ["/etc", "/proc", "/sys", "/var", "/boot", "/root", "/dev", "/usr", "/bin", "/sbin", "/lib", "/tmp"]
 const underSystemPath = (p: string) => SYSTEM_PREFIXES.some((s) => p === s || p.startsWith(s + "/"))
 function homeFixtureRoot() {

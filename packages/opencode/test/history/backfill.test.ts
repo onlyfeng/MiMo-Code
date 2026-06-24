@@ -1,5 +1,6 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, beforeEach, describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
+import { eq } from "drizzle-orm"
 import { Database } from "../../src/storage"
 import { HistoryFtsTable } from "../../src/history/fts.sql"
 import { MessageTable, PartTable, SessionTable } from "../../src/session/session.sql"
@@ -11,7 +12,8 @@ import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 
-afterEach(async () => {
+async function resetHistoryTestState() {
+  await Instance.disposeAll()
   Database.use((db) => {
     db.delete(HistoryFtsTable).run()
     db.delete(PartTable).run()
@@ -19,8 +21,10 @@ afterEach(async () => {
     db.delete(SessionTable).run()
     db.delete(ProjectTable).run()
   })
-  await Instance.disposeAll()
-})
+}
+
+beforeEach(resetHistoryTestState)
+afterEach(resetHistoryTestState)
 
 const it = testEffect(Layer.mergeAll(History.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
@@ -97,6 +101,18 @@ function seed(
   })
 }
 
+function historyPartIDs(sessionID: string) {
+  return Database.use((db) =>
+    db
+      .select({ part_id: HistoryFtsTable.part_id })
+      .from(HistoryFtsTable)
+      .where(eq(HistoryFtsTable.session_id, sessionID))
+      .all(),
+  )
+    .map((row) => row.part_id)
+    .sort()
+}
+
 describe("History.backfill", () => {
   it.live("indexes existing text and tool parts", () =>
     provideTmpdirInstance(() =>
@@ -123,8 +139,7 @@ describe("History.backfill", () => {
 
         yield* backfillAll()
 
-        const rows = Database.use((db) => db.select().from(HistoryFtsTable).all())
-        expect(rows.map((r) => r.part_id).sort()).toEqual(["p1", "p2"])
+        expect(historyPartIDs("ses_1")).toEqual(["p1", "p2"])
       }),
     ),
   )
@@ -141,8 +156,7 @@ describe("History.backfill", () => {
         ])
         yield* backfillAll()
 
-        const rows = Database.use((db) => db.select().from(HistoryFtsTable).all())
-        expect(rows.map((r) => r.part_id).sort()).toEqual(["p1", "p2"])
+        expect(historyPartIDs("ses_x")).toEqual(["p1", "p2"])
       }),
     ),
   )
