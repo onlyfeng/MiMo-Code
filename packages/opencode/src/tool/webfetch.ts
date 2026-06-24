@@ -1,6 +1,6 @@
 import z from "zod"
-import { Effect } from "effect"
-import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { Effect, Option } from "effect"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import * as Tool from "./tool"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
@@ -9,6 +9,7 @@ import { isImageAttachment } from "@/util/media"
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
+const MAX_REDIRECTS = 10
 
 const parameters = z.object({
   url: z.string().describe("The URL to fetch content from"),
@@ -23,27 +24,27 @@ export const WebFetchTool = Tool.define(
   "webfetch",
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
-    const httpOk = HttpClient.filterStatusOk(http)
 
     return {
       description: DESCRIPTION,
       parameters,
       execute: (params: z.infer<typeof parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
-          if (!params.url.startsWith("http://") && !params.url.startsWith("https://")) {
-            throw new Error("URL must start with http:// or https://")
-          }
+          assertHttpUrl(params.url)
 
-          yield* ctx.ask({
-            permission: "webfetch",
-            patterns: [params.url],
-            always: ["*"],
-            metadata: {
-              url: params.url,
-              format: params.format,
-              timeout: params.timeout,
-            },
-          })
+          const ask = (url: string) =>
+            ctx.ask({
+              permission: "webfetch",
+              patterns: [url],
+              always: ["*"],
+              metadata: {
+                url,
+                format: params.format,
+                timeout: params.timeout,
+              },
+            })
+
+          yield* ask(params.url)
 
           const timeout = Math.min((params.timeout ?? DEFAULT_TIMEOUT / 1000) * 1000, MAX_TIMEOUT)
 
@@ -70,23 +71,40 @@ export const WebFetchTool = Tool.define(
             Accept: acceptHeader,
             "Accept-Language": "en-US,en;q=0.9",
           }
+          const fetchRequestInit = Option.getOrUndefined(yield* Effect.serviceOption(FetchHttpClient.RequestInit))
+          const executeRequest = (url: string, requestHeaders: Record<string, string>) =>
+            http.execute(HttpClientRequest.get(url).pipe(HttpClientRequest.setHeaders(requestHeaders))).pipe(
+              Effect.provideService(FetchHttpClient.RequestInit, {
+                ...(fetchRequestInit ?? {}),
+                redirect: "manual",
+              }),
+            )
+          const fetchUrl = (
+            url: string,
+            redirects = 0,
+          ): Effect.Effect<HttpClientResponse.HttpClientResponse, unknown> =>
+            Effect.gen(function* () {
+              const browserResponse = yield* executeRequest(url, headers)
+              const response =
+                browserResponse.status === 403 && browserResponse.headers["cf-mitigated"] === "challenge"
+                  ? yield* executeRequest(url, { ...headers, "User-Agent": "mimocode" })
+                  : browserResponse
 
-          const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
+              if (response.status >= 300 && response.status < 400 && response.headers.location) {
+                if (redirects >= MAX_REDIRECTS) {
+                  throw new Error("Too many redirects")
+                }
 
-          // Retry with honest UA if blocked by Cloudflare bot detection (TLS fingerprint mismatch)
-          const response = yield* httpOk.execute(request).pipe(
-            Effect.catchIf(
-              (err) =>
-                err.reason._tag === "StatusCodeError" &&
-                err.reason.response.status === 403 &&
-                err.reason.response.headers["cf-mitigated"] === "challenge",
-              () =>
-                httpOk.execute(
-                  HttpClientRequest.get(params.url).pipe(
-                    HttpClientRequest.setHeaders({ ...headers, "User-Agent": "mimocode" }),
-                  ),
-                ),
-            ),
+                const redirectUrl = new URL(response.headers.location, url).toString()
+                assertHttpUrl(redirectUrl)
+                yield* ask(redirectUrl)
+                return yield* fetchUrl(redirectUrl, redirects + 1)
+              }
+
+              return yield* HttpClientResponse.filterStatusOk(response)
+            })
+
+          const response = yield* fetchUrl(params.url).pipe(
             Effect.timeoutOrElse({ duration: timeout, orElse: () => Effect.die(new Error("Request timed out")) }),
           )
 
@@ -153,6 +171,12 @@ export const WebFetchTool = Tool.define(
     }
   }),
 )
+
+function assertHttpUrl(url: string) {
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    throw new Error("URL must start with http:// or https://")
+  }
+}
 
 async function extractTextFromHTML(html: string) {
   let text = ""
