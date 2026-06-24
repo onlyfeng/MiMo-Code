@@ -3,12 +3,18 @@ import type * as Tool from "./tool"
 import { SessionCwd } from "./session-cwd"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { RecoverableError } from "./recoverable"
+import { registerDisposer } from "@/effect/instance-registry"
 import type { SessionID } from "../session/schema"
 
 const MAIN_ACTOR_ID = "main"
 type ReadContext = Pick<Tool.Context, "sessionID" | "actorID">
 
 const readState = new Map<SessionID, Map<string, Set<string>>>()
+
+// Mirror SessionCwd: drop the whole runtime cache when the instance is torn
+// down so it doesn't leak across instance rebuilds (and so tests don't have to
+// call clearReadState by hand).
+registerDisposer(async () => readState.clear())
 
 function canon(sessionID: SessionID, p: string): string {
   const abs = path.isAbsolute(p) ? p : path.resolve(SessionCwd.get(sessionID), p)
