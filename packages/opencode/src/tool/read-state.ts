@@ -10,19 +10,24 @@ import type { SessionID } from "../session/schema"
 const MAIN_ACTOR_ID = "main"
 type ReadContext = Pick<Tool.Context, "sessionID" | "actorID">
 
-const readState = new Map<SessionID, Map<string, Set<string>>>()
-// Which instance directory each tracked session belongs to. A server can host
-// several project instances at once, and disposeInstance() runs every disposer
-// with the directory being torn down — so clear only that directory's sessions
-// instead of wiping the whole process map (which would drop other projects'
-// live read marks and make their next edit fail "has not been read").
-const sessionDirectory = new Map<SessionID, string>()
+// Per actor, group read paths by the instance directory that owns them. A
+// session can span several directories, and keeping the directory below the
+// actor level avoids overwriting marks if an actor ever reads in more than one.
+type ActorReads = Map<string | undefined, Set<string>>
+const readState = new Map<SessionID, Map<string, ActorReads>>()
 
+// A server can host several project instances at once, and disposeInstance()
+// runs every disposer with the directory being torn down. Drop only the marks
+// owned by that directory; clearing more would wipe other projects' (or, on a
+// shared session, other actors') live marks and make their next edit fail
+// "has not been read".
 registerDisposer(async (directory) => {
-  for (const [sessionID, dir] of sessionDirectory) {
-    if (dir !== directory) continue
-    readState.delete(sessionID)
-    sessionDirectory.delete(sessionID)
+  for (const [sessionID, actors] of readState) {
+    for (const [actor, readsByDirectory] of actors) {
+      readsByDirectory.delete(directory)
+      if (readsByDirectory.size === 0) actors.delete(actor)
+    }
+    if (actors.size === 0) readState.delete(sessionID)
   }
 })
 
@@ -41,7 +46,7 @@ function sessionActors(sessionID: SessionID) {
   const existing = readState.get(sessionID)
   if (existing) return existing
 
-  const next = new Map<string, Set<string>>()
+  const next = new Map<string, ActorReads>()
   readState.set(sessionID, next)
   return next
 }
@@ -51,28 +56,30 @@ function actorReads(ctx: ReadContext) {
   const existing = actors.get(actorID(ctx))
   if (existing) return existing
 
-  const next = new Set<string>()
+  const next: ActorReads = new Map()
   actors.set(actorID(ctx), next)
   return next
 }
 
 export function markFileRead(ctx: ReadContext, targetPath: string): void {
-  actorReads(ctx).add(canon(ctx.sessionID, targetPath))
-  // Remember the owning instance so the disposer can scope cleanup by
-  // directory. Undefined only outside an instance context (e.g. tests that
-  // mark before providing one), which the per-directory dispose can skip.
+  const reads = actorReads(ctx)
+  const target = canon(ctx.sessionID, targetPath)
   const directory = Instance.directoryOrUndefined
-  if (directory) sessionDirectory.set(ctx.sessionID, directory)
+  const existing = reads.get(directory)
+  if (existing) {
+    existing.add(target)
+    return
+  }
+
+  reads.set(directory, new Set([target]))
 }
 
 export function clearReadState(sessionID?: SessionID): void {
   if (!sessionID) {
     readState.clear()
-    sessionDirectory.clear()
     return
   }
   readState.delete(sessionID)
-  sessionDirectory.delete(sessionID)
 }
 
 /**
@@ -87,7 +94,7 @@ export function clearReadState(sessionID?: SessionID): void {
  */
 export function assertFileRead(ctx: Tool.Context, targetPath: string, toolId: string): void {
   const target = canon(ctx.sessionID, targetPath)
-  if (readState.get(ctx.sessionID)?.get(actorID(ctx))?.has(target)) return
+  if ([...(readState.get(ctx.sessionID)?.get(actorID(ctx))?.values() ?? [])].some((paths) => paths.has(target))) return
 
   for (const msg of ctx.messages) {
     for (const part of msg.parts) {
