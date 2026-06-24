@@ -100,4 +100,76 @@ describe("tool.webfetch", () => {
       },
     )
   })
+
+  test("blocks redirects to private addresses before fetching the target", async () => {
+    await withFetch(
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: { Location: "http://169.254.169.254/latest/meta-data/" },
+        }),
+      async (url) => {
+        await Instance.provide({
+          directory: projectRoot,
+          fn: async () => {
+            await expect(exec({ url: new URL("/redirect", url).toString(), format: "text" })).rejects.toThrow(
+              "SSRF protection",
+            )
+          },
+        })
+      },
+    )
+  })
+
+  test("follows safe redirects", async () => {
+    await withFetch(
+      (req) => {
+        if (new URL(req.url).pathname === "/redirect") {
+          return new Response(null, { status: 302, headers: { Location: "/final" } })
+        }
+        return new Response("safe redirect", { status: 200, headers: { "content-type": "text/plain" } })
+      },
+      async (url) => {
+        await Instance.provide({
+          directory: projectRoot,
+          fn: async () => {
+            const result = await exec({ url: new URL("/redirect", url).toString(), format: "text" })
+            expect(result.output).toBe("safe redirect")
+          },
+        })
+      },
+    )
+  })
+
+  test("rejects redirects without location as non-success responses", async () => {
+    await withFetch(
+      () => new Response(null, { status: 302 }),
+      async (url) => {
+        await Instance.provide({
+          directory: projectRoot,
+          fn: async () => {
+            await expect(exec({ url: new URL("/redirect", url).toString(), format: "text" })).rejects.toThrow(
+              "HTTP error: 302",
+            )
+          },
+        })
+      },
+    )
+  })
+
+  test("rejects redirect loops", async () => {
+    await withFetch(
+      () => new Response(null, { status: 302, headers: { Location: "/loop" } }),
+      async (url) => {
+        await Instance.provide({
+          directory: projectRoot,
+          fn: async () => {
+            await expect(exec({ url: new URL("/loop", url).toString(), format: "text" })).rejects.toThrow(
+              "too many redirects",
+            )
+          },
+        })
+      },
+    )
+  })
 })

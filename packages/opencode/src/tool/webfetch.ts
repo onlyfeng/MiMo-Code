@@ -1,11 +1,11 @@
 import z from "zod"
 import { Effect } from "effect"
-import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { HttpClient } from "effect/unstable/http"
 import * as Tool from "./tool"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 import { isImageAttachment } from "@/util/media"
-import { assertSafeUrl } from "@/util/ssrf"
+import { assertSafeUrl, safeFetch } from "@/util/ssrf"
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
@@ -23,8 +23,7 @@ const parameters = z.object({
 export const WebFetchTool = Tool.define(
   "webfetch",
   Effect.gen(function* () {
-    const http = yield* HttpClient.HttpClient
-    const httpOk = HttpClient.filterStatusOk(http)
+    yield* HttpClient.HttpClient
 
     return {
       description: DESCRIPTION,
@@ -74,43 +73,44 @@ export const WebFetchTool = Tool.define(
             "Accept-Language": "en-US,en;q=0.9",
           }
 
-          const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
-
-          // Retry with honest UA if blocked by Cloudflare bot detection (TLS fingerprint mismatch)
-          const response = yield* httpOk.execute(request).pipe(
-            Effect.catchIf(
-              (err) =>
-                err.reason._tag === "StatusCodeError" &&
-                err.reason.response.status === 403 &&
-                err.reason.response.headers["cf-mitigated"] === "challenge",
-              () =>
-                httpOk.execute(
-                  HttpClientRequest.get(params.url).pipe(
-                    HttpClientRequest.setHeaders({ ...headers, "User-Agent": "mimocode" }),
-                  ),
-                ),
-            ),
-            Effect.timeoutOrElse({ duration: timeout, orElse: () => Effect.die(new Error("Request timed out")) }),
-          )
-
-          // Block SSRF via redirect: if the response was redirected, validate final URL
-          const source = (response as any).source as Response | undefined
-          if (source?.url && source.url !== params.url) {
-            yield* Effect.promise(() => assertSafeUrl(source.url))
+          const response = yield* Effect.tryPromise({
+            try: async () => {
+              const controller = new AbortController()
+              const timeoutId = setTimeout(() => controller.abort(), timeout)
+              try {
+                const response = await safeFetch(params.url, { headers, signal: controller.signal })
+                // Retry with honest UA if blocked by Cloudflare bot detection (TLS fingerprint mismatch)
+                return response.status === 403 && response.headers.get("cf-mitigated") === "challenge"
+                  ? await safeFetch(params.url, {
+                      headers: { ...headers, "User-Agent": "mimocode" },
+                      signal: controller.signal,
+                    })
+                  : response
+              } finally {
+                clearTimeout(timeoutId)
+              }
+            },
+            catch: (e) => {
+              if (e instanceof Error && e.name === "AbortError") return new Error("Request timed out")
+              return e instanceof Error ? e : new Error(String(e))
+            },
+          })
+          if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status} ${response.statusText}`)
           }
 
           // Check content length
-          const contentLength = response.headers["content-length"]
+          const contentLength = response.headers.get("content-length")
           if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
             throw new Error("Response too large (exceeds 5MB limit)")
           }
 
-          const arrayBuffer = yield* response.arrayBuffer
+          const arrayBuffer = yield* Effect.promise(() => response.arrayBuffer())
           if (arrayBuffer.byteLength > MAX_RESPONSE_SIZE) {
             throw new Error("Response too large (exceeds 5MB limit)")
           }
 
-          const contentType = response.headers["content-type"] || ""
+          const contentType = response.headers.get("content-type") || ""
           const mime = contentType.split(";")[0]?.trim().toLowerCase() || ""
           const title = `${params.url} (${contentType})`
 
