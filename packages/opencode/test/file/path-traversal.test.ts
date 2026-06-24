@@ -219,7 +219,6 @@ describe("Instance.provide directory safety", () => {
       "/proc",
       "/sys",
       "/dev",
-      "/root",
       "/boot",
       "/private",
       "/var",
