@@ -122,4 +122,55 @@ describe("runTurn (Plan 1 / Task 3)", () => {
       expect(entry?.lastError).toBeUndefined()
     })
   })
+
+  test("external cancellation remains final when work completes late", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withTurn(tmp.path, async (rt) => {
+      const parent = await rt.runPromise(Session.Service.use((s) => s.create()))
+      const sid = parent.id
+      await rt.runPromise(
+        ActorRegistry.Service.use((reg) =>
+          reg.register({
+            sessionID: sid,
+            actorID: "turn-actor-d",
+            mode: "subagent",
+            parentActorID: undefined,
+            agent: "main",
+            description: "main",
+            contextMode: "full",
+            contextWatermark: undefined,
+            background: false,
+            lifecycle: "ephemeral",
+          }),
+        ),
+      )
+      const cancelled = { current: false }
+      const release = { current: undefined as undefined | (() => void) }
+      const lateWork = new Promise<string>((resolve) => {
+        release.current = () => resolve("late success")
+      })
+      const fiber = rt.runFork(
+        runTurn(sid, "turn-actor-d", Effect.promise(() => lateWork), {
+          isCancelled: Effect.sync(() => cancelled.current),
+        }),
+      )
+      await new Promise((res) => setTimeout(res, 50))
+      cancelled.current = true
+      await rt.runPromise(
+        ActorRegistry.Service.use((reg) =>
+          reg.updateStatus(sid, "turn-actor-d", {
+            status: "idle",
+            lastOutcome: "cancelled",
+            lastError: undefined,
+          }),
+        ),
+      )
+      release.current?.()
+      await rt.runPromise(Fiber.await(fiber))
+      const entry = await rt.runPromise(ActorRegistry.Service.use((reg) => reg.get(sid, "turn-actor-d")))
+      expect(entry?.status).toBe("idle")
+      expect(entry?.lastOutcome).toBe("cancelled")
+      expect(entry?.lastError).toBeUndefined()
+    })
+  })
 })
