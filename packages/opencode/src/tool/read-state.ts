@@ -4,17 +4,27 @@ import { SessionCwd } from "./session-cwd"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { RecoverableError } from "./recoverable"
 import { registerDisposer } from "@/effect/instance-registry"
+import { Instance } from "@/project/instance"
 import type { SessionID } from "../session/schema"
 
 const MAIN_ACTOR_ID = "main"
 type ReadContext = Pick<Tool.Context, "sessionID" | "actorID">
 
 const readState = new Map<SessionID, Map<string, Set<string>>>()
+// Which instance directory each tracked session belongs to. A server can host
+// several project instances at once, and disposeInstance() runs every disposer
+// with the directory being torn down — so clear only that directory's sessions
+// instead of wiping the whole process map (which would drop other projects'
+// live read marks and make their next edit fail "has not been read").
+const sessionDirectory = new Map<SessionID, string>()
 
-// Mirror SessionCwd: drop the whole runtime cache when the instance is torn
-// down so it doesn't leak across instance rebuilds (and so tests don't have to
-// call clearReadState by hand).
-registerDisposer(async () => readState.clear())
+registerDisposer(async (directory) => {
+  for (const [sessionID, dir] of sessionDirectory) {
+    if (dir !== directory) continue
+    readState.delete(sessionID)
+    sessionDirectory.delete(sessionID)
+  }
+})
 
 function canon(sessionID: SessionID, p: string): string {
   const abs = path.isAbsolute(p) ? p : path.resolve(SessionCwd.get(sessionID), p)
@@ -48,14 +58,21 @@ function actorReads(ctx: ReadContext) {
 
 export function markFileRead(ctx: ReadContext, targetPath: string): void {
   actorReads(ctx).add(canon(ctx.sessionID, targetPath))
+  // Remember the owning instance so the disposer can scope cleanup by
+  // directory. Undefined only outside an instance context (e.g. tests that
+  // mark before providing one), which the per-directory dispose can skip.
+  const directory = Instance.directoryOrUndefined
+  if (directory) sessionDirectory.set(ctx.sessionID, directory)
 }
 
 export function clearReadState(sessionID?: SessionID): void {
   if (!sessionID) {
     readState.clear()
+    sessionDirectory.clear()
     return
   }
   readState.delete(sessionID)
+  sessionDirectory.delete(sessionID)
 }
 
 /**

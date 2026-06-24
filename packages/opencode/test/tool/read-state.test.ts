@@ -11,6 +11,7 @@ import { MessageID, SessionID } from "../../src/session/schema"
 import { EditTool } from "../../src/tool/edit"
 import { ReadTool } from "../../src/tool/read"
 import { assertFileRead, clearReadState, markFileRead } from "../../src/tool/read-state"
+import { disposeInstance } from "../../src/effect/instance-registry"
 import { Truncate } from "../../src/tool"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { tmpdir } from "../fixture/fixture"
@@ -122,5 +123,28 @@ describe("tool.read-state", () => {
         expect(() => assertFileRead(ctx, filePath, "edit")).toThrow("has not been read")
       },
     })
+  })
+
+  test("disposing one instance leaves another instance's read marks intact", async () => {
+    await using tmpA = await tmpdir()
+    await using tmpB = await tmpdir()
+    const fileB = path.join(tmpB.path, "file.txt")
+    await Bun.write(fileB, "old")
+
+    const ctxB = { ...ctx, sessionID: SessionID.make("ses_test-read-state-dir-b") }
+
+    await Instance.provide({
+      directory: tmpB.path,
+      fn: async () => markFileRead(ctxB, fileB),
+    })
+
+    // Tearing down a different project (A) must not wipe B's marks. Absolute
+    // paths mean assertFileRead needs no instance context here.
+    await disposeInstance(AppFileSystem.resolve(tmpA.path))
+    expect(() => assertFileRead(ctxB, fileB, "edit")).not.toThrow()
+
+    // Tearing down B's own directory does clear B.
+    await disposeInstance(AppFileSystem.resolve(tmpB.path))
+    expect(() => assertFileRead(ctxB, fileB, "edit")).toThrow("has not been read")
   })
 })
