@@ -7,10 +7,6 @@ import fs from "fs/promises"
 import { setTimeout as sleep } from "node:timers/promises"
 import { afterAll } from "bun:test"
 
-// Set XDG env vars FIRST, before any src/ imports
-const dir = path.join(os.tmpdir(), "mimocode-test-data-" + process.pid)
-await fs.mkdir(dir, { recursive: true })
-
 const forbiddenFixtureRoots = [
   "/etc",
   "/proc",
@@ -79,11 +75,18 @@ async function fixtureBase() {
   return selected?.candidate ?? os.tmpdir()
 }
 
+// Set XDG env vars FIRST, before any src/ imports. Keep the process-wide data
+// root outside protected system paths because worktree bootstrap creates real
+// project instances under Global.Path.data.
+const base = await fixtureBase()
+const dir = path.join(base, "mimocode-test-data-" + process.pid)
+await fs.mkdir(dir, { recursive: true })
+
 // Route default fixture tmpdirs outside both the repository checkout and
 // protected system paths. HTTP route tests that must pass the
 // InstanceMiddleware cwd containment check opt into root: "cwd" in the fixture
 // helper.
-const fixtureRoot = path.join(await fixtureBase(), ".mimocode-test-fixtures-" + process.pid)
+const fixtureRoot = path.join(base, ".mimocode-test-fixtures-" + process.pid)
 await fs.mkdir(fixtureRoot, { recursive: true })
 process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = fixtureRoot
 afterAll(async () => {

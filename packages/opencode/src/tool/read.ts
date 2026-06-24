@@ -12,6 +12,7 @@ import { assertExternalDirectoryEffect } from "./external-directory"
 import { SessionCwd } from "./session-cwd"
 import { Instruction } from "../session/instruction"
 import { isImageAttachment, isPdfAttachment, sniffAttachmentMime } from "@/util/media"
+import { markFileRead } from "./read-state"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -21,7 +22,7 @@ const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
 const SAMPLE_BYTES = 4096
 
 const parameters = z.object({
-  filePath: z.string().describe("The absolute path to the file or directory to read"),
+  file_path: z.string().describe("The absolute path to the file or directory to read"),
   offset: z.coerce.number().describe("The line number to start reading from (1-indexed)").optional(),
   limit: z.coerce.number().describe("The maximum number of lines to read (defaults to 2000)").optional(),
 })
@@ -146,7 +147,7 @@ export const ReadTool = Tool.define(
         return yield* Effect.fail(new Error("offset must be greater than or equal to 1"))
       }
 
-      let filepath = params.filePath
+      let filepath = params.file_path
       if (!path.isAbsolute(filepath)) {
         filepath = path.resolve(SessionCwd.get(ctx.sessionID), filepath)
       }
@@ -183,6 +184,7 @@ export const ReadTool = Tool.define(
         const start = offset - 1
         const sliced = items.slice(start, start + limit)
         const truncated = start + sliced.length < items.length
+        markFileRead(ctx, filepath)
 
         return {
           title,
@@ -211,6 +213,7 @@ export const ReadTool = Tool.define(
       if (isImageAttachment(mime) || isPdfAttachment(mime)) {
         const bytes = yield* fs.readFile(filepath)
         const msg = isPdfAttachment(mime) ? "PDF read successfully" : "Image read successfully"
+        markFileRead(ctx, filepath)
         return {
           title,
           output: msg,
@@ -262,6 +265,8 @@ export const ReadTool = Tool.define(
       if (loaded.length > 0) {
         output += `\n\n<system-reminder>\n${loaded.map((item) => item.content).join("\n\n")}\n</system-reminder>`
       }
+
+      markFileRead(ctx, filepath)
 
       return {
         title,

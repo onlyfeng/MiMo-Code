@@ -12,20 +12,61 @@ import { Agent } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
 import { BusEvent } from "../../src/bus/bus-event"
 import { Truncate } from "../../src/tool"
-import { SessionID, MessageID } from "../../src/session/schema"
+import { SessionID, MessageID, PartID } from "../../src/session/schema"
+import type { MessageV2 } from "../../src/session/message-v2"
+import { clearReadState, markFileRead } from "../../src/tool/read-state"
 
-const ctx = {
+const baseCtx = {
   sessionID: SessionID.make("ses_test-edit-session"),
   messageID: MessageID.make(""),
   callID: "",
   agent: "build",
   abort: AbortSignal.any([]),
-  messages: [],
+  messages: [] as MessageV2.WithParts[],
   metadata: () => Effect.void,
   ask: () => Effect.void,
 }
 
+type EditCtx = typeof baseCtx
+
+function withRead(filePath: string, ctx: EditCtx = baseCtx): EditCtx {
+  const messageID = MessageID.make("msg_read")
+  return {
+    ...ctx,
+    messages: [
+      {
+        info: {
+          id: messageID,
+          sessionID: ctx.sessionID,
+          role: "assistant",
+        },
+        parts: [
+          {
+            id: PartID.make("part_read"),
+            messageID,
+            sessionID: ctx.sessionID,
+            type: "tool",
+            tool: "read",
+            callID: "call_read",
+            state: {
+              status: "completed",
+              input: { file_path: filePath },
+              output: "",
+              title: `Read ${filePath}`,
+              metadata: {},
+              time: { start: 0, end: 0 },
+            },
+          },
+        ],
+      },
+    ] as unknown as MessageV2.WithParts[],
+  }
+}
+
+const ctx = baseCtx
+
 afterEach(async () => {
+  clearReadState(ctx.sessionID)
   await Instance.disposeAll()
 })
 
@@ -55,6 +96,8 @@ const resolve = () =>
 const subscribeBus = <D extends BusEvent.Definition>(def: D, callback: () => unknown) =>
   runtime.runPromise(Bus.Service.use((bus) => bus.subscribeCallback(def, callback)))
 
+const markRead = (filePath: string) => markFileRead(ctx, filePath)
+
 async function onceBus<D extends BusEvent.Definition>(def: D) {
   const result = Promise.withResolvers<void>()
   const unsub = await subscribeBus(def, () => {
@@ -80,9 +123,9 @@ describe("tool.edit", () => {
           const result = await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
-                oldString: "",
-                newString: "new content",
+                file_path: filepath,
+                old_string: "",
+                new_string: "new content",
               },
               ctx,
             ),
@@ -107,9 +150,9 @@ describe("tool.edit", () => {
           await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
-                oldString: "",
-                newString: "nested file",
+                file_path: filepath,
+                old_string: "",
+                new_string: "nested file",
               },
               ctx,
             ),
@@ -137,9 +180,9 @@ describe("tool.edit", () => {
             await Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
-                  oldString: "",
-                  newString: "content",
+                  file_path: filepath,
+                  old_string: "",
+                  new_string: "content",
                 },
                 ctx,
               ),
@@ -159,6 +202,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "existing.txt")
       await fs.writeFile(filepath, "old content here", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -167,11 +211,11 @@ describe("tool.edit", () => {
           const result = await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
-                oldString: "old content",
-                newString: "new content",
+                file_path: filepath,
+                old_string: "old content",
+                new_string: "new content",
               },
-              ctx,
+              withRead(filepath),
             ),
           )
 
@@ -186,6 +230,9 @@ describe("tool.edit", () => {
     test("throws error when file does not exist", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "nonexistent.txt")
+      await fs.writeFile(filepath, "old", "utf-8")
+      markRead(filepath)
+      await fs.unlink(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -195,11 +242,11 @@ describe("tool.edit", () => {
             Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
-                  oldString: "old",
-                  newString: "new",
+                  file_path: filepath,
+                  old_string: "old",
+                  new_string: "new",
                 },
-                ctx,
+                withRead(filepath),
               ),
             ),
           ).rejects.toThrow("not found")
@@ -220,9 +267,9 @@ describe("tool.edit", () => {
             Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
-                  oldString: "same",
-                  newString: "same",
+                  file_path: filepath,
+                  old_string: "same",
+                  new_string: "same",
                 },
                 ctx,
               ),
@@ -236,6 +283,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "actual content", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -245,11 +293,11 @@ describe("tool.edit", () => {
             Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
-                  oldString: "not in file",
-                  newString: "replacement",
+                  file_path: filepath,
+                  old_string: "not in file",
+                  new_string: "replacement",
                 },
-                ctx,
+                withRead(filepath),
               ),
             ),
           ).rejects.toThrow()
@@ -261,6 +309,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "foo bar foo baz foo", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -269,12 +318,12 @@ describe("tool.edit", () => {
           await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
-                oldString: "foo",
-                newString: "qux",
-                replaceAll: true,
+                file_path: filepath,
+                old_string: "foo",
+                new_string: "qux",
+                replace_all: true,
               },
-              ctx,
+              withRead(filepath),
             ),
           )
 
@@ -288,6 +337,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "original", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -301,11 +351,11 @@ describe("tool.edit", () => {
             await Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
-                  oldString: "original",
-                  newString: "modified",
+                  file_path: filepath,
+                  old_string: "original",
+                  new_string: "modified",
                 },
-                ctx,
+                withRead(filepath),
               ),
             )
 
@@ -323,6 +373,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "line1\nline2\nline3", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -331,11 +382,11 @@ describe("tool.edit", () => {
           await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
-                oldString: "line2",
-                newString: "new line 2\nextra line",
+                file_path: filepath,
+                old_string: "line2",
+                new_string: "new line 2\nextra line",
               },
-              ctx,
+              withRead(filepath),
             ),
           )
 
@@ -349,6 +400,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "line1\r\nold\r\nline3", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -357,11 +409,11 @@ describe("tool.edit", () => {
           await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
-                oldString: "old",
-                newString: "new",
+                file_path: filepath,
+                old_string: "old",
+                new_string: "new",
               },
-              ctx,
+              withRead(filepath),
             ),
           )
 
@@ -384,9 +436,9 @@ describe("tool.edit", () => {
             Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
-                  oldString: "",
-                  newString: "",
+                  file_path: filepath,
+                  old_string: "",
+                  new_string: "",
                 },
                 ctx,
               ),
@@ -400,6 +452,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const dirpath = path.join(tmp.path, "adir")
       await fs.mkdir(dirpath)
+      markRead(dirpath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -409,11 +462,11 @@ describe("tool.edit", () => {
             Effect.runPromise(
               edit.execute(
                 {
-                  filePath: dirpath,
-                  oldString: "old",
-                  newString: "new",
+                  file_path: dirpath,
+                  old_string: "old",
+                  new_string: "new",
                 },
-                ctx,
+                withRead(dirpath),
               ),
             ),
           ).rejects.toThrow("directory")
@@ -425,6 +478,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "line1\nline2\nline3", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -433,11 +487,11 @@ describe("tool.edit", () => {
           const result = await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
-                oldString: "line2",
-                newString: "new line a\nnew line b",
+                file_path: filepath,
+                old_string: "line2",
+                new_string: "new line a\nnew line b",
               },
-              ctx,
+              withRead(filepath),
             ),
           )
 
@@ -483,9 +537,9 @@ describe("tool.edit", () => {
 
     type Input = {
       content: string
-      oldString: string
-      newString: string
-      replaceAll?: boolean
+      old_string: string
+      new_string: string
+      replace_all?: boolean
     }
 
     const apply = async (input: Input) => {
@@ -500,15 +554,16 @@ describe("tool.edit", () => {
         fn: async () => {
           const edit = await resolve()
           const filePath = path.join(tmp.path, "test.txt")
+          markRead(filePath)
           await Effect.runPromise(
             edit.execute(
               {
-                filePath,
-                oldString: input.oldString,
-                newString: input.newString,
-                replaceAll: input.replaceAll,
+                file_path: filePath,
+                old_string: input.old_string,
+                new_string: input.new_string,
+                replace_all: input.replace_all,
               },
-              ctx,
+              withRead(filePath),
             ),
           )
           return await Bun.file(filePath).text()
@@ -520,8 +575,8 @@ describe("tool.edit", () => {
       const content = normalize(old + "\n", "\n")
       const output = await apply({
         content,
-        oldString: normalize(old, "\n"),
-        newString: normalize(next, "\n"),
+        old_string: normalize(old, "\n"),
+        new_string: normalize(next, "\n"),
       })
       expect(output).toBe(normalize(next + "\n", "\n"))
       expectLf(output)
@@ -531,8 +586,8 @@ describe("tool.edit", () => {
       const content = normalize(old + "\n", "\r\n")
       const output = await apply({
         content,
-        oldString: normalize(old, "\r\n"),
-        newString: normalize(next, "\r\n"),
+        old_string: normalize(old, "\r\n"),
+        new_string: normalize(next, "\r\n"),
       })
       expect(output).toBe(normalize(next + "\n", "\r\n"))
       expectCrlf(output)
@@ -542,8 +597,8 @@ describe("tool.edit", () => {
       const content = normalize(old + "\n", "\n")
       const output = await apply({
         content,
-        oldString: normalize(old, "\r\n"),
-        newString: normalize(next, "\r\n"),
+        old_string: normalize(old, "\r\n"),
+        new_string: normalize(next, "\r\n"),
       })
       expect(output).toBe(normalize(next + "\n", "\n"))
       expectLf(output)
@@ -553,8 +608,8 @@ describe("tool.edit", () => {
       const content = normalize(old + "\n", "\r\n")
       const output = await apply({
         content,
-        oldString: normalize(old, "\n"),
-        newString: normalize(next, "\n"),
+        old_string: normalize(old, "\n"),
+        new_string: normalize(next, "\n"),
       })
       expect(output).toBe(normalize(next + "\n", "\r\n"))
       expectCrlf(output)
@@ -564,8 +619,8 @@ describe("tool.edit", () => {
       const content = normalize(old + "\n", "\n")
       const output = await apply({
         content,
-        oldString: normalize(old, "\n"),
-        newString: normalize(next, "\r\n"),
+        old_string: normalize(old, "\n"),
+        new_string: normalize(next, "\r\n"),
       })
       expect(output).toBe(normalize(next + "\n", "\n"))
       expectLf(output)
@@ -575,8 +630,8 @@ describe("tool.edit", () => {
       const content = normalize(old + "\n", "\r\n")
       const output = await apply({
         content,
-        oldString: normalize(old, "\r\n"),
-        newString: normalize(next, "\n"),
+        old_string: normalize(old, "\r\n"),
+        new_string: normalize(next, "\n"),
       })
       expect(output).toBe(normalize(next + "\n", "\r\n"))
       expectCrlf(output)
@@ -586,8 +641,8 @@ describe("tool.edit", () => {
       const content = normalize(old + "\n", "\n")
       const output = await apply({
         content,
-        oldString: "alpha\nbeta\r\ngamma",
-        newString: "alpha\r\nbeta\nomega",
+        old_string: "alpha\nbeta\r\ngamma",
+        new_string: "alpha\r\nbeta\nomega",
       })
       expect(output).toBe(normalize(alt + "\n", "\n"))
       expectLf(output)
@@ -597,8 +652,8 @@ describe("tool.edit", () => {
       const content = normalize(old + "\n", "\r\n")
       const output = await apply({
         content,
-        oldString: "alpha\r\nbeta\ngamma",
-        newString: "alpha\nbeta\r\nomega",
+        old_string: "alpha\r\nbeta\ngamma",
+        new_string: "alpha\nbeta\r\nomega",
       })
       expect(output).toBe(normalize(alt + "\n", "\r\n"))
       expectCrlf(output)
@@ -610,9 +665,9 @@ describe("tool.edit", () => {
       const content = normalize(blockOld + "\n" + blockOld + "\n", "\n")
       const output = await apply({
         content,
-        oldString: normalize(blockOld, "\n"),
-        newString: normalize(blockNew, "\n"),
-        replaceAll: true,
+        old_string: normalize(blockOld, "\n"),
+        new_string: normalize(blockNew, "\n"),
+        replace_all: true,
       })
       expect(output).toBe(normalize(blockNew + "\n" + blockNew + "\n", "\n"))
       expectLf(output)
@@ -624,9 +679,9 @@ describe("tool.edit", () => {
       const content = normalize(blockOld + "\n" + blockOld + "\n", "\r\n")
       const output = await apply({
         content,
-        oldString: normalize(blockOld, "\r\n"),
-        newString: normalize(blockNew, "\r\n"),
-        replaceAll: true,
+        old_string: normalize(blockOld, "\r\n"),
+        new_string: normalize(blockNew, "\r\n"),
+        replace_all: true,
       })
       expect(output).toBe(normalize(blockNew + "\n" + blockNew + "\n", "\r\n"))
       expectCrlf(output)
@@ -638,6 +693,7 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "top = 0\nmiddle = keep\nbottom = 0\n", "utf-8")
+      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -646,7 +702,7 @@ describe("tool.edit", () => {
           let asks = 0
           const firstAsk = Promise.withResolvers<void>()
           const delayedCtx = {
-            ...ctx,
+            ...withRead(filepath),
             ask: () =>
               Effect.gen(function* () {
                 asks++
@@ -659,9 +715,9 @@ describe("tool.edit", () => {
           const promise1 = Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
-                oldString: "top = 0",
-                newString: "top = 1",
+                file_path: filepath,
+                old_string: "top = 0",
+                new_string: "top = 1",
               },
               delayedCtx,
             ),
@@ -672,9 +728,9 @@ describe("tool.edit", () => {
           const promise2 = Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
-                oldString: "bottom = 0",
-                newString: "bottom = 2",
+                file_path: filepath,
+                old_string: "bottom = 0",
+                new_string: "bottom = 2",
               },
               delayedCtx,
             ),
