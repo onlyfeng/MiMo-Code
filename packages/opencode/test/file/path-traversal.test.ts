@@ -212,12 +212,38 @@ describe("Instance.containsPath", () => {
 
 describe("Instance.provide directory safety", () => {
   test("rejects system paths containing secrets", async () => {
-    const systemPaths = ["/etc", "/etc/nginx", "/etc/shadow", "/proc", "/sys", "/dev", "/root", "/boot", "/var"]
+    const systemPaths = [
+      "/etc",
+      "/etc/nginx",
+      "/etc/shadow",
+      "/proc",
+      "/sys",
+      "/dev",
+      "/root",
+      "/boot",
+      "/private",
+      "/var",
+      "/private/var",
+      "/var/log",
+      "/private/var/log",
+    ]
     for (const dir of systemPaths) {
       await expect(
         Instance.provide({ directory: dir, fn: () => {} }),
       ).rejects.toThrow("Access denied")
     }
+  })
+
+  test("allows non-log subdirectories under var", async () => {
+    await expect(
+      Instance.provide({ directory: "/var/tmp", fn: () => Instance.directory }),
+    ).resolves.toBe(await fs.realpath("/var/tmp"))
+  })
+
+  test.skipIf(process.platform !== "darwin")("allows non-log subdirectories under private var", async () => {
+    await expect(
+      Instance.provide({ directory: "/private/var/tmp", fn: () => Instance.directory }),
+    ).resolves.toBe(await fs.realpath("/private/var/tmp"))
   })
 
   test("rejects filesystem root", async () => {
