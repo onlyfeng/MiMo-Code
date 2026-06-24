@@ -95,12 +95,15 @@ function tmpdirBase(root?: "cwd" | "tmp" | "home") {
 
 type TmpDirOptions<T> = {
   git?: boolean
+  outsideGit?: boolean
   config?: Partial<Config.Info>
   init?: (dir: string) => Promise<T>
   dispose?: (dir: string) => Promise<T>
   root?: "cwd" | "tmp" | "home"
 }
 export async function tmpdir<T>(options?: TmpDirOptions<T>) {
+  const prevRoot = options?.outsideGit ? process.env["MIMOCODE_TEST_TMPDIR_ROOT"] : undefined
+  if (options?.outsideGit) process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = outsideGitTmpRoot()
   const dirpath = sanitizePath(
     path.join(tmpdirBase(options?.root), "mimocode-test-" + Math.random().toString(36).slice(2)),
   )
@@ -131,6 +134,10 @@ export async function tmpdir<T>(options?: TmpDirOptions<T>) {
       } finally {
         if (options?.git) await stop(realpath).catch(() => undefined)
         await cleanupTmpdir(realpath)
+        if (options?.outsideGit) {
+          if (prevRoot !== undefined) process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = prevRoot
+          else delete process.env["MIMOCODE_TEST_TMPDIR_ROOT"]
+        }
       }
     },
     path: realpath,

@@ -28,7 +28,7 @@ function waitReady() {
       if (evt.payload.type === Worktree.Event.Failed.type) {
         clearTimeout(timer)
         GlobalBus.off("event", on)
-        reject(new Error(evt.payload.properties.message ?? "worktree.failed"))
+        reject(new Error(evt.payload.properties.message ?? "worktree bootstrap failed"))
         return
       }
       if (evt.payload.type !== Worktree.Event.Ready.type) return
@@ -60,7 +60,7 @@ describe("Worktree", () => {
             expect(info.branch).toBe(`mimocode/${info.name}`)
             expect(info.directory).toContain(info.name)
           }),
-        { git: true },
+        { git: true, outsideGit: true },
       ),
     )
 
@@ -74,7 +74,7 @@ describe("Worktree", () => {
             expect(info.name).toBe("my-feature")
             expect(info.branch).toBe("mimocode/my-feature")
           }),
-        { git: true },
+        { git: true, outsideGit: true },
       ),
     )
 
@@ -87,7 +87,7 @@ describe("Worktree", () => {
 
             expect(info.name).toBe("my-feature-branch")
           }),
-        { git: true },
+        { git: true, outsideGit: true },
       ),
     )
 
@@ -112,18 +112,17 @@ describe("Worktree", () => {
         () =>
           Effect.gen(function* () {
             const svc = yield* Worktree.Service
-            const info = yield* svc.create()
+            const info = yield* svc.makeWorktreeInfo()
+            yield* svc.createFromInfo(info)
 
             expect(info.name).toBeDefined()
             expect(info.branch).toStartWith("mimocode/")
             expect(info.directory).toBeDefined()
 
-            yield* Effect.promise(() => Bun.sleep(1000))
-
             const ok = yield* svc.remove({ directory: info.directory })
             expect(ok).toBe(true)
           }),
-        { git: true },
+        { git: true, outsideGit: true },
       ),
     )
 
@@ -150,7 +149,7 @@ describe("Worktree", () => {
             yield* Effect.promise(() => Bun.sleep(100))
             yield* svc.remove({ directory: info.directory })
           }),
-        { git: true },
+        { git: true, outsideGit: true },
       ),
     )
 
@@ -170,7 +169,7 @@ describe("Worktree", () => {
             yield* Effect.promise(() => Bun.sleep(100))
             yield* svc.remove({ directory: info.directory })
           }),
-        { git: true },
+        { git: true, outsideGit: true },
       ),
     )
   })
@@ -191,7 +190,7 @@ describe("Worktree", () => {
 
             yield* svc.remove({ directory: info.directory })
           }),
-        { git: true },
+        { git: true, outsideGit: true },
       ),
     )
   })
@@ -205,7 +204,7 @@ describe("Worktree", () => {
             const ok = yield* svc.remove({ directory: path.join(dir, "does-not-exist") })
             expect(ok).toBe(true)
           }),
-        { git: true },
+        { git: true, outsideGit: true },
       ),
     )
 
@@ -218,6 +217,7 @@ describe("Worktree", () => {
           expect(Exit.isFailure(exit)).toBe(true)
           if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Worktree.NotGitError)
         }),
+        { outsideGit: true },
       ),
     )
   })
