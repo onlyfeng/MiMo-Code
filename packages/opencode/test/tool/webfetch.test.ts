@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import path from "path"
 import { Effect, Layer } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Agent } from "../../src/agent/agent"
 import { Truncate } from "../../src/tool"
 import { Instance } from "../../src/project/instance"
@@ -26,11 +26,11 @@ async function withFetch(fetch: (req: Request) => Response | Promise<Response>, 
   await fn(server.url)
 }
 
-function exec(args: { url: string; format: "text" | "markdown" | "html" }) {
+function exec(args: { url: string; format: "text" | "markdown" | "html" }, http = FetchHttpClient.layer) {
   return WebFetchTool.pipe(
     Effect.flatMap((info) => info.init()),
     Effect.flatMap((tool) => tool.execute(args, ctx)),
-    Effect.provide(Layer.mergeAll(FetchHttpClient.layer, Truncate.defaultLayer, Agent.defaultLayer)),
+    Effect.provide(Layer.mergeAll(http, Truncate.defaultLayer, Agent.defaultLayer)),
     Effect.runPromise,
   )
 }
@@ -99,5 +99,31 @@ describe("tool.webfetch", () => {
         })
       },
     )
+  })
+
+  test("allows private network URLs as user-approved fetch targets", async () => {
+    const requested: string[] = []
+    const http = Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) =>
+        Effect.sync(() => {
+          requested.push(request.url)
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response("internal knowledge", { headers: { "content-type": "text/plain; charset=utf-8" } }),
+          )
+        }),
+      ),
+    )
+
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const url = "http://10.0.0.5/wiki"
+        const result = await exec({ url, format: "text" }, http)
+        expect(result.output).toBe("internal knowledge")
+        expect(requested).toEqual([url])
+      },
+    })
   })
 })
