@@ -221,6 +221,7 @@ describe("Instance.provide directory safety", () => {
       "/dev",
       "/root",
       "/boot",
+      "/private",
       "/var",
       "/private/var",
       "/var/log",
@@ -237,6 +238,12 @@ describe("Instance.provide directory safety", () => {
     await expect(
       Instance.provide({ directory: "/var/tmp", fn: () => Instance.directory }),
     ).resolves.toBe(await fs.realpath("/var/tmp"))
+  })
+
+  test.skipIf(process.platform !== "darwin")("allows non-log subdirectories under private var", async () => {
+    await expect(
+      Instance.provide({ directory: "/private/var/tmp", fn: () => Instance.directory }),
+    ).resolves.toBe(await fs.realpath("/private/var/tmp"))
   })
 
   test("rejects filesystem root", async () => {

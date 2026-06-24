@@ -20,6 +20,7 @@ const cache = new Map<string, Promise<InstanceContext>>()
 const project = makeRuntime(Project.Service, Project.defaultLayer)
 
 const FORBIDDEN_EXACT_PATHS = [
+  "/private",
   "/var",
   "/private/var",
 ] as const
