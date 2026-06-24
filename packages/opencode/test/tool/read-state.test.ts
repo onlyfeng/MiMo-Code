@@ -11,6 +11,7 @@ import { MessageID, SessionID } from "../../src/session/schema"
 import { EditTool } from "../../src/tool/edit"
 import { ReadTool } from "../../src/tool/read"
 import { assertFileRead, clearReadState, markFileRead } from "../../src/tool/read-state"
+import { disposeInstance } from "../../src/effect/instance-registry"
 import { Truncate } from "../../src/tool"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { tmpdir } from "../fixture/fixture"
@@ -122,5 +123,75 @@ describe("tool.read-state", () => {
         expect(() => assertFileRead(ctx, filePath, "edit")).toThrow("has not been read")
       },
     })
+  })
+
+  test("disposing one instance leaves another instance's read marks intact", async () => {
+    await using tmpA = await tmpdir()
+    await using tmpB = await tmpdir()
+    const fileB = path.join(tmpB.path, "file.txt")
+    await Bun.write(fileB, "old")
+
+    const ctxB = { ...ctx, sessionID: SessionID.make("ses_test-read-state-dir-b") }
+
+    await Instance.provide({
+      directory: tmpB.path,
+      fn: async () => markFileRead(ctxB, fileB),
+    })
+
+    // Tearing down a different project (A) must not wipe B's marks. Absolute
+    // paths mean assertFileRead needs no instance context here.
+    await disposeInstance(AppFileSystem.resolve(tmpA.path))
+    expect(() => assertFileRead(ctxB, fileB, "edit")).not.toThrow()
+
+    // Tearing down B's own directory does clear B.
+    await disposeInstance(AppFileSystem.resolve(tmpB.path))
+    expect(() => assertFileRead(ctxB, fileB, "edit")).toThrow("has not been read")
+  })
+
+  test("scopes disposal per actor when one session spans multiple directories", async () => {
+    await using parent = await tmpdir()
+    await using worktree = await tmpdir()
+    const parentFile = path.join(parent.path, "p.txt")
+    const worktreeFile = path.join(worktree.path, "w.txt")
+    await Bun.write(parentFile, "old")
+    await Bun.write(worktreeFile, "old")
+
+    // Same session, two actors: the parent reads in the main tree while an
+    // isolated subagent reads in its worktree (workflow/runtime.ts).
+    const mainCtx = { ...ctx, actorID: "main" }
+    const subCtx = { ...ctx, actorID: "explore-1" }
+
+    await Instance.provide({ directory: parent.path, fn: async () => markFileRead(mainCtx, parentFile) })
+    await Instance.provide({ directory: worktree.path, fn: async () => markFileRead(subCtx, worktreeFile) })
+
+    // Disposing the worktree clears only the subagent's marks; the parent's survive.
+    await disposeInstance(AppFileSystem.resolve(worktree.path))
+    expect(() => assertFileRead(subCtx, worktreeFile, "edit")).toThrow("has not been read")
+    expect(() => assertFileRead(mainCtx, parentFile, "edit")).not.toThrow()
+
+    // Disposing the parent then clears the parent actor's marks.
+    await disposeInstance(AppFileSystem.resolve(parent.path))
+    expect(() => assertFileRead(mainCtx, parentFile, "edit")).toThrow("has not been read")
+  })
+
+  test("scopes disposal per directory when one actor spans multiple directories", async () => {
+    await using parent = await tmpdir()
+    await using worktree = await tmpdir()
+    const parentFile = path.join(parent.path, "p.txt")
+    const worktreeFile = path.join(worktree.path, "w.txt")
+    await Bun.write(parentFile, "old")
+    await Bun.write(worktreeFile, "old")
+
+    const sharedCtx = { ...ctx, actorID: "shared-actor" }
+
+    await Instance.provide({ directory: parent.path, fn: async () => markFileRead(sharedCtx, parentFile) })
+    await Instance.provide({ directory: worktree.path, fn: async () => markFileRead(sharedCtx, worktreeFile) })
+
+    await disposeInstance(AppFileSystem.resolve(worktree.path))
+    expect(() => assertFileRead(sharedCtx, worktreeFile, "edit")).toThrow("has not been read")
+    expect(() => assertFileRead(sharedCtx, parentFile, "edit")).not.toThrow()
+
+    await disposeInstance(AppFileSystem.resolve(parent.path))
+    expect(() => assertFileRead(sharedCtx, parentFile, "edit")).toThrow("has not been read")
   })
 })
