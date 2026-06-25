@@ -1,7 +1,7 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
-import { afterEach, expect } from "bun:test"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { expect } from "bun:test"
+import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
@@ -41,6 +41,7 @@ import { Truncate } from "../../src/tool"
 import { Actor } from "../../src/actor/spawn"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
+import { spawnRef } from "../../src/actor/spawn-ref"
 import { Memory } from "../../src/memory"
 import { History } from "../../src/history"
 import { Team } from "../../src/team"
@@ -303,6 +304,34 @@ function providerCfg(url: string) {
           ...cfg.provider.test.options,
           baseURL: url,
         },
+      },
+    },
+  }
+}
+
+function maxModeProviderCfg(url: string) {
+  return {
+    ...providerCfg(url),
+    experimental: {
+      maxMode: { candidates: 2 },
+    },
+    agent: {
+      general: {
+        maxMode: true,
+        model: "test/test-model",
+      },
+    },
+  }
+}
+
+function maxModeLastStepProviderCfg(url: string) {
+  return {
+    ...maxModeProviderCfg(url),
+    agent: {
+      general: {
+        maxMode: true,
+        steps: 1,
+        model: "test/test-model",
       },
     },
   }
@@ -708,6 +737,135 @@ it.live(
       { git: true, config: providerCfg },
     ),
   3_000,
+)
+
+it.live("subagent maxMode does not write session status", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const status = yield* SessionStatus.Service
+
+      const chat = yield* sessions.create({
+        title: "Subagent maxMode status",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* llm.text("candidate zero")
+      yield* llm.text("candidate one")
+      yield* llm.text("1")
+
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "general",
+        agentID: "general-1",
+        model: ref,
+        parts: [{ type: "text", text: "hello" }],
+      })
+
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "candidate one")).toBe(true)
+      expect(yield* llm.calls).toBe(3)
+      expect(yield* status.get(chat.id)).toEqual({ type: "idle" })
+    }),
+    { git: true, config: maxModeProviderCfg },
+  ),
+  20_000,
+)
+
+it.live("context full subagent uses maxMode candidate judge replay path", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const actorRegistry = yield* ActorRegistry.Service
+      const sessions = yield* Session.Service
+
+      const chat = yield* sessions.create({
+        title: "Fork maxMode",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const parentMsg = yield* user(chat.id, "parent context")
+      const forkCtx: Actor.ForkContext = {
+        system: ["fork-system"],
+        tools: {},
+        inheritedMessages: [{ role: "user", content: "inherited parent context" }],
+        parentPermission: [],
+        watermarkMsgID: parentMsg.id,
+        model: ref,
+      }
+      const prev = spawnRef.current
+      spawnRef.current = {
+        spawn: () => Effect.die("unexpected spawn in fork maxMode test"),
+        cancel: () => Effect.void,
+        getForkContext: (actorID) => Effect.succeed(actorID === "general-1" ? forkCtx : undefined),
+      }
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          spawnRef.current = prev
+        }),
+      )
+      yield* actorRegistry.register({
+        sessionID: chat.id,
+        actorID: "general-1",
+        mode: "subagent",
+        agent: "general",
+        description: "fork maxMode",
+        contextMode: "full",
+        contextWatermark: parentMsg.id,
+        background: false,
+        lifecycle: "ephemeral",
+        tools: [],
+      })
+      yield* llm.text("candidate zero")
+      yield* llm.text("candidate one")
+      yield* llm.text("1")
+
+      const result = yield* (yield* SessionPrompt.Service).prompt({
+        sessionID: chat.id,
+        agent: "general",
+        agentID: "general-1",
+        model: ref,
+        parts: [{ type: "text", text: "handle fork task" }],
+      })
+
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "candidate one")).toBe(true)
+      expect(yield* llm.calls).toBe(3)
+    }),
+    { git: true, config: maxModeProviderCfg },
+  ),
+  20_000,
+)
+
+it.live("last-step maxMode bypasses candidate path", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+
+      const chat = yield* sessions.create({
+        title: "Last step maxMode",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* llm.text("final answer")
+
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "general",
+        agentID: "general-1",
+        model: ref,
+        parts: [{ type: "text", text: "hello" }],
+      })
+
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "final answer")).toBe(true)
+      // steps: 1 makes the only step the last step → runStep bypasses maxMode and
+      // issues a single handle.process call honoring toolChoice "none", instead of
+      // the candidates(2)+judge(1) = 3 calls the max-mode path would make. This guards
+      // the fork/main step cap from maxMode ignoring toolChoice.
+      expect(yield* llm.calls).toBe(1)
+    }),
+    { git: true, config: maxModeLastStepProviderCfg },
+  ),
+  20_000,
 )
 
 // Cancel semantics

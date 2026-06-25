@@ -2795,6 +2795,34 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
             const format = lastUser.format ?? { type: "text" as const }
+            const maxModeCfg = (yield* config.get()).experimental?.maxMode
+            const useMaxMode =
+              (agent.name === MaxMode.MAX_MODE_AGENT || agent.maxMode === true) &&
+              maxModeCfg !== undefined &&
+              format.type !== "json_schema"
+            const maxModeSetStatus =
+              resolvedAgentID === "main"
+                ? (message: string | undefined) =>
+                    status.set(sessionID, message ? { type: "busy", message } : { type: "busy" })
+                : undefined
+            // Skip maxMode on the final step: it must honor `toolChoice: "none"` to
+            // force a text-only response and end the loop. runMaxStep ignores toolChoice
+            // (candidates run propose-only, then the winner's tool calls are replayed and
+            // executed), so routing the last step through it would let the agent call
+            // tools past its step cap. Falling back to handle.process keeps the cap
+            // enforced for every path — fork and main alike.
+            const runStep = (processArgs: LLM.StreamInput) =>
+              useMaxMode && !isLastStep
+                ? MaxMode.runMaxStep({
+                    ...processArgs,
+                    handle,
+                    llm,
+                    candidates: maxModeCfg?.candidates,
+                    // Only the main agent owns session status; subagents (incl. forks)
+                    // pass undefined so runMaxStep's internal no-op guard skips the write.
+                    setStatus: maxModeSetStatus,
+                  })
+                : handle.process(processArgs)
 
             // Determine if this iteration is for a fork agent (contextMode === "full").
             // Fork agents use the frozen ForkContext snapshot captured at spawn time
@@ -2881,35 +2909,34 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 )
                 return "break" as const
               }
-              const result = yield* handle
-                .process({
-                  user: lastUser,
-                  agent,
-                  // Fork inherits the parent agent's permission (captured at spawn into
-                  // ForkContext). This drives llm.ts resolveTools/disabled() to the SAME
-                  // visible tool set as the parent → prompt-cache parity on the inherited
-                  // prefix. Scope: this affects tool VISIBILITY only; the per-call ask
-                  // ruleset (built separately in resolveTools' ask closure) is unchanged.
-                  // Parity is exact modulo non-default `session.permission`: the parent's
-                  // visibility ruleset is merge(parent.permission, session.permission)
-                  // while the fork's is merge(writer.permission, parentPermission) — so a
-                  // session-level rule pins the parent but not the fork. Still a strict
-                  // improvement over the old bespoke "*":"deny" block (which always
-                  // diverged). The `?? session.permission` is defense-in-depth only:
-                  // parentPermission is a required field (empty `[]` on a missed capture,
-                  // which `??` does NOT override), so the fallback fires solely if a future
-                  // refactor makes the field optional.
-                  permission: forkCtx.parentPermission ?? session.permission,
-                  sessionID,
-                  parentSessionID: session.parentID,
-                  system: additions,
-                  prebuiltSystem,
-                  messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
-                  tools,
-                  model,
-                  toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
-                  agentID: lastUser.agentID,
-                })
+              const result = yield* runStep({
+                user: lastUser,
+                agent,
+                // Fork inherits the parent agent's permission (captured at spawn into
+                // ForkContext). This drives llm.ts resolveTools/disabled() to the SAME
+                // visible tool set as the parent → prompt-cache parity on the inherited
+                // prefix. Scope: this affects tool VISIBILITY only; the per-call ask
+                // ruleset (built separately in resolveTools' ask closure) is unchanged.
+                // Parity is exact modulo non-default `session.permission`: the parent's
+                // visibility ruleset is merge(parent.permission, session.permission)
+                // while the fork's is merge(writer.permission, parentPermission) — so a
+                // session-level rule pins the parent but not the fork. Still a strict
+                // improvement over the old bespoke "*":"deny" block (which always
+                // diverged). The `?? session.permission` is defense-in-depth only:
+                // parentPermission is a required field (empty `[]` on a missed capture,
+                // which `??` does NOT override), so the fallback fires solely if a future
+                // refactor makes the field optional.
+                permission: forkCtx.parentPermission ?? session.permission,
+                sessionID,
+                parentSessionID: session.parentID,
+                system: additions,
+                prebuiltSystem,
+                messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
+                tools,
+                model,
+                toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
+                agentID: lastUser.agentID,
+              })
                 .pipe(
                   Effect.onExit((exit) =>
                     plugin
@@ -3049,12 +3076,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 Effect.provideService(LLM.Service, llm),
                 Effect.provideService(ToolRegistry.Service, registry),
               )
-            const maxModeCfg = (yield* config.get()).experimental?.maxMode
-            const useMaxMode =
-              (agent.name === MaxMode.MAX_MODE_AGENT || agent.maxMode === true) &&
-              maxModeCfg !== undefined &&
-              format.type !== "json_schema"
-
             const processArgs = {
               user: lastUser,
               agent,
@@ -3110,18 +3131,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return "break" as const
             }
 
-            const stepEffect = useMaxMode
-              ? MaxMode.runMaxStep({
-                  // runMaxStep reuses the identical per-step args as handle.process,
-                  // plus the orchestration handles it needs.
-                  ...processArgs,
-                  handle,
-                  llm,
-                  candidates: maxModeCfg?.candidates,
-                  setStatus: (message) =>
-                    status.set(sessionID, message ? { type: "busy", message } : { type: "busy" }),
-                })
-              : handle.process(processArgs)
+            const stepEffect = runStep(processArgs)
 
             const result = yield* stepEffect.pipe(
               Effect.onExit((exit) =>
