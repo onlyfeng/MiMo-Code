@@ -868,6 +868,48 @@ it.live("last-step maxMode bypasses candidate path", () =>
   20_000,
 )
 
+it.live("maxMode skips candidates for json_schema output", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+
+      const chat = yield* sessions.create({
+        title: "maxMode json_schema",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* llm.tool("StructuredOutput", { answer: 4 })
+
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "general",
+        agentID: "general-1",
+        model: ref,
+        parts: [{ type: "text", text: "what is 2 + 2?" }],
+        format: {
+          type: "json_schema",
+          schema: { type: "object", properties: { answer: { type: "number" } }, required: ["answer"] },
+          retryCount: 0,
+        },
+      })
+
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role === "assistant") {
+        expect((result.info.structured as { answer: number }).answer).toBe(4)
+        expect(result.info.error).toBeUndefined()
+      }
+      // json_schema output forces toolChoice "required" plus the StructuredOutput tool,
+      // which maxMode's propose-only candidates cannot honor. So even with maxMode enabled
+      // (general.maxMode) the step runs as a single handle.process call — not the
+      // candidates(2)+judge(1) = 3 calls of the max-mode path. Guards the
+      // `format.type !== "json_schema"` gate in useMaxMode.
+      expect(yield* llm.calls).toBe(1)
+    }),
+    { git: true, config: maxModeProviderCfg },
+  ),
+  20_000,
+)
+
 // Cancel semantics
 
 it.live(
