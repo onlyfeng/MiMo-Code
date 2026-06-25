@@ -484,6 +484,50 @@ describe("Actor.spawn completion gate (B)", () => {
     ),
   )
 
+  it.live("graceful cancel during gate re-entry settles the outcome", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const tasks = yield* TaskRegistry.Service
+
+        const parent = yield* session.create({
+          title: "gate cancel",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+
+        yield* tasks.create({
+          session_id: parent.id,
+          summary: "the unfinished thing",
+          owner: "general-1",
+        })
+
+        yield* llm.text("**Status**: success\n**Summary**: thought I was done")
+        yield* llm.hang
+
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "general",
+          task: "do the work",
+          context: "none",
+          tools: ["read"],
+          background: true,
+          model: ref,
+        })
+        expect(result.actorID).toBe("general-1")
+
+        yield* llm.wait(2).pipe(Effect.timeout("10 seconds"))
+        yield* actor.cancel(result.sessionID, result.actorID, "graceful").pipe(Effect.timeout("1 second"))
+
+        const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("10 seconds"))
+        expect(outcome.status).toBe("cancelled")
+      }),
+      { git: true, config: providerCfg },
+    ),
+    20000,
+  )
+
   it.live("does not downgrade a specialized (non-gate-eligible) subagent even with an open owned task", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {

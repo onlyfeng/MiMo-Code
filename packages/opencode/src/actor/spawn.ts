@@ -1,4 +1,4 @@
-import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause } from "effect"
+import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit } from "effect"
 import type { SessionID, MessageID } from "@/session/schema"
 import type { ProviderID, ModelID } from "@/provider/schema"
 import type { Tool as AITool, ModelMessage } from "ai"
@@ -312,6 +312,19 @@ export const layer = Layer.effect(
                 })
                 .pipe(Effect.ignore)
             : Effect.void
+        const settleFailure = (cause: Cause.Cause<unknown>) =>
+          Effect.gen(function* () {
+            if (!(yield* Deferred.isDone(outcome))) {
+              const cancelled = Cause.hasInterruptsOnly(cause)
+              const error = Cause.pretty(cause)
+              yield* notify(cancelled ? "cancelled" : "failed", cancelled ? {} : { error })
+              yield* Deferred.succeed(
+                outcome,
+                cancelled ? { status: "cancelled" as const } : { status: "failure" as const, error },
+              )
+            }
+            yield* clearActorState(key, input.actorID)
+          })
 
         // Derive actor mode from spawn shape: peer creates a new session, subagent shares parent's
         const actorMode: "peer" | "subagent" = input.parentSessionID === input.sessionID ? "subagent" : "peer"
@@ -589,20 +602,12 @@ export const layer = Layer.effect(
                   lastFinalText = newTurn.finalText
                 }
 
-                yield* clearActorState(key, input.actorID)
               }),
-            onFailure: (cause) =>
-              Effect.gen(function* () {
-                const cancelled = Cause.hasInterruptsOnly(cause)
-                const error = Cause.pretty(cause)
-                yield* notify(cancelled ? "cancelled" : "failed", cancelled ? {} : { error })
-                yield* Deferred.succeed(
-                  outcome,
-                  cancelled ? { status: "cancelled" as const } : { status: "failure" as const, error },
-                )
-                yield* clearActorState(key, input.actorID)
-              }),
+            onFailure: settleFailure,
           }),
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit) ? settleFailure(exit.cause) : clearActorState(key, input.actorID),
+          ),
         )
         const fiber = yield* work.pipe(Effect.forkIn(scope))
         return { fiber, outcome }
