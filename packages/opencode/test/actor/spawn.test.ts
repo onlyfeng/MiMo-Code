@@ -417,6 +417,37 @@ describe("Actor.cancel", () => {
       { git: true, config: providerCfg },
     ),
   )
+
+  it.live("cancel(graceful) returns without waiting for the turn and stamps cancelled", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const reg = yield* ActorRegistry.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "x",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* llm.hang
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "build",
+          task: "long task",
+          context: "none",
+          tools: ["read"],
+          background: true,
+          model: ref,
+        })
+        yield* llm.wait(1)
+        yield* actor.cancel(result.sessionID, result.actorID, "graceful").pipe(Effect.timeout("1 second"))
+        const row = yield* reg.get(result.sessionID, result.actorID)
+        expect(row?.status).toBe("idle")
+        expect(row?.lastOutcome).toBe("cancelled")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
 })
 
 describe("Actor.spawn agent_id persistence", () => {

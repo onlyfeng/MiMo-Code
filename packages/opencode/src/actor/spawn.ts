@@ -1,4 +1,4 @@
-import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause } from "effect"
+import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit } from "effect"
 import type { SessionID, MessageID } from "@/session/schema"
 import type { ProviderID, ModelID } from "@/provider/schema"
 import type { Tool as AITool, ModelMessage } from "ai"
@@ -199,6 +199,17 @@ export const layer = Layer.effect(
     // (contextMode = "full"). Read by fork's runLoop (see prompt.ts) and
     // cleared on terminal status. Fiber tracking moved to SessionRunState.
     const forkContexts = new Map<string, ForkContext>()
+    const cancelledActors = new Set<string>()
+    const actorKey = (sessionID: SessionID, actorID: string) => `${sessionID}:${actorID}`
+    const isCancelled = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => cancelledActors.has(actorKey(sessionID, actorID)))
+    const markCancelled = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => cancelledActors.add(actorKey(sessionID, actorID)))
+    const clearActorState = (key: string, actorID: string) =>
+      Effect.sync(() => {
+        forkContexts.delete(actorID)
+        cancelledActors.delete(key)
+      })
 
     // Real agent loop: marks the actor running, then drives a SessionPrompt.prompt
     // turn. The user message persisted by SessionPrompt carries the actor's
@@ -263,6 +274,7 @@ export const layer = Layer.effect(
       format?: MessageV2.OutputFormat
     }) =>
       Effect.gen(function* () {
+        const key = actorKey(input.sessionID, input.actorID)
         const outcome = yield* Deferred.make<AgentOutcome>()
         const description = input.description ?? input.agentType
         // Auto-start the bound task: spawning an actor for a task IS that task
@@ -300,6 +312,19 @@ export const layer = Layer.effect(
                 })
                 .pipe(Effect.ignore)
             : Effect.void
+        const settleFailure = (cause: Cause.Cause<unknown>) =>
+          Effect.gen(function* () {
+            if (!(yield* Deferred.isDone(outcome))) {
+              const cancelled = Cause.hasInterruptsOnly(cause)
+              const error = Cause.pretty(cause)
+              yield* notify(cancelled ? "cancelled" : "failed", cancelled ? {} : { error })
+              yield* Deferred.succeed(
+                outcome,
+                cancelled ? { status: "cancelled" as const } : { status: "failure" as const, error },
+              )
+            }
+            yield* clearActorState(key, input.actorID)
+          })
 
         // Derive actor mode from spawn shape: peer creates a new session, subagent shares parent's
         const actorMode: "peer" | "subagent" = input.parentSessionID === input.sessionID ? "subagent" : "peer"
@@ -344,6 +369,7 @@ export const layer = Layer.effect(
                     }
                   : undefined,
               }),
+              { isCancelled: isCancelled(input.sessionID, input.actorID) },
             )
             finalText = turn.finalText
             structured = turn.structured
@@ -428,6 +454,7 @@ export const layer = Layer.effect(
                         source: "hook",
                         provenance: { hookPhase: "post", hookIteration: gateIter, pluginNames: [], hookIDs: [] },
                       }),
+                      { isCancelled: isCancelled(input.sessionID, input.actorID) },
                     ).pipe(
                       Effect.catch(() =>
                         Effect.gen(function* () {
@@ -557,6 +584,7 @@ export const layer = Layer.effect(
                         hookIDs: postReentry.contributingHookIDs,
                       },
                     }),
+                    { isCancelled: isCancelled(input.sessionID, input.actorID) },
                   ).pipe(
                     // postStop LLM failure: log + break loop, do NOT propagate
                     Effect.catch(() =>
@@ -574,20 +602,12 @@ export const layer = Layer.effect(
                   lastFinalText = newTurn.finalText
                 }
 
-                yield* Effect.sync(() => forkContexts.delete(input.actorID))
               }),
-            onFailure: (cause) =>
-              Effect.gen(function* () {
-                const cancelled = Cause.hasInterruptsOnly(cause)
-                const error = Cause.pretty(cause)
-                yield* notify(cancelled ? "cancelled" : "failed", cancelled ? {} : { error })
-                yield* Deferred.succeed(
-                  outcome,
-                  cancelled ? { status: "cancelled" as const } : { status: "failure" as const, error },
-                )
-                yield* Effect.sync(() => forkContexts.delete(input.actorID))
-              }),
+            onFailure: settleFailure,
           }),
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit) ? settleFailure(exit.cause) : clearActorState(key, input.actorID),
+          ),
         )
         const fiber = yield* work.pipe(Effect.forkIn(scope))
         return { fiber, outcome }
@@ -697,12 +717,13 @@ export const layer = Layer.effect(
 
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
+        if (mode === "graceful") yield* markCancelled(sessionID, actorID)
         const children = yield* actorReg.listByParent(sessionID, actorID)
         yield* Effect.forEach(children, (c) => cancel(sessionID, c.actorID, mode), {
           concurrency: "unbounded",
           discard: true,
         })
-        yield* state.cancelActor(sessionID, actorID)
+        yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
         yield* actorReg
           .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
           .pipe(Effect.ignore)
