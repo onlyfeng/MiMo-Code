@@ -2805,8 +2805,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 ? (message: string | undefined) =>
                     status.set(sessionID, message ? { type: "busy", message } : { type: "busy" })
                 : undefined
+            // Skip maxMode on the final step: it must honor `toolChoice: "none"` to
+            // force a text-only response and end the loop. runMaxStep ignores toolChoice
+            // (candidates run propose-only, then the winner's tool calls are replayed and
+            // executed), so routing the last step through it would let the agent call
+            // tools past its step cap. Falling back to handle.process keeps the cap
+            // enforced for every path — fork and main alike.
             const runStep = (processArgs: LLM.StreamInput) =>
-              useMaxMode
+              useMaxMode && !isLastStep
                 ? MaxMode.runMaxStep({
                     ...processArgs,
                     handle,

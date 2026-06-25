@@ -324,6 +324,19 @@ function maxModeProviderCfg(url: string) {
   }
 }
 
+function maxModeLastStepProviderCfg(url: string) {
+  return {
+    ...maxModeProviderCfg(url),
+    agent: {
+      general: {
+        maxMode: true,
+        steps: 1,
+        model: "test/test-model",
+      },
+    },
+  }
+}
+
 const user = Effect.fn("test.user")(function* (sessionID: SessionID, text: string) {
   const session = yield* Session.Service
   const msg = yield* session.updateMessage({
@@ -818,6 +831,39 @@ it.live("context full subagent uses maxMode candidate judge replay path", () =>
       expect(yield* llm.calls).toBe(3)
     }),
     { git: true, config: maxModeProviderCfg },
+  ),
+  20_000,
+)
+
+it.live("last-step maxMode bypasses candidate path", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+
+      const chat = yield* sessions.create({
+        title: "Last step maxMode",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* llm.text("final answer")
+
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "general",
+        agentID: "general-1",
+        model: ref,
+        parts: [{ type: "text", text: "hello" }],
+      })
+
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "final answer")).toBe(true)
+      // steps: 1 makes the only step the last step → runStep bypasses maxMode and
+      // issues a single handle.process call honoring toolChoice "none", instead of
+      // the candidates(2)+judge(1) = 3 calls the max-mode path would make. This guards
+      // the fork/main step cap from maxMode ignoring toolChoice.
+      expect(yield* llm.calls).toBe(1)
+    }),
+    { git: true, config: maxModeLastStepProviderCfg },
   ),
   20_000,
 )
