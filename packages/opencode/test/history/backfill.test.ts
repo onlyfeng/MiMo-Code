@@ -12,6 +12,8 @@ import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 
+// The test process shares a single in-memory SQLite DB (test/preload sets
+// MIMOCODE_DB=:memory:), so wipe the relevant rows before and after each test.
 async function resetHistoryTestState() {
   await Instance.disposeAll()
   Database.use((db) => {
