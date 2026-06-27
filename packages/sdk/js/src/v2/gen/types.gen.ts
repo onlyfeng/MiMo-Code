@@ -494,6 +494,13 @@ export type InvalidOutputError = {
   }
 }
 
+export type TextToolCallError = {
+  name: "TextToolCallError"
+  data: {
+    message: string
+  }
+}
+
 export type ContentFilterError = {
   name: "ContentFilterError"
   data: {
@@ -536,6 +543,7 @@ export type EventSessionError = {
       | StructuredOutputError
       | ContextOverflowError
       | InvalidOutputError
+      | TextToolCallError
       | ContentFilterError
       | ModelError
       | ApiError
@@ -966,6 +974,7 @@ export type AssistantMessage = {
     | StructuredOutputError
     | ContextOverflowError
     | InvalidOutputError
+    | TextToolCallError
     | ContentFilterError
     | ModelError
     | ApiError
@@ -2838,6 +2847,7 @@ export type Agent = {
   temperature?: number
   color?: string
   permission: PermissionRuleset
+  hardPermission?: PermissionRuleset
   model?: {
     modelID: string
     providerID: string
@@ -5262,6 +5272,57 @@ export type WorkflowResumeResponses = {
 }
 
 export type WorkflowResumeResponse = WorkflowResumeResponses[keyof WorkflowResumeResponses]
+
+export type WorkflowTranscriptData = {
+  body?: never
+  path: {
+    runID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflows/{runID}/transcript"
+}
+
+export type WorkflowTranscriptResponses = {
+  /**
+   * Full transcript
+   */
+  200: {
+    runID: string
+    transcript: Array<{
+      kind: "phase" | "log"
+      text: string
+    }>
+  }
+}
+
+export type WorkflowTranscriptResponse = WorkflowTranscriptResponses[keyof WorkflowTranscriptResponses]
+
+export type WorkflowStructureData = {
+  body?: never
+  path: {
+    runID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflows/{runID}/structure"
+}
+
+export type WorkflowStructureResponses = {
+  /**
+   * Structure tree
+   */
+  200: {
+    runID: string
+    nodes: Array<unknown>
+  }
+}
+
+export type WorkflowStructureResponse = WorkflowStructureResponses[keyof WorkflowStructureResponses]
 
 export type QuestionListData = {
   body?: never
