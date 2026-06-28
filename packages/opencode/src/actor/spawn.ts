@@ -722,36 +722,36 @@ export const layer = Layer.effect(
 
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
-        // Decide + mark BEFORE cascading to children. runTurn only observes a
-        // graceful cancel through `isCancelled` at turn boundaries, so the parent's
-        // flag must be armed before any child work runs — otherwise a parent in the
-        // idle/success gap between turns could begin its next turn during the
-        // cascade and miss this request.
-        //
-        // Skip an actor that has already settled. A locally-spawned actor whose
-        // work fiber exited is gone from liveActors; if the registry also shows it
-        // terminal (idle + a recorded outcome) it is truly finished, and
-        // re-stamping it would clobber that outcome and leave a stale cancel flag
-        // nothing clears. Actors still running stay cancellable — whether tracked
-        // locally (liveActors, e.g. between turns where the registry transiently
-        // reads idle+success) or registered by another path (registry non-terminal).
-        // Mark the graceful flag in the SAME sync as the liveness check so an actor
-        // finishing concurrently is never marked after its onExit cleanup.
+        // Mark the graceful flag iff the actor is live, atomically with the
+        // liveness check (so it is never marked after its onExit cleanup → no stale
+        // flag) and BEFORE cascading: runTurn only observes `isCancelled` at turn
+        // boundaries, so a live parent's flag must be armed before any child turn
+        // can begin — otherwise a parent in the idle/success gap between turns could
+        // start its next turn during the cascade and miss this request.
         const key = actorKey(sessionID, actorID)
-        const existing = yield* actorReg.get(sessionID, actorID)
-        const settled = existing?.status === "idle" && existing.lastOutcome != null
-        const proceed = yield* Effect.sync(() => {
-          if (!liveActors.has(key) && settled) return false
+        const live = yield* Effect.sync(() => {
+          if (!liveActors.has(key)) return false
           if (mode === "graceful") cancelledActors.add(key)
           return true
         })
-        // Cascade regardless — children may still be live even when this actor is not.
+        // Cascade regardless — children may be live even when this actor is not.
         const children = yield* actorReg.listByParent(sessionID, actorID)
         yield* Effect.forEach(children, (c) => cancel(sessionID, c.actorID, mode), {
           concurrency: "unbounded",
           discard: true,
         })
-        if (!proceed) return
+        // For a non-live actor, decide skip-vs-stamp from a FRESH registry read. A
+        // locally-spawned actor leaves liveActors only in its work fiber's onExit,
+        // which runs after runTurn has already stamped the terminal status — so a
+        // "not live" observation here guarantees the registry already reads terminal,
+        // closing the read/decision race (a stale earlier read could have predated
+        // the terminal stamp). Skipping then preserves the recorded outcome rather
+        // than clobbering it with "cancelled". An externally-registered actor that is
+        // still running reads non-terminal and is stamped cancelled.
+        if (!live) {
+          const existing = yield* actorReg.get(sessionID, actorID)
+          if (existing?.status === "idle" && existing.lastOutcome != null) return
+        }
         yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
         yield* actorReg
           .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
