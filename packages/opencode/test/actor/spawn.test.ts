@@ -744,6 +744,9 @@ describe("mode × contextMode matrix", () => {
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
 
+        // One hang per background actor: each consumes a response, so both must
+        // stay parked to keep their fork contexts live until the assertions.
+        yield* llm.hang
         yield* llm.hang
 
         // Each session allocates its subagent id independently → both "explore-1".
