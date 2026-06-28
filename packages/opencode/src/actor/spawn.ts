@@ -749,22 +749,23 @@ export const layer = Layer.effect(
           concurrency: "unbounded",
           discard: true,
         })
-        // Not live: the actor is either finished (a local actor leaves liveActors
-        // only in its onExit, which runs after runTurn stamped the terminal status,
-        // so it reads terminal here) or registered by another path. A FRESH read
-        // distinguishes them: terminal → skip so we don't clobber the recorded
-        // outcome; non-terminal (external) → stamp cancelled. Because liveActors now
-        // covers a local actor's whole observable lifetime (added before its
-        // registry row exists), there is no in-flight local actor in this branch, so
-        // no graceful flag needs arming here.
-        if (!live) {
-          const existing = yield* actorReg.get(sessionID, actorID)
-          if (existing?.status === "idle" && existing.lastOutcome != null) return
-        }
-        yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
-        yield* actorReg
-          .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
-          .pipe(Effect.ignore)
+        // Interrupt the live work: graceful detaches (non-blocking), forced is
+        // immediate. Not-live actors have no local fiber to interrupt.
+        if (live) yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
+        // Never clobber an already-recorded terminal outcome. A FRESH read right
+        // before the stamp is the single guard that covers every state:
+        //  - finished / externally-terminal → skip (preserve the outcome);
+        //  - a delivered background actor still running its postStop loop → skip
+        //    (the registry was stamped idle+success before postStop; liveActors is
+        //    still set, so `live` alone is not enough — the terminal read is);
+        //  - the between-turns gap → skip now; the flag armed above makes the next
+        //    turn stamp cancelled;
+        //  - running / pending / external-running (non-terminal) → stamp cancelled.
+        const existing = yield* actorReg.get(sessionID, actorID)
+        if (!(existing?.status === "idle" && existing.lastOutcome != null))
+          yield* actorReg
+            .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
+            .pipe(Effect.ignore)
         yield* Effect.sync(() => forkContexts.delete(actorID))
       })
 
