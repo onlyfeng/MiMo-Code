@@ -164,71 +164,49 @@ export const make = <A, E = never>(
       }),
     ).pipe(Effect.flatten)
 
-  const cancel = SynchronizedRef.modify(ref, (st) => {
-    switch (st._tag) {
-      case "Idle":
-        return [Effect.void, st] as const
-      case "Running":
-        return [
-          Effect.gen(function* () {
-            yield* Fiber.interrupt(st.run.fiber)
-            yield* Deferred.await(st.run.done).pipe(Effect.exit, Effect.asVoid)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
-      case "Shell":
-        return [
-          Effect.gen(function* () {
-            yield* stopShell(st.shell)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
-      case "ShellThenRun":
-        return [
-          Effect.gen(function* () {
-            yield* Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.asVoid)
-            yield* stopShell(st.shell)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
-    }
-  }).pipe(Effect.flatten)
+  // `cancel` (detached=false) awaits the interrupt + the run's settlement so the
+  // caller observes a fully-stopped runner. `cancelDetached` (detached=true) forks
+  // the interrupt/shell teardown so a graceful cancel never blocks on the work's
+  // own cleanup. Both transition the runner to Idle synchronously.
+  const makeCancel = (detached: boolean) => {
+    const stop = <X, EE>(eff: Effect.Effect<X, EE>): Effect.Effect<void, EE> =>
+      detached ? Effect.forkDetach(eff).pipe(Effect.asVoid) : eff.pipe(Effect.asVoid)
+    return SynchronizedRef.modify(ref, (st) => {
+      switch (st._tag) {
+        case "Idle":
+          return [Effect.void, st] as const
+        case "Running":
+          return [
+            Effect.gen(function* () {
+              yield* stop(Fiber.interrupt(st.run.fiber))
+              if (!detached) yield* Deferred.await(st.run.done).pipe(Effect.exit, Effect.asVoid)
+              yield* idleIfCurrent()
+            }),
+            { _tag: "Idle" } as const,
+          ] as const
+        case "Shell":
+          return [
+            Effect.gen(function* () {
+              yield* stop(stopShell(st.shell))
+              yield* idleIfCurrent()
+            }),
+            { _tag: "Idle" } as const,
+          ] as const
+        case "ShellThenRun":
+          return [
+            Effect.gen(function* () {
+              yield* Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.asVoid)
+              yield* stop(stopShell(st.shell))
+              yield* idleIfCurrent()
+            }),
+            { _tag: "Idle" } as const,
+          ] as const
+      }
+    }).pipe(Effect.flatten)
+  }
 
-  const cancelDetached = SynchronizedRef.modify(ref, (st) => {
-    switch (st._tag) {
-      case "Idle":
-        return [Effect.void, st] as const
-      case "Running":
-        return [
-          Effect.gen(function* () {
-            yield* Fiber.interrupt(st.run.fiber).pipe(Effect.forkDetach)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
-      case "Shell":
-        return [
-          Effect.gen(function* () {
-            yield* stopShell(st.shell).pipe(Effect.forkDetach)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
-      case "ShellThenRun":
-        return [
-          Effect.gen(function* () {
-            yield* Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.asVoid)
-            yield* stopShell(st.shell).pipe(Effect.forkDetach)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
-    }
-    return [Effect.void, st] as const
-  }).pipe(Effect.flatten)
+  const cancel = makeCancel(false)
+  const cancelDetached = makeCancel(true)
 
   return {
     get state() {
