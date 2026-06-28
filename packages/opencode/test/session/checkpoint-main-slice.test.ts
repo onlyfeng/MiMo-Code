@@ -29,8 +29,9 @@ const ref = {
 
 // Capture the SpawnInput passed to actor.spawn so the test can inspect the
 // ForkContext (specifically watermarkMsgID) that tryStartCheckpointWriter
-// computed. The outcome never resolves — we only care about what was passed
-// in, not what the writer produces.
+// computed. The outcome resolves immediately so the checkpoint writer's
+// settlement watcher runs to completion (writers.delete) instead of leaving a
+// fiber suspended past scope close — the test asserts that drain at the end.
 interface PrefixRecord {
   id: string
   agentID?: string
@@ -44,11 +45,14 @@ const captures: Captures = { input: undefined, prefixMsgs: undefined }
 const recordingActor = Layer.effect(
   Actor.Service,
   Effect.gen(function* () {
+    const prevSpawnRef = spawnRef.current
+    const prevPrefixCaptureRef = prefixCaptureRef.current
     const impl = Actor.Service.of({
       spawn: (input) =>
         Effect.gen(function* () {
           captures.input = input
           const outcome = yield* Deferred.make<AgentOutcome>()
+          yield* Deferred.succeed(outcome, { status: "success" })
           return {
             actorID: `${input.agentType}-1`,
             sessionID: input.sessionID,
@@ -80,8 +84,8 @@ const recordingActor = Layer.effect(
 
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
-        if (spawnRef.current === impl) spawnRef.current = undefined
-        if (prefixCaptureRef.current === capture) prefixCaptureRef.current = undefined
+        if (spawnRef.current === impl) spawnRef.current = prevSpawnRef
+        if (prefixCaptureRef.current === capture) prefixCaptureRef.current = prevPrefixCaptureRef
       }),
     )
     return impl
@@ -253,6 +257,16 @@ describe("SessionCheckpoint.tryStartCheckpointWriter main-slice", () => {
         expect(seenIDs).not.toContain(subAsst.id)
         const seenAgents = new Set(capturedPrefixMsgs?.map((m) => m.agentID ?? "main"))
         expect(seenAgents).toEqual(new Set(["main"]))
+
+        const writerState = yield* Effect.gen(function* () {
+          for (let i = 0; i < 20; i++) {
+            const state = yield* svc.waitForWriter(info.id)
+            if (state === "no-writer") return state
+            yield* Effect.sleep("10 millis")
+          }
+          return yield* svc.waitForWriter(info.id)
+        })
+        expect(writerState).toBe("no-writer")
       }),
     ),
   )
