@@ -743,14 +743,20 @@ export const layer = Layer.effect(
         // For a non-live actor, decide skip-vs-stamp from a FRESH registry read. A
         // locally-spawned actor leaves liveActors only in its work fiber's onExit,
         // which runs after runTurn has already stamped the terminal status — so a
-        // "not live" observation here guarantees the registry already reads terminal,
-        // closing the read/decision race (a stale earlier read could have predated
-        // the terminal stamp). Skipping then preserves the recorded outcome rather
-        // than clobbering it with "cancelled". An externally-registered actor that is
-        // still running reads non-terminal and is stamped cancelled.
+        // "not live" observation here guarantees a finished actor already reads
+        // terminal, closing the read/decision race (a stale earlier read could have
+        // predated the terminal stamp). Skipping then preserves the recorded outcome
+        // rather than clobbering it with "cancelled".
+        //
+        // A non-terminal not-live actor is either still spawning (registered +
+        // exposed to reclaim via onActorID, but not yet at liveActors.add) or
+        // registered by another path. Arm the graceful flag so a spawn that reaches
+        // its first turn AFTER this cancel still observes isCancelled and stops; the
+        // actor's onExit clears the flag, so this does not leak.
         if (!live) {
           const existing = yield* actorReg.get(sessionID, actorID)
           if (existing?.status === "idle" && existing.lastOutcome != null) return
+          if (mode === "graceful") yield* Effect.sync(() => cancelledActors.add(key))
         }
         yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
         yield* actorReg
