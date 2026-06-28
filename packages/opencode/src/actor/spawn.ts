@@ -200,15 +200,19 @@ export const layer = Layer.effect(
     // cleared on terminal status. Fiber tracking moved to SessionRunState.
     const forkContexts = new Map<string, ForkContext>()
     const cancelledActors = new Set<string>()
+    // Actors whose work fiber is live — added before the fiber forks, removed in
+    // its onExit. cancel() consults this so it never re-stamps an actor that has
+    // already settled (which would clobber the recorded outcome and leave a stale
+    // cancel flag that nothing clears).
+    const liveActors = new Set<string>()
     const actorKey = (sessionID: SessionID, actorID: string) => `${sessionID}:${actorID}`
     const isCancelled = (sessionID: SessionID, actorID: string) =>
       Effect.sync(() => cancelledActors.has(actorKey(sessionID, actorID)))
-    const markCancelled = (sessionID: SessionID, actorID: string) =>
-      Effect.sync(() => cancelledActors.add(actorKey(sessionID, actorID)))
     const clearActorState = (key: string, actorID: string) =>
       Effect.sync(() => {
         forkContexts.delete(actorID)
         cancelledActors.delete(key)
+        liveActors.delete(key)
       })
 
     // Real agent loop: marks the actor running, then drives a SessionPrompt.prompt
@@ -275,6 +279,7 @@ export const layer = Layer.effect(
     }) =>
       Effect.gen(function* () {
         const key = actorKey(input.sessionID, input.actorID)
+        yield* Effect.sync(() => liveActors.add(key))
         const outcome = yield* Deferred.make<AgentOutcome>()
         const description = input.description ?? input.agentType
         // Auto-start the bound task: spawning an actor for a task IS that task
@@ -717,12 +722,30 @@ export const layer = Layer.effect(
 
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
-        if (mode === "graceful") yield* markCancelled(sessionID, actorID)
+        // Cascade first — children may still be live even when this actor is not.
         const children = yield* actorReg.listByParent(sessionID, actorID)
         yield* Effect.forEach(children, (c) => cancel(sessionID, c.actorID, mode), {
           concurrency: "unbounded",
           discard: true,
         })
+        // Skip an actor that has already settled. A locally-spawned actor whose
+        // work fiber exited is gone from liveActors; if the registry also shows it
+        // terminal (idle + a recorded outcome) it is truly finished, and
+        // re-stamping it would clobber that outcome and leave a stale cancel flag
+        // nothing clears. Actors still running stay cancellable — whether tracked
+        // locally (liveActors, e.g. between turns where the registry transiently
+        // reads idle+success) or registered by another path (registry non-terminal).
+        // Mark the graceful flag in the SAME sync as the liveness check so an actor
+        // finishing concurrently is never marked after its onExit cleanup.
+        const key = actorKey(sessionID, actorID)
+        const existing = yield* actorReg.get(sessionID, actorID)
+        const settled = existing?.status === "idle" && existing.lastOutcome != null
+        const proceed = yield* Effect.sync(() => {
+          if (!liveActors.has(key) && settled) return false
+          if (mode === "graceful") cancelledActors.add(key)
+          return true
+        })
+        if (!proceed) return
         yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
         yield* actorReg
           .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })

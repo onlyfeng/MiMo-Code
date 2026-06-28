@@ -448,6 +448,43 @@ describe("Actor.cancel", () => {
       { git: true, config: providerCfg },
     ),
   )
+
+  it.live("cancel(graceful) on an already-finished actor does not overwrite its outcome", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const reg = yield* ActorRegistry.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "x",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* llm.text("done")
+        // Blocking spawn: returns only after the work fiber has joined (onExit
+        // ran), so the actor is fully finished and stamped "success".
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "build",
+          task: "quick task",
+          context: "none",
+          tools: ["read"],
+          background: false,
+          model: ref,
+        })
+        const outcome = yield* Deferred.await(result.outcome)
+        expect(outcome.status).toBe("success")
+        expect((yield* reg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("success")
+
+        // A late cancel (e.g. cascade or programmatic reclaim) must be a no-op
+        // for an actor that already settled — it must NOT clobber the outcome.
+        yield* actor.cancel(result.sessionID, result.actorID, "graceful").pipe(Effect.timeout("1 second"))
+
+        expect((yield* reg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("success")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
 })
 
 describe("Actor.spawn agent_id persistence", () => {
