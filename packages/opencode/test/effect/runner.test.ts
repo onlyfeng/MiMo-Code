@@ -233,7 +233,13 @@ describe("Runner", () => {
       yield* Effect.sleep("10 millis")
       expect(runner.busy).toBe(true)
 
-      yield* runner.cancelDetached.pipe(Effect.timeout("250 millis"))
+      // cancelDetached must return WITHOUT awaiting the blocked finalizer. A
+      // blocking variant would deadlock here (the finalizer only releases AFTER
+      // this returns), so `Effect.timeout` would raise TimeoutException — assert
+      // the cancel completed successfully within budget. (runner.busy flips to
+      // Idle synchronously inside `modify`, so it alone does not prove non-blocking.)
+      const detachedExit = yield* runner.cancelDetached.pipe(Effect.timeout("250 millis"), Effect.exit)
+      expect(Exit.isSuccess(detachedExit)).toBe(true)
       expect(runner.busy).toBe(false)
 
       yield* Deferred.succeed(releaseCleanup, undefined)
