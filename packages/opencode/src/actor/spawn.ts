@@ -200,10 +200,13 @@ export const layer = Layer.effect(
     // cleared on terminal status. Fiber tracking moved to SessionRunState.
     const forkContexts = new Map<string, ForkContext>()
     const cancelledActors = new Set<string>()
-    // Actors whose work fiber is live — added before the fiber forks, removed in
-    // its onExit. cancel() consults this so it never re-stamps an actor that has
-    // already settled (which would clobber the recorded outcome and leave a stale
-    // cancel flag that nothing clears).
+    // Actors that are live locally — added at spawn BEFORE the actor becomes
+    // observable (registry row / onActorID reclaim exposure) and removed in the
+    // work fiber's onExit. Because there is no observable-but-not-live window, a
+    // cancel racing a spawn always sees the actor as live (and arms isCancelled),
+    // while "not live" reliably means finished (onExit ran, after runTurn stamped
+    // the terminal status) or registered by another path. cancel() relies on this
+    // to avoid clobbering a finished actor's recorded outcome.
     const liveActors = new Set<string>()
     const actorKey = (sessionID: SessionID, actorID: string) => `${sessionID}:${actorID}`
     const isCancelled = (sessionID: SessionID, actorID: string) =>
@@ -279,7 +282,6 @@ export const layer = Layer.effect(
     }) =>
       Effect.gen(function* () {
         const key = actorKey(input.sessionID, input.actorID)
-        yield* Effect.sync(() => liveActors.add(key))
         const outcome = yield* Deferred.make<AgentOutcome>()
         const description = input.description ?? input.agentType
         // Auto-start the bound task: spawning an actor for a task IS that task
@@ -624,6 +626,9 @@ export const layer = Layer.effect(
         contextFrom: input.context === "full" ? input.sessionID : undefined,
         title: `${input.agentType}: ${input.task.slice(0, 40)}`,
       })
+      // Mark live before registration so a racing cancel always observes it (see
+      // spawnSubagent). Peer actorID === child session id. Removed in onExit.
+      yield* Effect.sync(() => liveActors.add(actorKey(child.id, child.id)))
       yield* actorReg.register({
         sessionID: child.id,
         actorID: child.id,
@@ -660,6 +665,10 @@ export const layer = Layer.effect(
 
     const spawnSubagent = Effect.fn("Actor.spawnSubagent")(function* (input: SpawnInput) {
       const actorID = yield* actorReg.allocateActorID(input.sessionID, input.agentType)
+      // Mark live BEFORE the actor becomes observable (registry row below, then the
+      // onActorID reclaim callback) so a cancel racing the spawn always sees it as
+      // live and arms isCancelled. Removed in the work fiber's onExit.
+      yield* Effect.sync(() => liveActors.add(actorKey(input.sessionID, actorID)))
 
       const watermark = input.context === "full" ? yield* session.lastMainMessageID(input.sessionID) : undefined
 
@@ -740,23 +749,17 @@ export const layer = Layer.effect(
           concurrency: "unbounded",
           discard: true,
         })
-        // For a non-live actor, decide skip-vs-stamp from a FRESH registry read. A
-        // locally-spawned actor leaves liveActors only in its work fiber's onExit,
-        // which runs after runTurn has already stamped the terminal status — so a
-        // "not live" observation here guarantees a finished actor already reads
-        // terminal, closing the read/decision race (a stale earlier read could have
-        // predated the terminal stamp). Skipping then preserves the recorded outcome
-        // rather than clobbering it with "cancelled".
-        //
-        // A non-terminal not-live actor is either still spawning (registered +
-        // exposed to reclaim via onActorID, but not yet at liveActors.add) or
-        // registered by another path. Arm the graceful flag so a spawn that reaches
-        // its first turn AFTER this cancel still observes isCancelled and stops; the
-        // actor's onExit clears the flag, so this does not leak.
+        // Not live: the actor is either finished (a local actor leaves liveActors
+        // only in its onExit, which runs after runTurn stamped the terminal status,
+        // so it reads terminal here) or registered by another path. A FRESH read
+        // distinguishes them: terminal → skip so we don't clobber the recorded
+        // outcome; non-terminal (external) → stamp cancelled. Because liveActors now
+        // covers a local actor's whole observable lifetime (added before its
+        // registry row exists), there is no in-flight local actor in this branch, so
+        // no graceful flag needs arming here.
         if (!live) {
           const existing = yield* actorReg.get(sessionID, actorID)
           if (existing?.status === "idle" && existing.lastOutcome != null) return
-          if (mode === "graceful") yield* Effect.sync(() => cancelledActors.add(key))
         }
         yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
         yield* actorReg
