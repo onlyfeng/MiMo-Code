@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import path from "path"
 import { Session as SessionNs } from "../../src/session"
 import { Bus } from "../../src/bus"
@@ -7,10 +7,16 @@ import { Instance } from "../../src/project/instance"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { AppRuntime } from "../../src/effect/app-runtime"
+import { Flag } from "../../src/flag/flag"
 import { tmpdir } from "../fixture/fixture"
 
 const projectRoot = path.join(__dirname, "../..")
 void Log.init({ print: false })
+const originalWorkspaces = Flag.MIMOCODE_EXPERIMENTAL_WORKSPACES
+
+afterEach(() => {
+  Flag.MIMOCODE_EXPERIMENTAL_WORKSPACES = originalWorkspaces
+})
 
 function create(input?: SessionNs.CreateInput) {
   return AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.create(input)))
@@ -32,6 +38,15 @@ function updatePart<T extends MessageV2.Part>(part: T) {
   return AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.updatePart(part)))
 }
 
+async function waitUntil(predicate: () => boolean, timeout = 1000) {
+  const deadline = Date.now() + timeout
+  while (!predicate()) {
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  return true
+}
+
 describe("session.created event", () => {
   test("should emit session.created event when session is created", async () => {
     await Instance.provide({
@@ -46,7 +61,7 @@ describe("session.created event", () => {
         })
 
         const info = await create({})
-        await new Promise((resolve) => setTimeout(resolve, 100))
+        expect(await waitUntil(() => eventReceived)).toBe(true)
         unsub()
 
         expect(eventReceived).toBe(true)
@@ -62,6 +77,8 @@ describe("session.created event", () => {
   })
 
   test("session.created event should be emitted before session.updated", async () => {
+    Flag.MIMOCODE_EXPERIMENTAL_WORKSPACES = false
+
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
@@ -76,7 +93,7 @@ describe("session.created event", () => {
         })
 
         const info = await create({})
-        await new Promise((resolve) => setTimeout(resolve, 100))
+        expect(await waitUntil(() => events.includes("created") && events.includes("updated"))).toBe(true)
         unsubCreated()
         unsubUpdated()
 
@@ -135,7 +152,7 @@ describe("step-finish token propagation via Bus event", () => {
           }
 
           await updatePart(partInput)
-          await new Promise((resolve) => setTimeout(resolve, 100))
+          expect(await waitUntil(() => received !== undefined)).toBe(true)
 
           expect(received).toBeDefined()
           expect(received!.type).toBe("step-finish")

@@ -1337,6 +1337,7 @@ unix(
             title: "Interrupted bash truncation",
             permission: [{ permission: "*", pattern: "*", action: "allow" }],
           })
+          const ready = "bash-output-ready"
 
           yield* prompt.prompt({
             sessionID: chat.id,
@@ -1346,16 +1347,17 @@ unix(
           })
 
           yield* llm.tool("bash", {
-            command:
-              'i=0; while [ "$i" -lt 4000 ]; do printf "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx %05d\\n" "$i"; i=$((i + 1)); done; sleep 30',
-            description: "Print many lines",
+            command: `head -c 200000 /dev/zero | tr '\\0' x; touch ${ready}; sleep 30`,
+            description: "Print large output",
             timeout: 30_000,
             workdir: path.resolve(dir),
           })
 
           const run = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
           yield* llm.wait(1)
-          yield* Effect.sleep(150)
+          yield* Effect.gen(function* () {
+            while (!(yield* Effect.promise(() => Bun.file(path.join(dir, ready)).exists()))) yield* Effect.sleep(10)
+          }).pipe(Effect.timeout(5000))
           yield* prompt.cancel(chat.id)
 
           const exit = yield* Fiber.await(run)
