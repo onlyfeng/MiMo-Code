@@ -722,12 +722,12 @@ export const layer = Layer.effect(
 
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
-        // Cascade first — children may still be live even when this actor is not.
-        const children = yield* actorReg.listByParent(sessionID, actorID)
-        yield* Effect.forEach(children, (c) => cancel(sessionID, c.actorID, mode), {
-          concurrency: "unbounded",
-          discard: true,
-        })
+        // Decide + mark BEFORE cascading to children. runTurn only observes a
+        // graceful cancel through `isCancelled` at turn boundaries, so the parent's
+        // flag must be armed before any child work runs — otherwise a parent in the
+        // idle/success gap between turns could begin its next turn during the
+        // cascade and miss this request.
+        //
         // Skip an actor that has already settled. A locally-spawned actor whose
         // work fiber exited is gone from liveActors; if the registry also shows it
         // terminal (idle + a recorded outcome) it is truly finished, and
@@ -744,6 +744,12 @@ export const layer = Layer.effect(
           if (!liveActors.has(key) && settled) return false
           if (mode === "graceful") cancelledActors.add(key)
           return true
+        })
+        // Cascade regardless — children may still be live even when this actor is not.
+        const children = yield* actorReg.listByParent(sessionID, actorID)
+        yield* Effect.forEach(children, (c) => cancel(sessionID, c.actorID, mode), {
+          concurrency: "unbounded",
+          discard: true,
         })
         if (!proceed) return
         yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
