@@ -790,10 +790,10 @@ export const layer = Layer.effect(
           existing?.status === "idle" &&
           existing.lastOutcome != null &&
           (!live || delivered || existing.lastOutcome !== "success")
-        if (!terminalShouldStay)
-          yield* actorReg
-            .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
-            .pipe(Effect.ignore)
+        if (terminalShouldStay) return
+        yield* actorReg
+          .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
+          .pipe(Effect.ignore)
         yield* Effect.sync(() => forkContexts.delete(actorID))
       })
 

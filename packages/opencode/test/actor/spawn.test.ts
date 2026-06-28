@@ -194,6 +194,7 @@ function makeLayer(pluginLayer = Plugin.defaultLayer) {
 
 const it = testEffect(makeLayer())
 let preStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
+let postStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
 const pausePreStopPlugin = Layer.succeed(
   Plugin.Service,
   Plugin.Service.of({
@@ -210,7 +211,15 @@ const pausePreStopPlugin = Layer.succeed(
         }
         return { continue: false, contributingPluginNames: [], contributingHookIDs: [] }
       }),
-    triggerActorPostStop: () => Effect.succeed({ continue: false, contributingPluginNames: [], contributingHookIDs: [] }),
+    triggerActorPostStop: () =>
+      Effect.gen(function* () {
+        const pause = postStopPause
+        if (pause) {
+          yield* Deferred.succeed(pause.hit, undefined)
+          yield* Deferred.await(pause.release)
+        }
+        return { continue: false, contributingPluginNames: [], contributingHookIDs: [] }
+      }),
   }),
 )
 const pauseIt = testEffect(makeLayer(pausePreStopPlugin))
@@ -793,6 +802,62 @@ describe("Actor forkContext lifecycle", () => {
       }),
       { git: true, config: providerCfg },
     ),
+  )
+
+  pauseIt.live("delivered no-op cancel preserves forkContext while postStop is still running", () =>
+    Effect.gen(function* () {
+      const hit = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      postStopPause = { hit, release }
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(release, undefined).pipe(Effect.ignore)
+          yield* Effect.sync(() => {
+            postStopPause = undefined
+          })
+        }),
+      )
+      yield* provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const actor = yield* Actor.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "forkCtx delivered cancel",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          const forkContext = {
+            system: ["test-system"],
+            tools: {},
+            inheritedMessages: [],
+            parentPermission: [],
+            watermarkMsgID: MessageID.ascending(),
+            model: ref,
+          }
+          yield* llm.text("done")
+          const result = yield* actor.spawn({
+            mode: "subagent",
+            sessionID: parent.id,
+            agentType: "explore",
+            task: "noop",
+            context: "full",
+            tools: [],
+            background: true,
+            model: ref,
+            forkContext,
+          })
+
+          const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("1 second"))
+          expect(outcome.status).toBe("success")
+          yield* Deferred.await(hit).pipe(Effect.timeout("1 second"))
+
+          yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.timeout("1 second"))
+          expect((yield* actor.getForkContext(result.actorID))?.system).toEqual(["test-system"])
+
+          yield* Deferred.succeed(release, undefined)
+        }),
+        { git: true, config: providerCfg },
+      )
+    }),
   )
 })
 
