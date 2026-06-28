@@ -200,6 +200,7 @@ export const layer = Layer.effect(
     // cleared on terminal status. Fiber tracking moved to SessionRunState.
     const forkContexts = new Map<string, ForkContext>()
     const cancelledActors = new Set<string>()
+    const deliveredActors = new Set<string>()
     // Actors that are live locally — added at spawn BEFORE the actor becomes
     // observable (registry row / onActorID reclaim exposure) and removed in the
     // work fiber's onExit. Because there is no observable-but-not-live window, a
@@ -215,6 +216,7 @@ export const layer = Layer.effect(
       Effect.sync(() => {
         forkContexts.delete(actorID)
         cancelledActors.delete(key)
+        deliveredActors.delete(key)
         liveActors.delete(key)
       })
 
@@ -319,6 +321,17 @@ export const layer = Layer.effect(
                 })
                 .pipe(Effect.ignore)
             : Effect.void
+        const commitCancelled = Effect.fn("Actor.commitCancelled")(function* () {
+          yield* actorReg
+            .updateStatus(input.sessionID, input.actorID, {
+              status: "idle",
+              lastOutcome: "cancelled",
+              lastError: undefined,
+            })
+            .pipe(Effect.ignore)
+          yield* notify("cancelled", {})
+          yield* Deferred.succeed(outcome, { status: "cancelled" as const })
+        })
         const settleFailure = (cause: Cause.Cause<unknown>) =>
           Effect.gen(function* () {
             if (!(yield* Deferred.isDone(outcome))) {
@@ -501,6 +514,14 @@ export const layer = Layer.effect(
                 // notification body (DW spec P3 §5.2); otherwise deliver the gate's
                 // reconciled text. The success outcome carries both the reconciled
                 // text + completion-gate fields AND structured when present.
+                const delivery = yield* Effect.sync(() => {
+                  deliveredActors.add(key)
+                  return cancelledActors.has(key) ? "cancelled" as const : "success" as const
+                })
+                if (delivery === "cancelled") {
+                  yield* commitCancelled()
+                  return
+                }
                 const deliveryText =
                   structured !== undefined ? JSON.stringify(structured) : (reconciledText ?? "(no output)")
                 yield* notify("completed", {
@@ -742,6 +763,7 @@ export const layer = Layer.effect(
         const key = actorKey(sessionID, actorID)
         const live = yield* Effect.sync(() => {
           if (!liveActors.has(key)) return false
+          if (deliveredActors.has(key)) return false
           cancelledActors.add(key)
           return true
         })
@@ -754,17 +776,21 @@ export const layer = Layer.effect(
         // Interrupt the live work: graceful detaches (non-blocking), forced is
         // immediate. Not-live actors have no local fiber to interrupt.
         if (live) yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
-        // Never clobber an already-recorded terminal outcome. A FRESH read right
-        // before the stamp is the single guard that covers every state:
+        // Never clobber an already-delivered or finished terminal outcome. A FRESH
+        // read right before the stamp is the single guard that covers every state:
         //  - finished / externally-terminal → skip (preserve the outcome);
-        //  - a delivered background actor still running its postStop loop → skip
-        //    (the registry was stamped idle+success before postStop; liveActors is
-        //    still set, so `live` alone is not enough — the terminal read is);
-        //  - the between-turns gap → skip now; the flag armed above makes the next
-        //    turn stamp cancelled;
+        //  - a delivered background actor still running its postStop loop → skip;
+        //  - the between-turns / final-delivery gap → stamp cancelled (the actor is
+        //    still live and not delivered, so cancel must win even if runTurn has
+        //    already written idle/success);
         //  - running / pending / external-running (non-terminal) → stamp cancelled.
         const existing = yield* actorReg.get(sessionID, actorID)
-        if (!(existing?.status === "idle" && existing.lastOutcome != null))
+        const delivered = yield* Effect.sync(() => deliveredActors.has(key))
+        const terminalShouldStay =
+          existing?.status === "idle" &&
+          existing.lastOutcome != null &&
+          (!live || delivered || existing.lastOutcome !== "success")
+        if (!terminalShouldStay)
           yield* actorReg
             .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
             .pipe(Effect.ignore)
