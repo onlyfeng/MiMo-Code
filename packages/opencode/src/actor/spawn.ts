@@ -731,16 +731,18 @@ export const layer = Layer.effect(
 
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
-        // Mark the graceful flag iff the actor is live, atomically with the
-        // liveness check (so it is never marked after its onExit cleanup → no stale
-        // flag) and BEFORE cascading: runTurn only observes `isCancelled` at turn
-        // boundaries, so a live parent's flag must be armed before any child turn
-        // can begin — otherwise a parent in the idle/success gap between turns could
-        // start its next turn during the cascade and miss this request.
+        // Arm the cancel flag iff the actor is live, atomically with the liveness
+        // check (so it is never marked after its onExit cleanup → no stale flag) and
+        // BEFORE cascading. `isCancelled` is the mode-agnostic turn-boundary signal
+        // runTurn observes, so BOTH modes arm it: it stops the actor at its next
+        // turn even when there is no busy runner to interrupt — e.g. a cancel
+        // arriving in the idle/gap between preStop/gate/postStop re-entries, or a
+        // parent cancelled while the child cascade is still running. Forced mode
+        // additionally interrupts the current turn immediately below.
         const key = actorKey(sessionID, actorID)
         const live = yield* Effect.sync(() => {
           if (!liveActors.has(key)) return false
-          if (mode === "graceful") cancelledActors.add(key)
+          cancelledActors.add(key)
           return true
         })
         // Cascade regardless — children may be live even when this actor is not.
