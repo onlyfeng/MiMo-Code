@@ -459,13 +459,11 @@ describe("WorkflowTool run", () => {
           metadata: () => Effect.void,
           ask: () => Effect.void,
         }
-        const res = yield* def.execute({ operation: "run", script, workspace: sub, async: true }, ctx as any)
+        const res = yield* def.execute({ operation: "run", script, workspace: sub }, ctx as any)
         expect(res.metadata.runID).toBeDefined()
-        // Wait for completion + assert the file landed under the chosen workspace (sub), not the worktree root.
-        const runtime = yield* WorkflowRuntime.Service
-        const outcome = yield* runtime.wait({ runID: res.metadata.runID as string })
-        expect(outcome.status).toBe("completed")
-        expect((outcome as { result: boolean }).result).toBe(true)
+        expect(res.metadata.status).toBe("completed")
+        expect(res.output).toContain("Result: true")
+        // Assert the file landed under the chosen workspace (sub), not the worktree root.
         const wrote = yield* Effect.promise(() => Bun.file(path.join(sub, "out.txt")).text())
         expect(wrote).toBe("hi")
       }),
