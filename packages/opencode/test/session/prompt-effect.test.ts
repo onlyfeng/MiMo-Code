@@ -368,13 +368,13 @@ function maxModeLastStepProviderCfg(url: string) {
   }
 }
 
-const user = Effect.fn("test.user")(function* (sessionID: SessionID, text: string) {
+const user = Effect.fn("test.user")(function* (sessionID: SessionID, text: string, agent = "build") {
   const session = yield* Session.Service
   const msg = yield* session.updateMessage({
     id: MessageID.ascending(),
     role: "user",
     sessionID,
-    agent: "build",
+    agent,
     model: ref,
     time: { created: Date.now() },
   })
@@ -519,6 +519,30 @@ it.live("request preflight overflow finalizes its placeholder assistant", () =>
         expect(assistant.info.error?.name).toBe("MessageAbortedError")
       }
       expect(assistant.parts).toEqual([])
+    }),
+    { git: true, config: preflightOverflowCfg },
+  ),
+)
+
+it.live("bounded native hidden agents skip request preflight overflow", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Bounded preflight skip" })
+      yield* user(chat.id, "hello " + "x".repeat(6_000), "dream")
+      yield* llm.text("bounded-ok")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      const parts = result.parts.filter((part) => part.type === "text")
+
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role === "assistant") {
+        expect(result.info.finish).toBe("stop")
+        expect(result.info.error).toBeUndefined()
+      }
+      expect(parts.some((part) => part.type === "text" && part.text === "bounded-ok")).toBe(true)
+      expect(yield* llm.hits).toHaveLength(1)
     }),
     { git: true, config: preflightOverflowCfg },
   ),
