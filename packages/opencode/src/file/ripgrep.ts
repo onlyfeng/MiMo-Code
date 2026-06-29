@@ -186,15 +186,21 @@ function clean(file: string) {
 // a leading "!" excludes, later patterns win (last match decides), and any positive
 // pattern flips matching to allowlist mode. A pattern without a slash matches at any
 // depth (against the basename, so `*.ts` still hits `src/a.ts`); a pattern with a slash
-// matches the full cwd-relative path.
+// matches the full cwd-relative path. Rooted patterns are anchored to the search cwd.
+function globRule(glob: string) {
+  const negated = glob.startsWith("!")
+  const raw = negated ? glob.slice(1) : glob
+  const pattern = raw.startsWith("/") ? raw.slice(1) : raw
+  return { negated, pattern }
+}
+
 function matchesGlobs(rel: string, globs: string[]) {
   const posix = rel.split(path.sep).join("/")
   const base = posix.slice(posix.lastIndexOf("/") + 1)
   return globs.reduce(
     (included, glob) => {
-      const negated = glob.startsWith("!")
-      const pattern = negated ? glob.slice(1) : glob
-      return Glob.match(pattern, pattern.includes("/") ? posix : base) ? !negated : included
+      const rule = globRule(glob)
+      return Glob.match(rule.pattern, rule.pattern.includes("/") ? posix : base) ? !rule.negated : included
     },
     !globs.some((g) => !g.startsWith("!")),
   )
@@ -204,10 +210,9 @@ function excludedByGlobs(rel: string, globs: string[]) {
   const posix = rel.split(path.sep).join("/")
   const base = posix.slice(posix.lastIndexOf("/") + 1)
   return globs.reduce((excluded, glob) => {
-    const negated = glob.startsWith("!")
-    const pattern = negated ? glob.slice(1) : glob
-    const target = pattern.endsWith("/") ? `${posix}/` : pattern.includes("/") ? posix : base
-    return Glob.match(pattern, target) ? negated : excluded
+    const rule = globRule(glob)
+    const target = rule.pattern.endsWith("/") ? `${posix}/` : rule.pattern.includes("/") ? posix : base
+    return Glob.match(rule.pattern, target) ? rule.negated : excluded
   }, false)
 }
 

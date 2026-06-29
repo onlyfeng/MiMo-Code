@@ -333,6 +333,8 @@ describe("file.ripgrep", () => {
         await Bun.write(path.join(dir, "src", "a.ts"), "src")
         await fs.mkdir(path.join(dir, "vendor"), { recursive: true })
         await Bun.write(path.join(dir, "vendor", "a.ts"), "vendor")
+        await fs.mkdir(path.join(dir, "dist"), { recursive: true })
+        await Bun.write(path.join(dir, "dist", "a.ts"), "dist")
         await Bun.write(path.join(dir, "root.js"), "root")
       },
     })
@@ -349,6 +351,19 @@ describe("file.ripgrep", () => {
 
       const reinclude = await fallbackFiles(tmp.path, { glob: ["!vendor/**", "vendor/a.ts"] })
       expect(reinclude).toContain(path.join("vendor", "a.ts"))
+
+      const rooted = await fallbackFiles(tmp.path, { glob: ["/src/**"] })
+      expect(rooted).toContain(path.join("src", "a.ts"))
+      expect(rooted).not.toContain(path.join("vendor", "a.ts"))
+      expect(rooted).not.toContain(path.join("dist", "a.ts"))
+      expect(rooted).not.toContain("root.js")
+
+      const rootedExcluded = await fallbackFiles(tmp.path, { glob: ["!/dist/**"] })
+      expect(rootedExcluded).toContain(path.join("src", "a.ts"))
+      expect(rootedExcluded).not.toContain(path.join("dist", "a.ts"))
+
+      const rootedReinclude = await fallbackFiles(tmp.path, { glob: ["!/dist/**", "/dist/a.ts"] })
+      expect(rootedReinclude).toContain(path.join("dist", "a.ts"))
     })
   })
 
