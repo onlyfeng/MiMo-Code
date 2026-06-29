@@ -3221,7 +3221,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return "break" as const
             }
 
-            const stepEffect = useMaxMode
+            // Skip maxMode on the final step: it must honor `toolChoice: "none"` to force
+            // a text-only response and end the loop. runMaxStep ignores toolChoice, so it
+            // would keep calling tools and bypass the step cap.
+            const stepEffect = useMaxMode && !isLastStep
               ? MaxMode.runMaxStep({
                   // runMaxStep reuses the identical per-step args as handle.process,
                   // plus the orchestration handles it needs.
