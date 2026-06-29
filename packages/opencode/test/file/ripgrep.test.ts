@@ -29,6 +29,29 @@ const noRipgrepLayer = Ripgrep.layer.pipe(
 const runWithoutRipgrep = <A>(effect: Effect.Effect<A, unknown, Ripgrep.Service>) =>
   effect.pipe(Effect.provide(noRipgrepLayer), Effect.runPromise)
 
+const fallbackFiles = (cwd: string) =>
+  runWithoutRipgrep(
+    Ripgrep.Service.use((rg) =>
+      rg.files({ cwd }).pipe(
+        Stream.runCollect,
+        Effect.map((c) => [...c]),
+      ),
+    ),
+  )
+
+async function withNoRipgrep(dir: string, fn: () => Promise<void>) {
+  const prevPath = process.env.PATH
+  await fs.rm(path.join(Global.Path.bin, process.platform === "win32" ? "rg.exe" : "rg"), { force: true })
+  await fs.mkdir(path.join(dir, "empty-bin"), { recursive: true })
+  process.env.PATH = path.join(dir, "empty-bin")
+  try {
+    await fn()
+  } finally {
+    if (prevPath === undefined) delete process.env.PATH
+    else process.env.PATH = prevPath
+  }
+}
+
 // Ripgrep respects parent .gitignore. When tmpdirs are under the repo,
 // patterns like `.mimocode/` in root .gitignore affect test results.
 
@@ -196,8 +219,11 @@ describe("file.ripgrep", () => {
   test("fallback files honors ignore files", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
+        await fs.mkdir(path.join(dir, ".git", "info"), { recursive: true })
+        await Bun.write(path.join(dir, ".git", "info", "exclude"), "exclude-only/\n")
         await Bun.write(path.join(dir, ".gitignore"), "node_modules/\ndist/\n*.tmp\n")
         await Bun.write(path.join(dir, ".ignore"), "build/\n")
+        await Bun.write(path.join(dir, ".rgignore"), "rg-only/\n")
         await fs.mkdir(path.join(dir, "src"), { recursive: true })
         await Bun.write(path.join(dir, "src", ".gitignore"), "!keep.tmp\nlocal.log\n")
         await Bun.write(path.join(dir, "src", "app.ts"), "export {}\n")
@@ -210,22 +236,15 @@ describe("file.ripgrep", () => {
         await Bun.write(path.join(dir, "dist", "output.js"), "dist")
         await fs.mkdir(path.join(dir, "build"), { recursive: true })
         await Bun.write(path.join(dir, "build", "cache.js"), "build")
+        await fs.mkdir(path.join(dir, "rg-only"), { recursive: true })
+        await Bun.write(path.join(dir, "rg-only", "cache.js"), "rg")
+        await fs.mkdir(path.join(dir, "exclude-only"), { recursive: true })
+        await Bun.write(path.join(dir, "exclude-only", "cache.js"), "exclude")
       },
     })
 
-    const prevPath = process.env.PATH
-    await fs.rm(path.join(Global.Path.bin, process.platform === "win32" ? "rg.exe" : "rg"), { force: true })
-    await fs.mkdir(path.join(tmp.path, "empty-bin"), { recursive: true })
-    process.env.PATH = path.join(tmp.path, "empty-bin")
-    try {
-      const files = await runWithoutRipgrep(
-        Ripgrep.Service.use((rg) =>
-          rg.files({ cwd: tmp.path }).pipe(
-            Stream.runCollect,
-            Effect.map((c) => [...c]),
-          ),
-        ),
-      )
+    await withNoRipgrep(tmp.path, async () => {
+      const files = await fallbackFiles(tmp.path)
       expect(files).toContain(path.join("src", "app.ts"))
       expect(files).toContain(path.join("src", "keep.tmp"))
       expect(files).not.toContain(path.join("src", "skip.tmp"))
@@ -233,10 +252,36 @@ describe("file.ripgrep", () => {
       expect(files).not.toContain(path.join("node_modules", "pkg", "index.js"))
       expect(files).not.toContain(path.join("dist", "output.js"))
       expect(files).not.toContain(path.join("build", "cache.js"))
-    } finally {
-      if (prevPath === undefined) delete process.env.PATH
-      else process.env.PATH = prevPath
-    }
+      expect(files).not.toContain(path.join("rg-only", "cache.js"))
+      expect(files).not.toContain(path.join("exclude-only", "cache.js"))
+    })
+  })
+
+  test("fallback files seeds parent ignore rules", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, ".git", "info"), { recursive: true })
+        await Bun.write(path.join(dir, ".git", "info", "exclude"), "src/ignored-by-exclude.txt\n")
+        await Bun.write(path.join(dir, ".gitignore"), "src/ignored-by-gitignore.txt\n")
+        await Bun.write(path.join(dir, ".ignore"), "src/ignored-by-ignore.txt\n")
+        await Bun.write(path.join(dir, ".rgignore"), "src/ignored-by-rgignore.txt\n")
+        await fs.mkdir(path.join(dir, "src"), { recursive: true })
+        await Bun.write(path.join(dir, "src", "kept.ts"), "export {}\n")
+        await Bun.write(path.join(dir, "src", "ignored-by-exclude.txt"), "exclude")
+        await Bun.write(path.join(dir, "src", "ignored-by-gitignore.txt"), "gitignore")
+        await Bun.write(path.join(dir, "src", "ignored-by-ignore.txt"), "ignore")
+        await Bun.write(path.join(dir, "src", "ignored-by-rgignore.txt"), "rgignore")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const files = await fallbackFiles(path.join(tmp.path, "src"))
+      expect(files).toContain("kept.ts")
+      expect(files).not.toContain("ignored-by-exclude.txt")
+      expect(files).not.toContain("ignored-by-gitignore.txt")
+      expect(files).not.toContain("ignored-by-ignore.txt")
+      expect(files).not.toContain("ignored-by-rgignore.txt")
+    })
   })
 
   test("files dies on nonexistent directory", async () => {

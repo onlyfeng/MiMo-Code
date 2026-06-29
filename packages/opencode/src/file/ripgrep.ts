@@ -20,6 +20,7 @@ import { which } from "@/util/which"
 const log = Log.create({ service: "ripgrep" })
 const VERSION = "15.1.0"
 type IgnoreContext = { root: string; matcher: ReturnType<typeof ignore> }
+type GitInfo = { root: string; dir: string }
 const PLATFORM = {
   "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
   "arm64-linux": { platform: "aarch64-unknown-linux-gnu", extension: "tar.gz" },
@@ -204,10 +205,15 @@ function ignorePath(file: string, directory: boolean) {
   return directory ? `${normalized}/` : normalized
 }
 
+function isInside(root: string, file: string) {
+  const rel = path.relative(root, file)
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+}
+
 function isIgnored(file: string, directory: boolean, contexts: IgnoreContext[]) {
   return contexts.reduce((ignored, context) => {
+    if (!isInside(context.root, file)) return ignored
     const rel = path.relative(context.root, file)
-    if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return ignored
     const result = context.matcher.test(ignorePath(rel, directory))
     if (result.unignored) return false
     if (result.ignored) return true
@@ -215,16 +221,63 @@ function isIgnored(file: string, directory: boolean, contexts: IgnoreContext[]) 
   }, false)
 }
 
-async function addIgnoreContext(dir: string, contexts: IgnoreContext[]) {
-  const texts = await Promise.all(
-    [".gitignore", ".ignore"].map((name) => nodeFs.promises.readFile(path.join(dir, name), "utf8").catch(() => "")),
-  )
+async function gitDir(root: string) {
+  const dotGit = path.join(root, ".git")
+  const stat = await nodeFs.promises.stat(dotGit).catch(() => undefined)
+  if (!stat) return
+  if (stat.isDirectory()) return dotGit
+  if (!stat.isFile()) return
+  const match = /^gitdir:\s*(.+)\s*$/i.exec(await nodeFs.promises.readFile(dotGit, "utf8").catch(() => ""))
+  return match ? path.resolve(root, match[1]!) : undefined
+}
+
+async function findGitInfo(cwd: string): Promise<GitInfo | undefined> {
+  let dir = path.resolve(cwd)
+  while (true) {
+    const found = await gitDir(dir)
+    if (found) return { root: dir, dir: found }
+    const parent = path.dirname(dir)
+    if (parent === dir) return
+    dir = parent
+  }
+}
+
+function parentDirs(cwd: string) {
+  const dirs: string[] = []
+  const resolved = path.resolve(cwd)
+  let dir = path.dirname(resolved)
+  while (dir !== resolved) {
+    dirs.push(dir)
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return dirs.reverse()
+}
+
+async function addIgnoreContext(dir: string, contexts: IgnoreContext[], git?: GitInfo) {
+  const files = [
+    ...(git?.root === dir ? [path.join(git.dir, "info", "exclude")] : []),
+    ...(git && isInside(git.root, dir) ? [path.join(dir, ".gitignore")] : []),
+    path.join(dir, ".ignore"),
+    path.join(dir, ".rgignore"),
+  ]
+  const texts = await Promise.all(files.map((file) => nodeFs.promises.readFile(file, "utf8").catch(() => "")))
   if (!texts.some(Boolean)) return contexts
   const matcher = ignore()
   for (const text of texts) {
     if (text) matcher.add(text)
   }
   return [...contexts, { root: dir, matcher }]
+}
+
+async function parentIgnoreContexts(cwd: string) {
+  const git = await findGitInfo(cwd)
+  let contexts: IgnoreContext[] = []
+  for (const dir of parentDirs(cwd)) {
+    contexts = await addIgnoreContext(dir, contexts, git)
+  }
+  return { contexts, git }
 }
 
 function row(data: Row): Row {
@@ -414,12 +467,12 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 
       async function* walkDir(
         dir: string,
-        options: { hidden: boolean; ignore: IgnoreContext[]; maxDepth?: number },
+        options: { git?: GitInfo; hidden: boolean; ignore: IgnoreContext[]; maxDepth?: number },
         currentDepth = 0,
       ): AsyncGenerator<string> {
         if (options.maxDepth !== undefined && currentDepth > options.maxDepth) return
 
-        const contexts = await addIgnoreContext(dir, options.ignore)
+        const contexts = await addIgnoreContext(dir, options.ignore, options.git)
         const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as nodeFs.Dirent[])
         for (const entry of entries) {
           const name = entry.name
@@ -450,9 +503,11 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                     // Stream.take stops early), so the walk doesn't keep scanning the whole
                     // tree after the reader is done.
                     try: async (signal) => {
+                      const ignore = await parentIgnoreContexts(input.cwd)
                       for await (const file of walkDir(input.cwd, {
+                        git: ignore.git,
                         hidden: input.hidden !== false,
-                        ignore: [],
+                        ignore: ignore.contexts,
                         maxDepth: input.maxDepth,
                       })) {
                         if (signal.aborted || input.signal?.aborted) break
