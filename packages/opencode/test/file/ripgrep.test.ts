@@ -1,13 +1,59 @@
 import { describe, expect, test } from "bun:test"
-import { Effect } from "effect"
+import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { Effect, Layer } from "effect"
 import * as Stream from "effect/Stream"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import fs from "fs/promises"
 import path from "path"
 import { tmpdir, withTmpdirOutsideGit } from "../fixture/fixture"
+import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Ripgrep } from "../../src/file/ripgrep"
+import { Global } from "../../src/global"
 
 const run = <A>(effect: Effect.Effect<A, unknown, Ripgrep.Service>) =>
   effect.pipe(Effect.provide(Ripgrep.defaultLayer), Effect.runPromise)
+
+const noRipgrepLayer = Ripgrep.layer.pipe(
+  Layer.provide(
+    Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) =>
+        Effect.succeed(HttpClientResponse.fromWeb(request, new Response("offline", { status: 503 }))),
+      ),
+    ),
+  ),
+  Layer.provide(AppFileSystem.defaultLayer),
+  Layer.provide(CrossSpawnSpawner.defaultLayer),
+)
+
+const runWithoutRipgrep = <A>(effect: Effect.Effect<A, unknown, Ripgrep.Service>) =>
+  effect.pipe(Effect.provide(noRipgrepLayer), Effect.runPromise)
+
+const fallbackFiles = (
+  cwd: string,
+  input: { follow?: boolean; glob?: string[]; hidden?: boolean; maxDepth?: number; signal?: AbortSignal } = {},
+) =>
+  runWithoutRipgrep(
+    Ripgrep.Service.use((rg) =>
+      rg.files({ cwd, ...input }).pipe(
+        Stream.runCollect,
+        Effect.map((c) => [...c]),
+      ),
+    ),
+  )
+
+async function withNoRipgrep(dir: string, fn: () => Promise<void>) {
+  const prevPath = process.env.PATH
+  await fs.rm(path.join(Global.Path.bin, process.platform === "win32" ? "rg.exe" : "rg"), { force: true })
+  await fs.mkdir(path.join(dir, "empty-bin"), { recursive: true })
+  process.env.PATH = path.join(dir, "empty-bin")
+  try {
+    await fn()
+  } finally {
+    if (prevPath === undefined) delete process.env.PATH
+    else process.env.PATH = prevPath
+  }
+}
 
 // Ripgrep respects parent .gitignore. When tmpdirs are under the repo,
 // patterns like `.mimocode/` in root .gitignore affect test results.
@@ -171,6 +217,190 @@ describe("file.ripgrep", () => {
       ),
     )
     expect(files).toEqual(["keep.ts"])
+  })
+
+  test("fallback files handles only simple listings", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "visible.txt"), "visible")
+        await fs.mkdir(path.join(dir, "src"), { recursive: true })
+        await Bun.write(path.join(dir, "src", "nested.ts"), "nested")
+        await fs.mkdir(path.join(dir, ".hidden"), { recursive: true })
+        await Bun.write(path.join(dir, ".hidden", "file.txt"), "hidden")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const files = await fallbackFiles(tmp.path)
+      expect(files).toContain("visible.txt")
+      expect(files).toContain(path.join("src", "nested.ts"))
+      expect(files).toContain(path.join(".hidden", "file.txt"))
+
+      const visibleOnly = await fallbackFiles(tmp.path, { hidden: false })
+      expect(visibleOnly).toContain("visible.txt")
+      expect(visibleOnly).not.toContain(path.join(".hidden", "file.txt"))
+    })
+  })
+
+  test("fallback files requires ripgrep for advanced listing options", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "file.txt"), "file")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      await expect(fallbackFiles(tmp.path, { glob: ["*.txt"] })).rejects.toThrow(/Install ripgrep/)
+      await expect(fallbackFiles(tmp.path, { follow: true })).rejects.toThrow(/Install ripgrep/)
+      await expect(fallbackFiles(tmp.path, { maxDepth: 1 })).rejects.toThrow(/Install ripgrep/)
+    })
+  })
+
+  test("fallback files requires ripgrep when ignore semantics are present", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "repo", ".git"), { recursive: true })
+        await Bun.write(path.join(dir, "repo", ".gitignore"), "dist/\n")
+        await Bun.write(path.join(dir, "repo", "file.txt"), "file")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      await expect(fallbackFiles(path.join(tmp.path, "repo"))).rejects.toThrow(/Install ripgrep/)
+    })
+  })
+
+  test("fallback files allows gitignore outside source control", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, ".gitignore"), "ignored.txt\n")
+        await Bun.write(path.join(dir, "ignored.txt"), "ignored")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const files = await fallbackFiles(tmp.path)
+      expect(files).toContain(".gitignore")
+      expect(files).toContain("ignored.txt")
+    })
+  })
+
+  test("fallback files resolves cwd before marker scanning", async () => {
+    if (process.platform === "win32") return
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "repo", ".git"), { recursive: true })
+        await fs.mkdir(path.join(dir, "repo", "src"), { recursive: true })
+        await Bun.write(path.join(dir, "repo", "src", "file.txt"), "file")
+        await fs.symlink(path.join(dir, "repo", "src"), path.join(dir, "linked-src"), "dir")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const failed = await fallbackFiles(path.join(tmp.path, "linked-src")).then(
+        () => false,
+        () => true,
+      )
+      expect(failed).toBe(true)
+    })
+  })
+
+  test("fallback files ignores lexical-only markers for symlinked cwd", async () => {
+    if (process.platform === "win32") return
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "repo", ".git"), { recursive: true })
+        await fs.mkdir(path.join(dir, "target"), { recursive: true })
+        await Bun.write(path.join(dir, "target", "file.txt"), "file")
+        await fs.symlink(path.join(dir, "target"), path.join(dir, "repo", "linked-target"), "dir")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const files = await fallbackFiles(path.join(tmp.path, "repo", "linked-target"))
+      expect(files).toEqual(["file.txt"])
+    })
+  })
+
+  test("fallback files fails before yielding nested marker results", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "a.txt"), "file")
+        await fs.mkdir(path.join(dir, "z"), { recursive: true })
+        await Bun.write(path.join(dir, "z", ".ignore"), "ignored.txt\n")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const failed = await runWithoutRipgrep(
+        Ripgrep.Service.use((rg) =>
+          rg.files({ cwd: tmp.path }).pipe(
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.map((c) => [...c]),
+          ),
+        ),
+      ).then(
+        () => false,
+        () => true,
+      )
+      expect(failed).toBe(true)
+    })
+  })
+
+  test("fallback files preserves directory read errors", async () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "file.txt"), "file")
+        await fs.mkdir(path.join(dir, "locked"), { recursive: true })
+        await Bun.write(path.join(dir, "locked", "hidden.txt"), "hidden")
+      },
+    })
+
+    await fs.chmod(path.join(tmp.path, "locked"), 0)
+    try {
+      await withNoRipgrep(tmp.path, async () => {
+        const failed = await fallbackFiles(tmp.path).then(
+          () => false,
+          () => true,
+        )
+        expect(failed).toBe(true)
+      })
+    } finally {
+      await fs.chmod(path.join(tmp.path, "locked"), 0o700)
+    }
+  })
+
+  test("fallback files fails on caller abort", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "file.txt"), "file")
+      },
+    })
+
+    const controller = new AbortController()
+    controller.abort()
+    await withNoRipgrep(tmp.path, async () => {
+      await expect(fallbackFiles(tmp.path, { signal: controller.signal })).rejects.toThrow(/abort/i)
+    })
+  })
+
+  test("fallback search requires ripgrep", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "file.txt"), "needle")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      await expect(
+        runWithoutRipgrep(Ripgrep.Service.use((rg) => rg.search({ cwd: tmp.path, pattern: "needle" }))),
+      ).rejects.toThrow(/Search requires ripgrep/)
+    })
   })
 
   test("files dies on nonexistent directory", async () => {

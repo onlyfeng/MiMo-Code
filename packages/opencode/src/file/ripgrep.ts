@@ -2,7 +2,6 @@ import nodeFs from "fs"
 import path from "path"
 import z from "zod"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
-import { Glob } from "@mimo-ai/shared/util/glob"
 import { Cause, Context, Effect, Fiber, Layer, Queue, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
@@ -18,6 +17,9 @@ import { which } from "@/util/which"
 
 const log = Log.create({ service: "ripgrep" })
 const VERSION = "15.1.0"
+const INSTALL_RIPGREP_MESSAGE =
+  "Install ripgrep to use this operation in restricted environments: https://github.com/BurntSushi/ripgrep#installation"
+const FALLBACK_RIPGREP_MARKERS = [".git", ".ignore", ".rgignore"]
 const PLATFORM = {
   "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
   "arm64-linux": { platform: "aarch64-unknown-linux-gnu", extension: "tar.gz" },
@@ -179,22 +181,40 @@ function clean(file: string) {
   return path.normalize(file.replace(/^\.[\\/]/, ""))
 }
 
-// Approximate `rg --glob` for the no-rg fallback, following .gitignore glob rules:
-// a leading "!" excludes, later patterns win (last match decides), and any positive
-// pattern flips matching to allowlist mode. A pattern without a slash matches at any
-// depth (against the basename, so `*.ts` still hits `src/a.ts`); a pattern with a slash
-// matches the full cwd-relative path.
-function matchesGlobs(rel: string, globs: string[]) {
-  const posix = rel.split(path.sep).join("/")
-  const base = posix.slice(posix.lastIndexOf("/") + 1)
-  return globs.reduce(
-    (included, glob) => {
-      const negated = glob.startsWith("!")
-      const pattern = negated ? glob.slice(1) : glob
-      return Glob.match(pattern, pattern.includes("/") ? posix : base) ? !negated : included
-    },
-    !globs.some((g) => !g.startsWith("!")),
-  )
+async function requiresRipgrepFallback(cwd: string) {
+  let dir = await nodeFs.promises.realpath(cwd).catch(() => path.resolve(cwd))
+  while (true) {
+    if (
+      (
+        await Promise.all(
+          FALLBACK_RIPGREP_MARKERS.map((name) =>
+            nodeFs.promises.stat(path.join(dir, name)).then(
+              () => true,
+              () => false,
+            ),
+          ),
+        )
+      ).some(Boolean)
+    ) {
+      return true
+    }
+    const parent = path.dirname(dir)
+    if (parent === dir) return false
+    dir = parent
+  }
+}
+
+async function hasFallbackRipgrepMarker(dir: string, hidden: boolean): Promise<boolean> {
+  const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    if (FALLBACK_RIPGREP_MARKERS.includes(entry.name)) return true
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (!hidden && entry.name.startsWith(".")) continue
+    if (await hasFallbackRipgrepMarker(path.join(dir, entry.name), hidden)) return true
+  }
+  return false
 }
 
 function row(data: Row): Row {
@@ -384,20 +404,20 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 
       async function* walkDir(
         dir: string,
-        options: { hidden: boolean; maxDepth?: number },
-        currentDepth = 0,
+        options: {
+          cwd: string
+          hidden: boolean
+        },
       ): AsyncGenerator<string> {
-        if (options.maxDepth !== undefined && currentDepth > options.maxDepth) return
-
-        const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as nodeFs.Dirent[])
+        const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true })
         for (const entry of entries) {
           const name = entry.name
+          if (FALLBACK_RIPGREP_MARKERS.includes(name)) throw new Error(INSTALL_RIPGREP_MESSAGE)
           if (!options.hidden && name.startsWith(".")) continue
-          if (name === ".git") continue
 
           const fullPath = path.join(dir, name)
           if (entry.isDirectory()) {
-            yield* walkDir(fullPath, options, currentDepth + 1)
+            yield* walkDir(fullPath, options)
           } else if (entry.isFile()) {
             yield fullPath
           }
@@ -412,23 +432,28 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                 yield* check(input.cwd)
                 const binary = yield* filepath.pipe(Effect.catch(() => Effect.succeed(undefined)))
                 if (!binary) {
+                  if (input.glob || input.follow || input.maxDepth !== undefined) {
+                    return yield* Effect.fail(new Error(INSTALL_RIPGREP_MESSAGE))
+                  }
+                  if (yield* Effect.tryPromise(() => requiresRipgrepFallback(input.cwd))) {
+                    return yield* Effect.fail(new Error(INSTALL_RIPGREP_MESSAGE))
+                  }
                   log.info("ripgrep not available, using fallback for file listing")
                   yield* Effect.tryPromise({
-                    // `signal` aborts when the Stream scope closes (e.g. a consumer using
-                    // Stream.take stops early), so the walk doesn't keep scanning the whole
-                    // tree after the reader is done.
                     try: async (signal) => {
-                      for await (const file of walkDir(input.cwd, {
-                        hidden: input.hidden !== false,
-                        maxDepth: input.maxDepth,
-                      })) {
-                        if (signal.aborted || input.signal?.aborted) break
-                        // walkDir yields absolute paths; emit cwd-relative ones so the output
-                        // matches `rg --files` (consumers like tree() split on path.sep).
-                        const rel = path.relative(input.cwd, file)
-                        if (input.glob && !matchesGlobs(rel, input.glob)) continue
-                        Queue.offerUnsafe(queue, clean(rel))
+                      if (input.signal?.aborted) throw aborted(input.signal)
+                      if (await hasFallbackRipgrepMarker(input.cwd, input.hidden !== false)) {
+                        throw new Error(INSTALL_RIPGREP_MESSAGE)
                       }
+                      for await (const file of walkDir(input.cwd, {
+                        cwd: input.cwd,
+                        hidden: input.hidden !== false,
+                      })) {
+                        if (input.signal?.aborted) throw aborted(input.signal)
+                        if (signal.aborted) break
+                        Queue.offerUnsafe(queue, clean(path.relative(input.cwd, file)))
+                      }
+                      if (input.signal?.aborted) throw aborted(input.signal)
                     },
                     catch: (err) => (err instanceof Error ? err : new Error(String(err))),
                   })
@@ -474,8 +499,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
               return yield* Effect.fail(
                 new Error(
                   "Search requires ripgrep, which is unavailable and could not be downloaded. " +
-                    "If you are in a restricted network, install ripgrep manually: " +
-                    "https://github.com/BurntSushi/ripgrep#installation",
+                    INSTALL_RIPGREP_MESSAGE,
                 ),
               )
             const handle = yield* spawner.spawn(yield* command(input.cwd, searchArgs(input)))
