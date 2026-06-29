@@ -270,6 +270,42 @@ describe("file.ripgrep", () => {
     })
   })
 
+  test("fallback files allows gitignore outside source control", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, ".gitignore"), "ignored.txt\n")
+        await Bun.write(path.join(dir, "ignored.txt"), "ignored")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const files = await fallbackFiles(tmp.path)
+      expect(files).toContain(".gitignore")
+      expect(files).toContain("ignored.txt")
+    })
+  })
+
+  test("fallback files resolves cwd before marker scanning", async () => {
+    if (process.platform === "win32") return
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "repo", ".git"), { recursive: true })
+        await fs.mkdir(path.join(dir, "repo", "src"), { recursive: true })
+        await Bun.write(path.join(dir, "repo", "src", "file.txt"), "file")
+        await fs.symlink(path.join(dir, "repo", "src"), path.join(dir, "linked-src"), "dir")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const failed = await fallbackFiles(path.join(tmp.path, "linked-src")).then(
+        () => false,
+        () => true,
+      )
+      expect(failed).toBe(true)
+    })
+  })
+
   test("fallback files preserves directory read errors", async () => {
     if (process.platform === "win32") return
 

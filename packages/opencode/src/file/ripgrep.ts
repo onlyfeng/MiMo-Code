@@ -19,7 +19,7 @@ const log = Log.create({ service: "ripgrep" })
 const VERSION = "15.1.0"
 const INSTALL_RIPGREP_MESSAGE =
   "Install ripgrep to use this operation in restricted environments: https://github.com/BurntSushi/ripgrep#installation"
-const FALLBACK_RIPGREP_MARKERS = [".git", ".gitignore", ".ignore", ".rgignore"]
+const FALLBACK_RIPGREP_MARKERS = [".git", ".ignore", ".rgignore"]
 const PLATFORM = {
   "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
   "arm64-linux": { platform: "aarch64-unknown-linux-gnu", extension: "tar.gz" },
@@ -182,26 +182,35 @@ function clean(file: string) {
 }
 
 async function requiresRipgrepFallback(cwd: string) {
-  let dir = path.resolve(cwd)
-  while (true) {
-    if (
-      (
-        await Promise.all(
-          FALLBACK_RIPGREP_MARKERS.map((name) =>
-            nodeFs.promises.stat(path.join(dir, name)).then(
-              () => true,
-              () => false,
+  async function scan(start: string) {
+    let dir = path.resolve(start)
+    while (true) {
+      if (
+        (
+          await Promise.all(
+            FALLBACK_RIPGREP_MARKERS.map((name) =>
+              nodeFs.promises.stat(path.join(dir, name)).then(
+                () => true,
+                () => false,
+              ),
             ),
-          ),
-        )
-      ).some(Boolean)
-    ) {
-      return true
+          )
+        ).some(Boolean)
+      ) {
+        return true
+      }
+      const parent = path.dirname(dir)
+      if (parent === dir) return false
+      dir = parent
     }
-    const parent = path.dirname(dir)
-    if (parent === dir) return false
-    dir = parent
   }
+
+  const starts = new Set([path.resolve(cwd)])
+  starts.add(await nodeFs.promises.realpath(cwd).catch(() => path.resolve(cwd)))
+  for (const start of starts) {
+    if (await scan(start)) return true
+  }
+  return false
 }
 
 function row(data: Row): Row {
