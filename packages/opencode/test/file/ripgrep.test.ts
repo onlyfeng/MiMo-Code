@@ -324,8 +324,34 @@ describe("file.ripgrep", () => {
     })
   })
 
+  test("fallback files fails before yielding nested marker results", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "a.txt"), "file")
+        await fs.mkdir(path.join(dir, "z"), { recursive: true })
+        await Bun.write(path.join(dir, "z", ".ignore"), "ignored.txt\n")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const failed = await runWithoutRipgrep(
+        Ripgrep.Service.use((rg) =>
+          rg.files({ cwd: tmp.path }).pipe(
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.map((c) => [...c]),
+          ),
+        ),
+      ).then(
+        () => false,
+        () => true,
+      )
+      expect(failed).toBe(true)
+    })
+  })
+
   test("fallback files preserves directory read errors", async () => {
-    if (process.platform === "win32") return
+    if (process.platform === "win32" || process.getuid?.() === 0) return
 
     await using tmp = await tmpdir({
       init: async (dir) => {

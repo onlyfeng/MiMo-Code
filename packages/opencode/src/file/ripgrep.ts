@@ -429,13 +429,19 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                   yield* Effect.tryPromise({
                     try: async (signal) => {
                       if (input.signal?.aborted) throw aborted(input.signal)
+                      const files: string[] = []
                       for await (const file of walkDir(input.cwd, {
                         cwd: input.cwd,
                         hidden: input.hidden !== false,
                       })) {
                         if (input.signal?.aborted) throw aborted(input.signal)
                         if (signal.aborted) break
-                        Queue.offerUnsafe(queue, clean(path.relative(input.cwd, file)))
+                        files.push(clean(path.relative(input.cwd, file)))
+                      }
+                      if (input.signal?.aborted) throw aborted(input.signal)
+                      for (const file of files) {
+                        if (signal.aborted) break
+                        Queue.offerUnsafe(queue, file)
                       }
                       if (input.signal?.aborted) throw aborted(input.signal)
                     },
