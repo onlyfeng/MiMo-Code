@@ -29,7 +29,10 @@ const noRipgrepLayer = Ripgrep.layer.pipe(
 const runWithoutRipgrep = <A>(effect: Effect.Effect<A, unknown, Ripgrep.Service>) =>
   effect.pipe(Effect.provide(noRipgrepLayer), Effect.runPromise)
 
-const fallbackFiles = (cwd: string, input: { follow?: boolean; glob?: string[]; maxDepth?: number } = {}) =>
+const fallbackFiles = (
+  cwd: string,
+  input: { follow?: boolean; glob?: string[]; maxDepth?: number; signal?: AbortSignal } = {},
+) =>
   runWithoutRipgrep(
     Ripgrep.Service.use((rg) =>
       rg.files({ cwd, ...input }).pipe(
@@ -281,6 +284,42 @@ describe("file.ripgrep", () => {
       expect(files).not.toContain("ignored-by-gitignore.txt")
       expect(files).not.toContain("ignored-by-ignore.txt")
       expect(files).not.toContain("ignored-by-rgignore.txt")
+    })
+  })
+
+  test("fallback files keeps explicit ignored cwd traversable", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, ".git"), { recursive: true })
+        await Bun.write(path.join(dir, ".gitignore"), "build/\nbuild/*.tmp\ncontents/**\n")
+        await fs.mkdir(path.join(dir, "build"), { recursive: true })
+        await Bun.write(path.join(dir, "build", "keep.txt"), "keep")
+        await Bun.write(path.join(dir, "build", "skip.tmp"), "skip")
+        await fs.mkdir(path.join(dir, "contents"), { recursive: true })
+        await Bun.write(path.join(dir, "contents", "skip.txt"), "skip")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const build = await fallbackFiles(path.join(tmp.path, "build"))
+      expect(build).toContain("keep.txt")
+      expect(build).not.toContain("skip.tmp")
+
+      expect(await fallbackFiles(path.join(tmp.path, "contents"))).toEqual([])
+    })
+  })
+
+  test("fallback files fails on caller abort", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "file.txt"), "file")
+      },
+    })
+
+    const controller = new AbortController()
+    controller.abort()
+    await withNoRipgrep(tmp.path, async () => {
+      await expect(fallbackFiles(tmp.path, { signal: controller.signal })).rejects.toThrow(/abort/i)
     })
   })
 

@@ -226,6 +226,17 @@ function isInside(root: string, file: string) {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
 }
 
+function allowExplicitDirectory(dir: string, contexts: IgnoreContext[]) {
+  return contexts.map((context) => {
+    if (!isInside(context.root, dir)) return context
+    const rel = path.relative(context.root, dir)
+    if (!rel) return context
+    const target = ignorePath(rel, true)
+    if (context.matcher.test(target).ignored) context.matcher.add(`!${target}`)
+    return context
+  })
+}
+
 function isIgnored(file: string, directory: boolean, contexts: IgnoreContext[]) {
   return contexts.reduce((ignored, context) => {
     if (!isInside(context.root, file)) return ignored
@@ -573,26 +584,31 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                     // Stream.take stops early), so the walk doesn't keep scanning the whole
                     // tree after the reader is done.
                     try: async (signal) => {
+                      if (input.signal?.aborted) throw aborted(input.signal)
                       const ignore = await parentIgnoreContexts(input.cwd)
+                      const contexts = allowExplicitDirectory(input.cwd, ignore.contexts)
+                      if (input.signal?.aborted) throw aborted(input.signal)
                       for await (const file of walkDir(input.cwd, {
                         cwd: input.cwd,
                         follow: input.follow,
                         glob: input.glob,
                         git: ignore.git,
                         hidden: input.hidden !== false,
-                        ignore: ignore.contexts,
+                        ignore: contexts,
                         maxDepth: input.maxDepth,
                         seen: input.follow
                           ? new Set([await nodeFs.promises.realpath(input.cwd).catch(() => path.resolve(input.cwd))])
                           : undefined,
                       })) {
-                        if (signal.aborted || input.signal?.aborted) break
+                        if (input.signal?.aborted) throw aborted(input.signal)
+                        if (signal.aborted) break
                         // walkDir yields absolute paths; emit cwd-relative ones so the output
                         // matches `rg --files` (consumers like tree() split on path.sep).
                         const rel = path.relative(input.cwd, file)
                         if (input.glob && !matchesGlobs(rel, input.glob)) continue
                         Queue.offerUnsafe(queue, clean(rel))
                       }
+                      if (input.signal?.aborted) throw aborted(input.signal)
                     },
                     catch: (err) => (err instanceof Error ? err : new Error(String(err))),
                   })
