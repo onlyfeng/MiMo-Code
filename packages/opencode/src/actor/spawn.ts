@@ -787,12 +787,13 @@ export const layer = Layer.effect(
         //    still live and not delivered, so cancel must win even if runTurn has
         //    already written idle/success);
         //  - running / pending / external-running (non-terminal) → stamp cancelled.
-        const existing = yield* actorReg.get(sessionID, actorID)
         const delivered = yield* Effect.sync(() => deliveredActors.has(key))
+        if (delivered) return
+        const existing = yield* actorReg.get(sessionID, actorID)
         const terminalShouldStay =
           existing?.status === "idle" &&
           existing.lastOutcome != null &&
-          (!live || delivered || existing.lastOutcome !== "success")
+          (!live || existing.lastOutcome !== "success")
         if (terminalShouldStay) return
         yield* actorReg
           .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
