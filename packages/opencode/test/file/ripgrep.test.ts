@@ -227,8 +227,6 @@ describe("file.ripgrep", () => {
         await Bun.write(path.join(dir, "src", "nested.ts"), "nested")
         await fs.mkdir(path.join(dir, ".hidden"), { recursive: true })
         await Bun.write(path.join(dir, ".hidden", "file.txt"), "hidden")
-        await fs.mkdir(path.join(dir, ".git"), { recursive: true })
-        await Bun.write(path.join(dir, ".git", "config"), "git")
       },
     })
 
@@ -237,7 +235,6 @@ describe("file.ripgrep", () => {
       expect(files).toContain("visible.txt")
       expect(files).toContain(path.join("src", "nested.ts"))
       expect(files).toContain(path.join(".hidden", "file.txt"))
-      expect(files).not.toContain(path.join(".git", "config"))
 
       const visibleOnly = await fallbackFiles(tmp.path, { hidden: false })
       expect(visibleOnly).toContain("visible.txt")
@@ -256,6 +253,20 @@ describe("file.ripgrep", () => {
       await expect(fallbackFiles(tmp.path, { glob: ["*.txt"] })).rejects.toThrow(/Install ripgrep/)
       await expect(fallbackFiles(tmp.path, { follow: true })).rejects.toThrow(/Install ripgrep/)
       await expect(fallbackFiles(tmp.path, { maxDepth: 1 })).rejects.toThrow(/Install ripgrep/)
+    })
+  })
+
+  test("fallback files requires ripgrep when ignore semantics are present", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "repo", ".git"), { recursive: true })
+        await Bun.write(path.join(dir, "repo", ".gitignore"), "dist/\n")
+        await Bun.write(path.join(dir, "repo", "file.txt"), "file")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      await expect(fallbackFiles(path.join(tmp.path, "repo"))).rejects.toThrow(/Install ripgrep/)
     })
   })
 

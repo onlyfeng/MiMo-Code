@@ -19,6 +19,7 @@ const log = Log.create({ service: "ripgrep" })
 const VERSION = "15.1.0"
 const INSTALL_RIPGREP_MESSAGE =
   "Install ripgrep to use this operation in restricted environments: https://github.com/BurntSushi/ripgrep#installation"
+const FALLBACK_RIPGREP_MARKERS = [".git", ".gitignore", ".ignore", ".rgignore"]
 const PLATFORM = {
   "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
   "arm64-linux": { platform: "aarch64-unknown-linux-gnu", extension: "tar.gz" },
@@ -178,6 +179,29 @@ function error(stderr: string, code: number) {
 
 function clean(file: string) {
   return path.normalize(file.replace(/^\.[\\/]/, ""))
+}
+
+async function requiresRipgrepFallback(cwd: string) {
+  let dir = path.resolve(cwd)
+  while (true) {
+    if (
+      (
+        await Promise.all(
+          FALLBACK_RIPGREP_MARKERS.map((name) =>
+            nodeFs.promises.stat(path.join(dir, name)).then(
+              () => true,
+              () => false,
+            ),
+          ),
+        )
+      ).some(Boolean)
+    ) {
+      return true
+    }
+    const parent = path.dirname(dir)
+    if (parent === dir) return false
+    dir = parent
+  }
 }
 
 function row(data: Row): Row {
@@ -375,8 +399,8 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
         const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as nodeFs.Dirent[])
         for (const entry of entries) {
           const name = entry.name
+          if (FALLBACK_RIPGREP_MARKERS.includes(name)) throw new Error(INSTALL_RIPGREP_MESSAGE)
           if (!options.hidden && name.startsWith(".")) continue
-          if (name === ".git") continue
 
           const fullPath = path.join(dir, name)
           if (entry.isDirectory()) {
@@ -396,6 +420,9 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                 const binary = yield* filepath.pipe(Effect.catch(() => Effect.succeed(undefined)))
                 if (!binary) {
                   if (input.glob || input.follow || input.maxDepth !== undefined) {
+                    return yield* Effect.fail(new Error(INSTALL_RIPGREP_MESSAGE))
+                  }
+                  if (yield* Effect.tryPromise(() => requiresRipgrepFallback(input.cwd))) {
                     return yield* Effect.fail(new Error(INSTALL_RIPGREP_MESSAGE))
                   }
                   log.info("ripgrep not available, using fallback for file listing")
