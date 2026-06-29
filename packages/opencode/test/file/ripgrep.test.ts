@@ -29,10 +29,10 @@ const noRipgrepLayer = Ripgrep.layer.pipe(
 const runWithoutRipgrep = <A>(effect: Effect.Effect<A, unknown, Ripgrep.Service>) =>
   effect.pipe(Effect.provide(noRipgrepLayer), Effect.runPromise)
 
-const fallbackFiles = (cwd: string) =>
+const fallbackFiles = (cwd: string, input: { follow?: boolean; maxDepth?: number } = {}) =>
   runWithoutRipgrep(
     Ripgrep.Service.use((rg) =>
-      rg.files({ cwd }).pipe(
+      rg.files({ cwd, ...input }).pipe(
         Stream.runCollect,
         Effect.map((c) => [...c]),
       ),
@@ -281,6 +281,48 @@ describe("file.ripgrep", () => {
       expect(files).not.toContain("ignored-by-gitignore.txt")
       expect(files).not.toContain("ignored-by-ignore.txt")
       expect(files).not.toContain("ignored-by-rgignore.txt")
+    })
+  })
+
+  test("fallback files matches ripgrep maxDepth", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "root.txt"), "root")
+        await fs.mkdir(path.join(dir, "src"), { recursive: true })
+        await Bun.write(path.join(dir, "src", "nested.txt"), "nested")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      expect(await fallbackFiles(tmp.path, { maxDepth: 0 })).toEqual([])
+      expect(await fallbackFiles(tmp.path, { maxDepth: 1 })).toContain("root.txt")
+      expect(await fallbackFiles(tmp.path, { maxDepth: 1 })).not.toContain(path.join("src", "nested.txt"))
+      expect(await fallbackFiles(tmp.path, { maxDepth: 2 })).toContain(path.join("src", "nested.txt"))
+    })
+  })
+
+  test("fallback files follows symlinks when requested", async () => {
+    if (process.platform === "win32") return
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "real"), { recursive: true })
+        await Bun.write(path.join(dir, "real", "file.txt"), "real")
+        await fs.symlink("real", path.join(dir, "linkdir"), "dir")
+        await fs.symlink(path.join("real", "file.txt"), path.join(dir, "linkfile.txt"), "file")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const normal = await fallbackFiles(tmp.path)
+      expect(normal).toContain(path.join("real", "file.txt"))
+      expect(normal).not.toContain(path.join("linkdir", "file.txt"))
+      expect(normal).not.toContain("linkfile.txt")
+
+      const followed = await fallbackFiles(tmp.path, { follow: true })
+      expect(followed).toContain(path.join("real", "file.txt"))
+      expect(followed).toContain(path.join("linkdir", "file.txt"))
+      expect(followed).toContain("linkfile.txt")
     })
   })
 

@@ -467,10 +467,17 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 
       async function* walkDir(
         dir: string,
-        options: { git?: GitInfo; hidden: boolean; ignore: IgnoreContext[]; maxDepth?: number },
+        options: {
+          follow?: boolean
+          git?: GitInfo
+          hidden: boolean
+          ignore: IgnoreContext[]
+          maxDepth?: number
+          seen?: Set<string>
+        },
         currentDepth = 0,
       ): AsyncGenerator<string> {
-        if (options.maxDepth !== undefined && currentDepth > options.maxDepth) return
+        if (options.maxDepth !== undefined && currentDepth >= options.maxDepth) return
 
         const contexts = await addIgnoreContext(dir, options.ignore, options.git)
         const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as nodeFs.Dirent[])
@@ -480,10 +487,19 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           if (name === ".git") continue
 
           const fullPath = path.join(dir, name)
-          if (isIgnored(fullPath, entry.isDirectory(), contexts)) continue
-          if (entry.isDirectory()) {
-            yield* walkDir(fullPath, { ...options, ignore: contexts }, currentDepth + 1)
-          } else if (entry.isFile()) {
+          const stat = options.follow && entry.isSymbolicLink() ? await nodeFs.promises.stat(fullPath).catch(() => undefined) : undefined
+          const directory = entry.isDirectory() || stat?.isDirectory() === true
+          const file = entry.isFile() || stat?.isFile() === true
+          if (isIgnored(fullPath, directory, contexts)) continue
+          if (directory) {
+            const seen = options.follow && options.seen ? new Set(options.seen) : options.seen
+            if (options.follow && seen) {
+              const real = await nodeFs.promises.realpath(fullPath).catch(() => fullPath)
+              if (seen.has(real)) continue
+              seen.add(real)
+            }
+            yield* walkDir(fullPath, { ...options, ignore: contexts, seen }, currentDepth + 1)
+          } else if (file) {
             yield fullPath
           }
         }
@@ -505,10 +521,14 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                     try: async (signal) => {
                       const ignore = await parentIgnoreContexts(input.cwd)
                       for await (const file of walkDir(input.cwd, {
+                        follow: input.follow,
                         git: ignore.git,
                         hidden: input.hidden !== false,
                         ignore: ignore.contexts,
                         maxDepth: input.maxDepth,
+                        seen: input.follow
+                          ? new Set([await nodeFs.promises.realpath(input.cwd).catch(() => path.resolve(input.cwd))])
+                          : undefined,
                       })) {
                         if (signal.aborted || input.signal?.aborted) break
                         // walkDir yields absolute paths; emit cwd-relative ones so the output
