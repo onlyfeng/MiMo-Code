@@ -1,13 +1,33 @@
 import { describe, expect, test } from "bun:test"
-import { Effect } from "effect"
+import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { Effect, Layer } from "effect"
 import * as Stream from "effect/Stream"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import fs from "fs/promises"
 import path from "path"
 import { tmpdir, withTmpdirOutsideGit } from "../fixture/fixture"
+import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Ripgrep } from "../../src/file/ripgrep"
+import { Global } from "../../src/global"
 
 const run = <A>(effect: Effect.Effect<A, unknown, Ripgrep.Service>) =>
   effect.pipe(Effect.provide(Ripgrep.defaultLayer), Effect.runPromise)
+
+const noRipgrepLayer = Ripgrep.layer.pipe(
+  Layer.provide(
+    Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) =>
+        Effect.succeed(HttpClientResponse.fromWeb(request, new Response("offline", { status: 503 }))),
+      ),
+    ),
+  ),
+  Layer.provide(AppFileSystem.defaultLayer),
+  Layer.provide(CrossSpawnSpawner.defaultLayer),
+)
+
+const runWithoutRipgrep = <A>(effect: Effect.Effect<A, unknown, Ripgrep.Service>) =>
+  effect.pipe(Effect.provide(noRipgrepLayer), Effect.runPromise)
 
 // Ripgrep respects parent .gitignore. When tmpdirs are under the repo,
 // patterns like `.mimocode/` in root .gitignore affect test results.
@@ -171,6 +191,52 @@ describe("file.ripgrep", () => {
       ),
     )
     expect(files).toEqual(["keep.ts"])
+  })
+
+  test("fallback files honors ignore files", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, ".gitignore"), "node_modules/\ndist/\n*.tmp\n")
+        await Bun.write(path.join(dir, ".ignore"), "build/\n")
+        await fs.mkdir(path.join(dir, "src"), { recursive: true })
+        await Bun.write(path.join(dir, "src", ".gitignore"), "!keep.tmp\nlocal.log\n")
+        await Bun.write(path.join(dir, "src", "app.ts"), "export {}\n")
+        await Bun.write(path.join(dir, "src", "skip.tmp"), "skip")
+        await Bun.write(path.join(dir, "src", "keep.tmp"), "keep")
+        await Bun.write(path.join(dir, "src", "local.log"), "local")
+        await fs.mkdir(path.join(dir, "node_modules", "pkg"), { recursive: true })
+        await Bun.write(path.join(dir, "node_modules", "pkg", "index.js"), "module.exports = {}\n")
+        await fs.mkdir(path.join(dir, "dist"), { recursive: true })
+        await Bun.write(path.join(dir, "dist", "output.js"), "dist")
+        await fs.mkdir(path.join(dir, "build"), { recursive: true })
+        await Bun.write(path.join(dir, "build", "cache.js"), "build")
+      },
+    })
+
+    const prevPath = process.env.PATH
+    await fs.rm(path.join(Global.Path.bin, process.platform === "win32" ? "rg.exe" : "rg"), { force: true })
+    await fs.mkdir(path.join(tmp.path, "empty-bin"), { recursive: true })
+    process.env.PATH = path.join(tmp.path, "empty-bin")
+    try {
+      const files = await runWithoutRipgrep(
+        Ripgrep.Service.use((rg) =>
+          rg.files({ cwd: tmp.path }).pipe(
+            Stream.runCollect,
+            Effect.map((c) => [...c]),
+          ),
+        ),
+      )
+      expect(files).toContain(path.join("src", "app.ts"))
+      expect(files).toContain(path.join("src", "keep.tmp"))
+      expect(files).not.toContain(path.join("src", "skip.tmp"))
+      expect(files).not.toContain(path.join("src", "local.log"))
+      expect(files).not.toContain(path.join("node_modules", "pkg", "index.js"))
+      expect(files).not.toContain(path.join("dist", "output.js"))
+      expect(files).not.toContain(path.join("build", "cache.js"))
+    } finally {
+      if (prevPath === undefined) delete process.env.PATH
+      else process.env.PATH = prevPath
+    }
   })
 
   test("files dies on nonexistent directory", async () => {

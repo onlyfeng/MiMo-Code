@@ -1,4 +1,5 @@
 import nodeFs from "fs"
+import ignore from "ignore"
 import path from "path"
 import z from "zod"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
@@ -18,6 +19,7 @@ import { which } from "@/util/which"
 
 const log = Log.create({ service: "ripgrep" })
 const VERSION = "15.1.0"
+type IgnoreContext = { root: string; matcher: ReturnType<typeof ignore> }
 const PLATFORM = {
   "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
   "arm64-linux": { platform: "aarch64-unknown-linux-gnu", extension: "tar.gz" },
@@ -195,6 +197,34 @@ function matchesGlobs(rel: string, globs: string[]) {
     },
     !globs.some((g) => !g.startsWith("!")),
   )
+}
+
+function ignorePath(file: string, directory: boolean) {
+  const normalized = file.split(path.sep).join("/").replace(/\/+$/, "")
+  return directory ? `${normalized}/` : normalized
+}
+
+function isIgnored(file: string, directory: boolean, contexts: IgnoreContext[]) {
+  return contexts.reduce((ignored, context) => {
+    const rel = path.relative(context.root, file)
+    if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return ignored
+    const result = context.matcher.test(ignorePath(rel, directory))
+    if (result.unignored) return false
+    if (result.ignored) return true
+    return ignored
+  }, false)
+}
+
+async function addIgnoreContext(dir: string, contexts: IgnoreContext[]) {
+  const texts = await Promise.all(
+    [".gitignore", ".ignore"].map((name) => nodeFs.promises.readFile(path.join(dir, name), "utf8").catch(() => "")),
+  )
+  if (!texts.some(Boolean)) return contexts
+  const matcher = ignore()
+  for (const text of texts) {
+    if (text) matcher.add(text)
+  }
+  return [...contexts, { root: dir, matcher }]
 }
 
 function row(data: Row): Row {
@@ -384,11 +414,12 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 
       async function* walkDir(
         dir: string,
-        options: { hidden: boolean; maxDepth?: number },
+        options: { hidden: boolean; ignore: IgnoreContext[]; maxDepth?: number },
         currentDepth = 0,
       ): AsyncGenerator<string> {
         if (options.maxDepth !== undefined && currentDepth > options.maxDepth) return
 
+        const contexts = await addIgnoreContext(dir, options.ignore)
         const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as nodeFs.Dirent[])
         for (const entry of entries) {
           const name = entry.name
@@ -396,8 +427,9 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           if (name === ".git") continue
 
           const fullPath = path.join(dir, name)
+          if (isIgnored(fullPath, entry.isDirectory(), contexts)) continue
           if (entry.isDirectory()) {
-            yield* walkDir(fullPath, options, currentDepth + 1)
+            yield* walkDir(fullPath, { ...options, ignore: contexts }, currentDepth + 1)
           } else if (entry.isFile()) {
             yield fullPath
           }
@@ -420,6 +452,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                     try: async (signal) => {
                       for await (const file of walkDir(input.cwd, {
                         hidden: input.hidden !== false,
+                        ignore: [],
                         maxDepth: input.maxDepth,
                       })) {
                         if (signal.aborted || input.signal?.aborted) break
