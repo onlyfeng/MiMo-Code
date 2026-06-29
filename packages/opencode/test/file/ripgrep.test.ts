@@ -29,7 +29,7 @@ const noRipgrepLayer = Ripgrep.layer.pipe(
 const runWithoutRipgrep = <A>(effect: Effect.Effect<A, unknown, Ripgrep.Service>) =>
   effect.pipe(Effect.provide(noRipgrepLayer), Effect.runPromise)
 
-const fallbackFiles = (cwd: string, input: { follow?: boolean; maxDepth?: number } = {}) =>
+const fallbackFiles = (cwd: string, input: { follow?: boolean; glob?: string[]; maxDepth?: number } = {}) =>
   runWithoutRipgrep(
     Ripgrep.Service.use((rg) =>
       rg.files({ cwd, ...input }).pipe(
@@ -324,6 +324,58 @@ describe("file.ripgrep", () => {
       expect(followed).toContain(path.join("linkdir", "file.txt"))
       expect(followed).toContain("linkfile.txt")
     })
+  })
+
+  test("fallback files applies glob excludes to directories", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "src"), { recursive: true })
+        await Bun.write(path.join(dir, "src", "a.ts"), "src")
+        await fs.mkdir(path.join(dir, "vendor"), { recursive: true })
+        await Bun.write(path.join(dir, "vendor", "a.ts"), "vendor")
+        await Bun.write(path.join(dir, "root.js"), "root")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const excluded = await fallbackFiles(tmp.path, { glob: ["!vendor"] })
+      expect(excluded).toContain(path.join("src", "a.ts"))
+      expect(excluded).not.toContain(path.join("vendor", "a.ts"))
+
+      const ts = await fallbackFiles(tmp.path, { glob: ["*.ts"] })
+      expect(ts).toContain(path.join("src", "a.ts"))
+      expect(ts).toContain(path.join("vendor", "a.ts"))
+      expect(ts).not.toContain("root.js")
+
+      const reinclude = await fallbackFiles(tmp.path, { glob: ["!vendor/**", "vendor/a.ts"] })
+      expect(reinclude).toContain(path.join("vendor", "a.ts"))
+    })
+  })
+
+  test("fallback files honors global git ignore", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, ".git"), { recursive: true })
+        await Bun.write(path.join(dir, ".env.local"), "secret")
+        await Bun.write(path.join(dir, "keep.txt"), "keep")
+        await fs.mkdir(path.join(dir, "home"), { recursive: true })
+        await Bun.write(path.join(dir, "home", ".gitconfig"), "[core]\n\texcludesFile = ~/global-ignore\n")
+        await Bun.write(path.join(dir, "home", "global-ignore"), ".env.local\n")
+      },
+    })
+
+    const prevHome = process.env.HOME
+    process.env.HOME = path.join(tmp.path, "home")
+    try {
+      await withNoRipgrep(tmp.path, async () => {
+        const files = await fallbackFiles(tmp.path)
+        expect(files).toContain("keep.txt")
+        expect(files).not.toContain(".env.local")
+      })
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+    }
   })
 
   test("files dies on nonexistent directory", async () => {

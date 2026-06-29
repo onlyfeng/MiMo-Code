@@ -20,7 +20,7 @@ import { which } from "@/util/which"
 const log = Log.create({ service: "ripgrep" })
 const VERSION = "15.1.0"
 type IgnoreContext = { root: string; matcher: ReturnType<typeof ignore> }
-type GitInfo = { root: string; dir: string }
+type GitInfo = { root: string; dir: string; global: string[] }
 const PLATFORM = {
   "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
   "arm64-linux": { platform: "aarch64-unknown-linux-gnu", extension: "tar.gz" },
@@ -200,6 +200,17 @@ function matchesGlobs(rel: string, globs: string[]) {
   )
 }
 
+function excludedByGlobs(rel: string, globs: string[]) {
+  const posix = rel.split(path.sep).join("/")
+  const base = posix.slice(posix.lastIndexOf("/") + 1)
+  return globs.reduce((excluded, glob) => {
+    const negated = glob.startsWith("!")
+    const pattern = negated ? glob.slice(1) : glob
+    const target = pattern.endsWith("/") ? `${posix}/` : pattern.includes("/") ? posix : base
+    return Glob.match(pattern, target) ? negated : excluded
+  }, false)
+}
+
 function ignorePath(file: string, directory: boolean) {
   const normalized = file.split(path.sep).join("/").replace(/\/+$/, "")
   return directory ? `${normalized}/` : normalized
@@ -231,11 +242,45 @@ async function gitDir(root: string) {
   return match ? path.resolve(root, match[1]!) : undefined
 }
 
+function expandGitPath(file: string) {
+  if (file === "~") return Global.Path.home
+  if (file.startsWith("~/")) return path.join(Global.Path.home, file.slice(2))
+  return file
+}
+
+function coreExcludesFiles(text: string) {
+  return text
+    .split(/\r?\n/)
+    .reduce(
+      (state, line) => {
+        const section = /^\s*\[([^\]]+)\]\s*$/.exec(line)
+        if (section) return { core: section[1]?.trim().toLowerCase() === "core", files: state.files }
+        if (!state.core) return state
+        const match = /^\s*excludesfile\s*=\s*(.+?)\s*$/i.exec(line)
+        return match ? { ...state, files: [...state.files, expandGitPath(match[1]!)] } : state
+      },
+      { core: false, files: [] as string[] },
+    )
+    .files
+}
+
+async function globalGitIgnoreFiles() {
+  const config = process.env.XDG_CONFIG_HOME ?? path.join(Global.Path.home, ".config")
+  const configured = (
+    await Promise.all(
+      [path.join(Global.Path.home, ".gitconfig"), path.join(config, "git", "config")].map((file) =>
+        nodeFs.promises.readFile(file, "utf8").catch(() => ""),
+      ),
+    )
+  ).flatMap(coreExcludesFiles)
+  return configured.length > 0 ? configured : [path.join(config, "git", "ignore")]
+}
+
 async function findGitInfo(cwd: string): Promise<GitInfo | undefined> {
   let dir = path.resolve(cwd)
   while (true) {
     const found = await gitDir(dir)
-    if (found) return { root: dir, dir: found }
+    if (found) return { root: dir, dir: found, global: await globalGitIgnoreFiles() }
     const parent = path.dirname(dir)
     if (parent === dir) return
     dir = parent
@@ -257,6 +302,7 @@ function parentDirs(cwd: string) {
 
 async function addIgnoreContext(dir: string, contexts: IgnoreContext[], git?: GitInfo) {
   const files = [
+    ...(git?.root === dir ? git.global : []),
     ...(git?.root === dir ? [path.join(git.dir, "info", "exclude")] : []),
     ...(git && isInside(git.root, dir) ? [path.join(dir, ".gitignore")] : []),
     path.join(dir, ".ignore"),
@@ -469,7 +515,9 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
         dir: string,
         options: {
           follow?: boolean
+          glob?: string[]
           git?: GitInfo
+          cwd: string
           hidden: boolean
           ignore: IgnoreContext[]
           maxDepth?: number
@@ -492,6 +540,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           const file = entry.isFile() || stat?.isFile() === true
           if (isIgnored(fullPath, directory, contexts)) continue
           if (directory) {
+            if (options.glob && excludedByGlobs(path.relative(options.cwd, fullPath), options.glob)) continue
             const seen = options.follow && options.seen ? new Set(options.seen) : options.seen
             if (options.follow && seen) {
               const real = await nodeFs.promises.realpath(fullPath).catch(() => fullPath)
@@ -521,7 +570,9 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                     try: async (signal) => {
                       const ignore = await parentIgnoreContexts(input.cwd)
                       for await (const file of walkDir(input.cwd, {
+                        cwd: input.cwd,
                         follow: input.follow,
+                        glob: input.glob,
                         git: ignore.git,
                         hidden: input.hidden !== false,
                         ignore: ignore.contexts,
