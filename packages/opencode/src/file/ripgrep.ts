@@ -396,7 +396,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           hidden: boolean
         },
       ): AsyncGenerator<string> {
-        const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as nodeFs.Dirent[])
+        const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true })
         for (const entry of entries) {
           const name = entry.name
           if (FALLBACK_RIPGREP_MARKERS.includes(name)) throw new Error(INSTALL_RIPGREP_MESSAGE)

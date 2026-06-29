@@ -270,6 +270,31 @@ describe("file.ripgrep", () => {
     })
   })
 
+  test("fallback files preserves directory read errors", async () => {
+    if (process.platform === "win32") return
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "file.txt"), "file")
+        await fs.mkdir(path.join(dir, "locked"), { recursive: true })
+        await Bun.write(path.join(dir, "locked", "hidden.txt"), "hidden")
+      },
+    })
+
+    await fs.chmod(path.join(tmp.path, "locked"), 0)
+    try {
+      await withNoRipgrep(tmp.path, async () => {
+        const failed = await fallbackFiles(tmp.path).then(
+          () => false,
+          () => true,
+        )
+        expect(failed).toBe(true)
+      })
+    } finally {
+      await fs.chmod(path.join(tmp.path, "locked"), 0o700)
+    }
+  })
+
   test("fallback files fails on caller abort", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
