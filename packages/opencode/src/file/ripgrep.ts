@@ -19,7 +19,7 @@ import { which } from "@/util/which"
 
 const log = Log.create({ service: "ripgrep" })
 const VERSION = "15.1.0"
-type IgnoreContext = { root: string; matcher: ReturnType<typeof ignore> }
+type IgnoreContext = { root: string; matcher: ReturnType<typeof ignore>; kind: "git" | "generic" }
 type GitInfo = { root: string; dir: string; global: string[] }
 const PLATFORM = {
   "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
@@ -303,6 +303,15 @@ async function findGitInfo(cwd: string): Promise<GitInfo | undefined> {
   }
 }
 
+async function gitInfoAt(dir: string): Promise<GitInfo | undefined> {
+  const found = await gitDir(dir)
+  return found ? { root: dir, dir: found, global: await globalGitIgnoreFiles() } : undefined
+}
+
+async function gitInfoForDir(dir: string, git?: GitInfo) {
+  return (await gitInfoAt(dir)) ?? (git && isInside(git.root, dir) ? git : undefined)
+}
+
 function parentDirs(cwd: string) {
   const dirs: string[] = []
   const resolved = path.resolve(cwd)
@@ -316,21 +325,33 @@ function parentDirs(cwd: string) {
   return dirs.reverse()
 }
 
-async function addIgnoreContext(dir: string, contexts: IgnoreContext[], git?: GitInfo) {
-  const files = [
-    ...(git?.root === dir ? git.global : []),
-    ...(git?.root === dir ? [path.join(git.dir, "info", "exclude")] : []),
-    ...(git && isInside(git.root, dir) ? [path.join(dir, ".gitignore")] : []),
-    path.join(dir, ".ignore"),
-    path.join(dir, ".rgignore"),
-  ]
+async function addIgnoreMatcher(
+  dir: string,
+  contexts: IgnoreContext[],
+  files: string[],
+  kind: IgnoreContext["kind"],
+) {
   const texts = await Promise.all(files.map((file) => nodeFs.promises.readFile(file, "utf8").catch(() => "")))
   if (!texts.some(Boolean)) return contexts
   const matcher = ignore()
   for (const text of texts) {
     if (text) matcher.add(text)
   }
-  return [...contexts, { root: dir, matcher }]
+  return [...contexts, { root: dir, matcher, kind }]
+}
+
+async function addIgnoreContext(dir: string, contexts: IgnoreContext[], git?: GitInfo) {
+  const withGit = await addIgnoreMatcher(
+    dir,
+    contexts,
+    [
+      ...(git?.root === dir ? git.global : []),
+      ...(git?.root === dir ? [path.join(git.dir, "info", "exclude")] : []),
+      ...(git && isInside(git.root, dir) ? [path.join(dir, ".gitignore")] : []),
+    ],
+    "git",
+  )
+  return addIgnoreMatcher(dir, withGit, [path.join(dir, ".ignore"), path.join(dir, ".rgignore")], "generic")
 }
 
 async function parentIgnoreContexts(cwd: string) {
@@ -543,7 +564,12 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
       ): AsyncGenerator<string> {
         if (options.maxDepth !== undefined && currentDepth >= options.maxDepth) return
 
-        const contexts = await addIgnoreContext(dir, options.ignore, options.git)
+        const git = await gitInfoForDir(dir, options.git)
+        const inherited =
+          git && options.git && git.root !== options.git.root
+            ? options.ignore.filter((context) => context.kind !== "git")
+            : options.ignore
+        const contexts = await addIgnoreContext(dir, inherited, git)
         const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as nodeFs.Dirent[])
         for (const entry of entries) {
           const name = entry.name
@@ -563,7 +589,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
               if (seen.has(real)) continue
               seen.add(real)
             }
-            yield* walkDir(fullPath, { ...options, ignore: contexts, seen }, currentDepth + 1)
+            yield* walkDir(fullPath, { ...options, git, ignore: contexts, seen }, currentDepth + 1)
           } else if (file) {
             yield fullPath
           }

@@ -432,6 +432,53 @@ describe("file.ripgrep", () => {
     }
   })
 
+  test("fallback files honors git ignores in nested repositories", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "repo", ".git", "info"), { recursive: true })
+        await Bun.write(path.join(dir, "repo", ".gitignore"), "ignored.txt\nsub/ignored-sub.txt\n")
+        await Bun.write(path.join(dir, "repo", ".git", "info", "exclude"), "excluded.txt\n")
+        await Bun.write(path.join(dir, "repo", "keep.txt"), "keep")
+        await Bun.write(path.join(dir, "repo", "ignored.txt"), "ignored")
+        await Bun.write(path.join(dir, "repo", "excluded.txt"), "excluded")
+        await fs.mkdir(path.join(dir, "repo", "sub"), { recursive: true })
+        await Bun.write(path.join(dir, "repo", "sub", "ignored-sub.txt"), "ignored")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const files = await fallbackFiles(tmp.path)
+      expect(files).toContain(path.join("repo", "keep.txt"))
+      expect(files).not.toContain(path.join("repo", "ignored.txt"))
+      expect(files).not.toContain(path.join("repo", "excluded.txt"))
+      expect(files).not.toContain(path.join("repo", "sub", "ignored-sub.txt"))
+    })
+  })
+
+  test("fallback files resets parent git ignores at nested repository roots", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, ".git"), { recursive: true })
+        await Bun.write(path.join(dir, ".gitignore"), "nested/parent-gitignored.txt\n")
+        await Bun.write(path.join(dir, ".ignore"), "nested/parent-ignored.txt\n")
+        await fs.mkdir(path.join(dir, "nested", ".git"), { recursive: true })
+        await Bun.write(path.join(dir, "nested", ".gitignore"), "child-ignored.txt\n")
+        await Bun.write(path.join(dir, "nested", "keep.txt"), "keep")
+        await Bun.write(path.join(dir, "nested", "parent-gitignored.txt"), "parent gitignore")
+        await Bun.write(path.join(dir, "nested", "parent-ignored.txt"), "parent ignore")
+        await Bun.write(path.join(dir, "nested", "child-ignored.txt"), "child")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const files = await fallbackFiles(tmp.path)
+      expect(files).toContain(path.join("nested", "keep.txt"))
+      expect(files).toContain(path.join("nested", "parent-gitignored.txt"))
+      expect(files).not.toContain(path.join("nested", "parent-ignored.txt"))
+      expect(files).not.toContain(path.join("nested", "child-ignored.txt"))
+    })
+  })
+
   test("files dies on nonexistent directory", async () => {
     const exit = await Ripgrep.Service.use((rg) =>
       rg.files({ cwd: "/tmp/nonexistent-dir-12345" }).pipe(Stream.runCollect),
