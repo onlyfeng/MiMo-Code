@@ -182,35 +182,26 @@ function clean(file: string) {
 }
 
 async function requiresRipgrepFallback(cwd: string) {
-  async function scan(start: string) {
-    let dir = path.resolve(start)
-    while (true) {
-      if (
-        (
-          await Promise.all(
-            FALLBACK_RIPGREP_MARKERS.map((name) =>
-              nodeFs.promises.stat(path.join(dir, name)).then(
-                () => true,
-                () => false,
-              ),
+  let dir = await nodeFs.promises.realpath(cwd).catch(() => path.resolve(cwd))
+  while (true) {
+    if (
+      (
+        await Promise.all(
+          FALLBACK_RIPGREP_MARKERS.map((name) =>
+            nodeFs.promises.stat(path.join(dir, name)).then(
+              () => true,
+              () => false,
             ),
-          )
-        ).some(Boolean)
-      ) {
-        return true
-      }
-      const parent = path.dirname(dir)
-      if (parent === dir) return false
-      dir = parent
+          ),
+        )
+      ).some(Boolean)
+    ) {
+      return true
     }
+    const parent = path.dirname(dir)
+    if (parent === dir) return false
+    dir = parent
   }
-
-  const starts = new Set([path.resolve(cwd)])
-  starts.add(await nodeFs.promises.realpath(cwd).catch(() => path.resolve(cwd)))
-  for (const start of starts) {
-    if (await scan(start)) return true
-  }
-  return false
 }
 
 function row(data: Row): Row {

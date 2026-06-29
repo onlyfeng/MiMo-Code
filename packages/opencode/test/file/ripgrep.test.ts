@@ -306,6 +306,24 @@ describe("file.ripgrep", () => {
     })
   })
 
+  test("fallback files ignores lexical-only markers for symlinked cwd", async () => {
+    if (process.platform === "win32") return
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "repo", ".git"), { recursive: true })
+        await fs.mkdir(path.join(dir, "target"), { recursive: true })
+        await Bun.write(path.join(dir, "target", "file.txt"), "file")
+        await fs.symlink(path.join(dir, "target"), path.join(dir, "repo", "linked-target"), "dir")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const files = await fallbackFiles(path.join(tmp.path, "repo", "linked-target"))
+      expect(files).toEqual(["file.txt"])
+    })
+  })
+
   test("fallback files preserves directory read errors", async () => {
     if (process.platform === "win32") return
 
