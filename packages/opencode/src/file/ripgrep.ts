@@ -1,9 +1,7 @@
 import nodeFs from "fs"
-import ignore from "ignore"
 import path from "path"
 import z from "zod"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
-import { Glob } from "@mimo-ai/shared/util/glob"
 import { Cause, Context, Effect, Fiber, Layer, Queue, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
@@ -19,8 +17,8 @@ import { which } from "@/util/which"
 
 const log = Log.create({ service: "ripgrep" })
 const VERSION = "15.1.0"
-type IgnoreContext = { root: string; matcher: ReturnType<typeof ignore>; kind: "git" | "generic" }
-type GitInfo = { root: string; dir: string; global: string[] }
+const INSTALL_RIPGREP_MESSAGE =
+  "Install ripgrep to use this operation in restricted environments: https://github.com/BurntSushi/ripgrep#installation"
 const PLATFORM = {
   "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
   "arm64-linux": { platform: "aarch64-unknown-linux-gnu", extension: "tar.gz" },
@@ -180,200 +178,6 @@ function error(stderr: string, code: number) {
 
 function clean(file: string) {
   return path.normalize(file.replace(/^\.[\\/]/, ""))
-}
-
-// Approximate `rg --glob` for the no-rg fallback, following .gitignore glob rules:
-// a leading "!" excludes, later patterns win (last match decides), and any positive
-// pattern flips matching to allowlist mode. A pattern without a slash matches at any
-// depth (against the basename, so `*.ts` still hits `src/a.ts`); a pattern with a slash
-// matches the full cwd-relative path. Rooted patterns are anchored to the search cwd.
-function globRule(glob: string) {
-  const negated = glob.startsWith("!")
-  const raw = negated ? glob.slice(1) : glob
-  const pattern = raw.startsWith("/") ? raw.slice(1) : raw
-  return { negated, pattern }
-}
-
-function globTarget(posix: string, base: string, pattern: string, directory: boolean) {
-  if (directory && pattern.endsWith("/")) return `${posix}/`
-  return pattern.includes("/") ? posix : base
-}
-
-function matchesGlobs(rel: string, globs: string[]) {
-  const posix = rel.split(path.sep).join("/")
-  const base = posix.slice(posix.lastIndexOf("/") + 1)
-  return globs.reduce(
-    (included, glob) => {
-      const rule = globRule(glob)
-      return Glob.match(rule.pattern, globTarget(posix, base, rule.pattern, false)) ? !rule.negated : included
-    },
-    !globs.some((g) => !g.startsWith("!")),
-  )
-}
-
-function matchesDirectoryGlobs(rel: string, globs: string[]) {
-  const posix = rel.split(path.sep).join("/")
-  const base = posix.slice(posix.lastIndexOf("/") + 1)
-  return globs.reduce((included, glob) => {
-    const rule = globRule(glob)
-    return Glob.match(rule.pattern, globTarget(posix, base, rule.pattern, true)) ? !rule.negated : included
-  }, false)
-}
-
-function excludedByGlobs(rel: string, globs: string[]) {
-  const posix = rel.split(path.sep).join("/")
-  const base = posix.slice(posix.lastIndexOf("/") + 1)
-  return globs.reduce((excluded, glob) => {
-    const rule = globRule(glob)
-    return Glob.match(rule.pattern, globTarget(posix, base, rule.pattern, true)) ? rule.negated : excluded
-  }, false)
-}
-
-function ignorePath(file: string, directory: boolean) {
-  const normalized = file.split(path.sep).join("/").replace(/\/+$/, "")
-  return directory ? `${normalized}/` : normalized
-}
-
-function isInside(root: string, file: string) {
-  const rel = path.relative(root, file)
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
-}
-
-function allowExplicitDirectory(dir: string, contexts: IgnoreContext[]) {
-  return contexts.map((context) => {
-    if (!isInside(context.root, dir)) return context
-    const rel = path.relative(context.root, dir)
-    if (!rel) return context
-    const target = ignorePath(rel, true)
-    if (context.matcher.test(target).ignored) context.matcher.add(`!${target}`)
-    return context
-  })
-}
-
-function isIgnored(file: string, directory: boolean, contexts: IgnoreContext[]) {
-  return contexts.reduce((ignored, context) => {
-    if (!isInside(context.root, file)) return ignored
-    const rel = path.relative(context.root, file)
-    const result = context.matcher.test(ignorePath(rel, directory))
-    if (result.unignored) return false
-    if (result.ignored) return true
-    return ignored
-  }, false)
-}
-
-async function gitDir(root: string) {
-  const dotGit = path.join(root, ".git")
-  const stat = await nodeFs.promises.stat(dotGit).catch(() => undefined)
-  if (!stat) return
-  if (stat.isDirectory()) return dotGit
-  if (!stat.isFile()) return
-  const match = /^gitdir:\s*(.+)\s*$/i.exec(await nodeFs.promises.readFile(dotGit, "utf8").catch(() => ""))
-  return match ? path.resolve(root, match[1]!) : undefined
-}
-
-function expandGitPath(file: string) {
-  if (file === "~") return Global.Path.home
-  if (file.startsWith("~/")) return path.join(Global.Path.home, file.slice(2))
-  return file
-}
-
-function coreExcludesFiles(text: string) {
-  return text
-    .split(/\r?\n/)
-    .reduce(
-      (state, line) => {
-        const section = /^\s*\[([^\]]+)\]\s*$/.exec(line)
-        if (section) return { core: section[1]?.trim().toLowerCase() === "core", files: state.files }
-        if (!state.core) return state
-        const match = /^\s*excludesfile\s*=\s*(.+?)\s*$/i.exec(line)
-        return match ? { ...state, files: [...state.files, expandGitPath(match[1]!)] } : state
-      },
-      { core: false, files: [] as string[] },
-    )
-    .files
-}
-
-async function globalGitIgnoreFiles() {
-  const config = process.env.XDG_CONFIG_HOME ?? path.join(Global.Path.home, ".config")
-  const configured = (
-    await Promise.all(
-      [path.join(Global.Path.home, ".gitconfig"), path.join(config, "git", "config")].map((file) =>
-        nodeFs.promises.readFile(file, "utf8").catch(() => ""),
-      ),
-    )
-  ).flatMap(coreExcludesFiles)
-  return configured.length > 0 ? configured : [path.join(config, "git", "ignore")]
-}
-
-async function findGitInfo(cwd: string): Promise<GitInfo | undefined> {
-  let dir = path.resolve(cwd)
-  while (true) {
-    const found = await gitDir(dir)
-    if (found) return { root: dir, dir: found, global: await globalGitIgnoreFiles() }
-    const parent = path.dirname(dir)
-    if (parent === dir) return
-    dir = parent
-  }
-}
-
-async function gitInfoAt(dir: string): Promise<GitInfo | undefined> {
-  const found = await gitDir(dir)
-  return found ? { root: dir, dir: found, global: await globalGitIgnoreFiles() } : undefined
-}
-
-async function gitInfoForDir(dir: string, git?: GitInfo) {
-  return (await gitInfoAt(dir)) ?? (git && isInside(git.root, dir) ? git : undefined)
-}
-
-function parentDirs(cwd: string) {
-  const dirs: string[] = []
-  const resolved = path.resolve(cwd)
-  let dir = path.dirname(resolved)
-  while (dir !== resolved) {
-    dirs.push(dir)
-    const parent = path.dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-  return dirs.reverse()
-}
-
-async function addIgnoreMatcher(
-  dir: string,
-  contexts: IgnoreContext[],
-  files: string[],
-  kind: IgnoreContext["kind"],
-) {
-  const texts = await Promise.all(files.map((file) => nodeFs.promises.readFile(file, "utf8").catch(() => "")))
-  if (!texts.some(Boolean)) return contexts
-  const matcher = ignore()
-  for (const text of texts) {
-    if (text) matcher.add(text)
-  }
-  return [...contexts, { root: dir, matcher, kind }]
-}
-
-async function addIgnoreContext(dir: string, contexts: IgnoreContext[], git?: GitInfo) {
-  const withGit = await addIgnoreMatcher(
-    dir,
-    contexts,
-    [
-      ...(git?.root === dir ? git.global : []),
-      ...(git?.root === dir ? [path.join(git.dir, "info", "exclude")] : []),
-      ...(git && isInside(git.root, dir) ? [path.join(dir, ".gitignore")] : []),
-    ],
-    "git",
-  )
-  return addIgnoreMatcher(dir, withGit, [path.join(dir, ".ignore"), path.join(dir, ".rgignore")], "generic")
-}
-
-async function parentIgnoreContexts(cwd: string) {
-  const git = await findGitInfo(cwd)
-  let contexts: IgnoreContext[] = []
-  for (const dir of parentDirs(cwd)) {
-    contexts = await addIgnoreContext(dir, contexts, git)
-  }
-  return { contexts, git }
 }
 
 function row(data: Row): Row {
@@ -564,25 +368,10 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
       async function* walkDir(
         dir: string,
         options: {
-          follow?: boolean
-          glob?: string[]
-          git?: GitInfo
           cwd: string
           hidden: boolean
-          ignore: IgnoreContext[]
-          maxDepth?: number
-          seen?: Set<string>
         },
-        currentDepth = 0,
       ): AsyncGenerator<string> {
-        if (options.maxDepth !== undefined && currentDepth >= options.maxDepth) return
-
-        const git = await gitInfoForDir(dir, options.git)
-        const inherited =
-          git && options.git && git.root !== options.git.root
-            ? options.ignore.filter((context) => context.kind !== "git")
-            : options.ignore
-        const contexts = await addIgnoreContext(dir, inherited, git)
         const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as nodeFs.Dirent[])
         for (const entry of entries) {
           const name = entry.name
@@ -590,23 +379,9 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           if (name === ".git") continue
 
           const fullPath = path.join(dir, name)
-          const stat = options.follow && entry.isSymbolicLink() ? await nodeFs.promises.stat(fullPath).catch(() => undefined) : undefined
-          const directory = entry.isDirectory() || stat?.isDirectory() === true
-          const file = entry.isFile() || stat?.isFile() === true
-          const rel = path.relative(options.cwd, fullPath)
-          const ignored = isIgnored(fullPath, directory, contexts)
-          if (directory) {
-            if (ignored && !(options.glob && matchesDirectoryGlobs(rel, options.glob))) continue
-            if (options.glob && excludedByGlobs(rel, options.glob)) continue
-            const seen = options.follow && options.seen ? new Set(options.seen) : options.seen
-            if (options.follow && seen) {
-              const real = await nodeFs.promises.realpath(fullPath).catch(() => fullPath)
-              if (seen.has(real)) continue
-              seen.add(real)
-            }
-            yield* walkDir(fullPath, { ...options, git, ignore: contexts, seen }, currentDepth + 1)
-          } else if (file) {
-            if (ignored && !(options.glob && matchesGlobs(rel, options.glob))) continue
+          if (entry.isDirectory()) {
+            yield* walkDir(fullPath, options)
+          } else if (entry.isFile()) {
             yield fullPath
           }
         }
@@ -620,35 +395,20 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                 yield* check(input.cwd)
                 const binary = yield* filepath.pipe(Effect.catch(() => Effect.succeed(undefined)))
                 if (!binary) {
+                  if (input.glob || input.follow || input.maxDepth !== undefined) {
+                    return yield* Effect.fail(new Error(INSTALL_RIPGREP_MESSAGE))
+                  }
                   log.info("ripgrep not available, using fallback for file listing")
                   yield* Effect.tryPromise({
-                    // `signal` aborts when the Stream scope closes (e.g. a consumer using
-                    // Stream.take stops early), so the walk doesn't keep scanning the whole
-                    // tree after the reader is done.
                     try: async (signal) => {
-                      if (input.signal?.aborted) throw aborted(input.signal)
-                      const ignore = await parentIgnoreContexts(input.cwd)
-                      const contexts = allowExplicitDirectory(input.cwd, ignore.contexts)
                       if (input.signal?.aborted) throw aborted(input.signal)
                       for await (const file of walkDir(input.cwd, {
                         cwd: input.cwd,
-                        follow: input.follow,
-                        glob: input.glob,
-                        git: ignore.git,
                         hidden: input.hidden !== false,
-                        ignore: contexts,
-                        maxDepth: input.maxDepth,
-                        seen: input.follow
-                          ? new Set([await nodeFs.promises.realpath(input.cwd).catch(() => path.resolve(input.cwd))])
-                          : undefined,
                       })) {
                         if (input.signal?.aborted) throw aborted(input.signal)
                         if (signal.aborted) break
-                        // walkDir yields absolute paths; emit cwd-relative ones so the output
-                        // matches `rg --files` (consumers like tree() split on path.sep).
-                        const rel = path.relative(input.cwd, file)
-                        if (input.glob && !matchesGlobs(rel, input.glob)) continue
-                        Queue.offerUnsafe(queue, clean(rel))
+                        Queue.offerUnsafe(queue, clean(path.relative(input.cwd, file)))
                       }
                       if (input.signal?.aborted) throw aborted(input.signal)
                     },
@@ -696,8 +456,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
               return yield* Effect.fail(
                 new Error(
                   "Search requires ripgrep, which is unavailable and could not be downloaded. " +
-                    "If you are in a restricted network, install ripgrep manually: " +
-                    "https://github.com/BurntSushi/ripgrep#installation",
+                    INSTALL_RIPGREP_MESSAGE,
                 ),
               )
             const handle = yield* spawner.spawn(yield* command(input.cwd, searchArgs(input)))

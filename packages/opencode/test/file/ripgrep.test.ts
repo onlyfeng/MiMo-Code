@@ -31,7 +31,7 @@ const runWithoutRipgrep = <A>(effect: Effect.Effect<A, unknown, Ripgrep.Service>
 
 const fallbackFiles = (
   cwd: string,
-  input: { follow?: boolean; glob?: string[]; maxDepth?: number; signal?: AbortSignal } = {},
+  input: { follow?: boolean; glob?: string[]; hidden?: boolean; maxDepth?: number; signal?: AbortSignal } = {},
 ) =>
   runWithoutRipgrep(
     Ripgrep.Service.use((rg) =>
@@ -219,93 +219,43 @@ describe("file.ripgrep", () => {
     expect(files).toEqual(["keep.ts"])
   })
 
-  test("fallback files honors ignore files", async () => {
+  test("fallback files handles only simple listings", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
-        await fs.mkdir(path.join(dir, ".git", "info"), { recursive: true })
-        await Bun.write(path.join(dir, ".git", "info", "exclude"), "exclude-only/\n")
-        await Bun.write(path.join(dir, ".gitignore"), "node_modules/\ndist/\n*.tmp\n")
-        await Bun.write(path.join(dir, ".ignore"), "build/\n")
-        await Bun.write(path.join(dir, ".rgignore"), "rg-only/\n")
+        await Bun.write(path.join(dir, "visible.txt"), "visible")
         await fs.mkdir(path.join(dir, "src"), { recursive: true })
-        await Bun.write(path.join(dir, "src", ".gitignore"), "!keep.tmp\nlocal.log\n")
-        await Bun.write(path.join(dir, "src", "app.ts"), "export {}\n")
-        await Bun.write(path.join(dir, "src", "skip.tmp"), "skip")
-        await Bun.write(path.join(dir, "src", "keep.tmp"), "keep")
-        await Bun.write(path.join(dir, "src", "local.log"), "local")
-        await fs.mkdir(path.join(dir, "node_modules", "pkg"), { recursive: true })
-        await Bun.write(path.join(dir, "node_modules", "pkg", "index.js"), "module.exports = {}\n")
-        await fs.mkdir(path.join(dir, "dist"), { recursive: true })
-        await Bun.write(path.join(dir, "dist", "output.js"), "dist")
-        await fs.mkdir(path.join(dir, "build"), { recursive: true })
-        await Bun.write(path.join(dir, "build", "cache.js"), "build")
-        await fs.mkdir(path.join(dir, "rg-only"), { recursive: true })
-        await Bun.write(path.join(dir, "rg-only", "cache.js"), "rg")
-        await fs.mkdir(path.join(dir, "exclude-only"), { recursive: true })
-        await Bun.write(path.join(dir, "exclude-only", "cache.js"), "exclude")
+        await Bun.write(path.join(dir, "src", "nested.ts"), "nested")
+        await fs.mkdir(path.join(dir, ".hidden"), { recursive: true })
+        await Bun.write(path.join(dir, ".hidden", "file.txt"), "hidden")
+        await fs.mkdir(path.join(dir, ".git"), { recursive: true })
+        await Bun.write(path.join(dir, ".git", "config"), "git")
       },
     })
 
     await withNoRipgrep(tmp.path, async () => {
       const files = await fallbackFiles(tmp.path)
-      expect(files).toContain(path.join("src", "app.ts"))
-      expect(files).toContain(path.join("src", "keep.tmp"))
-      expect(files).not.toContain(path.join("src", "skip.tmp"))
-      expect(files).not.toContain(path.join("src", "local.log"))
-      expect(files).not.toContain(path.join("node_modules", "pkg", "index.js"))
-      expect(files).not.toContain(path.join("dist", "output.js"))
-      expect(files).not.toContain(path.join("build", "cache.js"))
-      expect(files).not.toContain(path.join("rg-only", "cache.js"))
-      expect(files).not.toContain(path.join("exclude-only", "cache.js"))
+      expect(files).toContain("visible.txt")
+      expect(files).toContain(path.join("src", "nested.ts"))
+      expect(files).toContain(path.join(".hidden", "file.txt"))
+      expect(files).not.toContain(path.join(".git", "config"))
+
+      const visibleOnly = await fallbackFiles(tmp.path, { hidden: false })
+      expect(visibleOnly).toContain("visible.txt")
+      expect(visibleOnly).not.toContain(path.join(".hidden", "file.txt"))
     })
   })
 
-  test("fallback files seeds parent ignore rules", async () => {
+  test("fallback files requires ripgrep for advanced listing options", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
-        await fs.mkdir(path.join(dir, ".git", "info"), { recursive: true })
-        await Bun.write(path.join(dir, ".git", "info", "exclude"), "src/ignored-by-exclude.txt\n")
-        await Bun.write(path.join(dir, ".gitignore"), "src/ignored-by-gitignore.txt\n")
-        await Bun.write(path.join(dir, ".ignore"), "src/ignored-by-ignore.txt\n")
-        await Bun.write(path.join(dir, ".rgignore"), "src/ignored-by-rgignore.txt\n")
-        await fs.mkdir(path.join(dir, "src"), { recursive: true })
-        await Bun.write(path.join(dir, "src", "kept.ts"), "export {}\n")
-        await Bun.write(path.join(dir, "src", "ignored-by-exclude.txt"), "exclude")
-        await Bun.write(path.join(dir, "src", "ignored-by-gitignore.txt"), "gitignore")
-        await Bun.write(path.join(dir, "src", "ignored-by-ignore.txt"), "ignore")
-        await Bun.write(path.join(dir, "src", "ignored-by-rgignore.txt"), "rgignore")
+        await Bun.write(path.join(dir, "file.txt"), "file")
       },
     })
 
     await withNoRipgrep(tmp.path, async () => {
-      const files = await fallbackFiles(path.join(tmp.path, "src"))
-      expect(files).toContain("kept.ts")
-      expect(files).not.toContain("ignored-by-exclude.txt")
-      expect(files).not.toContain("ignored-by-gitignore.txt")
-      expect(files).not.toContain("ignored-by-ignore.txt")
-      expect(files).not.toContain("ignored-by-rgignore.txt")
-    })
-  })
-
-  test("fallback files keeps explicit ignored cwd traversable", async () => {
-    await using tmp = await tmpdir({
-      init: async (dir) => {
-        await fs.mkdir(path.join(dir, ".git"), { recursive: true })
-        await Bun.write(path.join(dir, ".gitignore"), "build/\nbuild/*.tmp\ncontents/**\n")
-        await fs.mkdir(path.join(dir, "build"), { recursive: true })
-        await Bun.write(path.join(dir, "build", "keep.txt"), "keep")
-        await Bun.write(path.join(dir, "build", "skip.tmp"), "skip")
-        await fs.mkdir(path.join(dir, "contents"), { recursive: true })
-        await Bun.write(path.join(dir, "contents", "skip.txt"), "skip")
-      },
-    })
-
-    await withNoRipgrep(tmp.path, async () => {
-      const build = await fallbackFiles(path.join(tmp.path, "build"))
-      expect(build).toContain("keep.txt")
-      expect(build).not.toContain("skip.tmp")
-
-      expect(await fallbackFiles(path.join(tmp.path, "contents"))).toEqual([])
+      await expect(fallbackFiles(tmp.path, { glob: ["*.txt"] })).rejects.toThrow(/Install ripgrep/)
+      await expect(fallbackFiles(tmp.path, { follow: true })).rejects.toThrow(/Install ripgrep/)
+      await expect(fallbackFiles(tmp.path, { maxDepth: 1 })).rejects.toThrow(/Install ripgrep/)
     })
   })
 
@@ -323,181 +273,17 @@ describe("file.ripgrep", () => {
     })
   })
 
-  test("fallback files matches ripgrep maxDepth", async () => {
+  test("fallback search requires ripgrep", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
-        await Bun.write(path.join(dir, "root.txt"), "root")
-        await fs.mkdir(path.join(dir, "src"), { recursive: true })
-        await Bun.write(path.join(dir, "src", "nested.txt"), "nested")
+        await Bun.write(path.join(dir, "file.txt"), "needle")
       },
     })
 
     await withNoRipgrep(tmp.path, async () => {
-      expect(await fallbackFiles(tmp.path, { maxDepth: 0 })).toEqual([])
-      expect(await fallbackFiles(tmp.path, { maxDepth: 1 })).toContain("root.txt")
-      expect(await fallbackFiles(tmp.path, { maxDepth: 1 })).not.toContain(path.join("src", "nested.txt"))
-      expect(await fallbackFiles(tmp.path, { maxDepth: 2 })).toContain(path.join("src", "nested.txt"))
-    })
-  })
-
-  test("fallback files follows symlinks when requested", async () => {
-    if (process.platform === "win32") return
-
-    await using tmp = await tmpdir({
-      init: async (dir) => {
-        await fs.mkdir(path.join(dir, "real"), { recursive: true })
-        await Bun.write(path.join(dir, "real", "file.txt"), "real")
-        await fs.symlink("real", path.join(dir, "linkdir"), "dir")
-        await fs.symlink(path.join("real", "file.txt"), path.join(dir, "linkfile.txt"), "file")
-      },
-    })
-
-    await withNoRipgrep(tmp.path, async () => {
-      const normal = await fallbackFiles(tmp.path)
-      expect(normal).toContain(path.join("real", "file.txt"))
-      expect(normal).not.toContain(path.join("linkdir", "file.txt"))
-      expect(normal).not.toContain("linkfile.txt")
-
-      const followed = await fallbackFiles(tmp.path, { follow: true })
-      expect(followed).toContain(path.join("real", "file.txt"))
-      expect(followed).toContain(path.join("linkdir", "file.txt"))
-      expect(followed).toContain("linkfile.txt")
-    })
-  })
-
-  test("fallback files applies glob excludes to directories", async () => {
-    await using tmp = await tmpdir({
-      init: async (dir) => {
-        await fs.mkdir(path.join(dir, "src"), { recursive: true })
-        await Bun.write(path.join(dir, "src", "a.ts"), "src")
-        await fs.mkdir(path.join(dir, "vendor"), { recursive: true })
-        await Bun.write(path.join(dir, "vendor", "a.ts"), "vendor")
-        await fs.mkdir(path.join(dir, "dist"), { recursive: true })
-        await Bun.write(path.join(dir, "dist", "a.ts"), "dist")
-        await Bun.write(path.join(dir, "root.js"), "root")
-      },
-    })
-
-    await withNoRipgrep(tmp.path, async () => {
-      const excluded = await fallbackFiles(tmp.path, { glob: ["!vendor"] })
-      expect(excluded).toContain(path.join("src", "a.ts"))
-      expect(excluded).not.toContain(path.join("vendor", "a.ts"))
-
-      const ts = await fallbackFiles(tmp.path, { glob: ["*.ts"] })
-      expect(ts).toContain(path.join("src", "a.ts"))
-      expect(ts).toContain(path.join("vendor", "a.ts"))
-      expect(ts).not.toContain("root.js")
-
-      const reinclude = await fallbackFiles(tmp.path, { glob: ["!vendor/**", "vendor/a.ts"] })
-      expect(reinclude).toContain(path.join("vendor", "a.ts"))
-
-      const rooted = await fallbackFiles(tmp.path, { glob: ["/src/**"] })
-      expect(rooted).toContain(path.join("src", "a.ts"))
-      expect(rooted).not.toContain(path.join("vendor", "a.ts"))
-      expect(rooted).not.toContain(path.join("dist", "a.ts"))
-      expect(rooted).not.toContain("root.js")
-
-      const rootedExcluded = await fallbackFiles(tmp.path, { glob: ["!/dist/**"] })
-      expect(rootedExcluded).toContain(path.join("src", "a.ts"))
-      expect(rootedExcluded).not.toContain(path.join("dist", "a.ts"))
-
-      const rootedReinclude = await fallbackFiles(tmp.path, { glob: ["!/dist/**", "/dist/a.ts"] })
-      expect(rootedReinclude).toContain(path.join("dist", "a.ts"))
-    })
-  })
-
-  test("fallback files lets positive globs override ignore files", async () => {
-    await using tmp = await tmpdir({
-      init: async (dir) => {
-        await fs.mkdir(path.join(dir, ".git"), { recursive: true })
-        await Bun.write(path.join(dir, ".gitignore"), "ignored.txt\ndist/\n")
-        await Bun.write(path.join(dir, "ignored.txt"), "ignored")
-        await Bun.write(path.join(dir, "keep.txt"), "keep")
-        await fs.mkdir(path.join(dir, "dist"), { recursive: true })
-        await Bun.write(path.join(dir, "dist", "a.txt"), "dist")
-      },
-    })
-
-    await withNoRipgrep(tmp.path, async () => {
-      expect(await fallbackFiles(tmp.path, { glob: ["ignored.txt"] })).toContain("ignored.txt")
-      expect(await fallbackFiles(tmp.path, { glob: ["ignored.txt", "!ignored.txt"] })).not.toContain("ignored.txt")
-
-      expect(await fallbackFiles(tmp.path, { glob: ["dist/a.txt"] })).not.toContain(path.join("dist", "a.txt"))
-      expect(await fallbackFiles(tmp.path, { glob: ["dist", "dist/a.txt"] })).toContain(path.join("dist", "a.txt"))
-      expect(await fallbackFiles(tmp.path, { glob: ["dist/", "dist/a.txt"] })).toContain(path.join("dist", "a.txt"))
-    })
-  })
-
-  test("fallback files honors global git ignore", async () => {
-    await using tmp = await tmpdir({
-      init: async (dir) => {
-        await fs.mkdir(path.join(dir, ".git"), { recursive: true })
-        await Bun.write(path.join(dir, ".env.local"), "secret")
-        await Bun.write(path.join(dir, "keep.txt"), "keep")
-        await fs.mkdir(path.join(dir, "home"), { recursive: true })
-        await Bun.write(path.join(dir, "home", ".gitconfig"), "[core]\n\texcludesFile = ~/global-ignore\n")
-        await Bun.write(path.join(dir, "home", "global-ignore"), ".env.local\n")
-      },
-    })
-
-    const prevHome = process.env.HOME
-    process.env.HOME = path.join(tmp.path, "home")
-    try {
-      await withNoRipgrep(tmp.path, async () => {
-        const files = await fallbackFiles(tmp.path)
-        expect(files).toContain("keep.txt")
-        expect(files).not.toContain(".env.local")
-      })
-    } finally {
-      if (prevHome === undefined) delete process.env.HOME
-      else process.env.HOME = prevHome
-    }
-  })
-
-  test("fallback files honors git ignores in nested repositories", async () => {
-    await using tmp = await tmpdir({
-      init: async (dir) => {
-        await fs.mkdir(path.join(dir, "repo", ".git", "info"), { recursive: true })
-        await Bun.write(path.join(dir, "repo", ".gitignore"), "ignored.txt\nsub/ignored-sub.txt\n")
-        await Bun.write(path.join(dir, "repo", ".git", "info", "exclude"), "excluded.txt\n")
-        await Bun.write(path.join(dir, "repo", "keep.txt"), "keep")
-        await Bun.write(path.join(dir, "repo", "ignored.txt"), "ignored")
-        await Bun.write(path.join(dir, "repo", "excluded.txt"), "excluded")
-        await fs.mkdir(path.join(dir, "repo", "sub"), { recursive: true })
-        await Bun.write(path.join(dir, "repo", "sub", "ignored-sub.txt"), "ignored")
-      },
-    })
-
-    await withNoRipgrep(tmp.path, async () => {
-      const files = await fallbackFiles(tmp.path)
-      expect(files).toContain(path.join("repo", "keep.txt"))
-      expect(files).not.toContain(path.join("repo", "ignored.txt"))
-      expect(files).not.toContain(path.join("repo", "excluded.txt"))
-      expect(files).not.toContain(path.join("repo", "sub", "ignored-sub.txt"))
-    })
-  })
-
-  test("fallback files resets parent git ignores at nested repository roots", async () => {
-    await using tmp = await tmpdir({
-      init: async (dir) => {
-        await fs.mkdir(path.join(dir, ".git"), { recursive: true })
-        await Bun.write(path.join(dir, ".gitignore"), "nested/parent-gitignored.txt\n")
-        await Bun.write(path.join(dir, ".ignore"), "nested/parent-ignored.txt\n")
-        await fs.mkdir(path.join(dir, "nested", ".git"), { recursive: true })
-        await Bun.write(path.join(dir, "nested", ".gitignore"), "child-ignored.txt\n")
-        await Bun.write(path.join(dir, "nested", "keep.txt"), "keep")
-        await Bun.write(path.join(dir, "nested", "parent-gitignored.txt"), "parent gitignore")
-        await Bun.write(path.join(dir, "nested", "parent-ignored.txt"), "parent ignore")
-        await Bun.write(path.join(dir, "nested", "child-ignored.txt"), "child")
-      },
-    })
-
-    await withNoRipgrep(tmp.path, async () => {
-      const files = await fallbackFiles(tmp.path)
-      expect(files).toContain(path.join("nested", "keep.txt"))
-      expect(files).toContain(path.join("nested", "parent-gitignored.txt"))
-      expect(files).not.toContain(path.join("nested", "parent-ignored.txt"))
-      expect(files).not.toContain(path.join("nested", "child-ignored.txt"))
+      await expect(
+        runWithoutRipgrep(Ripgrep.Service.use((rg) => rg.search({ cwd: tmp.path, pattern: "needle" }))),
+      ).rejects.toThrow(/Search requires ripgrep/)
     })
   })
 
