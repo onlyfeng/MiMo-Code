@@ -795,7 +795,7 @@ it.live("context full subagent uses maxMode candidate judge replay path", () =>
       spawnRef.current = {
         spawn: () => Effect.die("unexpected spawn in fork maxMode test"),
         cancel: () => Effect.void,
-        getForkContext: (actorID) => Effect.succeed(actorID === "general-1" ? forkCtx : undefined),
+        getForkContext: (_sessionID, actorID) => Effect.succeed(actorID === "general-1" ? forkCtx : undefined),
       }
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
