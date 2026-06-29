@@ -3,6 +3,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { expect } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
+import { mkdir } from "fs/promises"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
 import { Command } from "../../src/command"
@@ -118,28 +119,35 @@ function errorTool(parts: MessageV2.Part[]) {
   return part?.state.status === "error" ? (part as ErrorToolPart) : undefined
 }
 
-const mcp = Layer.succeed(
-  MCP.Service,
-  MCP.Service.of({
-    status: () => Effect.succeed({}),
-    clients: () => Effect.succeed({}),
-    tools: () => Effect.succeed({}),
-    prompts: () => Effect.succeed({}),
-    resources: () => Effect.succeed({}),
-    add: () => Effect.succeed({ status: { status: "disabled" as const } }),
-    connect: () => Effect.void,
-    disconnect: () => Effect.void,
-    getPrompt: () => Effect.succeed(undefined),
-    readResource: () => Effect.succeed(undefined),
-    startAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
-    authenticate: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
-    finishAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
-    removeAuth: () => Effect.void,
-    supportsOAuth: () => Effect.succeed(false),
-    hasStoredTokens: () => Effect.succeed(false),
-    getAuthStatus: () => Effect.succeed("not_authenticated" as const),
-  }),
-)
+function makeMcp(input?: { resourceText?: string }) {
+  return Layer.succeed(
+    MCP.Service,
+    MCP.Service.of({
+      status: () => Effect.succeed({}),
+      clients: () => Effect.succeed({}),
+      tools: () => Effect.succeed({}),
+      prompts: () => Effect.succeed({}),
+      resources: () => Effect.succeed({}),
+      add: () => Effect.succeed({ status: { status: "disabled" as const } }),
+      connect: () => Effect.void,
+      disconnect: () => Effect.void,
+      getPrompt: () => Effect.succeed(undefined),
+      readResource: () =>
+        Effect.succeed(
+          input?.resourceText
+            ? ({ contents: [{ text: input.resourceText, uri: "mcp://large", mimeType: "text/plain" }] } as any)
+            : undefined,
+        ),
+      startAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
+      authenticate: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
+      finishAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
+      removeAuth: () => Effect.void,
+      supportsOAuth: () => Effect.succeed(false),
+      hasStoredTokens: () => Effect.succeed(false),
+      getAuthStatus: () => Effect.succeed("not_authenticated" as const),
+    }),
+  )
+}
 
 const lsp = Layer.succeed(
   LSP.Service,
@@ -164,7 +172,8 @@ const lsp = Layer.succeed(
 const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
 const run = SessionRunState.layer.pipe(Layer.provide(status))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
-function makeHttp(input?: { actor?: boolean }) {
+function makeHttp(input?: { actor?: boolean; mcpResourceText?: string }) {
+  const mcp = makeMcp({ resourceText: input?.mcpResourceText })
   const taskRegistry = ActorRegistry.defaultLayer
   const deps = Layer.mergeAll(
     Session.defaultLayer,
@@ -259,6 +268,8 @@ function makeHttp(input?: { actor?: boolean }) {
 
 const it = testEffect(makeHttp())
 const itActor = testEffect(makeHttp({ actor: true }))
+const longMcpResourceText = "x".repeat(60 * 1024)
+const itMcp = testEffect(makeHttp({ mcpResourceText: longMcpResourceText }))
 const unix = process.platform !== "win32" ? it.live : it.live.skip
 
 // Config that registers a custom "test" provider with a "test-model" model
@@ -303,6 +314,26 @@ function providerCfg(url: string) {
         options: {
           ...cfg.provider.test.options,
           baseURL: url,
+        },
+      },
+    },
+  }
+}
+
+function preflightOverflowCfg(url: string) {
+  const base = providerCfg(url)
+  return {
+    ...base,
+    provider: {
+      ...base.provider,
+      test: {
+        ...base.provider.test,
+        models: {
+          ...base.provider.test.models,
+          "test-model": {
+            ...base.provider.test.models["test-model"],
+            limit: { context: 1000, output: 100 },
+          },
         },
       },
     },
@@ -452,6 +483,199 @@ it.live("loop calls LLM and returns assistant message", () =>
       expect(yield* llm.hits).toHaveLength(1)
     }),
     { git: true, config: providerCfg },
+  ),
+)
+
+it.live("request preflight overflow finalizes its placeholder assistant", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Preflight overflow" })
+      yield* user(chat.id, "hello " + "x".repeat(6_000))
+
+      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          yield* prompt.cancel(chat.id).pipe(Effect.ignore)
+          yield* Fiber.interrupt(fiber).pipe(Effect.ignore)
+        }),
+      )
+
+      const assistant = yield* Effect.gen(function* () {
+        while (true) {
+          const messages = yield* sessions.messages({ sessionID: chat.id })
+          const match = messages.find((msg) => msg.info.role === "assistant")
+          if (match?.info.role === "assistant" && (match.info.finish || match.info.error || match.parts.length > 0)) {
+            return match
+          }
+          yield* Effect.sleep(10)
+        }
+      }).pipe(Effect.timeout("10 seconds"))
+
+      expect(assistant.info.role).toBe("assistant")
+      if (assistant.info.role === "assistant") {
+        expect(assistant.info.finish).toBe("cancelled")
+        expect(assistant.info.error?.name).toBe("MessageAbortedError")
+      }
+      expect(assistant.parts).toEqual([])
+    }),
+    { git: true, config: preflightOverflowCfg },
+  ),
+)
+
+it.live("caps data text file parts before storing synthetic user text", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Data file cap" })
+      const longText = "x".repeat(60 * 1024)
+
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [
+          {
+            type: "file",
+            url: `data:text/plain;base64,${Buffer.from(longText).toString("base64")}`,
+            filename: "large.txt",
+            mime: "text/plain",
+          },
+        ],
+      })
+
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      const textParts = messages.flatMap((message) => message.parts.filter((part) => part.type === "text"))
+      const decoded = textParts.find((part) => part.type === "text" && part.text.includes("data text truncated before model injection"))
+
+      expect(decoded).toBeDefined()
+      if (decoded?.type === "text") expect(decoded.text.length).toBeLessThan(longText.length)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+itMcp.live("caps MCP resource text before storing synthetic user text", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "MCP resource cap" })
+
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [
+          {
+            type: "file",
+            url: "mcp://large",
+            filename: "large-resource.txt",
+            mime: "text/plain",
+            source: { type: "resource", clientName: "test-client", uri: "mcp://large" },
+          } as any,
+        ],
+      })
+
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      const textParts = messages.flatMap((message) => message.parts.filter((part) => part.type === "text"))
+      const resourceText = textParts.find(
+        (part) => part.type === "text" && part.text.includes("MCP resource text truncated before model injection"),
+      )
+
+      expect(resourceText).toBeDefined()
+      if (resourceText?.type === "text") expect(resourceText.text.length).toBeLessThan(longMcpResourceText.length)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("caps command shell expansion before storing command prompt", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Command shell cap" })
+
+      yield* llm.text("done")
+      yield* prompt.command({
+        sessionID: chat.id,
+        agent: "build",
+        command: "huge-shell",
+        arguments: "",
+      })
+
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      const textParts = messages.flatMap((message) => message.parts.filter((part) => part.type === "text"))
+      const expanded = textParts.find(
+        (part) => part.type === "text" && part.text.includes("command shell expansion truncated before model injection"),
+      )
+
+      expect(expanded).toBeDefined()
+    }),
+    {
+      git: true,
+      config: (url) => ({
+        ...providerCfg(url),
+        command: {
+          "huge-shell": {
+            template: 'Shell output:\n!`bun -e "process.stdout.write(\'x\'.repeat(60 * 1024))"`',
+          },
+        },
+      }),
+    },
+  ),
+)
+
+it.live("caps skill command content before storing synthetic skill text", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Skill command cap" })
+      const skillDir = path.join(dir, "local-skills", "huge-skill")
+      const longSkillBody = "x".repeat(60 * 1024)
+
+      yield* Effect.promise(async () => {
+        await mkdir(skillDir, { recursive: true })
+        await Bun.write(
+          path.join(skillDir, "SKILL.md"),
+          [
+            "---",
+            "name: huge-skill",
+            "description: Huge local skill",
+            "---",
+            longSkillBody,
+          ].join("\n"),
+        )
+      })
+
+      yield* llm.text("done")
+      yield* prompt.command({
+        sessionID: chat.id,
+        agent: "build",
+        command: "huge-skill",
+        arguments: "",
+      })
+
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      const textParts = messages.flatMap((message) => message.parts.filter((part) => part.type === "text"))
+      const skillContent = textParts.find(
+        (part) => part.type === "text" && part.text.includes("skill command content truncated before model injection"),
+      )
+
+      expect(skillContent).toBeDefined()
+      if (skillContent?.type === "text") expect(skillContent.text.length).toBeLessThan(longSkillBody.length)
+    }),
+    {
+      git: true,
+      config: (url) => ({
+        ...providerCfg(url),
+        skills: { paths: ["local-skills"] },
+      }),
+    },
   ),
 )
 

@@ -220,6 +220,44 @@ describe("Instruction.resolve", () => {
 })
 
 describe("Instruction.system", () => {
+  test("caps oversized system instruction files", async () => {
+    const longInstructions = "x".repeat(60 * 1024)
+
+    await using projectTmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "AGENTS.md"), longInstructions)
+      },
+    })
+    await using globalTmp = await tmpdir()
+    const originalGlobalConfig = Global.Path.config
+    ;(Global.Path as { config: string }).config = globalTmp.path
+
+    try {
+      await Instance.provide({
+        directory: projectTmp.path,
+        fn: () =>
+          run(
+            Instruction.Service.use((svc) =>
+              Effect.gen(function* () {
+                const rules = (yield* svc.system()).content
+                // Assert on the project AGENTS.md block specifically rather than the total
+                // count: a host's real ~/.claude/CLAUDE.md can add a second source on dev machines.
+                const projectRule = rules.find((rule) =>
+                  rule.includes(`Instructions from: ${path.join(projectTmp.path, "AGENTS.md")}`),
+                )
+                expect(projectRule).toBeDefined()
+                expect(projectRule!.length).toBeLessThan(longInstructions.length)
+                expect(projectRule!).toContain("instructions truncated before model injection")
+              }),
+            ),
+          ),
+      })
+    } finally {
+      ;(Global.Path as { config: string }).config = originalGlobalConfig
+    }
+  })
+
   test("loads both project and global AGENTS.md when both exist", async () => {
     const originalConfigDir = process.env["MIMOCODE_CONFIG_DIR"]
     delete process.env["MIMOCODE_CONFIG_DIR"]

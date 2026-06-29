@@ -18,6 +18,11 @@ import type { Provider } from "@/provider"
 import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
+import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "@/util/text-truncate"
+
+function capAvailableSkills(text: string) {
+  return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, "available skills")
+}
 
 export function provider(model: Provider.Model) {
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
@@ -84,7 +89,7 @@ export const layer = Layer.effect(
           "Use the skill tool to load a skill when a task matches its description.",
           // the agents seem to ingest the information about skills a bit better if we present a more verbose
           // version of them here and a less verbose version in tool description, rather than vice versa.
-          Skill.fmt(list, { verbose: true }),
+          capAvailableSkills(Skill.fmt(list, { verbose: true })),
         ].join("\n")
       }),
     })

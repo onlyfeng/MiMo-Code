@@ -75,6 +75,23 @@ function installMockSpawn(onSpawn?: (input: SpawnInput) => void) {
   })
 }
 
+function checkpointStub(latest: string | undefined) {
+  return SessionCheckpoint.Service.of({
+    tryStartCheckpointWriter: () => Effect.succeed("skipped" as const),
+    waitForWriter: () => Effect.succeed("no-writer" as const),
+    drainWriters: () => Effect.succeed({ drained: 0, timedOut: 0 }),
+    hasCheckpoint: () => Effect.succeed(latest !== undefined),
+    hasMemoryOrTasks: () => Effect.succeed(latest !== undefined),
+    loadLatest: () => Effect.succeed(latest),
+    loadCheckpoints: () => Effect.succeed(latest ? [latest] : []),
+    renderIndex: () => Effect.succeed(""),
+    renderRebuildContext: () => Effect.succeed(""),
+    lastBoundary: () => Effect.succeed(undefined),
+    isWriterRunning: () => Effect.succeed(false),
+    insertRebuildBoundary: () => Effect.succeed(false),
+  })
+}
+
 const ref = {
   providerID: ProviderID.make("test"),
   modelID: ModelID.make("test-model"),
@@ -425,6 +442,100 @@ describe("tool.actor", () => {
           experimental: {
             primary_tools: ["bash", "read"],
           },
+        },
+      },
+    ),
+  )
+
+  it.live("context state caps checkpoint injection before spawning", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          let capturedTask = ""
+          yield* installMockSpawn((input) => {
+            capturedTask = input.task
+          })
+          const { chat, assistant } = yield* seed()
+          const tool = yield* ActorTool
+          const def = yield* tool.init()
+
+          yield* def.execute(
+            {
+              operation: {
+                action: "run",
+                description: "inspect state",
+                prompt: "continue from state",
+                subagent_type: "general",
+                context: "state",
+              },
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              extra: {},
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
+
+          expect(capturedTask).toContain("[... checkpoint truncated")
+          expect(capturedTask).not.toContain("state-block-90")
+          expect(capturedTask).toContain("continue from state")
+        }).pipe(Effect.provideService(SessionCheckpoint.Service, checkpointStub(Array.from({ length: 100 }, (_, i) => `state-block-${i}`).join("\n")))),
+      {
+        config: {
+          checkpoint: { push_caps: { checkpoint: 20 } },
+        },
+      },
+    ),
+  )
+
+  it.live("context state caps multibyte checkpoint injection before spawning", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          let capturedTask = ""
+          yield* installMockSpawn((input) => {
+            capturedTask = input.task
+          })
+          const { chat, assistant } = yield* seed()
+          const tool = yield* ActorTool
+          const def = yield* tool.init()
+          const checkpoint = "界".repeat(400)
+
+          yield* def.execute(
+            {
+              operation: {
+                action: "run",
+                description: "inspect multibyte state",
+                prompt: "continue from state",
+                subagent_type: "general",
+                context: "state",
+              },
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              extra: {},
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
+
+          expect(capturedTask).toContain("[... checkpoint truncated")
+          expect(capturedTask).not.toContain("\uFFFD")
+          expect(capturedTask).not.toContain(checkpoint)
+          expect(capturedTask).not.toContain("界".repeat(100))
+        }).pipe(Effect.provideService(SessionCheckpoint.Service, checkpointStub("界".repeat(400)))),
+      {
+        config: {
+          checkpoint: { push_caps: { checkpoint: 20 } },
         },
       },
     ),

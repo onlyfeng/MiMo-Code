@@ -2,6 +2,9 @@ import type { Config } from "@/config"
 import type { Provider } from "@/provider"
 import { ProviderTransform } from "@/provider"
 import type { MessageV2 } from "./message-v2"
+import type { ModelMessage } from "ai"
+import { Token } from "../util"
+import { capUtf8TextByBytes } from "../util/text-truncate"
 
 const COMPACTION_BUFFER = 20_000
 
@@ -9,6 +12,29 @@ const COMPACTION_BUFFER = 20_000
 // don't strangle the usable input window. 20K covers >99.99% of compaction
 // summary outputs based on production telemetry of summary token counts.
 const OUTPUT_CAP = 20_000
+const REQUEST_PREFLIGHT_GUARD = 5_000
+const REQUEST_PREFLIGHT_TOOL_SCHEMA_MAX_BYTES = 80 * 1024
+
+type RequestEstimateInput = {
+  prebuiltSystem?: string[]
+  system?: string[]
+  messages: ModelMessage[]
+  tools?: Record<string, unknown>
+  toolChoice?: unknown
+}
+
+function safeStringify(input: unknown) {
+  const seen = new WeakSet<object>()
+  return JSON.stringify(input, (_key, value) => {
+    if (typeof value === "function") return "[function]"
+    if (typeof value === "symbol") return value.toString()
+    if (value && typeof value === "object") {
+      if (seen.has(value)) return "[circular]"
+      seen.add(value)
+    }
+    return value
+  }) ?? ""
+}
 
 export function usable(input: { cfg: Config.Info; model: Provider.Model }) {
   const context = input.model.limit.context
@@ -30,6 +56,32 @@ export function isOverflow(input: { cfg: Config.Info; tokens: MessageV2.Assistan
   const count =
     input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
   return count >= usable(input)
+}
+
+export function estimateRequestTokens(input: RequestEstimateInput) {
+  const tools = safeStringify(input.tools ?? {})
+  const serialized = safeStringify({
+    system: input.prebuiltSystem ?? input.system ?? [],
+    messages: input.messages,
+    tools: capUtf8TextByBytes(tools, REQUEST_PREFLIGHT_TOOL_SCHEMA_MAX_BYTES, "tool schemas"),
+    toolChoice: input.toolChoice,
+  })
+  const charEstimate = Token.estimate(serialized)
+  const byteEstimate = Math.round(Buffer.byteLength(serialized, "utf8") / 3)
+  return Math.max(charEstimate, byteEstimate)
+}
+
+export function isRequestOverflow(input: {
+  cfg: Config.Info
+  model: Provider.Model
+  requestTokens: number
+}) {
+  if (input.cfg.compaction?.auto === false) return false
+  if (input.model.limit.context === 0) return false
+  const limit = usable(input)
+  if (limit <= 0) return input.requestTokens > 0
+  const guard = Math.min(REQUEST_PREFLIGHT_GUARD, Math.floor(limit * 0.1))
+  return input.requestTokens >= Math.max(1, limit - guard)
 }
 
 export function pressureLevel(input: {

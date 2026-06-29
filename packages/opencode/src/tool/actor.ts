@@ -19,6 +19,7 @@ import { TaskID } from "@/task/schema"
 import { SessionCheckpoint } from "@/session/checkpoint"
 import { inboxServiceRef } from "@/inbox/inbox-ref"
 import { Effect, Deferred } from "effect"
+import { Token } from "../util"
 
 export interface ActorPromptOps {
   cancel(sessionID: SessionID): void
@@ -32,6 +33,44 @@ const MODEL_PARAM_DESCRIPTION =
   "(optional) Model for this subagent: a model group name (e.g. ultra/standard/lite) or a literal provider/model (e.g. mimo-v2.5-pro). Overrides the agent's configured model; defaults to the agent's model, else the parent's. If no model_groups are configured, the tier names resolve to the default model."
 
 const KNOWN_ACTOR_VERBS = ["run", "spawn", "status", "wait", "cancel", "send"]
+const DEFAULT_STATE_CONTEXT_TOKENS = 11_000
+
+function estimateStateTokens(text: string) {
+  return Math.max(Token.estimate(text), Math.round(Buffer.byteLength(text, "utf8") / 3))
+}
+
+function takeUtf8Prefix(text: string, maxBytes: number) {
+  let usedBytes = 0
+  let result = ""
+  for (const char of text) {
+    const bytes = Buffer.byteLength(char, "utf8")
+    if (usedBytes + bytes > maxBytes) break
+    result += char
+    usedBytes += bytes
+  }
+  return result
+}
+
+function takeUtf8Suffix(text: string, maxBytes: number) {
+  let usedBytes = 0
+  let result = ""
+  for (const char of Array.from(text).reverse()) {
+    const bytes = Buffer.byteLength(char, "utf8")
+    if (usedBytes + bytes > maxBytes) break
+    result = char + result
+    usedBytes += bytes
+  }
+  return result
+}
+
+function capStateContext(text: string, maxTokens: number) {
+  if (estimateStateTokens(text) <= maxTokens) return text
+  const marker = `\n\n[... checkpoint truncated to ${maxTokens} tokens for actor context=state ...]\n\n`
+  const budget = Math.max(0, maxTokens * 3 - Buffer.byteLength(marker, "utf8"))
+  const head = Math.floor(budget * 0.6)
+  const tail = budget - head
+  return takeUtf8Prefix(text, head) + marker + (tail > 0 ? takeUtf8Suffix(text, tail) : "")
+}
 
 function levenshteinActor(a: string, b: string): number {
   const m = a.length, n = b.length
@@ -654,12 +693,13 @@ export const ActorTool = Tool.define(
             .loadLatest(ctx.sessionID)
             .pipe(Effect.catch(() => Effect.succeed(undefined)))
           if (latest) {
+            const state = capStateContext(latest, cfg.checkpoint?.push_caps?.checkpoint ?? DEFAULT_STATE_CONTEXT_TOKENS)
             prompt =
               [
                 "<session-state>",
                 "Here is a summary of the parent session's progress:",
                 "",
-                latest,
+                state,
                 "</session-state>",
                 "",
               ].join("\n") + prompt

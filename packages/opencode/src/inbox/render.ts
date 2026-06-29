@@ -1,11 +1,27 @@
 import type { InboxRow } from "./inbox.sql"
+import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "../util/text-truncate"
+
+const ACTOR_NOTIFICATION_OPEN = "<actor-notification>\n"
+const ACTOR_NOTIFICATION_CLOSE = "\n</actor-notification>"
+
+function capInboxText(text: string) {
+  return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, "inbox content")
+}
+
+function capActorNotificationText(text: string) {
+  if (text.startsWith(ACTOR_NOTIFICATION_OPEN) && text.endsWith(ACTOR_NOTIFICATION_CLOSE)) {
+    const body = text.slice(ACTOR_NOTIFICATION_OPEN.length, -ACTOR_NOTIFICATION_CLOSE.length)
+    return `${ACTOR_NOTIFICATION_OPEN}${capInboxText(body)}${ACTOR_NOTIFICATION_CLOSE}`
+  }
+  return capInboxText(text)
+}
 
 export function renderInboxRow(row: InboxRow): string {
   if (row.type === "actor_notification") {
     // Pre-rendered notification text — sender produced the full
     // <actor-notification>...</actor-notification> wrapper.
     const content = row.content as { text?: string }
-    return content.text ?? "(no notification body)"
+    return capActorNotificationText(content.text ?? "(no notification body)")
   }
   // Default: type === "text" or unknown — wrap as <inbox> element so
   // the LLM can route by sender; the wrapper format mirrors the
@@ -15,7 +31,7 @@ export function renderInboxRow(row: InboxRow): string {
     ? `${row.sender_session_id}:${row.sender_actor_id ?? "?"}`
     : "system"
   const sentAt = new Date(row.created_at).toISOString()
-  return `<inbox from="${sender}" sent_at="${sentAt}">\n${content.text ?? "(empty)"}\n</inbox>`
+  return `<inbox from="${sender}" sent_at="${sentAt}">\n${capInboxText(content.text ?? "(empty)")}\n</inbox>`
 }
 
 export function renderActorNotification(event: {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { toSchemaOnlyTools, parseJudgeIndex } from "../../src/session/max-mode"
+import { toSchemaOnlyTools, parseJudgeIndex, renderCandidate } from "../../src/session/max-mode"
 
 describe("max-mode toSchemaOnlyTools", () => {
   test("strips execute closures but keeps schema fields", () => {
@@ -50,5 +50,26 @@ describe("max-mode parseJudgeIndex", () => {
 
   test("accepts last valid index", () => {
     expect(parseJudgeIndex("4", 5)).toBe(4)
+  })
+})
+
+describe("max-mode renderCandidate", () => {
+  test("caps candidate fields before judge injection", () => {
+    const large = "x".repeat(20_000)
+    const rendered = renderCandidate(
+      {
+        index: 0,
+        reasoning: large,
+        text: large,
+        toolCalls: [{ toolCallId: "call-1", toolName: "bash", input: { command: large } } as any],
+        finishReason: "tool-calls",
+      },
+      0,
+    )
+
+    expect(rendered.length).toBeLessThan(25_000)
+    expect(rendered).toContain("candidate reasoning truncated before max-mode judge injection")
+    expect(rendered).toContain("candidate message truncated before max-mode judge injection")
+    expect(rendered).toContain("tool input truncated before max-mode judge injection")
   })
 })

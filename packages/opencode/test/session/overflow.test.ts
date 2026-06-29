@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { isOverflow, pressureLevel, usable } from "../../src/session/overflow"
+import { estimateRequestTokens, isOverflow, isRequestOverflow, pressureLevel, usable } from "../../src/session/overflow"
 import { Token } from "../../src/util"
 import { Session as SessionNs } from "../../src/session"
 import type { Provider } from "../../src/provider"
@@ -572,5 +572,58 @@ describe("usable", () => {
     const model = createModel({ context: 200_000, output: 32_000 })
     const cfg = mockCfg({ reserved: 5_000 })
     expect(usable({ cfg, model })).toBe(175_000)
+  })
+})
+
+describe("request preflight overflow", () => {
+  test("estimates system, messages, and tool schemas before provider call", () => {
+    const requestTokens = estimateRequestTokens({
+      prebuiltSystem: ["s".repeat(4_000)],
+      messages: [{ role: "user", content: [{ type: "text", text: "m".repeat(4_000) }] }] as any,
+      tools: {
+        read: {
+          description: "t".repeat(4_000),
+          inputSchema: { type: "object", properties: { path: { type: "string" } } },
+        },
+      },
+    })
+
+    expect(requestTokens).toBeGreaterThan(2_500)
+  })
+
+  test("accounts for multibyte request content more conservatively than char-only estimate", () => {
+    const requestTokens = estimateRequestTokens({
+      messages: [{ role: "user", content: [{ type: "text", text: "界".repeat(4_000) }] }] as any,
+    })
+
+    expect(requestTokens).toBeGreaterThan(2_000)
+  })
+
+  test("routes near-limit requests to recovery before streamText", () => {
+    const model = createModel({ context: 100_000, output: 8_000 })
+    const cfg = mockCfg()
+    const limit = usable({ cfg, model })
+
+    expect(isRequestOverflow({ cfg, model, requestTokens: limit - 6_000 })).toBe(false)
+    expect(isRequestOverflow({ cfg, model, requestTokens: limit - 5_000 })).toBe(true)
+  })
+
+  test("does not route every request to recovery for small usable windows", () => {
+    const model = createModel({ context: 12_000, input: 8_000, output: 4_000 })
+    const cfg = mockCfg()
+    const limit = usable({ cfg, model })
+
+    expect(limit).toBe(4_000)
+    expect(isRequestOverflow({ cfg, model, requestTokens: 1 })).toBe(false)
+    expect(isRequestOverflow({ cfg, model, requestTokens: Math.floor(limit / 2) })).toBe(false)
+    expect(isRequestOverflow({ cfg, model, requestTokens: limit })).toBe(true)
+  })
+
+  test("does not route request preflight overflow when automatic compaction is disabled", () => {
+    const model = createModel({ context: 100_000, output: 8_000 })
+    const cfg = mockCfg({ auto: false })
+    const limit = usable({ cfg, model })
+
+    expect(isRequestOverflow({ cfg, model, requestTokens: limit })).toBe(false)
   })
 })

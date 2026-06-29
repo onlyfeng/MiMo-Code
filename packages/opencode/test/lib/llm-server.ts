@@ -691,7 +691,9 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
       })
 
       yield* router.add("POST", "/v1/chat/completions", handle("chat"))
+      yield* router.add("POST", "/chat/completions", handle("chat"))
       yield* router.add("POST", "/v1/responses", handle("responses"))
+      yield* router.add("POST", "/responses", handle("responses"))
 
       yield* server.serve(router.asHttpEffect())
 

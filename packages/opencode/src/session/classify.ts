@@ -36,6 +36,7 @@ export function classifyAssistantStep(input: {
   phase: "existing-assistant" | "after-process"
   // Reserved for T01–T05 (stop/overflow control flow stays in runLoop for T00).
   processResult?: "continue" | "stop" | "overflow" | "text-repeat"
+  recoverOverflowPlaceholder?: boolean
 }): StepClassification {
   const assistant = input.assistant
 
@@ -58,6 +59,20 @@ export function classifyAssistantStep(input: {
 
   // 2. Nothing finalized yet.
   if (!assistant.finish) return { type: "continue" }
+
+  // Request preflight overflow marks the placeholder assistant as cancelled
+  // before returning so history is not left with an empty unfinished message.
+  // The actual recovery decision still belongs to runLoop's overflow branch.
+  if (input.processResult === "overflow") return { type: "continue" }
+
+  if (
+    input.phase === "existing-assistant" &&
+    input.recoverOverflowPlaceholder &&
+    assistant.finish === "cancelled" &&
+    assistant.error?.name === "MessageAbortedError" &&
+    input.parts.length === 0
+  )
+    return { type: "continue" }
 
   // 3a. Text-form tool call: the model serialized a tool call as PROSE TEXT
   // instead of emitting a structured tool_use. Signature: finish "tool-calls"
