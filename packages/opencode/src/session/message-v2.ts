@@ -67,9 +67,17 @@ function capModelReplayToolInput(input: unknown) {
   if (Buffer.byteLength(serialized, "utf8") <= MODEL_VISIBLE_TEXT_CAP_BYTES) {
     return transformed ? JSON.parse(serialized) : input
   }
-  return {
-    truncated: capUtf8TextByBytes(serialized, MODEL_VISIBLE_TEXT_CAP_BYTES, "tool input", "before model replay"),
+  // Reserve room for the {"truncated":""} wrapper and JSON re-escaping so the
+  // replayed tool input serializes within the cap — some replay paths and
+  // downstream validators measure the serialized tool input against it.
+  const wrap = (s: string) => ({ truncated: s })
+  let budget = MODEL_VISIBLE_TEXT_CAP_BYTES - Buffer.byteLength(JSON.stringify(wrap("")), "utf8")
+  let result = wrap(capUtf8TextByBytes(serialized, budget, "tool input", "before model replay"))
+  while (budget > 0 && Buffer.byteLength(JSON.stringify(result), "utf8") > MODEL_VISIBLE_TEXT_CAP_BYTES) {
+    budget = Math.floor(budget * 0.9)
+    result = wrap(capUtf8TextByBytes(serialized, budget, "tool input", "before model replay"))
   }
+  return result
 }
 
 export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))

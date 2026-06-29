@@ -40,7 +40,8 @@ export function capUtf8TextByBytes(
   const marker = (omitted: number) => `... ${omitted} bytes of ${label} truncated ${suffix} ...`
 
   if (keep === "tail") {
-    const start = utf8TailBoundary(buf, buf.length - maxBytes)
+    const reserve = Buffer.byteLength(`${marker(buf.length)}\n\n`, "utf8")
+    const start = utf8TailBoundary(buf, buf.length - Math.max(0, maxBytes - reserve))
     const tail = buf.subarray(start).toString("utf8")
     return `${marker(buf.length - Buffer.byteLength(tail, "utf8"))}\n\n${tail}`
   }
@@ -56,7 +57,8 @@ export function capUtf8TextByBytes(
     return `${head}\n\n${marker(omitted)}\n\n${tail}`
   }
 
-  const end = utf8HeadBoundary(buf, maxBytes)
+  const reserve = Buffer.byteLength(`\n\n${marker(buf.length)}`, "utf8")
+  const end = utf8HeadBoundary(buf, Math.max(0, maxBytes - reserve))
   const head = buf.subarray(0, end).toString("utf8")
   return `${head}\n\n${marker(buf.length - Buffer.byteLength(head, "utf8"))}`
 }
