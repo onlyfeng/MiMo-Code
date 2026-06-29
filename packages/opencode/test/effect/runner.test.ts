@@ -190,6 +190,79 @@ describe("Runner", () => {
     }),
   )
 
+  // --- cancelDetached semantics (non-blocking cancel) ---
+
+  it.live(
+    "cancelDetached interrupts running work and goes idle",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const fiber = yield* runner.ensureRunning(Effect.never.pipe(Effect.as("never"))).pipe(Effect.forkChild)
+      yield* Effect.sleep("10 millis")
+      expect(runner.busy).toBe(true)
+      expect(runner.state._tag).toBe("Running")
+
+      yield* runner.cancelDetached
+      expect(runner.busy).toBe(false)
+
+      const exit = yield* Fiber.await(fiber)
+      expect(Exit.isFailure(exit)).toBe(true)
+    }),
+  )
+
+  it.live(
+    "cancelDetached on idle is a no-op",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      yield* runner.cancelDetached
+      expect(runner.busy).toBe(false)
+    }),
+  )
+
+  it.live(
+    "cancelDetached returns without awaiting the interrupted work's cleanup",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const releaseCleanup = yield* Deferred.make<void>()
+      // Work whose interruption cleanup blocks until releaseCleanup fires. A
+      // blocking `cancel` would await that cleanup; `cancelDetached` must not.
+      const work = Effect.never.pipe(Effect.onInterrupt(() => Deferred.await(releaseCleanup)), Effect.as("never"))
+      const fiber = yield* runner.ensureRunning(work).pipe(Effect.forkChild)
+      yield* Effect.sleep("10 millis")
+      expect(runner.busy).toBe(true)
+
+      // cancelDetached must return WITHOUT awaiting the blocked finalizer. A
+      // blocking variant would deadlock here (the finalizer only releases AFTER
+      // this returns), so `Effect.timeout` would raise TimeoutException — assert
+      // the cancel completed successfully within budget. (runner.busy flips to
+      // Idle synchronously inside `modify`, so it alone does not prove non-blocking.)
+      const detachedExit = yield* runner.cancelDetached.pipe(Effect.timeout("250 millis"), Effect.exit)
+      expect(Exit.isSuccess(detachedExit)).toBe(true)
+      expect(runner.busy).toBe(false)
+
+      yield* Deferred.succeed(releaseCleanup, undefined)
+      const exit = yield* Fiber.await(fiber)
+      expect(Exit.isFailure(exit)).toBe(true)
+    }),
+  )
+
+  it.live(
+    "work can be started after cancelDetached",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const fiber = yield* runner.ensureRunning(Effect.never.pipe(Effect.as("x"))).pipe(Effect.forkChild)
+      yield* Effect.sleep("10 millis")
+      yield* runner.cancelDetached
+      yield* Fiber.await(fiber)
+
+      const result = yield* runner.ensureRunning(Effect.succeed("after-detached-cancel"))
+      expect(result).toBe("after-detached-cancel")
+    }),
+  )
+
   test("cancel does not deadlock when replacement work starts before interrupted run exits", async () => {
     function defer() {
       let resolve!: () => void
