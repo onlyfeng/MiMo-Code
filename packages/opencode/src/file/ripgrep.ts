@@ -1,6 +1,8 @@
+import nodeFs from "fs"
 import path from "path"
 import z from "zod"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { Glob } from "@mimo-ai/shared/util/glob"
 import { Cause, Context, Effect, Fiber, Layer, Queue, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
@@ -10,6 +12,7 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { Global } from "@/global"
 import { Log } from "@/util"
+import { windowsZipExtractCommand } from "@/util/archive"
 import { sanitizedProcessEnv } from "@/util/mimo-process"
 import { which } from "@/util/which"
 
@@ -176,6 +179,24 @@ function clean(file: string) {
   return path.normalize(file.replace(/^\.[\\/]/, ""))
 }
 
+// Approximate `rg --glob` for the no-rg fallback, following .gitignore glob rules:
+// a leading "!" excludes, later patterns win (last match decides), and any positive
+// pattern flips matching to allowlist mode. A pattern without a slash matches at any
+// depth (against the basename, so `*.ts` still hits `src/a.ts`); a pattern with a slash
+// matches the full cwd-relative path.
+function matchesGlobs(rel: string, globs: string[]) {
+  const posix = rel.split(path.sep).join("/")
+  const base = posix.slice(posix.lastIndexOf("/") + 1)
+  return globs.reduce(
+    (included, glob) => {
+      const negated = glob.startsWith("!")
+      const pattern = negated ? glob.slice(1) : glob
+      return Glob.match(pattern, pattern.includes("/") ? posix : base) ? !negated : included
+    },
+    !globs.some((g) => !g.startsWith("!")),
+  )
+}
+
 function row(data: Row): Row {
   return {
     ...data,
@@ -261,7 +282,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            `$global:ProgressPreference = 'SilentlyContinue'; Expand-Archive -LiteralPath '${archive.replaceAll("'", "''")}' -DestinationPath '${dir.replaceAll("'", "''")}' -Force`,
+            windowsZipExtractCommand(archive, dir),
           ])
           if (result.code !== 0) {
             return yield* Effect.fail(error(result.stderr || result.stdout, result.code))
@@ -313,10 +334,24 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           const bytes = yield* HttpClientRequest.get(url).pipe(
             http.execute,
             Effect.flatMap((response) => response.arrayBuffer),
-            Effect.mapError((cause) => (cause instanceof Error ? cause : new Error(String(cause)))),
+            Effect.mapError((cause) => {
+              const msg = cause instanceof Error ? cause.message : String(cause)
+              if (msg.includes("ENOTFOUND") || msg.includes("ECONNREFUSED") || msg.includes("fetch")) {
+                return new Error(
+                  `Cannot download ripgrep: network unavailable (${msg}). ` +
+                    `Please install ripgrep manually: https://github.com/BurntSushi/ripgrep#installation`,
+                )
+              }
+              return cause instanceof Error ? cause : new Error(String(cause))
+            }),
           )
           if (bytes.byteLength === 0) {
-            return yield* Effect.fail(new Error(`failed to download ripgrep from ${url}`))
+            return yield* Effect.fail(
+              new Error(
+                `Failed to download ripgrep from ${url}. ` +
+                  `If you are in a restricted network, please install ripgrep manually.`,
+              ),
+            )
           }
 
           yield* fs.writeWithDirs(archive, new Uint8Array(bytes))
@@ -347,12 +382,59 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
         })
       })
 
+      async function* walkDir(
+        dir: string,
+        options: { hidden: boolean; maxDepth?: number },
+        currentDepth = 0,
+      ): AsyncGenerator<string> {
+        if (options.maxDepth !== undefined && currentDepth > options.maxDepth) return
+
+        const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as nodeFs.Dirent[])
+        for (const entry of entries) {
+          const name = entry.name
+          if (!options.hidden && name.startsWith(".")) continue
+          if (name === ".git") continue
+
+          const fullPath = path.join(dir, name)
+          if (entry.isDirectory()) {
+            yield* walkDir(fullPath, options, currentDepth + 1)
+          } else if (entry.isFile()) {
+            yield fullPath
+          }
+        }
+      }
+
       const files: Interface["files"] = (input) =>
         Stream.callback<string, PlatformError | Error>((queue) =>
           Effect.gen(function* () {
             yield* Effect.forkScoped(
               Effect.gen(function* () {
                 yield* check(input.cwd)
+                const binary = yield* filepath.pipe(Effect.catch(() => Effect.succeed(undefined)))
+                if (!binary) {
+                  log.info("ripgrep not available, using fallback for file listing")
+                  yield* Effect.tryPromise({
+                    // `signal` aborts when the Stream scope closes (e.g. a consumer using
+                    // Stream.take stops early), so the walk doesn't keep scanning the whole
+                    // tree after the reader is done.
+                    try: async (signal) => {
+                      for await (const file of walkDir(input.cwd, {
+                        hidden: input.hidden !== false,
+                        maxDepth: input.maxDepth,
+                      })) {
+                        if (signal.aborted || input.signal?.aborted) break
+                        // walkDir yields absolute paths; emit cwd-relative ones so the output
+                        // matches `rg --files` (consumers like tree() split on path.sep).
+                        const rel = path.relative(input.cwd, file)
+                        if (input.glob && !matchesGlobs(rel, input.glob)) continue
+                        Queue.offerUnsafe(queue, clean(rel))
+                      }
+                    },
+                    catch: (err) => (err instanceof Error ? err : new Error(String(err))),
+                  })
+                  Queue.endUnsafe(queue)
+                  return
+                }
                 const handle = yield* spawner.spawn(yield* command(input.cwd, filesArgs(input)))
                 const stderr = yield* Stream.mkString(Stream.decodeText(handle.stderr)).pipe(Effect.forkScoped)
                 const stdout = yield* Stream.decodeText(handle.stdout).pipe(
@@ -384,6 +466,18 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 
         const program = Effect.scoped(
           Effect.gen(function* () {
+            // Unlike files(), search has no JS fallback; surface a clear, actionable error
+            // instead of a raw spawn/download failure when ripgrep can't be obtained.
+            // Resolve inside the raced program so input.signal can abort a slow download.
+            const binary = yield* filepath.pipe(Effect.catch(() => Effect.succeed(undefined)))
+            if (!binary)
+              return yield* Effect.fail(
+                new Error(
+                  "Search requires ripgrep, which is unavailable and could not be downloaded. " +
+                    "If you are in a restricted network, install ripgrep manually: " +
+                    "https://github.com/BurntSushi/ripgrep#installation",
+                ),
+              )
             const handle = yield* spawner.spawn(yield* command(input.cwd, searchArgs(input)))
 
             const [items, stderr, code] = yield* Effect.all(
