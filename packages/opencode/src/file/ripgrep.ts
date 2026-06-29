@@ -204,6 +204,19 @@ async function requiresRipgrepFallback(cwd: string) {
   }
 }
 
+async function hasFallbackRipgrepMarker(dir: string, hidden: boolean): Promise<boolean> {
+  const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    if (FALLBACK_RIPGREP_MARKERS.includes(entry.name)) return true
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (!hidden && entry.name.startsWith(".")) continue
+    if (await hasFallbackRipgrepMarker(path.join(dir, entry.name), hidden)) return true
+  }
+  return false
+}
+
 function row(data: Row): Row {
   return {
     ...data,
@@ -429,19 +442,16 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                   yield* Effect.tryPromise({
                     try: async (signal) => {
                       if (input.signal?.aborted) throw aborted(input.signal)
-                      const files: string[] = []
+                      if (await hasFallbackRipgrepMarker(input.cwd, input.hidden !== false)) {
+                        throw new Error(INSTALL_RIPGREP_MESSAGE)
+                      }
                       for await (const file of walkDir(input.cwd, {
                         cwd: input.cwd,
                         hidden: input.hidden !== false,
                       })) {
                         if (input.signal?.aborted) throw aborted(input.signal)
                         if (signal.aborted) break
-                        files.push(clean(path.relative(input.cwd, file)))
-                      }
-                      if (input.signal?.aborted) throw aborted(input.signal)
-                      for (const file of files) {
-                        if (signal.aborted) break
-                        Queue.offerUnsafe(queue, file)
+                        Queue.offerUnsafe(queue, clean(path.relative(input.cwd, file)))
                       }
                       if (input.signal?.aborted) throw aborted(input.signal)
                     },

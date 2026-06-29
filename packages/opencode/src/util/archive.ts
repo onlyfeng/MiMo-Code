@@ -18,7 +18,7 @@ export function windowsZipExtractCommand(zipPath: string, destDir: string) {
     `$zip=[System.IO.Compression.ZipFile]::OpenRead('${src}');`,
     "try{foreach($e in $zip.Entries){",
     "$t=[System.IO.Path]::GetFullPath([System.IO.Path]::Combine($dest,$e.FullName));",
-    "if(-not $t.StartsWith($dest,[System.StringComparison]::OrdinalIgnoreCase)){throw 'unsafe zip entry'};",
+    "if(-not $t.StartsWith($dest,[System.StringComparison]::Ordinal)){throw 'unsafe zip entry'};",
     "if([string]::IsNullOrEmpty($e.Name)){[System.IO.Directory]::CreateDirectory($t)|Out-Null;continue};",
     "[System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($t))|Out-Null;",
     "[System.IO.Compression.ZipFileExtensions]::ExtractToFile($e,$t,$true)",
