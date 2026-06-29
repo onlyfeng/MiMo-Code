@@ -118,7 +118,7 @@ const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
 const run = SessionRunState.layer.pipe(Layer.provide(status))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 
-function makeLayer() {
+function makeLayer(pluginLayer = Plugin.defaultLayer) {
   const deps = Layer.mergeAll(
     Session.defaultLayer,
     Snapshot.defaultLayer,
@@ -127,7 +127,7 @@ function makeLayer() {
     AgentSvc.defaultLayer,
     Command.defaultLayer,
     Permission.defaultLayer,
-    Plugin.defaultLayer,
+    pluginLayer,
     Config.defaultLayer,
     ProviderSvc.defaultLayer,
     lsp,
@@ -193,6 +193,36 @@ function makeLayer() {
 }
 
 const it = testEffect(makeLayer())
+let preStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
+let postStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
+const pausePreStopPlugin = Layer.succeed(
+  Plugin.Service,
+  Plugin.Service.of({
+    trigger: (_name, _input, output) => Effect.succeed(output),
+    list: () => Effect.succeed([]),
+    init: () => Effect.void,
+    reloadFileHooks: () => Effect.void,
+    triggerActorPreStop: () =>
+      Effect.gen(function* () {
+        const pause = preStopPause
+        if (pause) {
+          yield* Deferred.succeed(pause.hit, undefined)
+          yield* Deferred.await(pause.release)
+        }
+        return { continue: false, contributingPluginNames: [], contributingHookIDs: [] }
+      }),
+    triggerActorPostStop: () =>
+      Effect.gen(function* () {
+        const pause = postStopPause
+        if (pause) {
+          yield* Deferred.succeed(pause.hit, undefined)
+          yield* Deferred.await(pause.release)
+        }
+        return { continue: false, contributingPluginNames: [], contributingHookIDs: [] }
+      }),
+  }),
+)
+const pauseIt = testEffect(makeLayer(pausePreStopPlugin))
 
 const ref = {
   providerID: ProviderID.make("test"),
@@ -448,6 +478,97 @@ describe("Actor.cancel", () => {
       { git: true, config: providerCfg },
     ),
   )
+
+  it.live("cancel(graceful) on an already-finished actor does not overwrite its outcome", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const reg = yield* ActorRegistry.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "x",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* llm.text("done")
+        // Blocking spawn: returns only after the work fiber has joined (onExit
+        // ran), so the actor is fully finished and stamped "success".
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "build",
+          task: "quick task",
+          context: "none",
+          tools: ["read"],
+          background: false,
+          model: ref,
+        })
+        const outcome = yield* Deferred.await(result.outcome)
+        expect(outcome.status).toBe("success")
+        expect((yield* reg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("success")
+
+        // A late cancel (e.g. cascade or programmatic reclaim) must be a no-op
+        // for an actor that already settled — it must NOT clobber the outcome.
+        yield* actor.cancel(result.sessionID, result.actorID, "graceful").pipe(Effect.timeout("1 second"))
+
+        expect((yield* reg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("success")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
+  pauseIt.live("cancel(forced) after the final turn but before delivery settles cancelled", () =>
+    Effect.gen(function* () {
+      const hit = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      preStopPause = { hit, release }
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(release, undefined).pipe(Effect.ignore)
+          yield* Effect.sync(() => {
+            preStopPause = undefined
+          })
+        }),
+      )
+      yield* provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const actor = yield* Actor.Service
+          const reg = yield* ActorRegistry.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "x",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          yield* llm.text("done")
+          const result = yield* actor.spawn({
+            mode: "subagent",
+            sessionID: parent.id,
+            agentType: "custom",
+            task: "quick task",
+            context: "none",
+            tools: [],
+            background: true,
+            model: ref,
+          })
+          yield* Deferred.await(hit).pipe(Effect.timeout("1 second"))
+          expect((yield* reg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("success")
+
+          yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.timeout("1 second"))
+          yield* Deferred.succeed(release, undefined)
+
+          const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("1 second"))
+          expect(outcome.status).toBe("cancelled")
+          expect((yield* reg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("cancelled")
+        }),
+        {
+          git: true,
+          config: (url) => ({
+            ...providerCfg(url),
+            agent: { custom: { model: "test/test-model" } },
+          }),
+        },
+      )
+    }),
+  )
 })
 
 describe("Actor.spawn agent_id persistence", () => {
@@ -668,7 +789,7 @@ describe("Actor forkContext lifecycle", () => {
         })
 
         // Before cancel: forkContext must be present.
-        const before = yield* actor.getForkContext(result.actorID)
+        const before = yield* actor.getForkContext(result.sessionID, result.actorID)
         expect(before).toBeDefined()
         expect(before?.system).toEqual(["test-system"])
 
@@ -676,11 +797,67 @@ describe("Actor forkContext lifecycle", () => {
         yield* actor.cancel(result.sessionID, result.actorID, "forced")
 
         // After cancel: forkContext must be gone.
-        const after = yield* actor.getForkContext(result.actorID)
+        const after = yield* actor.getForkContext(result.sessionID, result.actorID)
         expect(after).toBeUndefined()
       }),
       { git: true, config: providerCfg },
     ),
+  )
+
+  pauseIt.live("delivered no-op cancel preserves forkContext while postStop is still running", () =>
+    Effect.gen(function* () {
+      const hit = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      postStopPause = { hit, release }
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(release, undefined).pipe(Effect.ignore)
+          yield* Effect.sync(() => {
+            postStopPause = undefined
+          })
+        }),
+      )
+      yield* provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const actor = yield* Actor.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "forkCtx delivered cancel",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          const forkContext = {
+            system: ["test-system"],
+            tools: {},
+            inheritedMessages: [],
+            parentPermission: [],
+            watermarkMsgID: MessageID.ascending(),
+            model: ref,
+          }
+          yield* llm.text("done")
+          const result = yield* actor.spawn({
+            mode: "subagent",
+            sessionID: parent.id,
+            agentType: "explore",
+            task: "noop",
+            context: "full",
+            tools: [],
+            background: true,
+            model: ref,
+            forkContext,
+          })
+
+          const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("1 second"))
+          expect(outcome.status).toBe("success")
+          yield* Deferred.await(hit).pipe(Effect.timeout("1 second"))
+
+          yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.timeout("1 second"))
+          expect((yield* actor.getForkContext(result.sessionID, result.actorID))?.system).toEqual(["test-system"])
+
+          yield* Deferred.succeed(release, undefined)
+        }),
+        { git: true, config: providerCfg },
+      )
+    }),
   )
 })
 
@@ -719,11 +896,70 @@ describe("mode × contextMode matrix", () => {
           forkContext: fakeForkCtx,
         })
 
-        const ctx = yield* actor.getForkContext(result.actorID)
+        const ctx = yield* actor.getForkContext(result.sessionID, result.actorID)
         expect(ctx).toBeDefined()
         expect(ctx?.system).toEqual(["test-system"])
 
         yield* actor.cancel(result.sessionID, result.actorID, "forced")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
+  it.live("subagent + full: forkContext is isolated per session (same actorID, different sessions)", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+
+        const sessionA = yield* session.create({
+          title: "iso A",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const sessionB = yield* session.create({
+          title: "iso B",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+
+        // One hang per background actor: each consumes a response, so both must
+        // stay parked to keep their fork contexts live until the assertions.
+        yield* llm.hang
+        yield* llm.hang
+
+        // Each session allocates its subagent id independently → both "explore-1".
+        const a = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: sessionA.id,
+          agentType: "explore",
+          task: "noop",
+          context: "full",
+          tools: [],
+          background: true,
+          model: ref,
+          forkContext: { ...fakeForkCtx, system: ["A"] },
+        })
+        const b = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: sessionB.id,
+          agentType: "explore",
+          task: "noop",
+          context: "full",
+          tools: [],
+          background: true,
+          model: ref,
+          forkContext: { ...fakeForkCtx, system: ["B"] },
+        })
+        expect(a.actorID).toBe("explore-1")
+        expect(b.actorID).toBe("explore-1")
+
+        // Each session's fork agent must read ITS OWN context, not the other's.
+        const ctxA = yield* actor.getForkContext(a.sessionID, a.actorID)
+        const ctxB = yield* actor.getForkContext(b.sessionID, b.actorID)
+        expect(ctxA?.system).toEqual(["A"])
+        expect(ctxB?.system).toEqual(["B"])
+
+        yield* actor.cancel(a.sessionID, a.actorID, "forced")
+        yield* actor.cancel(b.sessionID, b.actorID, "forced")
       }),
       { git: true, config: providerCfg },
     ),
@@ -754,7 +990,7 @@ describe("mode × contextMode matrix", () => {
           // no forkContext
         })
 
-        const ctx = yield* actor.getForkContext(result.actorID)
+        const ctx = yield* actor.getForkContext(result.sessionID, result.actorID)
         expect(ctx).toBeUndefined()
 
         yield* actor.cancel(result.sessionID, result.actorID, "forced")
@@ -790,7 +1026,7 @@ describe("mode × contextMode matrix", () => {
 
         // For peer, result.actorID === child.id (the new session id)
         expect(result.actorID).not.toBe(parent.id)
-        const ctx = yield* actor.getForkContext(result.actorID)
+        const ctx = yield* actor.getForkContext(result.sessionID, result.actorID)
         expect(ctx).toBeDefined()
         expect(ctx?.system).toEqual(["test-system"])
 
@@ -825,7 +1061,7 @@ describe("mode × contextMode matrix", () => {
           // no forkContext
         })
 
-        const ctx = yield* actor.getForkContext(result.actorID)
+        const ctx = yield* actor.getForkContext(result.sessionID, result.actorID)
         expect(ctx).toBeUndefined()
 
         yield* actor.cancel(result.sessionID, result.actorID, "forced")

@@ -176,7 +176,7 @@ export interface SpawnResult {
 export interface Interface {
   readonly spawn: (input: SpawnInput) => Effect.Effect<SpawnResult>
   readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
-  readonly getForkContext: (actorID: string) => Effect.Effect<ForkContext | undefined>
+  readonly getForkContext: (sessionID: SessionID, actorID: string) => Effect.Effect<ForkContext | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Actor") {}
@@ -197,18 +197,30 @@ export const layer = Layer.effect(
 
     // ForkContext snapshot per actor, captured at spawn for fork agents
     // (contextMode = "full"). Read by fork's runLoop (see prompt.ts) and
-    // cleared on terminal status. Fiber tracking moved to SessionRunState.
+    // cleared on terminal status. Keyed by (sessionID, actorID): subagent
+    // actorIDs (`<type>-<n>`) are only unique within a session, so a bare
+    // actorID would collide across concurrent sessions. Fiber tracking moved to
+    // SessionRunState.
     const forkContexts = new Map<string, ForkContext>()
     const cancelledActors = new Set<string>()
+    const deliveredActors = new Set<string>()
+    // Actors that are live locally — added at spawn BEFORE the actor becomes
+    // observable (registry row / onActorID reclaim exposure) and removed in the
+    // work fiber's onExit. Because there is no observable-but-not-live window, a
+    // cancel racing a spawn always sees the actor as live (and arms isCancelled),
+    // while "not live" reliably means finished (onExit ran, after runTurn stamped
+    // the terminal status) or registered by another path. cancel() relies on this
+    // to avoid clobbering a finished actor's recorded outcome.
+    const liveActors = new Set<string>()
     const actorKey = (sessionID: SessionID, actorID: string) => `${sessionID}:${actorID}`
     const isCancelled = (sessionID: SessionID, actorID: string) =>
       Effect.sync(() => cancelledActors.has(actorKey(sessionID, actorID)))
-    const markCancelled = (sessionID: SessionID, actorID: string) =>
-      Effect.sync(() => cancelledActors.add(actorKey(sessionID, actorID)))
-    const clearActorState = (key: string, actorID: string) =>
+    const clearActorState = (key: string) =>
       Effect.sync(() => {
-        forkContexts.delete(actorID)
+        forkContexts.delete(key)
         cancelledActors.delete(key)
+        deliveredActors.delete(key)
+        liveActors.delete(key)
       })
 
     // Real agent loop: marks the actor running, then drives a SessionPrompt.prompt
@@ -312,6 +324,17 @@ export const layer = Layer.effect(
                 })
                 .pipe(Effect.ignore)
             : Effect.void
+        const commitCancelled = Effect.fn("Actor.commitCancelled")(function* () {
+          yield* actorReg
+            .updateStatus(input.sessionID, input.actorID, {
+              status: "idle",
+              lastOutcome: "cancelled",
+              lastError: undefined,
+            })
+            .pipe(Effect.ignore)
+          yield* notify("cancelled", {})
+          yield* Deferred.succeed(outcome, { status: "cancelled" as const })
+        })
         const settleFailure = (cause: Cause.Cause<unknown>) =>
           Effect.gen(function* () {
             if (!(yield* Deferred.isDone(outcome))) {
@@ -323,7 +346,7 @@ export const layer = Layer.effect(
                 cancelled ? { status: "cancelled" as const } : { status: "failure" as const, error },
               )
             }
-            yield* clearActorState(key, input.actorID)
+            yield* clearActorState(key)
           })
 
         // Derive actor mode from spawn shape: peer creates a new session, subagent shares parent's
@@ -494,6 +517,14 @@ export const layer = Layer.effect(
                 // notification body (DW spec P3 §5.2); otherwise deliver the gate's
                 // reconciled text. The success outcome carries both the reconciled
                 // text + completion-gate fields AND structured when present.
+                const delivery = yield* Effect.sync(() => {
+                  deliveredActors.add(key)
+                  return cancelledActors.has(key) ? "cancelled" as const : "success" as const
+                })
+                if (delivery === "cancelled") {
+                  yield* commitCancelled()
+                  return
+                }
                 const deliveryText =
                   structured !== undefined ? JSON.stringify(structured) : (reconciledText ?? "(no output)")
                 yield* notify("completed", {
@@ -606,7 +637,7 @@ export const layer = Layer.effect(
             onFailure: settleFailure,
           }),
           Effect.onExit((exit) =>
-            Exit.isFailure(exit) ? settleFailure(exit.cause) : clearActorState(key, input.actorID),
+            Exit.isFailure(exit) ? settleFailure(exit.cause) : clearActorState(key),
           ),
         )
         const fiber = yield* work.pipe(Effect.forkIn(scope))
@@ -619,6 +650,9 @@ export const layer = Layer.effect(
         contextFrom: input.context === "full" ? input.sessionID : undefined,
         title: `${input.agentType}: ${input.task.slice(0, 40)}`,
       })
+      // Mark live before registration so a racing cancel always observes it (see
+      // spawnSubagent). Peer actorID === child session id. Removed in onExit.
+      yield* Effect.sync(() => liveActors.add(actorKey(child.id, child.id)))
       yield* actorReg.register({
         sessionID: child.id,
         actorID: child.id,
@@ -633,7 +667,7 @@ export const layer = Layer.effect(
         tools: input.tools,
       })
       if (input.forkContext) {
-        forkContexts.set(child.id, input.forkContext) // peer's actorID === child.id
+        forkContexts.set(actorKey(child.id, child.id), input.forkContext) // peer's actorID === child.id === sessionID
       }
       const { fiber, outcome } = yield* forkWork({
         sessionID: child.id,
@@ -655,6 +689,10 @@ export const layer = Layer.effect(
 
     const spawnSubagent = Effect.fn("Actor.spawnSubagent")(function* (input: SpawnInput) {
       const actorID = yield* actorReg.allocateActorID(input.sessionID, input.agentType)
+      // Mark live BEFORE the actor becomes observable (registry row below, then the
+      // onActorID reclaim callback) so a cancel racing the spawn always sees it as
+      // live and arms isCancelled. Removed in the work fiber's onExit.
+      yield* Effect.sync(() => liveActors.add(actorKey(input.sessionID, actorID)))
 
       const watermark = input.context === "full" ? yield* session.lastMainMessageID(input.sessionID) : undefined
 
@@ -678,7 +716,7 @@ export const layer = Layer.effect(
       if (input.onActorID) yield* Effect.sync(() => input.onActorID!(actorID)).pipe(Effect.ignore)
 
       if (input.forkContext) {
-        forkContexts.set(actorID, input.forkContext)
+        forkContexts.set(actorKey(input.sessionID, actorID), input.forkContext)
       }
 
       // Auto-inject return-format instruction for non-specialized subagents.
@@ -717,21 +755,53 @@ export const layer = Layer.effect(
 
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
-        if (mode === "graceful") yield* markCancelled(sessionID, actorID)
+        // Arm the cancel flag iff the actor is live, atomically with the liveness
+        // check (so it is never marked after its onExit cleanup → no stale flag) and
+        // BEFORE cascading. `isCancelled` is the mode-agnostic turn-boundary signal
+        // runTurn observes, so BOTH modes arm it: it stops the actor at its next
+        // turn even when there is no busy runner to interrupt — e.g. a cancel
+        // arriving in the idle/gap between preStop/gate/postStop re-entries, or a
+        // parent cancelled while the child cascade is still running. Forced mode
+        // additionally interrupts the current turn immediately below.
+        const key = actorKey(sessionID, actorID)
+        const live = yield* Effect.sync(() => {
+          if (!liveActors.has(key)) return false
+          if (deliveredActors.has(key)) return false
+          cancelledActors.add(key)
+          return true
+        })
+        // Cascade regardless — children may be live even when this actor is not.
         const children = yield* actorReg.listByParent(sessionID, actorID)
         yield* Effect.forEach(children, (c) => cancel(sessionID, c.actorID, mode), {
           concurrency: "unbounded",
           discard: true,
         })
-        yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
+        // Interrupt the live work: graceful detaches (non-blocking), forced is
+        // immediate. Not-live actors have no local fiber to interrupt.
+        if (live) yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
+        // Never clobber an already-delivered or finished terminal outcome. A FRESH
+        // read right before the stamp is the single guard that covers every state:
+        //  - finished / externally-terminal → skip (preserve the outcome);
+        //  - a delivered background actor still running its postStop loop → skip;
+        //  - the between-turns / final-delivery gap → stamp cancelled (the actor is
+        //    still live and not delivered, so cancel must win even if runTurn has
+        //    already written idle/success);
+        //  - running / pending / external-running (non-terminal) → stamp cancelled.
+        const existing = yield* actorReg.get(sessionID, actorID)
+        const delivered = yield* Effect.sync(() => deliveredActors.has(key))
+        const terminalShouldStay =
+          existing?.status === "idle" &&
+          existing.lastOutcome != null &&
+          (!live || delivered || existing.lastOutcome !== "success")
+        if (terminalShouldStay) return
         yield* actorReg
           .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
           .pipe(Effect.ignore)
-        yield* Effect.sync(() => forkContexts.delete(actorID))
+        yield* Effect.sync(() => forkContexts.delete(actorKey(sessionID, actorID)))
       })
 
-    const getForkContext = Effect.fn("Actor.getForkContext")(function* (actorID: string) {
-      return forkContexts.get(actorID)
+    const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
+      return forkContexts.get(actorKey(sessionID, actorID))
     })
 
     const impl = Service.of({ spawn, cancel, getForkContext })
