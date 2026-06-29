@@ -406,6 +406,28 @@ describe("file.ripgrep", () => {
     })
   })
 
+  test("fallback files lets positive globs override ignore files", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, ".git"), { recursive: true })
+        await Bun.write(path.join(dir, ".gitignore"), "ignored.txt\ndist/\n")
+        await Bun.write(path.join(dir, "ignored.txt"), "ignored")
+        await Bun.write(path.join(dir, "keep.txt"), "keep")
+        await fs.mkdir(path.join(dir, "dist"), { recursive: true })
+        await Bun.write(path.join(dir, "dist", "a.txt"), "dist")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      expect(await fallbackFiles(tmp.path, { glob: ["ignored.txt"] })).toContain("ignored.txt")
+      expect(await fallbackFiles(tmp.path, { glob: ["ignored.txt", "!ignored.txt"] })).not.toContain("ignored.txt")
+
+      expect(await fallbackFiles(tmp.path, { glob: ["dist/a.txt"] })).not.toContain(path.join("dist", "a.txt"))
+      expect(await fallbackFiles(tmp.path, { glob: ["dist", "dist/a.txt"] })).toContain(path.join("dist", "a.txt"))
+      expect(await fallbackFiles(tmp.path, { glob: ["dist/", "dist/a.txt"] })).toContain(path.join("dist", "a.txt"))
+    })
+  })
+
   test("fallback files honors global git ignore", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {

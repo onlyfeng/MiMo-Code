@@ -194,16 +194,30 @@ function globRule(glob: string) {
   return { negated, pattern }
 }
 
+function globTarget(posix: string, base: string, pattern: string, directory: boolean) {
+  if (directory && pattern.endsWith("/")) return `${posix}/`
+  return pattern.includes("/") ? posix : base
+}
+
 function matchesGlobs(rel: string, globs: string[]) {
   const posix = rel.split(path.sep).join("/")
   const base = posix.slice(posix.lastIndexOf("/") + 1)
   return globs.reduce(
     (included, glob) => {
       const rule = globRule(glob)
-      return Glob.match(rule.pattern, rule.pattern.includes("/") ? posix : base) ? !rule.negated : included
+      return Glob.match(rule.pattern, globTarget(posix, base, rule.pattern, false)) ? !rule.negated : included
     },
     !globs.some((g) => !g.startsWith("!")),
   )
+}
+
+function matchesDirectoryGlobs(rel: string, globs: string[]) {
+  const posix = rel.split(path.sep).join("/")
+  const base = posix.slice(posix.lastIndexOf("/") + 1)
+  return globs.reduce((included, glob) => {
+    const rule = globRule(glob)
+    return Glob.match(rule.pattern, globTarget(posix, base, rule.pattern, true)) ? !rule.negated : included
+  }, false)
 }
 
 function excludedByGlobs(rel: string, globs: string[]) {
@@ -211,8 +225,7 @@ function excludedByGlobs(rel: string, globs: string[]) {
   const base = posix.slice(posix.lastIndexOf("/") + 1)
   return globs.reduce((excluded, glob) => {
     const rule = globRule(glob)
-    const target = rule.pattern.endsWith("/") ? `${posix}/` : rule.pattern.includes("/") ? posix : base
-    return Glob.match(rule.pattern, target) ? rule.negated : excluded
+    return Glob.match(rule.pattern, globTarget(posix, base, rule.pattern, true)) ? rule.negated : excluded
   }, false)
 }
 
@@ -580,9 +593,11 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           const stat = options.follow && entry.isSymbolicLink() ? await nodeFs.promises.stat(fullPath).catch(() => undefined) : undefined
           const directory = entry.isDirectory() || stat?.isDirectory() === true
           const file = entry.isFile() || stat?.isFile() === true
-          if (isIgnored(fullPath, directory, contexts)) continue
+          const rel = path.relative(options.cwd, fullPath)
+          const ignored = isIgnored(fullPath, directory, contexts)
           if (directory) {
-            if (options.glob && excludedByGlobs(path.relative(options.cwd, fullPath), options.glob)) continue
+            if (ignored && !(options.glob && matchesDirectoryGlobs(rel, options.glob))) continue
+            if (options.glob && excludedByGlobs(rel, options.glob)) continue
             const seen = options.follow && options.seen ? new Set(options.seen) : options.seen
             if (options.follow && seen) {
               const real = await nodeFs.promises.realpath(fullPath).catch(() => fullPath)
@@ -591,6 +606,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
             }
             yield* walkDir(fullPath, { ...options, git, ignore: contexts, seen }, currentDepth + 1)
           } else if (file) {
+            if (ignored && !(options.glob && matchesGlobs(rel, options.glob))) continue
             yield fullPath
           }
         }
