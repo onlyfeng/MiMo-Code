@@ -2950,21 +2950,47 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               handle.message.time.completed = Date.now()
               yield* sessions.updateMessage(handle.message)
             })
+            // Static-prefix overflow is unrecoverable: compaction and checkpoint rebuild
+            // only shrink conversation messages, never the system prompt or tool schemas.
+            // Finalize a clear error (not a cancelled recovery placeholder) so the loop
+            // terminates instead of recomputing the same over-limit estimate forever.
+            const finalizeUnrecoverableOverflow = Effect.fn("SessionPrompt.finalizeUnrecoverableOverflow")(function* () {
+              if (handle.message.finish || handle.message.error || MessageV2.parts(handle.message.id).length > 0) return
+              handle.message.error = new MessageV2.ModelError({
+                message:
+                  "Request exceeds the model's usable context before any conversation history: the system prompt and tool schemas alone overflow the window, which compaction cannot recover. Reduce instructions (e.g. AGENTS.md), disable unused tools, or use a larger-context model.",
+              }).toObject()
+              handle.message.finish = "error"
+              handle.message.time.completed = Date.now()
+              yield* sessions.updateMessage(handle.message)
+              yield* bus.publish(Session.Event.Error, { sessionID, error: handle.message.error })
+            })
             const runStep = (processArgs: LLM.StreamInput) =>
               Effect.gen(function* () {
                 if (!isBoundedComputation) {
-                  const requestTokens = estimateRequestTokens({
-                    ...processArgs,
-                    // Estimate only the tool schemas the request will actually carry:
-                    // resolveTools is the same filter llm.ts applies before the call, so
-                    // it drops user-disabled (`lastUser.tools`) and permission-denied
-                    // tools. Counting the unfiltered set could false-trip preflight on
-                    // schemas the provider never receives — and since tool schemas are
-                    // static, compaction can't shrink them, so the turn would get stuck
-                    // in recovery instead of reaching the provider.
-                    tools: LLM.resolveTools(processArgs),
-                  })
-                  if (isRequestOverflow({ cfg: yield* config.get(), model: processArgs.model, requestTokens })) {
+                  // Estimate only the tool schemas the request will actually carry:
+                  // resolveTools is the same filter llm.ts applies before the call, so
+                  // it drops user-disabled (`lastUser.tools`) and permission-denied
+                  // tools. Counting the unfiltered set could false-trip preflight on
+                  // schemas the provider never receives.
+                  const tools = LLM.resolveTools(processArgs)
+                  const cfg = yield* config.get()
+                  const requestTokens = estimateRequestTokens({ ...processArgs, tools })
+                  if (isRequestOverflow({ cfg, model: processArgs.model, requestTokens })) {
+                    // If the fixed prefix (system + tool schemas) overflows even with zero
+                    // history, recovery can never bring the estimate down — terminate with
+                    // a clear error rather than looping through compaction.
+                    const staticTokens = estimateRequestTokens({ ...processArgs, tools, messages: [] })
+                    if (isRequestOverflow({ cfg, model: processArgs.model, requestTokens: staticTokens })) {
+                      yield* slog.warn("request preflight overflow: static prefix exceeds usable context", {
+                        sessionID,
+                        agentID: processArgs.agentID ?? "main",
+                        requestTokens,
+                        staticTokens,
+                      })
+                      yield* finalizeUnrecoverableOverflow()
+                      return "overflow-static" as const
+                    }
                     yield* slog.warn("request preflight overflow; routing to context recovery", {
                       sessionID,
                       agentID: processArgs.agentID ?? "main",
@@ -3147,6 +3173,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 yield* sessions.updateMessage(handle.message)
                 return "break" as const
               }
+
+              // Unrecoverable static-prefix overflow: break instead of looping
+              // through per-actor compaction (which can't shrink system/tools).
+              if (result === "overflow-static") return "break" as const
 
               // Overflow recovery owns this step. Skip empty-output/error
               // classification so the placeholder assistant doesn't terminate
@@ -3351,6 +3381,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               handle.message.structured = structured
               handle.message.finish = handle.message.finish ?? "stop"
               yield* sessions.updateMessage(handle.message)
+              return "break" as const
+            }
+
+            if (result === "overflow-static") {
+              // Unrecoverable static-prefix overflow: the error is already written.
+              // Break instead of routing to recovery so we don't loop forever.
               return "break" as const
             }
 

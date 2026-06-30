@@ -682,3 +682,29 @@ describe("request preflight overflow tool filtering", () => {
     expect(isRequestOverflow({ cfg, model, requestTokens })).toBe(false)
   })
 })
+
+// Regression for the unrecoverable-loop case flagged on PR #36: when the fixed
+// request prefix (system + tool schemas) overflows on its own, compaction can
+// never bring the estimate down — the loop must terminate, not recover. The
+// preflight tells the two apart by re-estimating with messages cleared.
+describe("request preflight overflow static prefix", () => {
+  // context 12K, input 8K, output 4K → usable 4K, trip threshold ~3.6K.
+  const model = createModel({ context: 12_000, input: 8_000, output: 4_000 })
+  const cfg = mockCfg()
+
+  test("static prefix that overflows on its own is unrecoverable", () => {
+    // System prompt alone exceeds the window; clearing messages doesn't help.
+    const staticTokens = estimateRequestTokens({ prebuiltSystem: ["s".repeat(20_000)], messages: [] })
+    expect(isRequestOverflow({ cfg, model, requestTokens: staticTokens })).toBe(true)
+  })
+
+  test("oversized message over a small static prefix stays recoverable", () => {
+    const messages = [{ role: "user", content: [{ type: "text", text: "m".repeat(20_000) }] }] as any
+    // The full request overflows...
+    const full = estimateRequestTokens({ prebuiltSystem: ["ok"], messages })
+    expect(isRequestOverflow({ cfg, model, requestTokens: full })).toBe(true)
+    // ...but with messages cleared the static prefix fits, so recovery can help.
+    const staticOnly = estimateRequestTokens({ prebuiltSystem: ["ok"], messages: [] })
+    expect(isRequestOverflow({ cfg, model, requestTokens: staticOnly })).toBe(false)
+  })
+})
