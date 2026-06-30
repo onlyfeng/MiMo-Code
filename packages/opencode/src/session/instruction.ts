@@ -9,6 +9,7 @@ import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "../global"
 import { Log } from "../util"
+import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "../util/text-truncate"
 import type { MessageV2 } from "./message-v2"
 import type { MessageID } from "./schema"
 
@@ -23,6 +24,14 @@ const FILES = [
 // When the project AGENTS.md has fewer than this many (trimmed) characters, treat it as
 // sparse and also load CLAUDE.md so its guidance isn't dropped by the first-match-wins rule.
 const CLAUDE_FALLBACK_MAX_CHARS = 500
+
+function capInstructionBlock(text: string) {
+  return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, "instructions")
+}
+
+function instructionBlock(source: string, content: string) {
+  return capInstructionBlock(`Instructions from: ${source}\n${content}`)
+}
 
 function globalFiles() {
   const files = []
@@ -191,8 +200,8 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Config.S
         return {
           paths,
           content: [
-            ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
-            ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
+            ...Array.from(paths).flatMap((item, i) => (files[i] ? [instructionBlock(item, files[i])] : [])),
+            ...urls.flatMap((item, i) => (remote[i] ? [instructionBlock(item, remote[i])] : [])),
           ],
         }
       })
@@ -239,7 +248,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Config.S
           set.add(found)
           const content = yield* read(found)
           if (content) {
-            results.push({ filepath: found, content: `Instructions from: ${found}\n${content}` })
+            results.push({ filepath: found, content: instructionBlock(found, content) })
           }
 
           current = path.dirname(current)

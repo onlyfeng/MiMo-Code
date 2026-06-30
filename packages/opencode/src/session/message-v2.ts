@@ -12,6 +12,7 @@ import { ProviderError } from "@/provider"
 import { iife } from "@/util/iife"
 import { errorMessage } from "@/util/error"
 import { isMedia } from "@/util/media"
+import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "@/util/text-truncate"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
@@ -27,6 +28,57 @@ interface FetchDecompressionError extends Error {
 
 export const SYNTHETIC_ATTACHMENT_PROMPT = "Attached image(s) from tool result:"
 export { isMedia }
+
+function capModelReplayToolText(text: string, label = "tool output", keep: "head" | "head+tail" = "head") {
+  return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, label, "before model replay", keep)
+}
+
+function stringifyReplayToolInput(input: unknown) {
+  const seen = new WeakSet<object>()
+  let transformed = false
+  const serialized =
+    JSON.stringify(input, (_key, value) => {
+      if (typeof value === "bigint") {
+        transformed = true
+        return value.toString()
+      }
+      if (typeof value === "function") {
+        transformed = true
+        return "[function]"
+      }
+      if (typeof value === "symbol") {
+        transformed = true
+        return value.toString()
+      }
+      if (value && typeof value === "object") {
+        if (seen.has(value)) {
+          transformed = true
+          return "[circular]"
+        }
+        seen.add(value)
+      }
+      return value
+    }) ?? String(input)
+  return { serialized, transformed }
+}
+
+function capModelReplayToolInput(input: unknown) {
+  const { serialized, transformed } = stringifyReplayToolInput(input)
+  if (Buffer.byteLength(serialized, "utf8") <= MODEL_VISIBLE_TEXT_CAP_BYTES) {
+    return transformed ? JSON.parse(serialized) : input
+  }
+  // Reserve room for the {"truncated":""} wrapper and JSON re-escaping so the
+  // replayed tool input serializes within the cap — some replay paths and
+  // downstream validators measure the serialized tool input against it.
+  const wrap = (s: string) => ({ truncated: s })
+  let budget = MODEL_VISIBLE_TEXT_CAP_BYTES - Buffer.byteLength(JSON.stringify(wrap("")), "utf8")
+  let result = wrap(capUtf8TextByBytes(serialized, budget, "tool input", "before model replay"))
+  while (budget > 0 && Buffer.byteLength(JSON.stringify(result), "utf8") > MODEL_VISIBLE_TEXT_CAP_BYTES) {
+    budget = Math.floor(budget * 0.9)
+    result = wrap(capUtf8TextByBytes(serialized, budget, "tool input", "before model replay"))
+  }
+  return result
+}
 
 export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
 export const AbortedError = NamedError.create("MessageAbortedError", z.object({ message: z.string() }))
@@ -757,7 +809,9 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
         if (part.type === "tool") {
           toolNames.add(part.tool)
           if (part.state.status === "completed") {
-            const outputText = part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output
+            const outputText = part.state.time.compacted
+              ? "[Old tool result content cleared]"
+              : capModelReplayToolText(part.state.output)
             const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
 
             // For providers that don't support media in tool results, extract media files
@@ -781,7 +835,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               type: ("tool-" + part.tool) as `tool-${string}`,
               state: "output-available",
               toolCallId: part.callID,
-              input: part.state.input,
+              input: capModelReplayToolInput(part.state.input),
               output,
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
               ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
@@ -794,8 +848,8 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
                 type: ("tool-" + part.tool) as `tool-${string}`,
                 state: "output-available",
                 toolCallId: part.callID,
-                input: part.state.input,
-                output,
+                input: capModelReplayToolInput(part.state.input),
+                output: capModelReplayToolText(output),
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
               })
@@ -804,8 +858,8 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
                 type: ("tool-" + part.tool) as `tool-${string}`,
                 state: "output-error",
                 toolCallId: part.callID,
-                input: part.state.input,
-                errorText: part.state.error,
+                input: capModelReplayToolInput(part.state.input),
+                errorText: capModelReplayToolText(part.state.error, "tool error", "head+tail"),
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
               })
@@ -818,7 +872,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               type: ("tool-" + part.tool) as `tool-${string}`,
               state: "output-error",
               toolCallId: part.callID,
-              input: part.state.input,
+              input: capModelReplayToolInput(part.state.input),
               errorText: "[Tool execution was interrupted]",
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
               ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),

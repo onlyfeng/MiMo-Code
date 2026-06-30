@@ -588,6 +588,139 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("caps completed tool output before rebuilding model messages", async () => {
+    const userID = "m-user"
+    const assistantID = "m-assistant"
+    const longOutput = "x".repeat(60 * 1024)
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [
+          {
+            ...basePart(userID, "u1"),
+            type: "text",
+            text: "run tool",
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          {
+            ...basePart(assistantID, "a1"),
+            type: "tool",
+            callID: "call-1",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { cmd: "legacy" },
+              output: longOutput,
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    const value = ((result[2] as any).content[0].output as { type: "text"; value: string }).value
+
+    expect(value.length).toBeLessThan(longOutput.length)
+    expect(value).toContain("tool output truncated before model replay")
+  })
+
+  test("caps completed tool input before rebuilding model messages", async () => {
+    const userID = "m-user"
+    const assistantID = "m-assistant"
+    const longInput = "x".repeat(60 * 1024)
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [
+          {
+            ...basePart(userID, "u1"),
+            type: "text",
+            text: "run tool",
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          {
+            ...basePart(assistantID, "a1"),
+            type: "tool",
+            callID: "call-1",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { cmd: longInput },
+              output: "ok",
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    const replayInput = (result[1] as any).content[0].input
+    const serialized = JSON.stringify(replayInput)
+
+    expect(serialized.length).toBeLessThan(longInput.length)
+    expect(serialized).toContain("tool input truncated before model replay")
+  })
+
+  test("caps unserializable tool input before rebuilding model messages", async () => {
+    const userID = "m-user"
+    const assistantID = "m-assistant"
+    const circular: Record<string, unknown> = { count: 1n }
+    circular.self = circular
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [
+          {
+            ...basePart(userID, "u1"),
+            type: "text",
+            text: "run tool",
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          {
+            ...basePart(assistantID, "a1"),
+            type: "tool",
+            callID: "call-1",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: circular,
+              output: "ok",
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    const replayInput = (result[1] as any).content[0].input
+
+    expect(replayInput).toEqual({ count: "1", self: "[circular]" })
+  })
+
   test("converts assistant tool error into error-text tool result", async () => {
     const userID = "m-user"
     const assistantID = "m-assistant"

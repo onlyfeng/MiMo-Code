@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { recallHintLines } from "../../src/session/prompt"
+import { recallHintLines, shouldInjectActiveRecallReminder } from "../../src/session/prompt"
 
 describe("recallHintLines", () => {
   test("json mode (no tool config): task and actor use JSON form", () => {
@@ -33,5 +33,24 @@ describe("recallHintLines", () => {
     expect(lines[0]).toContain("memory(")
     expect(lines[1]).toBe("- task list")
     expect(lines[2]).toBe("- actor status <actor_id>")
+  })
+})
+
+describe("shouldInjectActiveRecallReminder", () => {
+  test("injects for normal text requests", () => {
+    expect(shouldInjectActiveRecallReminder({})).toBe(true)
+    expect(shouldInjectActiveRecallReminder({ format: { type: "text" } })).toBe(true)
+  })
+
+  test("skips json_schema requests", () => {
+    expect(
+      shouldInjectActiveRecallReminder({
+        format: {
+          type: "json_schema",
+          schema: { type: "object", properties: {}, additionalProperties: false },
+          retryCount: 0,
+        },
+      }),
+    ).toBe(false)
   })
 })

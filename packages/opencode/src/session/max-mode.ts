@@ -14,6 +14,7 @@ import {
 } from "./prompt/text-ngram-detection"
 import type { Permission } from "@/permission"
 import { Log } from "@/util"
+import { capTextByChars, JUDGE_FIELD_MAX_CHARS, JUDGE_TOOL_INPUT_MAX_CHARS } from "@/util/text-truncate"
 
 const log = Log.create({ service: "session.max-mode" })
 
@@ -21,6 +22,14 @@ export const DEFAULT_CANDIDATES = 5
 
 /** Name of the built-in max-mode primary agent. */
 export const MAX_MODE_AGENT = "max"
+
+function stringifyToolInput(input: unknown) {
+  try {
+    return JSON.stringify(input)
+  } catch {
+    return JSON.stringify("[unserializable tool input]")
+  }
+}
 
 /** One candidate's collected output from a propose-only stream. */
 export type Candidate = {
@@ -203,15 +212,22 @@ export const runCandidate = (
   )
 
 /** Render a candidate compactly for the judge. `label` is its judge-facing index. */
-function renderCandidate(c: Candidate, label: number): string {
+export function renderCandidate(c: Candidate, label: number): string {
   const tools =
     c.toolCalls.length === 0
       ? "(no tool calls — final answer / text only)"
       : c.toolCalls
-          .map((t) => `  - ${t.toolName}(${JSON.stringify(t.input)})`)
+          .map((t) => {
+            const input = capTextByChars(stringifyToolInput(t.input), JUDGE_TOOL_INPUT_MAX_CHARS, "tool input")
+            return `  - ${t.toolName}(${input})`
+          })
           .join("\n")
-  const reasoning = c.reasoning.trim() ? c.reasoning.trim() : "(no reasoning emitted)"
-  const text = c.text.trim() ? c.text.trim() : "(no text emitted)"
+  const reasoning = c.reasoning.trim()
+    ? capTextByChars(c.reasoning.trim(), JUDGE_FIELD_MAX_CHARS, "candidate reasoning")
+    : "(no reasoning emitted)"
+  const text = c.text.trim()
+    ? capTextByChars(c.text.trim(), JUDGE_FIELD_MAX_CHARS, "candidate message")
+    : "(no text emitted)"
   return [
     `### Candidate ${label}`,
     `Reasoning:\n${reasoning}`,

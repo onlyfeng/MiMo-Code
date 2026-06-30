@@ -17,7 +17,7 @@ import { SessionPrune } from "./prune"
 import { SessionCheckpoint } from "./checkpoint"
 import { SessionCompaction } from "./compaction"
 import { computeLastMessageInfo } from "./last-message-info"
-import { pressureLevel, isOverflow as overflowCheck } from "./overflow"
+import { estimateRequestTokens, isRequestOverflow, pressureLevel, isOverflow as overflowCheck } from "./overflow"
 import { Config } from "@/config"
 import { Global } from "@/global"
 import { Bus } from "../bus"
@@ -95,9 +95,14 @@ import { ActorRegistry } from "@/actor/registry"
 import { Metrics } from "@/metrics"
 import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
 import { shouldAutoDream, shouldAutoDistill, DREAM_TASK, DISTILL_TASK, AUTO_DREAM_TITLE, AUTO_DISTILL_TITLE } from "./auto-dream"
+import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "../util/text-truncate"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
+
+function capSyntheticText(text: string, label: string) {
+  return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, label)
+}
 
 // Recall-reminder hints, rendered in each tool's configured invocation style so
 // shell-mode sessions never see a JSON-shaped example (which primes models to
@@ -112,6 +117,10 @@ export function recallHintLines(toolCfg: ToolStyleConfig | undefined): string[] 
       : `- actor({ operation: "status", actor_id: "<id>" })`
   // memory has no shell form (no shell.parse) → always JSON.
   return [`- memory({ operation: "search", query: "<keyword>" })`, taskHint, actorHint]
+}
+
+export function shouldInjectActiveRecallReminder(input: { format?: MessageV2.User["format"] } | undefined) {
+  return input?.format?.type !== "json_schema"
 }
 
 /**
@@ -1456,7 +1465,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     sessionID: input.sessionID,
                     type: "text",
                     synthetic: true,
-                    text: c.text,
+                    text: capSyntheticText(c.text, "MCP resource text"),
                   })
                 } else if ("blob" in c && c.blob) {
                   const mime = "mimeType" in c ? c.mimeType : part.mime
@@ -1501,7 +1510,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     sessionID: input.sessionID,
                     type: "text",
                     synthetic: true,
-                    text: decodeDataUrl(part.url),
+                    text: capSyntheticText(decodeDataUrl(part.url), "data text"),
                   },
                   { ...part, messageID: info.id, sessionID: input.sessionID },
                 ]
@@ -2472,8 +2481,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // memory.search / task / actor / Read stays warm across many
           // post-rebuild turns. Cost ~120 tokens per turn, conditional on
           // hasMemoryOrTasks.
-          const lastUserMsgForRecall = msgs.findLast((m) => m.info.role === "user")
-          if (lastUserMsgForRecall) {
+          const lastUserMsgForRecall = msgs.findLast(
+            (m): m is MessageV2.WithParts & { info: MessageV2.User } => m.info.role === "user",
+          )
+          if (lastUserMsgForRecall && shouldInjectActiveRecallReminder(lastUserMsgForRecall.info)) {
             const hasRecallTarget = yield* checkpoint
               .hasMemoryOrTasks(sessionID)
               .pipe(Effect.catch(() => Effect.succeed(false)))
@@ -2521,12 +2532,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             continue
           }
 
+          // Resolve the agent for this iteration once. Both bounded overflow
+          // placeholder recovery and the management hooks below reuse it.
+          const agent = yield* agents.get(lastUser.agent)
+          const isBoundedComputation =
+            agent?.native === true && agent?.hidden === true
+
           if (lastAssistant) {
             const classification = classifyAssistantStep({
               phase: "existing-assistant",
               lastUser,
               assistant: lastAssistant,
               parts: lastAssistantMsg?.parts ?? [],
+              recoverOverflowPlaceholder: isBoundedComputation,
             })
             if (classification.type === "filtered") {
               yield* writeContentFilterError({ assistant: lastAssistant })
@@ -2708,15 +2726,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
           }
 
-          // Resolve the agent for this iteration once. Both the management
-          // hooks below (fireCheckpoints, overflow handler) and the existing
-          // agent-not-found check later in the iteration reuse this binding.
+          // Bounded computation is resolved above so existing-assistant overflow
+          // placeholders use the same policy as the management hooks below.
           // Bounded computation agents (native + hidden — currently title,
           // summary, checkpoint-writer) are exempt from context management;
           // see docs/superpowers/specs/2026-04-28-bounded-computation-agents-design.md
-          const agent = yield* agents.get(lastUser.agent)
-          const isBoundedComputation =
-            agent?.native === true && agent?.hidden === true
 
           // Fire background checkpoint writers for any newly-crossed thresholds
           // based on the latest completed assistant message's tokens. Must run
@@ -2914,24 +2928,64 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 ? (message: string | undefined) =>
                     status.set(sessionID, message ? { type: "busy", message } : { type: "busy" })
                 : undefined
+            const captureStructuredFromToolPart = () => {
+              if (structured !== undefined || format.type !== "json_schema") return
+              const part = MessageV2.parts(handle.message.id).find(
+                (part) => part.type === "tool" && part.tool === "StructuredOutput" && part.state.status === "completed",
+              )
+              if (part?.type === "tool" && part.state.status === "completed") structured = part.state.input
+            }
             // Skip maxMode on the final step: it must honor `toolChoice: "none"` to
             // force a text-only response and end the loop. runMaxStep ignores toolChoice
             // (candidates run propose-only, then the winner's tool calls are replayed and
             // executed), so routing the last step through it would let the agent call
             // tools past its step cap. Falling back to handle.process keeps the cap
             // enforced for every path — fork and main alike.
+            const finalizeOverflowAssistant = Effect.fn("SessionPrompt.finalizeOverflowAssistant")(function* () {
+              if (handle.message.finish || handle.message.error || MessageV2.parts(handle.message.id).length > 0) return
+              handle.message.error = new MessageV2.AbortedError({
+                message: "Request overflow triggered context recovery",
+              }).toObject()
+              handle.message.finish = "cancelled"
+              handle.message.time.completed = Date.now()
+              yield* sessions.updateMessage(handle.message)
+            })
             const runStep = (processArgs: LLM.StreamInput) =>
-              useMaxMode && !isLastStep
-                ? MaxMode.runMaxStep({
+              Effect.gen(function* () {
+                if (!isBoundedComputation) {
+                  const requestTokens = estimateRequestTokens({
                     ...processArgs,
-                    handle,
-                    llm,
-                    candidates: maxModeCfg?.candidates,
-                    // Only the main agent owns session status; subagents (incl. forks)
-                    // pass undefined so runMaxStep's internal no-op guard skips the write.
-                    setStatus: maxModeSetStatus,
+                    // Static system/tool overhead is large and already bounded at the
+                    // injection sources; this preflight guard only caps dynamic payloads.
+                    prebuiltSystem: [],
+                    system: [],
+                    tools: undefined,
                   })
-                : handle.process(processArgs)
+                  if (isRequestOverflow({ cfg: yield* config.get(), model: processArgs.model, requestTokens })) {
+                    yield* slog.warn("request preflight overflow; routing to context recovery", {
+                      sessionID,
+                      agentID: processArgs.agentID ?? "main",
+                      requestTokens,
+                    })
+                    yield* finalizeOverflowAssistant()
+                    return "overflow" as const
+                  }
+                }
+
+                const result = yield* (useMaxMode && !isLastStep
+                  ? MaxMode.runMaxStep({
+                      ...processArgs,
+                      handle,
+                      llm,
+                      candidates: maxModeCfg?.candidates,
+                      // Only the main agent owns session status; subagents (incl. forks)
+                      // pass undefined so runMaxStep's internal no-op guard skips the write.
+                      setStatus: maxModeSetStatus,
+                    })
+                  : handle.process(processArgs))
+                if (result === "overflow") yield* finalizeOverflowAssistant()
+                return result
+              })
 
             // Determine if this iteration is for a fork agent (contextMode === "full").
             // Fork agents use the frozen ForkContext snapshot captured at spawn time
@@ -3083,11 +3137,31 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 return "break" as const
               }
 
+              captureStructuredFromToolPart()
               if (structured !== undefined) {
                 handle.message.structured = structured
                 handle.message.finish = handle.message.finish ?? "stop"
                 yield* sessions.updateMessage(handle.message)
                 return "break" as const
+              }
+
+              // Overflow recovery owns this step. Skip empty-output/error
+              // classification so the placeholder assistant doesn't terminate
+              // the loop before compaction/rebuild gets a chance to run.
+              if (result === "overflow") {
+                if (!isBoundedComputation) {
+                  yield* compaction
+                    .create({
+                      sessionID,
+                      agent: lastUser.agent,
+                      model: { providerID: model.providerID, modelID: model.id },
+                      auto: true,
+                      overflow: true,
+                      agentID: lastUser.agentID,
+                    })
+                    .pipe(Effect.ignore)
+                }
+                return "continue" as const
               }
 
               const forkClassification = classifyAssistantStep({
@@ -3129,20 +3203,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               if (forkClassification.type === "final" && forkClassification.degraded)
                 yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
               if (result === "stop") return "break" as const
-              // Fork agents are always subagents (lastUser.agentID is set); use
-              // per-actor compaction on overflow (same as non-fork subagent path).
-              if (!isBoundedComputation && result === "overflow") {
-                yield* compaction
-                  .create({
-                    sessionID,
-                    agent: lastUser.agent,
-                    model: { providerID: model.providerID, modelID: model.id },
-                    auto: true,
-                    overflow: true,
-                    agentID: lastUser.agentID,
-                  })
-                  .pipe(Effect.ignore)
-              }
               return "continue" as const
             }
 
@@ -3283,11 +3343,83 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return "break" as const
             }
 
+            captureStructuredFromToolPart()
             if (structured !== undefined) {
               handle.message.structured = structured
               handle.message.finish = handle.message.finish ?? "stop"
               yield* sessions.updateMessage(handle.message)
               return "break" as const
+            }
+
+            if (result === "overflow") {
+              if (!isBoundedComputation) {
+                // Subagent overflow → per-actor compaction. Insert a boundary
+                // tagged with the subagent's agent_id; the next runLoop iteration
+                // will see a trimmed context (filterCompactedEffect stops at
+                // the boundary).
+                // Gate must exclude "main" — see comment at the matching gate
+                // earlier in this file (~line 1716) and at checkpoint.ts:715.
+                if (lastUser.agentID && lastUser.agentID !== "main") {
+                  yield* compaction
+                    .create({
+                      sessionID,
+                      agent: lastUser.agent,
+                      model: { providerID: model.providerID, modelID: model.id },
+                      auto: true,
+                      overflow: true,
+                      agentID: lastUser.agentID,
+                    })
+                    .pipe(Effect.ignore)
+                  return "continue" as const
+                }
+
+                // Main-agent provider-signalled overflow: insert a checkpoint
+                // boundary marker (never deletes). Prefer rebuild over compaction:
+                // if a writer is running or finished, wait (bounded) and rebuild
+                // from it. Fall back to compaction only when no boundary exists.
+                const writerRunning = yield* checkpoint.isWriterRunning(sessionID)
+                  .pipe(Effect.catch(() => Effect.succeed(false)))
+                const hasCP = yield* checkpoint.hasCheckpoint(sessionID)
+                  .pipe(Effect.catch(() => Effect.succeed(false)))
+
+                if (writerRunning || hasCP) {
+                  yield* checkpoint.waitForWriter(sessionID).pipe(Effect.ignore)
+                  const boundary2 = yield* checkpoint.lastBoundary(sessionID)
+                    .pipe(Effect.catch(() => Effect.succeed(undefined)))
+                  const boundary2Msg = boundary2 ? msgs.find((m) => m.info.id === boundary2) : undefined
+                  const inserted2 = boundary2
+                    ? yield* checkpoint
+                        .insertRebuildBoundary({
+                          sessionID,
+                          boundary: boundary2,
+                          lastMessageInfo: computeLastMessageInfo(msgs.map((m) => m.info)),
+                          agentID: lastUser.agentID,
+                          agent: lastUser.agent,
+                          model: { providerID: model.providerID, modelID: model.id },
+                          boundaryCreatedAt: boundary2Msg?.info.time.created,
+                        })
+                        .pipe(Effect.catch(() => Effect.succeed(false)))
+                    : false
+
+                  if (inserted2) {
+                    yield* prune.resetThresholds(sessionID)
+                    return "continue" as const
+                  }
+                }
+
+                // F39: no checkpoint — fall back to compaction (LLM-driven lossy summary).
+                yield* compaction
+                  .create({
+                    sessionID,
+                    agent: lastUser.agent,
+                    model: { providerID: model.providerID, modelID: model.id },
+                    auto: true,
+                    overflow: true,
+                    agentID: lastUser.agentID,
+                  })
+                  .pipe(Effect.ignore)
+              }
+              return "continue" as const
             }
 
             const classification = classifyAssistantStep({
@@ -3327,73 +3459,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             if (classification.type === "final" && classification.degraded)
               yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
             if (result === "stop") return "break" as const
-            if (!isBoundedComputation && result === "overflow") {
-              // Subagent overflow → per-actor compaction. Insert a boundary
-              // tagged with the subagent's agent_id; the next runLoop iteration
-              // will see a trimmed context (filterCompactedEffect stops at
-              // the boundary).
-              // Gate must exclude "main" — see comment at the matching gate
-              // earlier in this file (~line 1716) and at checkpoint.ts:715.
-              if (lastUser.agentID && lastUser.agentID !== "main") {
-                yield* compaction
-                  .create({
-                    sessionID,
-                    agent: lastUser.agent,
-                    model: { providerID: model.providerID, modelID: model.id },
-                    auto: true,
-                    overflow: true,
-                    agentID: lastUser.agentID,
-                  })
-                  .pipe(Effect.ignore)
-                return "continue" as const
-              }
-
-              // Main-agent provider-signalled overflow: insert a checkpoint
-              // boundary marker (never deletes). Prefer rebuild over compaction:
-              // if a writer is running or finished, wait (bounded) and rebuild
-              // from it. Fall back to compaction only when no boundary exists.
-              const writerRunning = yield* checkpoint.isWriterRunning(sessionID)
-                .pipe(Effect.catch(() => Effect.succeed(false)))
-              const hasCP = yield* checkpoint.hasCheckpoint(sessionID)
-                .pipe(Effect.catch(() => Effect.succeed(false)))
-
-              if (writerRunning || hasCP) {
-                yield* checkpoint.waitForWriter(sessionID).pipe(Effect.ignore)
-                const boundary2 = yield* checkpoint.lastBoundary(sessionID)
-                  .pipe(Effect.catch(() => Effect.succeed(undefined)))
-                const boundary2Msg = boundary2 ? msgs.find((m) => m.info.id === boundary2) : undefined
-                const inserted2 = boundary2
-                  ? yield* checkpoint
-                      .insertRebuildBoundary({
-                        sessionID,
-                        boundary: boundary2,
-                        lastMessageInfo: computeLastMessageInfo(msgs.map((m) => m.info)),
-                        agentID: lastUser.agentID,
-                        agent: lastUser.agent,
-                        model: { providerID: model.providerID, modelID: model.id },
-                        boundaryCreatedAt: boundary2Msg?.info.time.created,
-                      })
-                      .pipe(Effect.catch(() => Effect.succeed(false)))
-                  : false
-
-                if (inserted2) {
-                  yield* prune.resetThresholds(sessionID)
-                  return "continue" as const
-                }
-              }
-
-              // F39: no checkpoint — fall back to compaction (LLM-driven lossy summary).
-              yield* compaction
-                .create({
-                  sessionID,
-                  agent: lastUser.agent,
-                  model: { providerID: model.providerID, modelID: model.id },
-                  auto: true,
-                  overflow: true,
-                  agentID: lastUser.agentID,
-                })
-                .pipe(Effect.ignore)
-            }
             return "continue" as const
           }).pipe(Effect.ensuring(instruction.clear(handle.message.id)))
 
@@ -3577,7 +3642,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const sh = Shell.preferred()
         const results = yield* Effect.promise(() =>
           Promise.all(
-            shellMatches.map(async ([, cmd]) => (await Process.text([cmd], { shell: sh, nothrow: true })).text),
+            shellMatches.map(async ([, cmd]) =>
+              capSyntheticText((await Process.text([cmd], { shell: sh, nothrow: true })).text, "command shell expansion"),
+            ),
           ),
         )
         let index = 0
@@ -3612,7 +3679,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       let parts: PromptInput["parts"]
       if (isSubtask) {
         const promptText = cmd.source === "skill"
-          ? templateCommand + (input.arguments.trim() ? "\n\n" + input.arguments : "")
+          ? capSyntheticText(templateCommand, "skill command content") + (input.arguments.trim() ? "\n\n" + input.arguments : "")
           : (templateParts.find((y): y is typeof y & { type: "text"; text: string } => y.type === "text"))?.text ?? ""
         parts = [
           {
@@ -3630,7 +3697,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           : `/${input.command}`
         const skillPart = {
           type: "text" as const,
-          text: `<skill_content name="${input.command}">\n${templateCommand}\n</skill_content>`,
+          text: `<skill_content name="${input.command}">\n${capSyntheticText(templateCommand, "skill command content")}\n</skill_content>`,
           synthetic: true,
         }
         const attachments = templateParts.filter((p): p is Exclude<typeof p, { type: "text" }> => p.type !== "text")

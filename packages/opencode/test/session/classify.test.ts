@@ -275,6 +275,35 @@ describe("classifyAssistantStep", () => {
     ).toEqual({ type: "final" })
   })
 
+  test("existing-assistant phase + empty cancelled overflow placeholder => continue", () => {
+    expect(
+      classifyAssistantStep({
+        phase: "existing-assistant",
+        lastUser: userInfo("m-1"),
+        assistant: assistantInfo("m-2", {
+          finish: "cancelled",
+          error: new MessageV2.AbortedError({ message: "Request overflow triggered context recovery" }).toObject(),
+        }),
+        parts: [],
+        recoverOverflowPlaceholder: true,
+      }),
+    ).toEqual({ type: "continue" })
+  })
+
+  test("existing-assistant phase + empty cancelled placeholder without recovery intent => failed", () => {
+    expect(
+      classifyAssistantStep({
+        phase: "existing-assistant",
+        lastUser: userInfo("m-1"),
+        assistant: assistantInfo("m-2", {
+          finish: "cancelled",
+          error: new MessageV2.AbortedError({ message: "Request overflow triggered context recovery" }).toObject(),
+        }),
+        parts: [],
+      }),
+    ).toEqual({ type: "failed", reason: "MessageAbortedError" })
+  })
+
   test("assistant.summary => final (terminal, never nudge-able)", () => {
     expect(
       classifyAssistantStep({
