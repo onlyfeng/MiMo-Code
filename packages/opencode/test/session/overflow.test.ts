@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { estimateRequestTokens, isOverflow, isRequestOverflow, pressureLevel, usable } from "../../src/session/overflow"
+import { LLM } from "../../src/session/llm"
 import { Token } from "../../src/util"
 import { Session as SessionNs } from "../../src/session"
 import type { Provider } from "../../src/provider"
@@ -625,5 +626,85 @@ describe("request preflight overflow", () => {
     const limit = usable({ cfg, model })
 
     expect(isRequestOverflow({ cfg, model, requestTokens: limit })).toBe(false)
+  })
+})
+
+// Regression for the over-count flagged on PR #36: preflight must estimate only
+// the tool schemas the request will actually carry. resolveTools is the same
+// filter llm.ts applies before the call (drops user-disabled `lastUser.tools`
+// and permission-denied tools), so a turn that pins a narrow toolset must not
+// trip overflow on schemas the provider never receives — tool schemas are
+// static, so compaction could never shrink them back out of recovery.
+describe("request preflight overflow tool filtering", () => {
+  // Big enough that, on its own, the schema pushes a small-context model over
+  // the preflight threshold; small enough to stay under the 80KB schema cap.
+  const bigTool = () => ({
+    description: "d".repeat(20_000),
+    inputSchema: { type: "object", properties: { path: { type: "string" } } },
+  })
+  const keepTool = () => ({
+    description: "ok",
+    inputSchema: { type: "object", properties: {} },
+  })
+  const messages = [{ role: "user", content: [{ type: "text", text: "hello" }] }] as any
+  // context 12K, input 8K, output 4K → usable 4K, trip threshold ~3.6K.
+  const model = createModel({ context: 12_000, input: 8_000, output: 4_000 })
+  const cfg = mockCfg()
+
+  test("unfiltered large tool schema trips preflight on a small-context model", () => {
+    const requestTokens = estimateRequestTokens({ messages, tools: { bigTool: bigTool(), keep: keepTool() } })
+    expect(isRequestOverflow({ cfg, model, requestTokens })).toBe(true)
+  })
+
+  test("per-turn disabled tool (lastUser.tools) is excluded from the estimate", () => {
+    const filtered = LLM.resolveTools({
+      tools: { bigTool: bigTool(), keep: keepTool() },
+      agent: { name: "test", permission: [], hardPermission: [] },
+      permission: undefined,
+      user: { tools: { bigTool: false } },
+    } as any)
+
+    expect(Object.keys(filtered)).toEqual(["keep"])
+    const requestTokens = estimateRequestTokens({ messages, tools: filtered })
+    expect(isRequestOverflow({ cfg, model, requestTokens })).toBe(false)
+  })
+
+  test("permission-denied tool is excluded from the estimate", () => {
+    const filtered = LLM.resolveTools({
+      tools: { bigTool: bigTool(), keep: keepTool() },
+      agent: { name: "test", permission: [{ permission: "bigTool", pattern: "*", action: "deny" }], hardPermission: [] },
+      permission: undefined,
+      user: {},
+    } as any)
+
+    expect(Object.keys(filtered)).toEqual(["keep"])
+    const requestTokens = estimateRequestTokens({ messages, tools: filtered })
+    expect(isRequestOverflow({ cfg, model, requestTokens })).toBe(false)
+  })
+})
+
+// Regression for the unrecoverable-loop case flagged on PR #36: when the fixed
+// request prefix (system + tool schemas) overflows on its own, compaction can
+// never bring the estimate down — the loop must terminate, not recover. The
+// preflight tells the two apart by re-estimating with messages cleared.
+describe("request preflight overflow static prefix", () => {
+  // context 12K, input 8K, output 4K → usable 4K, trip threshold ~3.6K.
+  const model = createModel({ context: 12_000, input: 8_000, output: 4_000 })
+  const cfg = mockCfg()
+
+  test("static prefix that overflows on its own is unrecoverable", () => {
+    // System prompt alone exceeds the window; clearing messages doesn't help.
+    const staticTokens = estimateRequestTokens({ prebuiltSystem: ["s".repeat(20_000)], messages: [] })
+    expect(isRequestOverflow({ cfg, model, requestTokens: staticTokens })).toBe(true)
+  })
+
+  test("oversized message over a small static prefix stays recoverable", () => {
+    const messages = [{ role: "user", content: [{ type: "text", text: "m".repeat(20_000) }] }] as any
+    // The full request overflows...
+    const full = estimateRequestTokens({ prebuiltSystem: ["ok"], messages })
+    expect(isRequestOverflow({ cfg, model, requestTokens: full })).toBe(true)
+    // ...but with messages cleared the static prefix fits, so recovery can help.
+    const staticOnly = estimateRequestTokens({ prebuiltSystem: ["ok"], messages: [] })
+    expect(isRequestOverflow({ cfg, model, requestTokens: staticOnly })).toBe(false)
   })
 })

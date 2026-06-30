@@ -340,6 +340,50 @@ function preflightOverflowCfg(url: string) {
   }
 }
 
+function staticPreflightOverflowCfg(url: string) {
+  const base = providerCfg(url)
+  return {
+    ...base,
+    provider: {
+      ...base.provider,
+      test: {
+        ...base.provider.test,
+        models: {
+          ...base.provider.test.models,
+          "test-model": {
+            ...base.provider.test.models["test-model"],
+            limit: { context: 16_000, output: 1_000 },
+          },
+        },
+      },
+    },
+  }
+}
+
+function recoverableOverflowCfg(url: string) {
+  const base = providerCfg(url)
+  return {
+    ...base,
+    provider: {
+      ...base.provider,
+      test: {
+        ...base.provider.test,
+        models: {
+          ...base.provider.test.models,
+          "test-model": {
+            ...base.provider.test.models["test-model"],
+            // Large enough that the static prefix (system + tool schemas) fits well
+            // under the usable window, so only an oversized message trips preflight —
+            // a recoverable overflow that routes to compaction, not an unrecoverable
+            // static-prefix overflow.
+            limit: { context: 120_000, output: 1_000 },
+          },
+        },
+      },
+    },
+  }
+}
+
 function maxModeProviderCfg(url: string) {
   return {
     ...providerCfg(url),
@@ -492,7 +536,9 @@ it.live("request preflight overflow finalizes its placeholder assistant", () =>
       const prompt = yield* SessionPrompt.Service
       const sessions = yield* Session.Service
       const chat = yield* sessions.create({ title: "Preflight overflow" })
-      yield* user(chat.id, "hello " + "x".repeat(6_000))
+      // The oversized message (not the static prefix) trips preflight, so this is a
+      // recoverable overflow: it finalizes a cancelled placeholder and routes to recovery.
+      yield* user(chat.id, "hello " + "x".repeat(400 * 1024))
 
       const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
       yield* Effect.addFinalizer(() =>
@@ -520,7 +566,50 @@ it.live("request preflight overflow finalizes its placeholder assistant", () =>
       }
       expect(assistant.parts).toEqual([])
     }),
-    { git: true, config: preflightOverflowCfg },
+    { git: true, config: recoverableOverflowCfg },
+  ),
+)
+
+it.live("request preflight overflow terminates on unrecoverable static prefix", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      yield* Effect.promise(() => Bun.write(path.join(dir, "AGENTS.md"), "x".repeat(60 * 1024)))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Static preflight overflow" })
+      yield* user(chat.id, "hello")
+
+      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          yield* prompt.cancel(chat.id).pipe(Effect.ignore)
+          yield* Fiber.interrupt(fiber).pipe(Effect.ignore)
+        }),
+      )
+
+      const assistant = yield* Effect.gen(function* () {
+        while (true) {
+          const messages = yield* sessions.messages({ sessionID: chat.id })
+          const match = messages.find((msg) => msg.info.role === "assistant")
+          if (match?.info.role === "assistant" && (match.info.finish || match.info.error || match.parts.length > 0)) {
+            return match
+          }
+          yield* Effect.sleep(10)
+        }
+      }).pipe(Effect.timeout("10 seconds"))
+
+      expect(assistant.info.role).toBe("assistant")
+      if (assistant.info.role === "assistant") {
+        // The static prefix (60KB AGENTS.md) alone overflows the 16K window; compaction
+        // can't shrink it, so the turn terminates with a clear error instead of looping
+        // through recovery.
+        expect(assistant.info.finish).toBe("error")
+        expect(assistant.info.error?.name).toBe("ModelError")
+      }
+      expect(assistant.parts).toEqual([])
+      expect(yield* llm.hits).toHaveLength(0)
+    }),
+    { git: true, config: staticPreflightOverflowCfg },
   ),
 )
 
