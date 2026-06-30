@@ -2953,7 +2953,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const runStep = (processArgs: LLM.StreamInput) =>
               Effect.gen(function* () {
                 if (!isBoundedComputation) {
-                  const requestTokens = estimateRequestTokens(processArgs)
+                  const requestTokens = estimateRequestTokens({
+                    ...processArgs,
+                    // Estimate only the tool schemas the request will actually carry:
+                    // resolveTools is the same filter llm.ts applies before the call, so
+                    // it drops user-disabled (`lastUser.tools`) and permission-denied
+                    // tools. Counting the unfiltered set could false-trip preflight on
+                    // schemas the provider never receives — and since tool schemas are
+                    // static, compaction can't shrink them, so the turn would get stuck
+                    // in recovery instead of reaching the provider.
+                    tools: LLM.resolveTools(processArgs),
+                  })
                   if (isRequestOverflow({ cfg: yield* config.get(), model: processArgs.model, requestTokens })) {
                     yield* slog.warn("request preflight overflow; routing to context recovery", {
                       sessionID,
