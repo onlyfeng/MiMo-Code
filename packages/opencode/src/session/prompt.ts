@@ -2953,14 +2953,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const runStep = (processArgs: LLM.StreamInput) =>
               Effect.gen(function* () {
                 if (!isBoundedComputation) {
-                  const requestTokens = estimateRequestTokens({
-                    ...processArgs,
-                    // Static system/tool overhead is large and already bounded at the
-                    // injection sources; this preflight guard only caps dynamic payloads.
-                    prebuiltSystem: [],
-                    system: [],
-                    tools: undefined,
-                  })
+                  const requestTokens = estimateRequestTokens(processArgs)
                   if (isRequestOverflow({ cfg: yield* config.get(), model: processArgs.model, requestTokens })) {
                     yield* slog.warn("request preflight overflow; routing to context recovery", {
                       sessionID,

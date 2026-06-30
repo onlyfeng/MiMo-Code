@@ -340,6 +340,26 @@ function preflightOverflowCfg(url: string) {
   }
 }
 
+function staticPreflightOverflowCfg(url: string) {
+  const base = providerCfg(url)
+  return {
+    ...base,
+    provider: {
+      ...base.provider,
+      test: {
+        ...base.provider.test,
+        models: {
+          ...base.provider.test.models,
+          "test-model": {
+            ...base.provider.test.models["test-model"],
+            limit: { context: 16_000, output: 1_000 },
+          },
+        },
+      },
+    },
+  }
+}
+
 function maxModeProviderCfg(url: string) {
   return {
     ...providerCfg(url),
@@ -521,6 +541,46 @@ it.live("request preflight overflow finalizes its placeholder assistant", () =>
       expect(assistant.parts).toEqual([])
     }),
     { git: true, config: preflightOverflowCfg },
+  ),
+)
+
+it.live("request preflight overflow includes static system overhead", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      yield* Effect.promise(() => Bun.write(path.join(dir, "AGENTS.md"), "x".repeat(60 * 1024)))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Static preflight overflow" })
+      yield* user(chat.id, "hello")
+
+      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          yield* prompt.cancel(chat.id).pipe(Effect.ignore)
+          yield* Fiber.interrupt(fiber).pipe(Effect.ignore)
+        }),
+      )
+
+      const assistant = yield* Effect.gen(function* () {
+        while (true) {
+          const messages = yield* sessions.messages({ sessionID: chat.id })
+          const match = messages.find((msg) => msg.info.role === "assistant")
+          if (match?.info.role === "assistant" && (match.info.finish || match.info.error || match.parts.length > 0)) {
+            return match
+          }
+          yield* Effect.sleep(10)
+        }
+      }).pipe(Effect.timeout("10 seconds"))
+
+      expect(assistant.info.role).toBe("assistant")
+      if (assistant.info.role === "assistant") {
+        expect(assistant.info.finish).toBe("cancelled")
+        expect(assistant.info.error?.name).toBe("MessageAbortedError")
+      }
+      expect(assistant.parts).toEqual([])
+      expect(yield* llm.hits).toHaveLength(0)
+    }),
+    { git: true, config: staticPreflightOverflowCfg },
   ),
 )
 
