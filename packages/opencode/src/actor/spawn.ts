@@ -176,7 +176,7 @@ export interface SpawnResult {
 export interface Interface {
   readonly spawn: (input: SpawnInput) => Effect.Effect<SpawnResult>
   readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
-  readonly getForkContext: (actorID: string) => Effect.Effect<ForkContext | undefined>
+  readonly getForkContext: (sessionID: SessionID, actorID: string) => Effect.Effect<ForkContext | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Actor") {}
@@ -198,7 +198,14 @@ export const layer = Layer.effect(
     // ForkContext snapshot per actor, captured at spawn for fork agents
     // (contextMode = "full"). Read by fork's runLoop (see prompt.ts) and
     // cleared on terminal status. Fiber tracking moved to SessionRunState.
+    //
+    // Keyed by (sessionID, actorID) rather than actorID alone: actorID is only
+    // unique within a (sessionID, agentType) scope (see
+    // ActorRegistry.allocateActorID), so two concurrent sessions spawning the
+    // same agentType can allocate the same actorID. A bare actorID key would
+    // let one session's forkContext clobber or be deleted by another's.
     const forkContexts = new Map<string, ForkContext>()
+    const forkContextKey = (sessionID: SessionID, actorID: string) => `${sessionID}:${actorID}`
 
     // Real agent loop: marks the actor running, then drives a SessionPrompt.prompt
     // turn. The user message persisted by SessionPrompt carries the actor's
@@ -574,7 +581,7 @@ export const layer = Layer.effect(
                   lastFinalText = newTurn.finalText
                 }
 
-                yield* Effect.sync(() => forkContexts.delete(input.actorID))
+                yield* Effect.sync(() => forkContexts.delete(forkContextKey(input.sessionID, input.actorID)))
               }),
             onFailure: (cause) =>
               Effect.gen(function* () {
@@ -585,7 +592,7 @@ export const layer = Layer.effect(
                   outcome,
                   cancelled ? { status: "cancelled" as const } : { status: "failure" as const, error },
                 )
-                yield* Effect.sync(() => forkContexts.delete(input.actorID))
+                yield* Effect.sync(() => forkContexts.delete(forkContextKey(input.sessionID, input.actorID)))
               }),
           }),
         )
@@ -613,7 +620,7 @@ export const layer = Layer.effect(
         tools: input.tools,
       })
       if (input.forkContext) {
-        forkContexts.set(child.id, input.forkContext) // peer's actorID === child.id
+        forkContexts.set(forkContextKey(child.id, child.id), input.forkContext) // peer's actorID === child.id === sessionID
       }
       const { fiber, outcome } = yield* forkWork({
         sessionID: child.id,
@@ -658,7 +665,7 @@ export const layer = Layer.effect(
       if (input.onActorID) yield* Effect.sync(() => input.onActorID!(actorID)).pipe(Effect.ignore)
 
       if (input.forkContext) {
-        forkContexts.set(actorID, input.forkContext)
+        forkContexts.set(forkContextKey(input.sessionID, actorID), input.forkContext)
       }
 
       // Auto-inject return-format instruction for non-specialized subagents.
@@ -706,11 +713,11 @@ export const layer = Layer.effect(
         yield* actorReg
           .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
           .pipe(Effect.ignore)
-        yield* Effect.sync(() => forkContexts.delete(actorID))
+        yield* Effect.sync(() => forkContexts.delete(forkContextKey(sessionID, actorID)))
       })
 
-    const getForkContext = Effect.fn("Actor.getForkContext")(function* (actorID: string) {
-      return forkContexts.get(actorID)
+    const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
+      return forkContexts.get(forkContextKey(sessionID, actorID))
     })
 
     const impl = Service.of({ spawn, cancel, getForkContext })
