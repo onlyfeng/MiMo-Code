@@ -1171,22 +1171,11 @@ export function maxOutputTokens(model: Provider.Model): number {
   return Math.min(model.limit.output, OUTPUT_TOKEN_MAX) || OUTPUT_TOKEN_MAX
 }
 
-// Flatten a root-level `anyOf` / `oneOf` (typically from `z.discriminatedUnion`)
-// into a single `type: "object"` schema with all variant properties merged at
-// the root. The discriminator key becomes an `enum`, and per-variant required
-// fields are encoded as a textual hint on the discriminator's description.
-//
-// OpenAI's function-calling validator rejects oneOf/anyOf/allOf/enum/not at the
-// top level outright, so this is the only shape that gets through. We retain
-// `additionalProperties: false` to keep the model from inventing fields, and
-// rely on zod's runtime parse (still using the original discriminated union)
-// to enforce per-action required fields strictly.
-function flattenDiscriminatedUnion(schema: JSONSchema.BaseSchema | JSONSchema7): JSONSchema7 {
-  const root = schema as Record<string, any>
-  const variants = (root.anyOf ?? root.oneOf) as Array<Record<string, any>> | undefined
-  if (!variants?.length) return schema as JSONSchema7
-
-  // Find the discriminator: a property whose `const` differs across all variants.
+// Detect the discriminator of an `anyOf` / `oneOf` union: a property whose
+// `const` is present AND distinct across every variant — the exact shape
+// `z.discriminatedUnion` emits. Returns undefined for ordinary combinators
+// (e.g. `anyOf: [{type:"string"},{type:"number"}]`) so those are left untouched.
+function findUnionDiscriminator(variants: Array<Record<string, any>>): string | undefined {
   const constByKey = new Map<string, Set<unknown>>()
   for (const v of variants) {
     if (!v.properties) continue
@@ -1197,14 +1186,23 @@ function flattenDiscriminatedUnion(schema: JSONSchema.BaseSchema | JSONSchema7):
       }
     }
   }
-  let discriminator: string | undefined
   for (const [key, values] of constByKey) {
-    if (values.size === variants.length) {
-      discriminator = key
-      break
-    }
+    if (values.size === variants.length) return key
   }
+  return undefined
+}
 
+// Collapse one discriminated-union node into a single `type: "object"` schema
+// with all variant properties merged in. The discriminator becomes an `enum`,
+// and per-variant required fields are encoded as a textual hint on its
+// description.
+//
+// OpenAI's function-calling validator rejects oneOf/anyOf/allOf/enum/not
+// outright, so this is the only shape that gets through. We retain
+// `additionalProperties: false` to keep the model from inventing fields, and
+// rely on zod's runtime parse (still using the original discriminated union)
+// to enforce per-action required fields strictly.
+function flattenUnionVariants(variants: Array<Record<string, any>>, discriminator: string): JSONSchema7 {
   // Merge non-discriminator properties from every variant. Track which variants
   // each property appeared in so the description can tell the model
   // "(only when action='X'|'Y')" — flat schemas tempt some models (notably
@@ -1213,9 +1211,7 @@ function flattenDiscriminatedUnion(schema: JSONSchema.BaseSchema | JSONSchema7):
   const propertyOwners: Record<string, unknown[]> = {}
   for (const v of variants) {
     if (!v.properties) continue
-    const variantValue = discriminator
-      ? (v.properties as Record<string, any>)[discriminator]?.const
-      : undefined
+    const variantValue = (v.properties as Record<string, any>)[discriminator]?.const
     for (const [key, prop] of Object.entries(v.properties as Record<string, any>)) {
       if (key === discriminator) continue
       if (!(key in properties)) properties[key] = prop
@@ -1225,45 +1221,64 @@ function flattenDiscriminatedUnion(schema: JSONSchema.BaseSchema | JSONSchema7):
       }
     }
   }
-  if (discriminator) {
-    for (const [key, owners] of Object.entries(propertyOwners)) {
-      if (owners.length === variants.length) continue // present in every variant — no annotation
-      const tag = `(only when ${discriminator}=${owners.map((o) => JSON.stringify(o)).join("|")})`
-      const original = (properties[key] as Record<string, any>).description as string | undefined
-      properties[key] = {
-        ...properties[key],
-        description: original ? `${tag} ${original}` : tag,
-      }
+  for (const [key, owners] of Object.entries(propertyOwners)) {
+    if (owners.length === variants.length) continue // present in every variant — no annotation
+    const tag = `(only when ${discriminator}=${owners.map((o) => JSON.stringify(o)).join("|")})`
+    const original = (properties[key] as Record<string, any>).description as string | undefined
+    properties[key] = {
+      ...properties[key],
+      description: original ? `${tag} ${original}` : tag,
     }
   }
 
   // Discriminator becomes an enum with per-variant required fields hinted in
   // its description. Without this hint the model only sees a flat bag of
   // optional fields and forgets what to provide for each action.
-  if (discriminator) {
-    const proto = (variants[0].properties as Record<string, any>)[discriminator]
-    const enumValues = variants.map((v) => (v.properties as Record<string, any>)[discriminator!]?.const)
-    const baseDescription = (proto?.description as string | undefined) ?? ""
-    const hints = variants
-      .map((v) => {
-        const value = (v.properties as Record<string, any>)[discriminator!]?.const
-        const required = ((v.required as string[] | undefined) ?? []).filter((r) => r !== discriminator)
-        return required.length > 0 ? `${value}: requires ${required.join(", ")}` : `${value}: no extra required fields`
-      })
-      .join("; ")
-    properties[discriminator] = {
-      type: "string",
-      enum: enumValues,
-      description: baseDescription ? `${baseDescription}\n\nPer-${discriminator}: ${hints}.` : `Per-${discriminator}: ${hints}.`,
-    }
+  const proto = (variants[0].properties as Record<string, any>)[discriminator]
+  const enumValues = variants.map((v) => (v.properties as Record<string, any>)[discriminator]?.const)
+  const baseDescription = (proto?.description as string | undefined) ?? ""
+  const hints = variants
+    .map((v) => {
+      const value = (v.properties as Record<string, any>)[discriminator]?.const
+      const required = ((v.required as string[] | undefined) ?? []).filter((r) => r !== discriminator)
+      return required.length > 0 ? `${value}: requires ${required.join(", ")}` : `${value}: no extra required fields`
+    })
+    .join("; ")
+  properties[discriminator] = {
+    type: "string",
+    enum: enumValues,
+    description: baseDescription ? `${baseDescription}\n\nPer-${discriminator}: ${hints}.` : `Per-${discriminator}: ${hints}.`,
   }
 
   return {
     type: "object",
     properties,
-    required: discriminator ? [discriminator] : [],
+    required: [discriminator],
     additionalProperties: false,
   } as JSONSchema7
+}
+
+// Recursively flatten EVERY discriminated-union node in a tool schema, not only
+// a root-level union. `z.discriminatedUnion` nested under a property — e.g. the
+// cron tool's `z.strictObject({ operation: z.discriminatedUnion("action", [...]) })`
+// — emits `anyOf` deep in the tree; providers that reject oneOf/anyOf anywhere in
+// a tool schema (OpenAI-compatible gateways, Bedrock) return a 500 on it. We walk
+// bottom-up (children first) so a union nested inside another union still gets
+// collapsed, then flatten the node itself when it carries a discriminated union.
+// Ordinary combinators (no shared `const` discriminator) are preserved untouched.
+function flattenNestedDiscriminatedUnions(node: any): any {
+  if (Array.isArray(node)) return node.map(flattenNestedDiscriminatedUnions)
+  if (!node || typeof node !== "object") return node
+
+  const out: Record<string, any> = {}
+  for (const [key, value] of Object.entries(node)) out[key] = flattenNestedDiscriminatedUnions(value)
+
+  const variants = (out.anyOf ?? out.oneOf) as Array<Record<string, any>> | undefined
+  if (Array.isArray(variants) && variants.length > 0) {
+    const discriminator = findUnionDiscriminator(variants)
+    if (discriminator) return flattenUnionVariants(variants, discriminator)
+  }
+  return out
 }
 
 export function schema(model: Provider.Model, schema: JSONSchema.BaseSchema | JSONSchema7): JSONSchema7 {
@@ -1285,13 +1300,15 @@ export function schema(model: Provider.Model, schema: JSONSchema.BaseSchema | JS
   }
   */
 
-  // Many providers reject root-level `anyOf`/`oneOf` in tool schemas:
+  // Many providers reject `anyOf`/`oneOf` in tool schemas — and not just at the
+  // root, but anywhere in the tree (a discriminated union nested under a property,
+  // like the cron tool's `operation`, trips the same validator):
   // - OpenAI/Azure: "schema must have type 'object' and not have 'oneOf'/'anyOf'"
   // - Bedrock: "input_schema.type: Field required"
   // - Anthropic proxies to Bedrock: same Bedrock error
   // Flatten unconditionally — all providers accept a flat `type: "object"` schema,
   // and zod's runtime parse still enforces per-variant required fields strictly.
-  schema = flattenDiscriminatedUnion(schema)
+  schema = flattenNestedDiscriminatedUnions(schema)
 
   // Convert integer enums to string enums for Google/Gemini
   if (model.providerID === "google" || model.api.id.includes("gemini")) {

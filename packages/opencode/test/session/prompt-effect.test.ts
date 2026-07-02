@@ -430,6 +430,58 @@ it.live("loop calls LLM and returns assistant message", () =>
   ),
 )
 
+// Regression: the cron tool (default-on via MIMOCODE_EXPERIMENTAL_CRON) declares
+// `z.strictObject({ operation: z.discriminatedUnion("action", [...]) })`. Its
+// union is emitted nested under `operation`, so a root-only flatten left the raw
+// anyOf in the request and OpenAI-compatible gateways returned a 500 server_error.
+// Capture the ACTUAL schema sent to the provider and assert no combiner survives.
+it.live("cron tool schema sent to provider carries no nested combiner", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "hello" }],
+      })
+      yield* llm.text("done")
+
+      yield* prompt.loop({ sessionID: chat.id })
+
+      const hits = yield* llm.hits
+      const tools = ((hits[0]?.body as any)?.tools ?? []) as Array<{
+        function?: { name?: string; parameters?: unknown }
+      }>
+      const cron = tools.find((tool) => tool.function?.name === "cron")
+      // Cron is on by default, so it must actually reach the request — otherwise
+      // this test would pass vacuously without exercising the flatten.
+      expect(cron).toBeDefined()
+
+      const combiners: string[] = []
+      const walk = (node: any) => {
+        if (Array.isArray(node)) return node.forEach(walk)
+        if (!node || typeof node !== "object") return
+        for (const key of ["anyOf", "oneOf", "allOf"]) if (key in node) combiners.push(key)
+        Object.values(node).forEach(walk)
+      }
+      walk(cron!.function!.parameters)
+      expect(combiners).toEqual([])
+
+      // And the nested union is flattened into a plain object with an action enum.
+      const params = cron!.function!.parameters as any
+      expect(params.properties.operation.type).toBe("object")
+      expect(Array.isArray(params.properties.operation.properties.action.enum)).toBe(true)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
 it.live("static loop returns assistant text through local provider", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
