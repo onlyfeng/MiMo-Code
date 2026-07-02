@@ -3521,3 +3521,99 @@ describe("ProviderTransform.schema - openai discriminated-union flatten", () => 
     expect(result.anyOf).toBeUndefined()
   })
 })
+
+// Regression: the discriminated union can be nested UNDER a property, not just
+// at the root. The cron tool is `z.strictObject({ operation: z.discriminatedUnion(
+// "action", [...]) })`, so the union is emitted as `properties.operation.anyOf`.
+// A root-only flatten missed it, the raw anyOf reached OpenAI-compatible gateways
+// and returned a 500 server_error. Flatten must recurse into the whole schema.
+describe("ProviderTransform.schema - nested discriminated-union flatten", () => {
+  const nestedSchema = {
+    type: "object",
+    properties: {
+      operation: {
+        // z.discriminatedUnion(...).meta({ type: "object" }) — the union sits
+        // beside a `type: "object"`, deep in the tree.
+        type: "object",
+        anyOf: [
+          {
+            type: "object",
+            properties: {
+              action: { const: "schedule", description: "Operation" },
+              cron: { type: "string", minLength: 1 },
+            },
+            required: ["action", "cron"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: {
+              action: { const: "list" },
+              kind: { type: "string" },
+            },
+            required: ["action"],
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+    required: ["operation"],
+    additionalProperties: false,
+  } as any
+
+  const collectCombiners = (node: any, found: string[] = []) => {
+    if (Array.isArray(node)) {
+      node.forEach((child) => collectCombiners(child, found))
+      return found
+    }
+    if (!node || typeof node !== "object") return found
+    for (const key of ["anyOf", "oneOf", "allOf"]) if (key in node) found.push(key)
+    Object.values(node).forEach((child) => collectCombiners(child, found))
+    return found
+  }
+
+  test("openai — flattens the nested union, no combiner survives anywhere", () => {
+    const result = ProviderTransform.schema({ providerID: "openai", api: { id: "gpt-4" } } as any, nestedSchema) as any
+    // Root object stays intact.
+    expect(result.type).toBe("object")
+    expect(result.required).toEqual(["operation"])
+    // `operation` is now a flat object — no combiner left on it.
+    expect(result.properties.operation.type).toBe("object")
+    expect(result.properties.operation.anyOf).toBeUndefined()
+    expect(result.properties.operation.oneOf).toBeUndefined()
+    expect(result.properties.operation.additionalProperties).toBe(false)
+    // And nothing anywhere in the tree carries anyOf/oneOf/allOf.
+    expect(collectCombiners(result)).toEqual([])
+  })
+
+  test("openai — nested discriminator becomes enum with per-action required hints", () => {
+    const result = ProviderTransform.schema({ providerID: "openai", api: { id: "gpt-4" } } as any, nestedSchema) as any
+    const operation = result.properties.operation
+    expect(operation.properties.action.type).toBe("string")
+    expect(operation.properties.action.enum).toEqual(["schedule", "list"])
+    expect(operation.properties.action.description).toContain("schedule: requires cron")
+    expect(operation.properties.action.description).toContain("list: no extra required")
+    // Per-variant properties merged and annotated with the owning action.
+    expect(operation.properties.cron.description).toContain('only when action="schedule"')
+    expect(operation.properties.kind.description).toContain('only when action="list"')
+    // Only the discriminator is required inside the flattened object.
+    expect(operation.required).toEqual(["action"])
+  })
+
+  test("ordinary combinators (no shared const discriminator) are preserved", () => {
+    const comboSchema = {
+      type: "object",
+      properties: {
+        value: { anyOf: [{ type: "string" }, { type: "number" }] },
+        either: { oneOf: [{ type: "boolean" }, { type: "null" }] },
+      },
+      required: [],
+      additionalProperties: false,
+    } as any
+    const result = ProviderTransform.schema({ providerID: "openai", api: { id: "gpt-4" } } as any, comboSchema) as any
+    expect(Array.isArray(result.properties.value.anyOf)).toBe(true)
+    expect(result.properties.value.anyOf).toHaveLength(2)
+    expect(Array.isArray(result.properties.either.oneOf)).toBe(true)
+    expect(result.properties.either.oneOf).toHaveLength(2)
+  })
+})
