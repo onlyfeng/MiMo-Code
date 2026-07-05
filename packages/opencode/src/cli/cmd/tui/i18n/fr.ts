@@ -26,6 +26,7 @@ export const dict = {
   "tui.prompt.placeholder.normal": 'Posez votre question... "{{example}}"',
   "tui.prompt.placeholder.shell": 'Exécuter une commande... "{{example}}"',
   "tui.prompt.ghost": "{{prediction}}  (Tab pour accepter)",
+  "tui.paste.image.fallback_path": "Le modèle ne prend pas en charge la vision — chemin de l'image inséré à la place",
   "tui.home.placeholder.example.todo": "Corriger un TODO dans le code",
   "tui.home.placeholder.example.stack": "Quelle est la stack technique de ce projet ?",
   "tui.home.placeholder.example.tests": "Réparer les tests cassés",
@@ -50,7 +51,7 @@ export const dict = {
   "tui.tips.shell_prefix":
     "Commencez un message par {highlight}!{/highlight} pour exécuter directement des commandes shell (ex. {highlight}!ls -la{/highlight})",
   "tui.tips.tab_agent":
-    "Appuyez sur {highlight}Tab{/highlight} ou {highlight}Shift+Tab{/highlight} pour basculer entre les agents Build, Plan et Compose",
+    "Appuyez sur {highlight}Tab{/highlight} ou {highlight}Shift+Tab{/highlight} pour basculer entre les agents Build, Plan, Compose et Orchestrator",
   "tui.tips.theme_mode":
     "Exécutez {highlight}/dark{/highlight} pour le mode sombre ou {highlight}/light{/highlight} pour le mode clair",
   "tui.tips.doc": "Exécutez {highlight}/doc{/highlight} pour ouvrir la documentation utilisateur",
@@ -63,7 +64,7 @@ export const dict = {
     "Exécutez {highlight}/share{/highlight} pour créer un lien public vers votre conversation sur opencode.ai",
   "tui.tips.drag_drop": "Glissez-déposez des images ou PDF dans le terminal pour les ajouter au contexte",
   "tui.tips.paste_image":
-    "Appuyez sur {highlight}Ctrl+V{/highlight} pour coller des images du presse-papiers dans l'invite",
+    "Appuyez sur {highlight}Ctrl+V{/highlight} pour coller des images du presse-papiers (sur macOS, utilisez Ctrl+V et non Cmd+V — le terminal intercepte Cmd+V)",
   "tui.tips.editor":
     "Appuyez sur {highlight}Ctrl+X E{/highlight} ou {highlight}/editor{/highlight} pour rédiger des messages dans votre éditeur externe",
   "tui.tips.init":
@@ -259,6 +260,20 @@ export const dict = {
   "tui.slash.deep-research.description":
     "rapport de recherche approfondi multi-sources et vérifié (exécute le workflow deep-research)",
 
+  // Built-in bundled skill descriptions (user-facing, decoupled from SKILL.md description which targets the LLM)
+  "tui.skill.docx-official.description": "Créer, modifier et lire des fichiers Microsoft Word (.docx)",
+  "tui.skill.xlsx-official.description": "Créer, modifier et lire des classeurs Microsoft Excel (.xlsx)",
+  "tui.skill.pdf-official.description": "Créer, modifier, transformer et lire des fichiers PDF",
+  "tui.skill.pptx-official.description": "Créer, modifier et lire des présentations Microsoft PowerPoint (.pptx)",
+  "tui.skill.mimocode.description": "Documentation intégrée des fonctionnalités, config et commandes MiMoCode",
+  "tui.skill.self-extend.description": "Étendez vos capacités avec de nouvelles skills, outils et hooks",
+  "tui.skill.frontend-design.description": "Conseils pour un design d'interface visuel distinctif et intentionnel",
+  "tui.skill.loop.description": "Planifier l'exécution récurrente d'un prompt",
+  "tui.skill.html-to-video-pipeline.description": "L'arme ultime pour vidéos courtes — créez des vidéos courtes avec du HTML",
+  "tui.skill.arxiv.description": "Rechercher, citer, télécharger et suivre des articles arXiv",
+  "tui.skill.skill-creator.description": "Créer, réviser et améliorer des skills d'agent",
+  "tui.skill.research-paper-writing.description": "Rédiger, polir et critiquer des articles académiques avec l'œil d'un relecteur",
+
   // Language switching
   "tui.command.language.switch.title": "Changer de langue",
   "tui.command.language.switch.description": "Modifier la langue d'affichage",
@@ -375,6 +390,9 @@ export const dict = {
   "tui.command.session.timeline.title": "Aller à un message",
   "tui.command.session.fork.title": "Dupliquer la session",
   "tui.command.session.compact.title": "Compacter la session",
+  "tui.command.session.ask.title": "Poser une question annexe",
+  "tui.command.session.ask.description": "Posez une question à la session actuelle sans la perturber",
+  "tui.command.session.ask.placeholder": "Poser une question annexe…",
   "tui.command.session.unshare.title": "Annuler le partage",
   "tui.command.session.undo.title": "Annuler le message précédent",
   "tui.command.session.redo.title": "Rétablir",

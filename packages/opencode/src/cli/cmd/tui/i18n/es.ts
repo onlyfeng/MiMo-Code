@@ -26,6 +26,7 @@ export const dict = {
   "tui.prompt.placeholder.normal": 'Pregunta lo que quieras... "{{example}}"',
   "tui.prompt.placeholder.shell": 'Ejecuta un comando... "{{example}}"',
   "tui.prompt.ghost": "{{prediction}}  (Tab para aceptar)",
+  "tui.paste.image.fallback_path": "El modelo no admite imágenes — se insertó la ruta de la imagen en su lugar",
   "tui.home.placeholder.example.todo": "Corregir un TODO en el código",
   "tui.home.placeholder.example.stack": "¿Cuál es el stack técnico del proyecto?",
   "tui.home.placeholder.example.tests": "Arreglar las pruebas fallidas",
@@ -50,7 +51,7 @@ export const dict = {
   "tui.tips.shell_prefix":
     "Empieza un mensaje con {highlight}!{/highlight} para ejecutar comandos del shell directamente (p. ej., {highlight}!ls -la{/highlight})",
   "tui.tips.tab_agent":
-    "Pulsa {highlight}Tab{/highlight} o {highlight}Shift+Tab{/highlight} para alternar entre los agentes Build, Plan y Compose",
+    "Pulsa {highlight}Tab{/highlight} o {highlight}Shift+Tab{/highlight} para alternar entre los agentes Build, Plan, Compose y Orchestrator",
   "tui.tips.theme_mode":
     "Ejecuta {highlight}/dark{/highlight} para el modo oscuro o {highlight}/light{/highlight} para el modo claro",
   "tui.tips.doc": "Ejecuta {highlight}/doc{/highlight} para abrir la documentación de usuario",
@@ -65,7 +66,7 @@ export const dict = {
     "Ejecuta {highlight}/share{/highlight} para crear un enlace público a tu conversación en opencode.ai",
   "tui.tips.drag_drop": "Arrastra y suelta imágenes o PDF en el terminal para añadirlos como contexto",
   "tui.tips.paste_image":
-    "Pulsa {highlight}Ctrl+V{/highlight} para pegar imágenes desde el portapapeles en la entrada",
+    "Pulsa {highlight}Ctrl+V{/highlight} para pegar imágenes desde el portapapeles (en macOS usa Ctrl+V, no Cmd+V — la terminal intercepta Cmd+V)",
   "tui.tips.editor":
     "Pulsa {highlight}Ctrl+X E{/highlight} o {highlight}/editor{/highlight} para componer mensajes en tu editor externo",
   "tui.tips.init":
@@ -271,6 +272,20 @@ export const dict = {
   "tui.slash.deep-research.description":
     "informe de investigación profunda multi-fuente y verificado (ejecuta el workflow deep-research)",
 
+  // Built-in bundled skill descriptions (user-facing, decoupled from SKILL.md description which targets the LLM)
+  "tui.skill.docx-official.description": "Crear, editar y leer archivos de Microsoft Word (.docx)",
+  "tui.skill.xlsx-official.description": "Crear, editar y leer libros de Microsoft Excel (.xlsx)",
+  "tui.skill.pdf-official.description": "Crear, editar, transformar y leer archivos PDF",
+  "tui.skill.pptx-official.description": "Crear, editar y leer presentaciones de Microsoft PowerPoint (.pptx)",
+  "tui.skill.mimocode.description": "Autodocumentación de funciones, configuración y comandos de MiMoCode",
+  "tui.skill.self-extend.description": "Amplía tus propias capacidades con nuevas skills, herramientas y hooks",
+  "tui.skill.frontend-design.description": "Guía para un diseño visual de UI distintivo e intencional",
+  "tui.skill.loop.description": "Programar un prompt para ejecutarse en un intervalo recurrente",
+  "tui.skill.html-to-video-pipeline.description": "El arma definitiva para vídeos cortos — crea vídeos cortos con HTML",
+  "tui.skill.arxiv.description": "Busca, cita, descarga y sigue artículos de arXiv",
+  "tui.skill.skill-creator.description": "Crea, revisa y mejora skills de agente",
+  "tui.skill.research-paper-writing.description": "Redacta, pule y critica artículos académicos con perspectiva de revisor",
+
   // Language switching
   "tui.command.language.switch.title": "Cambiar idioma",
   "tui.command.language.switch.description": "Cambiar el idioma de la interfaz",
@@ -386,6 +401,9 @@ export const dict = {
   "tui.command.session.timeline.title": "Saltar a un mensaje",
   "tui.command.session.fork.title": "Bifurcar sesión",
   "tui.command.session.compact.title": "Compactar sesión",
+  "tui.command.session.ask.title": "Hacer una pregunta lateral",
+  "tui.command.session.ask.description": "Pregunta a la sesión actual sin interrumpirla",
+  "tui.command.session.ask.placeholder": "Haz una pregunta lateral…",
   "tui.command.session.unshare.title": "Dejar de compartir",
   "tui.command.session.undo.title": "Deshacer mensaje anterior",
   "tui.command.session.redo.title": "Rehacer",

@@ -15,6 +15,7 @@ import { disposeInstance } from "../../src/effect/instance-registry"
 import { Truncate } from "../../src/tool"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { tmpdir } from "../fixture/fixture"
+import { ProviderTest } from "../fake/provider"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-read-state-session"),
@@ -35,6 +36,7 @@ const runtime = ManagedRuntime.make(
     Format.defaultLayer,
     Instruction.defaultLayer,
     LSP.defaultLayer,
+    ProviderTest.fake().layer,
     Truncate.defaultLayer,
   ),
 )
