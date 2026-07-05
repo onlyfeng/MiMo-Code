@@ -66,6 +66,16 @@ export const Flag = {
   MIMOCODE_DISABLE_TERMINAL_TITLE: truthy("MIMOCODE_DISABLE_TERMINAL_TITLE"),
   MIMOCODE_SHOW_TTFD: truthy("MIMOCODE_SHOW_TTFD"),
   MIMOCODE_PERMISSION: process.env["MIMOCODE_PERMISSION"],
+
+  // Defaults to false. When false, the bash tool intercepts irreversible
+  // deletion commands (rm, rmdir, unlink, shred, del, erase, rd, remove-item,
+  // and git destructive subcommands like reset --hard / clean -f / branch -D /
+  // worktree remove / push --force / stash drop|clear / tag -d) and forces an
+  // extra permission prompt with permission="bash_delete" — separate from the
+  // normal bash-permission ask so it can't be silently pre-approved by a broad
+  // `bash: allow` rule. Set MIMOCODE_AUTO_APPROVE_DELETE=true to trust the
+  // model with deletes and skip the second confirmation.
+  MIMOCODE_AUTO_APPROVE_DELETE: truthy("MIMOCODE_AUTO_APPROVE_DELETE"),
   MIMOCODE_DISABLE_DEFAULT_PLUGINS: truthy("MIMOCODE_DISABLE_DEFAULT_PLUGINS"),
   MIMOCODE_DISABLE_LSP_DOWNLOAD: truthy("MIMOCODE_DISABLE_LSP_DOWNLOAD"),
   MIMOCODE_ENABLE_EXPERIMENTAL_MODELS: truthy("MIMOCODE_ENABLE_EXPERIMENTAL_MODELS"),
@@ -106,6 +116,13 @@ export const Flag = {
   MIMOCODE_DISABLE_EXTERNAL_SKILLS,
   MIMOCODE_DISABLE_CODEX_SKILLS: MIMOCODE_DISABLE_EXTERNAL_SKILLS || truthy("MIMOCODE_DISABLE_CODEX_SKILLS"),
   MIMOCODE_DISABLE_OPENCODE_SKILLS: MIMOCODE_DISABLE_EXTERNAL_SKILLS || truthy("MIMOCODE_DISABLE_OPENCODE_SKILLS"),
+
+  // Defaults to false. When enabled, skill-source commands appear in the `/`
+  // autocomplete dropdown alongside user commands and MCP prompts (Claude
+  // Code-style). By default skills are only surfaced via the `/skills` picker
+  // and model-driven invocation, keeping the `/` list focused on user-authored
+  // commands.
+  MIMOCODE_ENABLE_SLASH_SKILLS: truthy("MIMOCODE_ENABLE_SLASH_SKILLS"),
   MIMOCODE_FAKE_VCS: process.env["MIMOCODE_FAKE_VCS"],
 
   // When enabled, skips all git subprocess calls during project discovery
@@ -164,6 +181,11 @@ export const Flag = {
   MIMOCODE_EXPERIMENTAL_OXFMT: MIMOCODE_EXPERIMENTAL || truthy("MIMOCODE_EXPERIMENTAL_OXFMT"),
   MIMOCODE_EXPERIMENTAL_LSP_TY: truthy("MIMOCODE_EXPERIMENTAL_LSP_TY"),
   MIMOCODE_EXPERIMENTAL_LSP_TOOL: MIMOCODE_EXPERIMENTAL || truthy("MIMOCODE_EXPERIMENTAL_LSP_TOOL"),
+  // Defaults to OFF (opt-in): the Orchestrator primary mode — a general
+  // coordinator that delegates to child sessions via the `session` tool, with a
+  // global singleton workspace and child permission-approval routing. Enable with
+  // MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true (or the umbrella MIMOCODE_EXPERIMENTAL).
+  MIMOCODE_EXPERIMENTAL_ORCHESTRATOR: MIMOCODE_EXPERIMENTAL || truthy("MIMOCODE_EXPERIMENTAL_ORCHESTRATOR"),
   // Defaults to true: dynamic workflow + built-in deep-research are on by default.
   // Set MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL=false to opt out. The env-var name is
   // kept for backwards compat (long-running experiments still pass it as `1`).
@@ -217,6 +239,13 @@ export const Flag = {
   // independent and non-overlapping.
   get MIMOCODE_DISABLE_BUILTIN_SKILLS() {
     return truthy("MIMOCODE_DISABLE_BUILTIN_SKILLS")
+  },
+  // Disables the built-in official skills (docx, pdf, pptx, xlsx,
+  // html-to-video-pipeline) while keeping the rest of the builtin bundle
+  // available. Defaults to false (all skills are extracted and loaded). Set
+  // MIMOCODE_DISABLE_OFFICIAL_SKILLS=true to skip them.
+  get MIMOCODE_DISABLE_OFFICIAL_SKILLS() {
+    return truthy("MIMOCODE_DISABLE_OFFICIAL_SKILLS")
   },
   get MIMOCODE_DISABLE_PROJECT_CONFIG() {
     return truthy("MIMOCODE_DISABLE_PROJECT_CONFIG")

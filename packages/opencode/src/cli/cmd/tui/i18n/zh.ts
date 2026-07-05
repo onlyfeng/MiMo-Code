@@ -26,6 +26,7 @@ export const dict = {
   "tui.prompt.placeholder.normal": "输入消息...(输入/唤起命令)",
   "tui.prompt.placeholder.shell": '执行命令…… "{{example}}"',
   "tui.prompt.ghost": "{{prediction}}  (按 Tab 采纳)",
+  "tui.paste.image.fallback_path": "当前模型不支持图片，已改为插入图片路径",
   "tui.home.placeholder.example.todo": "修复代码库中的 TODO",
   "tui.home.placeholder.example.stack": "这个项目用了什么技术栈？",
   "tui.home.placeholder.example.tests": "修复失败的测试",
@@ -48,7 +49,7 @@ export const dict = {
   "tui.tips.attach_file": "输入 {highlight}@{/highlight} 后接文件名以模糊搜索并附加文件",
   "tui.tips.shell_prefix": "以 {highlight}!{/highlight} 开头可直接运行 shell 命令（例如 {highlight}!ls -la{/highlight}）",
   "tui.tips.tab_agent":
-    "按 {highlight}Tab{/highlight} 或 {highlight}Shift+Tab{/highlight} 在 Build / Plan / Compose 智能体之间切换",
+    "按 {highlight}Tab{/highlight} 或 {highlight}Shift+Tab{/highlight} 在 Build / Plan / Compose / Orchestrator 智能体之间切换",
   "tui.tips.theme_mode":
     "运行 {highlight}/dark{/highlight} 切换到深色模式，{highlight}/light{/highlight} 切换到浅色模式",
   "tui.tips.doc": "运行 {highlight}/doc{/highlight} 打开使用文档",
@@ -58,7 +59,7 @@ export const dict = {
   "tui.tips.redo": "使用 {highlight}/redo{/highlight} 恢复之前撤销的消息和文件改动",
   "tui.tips.share": "运行 {highlight}/share{/highlight} 在 opencode.ai 上为你的对话生成公开链接",
   "tui.tips.drag_drop": "把图片或 PDF 拖入终端可作为上下文添加",
-  "tui.tips.paste_image": "按 {highlight}Ctrl+V{/highlight} 把剪贴板中的图片粘贴到提示框",
+  "tui.tips.paste_image": "按 {highlight}Ctrl+V{/highlight} 把剪贴板中的图片粘贴到提示框（macOS 上请用 Ctrl+V，不要用 Cmd+V——Cmd+V 会被终端拦截）",
   "tui.tips.editor": "按 {highlight}Ctrl+X E{/highlight} 或 {highlight}/editor{/highlight} 在外部编辑器中编辑消息",
   "tui.tips.init": "运行 {highlight}/init{/highlight} 基于你的代码库自动生成项目规则",
   "tui.tips.models": "运行 {highlight}/models{/highlight} 或 {highlight}Ctrl+X M{/highlight} 切换模型",
@@ -184,6 +185,20 @@ export const dict = {
   "tui.slash.goal.description": "设置终止条件目标；运行直到判定达成。使用 /goal clear 中止",
   "tui.slash.deep-research.description": "深度多来源、事实核查的研究报告（运行 deep-research 工作流）",
 
+  // Built-in bundled skill descriptions (user-facing, decoupled from SKILL.md description which targets the LLM)
+  "tui.skill.docx-official.description": "创建、编辑、读取 Microsoft Word (.docx) 文档",
+  "tui.skill.xlsx-official.description": "创建、编辑、读取 Microsoft Excel (.xlsx) 工作簿",
+  "tui.skill.pdf-official.description": "创建、编辑、转换、读取 PDF 文件",
+  "tui.skill.pptx-official.description": "创建、编辑、读取 Microsoft PowerPoint (.pptx) 演示文稿",
+  "tui.skill.mimocode.description": "MiMoCode 功能、配置与命令的自文档参考",
+  "tui.skill.self-extend.description": "通过新技能、工具与钩子扩展自身能力",
+  "tui.skill.frontend-design.description": "具备鲜明主张的前端视觉设计指南",
+  "tui.skill.loop.description": "按固定周期循环运行提示词",
+  "tui.skill.html-to-video-pipeline.description": "短视频神器 - 利用 HTML 制作短视频",
+  "tui.skill.arxiv.description": "搜索、引用、下载与追踪 arXiv 论文",
+  "tui.skill.skill-creator.description": "创建、审查与改进 Agent 技能",
+  "tui.skill.research-paper-writing.description": "撰写、润色学术论文，并以审稿人视角提前把关",
+
   // Language switching
   "tui.command.language.switch.title": "切换语言",
   "tui.command.language.switch.description": "更改显示语言",
@@ -308,6 +323,9 @@ export const dict = {
   "tui.command.session.timeline.title": "跳转到消息",
   "tui.command.session.fork.title": "派生会话",
   "tui.command.session.compact.title": "压缩会话",
+  "tui.command.session.ask.title": "提一个旁问",
+  "tui.command.session.ask.description": "向当前会话提问而不打断它",
+  "tui.command.session.ask.placeholder": "提一个旁问…",
   "tui.command.session.unshare.title": "取消分享",
   "tui.command.session.undo.title": "撤销上一条消息",
   "tui.command.session.redo.title": "重做",

@@ -26,6 +26,7 @@ export const dict = {
   "tui.prompt.placeholder.normal": '何でも聞いてください... "{{example}}"',
   "tui.prompt.placeholder.shell": 'コマンドを実行... "{{example}}"',
   "tui.prompt.ghost": "{{prediction}}  (Tab で確定)",
+  "tui.paste.image.fallback_path": "モデルは画像に対応していないため、代わりに画像パスを挿入しました",
   "tui.home.placeholder.example.todo": "コードベース内の TODO を修正",
   "tui.home.placeholder.example.stack": "このプロジェクトの技術スタックは？",
   "tui.home.placeholder.example.tests": "壊れたテストを修正",
@@ -49,7 +50,7 @@ export const dict = {
   "tui.tips.shell_prefix":
     "メッセージを {highlight}!{/highlight} で始めるとシェルコマンドを直接実行できます（例：{highlight}!ls -la{/highlight}）",
   "tui.tips.tab_agent":
-    "{highlight}Tab{/highlight} または {highlight}Shift+Tab{/highlight} で Build / Plan / Compose エージェントを切り替えます",
+    "{highlight}Tab{/highlight} または {highlight}Shift+Tab{/highlight} で Build / Plan / Compose / Orchestrator エージェントを切り替えます",
   "tui.tips.theme_mode":
     "{highlight}/dark{/highlight} でダークモード、{highlight}/light{/highlight} でライトモードに切り替えます",
   "tui.tips.doc": "{highlight}/doc{/highlight} を実行してユーザードキュメントを開きます",
@@ -59,7 +60,7 @@ export const dict = {
   "tui.tips.redo": "{highlight}/redo{/highlight} で取り消したメッセージとファイル変更を復元します",
   "tui.tips.share": "{highlight}/share{/highlight} を実行すると opencode.ai に会話の公開リンクを作成します",
   "tui.tips.drag_drop": "画像や PDF をターミナルにドラッグ＆ドロップしてコンテキストに追加できます",
-  "tui.tips.paste_image": "{highlight}Ctrl+V{/highlight} でクリップボードの画像をプロンプトに貼り付けます",
+  "tui.tips.paste_image": "{highlight}Ctrl+V{/highlight} でクリップボードの画像を貼り付けます（macOS では Cmd+V ではなく Ctrl+V を使用してください。Cmd+V は端末が横取りします）",
   "tui.tips.editor":
     "{highlight}Ctrl+X E{/highlight} または {highlight}/editor{/highlight} で外部エディタからメッセージを書けます",
   "tui.tips.init": "{highlight}/init{/highlight} を実行するとコードベースを基にプロジェクトのルールを自動生成します",
@@ -208,6 +209,20 @@ export const dict = {
   "tui.slash.goal.description": "停止条件付きゴールを設定；判定が達成と言うまで実行。/goal clear で中止",
   "tui.slash.deep-research.description": "深い多ソース・ファクトチェック済み調査レポート（deep-research ワークフローを実行）",
 
+  // Built-in bundled skill descriptions (user-facing, decoupled from SKILL.md description which targets the LLM)
+  "tui.skill.docx-official.description": "Microsoft Word (.docx) ファイルの作成・編集・読み取り",
+  "tui.skill.xlsx-official.description": "Microsoft Excel (.xlsx) ブックの作成・編集・読み取り",
+  "tui.skill.pdf-official.description": "PDF ファイルの作成・編集・変換・読み取り",
+  "tui.skill.pptx-official.description": "Microsoft PowerPoint (.pptx) スライドの作成・編集・読み取り",
+  "tui.skill.mimocode.description": "MiMoCode の機能・設定・コマンドに関するセルフドキュメント",
+  "tui.skill.self-extend.description": "新しいスキル・ツール・フックで自身の能力を拡張",
+  "tui.skill.frontend-design.description": "個性的で意図的な UI ビジュアルデザインのガイド",
+  "tui.skill.loop.description": "プロンプトを一定間隔で繰り返し実行するようスケジュール",
+  "tui.skill.html-to-video-pipeline.description": "ショート動画の神ツール - HTML でショート動画を制作",
+  "tui.skill.arxiv.description": "arXiv 論文の検索・引用・ダウンロード・追跡",
+  "tui.skill.skill-creator.description": "エージェントスキルの作成・レビュー・改善",
+  "tui.skill.research-paper-writing.description": "学術論文の執筆・推敲・査読者視点の批評",
+
   // Language switching
   "tui.command.language.switch.title": "言語を切り替え",
   "tui.command.language.switch.description": "表示言語を変更します",
@@ -323,6 +338,9 @@ export const dict = {
   "tui.command.session.timeline.title": "メッセージにジャンプ",
   "tui.command.session.fork.title": "セッションを分岐",
   "tui.command.session.compact.title": "セッションを圧縮",
+  "tui.command.session.ask.title": "サイド質問をする",
+  "tui.command.session.ask.description": "現在のセッションを中断せずに質問する",
+  "tui.command.session.ask.placeholder": "サイド質問を入力…",
   "tui.command.session.unshare.title": "共有を解除",
   "tui.command.session.undo.title": "直前のメッセージを取り消す",
   "tui.command.session.redo.title": "やり直し",

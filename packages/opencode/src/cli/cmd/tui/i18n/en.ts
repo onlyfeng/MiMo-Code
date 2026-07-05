@@ -22,6 +22,7 @@ export const dict: Record<string, string> = {
   "tui.prompt.placeholder.normal": "Type your message... (type / for commands)",
   "tui.prompt.placeholder.shell": 'Run a command... "{{example}}"',
   "tui.prompt.ghost": "{{prediction}}  (Tab to accept)",
+  "tui.paste.image.fallback_path": "Model has no vision support — inserted image path instead",
   "tui.home.placeholder.example.todo": "Fix a TODO in the codebase",
   "tui.home.placeholder.example.stack": "What is the tech stack of this project?",
   "tui.home.placeholder.example.tests": "Fix broken tests",
@@ -45,7 +46,7 @@ export const dict: Record<string, string> = {
   "tui.tips.shell_prefix":
     "Start a message with {highlight}!{/highlight} to run shell commands directly (e.g., {highlight}!ls -la{/highlight})",
   "tui.tips.tab_agent":
-    "Press {highlight}Tab{/highlight} or {highlight}Shift+Tab{/highlight} to cycle between Build, Plan, and Compose agents",
+    "Press {highlight}Tab{/highlight} or {highlight}Shift+Tab{/highlight} to cycle between Build, Plan, Compose, and Orchestrator agents",
   "tui.tips.theme_mode":
     "Run {highlight}/dark{/highlight} for dark mode or {highlight}/light{/highlight} for light mode",
   "tui.tips.doc": "Run {highlight}/doc{/highlight} to open the user documentation",
@@ -56,7 +57,7 @@ export const dict: Record<string, string> = {
   "tui.tips.redo": "Use {highlight}/redo{/highlight} to restore previously undone messages and file changes",
   "tui.tips.share": "Run {highlight}/share{/highlight} to create a public link to your conversation at opencode.ai",
   "tui.tips.drag_drop": "Drag and drop images or PDFs into the terminal to add them as context",
-  "tui.tips.paste_image": "Press {highlight}Ctrl+V{/highlight} to paste images from your clipboard into the prompt",
+  "tui.tips.paste_image": "Press {highlight}Ctrl+V{/highlight} to paste images from your clipboard (on macOS use Ctrl+V, not Cmd+V — the terminal intercepts Cmd+V)",
   "tui.tips.editor":
     "Press {highlight}Ctrl+X E{/highlight} or {highlight}/editor{/highlight} to compose messages in your external editor",
   "tui.tips.init": "Run {highlight}/init{/highlight} to auto-generate project rules based on your codebase",
@@ -195,6 +196,20 @@ export const dict: Record<string, string> = {
   "tui.slash.deep-research.description":
     "deep multi-source, fact-checked research report (runs the deep-research workflow)",
 
+  // Built-in bundled skill descriptions (user-facing, decoupled from SKILL.md description which targets the LLM)
+  "tui.skill.docx-official.description": "Create, edit, and read Microsoft Word (.docx) files",
+  "tui.skill.xlsx-official.description": "Create, edit, and read Microsoft Excel (.xlsx) workbooks",
+  "tui.skill.pdf-official.description": "Create, edit, transform, and read PDF files",
+  "tui.skill.pptx-official.description": "Create, edit, and read Microsoft PowerPoint (.pptx) decks",
+  "tui.skill.mimocode.description": "Self-documentation for MiMoCode features, config, and commands",
+  "tui.skill.self-extend.description": "Extend your own capabilities with new skills, tools, and hooks",
+  "tui.skill.frontend-design.description": "Guidance for distinctive, intentional visual UI design",
+  "tui.skill.loop.description": "Schedule a prompt to run on a recurring interval",
+  "tui.skill.html-to-video-pipeline.description": "Short-video magic — make short videos with HTML",
+  "tui.skill.arxiv.description": "Search, cite, download, and track arXiv papers",
+  "tui.skill.skill-creator.description": "Create, review, and improve agent skills",
+  "tui.skill.research-paper-writing.description": "Draft, polish, and reviewer-style critique for academic papers",
+
   // Language switching
   "tui.command.language.switch.title": "Switch language",
   "tui.command.language.switch.description": "Change the display language",
@@ -319,6 +334,9 @@ export const dict: Record<string, string> = {
   "tui.command.session.timeline.title": "Jump to message",
   "tui.command.session.fork.title": "Fork session",
   "tui.command.session.compact.title": "Compact session",
+  "tui.command.session.ask.title": "Ask a side question",
+  "tui.command.session.ask.description": "Ask the current session a question without disrupting it",
+  "tui.command.session.ask.placeholder": "Ask a side question…",
   "tui.command.session.unshare.title": "Unshare session",
   "tui.command.session.undo.title": "Undo previous message",
   "tui.command.session.redo.title": "Redo",

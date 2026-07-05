@@ -8,7 +8,7 @@ import { Log } from "../util"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Agent } from "../agent/agent"
-import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
+import { decideAskRouting } from "@/agent/config"
 import { Provider } from "../provider"
 import { ModelID, ProviderID } from "../provider/schema"
 import {
@@ -54,6 +54,7 @@ import {
   TEXT_NGRAM_RECOVERY_REPLAN,
 } from "../session/prompt/text-ngram-detection"
 import { composeSkillsBlock } from "@/skill/compose/extract"
+import { builtinSkillRoot, matchDocumentSkills } from "@/skill/builtin/extract"
 import { ToolRegistry } from "../tool"
 import { MCP } from "../mcp"
 import { LSP } from "../lsp"
@@ -286,7 +287,7 @@ export const layer = Layer.effect(
         if (!captureSession) return empty
         const [skills, env, instructions] = yield* Effect.all([
           sys.skills(ag),
-          Effect.sync(() => sys.environment(model, captureSession.time.created)),
+          sys.environment(model, captureSession.time.created),
           instruction.system().pipe(Effect.orDie),
         ])
         // (checkpoint-writer never requests json_schema output, so STRUCTURED_OUTPUT_SYSTEM_PROMPT
@@ -569,6 +570,32 @@ export const layer = Layer.effect(
       }
 
       const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
+      if (!Flag.MIMOCODE_DISABLE_BUILTIN_SKILLS && !Flag.MIMOCODE_DISABLE_OFFICIAL_SKILLS) {
+        const fileCandidates = userMessage.parts.flatMap((p) => {
+          if (p.type !== "file") return []
+          const filenameFromSource =
+            p.source?.type === "file" && p.source.path ? path.basename(p.source.path) : undefined
+          return [{ mime: p.mime, filename: p.filename ?? filenameFromSource }]
+        })
+        const skills = matchDocumentSkills(fileCandidates)
+        if (skills.length > 0) {
+          const root = builtinSkillRoot()
+          const entries = skills.map((skill) => `- ${skill}: ${path.join(root, skill, "SKILL.md")}`).join("\n")
+          const part = yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: userMessage.info.id,
+            sessionID: userMessage.info.sessionID,
+            type: "text",
+            text: `<system-reminder>
+The user's message attaches office document file(s). The following built-in skill(s) may be relevant for producing, reading, or transforming these files. You are recommended to consult the SKILL.md when it fits the task — prefer using these skills over ad-hoc approaches when applicable:
+${entries}
+</system-reminder>`,
+            synthetic: true,
+          })
+          userMessage.parts.push(part)
+        }
+      }
+
       if (input.agent.name !== "plan" && assistantMessage?.info.agent === "plan") {
         const plan = Session.plan(input.session)
         if (!(yield* fsys.existsSafe(plan))) return input.messages
@@ -721,9 +748,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const askActor = input.agentID
         ? yield* actorRegistry.get(input.session.id, input.agentID)
         : undefined
-      const askNonInteractive = askActor
-        ? SYSTEM_SPAWNED_AGENT_TYPES.has(askActor.agent) || askActor.background
-        : SYSTEM_SPAWNED_AGENT_TYPES.has(input.agent.name)
+      // Three-way permission-ask routing (see decideAskRouting): system agent ->
+      // auto-deny; orchestrator peer -> FORWARD for approval; other background ->
+      // auto-deny; normal -> interactive.
+      const askRouting = decideAskRouting({
+        askActor: askActor
+          ? {
+              agent: askActor.agent,
+              background: askActor.background,
+              mode: askActor.mode,
+              parentActorID: askActor.parentActorID,
+            }
+          : undefined,
+        sessionParentID: input.session.parentID,
+        agentName: input.agent.name,
+        orchestratorEnabled: Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR,
+      })
+      const askInteractive = askRouting.interactive
+      const askForward = askRouting.forward
       const rejectionFor = (toolID: string) => ({
         title: "Tool not permitted",
         output: `The "${toolID}" tool is not in this actor's whitelist. Allowed tools: ${
@@ -764,10 +806,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 sessionID: input.session.id,
                 tool: { messageID: input.processor.message.id, callID: options.toolCallId },
                 ruleset: Agent.runtimePermission(input.agent, input.session.permission),
-                // System-spawned background agents (checkpoint-writer, dream, distill)
-                // AND any background actor (e.g. compose workflow subagents) have no
-                // human to answer a permission prompt — fail clean, don't hang.
-                interactive: !askNonInteractive,
+                // System-spawned + non-peer background agents have no human to answer
+                // → fail clean, don't hang. Orchestrator peers FORWARD for approval.
+                interactive: askInteractive,
+                ...(askForward ? { forward: askForward } : {}),
               },
               options.abortSignal,
             )
@@ -3313,7 +3355,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             const [skills, env, instructions] = yield* Effect.all([
               sys.skills(agent),
-              Effect.sync(() => sys.environment(model, session.time.created)),
+              sys.environment(model, session.time.created),
               instruction.system().pipe(Effect.orDie),
             ])
             // Surface which instruction files (CLAUDE.md, AGENTS.md, ...) were loaded.

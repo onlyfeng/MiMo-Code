@@ -26,6 +26,7 @@ export const dict = {
   "tui.prompt.placeholder.normal": 'Спросите что угодно... "{{example}}"',
   "tui.prompt.placeholder.shell": 'Выполните команду... "{{example}}"',
   "tui.prompt.ghost": "{{prediction}}  (Tab — принять)",
+  "tui.paste.image.fallback_path": "Модель не поддерживает изображения — вместо этого вставлен путь к изображению",
   "tui.home.placeholder.example.todo": "Исправь TODO в кодовой базе",
   "tui.home.placeholder.example.stack": "Какой технологический стек у этого проекта?",
   "tui.home.placeholder.example.tests": "Почини сломанные тесты",
@@ -50,7 +51,7 @@ export const dict = {
   "tui.tips.shell_prefix":
     "Начните сообщение с {highlight}!{/highlight}, чтобы выполнить shell-команду напрямую (например, {highlight}!ls -la{/highlight})",
   "tui.tips.tab_agent":
-    "Нажмите {highlight}Tab{/highlight} или {highlight}Shift+Tab{/highlight}, чтобы переключаться между агентами Build, Plan и Compose",
+    "Нажмите {highlight}Tab{/highlight} или {highlight}Shift+Tab{/highlight}, чтобы переключаться между агентами Build, Plan, Compose и Orchestrator",
   "tui.tips.theme_mode":
     "Выполните {highlight}/dark{/highlight} для тёмного режима или {highlight}/light{/highlight} для светлого",
   "tui.tips.doc": "Выполните {highlight}/doc{/highlight}, чтобы открыть пользовательскую документацию",
@@ -65,7 +66,7 @@ export const dict = {
     "Выполните {highlight}/share{/highlight}, чтобы получить публичную ссылку на диалог на opencode.ai",
   "tui.tips.drag_drop": "Перетащите изображения или PDF в терминал, чтобы добавить их в контекст",
   "tui.tips.paste_image":
-    "Нажмите {highlight}Ctrl+V{/highlight}, чтобы вставить изображение из буфера обмена в строку ввода",
+    "Нажмите {highlight}Ctrl+V{/highlight}, чтобы вставить изображение из буфера обмена (в macOS используйте Ctrl+V, а не Cmd+V — терминал перехватывает Cmd+V)",
   "tui.tips.editor":
     "Нажмите {highlight}Ctrl+X E{/highlight} или {highlight}/editor{/highlight}, чтобы редактировать сообщения во внешнем редакторе",
   "tui.tips.init":
@@ -274,6 +275,20 @@ export const dict = {
   "tui.slash.deep-research.description":
     "глубокий многоисточниковый проверенный отчёт (запускает workflow deep-research)",
 
+  // Built-in bundled skill descriptions (user-facing, decoupled from SKILL.md description which targets the LLM)
+  "tui.skill.docx-official.description": "Создание, редактирование и чтение файлов Microsoft Word (.docx)",
+  "tui.skill.xlsx-official.description": "Создание, редактирование и чтение книг Microsoft Excel (.xlsx)",
+  "tui.skill.pdf-official.description": "Создание, редактирование, преобразование и чтение PDF-файлов",
+  "tui.skill.pptx-official.description": "Создание, редактирование и чтение презентаций Microsoft PowerPoint (.pptx)",
+  "tui.skill.mimocode.description": "Самодокументация функций, конфигурации и команд MiMoCode",
+  "tui.skill.self-extend.description": "Расширьте свои возможности новыми skills, инструментами и hooks",
+  "tui.skill.frontend-design.description": "Руководство по выразительному, осмысленному визуальному дизайну UI",
+  "tui.skill.loop.description": "Запланировать запуск промпта с периодичностью",
+  "tui.skill.html-to-video-pipeline.description": "Магический инструмент для коротких видео — создавайте короткие видео с помощью HTML",
+  "tui.skill.arxiv.description": "Поиск, цитирование, загрузка и отслеживание статей arXiv",
+  "tui.skill.skill-creator.description": "Создание, проверка и улучшение skills агента",
+  "tui.skill.research-paper-writing.description": "Написание, полировка и рецензирование научных статей",
+
   // Language switching
   "tui.command.language.switch.title": "Сменить язык",
   "tui.command.language.switch.description": "Изменить язык интерфейса",
@@ -390,6 +405,9 @@ export const dict = {
   "tui.command.session.timeline.title": "Перейти к сообщению",
   "tui.command.session.fork.title": "Разветвить сессию",
   "tui.command.session.compact.title": "Сжать сессию",
+  "tui.command.session.ask.title": "Задать побочный вопрос",
+  "tui.command.session.ask.description": "Задайте вопрос текущей сессии, не прерывая её",
+  "tui.command.session.ask.placeholder": "Задайте побочный вопрос…",
   "tui.command.session.unshare.title": "Отменить публикацию",
   "tui.command.session.undo.title": "Отменить предыдущее сообщение",
   "tui.command.session.redo.title": "Повторить",
