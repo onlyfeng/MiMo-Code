@@ -202,13 +202,35 @@ export const dict: Record<string, string> = {
   "tui.skill.pdf-official.description": "Create, edit, transform, and read PDF files",
   "tui.skill.pptx-official.description": "Create, edit, and read Microsoft PowerPoint (.pptx) decks",
   "tui.skill.mimocode.description": "Self-documentation for MiMoCode features, config, and commands",
-  "tui.skill.self-extend.description": "Extend your own capabilities with new skills, tools, and hooks",
+  "tui.skill.evolve.description": "Rewrite any layer of yourself — tools, behavior hooks, knowledge, workflows, even the UI",
   "tui.skill.frontend-design.description": "Guidance for distinctive, intentional visual UI design",
   "tui.skill.loop.description": "Schedule a prompt to run on a recurring interval",
   "tui.skill.html-to-video-pipeline.description": "Short-video magic — make short videos with HTML",
   "tui.skill.arxiv.description": "Search, cite, download, and track arXiv papers",
   "tui.skill.skill-creator.description": "Create, review, and improve agent skills",
   "tui.skill.research-paper-writing.description": "Draft, polish, and reviewer-style critique for academic papers",
+  "tui.skill.design-blueprint.description":
+    "Produce a design blueprint (DESIGN.md + Decision Trace) before mocking up any visual",
+  "tui.skill.auto-research.description":
+    "Autonomous research workflows — literature surveys, experiment loops, paper reproduction",
+  "tui.skill.deep-research.description":
+    "Deep multi-source investigation with cross-checked, cited reports",
+  "tui.skill.modern-python-toolchain.description":
+    "Modern Python project setup with uv, ruff, and pyright",
+  "tui.skill.compose:ask.description": "Ask the user for decisions or clarifications",
+  "tui.skill.compose:brainstorm.description": "Explore requirements and design before implementation",
+  "tui.skill.compose:debug.description": "Systematic debugging before proposing fixes",
+  "tui.skill.compose:execute.description": "Execute an implementation plan with review checkpoints",
+  "tui.skill.compose:feedback.description": "Handle code review feedback with technical rigor",
+  "tui.skill.compose:merge.description": "Integrate completed work — merge, PR, or cleanup",
+  "tui.skill.compose:parallel.description": "Run independent tasks concurrently",
+  "tui.skill.compose:plan.description": "Create a step-by-step implementation plan from spec",
+  "tui.skill.compose:report.description": "Consolidate implementation into a final-state report",
+  "tui.skill.compose:review.description": "Verify work meets requirements before merging",
+  "tui.skill.compose:subagent.description": "Dispatch independent tasks to fresh sub-agents",
+  "tui.skill.compose:tdd.description": "Test-driven development — write tests before code",
+  "tui.skill.compose:verify.description": "Run verification and confirm passing output",
+  "tui.skill.compose:worktree.description": "Create an isolated workspace for feature work",
 
   // Language switching
   "tui.command.language.switch.title": "Switch language",
@@ -310,6 +332,7 @@ export const dict: Record<string, string> = {
   "tui.toast.update_available.success": "Successfully updated to MiMoCode v{{version}}. Please restart the application.",
   "tui.toast.updated.title": "Auto-updated",
   "tui.toast.updated.message": "Patch update applied: v{{version}}. Restart to use the new version. Disable via autoupdate: false in config.",
+  "tui.toast.native_installer_tip": "Tip: native installer (curl/PowerShell) is recommended for a better experience.",
   "tui.sidebar.instructions": "Instructions",
   "tui.sidebar.cwd": "Working Directory",
   "tui.toast.unknown_error": "An unknown error has occurred",
@@ -480,4 +503,13 @@ export const dict: Record<string, string> = {
   "trust.dangerous.advice_root": "Unless you have a very specific reason, DO NOT trust the filesystem root.",
   "trust.dangerous.option.yes": "I understand the risks, trust for this session",
   "trust.dangerous.option.no": "Exit (recommended)",
+  "skip_permissions.title": "WARNING: Bypass Permissions mode",
+  "skip_permissions.body":
+    "You started with --dangerously-skip-permissions. MiMo Code will read, edit, and execute files and run shell commands WITHOUT asking for approval. Only rules you have explicitly denied in config are still enforced. You are solely responsible for anything it does.",
+  "skip_permissions.plugin_warn":
+    "In this mode a malicious prompt, file, or plugin can run arbitrary commands, and modify or exfiltrate your data without any confirmation.",
+  "skip_permissions.root_warn":
+    "You are running as root. Bypassing permissions as root gives the model unrestricted control over this machine.",
+  "skip_permissions.option.no": "No, exit (recommended)",
+  "skip_permissions.option.yes": "Yes, I accept the risks and want to skip permissions",
 }

@@ -266,13 +266,35 @@ export const dict = {
   "tui.skill.pdf-official.description": "Créer, modifier, transformer et lire des fichiers PDF",
   "tui.skill.pptx-official.description": "Créer, modifier et lire des présentations Microsoft PowerPoint (.pptx)",
   "tui.skill.mimocode.description": "Documentation intégrée des fonctionnalités, config et commandes MiMoCode",
-  "tui.skill.self-extend.description": "Étendez vos capacités avec de nouvelles skills, outils et hooks",
+  "tui.skill.evolve.description": "Réécrivez chaque couche de vous-même — outils, hooks, connaissances, workflows, même l'UI",
   "tui.skill.frontend-design.description": "Conseils pour un design d'interface visuel distinctif et intentionnel",
   "tui.skill.loop.description": "Planifier l'exécution récurrente d'un prompt",
   "tui.skill.html-to-video-pipeline.description": "L'arme ultime pour vidéos courtes — créez des vidéos courtes avec du HTML",
   "tui.skill.arxiv.description": "Rechercher, citer, télécharger et suivre des articles arXiv",
   "tui.skill.skill-creator.description": "Créer, réviser et améliorer des skills d'agent",
   "tui.skill.research-paper-writing.description": "Rédiger, polir et critiquer des articles académiques avec l'œil d'un relecteur",
+  "tui.skill.design-blueprint.description":
+    "Produire un plan de design (DESIGN.md + Decision Trace) avant tout mockup",
+  "tui.skill.auto-research.description":
+    "Workflows de recherche autonomes — revues de littérature, boucles d'expériences, reproduction d'articles",
+  "tui.skill.deep-research.description":
+    "Investigation multi-sources approfondie avec rapport cité et vérifié",
+  "tui.skill.modern-python-toolchain.description":
+    "Configuration de projet Python moderne avec uv, ruff et pyright",
+  "tui.skill.compose:ask.description": "Demander une décision ou clarification à l'utilisateur",
+  "tui.skill.compose:brainstorm.description": "Explorer les besoins et la conception avant l'implémentation",
+  "tui.skill.compose:debug.description": "Débogage systématique avant de proposer un correctif",
+  "tui.skill.compose:execute.description": "Exécuter un plan d'implémentation avec points de revue",
+  "tui.skill.compose:feedback.description": "Traiter les retours de revue de code avec rigueur technique",
+  "tui.skill.compose:merge.description": "Intégrer le travail terminé — merge, PR ou nettoyage",
+  "tui.skill.compose:parallel.description": "Exécuter des tâches indépendantes en parallèle",
+  "tui.skill.compose:plan.description": "Créer un plan d'implémentation étape par étape",
+  "tui.skill.compose:report.description": "Consolider l'implémentation en rapport final",
+  "tui.skill.compose:review.description": "Vérifier la conformité aux exigences avant merge",
+  "tui.skill.compose:subagent.description": "Déléguer des tâches indépendantes à des sous-agents",
+  "tui.skill.compose:tdd.description": "Développement piloté par les tests — tests avant le code",
+  "tui.skill.compose:verify.description": "Lancer la vérification et confirmer la réussite",
+  "tui.skill.compose:worktree.description": "Créer un espace de travail isolé pour le développement",
 
   // Language switching
   "tui.command.language.switch.title": "Changer de langue",
@@ -366,6 +388,7 @@ export const dict = {
   "tui.toast.update_available.success": "Mis à jour vers MiMoCode v{{version}}. Veuillez redémarrer l'application.",
   "tui.toast.updated.title": "Mis à jour automatiquement",
   "tui.toast.updated.message": "Correctif appliqué automatiquement : v{{version}}. Redémarrez pour utiliser la nouvelle version. Désactivez avec autoupdate: false dans la configuration.",
+  "tui.toast.native_installer_tip": "Conseil : l'installateur natif (curl/PowerShell) est recommandé pour une meilleure expérience.",
   "tui.sidebar.instructions": "Instructions",
   "tui.sidebar.cwd": "Répertoire de travail",
   "tui.toast.unknown_error": "Une erreur inconnue s'est produite",
@@ -530,4 +553,13 @@ export const dict = {
   "trust.dangerous.advice_root": "Sauf raison très spécifique, NE faites PAS confiance à la racine du système de fichiers.",
   "trust.dangerous.option.yes": "Je comprends les risques, faire confiance pour cette session",
   "trust.dangerous.option.no": "Quitter (recommandé)",
+  "skip_permissions.title": "AVERTISSEMENT : mode contournement des permissions",
+  "skip_permissions.body":
+    "Vous avez démarré avec --dangerously-skip-permissions. MiMo Code va lire, modifier et exécuter des fichiers et lancer des commandes shell SANS demander d'approbation. Seules les règles que vous avez explicitement refusées (deny) dans la configuration restent appliquées. Vous êtes seul responsable de tout ce qu'il fait.",
+  "skip_permissions.plugin_warn":
+    "Dans ce mode, une invite, un fichier ou un plugin malveillant peut exécuter des commandes arbitraires et modifier ou exfiltrer vos données sans aucune confirmation.",
+  "skip_permissions.root_warn":
+    "Vous êtes en root. Contourner les permissions en root donne au modèle un contrôle illimité sur cette machine.",
+  "skip_permissions.option.no": "Non, quitter (recommandé)",
+  "skip_permissions.option.yes": "Oui, j'accepte les risques et veux ignorer les permissions",
 } satisfies Partial<Record<Keys, string>>
