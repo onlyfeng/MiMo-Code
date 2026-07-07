@@ -76,6 +76,10 @@ export const Flag = {
   // `bash: allow` rule. Set MIMOCODE_AUTO_APPROVE_DELETE=true to trust the
   // model with deletes and skip the second confirmation.
   MIMOCODE_AUTO_APPROVE_DELETE: truthy("MIMOCODE_AUTO_APPROVE_DELETE"),
+  // Set by the TUI's --dangerously-skip-permissions flag. When truthy, an
+  // allow-all base ruleset is injected UNDER the user's config permission so
+  // every tool auto-approves unless the user explicitly denied it.
+  MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS: truthy("MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS"),
   MIMOCODE_DISABLE_DEFAULT_PLUGINS: truthy("MIMOCODE_DISABLE_DEFAULT_PLUGINS"),
   MIMOCODE_DISABLE_LSP_DOWNLOAD: truthy("MIMOCODE_DISABLE_LSP_DOWNLOAD"),
   MIMOCODE_ENABLE_EXPERIMENTAL_MODELS: truthy("MIMOCODE_ENABLE_EXPERIMENTAL_MODELS"),
@@ -235,7 +239,7 @@ export const Flag = {
     return truthy("MIMOCODE_DISABLE_COMPOSE_SKILLS")
   },
   // Disables user-facing builtin skills shipped with the binary (e.g.
-  // self-extend). Does not affect compose skills — the two sets are
+  // evolve). Does not affect compose skills — the two sets are
   // independent and non-overlapping.
   get MIMOCODE_DISABLE_BUILTIN_SKILLS() {
     return truthy("MIMOCODE_DISABLE_BUILTIN_SKILLS")

@@ -31,6 +31,7 @@ export const Info = z.object({
   location: z.string(),
   content: z.string(),
   hidden: z.boolean().optional(),
+  bundled: z.boolean().optional(),
 })
 export type Info = z.infer<typeof Info>
 
@@ -60,6 +61,7 @@ type State = {
 type DiscoveryState = {
   matches: string[]
   dirs: string[]
+  bundledRoots: string[]
 }
 
 type ScanState = {
@@ -75,7 +77,7 @@ export interface Interface {
   readonly reload: () => Effect.Effect<void>
 }
 
-const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.Interface) {
+const add = Effect.fnUntraced(function* (state: State, match: string, bundledRoots: string[], bus: Bus.Interface) {
   const md = yield* Effect.tryPromise({
     try: () => ConfigMarkdown.parse(match),
     catch: (err) => err,
@@ -98,12 +100,21 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.I
   const parsed = Info.pick({ name: true, description: true, hidden: true }).safeParse(md.data)
   if (!parsed.success) return
 
-  if (state.skills[parsed.data.name]) {
-    log.warn("duplicate skill name", {
-      name: parsed.data.name,
-      existing: state.skills[parsed.data.name].location,
-      duplicate: match,
-    })
+  const isBundled = bundledRoots.some((root) => match.startsWith(root))
+  const existing = state.skills[parsed.data.name]
+
+  if (existing) {
+    // User overrides always win: bundled must not overwrite non-bundled
+    if (isBundled && !existing.bundled) return
+    if (!isBundled && existing.bundled) {
+      log.info("user skill overrides bundled", { name: parsed.data.name, location: match })
+    } else {
+      log.warn("duplicate skill name", {
+        name: parsed.data.name,
+        existing: existing.location,
+        duplicate: match,
+      })
+    }
   }
 
   state.dirs.add(path.dirname(match))
@@ -113,6 +124,7 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.I
     location: match,
     content: md.content,
     hidden: parsed.data.hidden,
+    bundled: isBundled || undefined,
   }
 })
 
@@ -154,6 +166,7 @@ const discoverSkills = Effect.fnUntraced(function* (
   worktree: string,
 ) {
   const state: ScanState = { matches: new Set(), dirs: new Set() }
+  const bundledRoots: string[] = []
 
   // Extract builtin skills to disk first (user skills with same name override)
   if (!Flag.MIMOCODE_DISABLE_BUILTIN_SKILLS) {
@@ -161,6 +174,7 @@ const discoverSkills = Effect.fnUntraced(function* (
       Effect.catch(() => Effect.succeed(undefined)),
     )
     if (builtinSkillRoot && (yield* fsys.isDir(builtinSkillRoot))) {
+      bundledRoots.push(builtinSkillRoot)
       yield* scan(state, builtinSkillRoot, SKILL_PATTERN, { scope: "builtin" })
       if (Flag.MIMOCODE_DISABLE_OFFICIAL_SKILLS) {
         const skillsRoot = path.join(builtinSkillRoot, "skills")
@@ -183,6 +197,7 @@ const discoverSkills = Effect.fnUntraced(function* (
       Effect.catch(() => Effect.succeed(undefined)),
     )
     if (composeSkillRoot && (yield* fsys.isDir(composeSkillRoot))) {
+      bundledRoots.push(composeSkillRoot)
       yield* scan(state, composeSkillRoot, SKILL_PATTERN, { scope: "compose" })
     }
   }
@@ -237,11 +252,12 @@ const discoverSkills = Effect.fnUntraced(function* (
   return {
     matches: Array.from(state.matches),
     dirs: Array.from(state.dirs),
+    bundledRoots,
   }
 })
 
 const loadSkills = Effect.fnUntraced(function* (state: State, discovered: DiscoveryState, bus: Bus.Interface) {
-  yield* Effect.forEach(discovered.matches, (match) => add(state, match, bus), {
+  yield* Effect.forEach(discovered.matches, (match) => add(state, match, discovered.bundledRoots, bus), {
     concurrency: "unbounded",
     discard: true,
   })

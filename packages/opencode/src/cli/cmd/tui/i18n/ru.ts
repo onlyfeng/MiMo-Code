@@ -281,13 +281,35 @@ export const dict = {
   "tui.skill.pdf-official.description": "Создание, редактирование, преобразование и чтение PDF-файлов",
   "tui.skill.pptx-official.description": "Создание, редактирование и чтение презентаций Microsoft PowerPoint (.pptx)",
   "tui.skill.mimocode.description": "Самодокументация функций, конфигурации и команд MiMoCode",
-  "tui.skill.self-extend.description": "Расширьте свои возможности новыми skills, инструментами и hooks",
+  "tui.skill.evolve.description": "Перепишите любой свой слой — инструменты, hooks, знания, workflows и даже UI",
   "tui.skill.frontend-design.description": "Руководство по выразительному, осмысленному визуальному дизайну UI",
   "tui.skill.loop.description": "Запланировать запуск промпта с периодичностью",
   "tui.skill.html-to-video-pipeline.description": "Магический инструмент для коротких видео — создавайте короткие видео с помощью HTML",
   "tui.skill.arxiv.description": "Поиск, цитирование, загрузка и отслеживание статей arXiv",
   "tui.skill.skill-creator.description": "Создание, проверка и улучшение skills агента",
   "tui.skill.research-paper-writing.description": "Написание, полировка и рецензирование научных статей",
+  "tui.skill.design-blueprint.description":
+    "Создать проектную спецификацию (DESIGN.md + Decision Trace) до макетов",
+  "tui.skill.auto-research.description":
+    "Автономные исследовательские workflow — обзоры литературы, циклы экспериментов, воспроизведение статей",
+  "tui.skill.deep-research.description":
+    "Глубокое многоисточниковое исследование с перекрёстной проверкой и цитированием",
+  "tui.skill.modern-python-toolchain.description":
+    "Настройка Python-проекта с uv, ruff и pyright",
+  "tui.skill.compose:ask.description": "Запросить у пользователя решение или уточнение",
+  "tui.skill.compose:brainstorm.description": "Исследовать требования и дизайн перед реализацией",
+  "tui.skill.compose:debug.description": "Системная отладка перед предложением исправлений",
+  "tui.skill.compose:execute.description": "Выполнить план реализации с контрольными точками",
+  "tui.skill.compose:feedback.description": "Обработать отзывы код-ревью с технической строгостью",
+  "tui.skill.compose:merge.description": "Интегрировать завершённую работу — merge, PR или очистка",
+  "tui.skill.compose:parallel.description": "Выполнять независимые задачи параллельно",
+  "tui.skill.compose:plan.description": "Создать пошаговый план реализации из спецификации",
+  "tui.skill.compose:report.description": "Свести результаты реализации в итоговый отчёт",
+  "tui.skill.compose:review.description": "Проверить соответствие требованиям перед merge",
+  "tui.skill.compose:subagent.description": "Делегировать независимые задачи субагентам",
+  "tui.skill.compose:tdd.description": "Разработка через тестирование — тесты перед кодом",
+  "tui.skill.compose:verify.description": "Запустить проверку и подтвердить успешный результат",
+  "tui.skill.compose:worktree.description": "Создать изолированное рабочее пространство",
 
   // Language switching
   "tui.command.language.switch.title": "Сменить язык",
@@ -381,6 +403,7 @@ export const dict = {
   "tui.toast.update_available.success": "Обновлено до MiMoCode v{{version}}. Пожалуйста, перезапустите приложение.",
   "tui.toast.updated.title": "Автообновление выполнено",
   "tui.toast.updated.message": "Патч применён автоматически: v{{version}}. Перезапустите для использования новой версии. Отключите через autoupdate: false в конфигурации.",
+  "tui.toast.native_installer_tip": "Совет: рекомендуется нативный установщик (curl/PowerShell) для лучшего опыта установки и обновления.",
   "tui.sidebar.instructions": "Инструкции",
   "tui.sidebar.cwd": "Рабочий каталог",
   "tui.toast.unknown_error": "Произошла неизвестная ошибка",
@@ -542,4 +565,13 @@ export const dict = {
   "trust.dangerous.advice_root": "Если нет весомой причины, НЕ доверяйте корню файловой системы.",
   "trust.dangerous.option.yes": "Я понимаю риски, доверять только в этой сессии",
   "trust.dangerous.option.no": "Выйти (рекомендуется)",
+  "skip_permissions.title": "ПРЕДУПРЕЖДЕНИЕ: режим обхода разрешений",
+  "skip_permissions.body":
+    "Вы запустили с --dangerously-skip-permissions. MiMo Code будет читать, редактировать и выполнять файлы, а также запускать команды оболочки БЕЗ запроса подтверждения. Действуют только правила, которые вы явно запретили (deny) в конфигурации. Вы несёте полную ответственность за все его действия.",
+  "skip_permissions.plugin_warn":
+    "В этом режиме вредоносный запрос, файл или плагин может выполнить произвольные команды и изменить или похитить ваши данные без какого-либо подтверждения.",
+  "skip_permissions.root_warn":
+    "Вы работаете от имени root. Обход разрешений от имени root даёт модели неограниченный контроль над этой машиной.",
+  "skip_permissions.option.no": "Нет, выйти (рекомендуется)",
+  "skip_permissions.option.yes": "Да, я принимаю риски и хочу пропустить проверку разрешений",
 } satisfies Partial<Record<Keys, string>>
