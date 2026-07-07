@@ -1,5 +1,7 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
+import { mkdir } from "node:fs/promises"
+import { join } from "node:path"
 import { afterEach, describe, expect } from "bun:test"
 import { Deferred, Effect, Layer } from "effect"
 import { eq, and } from "drizzle-orm"
@@ -46,7 +48,9 @@ import { SessionCompaction } from "../../src/session/compaction"
 import { TaskRegistry } from "../../src/task/registry"
 import { defaultLayer as SchedulerDefaultLayer } from "../../src/cron/scheduler"
 import { Auth } from "../../src/auth"
+import { TuiEvent } from "../../src/cli/cmd/tui/event"
 import { Database } from "../../src/storage"
+import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { Instance } from "../../src/project/instance"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Ripgrep } from "../../src/file/ripgrep"
@@ -391,6 +395,53 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
         )
 
         expect(rows.length).toBe(0)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
+  it.live("isolated background peer completion toast is published on the parent instance", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ dir, llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "notification-test-peer-toast",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const childDir = join(dir, "child-worktree")
+        yield* Effect.promise(() => mkdir(childDir, { recursive: true }))
+
+        const toast = yield* Deferred.make<GlobalEvent>()
+        const onGlobal = (event: GlobalEvent) => {
+          if (event.payload?.type !== TuiEvent.ToastShow.type) return
+          if (event.payload.properties?.message !== 'Child "isolated peer" completed') return
+          Effect.runFork(Deferred.succeed(toast, event))
+        }
+        GlobalBus.on("event", onGlobal)
+
+        yield* Effect.ensuring(
+          Effect.fnUntraced(function* () {
+            yield* llm.text("done")
+            const result = yield* actor.spawn({
+              mode: "peer",
+              sessionID: parent.id,
+              agentType: "build",
+              task: "finish in an isolated dir",
+              description: "isolated peer",
+              context: "none",
+              tools: ["read"],
+              background: true,
+              model: ref,
+              cwd: childDir,
+            })
+
+            yield* Deferred.await(result.outcome)
+            const event = yield* Deferred.await(toast).pipe(Effect.timeout("10 seconds"))
+            expect(event.directory).toBe(dir)
+          })(),
+          Effect.sync(() => GlobalBus.off("event", onGlobal)),
+        )
       }),
       { git: true, config: providerCfg },
     ),
