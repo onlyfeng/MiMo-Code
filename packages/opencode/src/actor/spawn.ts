@@ -322,32 +322,32 @@ export const layer = Layer.effect(
           extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string },
         ) =>
           input.background && input.agentType !== "checkpoint-writer"
-            ? inbox
-                .send({
-                  receiverSessionID: input.parentSessionID,
-                  receiverActorID: input.parentActorID ?? "main",
-                  senderSessionID: input.sessionID,
-                  senderActorID: input.actorID,
-                  type: "actor_notification",
-                  content: renderActorNotification({
-                    actorID: input.actorID,
-                    description,
-                    status,
-                    ...extra,
-                  }),
-                })
-                .pipe(Effect.ignore)
-                // Also give the user a visible signal (the child may be unfocused).
-                .pipe(
-                  Effect.andThen(
-                    Effect.promise(() =>
-                      Bus.publish(TuiEvent.ToastShow, {
-                        message: `Child "${description}" ${status}`,
-                        variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
+            ? Effect.all(
+                [
+                  inbox
+                    .send({
+                      receiverSessionID: input.parentSessionID,
+                      receiverActorID: input.parentActorID ?? "main",
+                      senderSessionID: input.sessionID,
+                      senderActorID: input.actorID,
+                      type: "actor_notification",
+                      content: renderActorNotification({
+                        actorID: input.actorID,
+                        description,
+                        status,
+                        ...extra,
                       }),
-                    ).pipe(Effect.ignore),
-                  ),
-                )
+                    })
+                    .pipe(Effect.ignoreCause({ log: "Warn", message: "actor inbox notification failed" })),
+                  bus
+                    .publish(TuiEvent.ToastShow, {
+                      message: `Child "${description}" ${status}`,
+                      variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
+                    })
+                    .pipe(Effect.ignoreCause({ log: "Warn", message: "actor toast notification failed" })),
+                ],
+                { concurrency: "unbounded", discard: true },
+              )
             : Effect.void
         const commitCancelled = Effect.fn("Actor.commitCancelled")(function* () {
           yield* actorReg
