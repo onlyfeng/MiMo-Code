@@ -22,6 +22,7 @@ import { Plugin, HookEvent } from "@/plugin"
 import { parseReturnHeader, type ReturnStatus } from "./return-header"
 import { Log } from "@/util"
 import { Instance, type InstanceContext } from "@/project/instance"
+import { InstanceState } from "@/effect"
 import { InstanceRef } from "@/effect/instance-ref"
 
 const log = Log.create({ service: "actor.spawn" })
@@ -303,6 +304,7 @@ export const layer = Layer.effect(
         const key = actorKey(input.sessionID, input.actorID)
         const outcome = yield* Deferred.make<AgentOutcome>()
         const description = input.description ?? input.agentType
+        const parentInstance = yield* InstanceState.context
         // Auto-start the bound task: spawning an actor for a task IS that task
         // beginning work. Status transition is a structural side-effect of spawn,
         // not a model action (the model maintains task status unreliably).
@@ -322,32 +324,33 @@ export const layer = Layer.effect(
           extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string },
         ) =>
           input.background && input.agentType !== "checkpoint-writer"
-            ? inbox
-                .send({
-                  receiverSessionID: input.parentSessionID,
-                  receiverActorID: input.parentActorID ?? "main",
-                  senderSessionID: input.sessionID,
-                  senderActorID: input.actorID,
-                  type: "actor_notification",
-                  content: renderActorNotification({
-                    actorID: input.actorID,
-                    description,
-                    status,
-                    ...extra,
-                  }),
-                })
-                .pipe(Effect.ignore)
-                // Also give the user a visible signal (the child may be unfocused).
-                .pipe(
-                  Effect.andThen(
-                    Effect.promise(() =>
-                      Bus.publish(TuiEvent.ToastShow, {
-                        message: `Child "${description}" ${status}`,
-                        variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
+            ? Effect.all(
+                [
+                  inbox
+                    .send({
+                      receiverSessionID: input.parentSessionID,
+                      receiverActorID: input.parentActorID ?? "main",
+                      senderSessionID: input.sessionID,
+                      senderActorID: input.actorID,
+                      type: "actor_notification",
+                      content: renderActorNotification({
+                        actorID: input.actorID,
+                        description,
+                        status,
+                        ...extra,
                       }),
-                    ).pipe(Effect.ignore),
-                  ),
-                )
+                    })
+                    .pipe(Effect.ignoreCause({ log: "Warn", message: "actor inbox notification failed" })),
+                  bus
+                    .publish(TuiEvent.ToastShow, {
+                      message: `Child "${description}" ${status}`,
+                      variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
+                    })
+                    .pipe(Effect.provideService(InstanceRef, parentInstance))
+                    .pipe(Effect.ignoreCause({ log: "Warn", message: "actor toast notification failed" })),
+                ],
+                { concurrency: "unbounded", discard: true },
+              )
             : Effect.void
         const commitCancelled = Effect.fn("Actor.commitCancelled")(function* () {
           yield* actorReg
