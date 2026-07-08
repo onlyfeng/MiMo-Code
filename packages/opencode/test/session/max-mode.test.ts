@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { toSchemaOnlyTools, parseJudgeIndex, renderCandidate } from "../../src/session/max-mode"
+import { toSchemaOnlyTools, parseJudgeIndex, renderCandidate, shouldRunMaxModeStep } from "../../src/session/max-mode"
 
 describe("max-mode toSchemaOnlyTools", () => {
   test("strips execute closures but keeps schema fields", () => {
@@ -71,5 +71,61 @@ describe("max-mode renderCandidate", () => {
     expect(rendered).toContain("candidate reasoning truncated before max-mode judge injection")
     expect(rendered).toContain("candidate message truncated before max-mode judge injection")
     expect(rendered).toContain("tool input truncated before max-mode judge injection")
+  })
+})
+
+describe("max-mode shouldRunMaxModeStep", () => {
+  test("enables max mode for the built-in max agent when experimental config exists", () => {
+    expect(
+      shouldRunMaxModeStep({
+        agent: { name: "max" },
+        maxMode: { candidates: 2 },
+        format: { type: "text" },
+        isLastStep: false,
+      }),
+    ).toBe(true)
+  })
+
+  test("enables max mode for any agent with maxMode true when experimental config exists", () => {
+    expect(
+      shouldRunMaxModeStep({
+        agent: { name: "general", maxMode: true },
+        maxMode: { candidates: 2 },
+        format: { type: "text" },
+        isLastStep: false,
+      }),
+    ).toBe(true)
+  })
+
+  test("skips max mode without experimental maxMode config", () => {
+    expect(
+      shouldRunMaxModeStep({
+        agent: { name: "max" },
+        format: { type: "text" },
+        isLastStep: false,
+      }),
+    ).toBe(false)
+  })
+
+  test("skips max mode for json schema output", () => {
+    expect(
+      shouldRunMaxModeStep({
+        agent: { name: "general", maxMode: true },
+        maxMode: { candidates: 2 },
+        format: { type: "json_schema" },
+        isLastStep: false,
+      }),
+    ).toBe(false)
+  })
+
+  test("skips max mode on the final step", () => {
+    expect(
+      shouldRunMaxModeStep({
+        agent: { name: "general", maxMode: true },
+        maxMode: { candidates: 2 },
+        format: { type: "text" },
+        isLastStep: true,
+      }),
+    ).toBe(false)
   })
 })

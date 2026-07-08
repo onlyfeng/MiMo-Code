@@ -23,6 +23,21 @@ export const DEFAULT_CANDIDATES = 5
 /** Name of the built-in max-mode primary agent. */
 export const MAX_MODE_AGENT = "max"
 
+export function shouldRunMaxModeStep(input: {
+  agent: Pick<Agent.Info, "name" | "maxMode">
+  maxMode?: unknown
+  format: Pick<NonNullable<MessageV2.User["format"]>, "type">
+  isLastStep: boolean
+}) {
+  // The final step must honor toolChoice: "none" so step caps end the loop.
+  // runMaxStep replays the winning candidate's tool calls and intentionally does
+  // not use the caller's toolChoice.
+  if (input.isLastStep) return false
+  if (input.maxMode === undefined) return false
+  if (input.format.type === "json_schema") return false
+  return input.agent.name === MAX_MODE_AGENT || input.agent.maxMode === true
+}
+
 function stringifyToolInput(input: unknown) {
   try {
     return JSON.stringify(input)

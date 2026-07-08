@@ -27,7 +27,7 @@ import { SessionPrune } from "./prune"
 import { SessionCheckpoint } from "./checkpoint"
 import { SessionCompaction } from "./compaction"
 import { computeLastMessageInfo } from "./last-message-info"
-import { estimateRequestTokens, isRequestOverflow, pressureLevel, isOverflow as overflowCheck } from "./overflow"
+import { classifyRequestOverflow, pressureLevel, isOverflow as overflowCheck } from "./overflow"
 import { Config } from "@/config"
 import { Global } from "@/global"
 import { Bus } from "../bus"
@@ -3078,10 +3078,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             const format = lastUser.format ?? { type: "text" as const }
             const maxModeCfg = (yield* config.get()).experimental?.maxMode
-            const useMaxMode =
-              (agent.name === MaxMode.MAX_MODE_AGENT || agent.maxMode === true) &&
-              maxModeCfg !== undefined &&
-              format.type !== "json_schema"
+            const useMaxMode = MaxMode.shouldRunMaxModeStep({
+              agent,
+              maxMode: maxModeCfg,
+              format,
+              isLastStep,
+            })
             const maxModeSetStatus =
               resolvedAgentID === "main"
                 ? (message: string | undefined) =>
@@ -3094,12 +3096,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
               if (part?.type === "tool" && part.state.status === "completed") structured = part.state.input
             }
-            // Skip maxMode on the final step: it must honor `toolChoice: "none"` to
-            // force a text-only response and end the loop. runMaxStep ignores toolChoice
-            // (candidates run propose-only, then the winner's tool calls are replayed and
-            // executed), so routing the last step through it would let the agent call
-            // tools past its step cap. Falling back to handle.process keeps the cap
-            // enforced for every path — fork and main alike.
             const finalizeOverflowAssistant = Effect.fn("SessionPrompt.finalizeOverflowAssistant")(function* () {
               if (handle.message.finish || handle.message.error || MessageV2.parts(handle.message.id).length > 0) return
               handle.message.error = new MessageV2.AbortedError({
@@ -3134,18 +3130,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   // schemas the provider never receives.
                   const tools = LLM.resolveTools(processArgs)
                   const cfg = yield* config.get()
-                  const requestTokens = estimateRequestTokens({ ...processArgs, tools })
-                  if (isRequestOverflow({ cfg, model: processArgs.model, requestTokens })) {
-                    // If the fixed prefix (system + tool schemas) overflows even with zero
-                    // history, recovery can never bring the estimate down — terminate with
-                    // a clear error rather than looping through compaction.
-                    const staticTokens = estimateRequestTokens({ ...processArgs, tools, messages: [] })
-                    if (isRequestOverflow({ cfg, model: processArgs.model, requestTokens: staticTokens })) {
+                  const overflow = classifyRequestOverflow({ ...processArgs, cfg, tools, model: processArgs.model })
+                  if (overflow.type !== "ok") {
+                    if (overflow.type === "overflow-static") {
                       yield* slog.warn("request preflight overflow: static prefix exceeds usable context", {
                         sessionID,
                         agentID: processArgs.agentID ?? "main",
-                        requestTokens,
-                        staticTokens,
+                        requestTokens: overflow.requestTokens,
+                        staticTokens: overflow.staticTokens,
                       })
                       yield* finalizeUnrecoverableOverflow()
                       return "overflow-static" as const
@@ -3153,14 +3145,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     yield* slog.warn("request preflight overflow; routing to context recovery", {
                       sessionID,
                       agentID: processArgs.agentID ?? "main",
-                      requestTokens,
+                      requestTokens: overflow.requestTokens,
                     })
                     yield* finalizeOverflowAssistant()
                     return "overflow" as const
                   }
                 }
 
-                const result = yield* (useMaxMode && !isLastStep
+                const result = yield* (useMaxMode
                   ? MaxMode.runMaxStep({
                       ...processArgs,
                       handle,
