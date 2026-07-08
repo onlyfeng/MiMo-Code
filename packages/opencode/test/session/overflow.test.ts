@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { estimateRequestTokens, isOverflow, isRequestOverflow, pressureLevel, usable } from "../../src/session/overflow"
+import {
+  classifyRequestOverflow,
+  estimateRequestTokens,
+  isOverflow,
+  isRequestOverflow,
+  pressureLevel,
+  usable,
+} from "../../src/session/overflow"
 import { LLM } from "../../src/session/llm"
 import { Token } from "../../src/util"
 import { Session as SessionNs } from "../../src/session"
 import type { Provider } from "../../src/provider"
 import { Instance } from "../../src/project/instance"
+import type { ModelMessage } from "ai"
 
 function mockCfg(opts?: { reserved?: number; auto?: boolean }) {
   return {
@@ -44,6 +52,10 @@ function createModel(opts: {
     api: { npm: opts.npm ?? "@ai-sdk/anthropic" },
     options: {},
   } as Provider.Model
+}
+
+function textMessage(text: string): ModelMessage {
+  return { role: "user", content: [{ type: "text", text }] }
 }
 
 describe("pressureLevel", () => {
@@ -706,5 +718,44 @@ describe("request preflight overflow static prefix", () => {
     // ...but with messages cleared the static prefix fits, so recovery can help.
     const staticOnly = estimateRequestTokens({ prebuiltSystem: ["ok"], messages: [] })
     expect(isRequestOverflow({ cfg, model, requestTokens: staticOnly })).toBe(false)
+  })
+
+  test("classifies a fitting request as ok", () => {
+    expect(
+      classifyRequestOverflow({
+        cfg,
+        model,
+        prebuiltSystem: ["ok"],
+        messages: [textMessage("hello")],
+      }),
+    ).toEqual({ type: "ok" })
+  })
+
+  test("classifies an oversized message as recoverable overflow", () => {
+    const result = classifyRequestOverflow({
+      cfg,
+      model,
+      prebuiltSystem: ["ok"],
+      messages: [textMessage("m".repeat(20_000))],
+    })
+
+    expect(result.type).toBe("overflow")
+    if (result.type !== "overflow") return
+    expect(result.requestTokens).toBeGreaterThan(result.staticTokens)
+    expect(result.staticTokens).toBeGreaterThan(0)
+  })
+
+  test("classifies an oversized static prefix as unrecoverable overflow", () => {
+    const result = classifyRequestOverflow({
+      cfg,
+      model,
+      prebuiltSystem: ["s".repeat(20_000)],
+      messages: [textMessage("hello")],
+    })
+
+    expect(result.type).toBe("overflow-static")
+    if (result.type !== "overflow-static") return
+    expect(result.requestTokens).toBeGreaterThanOrEqual(result.staticTokens)
+    expect(result.staticTokens).toBeGreaterThan(0)
   })
 })

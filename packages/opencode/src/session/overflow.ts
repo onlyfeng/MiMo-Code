@@ -23,6 +23,11 @@ type RequestEstimateInput = {
   toolChoice?: unknown
 }
 
+export type RequestOverflowClassification =
+  | { type: "ok" }
+  | { type: "overflow"; requestTokens: number; staticTokens: number }
+  | { type: "overflow-static"; requestTokens: number; staticTokens: number }
+
 function safeStringify(input: unknown) {
   const seen = new WeakSet<object>()
   return JSON.stringify(input, (_key, value) => {
@@ -82,6 +87,20 @@ export function isRequestOverflow(input: {
   if (limit <= 0) return input.requestTokens > 0
   const guard = Math.min(REQUEST_PREFLIGHT_GUARD, Math.floor(limit * 0.1))
   return input.requestTokens >= Math.max(1, limit - guard)
+}
+
+export function classifyRequestOverflow(
+  input: RequestEstimateInput & {
+    cfg: Config.Info
+    model: Provider.Model
+  },
+): RequestOverflowClassification {
+  const requestTokens = estimateRequestTokens(input)
+  if (!isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens })) return { type: "ok" }
+  const staticTokens = estimateRequestTokens({ ...input, messages: [] })
+  return isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens: staticTokens })
+    ? { type: "overflow-static", requestTokens, staticTokens }
+    : { type: "overflow", requestTokens, staticTokens }
 }
 
 export function pressureLevel(input: {
