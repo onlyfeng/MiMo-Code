@@ -97,6 +97,17 @@ describe("max-mode shouldRunMaxModeStep", () => {
     ).toBe(true)
   })
 
+  test("skips max mode for an ordinary agent even with config present", () => {
+    expect(
+      shouldRunMaxModeStep({
+        agent: { name: "general" },
+        maxMode: { candidates: 2 },
+        format: { type: "text" },
+        isLastStep: false,
+      }),
+    ).toBe(false)
+  })
+
   test("skips max mode without experimental maxMode config", () => {
     expect(
       shouldRunMaxModeStep({
