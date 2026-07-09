@@ -881,20 +881,35 @@ export const layer: Layer.Layer<
 
       writers.set(input.sessionID, { writing: result.outcome })
 
-      // Bookkeeping: the parent's last_checkpoint_message_id advances when the
-      // writer settles. Fork into the layer's scope so the watcher survives
-      // tryStartCheckpointWriter returning (background: true semantics) but is still tied
-      // to the layer's lifetime — no orphan fiber on shutdown.
+      // Bookkeeping: the parent's last_checkpoint_message_id (the delta
+      // watermark — the point future rebuilds compute the message tail from)
+      // advances ONLY when the writer SUCCEEDS. This is a transactional
+      // invariant: the on-disk checkpoint content and the watermark move
+      // together, or neither moves. If the writer failed/was cancelled (e.g.
+      // `Aborted process` from worker teardown), advancing the watermark would
+      // "consume" messages the failed checkpoint never actually captured —
+      // silently dropping that span of context from every subsequent rebuild.
+      // Leaving the watermark put means the next writer re-covers the same
+      // delta, so nothing is lost. Fork into the layer's scope so the watcher
+      // survives tryStartCheckpointWriter returning (background: true) but stays
+      // tied to the layer's lifetime — no orphan fiber on shutdown.
       yield* Effect.gen(function* () {
         const outcome = yield* Deferred.await(result.outcome)
-        yield* Effect.sync(() =>
-          Database.use((d) =>
-            d.update(SessionTable)
-              .set({ last_checkpoint_message_id: endMessageID as MessageID })
-              .where(eq(SessionTable.id, input.sessionID))
-              .run(),
-          ),
-        )
+        if (outcome.status === "success") {
+          yield* Effect.sync(() =>
+            Database.use((d) =>
+              d.update(SessionTable)
+                .set({ last_checkpoint_message_id: endMessageID as MessageID })
+                .where(eq(SessionTable.id, input.sessionID))
+                .run(),
+            ),
+          )
+        } else {
+          log.warn("checkpoint writer did not succeed — leaving watermark unchanged so the delta is re-covered", {
+            sessionID: input.sessionID,
+            status: outcome.status,
+          })
+        }
 
         // F40: capture pending before deleting the slot so a queued writer
         // (held while writer1 was running) can fire as a fresh writer.
