@@ -554,7 +554,12 @@ describe("Actor.cancel", () => {
             background: true,
             model: ref,
           })
-          yield* llm.wait(1)
+          yield* llm.wait(1).pipe(
+            Effect.timeoutOrElse({
+              duration: "3 seconds",
+              orElse: () => Effect.fail(new Error("timed out waiting for the first test-LLM request")),
+            }),
+          )
           yield* Deferred.await(hit).pipe(
             Effect.timeoutOrElse({
               duration: "1 second",
@@ -589,6 +594,8 @@ describe("Actor.cancel", () => {
         },
       )
     }),
+    // above bun's 5s default so the stage-specific timeouts fire first and name the stuck stage
+    15_000,
   )
 })
 
