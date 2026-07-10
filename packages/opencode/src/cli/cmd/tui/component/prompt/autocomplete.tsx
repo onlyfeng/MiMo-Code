@@ -370,19 +370,27 @@ export function Autocomplete(props: {
   const commands = createMemo((): AutocompleteOption[] => {
     const results: AutocompleteOption[] = [...command.slashes()]
 
+    const isCompose = local.agent.current()?.name === "compose"
     for (const serverCommand of sync.data.command) {
-      if (serverCommand.source === "skill" && !Flag.MIMOCODE_ENABLE_SLASH_SKILLS) continue
-      if (serverCommand.source === "skill" && serverCommand.name.startsWith("compose:") && local.agent.current()?.name !== "compose") continue
+      if (serverCommand.source === "skill" && Flag.MIMOCODE_DISABLE_SLASH_SKILLS) continue
+      if (serverCommand.source === "skill" && !isCompose && serverCommand.name.startsWith("compose:")) continue
       const label = serverCommand.source === "mcp" ? ":mcp" : ""
       results.push({
         display: "/" + serverCommand.name + label,
         description: slashCommandDescription(lang.t, serverCommand.name, serverCommand.description),
         onSelect: () => {
-          const newText = "/" + serverCommand.name + " "
-          const cursor = props.input().logicalCursor
-          props.input().deleteRange(0, 0, cursor.row, cursor.col)
-          props.input().insertText(newText)
-          props.input().cursorOffset = Bun.stringWidth(newText)
+          const input = props.input()
+          const needsSpace = charAfterCursor(props.value, input.cursorOffset) !== " "
+          const append = "/" + serverCommand.name + (needsSpace ? " " : "")
+
+          const currentCursorOffset = input.cursorOffset
+          input.cursorOffset = store.index
+          const startCursor = input.logicalCursor
+          input.cursorOffset = currentCursorOffset
+          const endCursor = input.logicalCursor
+
+          input.deleteRange(startCursor.row, startCursor.col, endCursor.row, endCursor.col)
+          input.insertText(append)
         },
       })
     }
