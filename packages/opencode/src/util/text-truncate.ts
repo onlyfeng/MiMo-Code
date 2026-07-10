@@ -34,6 +34,10 @@ export function capUtf8TextByBytes(
   suffix = "before model injection",
   keep: TruncateKeep = "head",
 ) {
+  // Replay paths hand us values typed as string that are undefined at runtime
+  // (e.g. a completed tool part persisted without output); pass them through
+  // untouched like the pre-truncation code did.
+  if (typeof text !== "string") return text
   const buf = Buffer.from(text, "utf8")
   if (buf.length <= maxBytes) return text
 
