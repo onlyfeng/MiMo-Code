@@ -554,13 +554,29 @@ describe("Actor.cancel", () => {
             background: true,
             model: ref,
           })
-          yield* Deferred.await(hit).pipe(Effect.timeout("1 second"))
+          yield* llm.wait(1)
+          yield* Deferred.await(hit).pipe(
+            Effect.timeoutOrElse({
+              duration: "1 second",
+              orElse: () => Effect.fail(new Error("timed out waiting for actor.preStop pause")),
+            }),
+          )
           expect((yield* reg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("success")
 
-          yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.timeout("1 second"))
+          yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(
+            Effect.timeoutOrElse({
+              duration: "1 second",
+              orElse: () => Effect.fail(new Error("timed out waiting for forced actor cancellation")),
+            }),
+          )
           yield* Deferred.succeed(release, undefined)
 
-          const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("1 second"))
+          const outcome = yield* Deferred.await(result.outcome).pipe(
+            Effect.timeoutOrElse({
+              duration: "1 second",
+              orElse: () => Effect.fail(new Error("timed out waiting for cancelled actor outcome")),
+            }),
+          )
           expect(outcome.status).toBe("cancelled")
           expect((yield* reg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("cancelled")
         }),
