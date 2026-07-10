@@ -73,6 +73,7 @@ import { isPlainTerminal } from "./util/terminal"
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
+import { DialogModalities } from "./component/dialog-modalities"
 
 function rendererConfig(_config: TuiConfig.Info, plainTerminal: boolean): CliRendererConfig {
   const mouseEnabled = !plainTerminal && !Flag.MIMOCODE_DISABLE_MOUSE && (_config.mouse ?? true)
@@ -580,6 +581,17 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
     },
     {
+      title: t("tui.command.modalities.title"),
+      value: "model.modalities",
+      category: "agent",
+      slash: {
+        name: "modalities",
+      },
+      onSelect: () => {
+        DialogModalities.show(dialog)
+      },
+    },
+    {
       title: local.neverAsk.current()
         ? t("tui.command.never_ask.title_on")
         : t("tui.command.never_ask.title_off"),
@@ -595,6 +607,24 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           variant: next ? "warning" : "info",
           message: next ? t("tui.command.never_ask.toast_on") : t("tui.command.never_ask.toast_off"),
           duration: 4000,
+        })
+      },
+    },
+    {
+      title: local.skipPermissions.current()
+        ? t("tui.command.skip_permissions.title_on")
+        : t("tui.command.skip_permissions.title_off"),
+      value: "permission.skip_all.toggle",
+      category: "agent",
+      slash: {
+        name: "skip-permissions",
+      },
+      onSelect: () => {
+        const next = local.skipPermissions.toggle()
+        toast.show({
+          variant: next ? "warning" : "info",
+          message: next ? t("tui.command.skip_permissions.toast_on") : t("tui.command.skip_permissions.toast_off"),
+          duration: 5000,
         })
       },
     },
