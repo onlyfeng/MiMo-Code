@@ -1187,6 +1187,276 @@ describe("ProviderTransform.message - empty image handling", () => {
   })
 })
 
+describe("ProviderTransform.message - oversized image handling", () => {
+  const PROVIDER_HARD_LIMIT = 5_242_880
+  const mockModel = {
+    id: "anthropic/claude-3-5-sonnet",
+    providerID: "anthropic",
+    api: { id: "claude-3-5-sonnet-20241022", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
+    name: "Claude 3.5 Sonnet",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  const base64ByteSize = (b64: string) => {
+    const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0
+    return Math.floor((b64.length * 3) / 4) - padding
+  }
+
+  // A big decodable JPEG (>5 MB): noisy pixels resist JPEG compression, so the
+  // encoded payload actually exceeds the limit and forces the shrink path.
+  const bigJpegBase64 = (() => {
+    const jpeg = require("jpeg-js")
+    const width = 2600
+    const height = 2600
+    const data = Buffer.alloc(width * height * 4)
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = (i * 73) % 256
+      data[i + 1] = (i * 151) % 256
+      data[i + 2] = (i * 199) % 256
+      data[i + 3] = 255
+    }
+    const encoded = jpeg.encode({ data, width, height }, 100)
+    return Buffer.from(encoded.data).toString("base64")
+  })()
+
+  test("baseline: fixture is a real oversized image", () => {
+    expect(base64ByteSize(bigJpegBase64)).toBeGreaterThan(PROVIDER_HARD_LIMIT)
+  })
+
+  test("recompresses an oversized user image below the limit", () => {
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "What is in this image?" },
+          { type: "image", image: `data:image/jpeg;base64,${bigJpegBase64}` },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mockModel, {})
+    const part = (result[0].content as any[])[1]
+    // Either shrunk to a smaller image, or stripped to text — never still oversized.
+    if (part.type === "image") {
+      const match = String(part.image).match(/^data:[^;]+;base64,(.*)$/)
+      expect(match).not.toBeNull()
+      expect(base64ByteSize(match![1])).toBeLessThanOrEqual(PROVIDER_HARD_LIMIT)
+    } else {
+      expect(part.type).toBe("text")
+      expect(part.text).toContain("Image omitted")
+    }
+  })
+
+  test("recompresses an oversized tool-result image below the limit", () => {
+    const msgs = [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "read",
+            output: {
+              type: "content",
+              value: [
+                { type: "text", text: "Image read successfully" },
+                { type: "media", mediaType: "image/jpeg", data: bigJpegBase64 },
+              ],
+            },
+          },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mockModel, {})
+    const entry = (result[0].content[0] as any).output.value[1]
+    if (entry.type === "media" || entry.type === "image-data") {
+      expect(base64ByteSize(entry.data)).toBeLessThanOrEqual(PROVIDER_HARD_LIMIT)
+    } else {
+      expect(entry.type).toBe("text")
+      expect(entry.text).toContain("Image omitted")
+    }
+  })
+
+  test("strips an oversized undecodable image (webp) to a placeholder", () => {
+    // >5 MB of base64 that is NOT a decodable jpeg/png → must become a placeholder.
+    const junk = Buffer.alloc(6_000_000, 0x42).toString("base64")
+    const msgs = [
+      {
+        role: "user",
+        content: [{ type: "image", image: `data:image/webp;base64,${junk}` }],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mockModel, {})
+    const part = (result[0].content as any[])[0]
+    expect(part.type).toBe("text")
+    expect(part.text).toContain("Image omitted")
+  })
+
+  test("strips an oversized undecodable tool-result image to a placeholder", () => {
+    const junk = Buffer.alloc(6_000_000, 0x42).toString("base64")
+    const msgs = [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "read",
+            output: {
+              type: "content",
+              value: [{ type: "media", mediaType: "image/webp", data: junk }],
+            },
+          },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mockModel, {})
+    const entry = (result[0].content[0] as any).output.value[0]
+    expect(entry.type).toBe("text")
+    expect(entry.text).toContain("Image omitted")
+  })
+
+  test("leaves a small image untouched (default cap applies by default)", () => {
+    const validBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    const msgs = [
+      { role: "user", content: [{ type: "image", image: `data:image/png;base64,${validBase64}` }] },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mockModel, {})
+    expect(result[0].content[0]).toEqual({ type: "image", image: `data:image/png;base64,${validBase64}` })
+  })
+})
+
+describe("ProviderTransform.message - provider-aware image size cap", () => {
+  const PROVIDER_HARD_LIMIT = 5_242_880
+
+  const withApi = (providerID: string, api: { id: string; url: string; npm: string }, id?: string) =>
+    ({
+      id: id ?? `${providerID}/${api.id}`,
+      providerID,
+      api,
+      name: api.id,
+      capabilities: {
+        temperature: true,
+        reasoning: false,
+        attachment: true,
+        toolcall: true,
+        input: { text: true, audio: false, image: true, video: false, pdf: true },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+        interleaved: false,
+      },
+      cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+      limit: { context: 200000, output: 8192 },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  const base64ByteSize = (b64: string) => {
+    const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0
+    return Math.floor((b64.length * 3) / 4) - padding
+  }
+
+  // 6 MB of raw base64 bytes. Not a decodable jpeg/png, so if it ever hit the
+  // cap path it would be STRIPPED to a placeholder — which makes "left untouched"
+  // an unambiguous signal that no cap was applied.
+  const sixMbJunk = Buffer.alloc(6_000_000, 0x42).toString("base64")
+
+  test("baseline: fixture exceeds the anthropic 5MB hard limit", () => {
+    expect(base64ByteSize(sixMbJunk)).toBeGreaterThan(PROVIDER_HARD_LIMIT)
+  })
+
+  const userMsgs = () =>
+    [{ role: "user", content: [{ type: "image", image: `data:image/webp;base64,${sixMbJunk}` }] }] as any[]
+
+  const toolMsgs = () =>
+    [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "read",
+            output: { type: "content", value: [{ type: "media", mediaType: "image/webp", data: sixMbJunk }] },
+          },
+        ],
+      },
+    ] as any[]
+
+  test("anthropic: strips an oversized undecodable user image (cap enforced)", () => {
+    const model = withApi("anthropic", {
+      id: "claude-3-5-sonnet-20241022",
+      url: "https://api.anthropic.com",
+      npm: "@ai-sdk/anthropic",
+    })
+    const part = (ProviderTransform.message(userMsgs(), model, {})[0].content as any[])[0]
+    expect(part.type).toBe("text")
+    expect(part.text).toContain("Image omitted")
+  })
+
+  test("bedrock: strips an oversized undecodable tool-result image (cap enforced)", () => {
+    const model = withApi("amazon-bedrock", {
+      id: "anthropic.claude-opus-4-6",
+      url: "https://bedrock-runtime.us-east-1.amazonaws.com",
+      npm: "@ai-sdk/amazon-bedrock",
+    })
+    const entry = (ProviderTransform.message(toolMsgs(), model, {})[0].content[0] as any).output.value[0]
+    expect(entry.type).toBe("text")
+    expect(entry.text).toContain("Image omitted")
+  })
+
+  test("openai: leaves a 6MB user image UNTOUCHED (no cap for non-anthropic)", () => {
+    const model = withApi("openai", { id: "gpt-4o", url: "https://api.openai.com", npm: "@ai-sdk/openai" })
+    const part = (ProviderTransform.message(userMsgs(), model, {})[0].content as any[])[0]
+    expect(part).toEqual({ type: "image", image: `data:image/webp;base64,${sixMbJunk}` })
+  })
+
+  test("openai: leaves a 6MB tool-result image UNTOUCHED (no cap for non-anthropic)", () => {
+    const model = withApi("openai", { id: "gpt-4o", url: "https://api.openai.com", npm: "@ai-sdk/openai" })
+    const entry = (ProviderTransform.message(toolMsgs(), model, {})[0].content[0] as any).output.value[0]
+    expect(entry).toEqual({ type: "media", mediaType: "image/webp", data: sixMbJunk })
+  })
+
+  test("openrouter claude: still caps (routes to anthropic) — strips oversized image", () => {
+    const model = withApi(
+      "openrouter",
+      { id: "anthropic/claude-sonnet-4", url: "https://openrouter.ai/api", npm: "@openrouter/ai-sdk-provider" },
+      "openrouter/anthropic/claude-sonnet-4",
+    )
+    const part = (ProviderTransform.message(userMsgs(), model, {})[0].content as any[])[0]
+    expect(part.type).toBe("text")
+    expect(part.text).toContain("Image omitted")
+  })
+
+  test("openrouter non-claude: leaves a 6MB image UNTOUCHED (no anthropic route)", () => {
+    const model = withApi(
+      "openrouter",
+      { id: "openai/gpt-4o", url: "https://openrouter.ai/api", npm: "@openrouter/ai-sdk-provider" },
+      "openrouter/openai/gpt-4o",
+    )
+    const part = (ProviderTransform.message(userMsgs(), model, {})[0].content as any[])[0]
+    expect(part).toEqual({ type: "image", image: `data:image/webp;base64,${sixMbJunk}` })
+  })
+})
+
 describe("ProviderTransform.message - anthropic empty content filtering", () => {
   const anthropicModel = {
     id: "anthropic/claude-3-5-sonnet",
@@ -1357,14 +1627,18 @@ describe("ProviderTransform.message - anthropic empty content filtering", () => 
           { type: "text", text: "Answer" },
         ],
       },
+      // Bedrock rejects a trailing assistant message, so end on a user turn to
+      // isolate the empty-content filtering behavior under test here.
+      { role: "user", content: "Thanks" },
     ] as any[]
 
     const result = ProviderTransform.message(msgs, bedrockModel, {})
 
-    expect(result).toHaveLength(2)
+    expect(result).toHaveLength(3)
     expect(result[0].content).toBe("Hello")
     expect(result[1].content).toHaveLength(1)
     expect(result[1].content[0]).toEqual({ type: "text", text: "Answer" })
+    expect(result[2].content).toBe("Thanks")
   })
 
   test("does not filter for non-anthropic providers", () => {

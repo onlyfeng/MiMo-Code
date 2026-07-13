@@ -697,7 +697,9 @@ const live: Layer.Layer<
               }),
             )
 
-            return Stream.fromAsyncIterable(result.fullStream, (e) => (e instanceof Error ? e : new Error(String(e))))
+            return Stream.fromAsyncIterable(result.fullStream, (e) =>
+              e instanceof Error ? e : new Error(String(e)),
+            )
           }),
         ),
       )
