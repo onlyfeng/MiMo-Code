@@ -54,12 +54,27 @@ export function forkQuery(deps: {
   actor: ActorInterface
 }, targetSessionID: SessionID, question: string) {
   return Effect.gen(function* () {
-    // a. Read the target's main slice + compute the watermark boundary.
-    const msgs = yield* deps.sessions.messages({ sessionID: targetSessionID, agentID: "main" })
-    const watermark = yield* deps.sessions.lastMainMessageID(targetSessionID)
-    // Graceful: a target with no main-slice history (or no user message) can't
-    // be snapshotted — buildPrefix needs a user message and there is nothing to
-    // ask about. Answer directly instead of spawning.
+    // a. Resolve the target's persisted history and the slice to snapshot.
+    // A child created via `session create` runs as a PEER actor whose actorID
+    // === its own sessionID, so SessionPrompt persists its turns under
+    // agent_id = <targetSessionID> — NOT "main". Reading only the "main" slice
+    // (the old behaviour) therefore saw an empty history for every peer child
+    // (isolated or idle alike) and reported "no activity" even after real turns.
+    // Read ALL slices, then pick the slice that actually holds the child's
+    // conversation: "main" for an orchestrator/main session, else the peer's
+    // own-session slice. This answers from FROZEN persisted history regardless
+    // of whether the child is still running, went idle, or was isolated.
+    const all = yield* deps.sessions.messages({ sessionID: targetSessionID, agentID: "*" })
+    const sliceOf = (agentID: string) =>
+      all.filter((m) => (m.info.agentID ?? "main") === agentID)
+    const mainSlice = sliceOf("main")
+    // Prefer "main" when it carries real activity; otherwise fall back to the
+    // peer child's own-session slice (agent_id === targetSessionID).
+    const msgs = mainSlice.some((m) => m.info.role === "user") ? mainSlice : sliceOf(targetSessionID)
+    const watermark = msgs.at(-1)?.info.id
+    // Graceful: a target whose selected slice has no history (or no user
+    // message) can't be snapshotted — buildPrefix needs a user message and
+    // there is nothing to ask about. Answer directly instead of spawning.
     const hasUserMessage = msgs.some((m) => m.info.role === "user")
     if (!watermark || msgs.length === 0 || !hasUserMessage)
       return `(session ${targetSessionID} has no activity yet — nothing to ask about.)`
