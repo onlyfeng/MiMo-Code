@@ -38,3 +38,27 @@ export function renderActorNotification(event: {
   }
   return `<actor-notification>\n${header} was cancelled.\n</actor-notification>`
 }
+
+export type ParsedActorNotification = {
+  status: "completed" | "failed" | "cancelled" | "stalled"
+  description: string
+  summary?: string
+}
+
+// Inverse of renderActorNotification: recover the structured fields from the
+// pre-rendered <actor-notification> text so the TUI can show a card instead of
+// the raw wrapper. Pure + exported so it's unit-testable without the renderer.
+// Returns null for any text that isn't an actor notification.
+export function parseActorNotification(text: string): ParsedActorNotification | null {
+  if (!text.trimStart().startsWith("<actor-notification>")) return null
+  const header = text.match(/Background actor "(.*?)" \(actor_id: [^)]*\)\s+(completed|failed|was cancelled|stalled)\b/)
+  if (!header) return null
+  const description = header[1]
+  const verb = header[2]
+  const status: ParsedActorNotification["status"] =
+    verb === "completed" ? "completed" : verb === "failed" ? "failed" : verb === "stalled" ? "stalled" : "cancelled"
+  // Prefer the most human-relevant one-liner: Summary > Result > Error.
+  const line = (label: string) => text.match(new RegExp(`^${label}:\\s*(.+)$`, "m"))?.[1]?.trim()
+  const summary = line("Summary") ?? line("Result") ?? line("Error")
+  return summary ? { status, description, summary } : { status, description }
+}
