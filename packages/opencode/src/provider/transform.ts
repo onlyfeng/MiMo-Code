@@ -489,6 +489,11 @@ function limitImages(msgs: ModelMessage[], model: Provider.Model): ModelMessage[
   const maxImages = Flag.MIMOCODE_MAX_PROMPT_IMAGES
   const maxSize = Flag.MIMOCODE_MAX_PROMPT_IMAGE_SIZE ?? providerImageCap(model)
 
+  // Zero-allocation fast path: with no image-count cap and no size cap there is
+  // nothing to drop or shrink, so return the messages untouched instead of
+  // rebuilding every tool-result content object on each send.
+  if (maxImages === undefined && maxSize === Infinity) return msgs
+
   const total = msgs.reduce(
     (sum, msg) =>
       msg.role === "user" && Array.isArray(msg.content)
