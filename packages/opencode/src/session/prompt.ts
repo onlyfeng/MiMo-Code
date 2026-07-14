@@ -2110,11 +2110,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // so session.post reports outcome="cancelled" instead of "error".
         let cancelled = false
         let cancelReason: string | undefined
-        // Latest assembled system prompt sent to the LLM for the current turn.
-        // Captured after buildLLMRequestPrefix / fork-context read and forwarded to
-        // session.post / session.userQuery.post so trajectory consumers see the
-        // full system prompt (agent + provider + additions + memory + plugin transforms),
-        // not just the rare MessageV2.User.system per-turn override.
         let lastSystemPrompt: string[] | undefined = undefined
 
         // Fires session.post exactly once via Effect.onExit on the body below.
