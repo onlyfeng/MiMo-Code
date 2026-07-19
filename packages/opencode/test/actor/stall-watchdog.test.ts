@@ -1,7 +1,7 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, describe, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Deferred, Effect, Layer } from "effect"
 import { eq, and, sql } from "drizzle-orm"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
@@ -12,6 +12,7 @@ import { MCP } from "../../src/mcp"
 import { Permission } from "../../src/permission"
 import { Plugin } from "../../src/plugin"
 import { Provider as ProviderSvc } from "../../src/provider"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Env } from "../../src/env"
 import { SessionID } from "../../src/session/schema"
 import { Question } from "../../src/question"
@@ -52,7 +53,7 @@ import { Ripgrep } from "../../src/file/ripgrep"
 import { Format } from "../../src/format"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
-import { TestLLMServer } from "../lib/llm-server"
+import { reply, TestLLMServer } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import { ActorRegistryTable } from "../../src/actor/actor.sql"
@@ -327,6 +328,97 @@ describe("Actor stall watchdog (T40)", () => {
         expect((yield* parentInboxRows(parent.id)).length).toBe(0)
       }),
       { git: true },
+    ),
+  )
+
+  it.live("a running woken peer is visible to the watchdog with per-episode debounce", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const inbox = yield* Inbox.Service
+        const actorReg = yield* ActorRegistry.Service
+        const parent = yield* session.create({
+          title: "woken-peer-stall-watchdog",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+
+        yield* llm.text("spawn turn complete")
+        const result = yield* actor.spawn({
+          mode: "peer",
+          sessionID: parent.id,
+          agentType: "build",
+          task: "standing peer",
+          description: "woken stalling peer",
+          context: "none",
+          tools: ["read"],
+          background: true,
+          model: {
+            providerID: ProviderID.make("test"),
+            modelID: ModelID.make("test-model"),
+          },
+        })
+        yield* Deferred.await(result.outcome)
+        yield* Effect.sync(() =>
+          Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).run()),
+        )
+
+        const requestStarted = yield* Deferred.make<void>()
+        yield* llm.pushMatch((hit) => {
+          if (!JSON.stringify(hit.body).includes("woken-stall-token")) return false
+          Effect.runFork(Deferred.succeed(requestStarted, undefined))
+          return true
+        }, reply().hang())
+        yield* inbox
+          .send({
+            receiverSessionID: result.sessionID,
+            receiverActorID: result.actorID,
+            senderSessionID: parent.id,
+            senderActorID: "main",
+            content: "woken-stall-token",
+          })
+          .pipe(Effect.orDie)
+        yield* Deferred.await(requestStarted)
+
+        expect((yield* actorReg.get(result.sessionID, result.actorID))?.status).toBe("running")
+        yield* backdateTurn(result.sessionID, result.actorID, DEFAULT_LIVENESS_STALL_MS + 60_000)
+        yield* actor.scanStalledOnce!()
+        yield* actor.scanStalledOnce!()
+        expect((yield* parentInboxRows(parent.id)).length).toBe(1)
+
+        yield* actorReg.updateTurn(result.sessionID, result.actorID)
+        yield* actor.scanStalledOnce!()
+        yield* backdateTurn(result.sessionID, result.actorID, DEFAULT_LIVENESS_STALL_MS + 60_000)
+        yield* actor.scanStalledOnce!()
+        expect((yield* parentInboxRows(parent.id)).length).toBe(2)
+
+        yield* actor.cancel(result.sessionID, result.actorID, "forced")
+      }),
+      { git: true, config: (url) => ({
+        provider: {
+          test: {
+            name: "Test",
+            id: "test",
+            env: [],
+            npm: "@ai-sdk/openai-compatible",
+            models: {
+              "test-model": {
+                id: "test-model",
+                name: "Test Model",
+                attachment: false,
+                reasoning: false,
+                temperature: false,
+                tool_call: true,
+                release_date: "2025-01-01",
+                limit: { context: 100000, output: 10000 },
+                cost: { input: 0, output: 0 },
+                options: {},
+              },
+            },
+            options: { apiKey: "test-key", baseURL: url },
+          },
+        },
+      }) },
     ),
   )
 

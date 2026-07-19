@@ -20,7 +20,7 @@ import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Question } from "../../src/question"
 import { Todo } from "../../src/session/todo"
 import { Session } from "../../src/session"
-import { MessageV2 } from "../../src/session/message-v2"
+import { MessageID } from "../../src/session/schema"
 import { LLM } from "../../src/session/llm"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { SessionPrune } from "../../src/session/prune"
@@ -61,6 +61,7 @@ import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
 import { InboxTable } from "../../src/inbox/inbox.sql"
+import { ActorStatusChanged, InboxArrived } from "../../src/actor/events"
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -447,28 +448,27 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
     ),
   )
 
-  // T12: a persistent background PEER that finishes a *woken* (inbox-driven)
-  // turn must notify its parent exactly once — forkWork.notify only covers the
-  // spawn turn, so later woken turns would otherwise go idle silently.
-  // SKIP: test relies on polling (600×50ms=30s) that equals the bun timeout,
-  // causing flaky timeouts under CI load. No deterministic signal exists for
-  // woken-turn completion in the test context. Spawn-turn notification is
-  // already tested deterministically above.
-  it.live.skip("background peer finishing a woken turn sends exactly one actor_notification to parent", () =>
+  it.live("full-context persistent peer runs a woken turn and notifies its parent exactly once", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         const actor = yield* Actor.Service
         const session = yield* Session.Service
         const inbox = yield* Inbox.Service
+        const actorReg = yield* ActorRegistry.Service
+        const bus = yield* Bus.Service
 
         const parent = yield* session.create({
           title: "notification-test-woken-peer",
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
 
-        // One response for the spawn turn, one for the woken turn.
         yield* llm.text("**Status**: success\n**Summary**: spawn turn")
-        yield* llm.text("**Status**: success\n**Summary**: woken turn")
+        const wokenStart = yield* Deferred.make<"request" | "missing-context">()
+        yield* llm.textMatch((hit) => {
+          if (!JSON.stringify(hit.body).includes("persistent-wake-token")) return false
+          Effect.runFork(Deferred.succeed(wokenStart, "request"))
+          return true
+        }, "**Status**: success\n**Summary**: woken turn")
 
         const result = yield* actor.spawn({
           mode: "peer",
@@ -476,13 +476,20 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
           agentType: "build",
           task: "peer that will be woken",
           description: "woken peer task",
-          context: "none",
+          context: "full",
           tools: ["read"],
           background: true,
           model: ref,
+          forkContext: {
+            system: ["persistent-peer-system"],
+            tools: {},
+            inheritedMessages: [],
+            parentPermission: [],
+            watermarkMsgID: MessageID.ascending(),
+            model: ref,
+          },
         })
 
-        // Spawn turn completes → forkWork.notify writes the FIRST notification.
         yield* Deferred.await(result.outcome)
 
         const inboxRows = (agentID: string) =>
@@ -501,60 +508,54 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
             ),
           )
 
-        // Clear the spawn-turn notification so we can assert the woken turn adds
-        // exactly one more.
         yield* Effect.sync(() =>
           Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).run()),
         )
 
-        // Wake the peer with an inbox message. This drives a woken turn via
-        // SessionPrompt.loop({ notifyParentOnComplete: true }).
+        const notified = yield* Deferred.make<void>()
+        let notifications = 0
+        const off = yield* bus.subscribeCallback(InboxArrived, (event) => {
+          if (event.properties.receiverSessionID !== parent.id) return
+          if (event.properties.receiverActorID !== "main") return
+          if (event.properties.senderSessionID !== result.sessionID) return
+          if (event.properties.senderActorID !== result.actorID) return
+          notifications++
+          Effect.runFork(Deferred.succeed(notified, undefined))
+        })
+        yield* Effect.addFinalizer(() => Effect.sync(off))
+        const offStatus = yield* bus.subscribeCallback(ActorStatusChanged, (event) => {
+          if (event.properties.sessionID !== result.sessionID) return
+          if (event.properties.actorID !== result.actorID) return
+          if (event.properties.lastOutcome !== "failure") return
+          Effect.runFork(Deferred.succeed(wokenStart, "missing-context"))
+        })
+        yield* Effect.addFinalizer(() => Effect.sync(offStatus))
+
         yield* inbox
           .send({
             receiverSessionID: result.sessionID,
             receiverActorID: result.actorID,
             senderSessionID: parent.id,
             senderActorID: "main",
-            content: "please do more work",
+            content: "persistent-wake-token: please do more work",
           })
           .pipe(Effect.orDie)
 
-        // Poll for the woken-turn notification with a generous budget. The
-        // woken turn's LLM response latency is unbounded — under CI load it
-        // can exceed the old 5s (200×25ms) window. Use 600 iterations × 50ms
-        // = 30s worst-case, but the test bun --timeout is also 30s, so in
-        // practice the LLM response lands well before the deadline.
-        // Delivery can land in TWO places: the raw InboxTable row, OR a
-        // drained synthetic user message in the parent main slice.
-        const found = yield* Effect.gen(function* () {
-          for (let i = 0; i < 600; i++) {
-            const r = yield* inboxRows("main")
-            if (r.length > 0) {
-              const content = r[0].content as { text?: string }
-              return { type: r[0].type, text: content.text ?? "" }
-            }
-            const msgs = yield* Session.Service.use((s) => s.messages({ sessionID: parent.id, agentID: "main" })).pipe(
-              Effect.catch(() => Effect.succeed([] as MessageV2.WithParts[])),
-            )
-            for (const m of msgs) {
-              for (const p of m.parts) {
-                if (p.type === "text" && p.synthetic && p.text.includes("<actor-notification>")) {
-                  return { type: "actor_notification", text: p.text }
-                }
-              }
-            }
-            yield* Effect.sleep("50 millis")
-          }
-          return undefined
-        })
+        expect(yield* Deferred.await(wokenStart)).toBe("request")
+        yield* Deferred.await(notified)
 
-        expect(found).toBeDefined()
-        expect(found!.type).toBe("actor_notification")
-        expect(found!.text).toContain("<actor-notification>")
-        expect(found!.text).toContain("woken peer task")
-        expect(found!.text).toContain("completed")
-
-        yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.ignore)
+        const rows = yield* inboxRows("main")
+        expect(notifications).toBe(1)
+        expect(rows).toHaveLength(1)
+        expect(rows[0].type).toBe("actor_notification")
+        const content = rows[0].content as { text?: string }
+        expect(content.text).toContain("<actor-notification>")
+        expect(content.text).toContain("woken peer task")
+        expect(content.text).toContain("completed")
+        expect((yield* actorReg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("success")
+        expect((yield* actor.getForkContext(result.sessionID, result.actorID))?.system).toEqual([
+          "persistent-peer-system",
+        ])
       }),
       { git: true, config: providerCfg },
     ),

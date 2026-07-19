@@ -3,6 +3,7 @@ import { ulid } from "ulid"
 import { Database, eq, and, lte, inArray } from "@/storage"
 import { Bus } from "@/bus"
 import { ActorRegistry } from "@/actor/registry"
+import type { Actor } from "@/actor/schema"
 import { Session } from "@/session"
 import { MessageID, PartID } from "@/session/schema"
 import { InboxArrived } from "@/actor/events"
@@ -17,6 +18,8 @@ const log = Log.create({ service: "inbox" })
 
 const GC_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export const MAX_DRAIN_PER_TURN = 100
+const isRetiredPersistent = (actor: Actor | undefined) =>
+  actor?.lifecycle === "persistent" && actor.status === "idle" && actor.lastOutcome === "cancelled"
 
 /** Delete inbox rows whose created_at is at or before cutoffMs. Unit-testable without layer reset. */
 export function gcInboxRows(cutoffMs: number) {
@@ -143,7 +146,7 @@ export const layer: Layer.Layer<
     const send = Effect.fn("Inbox.send")(function* (input: SendInput) {
       // ESRCH check (B3). receiver row must exist.
       const receiver = yield* reg.get(input.receiverSessionID, input.receiverActorID)
-      if (!receiver) {
+      if (!receiver || isRetiredPersistent(receiver)) {
         return yield* Effect.fail(
           new InboxReceiverNotFound({
             receiverSessionID: input.receiverSessionID,
@@ -163,6 +166,17 @@ export const layer: Layer.Layer<
         created_at: Date.now(),
       }
       yield* Effect.sync(() => Database.use((db) => db.insert(InboxTable).values(row).run()))
+      // Close the get→insert retirement race. If cancel committed its tombstone
+      // after the first ESRCH check, remove this just-inserted row before publish.
+      if (isRetiredPersistent(yield* reg.get(input.receiverSessionID, input.receiverActorID))) {
+        yield* Effect.sync(() => Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.id, row.id)).run()))
+        return yield* Effect.fail(
+          new InboxReceiverNotFound({
+            receiverSessionID: input.receiverSessionID,
+            receiverActorID: input.receiverActorID,
+          }),
+        )
+      }
       yield* bus.publish(InboxArrived, {
         receiverSessionID: input.receiverSessionID,
         receiverActorID: input.receiverActorID,
@@ -221,6 +235,26 @@ export const layer: Layer.Layer<
         ),
       )
       if (rows.length === 0) return 0
+
+      // A cancelled persistent row is a durable tombstone, not a standing
+      // receiver. Drop any message that raced retirement instead of rendering
+      // it into a synthetic turn that could resurrect the actor.
+      if (isRetiredPersistent(yield* reg.get(sessionID, actorID))) {
+        yield* Effect.sync(() =>
+          Database.use((db) =>
+            db
+              .delete(InboxTable)
+              .where(
+                and(
+                  eq(InboxTable.receiver_session_id, sessionID),
+                  eq(InboxTable.receiver_actor_id, actorID),
+                ),
+              )
+              .run(),
+          ),
+        )
+        return 0
+      }
 
       // Resolve the {agent, model} the synthetic user message will carry, via a
       // LAYERED fallback (cheapest-first) so a woken idle/standing peer always

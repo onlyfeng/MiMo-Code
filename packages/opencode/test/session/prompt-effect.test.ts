@@ -371,6 +371,22 @@ function providerCfg(url: string) {
   }
 }
 
+function maxModeProviderCfg(url: string) {
+  return {
+    ...providerCfg(url),
+    experimental: {
+      maxMode: {
+        candidates: 2,
+      },
+    },
+    agent: {
+      max: {
+        steps: 1,
+      },
+    },
+  }
+}
+
 function mediaProviderCfg(url: string) {
   const config = providerCfg(url)
   return {
@@ -510,6 +526,35 @@ it.live("loop calls LLM and returns assistant message", () =>
       expect(yield* llm.hits).toHaveLength(1)
     }),
     { git: true, config: providerCfg },
+  ),
+)
+
+it.live("MaxMode final step bypasses runMaxStep and sends toolChoice none to the processor", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "MaxMode final step",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "max",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "text", text: "finish without another tool call" }],
+      })
+      yield* llm.text("final answer")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      expect(result.info.role).toBe("assistant")
+
+      const inputs = yield* llm.inputs
+      expect(inputs).toHaveLength(1)
+      expect(inputs[0].tool_choice).toBe("none")
+    }),
+    { git: true, config: maxModeProviderCfg },
   ),
 )
 

@@ -8,9 +8,7 @@ import { Log } from "../util"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Agent } from "../agent/agent"
-import { decideAskRouting, SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
-import { renderActorNotification } from "@/inbox/render"
-import { parseReturnHeader } from "@/actor/return-header"
+import { decideAskRouting } from "@/agent/config"
 import { Provider } from "../provider"
 import { ModelID, ProviderID } from "../provider/schema"
 import {
@@ -2122,9 +2120,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       sessionID: SessionID,
       agentID?: string,
       task_id?: string,
-      notifyParentOnComplete?: boolean,
     ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
-      function* (sessionID: SessionID, agentID?: string, task_id?: string, notifyParentOnComplete?: boolean) {
+      function* (sessionID: SessionID, agentID?: string, task_id?: string) {
         const ctx = yield* InstanceState.context
         const slog = elog.with({ sessionID })
         let structured: unknown | undefined
@@ -3842,49 +3839,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           finalIsError ? "error" : "completed",
           Option.isSome(lastUserForMetrics) ? lastUserForMetrics.value.info.agent : final.info.agent,
         )
-        // Woken-peer completion signal. forkWork.notify only wraps the FIRST
-        // (spawn) turn; a persistent background peer that finishes a later,
-        // inbox-driven turn would otherwise go idle silently and force the
-        // orchestrator to poll. When this loop was woken via the inbox path
-        // (notifyParentOnComplete), mirror forkWork's actor_notification to the
-        // parent so the event-driven model holds. Gated to background peers and
-        // excludes system subagents (checkpoint-writer/dream/distill). The flag
-        // is never set on the spawn turn, so turn 1 is not double-notified.
-        if (notifyParentOnComplete && agentID && session.parentID) {
-          const actor = yield* actorRegistry.get(sessionID, agentID)
-          if (
-            actor &&
-            actor.mode === "peer" &&
-            actor.background &&
-            !SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)
-          ) {
-            const finalText =
-              final.info.role === "assistant" ? assistantFinalText(final.info, final.parts) : undefined
-            const parsed = parseReturnHeader(finalText)
-            const status = finalIsError ? "failed" : "completed"
-            yield* inbox
-              .send({
-                receiverSessionID: session.parentID,
-                receiverActorID: actor.parentActorID ?? "main",
-                senderSessionID: sessionID,
-                senderActorID: agentID,
-                type: "actor_notification",
-                content: renderActorNotification({
-                  actorID: agentID,
-                  description: actor.description,
-                  status,
-                  ...(status === "completed"
-                    ? {
-                        result: finalText ?? "(no output)",
-                        ...(parsed.status ? { reportedStatus: parsed.status } : {}),
-                        ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
-                      }
-                    : { error: final.info.role === "assistant" ? sessionErrorText(final.info.error) : "unknown" }),
-                }),
-              })
-              .pipe(Effect.ignore)
-          }
-        }
         return final
         }).pipe(Effect.onExit(firePostSession), Effect.orDie)
       },
@@ -3894,11 +3848,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       "SessionPrompt.loop",
     )(function* (input: z.infer<typeof LoopInput>) {
       const agentID = input.agentID ?? "main"
+      const work = runLoop(input.sessionID, agentID, input.task_id)
+      const managed = spawnRef.current?.runPersistentTurn
+        ? spawnRef.current.runPersistentTurn({
+            sessionID: input.sessionID,
+            actorID: agentID,
+            work,
+            notifyParentOnComplete: input.notifyParentOnComplete ?? false,
+          })
+        : work
       return yield* state.ensureRunning(
         input.sessionID,
         agentID,
         lastAssistant(input.sessionID, agentID),
-        runLoop(input.sessionID, agentID, input.task_id, input.notifyParentOnComplete),
+        managed,
       )
     })
 
