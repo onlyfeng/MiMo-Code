@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Scope, Schema, Option } from "effect"
+import { Context, Effect, Fiber, Layer, Scope, Schema, Option } from "effect"
 import { ulid } from "ulid"
 import { Database, eq, and, lte, inArray } from "@/storage"
 import { Bus } from "@/bus"
@@ -13,6 +13,9 @@ import { InboxTable } from "./inbox.sql"
 import { renderInboxRow } from "./render"
 import { sessionPromptRef, inboxServiceRef, defaultModelRef } from "./inbox-ref"
 import type { ProviderID, ModelID } from "@/provider/schema"
+import { Instance } from "@/project/instance"
+import { InstanceRef } from "@/effect/instance-ref"
+import { EffectBridge } from "@/effect"
 
 const log = Log.create({ service: "inbox" })
 
@@ -69,6 +72,7 @@ export function resolveDrainSeed(
   reg: ActorRegistry.Interface,
   sessionID: SessionID,
   actorID: string,
+  modelRef = defaultModelRef.current,
 ): Effect.Effect<DrainSeed | undefined> {
   return Effect.gen(function* () {
     // Receiver's registry row decides the Tier 1 search scope + feeds Tier 2.
@@ -96,9 +100,8 @@ export function resolveDrainSeed(
 
     // Tier 2: turnCount-0 / empty slice. Agent from the registry row (recorded
     // at spawn); model from the already-wired default resolver.
-    const resolver = defaultModelRef.current
-    if (actor && resolver) {
-      const model = yield* resolver.defaultModel()
+    if (actor && modelRef) {
+      const model = yield* modelRef.defaultModel()
       return { agent: actor.agent, model: { providerID: model.providerID, modelID: model.modelID } }
     }
 
@@ -123,6 +126,12 @@ export interface SendResult {
 export interface Interface {
   readonly send: (input: SendInput) => Effect.Effect<SendResult, InboxReceiverNotFound>
   readonly drain: (sessionID: SessionID, actorID: string) => Effect.Effect<number>
+  readonly has: (inboxID: string) => Effect.Effect<boolean>
+  /** Internal cycle-breaker: binds this inbox layer to its owning prompt layer. */
+  readonly bindPrompt?: (
+    prompt: NonNullable<typeof sessionPromptRef.current>,
+    model?: NonNullable<typeof defaultModelRef.current>,
+  ) => () => void
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Inbox") {}
@@ -138,6 +147,18 @@ export const layer: Layer.Layer<
     const reg = yield* ActorRegistry.Service
     const sessions = yield* Session.Service
     const scope = yield* Scope.Scope
+    let boundPrompt: NonNullable<typeof sessionPromptRef.current> | undefined
+    let boundDefaultModel: NonNullable<typeof defaultModelRef.current> | undefined
+    const bindPrompt: NonNullable<Interface["bindPrompt"]> = (prompt, model) => {
+      const previousPrompt = boundPrompt
+      const previousModel = boundDefaultModel
+      boundPrompt = prompt
+      if (model) boundDefaultModel = model
+      return () => {
+        if (boundPrompt === prompt) boundPrompt = previousPrompt
+        if (model && boundDefaultModel === model) boundDefaultModel = previousModel
+      }
+    }
 
     // 7-day GC at init. Idempotent: deletes any rows older than now-7d.
     yield* gcInboxRows(Date.now() - GC_TTL_MS)
@@ -189,18 +210,26 @@ export const layer: Layer.Layer<
       // Fork-and-forget wake (B2). Sender returns after fork is scheduled;
       // wake fiber lives in the service scope, so sender lifecycle does
       // not affect delivery.
-      const promptRef = sessionPromptRef.current
+      const promptRef = boundPrompt ?? sessionPromptRef.current
       if (promptRef) {
-        yield* promptRef
-          .loop({
+        const receiver = yield* sessions.get(input.receiverSessionID)
+        const receiverInstance = yield* Effect.promise(() =>
+          Instance.provide({ directory: receiver.directory, fn: () => Instance.current }),
+        )
+        const bridge = yield* EffectBridge.make().pipe(Effect.provideService(InstanceRef, receiverInstance))
+        yield* Effect.acquireUseRelease(
+          Effect.sync(() => bridge.fork(promptRef.loop({
             sessionID: input.receiverSessionID,
             agentID: input.receiverActorID,
             // Woken turns notify their parent on completion. The spawn turn goes
             // through SessionPrompt.prompt (no flag) so forkWork.notify remains
             // the sole notifier for turn 1 — no double-notify.
             notifyParentOnComplete: true,
-          })
-          .pipe(Effect.ignore, Effect.forkIn(scope))
+            inboxID: row.id,
+          }))),
+          Fiber.await,
+          Fiber.interrupt,
+        ).pipe(Effect.ignore, Effect.forkIn(scope))
       } else {
         // Test fixtures / renderer-only paths can run without SessionPrompt.
         // Row is durable; will be drained on next runLoop iteration.
@@ -210,6 +239,14 @@ export const layer: Layer.Layer<
       }
 
       return { inboxID: row.id }
+    })
+
+    const has = Effect.fn("Inbox.has")(function* (inboxID: string) {
+      return yield* Effect.sync(() =>
+        Database.use((db) =>
+          db.select({ id: InboxTable.id }).from(InboxTable).where(eq(InboxTable.id, inboxID)).limit(1).get() !== undefined,
+        ),
+      )
     })
 
     const drain = Effect.fn("Inbox.drain")(function* (
@@ -272,7 +309,7 @@ export const layer: Layer.Layer<
       //   3. If BOTH yield nothing, do NOT drop the queued task: leave the rows
       //      durable and log, so a later turn that does have a model consumes
       //      them (no regression vs. the previous return-0 behavior).
-      const seed = yield* resolveDrainSeed(sessions, reg, sessionID, actorID)
+      const seed = yield* resolveDrainSeed(sessions, reg, sessionID, actorID, boundDefaultModel ?? defaultModelRef.current)
       if (!seed) {
         log.warn("inbox.drain: no model source (no prior model-bearing message, registry row, or default-model ref) — leaving rows durable", {
           sessionID,
@@ -321,7 +358,7 @@ export const layer: Layer.Layer<
       return rows.length
     })
 
-    const impl = Service.of({ send, drain })
+    const impl = Service.of({ send, drain, has, bindPrompt })
     inboxServiceRef.current = impl
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {

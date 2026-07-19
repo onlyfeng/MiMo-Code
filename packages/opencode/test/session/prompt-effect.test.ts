@@ -58,7 +58,10 @@ import { provideTmpdirInstance, provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
+import { inboxServiceRef } from "../../src/inbox/inbox-ref"
+import { InboxTable } from "../../src/inbox/inbox.sql"
 import { Metrics } from "../../src/metrics"
+import { Database } from "../../src/storage"
 
 void Log.init({ print: false })
 
@@ -169,7 +172,62 @@ const lsp = Layer.succeed(
 )
 
 const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
-const run = SessionRunState.layer.pipe(Layer.provide(status))
+const baseRun = SessionRunState.layer.pipe(Layer.provide(status))
+let lateRunGate:
+  | {
+      sessionID: SessionID
+      actorID: string
+      ownerArmed: boolean
+      followerArmed: boolean
+      ownerExit: Deferred.Deferred<void>
+      releaseOwner: Deferred.Deferred<void>
+      followerAttached: Deferred.Deferred<void>
+    }
+  | undefined
+const run = Layer.effect(
+  SessionRunState.Service,
+  Effect.gen(function* () {
+    const state = yield* SessionRunState.Service
+    return SessionRunState.Service.of({
+      ...state,
+      ensureRunning: (sessionID, actorID, onInterrupt, work) => {
+        const gate = lateRunGate
+        if (!gate || gate.sessionID !== sessionID || gate.actorID !== actorID) {
+          return state.ensureRunning(sessionID, actorID, onInterrupt, work)
+        }
+        if (gate.ownerArmed) {
+          gate.ownerArmed = false
+          return state.ensureRunning(
+            sessionID,
+            actorID,
+            onInterrupt,
+            work.pipe(
+              Effect.ensuring(
+                Deferred.succeed(gate.ownerExit, undefined).pipe(
+                  Effect.andThen(Deferred.await(gate.releaseOwner)),
+                ),
+              ),
+            ),
+          )
+        }
+        if (gate.followerArmed) {
+          gate.followerArmed = false
+          return Effect.gen(function* () {
+            const fiber = yield* Effect.forkChild(state.ensureRunning(sessionID, actorID, onInterrupt, work), {
+              startImmediately: true,
+            })
+            yield* Deferred.succeed(gate.followerAttached, undefined)
+            return yield* Fiber.join(fiber)
+          })
+        }
+        return state.ensureRunning(sessionID, actorID, onInterrupt, work)
+      },
+    })
+  }),
+).pipe(Layer.provide(baseRun))
+afterEach(() => {
+  lateRunGate = undefined
+})
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 function makeHttp(mcpService = mcp, input?: { actor?: boolean }) {
   const taskRegistry = ActorRegistry.defaultLayer
@@ -1168,6 +1226,144 @@ it.live(
       { git: true, config: providerCfg },
     ),
   3_000,
+)
+
+itActor.live(
+  "cancelling main only stops the active run and the same session remains runnable and inbox-addressable",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const inbox = inboxServiceRef.current
+        expect(inbox).toBeDefined()
+        if (!inbox) return
+        const chat = yield* sessions.create({ title: "main-cancel-rerun" })
+
+        yield* llm.hang
+        const first = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "first request hangs" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* llm.wait(1)
+
+        yield* prompt.cancel(chat.id)
+        yield* Fiber.join(first)
+
+        yield* llm.text("second request completed")
+        const second = yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "second request must run" }],
+        })
+        expect(second.parts.findLast((part) => part.type === "text")?.text).toBe("second request completed")
+
+        const wakeStarted = yield* Deferred.make<void>()
+        yield* llm.textMatch((hit) => {
+          if (!JSON.stringify(hit.body).includes("main-inbox-after-cancel")) return false
+          Effect.runFork(Deferred.succeed(wakeStarted, undefined))
+          return true
+        }, "main inbox wake completed")
+        const sent = yield* inbox
+          .send({
+            receiverSessionID: chat.id,
+            receiverActorID: "main",
+            content: "main-inbox-after-cancel",
+          })
+          .pipe(
+            Effect.as("accepted" as const),
+            Effect.catchTag("InboxReceiverNotFound", () => Effect.succeed("retired" as const)),
+          )
+        expect(sent).toBe("accepted")
+        yield* Deferred.await(wakeStarted).pipe(Effect.timeout("5 seconds"))
+      }),
+      { git: true, config: providerCfg },
+    ),
+  10_000,
+)
+
+itActor.live(
+  "a main inbox wake retries its own late row after joining an active run",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const inbox = inboxServiceRef.current
+        if (!inbox) return yield* Effect.die("inbox service ref was not initialized")
+        const chat = yield* sessions.create({ title: "main-inbox-late-row" })
+        yield* user(chat.id, "seed main model")
+        const ownerExit = yield* Deferred.make<void>()
+        const releaseOwner = yield* Deferred.make<void>()
+        const followerAttached = yield* Deferred.make<void>()
+        lateRunGate = {
+          sessionID: chat.id,
+          actorID: "main",
+          ownerArmed: true,
+          followerArmed: true,
+          ownerExit,
+          releaseOwner,
+          followerAttached,
+        }
+        yield* Effect.addFinalizer(() => Deferred.succeed(releaseOwner, undefined).pipe(Effect.ignore))
+
+        yield* llm.text("first wake complete")
+        const insert = (id: string, text: string) =>
+          Effect.sync(() =>
+            Database.use((db) =>
+              db
+                .insert(InboxTable)
+                .values({
+                  id,
+                  receiver_session_id: chat.id,
+                  receiver_actor_id: "main",
+                  sender_session_id: null,
+                  sender_actor_id: null,
+                  type: "text",
+                  content: { text },
+                  created_at: Date.now(),
+                })
+                .run(),
+            ),
+          )
+        yield* insert("first-main-row", "first-main-row")
+        const owner = yield* prompt
+          .loop({ sessionID: chat.id, agentID: "main", inboxID: "first-main-row" })
+          .pipe(Effect.forkChild)
+        yield* llm.wait(1).pipe(Effect.timeout("5 seconds"))
+        yield* Deferred.await(ownerExit).pipe(Effect.timeout("5 seconds"))
+
+        yield* llm.text("second wake complete")
+        yield* insert("late-main-row", "late-main-row")
+        const follower = yield* prompt
+          .loop({ sessionID: chat.id, agentID: "main", inboxID: "late-main-row" })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(followerAttached).pipe(Effect.timeout("5 seconds"))
+        expect(yield* inbox.has("late-main-row")).toBe(true)
+
+        yield* Deferred.succeed(releaseOwner, undefined)
+        const reachedSecond = yield* llm.wait(2).pipe(
+          Effect.as(true),
+          Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.succeed(false) }),
+        )
+        yield* Fiber.join(owner).pipe(Effect.timeout("5 seconds"))
+        yield* Fiber.join(follower).pipe(Effect.timeout("5 seconds"))
+
+        expect({ reachedSecond, calls: yield* llm.calls, lateExists: yield* inbox.has("late-main-row") }).toEqual({
+          reachedSecond: true,
+          calls: 2,
+          lateExists: false,
+        })
+        expect(yield* inbox.has("first-main-row")).toBe(false)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  15_000,
 )
 
 // Queue semantics

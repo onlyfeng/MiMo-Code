@@ -14,6 +14,7 @@ export class Cancelled extends Schema.TaggedErrorClass<Cancelled>()("RunnerCance
 interface RunHandle<A, E> {
   id: number
   done: Deferred.Deferred<A, E | Cancelled>
+  start: Deferred.Deferred<void>
   fiber: Fiber.Fiber<A, E>
 }
 
@@ -43,6 +44,12 @@ export const make = <A, E = never>(
     busy?: () => never
     label?: string
     onReentryWarn?: (info: { label: string; existingRunId: number }) => Effect.Effect<void>
+    /** @internal Deterministic scheduling seams for Runner race tests. */
+    _testHooks?: {
+      beforeRunPublish?: Effect.Effect<void>
+      beforeRunStart?: Effect.Effect<void>
+      onRunExit?: Effect.Effect<void>
+    }
   },
 ): Runner<A, E> => {
   const ref = SynchronizedRef.makeUnsafe<State<A, E>>({ _tag: "Idle" })
@@ -81,55 +88,79 @@ export const make = <A, E = never>(
   const startRun = (work: Effect.Effect<A, E>, done: Deferred.Deferred<A, E | Cancelled>) =>
     Effect.gen(function* () {
       const id = next()
-      const fiber = yield* work.pipe(
-        Effect.onExit((exit) => finishRun(id, done, exit)),
+      const start = yield* Deferred.make<void>()
+      const fiber = yield* Deferred.await(start).pipe(
+        Effect.andThen(work),
+        Effect.onExit((exit) =>
+          (opts?._testHooks?.onRunExit ?? Effect.void).pipe(
+            Effect.andThen(Deferred.await(start)),
+            Effect.andThen(finishRun(id, done, exit)),
+            Effect.uninterruptible,
+          ),
+        ),
         Effect.forkIn(scope),
       )
-      return { id, done, fiber } satisfies RunHandle<A, E>
+      if (opts?._testHooks?.beforeRunPublish) yield* opts._testHooks.beforeRunPublish
+      return { id, done, start, fiber } satisfies RunHandle<A, E>
     })
 
   const finishShell = (id: number) =>
-    SynchronizedRef.modifyEffect(
-      ref,
-      Effect.fnUntraced(function* (st) {
-        if (st._tag === "Shell" && st.shell.id === id) return [idle, { _tag: "Idle" }] as const
-        if (st._tag === "ShellThenRun" && st.shell.id === id) {
-          const run = yield* startRun(st.run.work, st.run.done)
-          return [Effect.void, { _tag: "Running", run }] as const
-        }
-        return [Effect.void, st] as const
-      }),
-    ).pipe(Effect.flatten)
+    Effect.uninterruptible(
+      SynchronizedRef.modifyEffect(
+        ref,
+        Effect.fnUntraced(function* (st) {
+          if (st._tag === "Shell" && st.shell.id === id) return [idle, { _tag: "Idle" }] as const
+          if (st._tag === "ShellThenRun" && st.shell.id === id) {
+            const run = yield* startRun(st.run.work, st.run.done)
+            return [
+              (opts?._testHooks?.beforeRunStart ?? Effect.void).pipe(
+                Effect.andThen(Effect.sync(() => Deferred.doneUnsafe(run.start, Effect.void))),
+                Effect.asVoid,
+              ),
+              { _tag: "Running", run },
+            ] as const
+          }
+          return [Effect.void, st] as const
+        }),
+      ).pipe(Effect.flatten),
+    )
 
   const stopShell = (shell: ShellHandle<A, E>) => Fiber.interrupt(shell.fiber)
 
   const ensureRunning = (work: Effect.Effect<A, E>) =>
-    SynchronizedRef.modifyEffect(
-      ref,
-      Effect.fnUntraced(function* (st) {
-        switch (st._tag) {
-          case "Running":
-          case "ShellThenRun":
-            if (opts?.onReentryWarn)
-              yield* opts.onReentryWarn({ label: opts.label ?? "(unlabeled)", existingRunId: st.run.id })
-            return [Deferred.await(st.run.done), st] as const
-          case "Shell": {
-            const run = {
-              id: next(),
-              done: yield* Deferred.make<A, E | Cancelled>(),
-              work,
-            } satisfies PendingHandle<A, E>
-            return [Deferred.await(run.done), { _tag: "ShellThenRun", shell: st.shell, run }] as const
+    Effect.uninterruptibleMask((restore) =>
+      SynchronizedRef.modifyEffect(
+        ref,
+        Effect.fnUntraced(function* (st) {
+          switch (st._tag) {
+            case "Running":
+            case "ShellThenRun":
+              if (opts?.onReentryWarn)
+                yield* opts.onReentryWarn({ label: opts.label ?? "(unlabeled)", existingRunId: st.run.id })
+              return [restore(Deferred.await(st.run.done)), st] as const
+            case "Shell": {
+              const run = {
+                id: next(),
+                done: yield* Deferred.make<A, E | Cancelled>(),
+                work,
+              } satisfies PendingHandle<A, E>
+              return [restore(Deferred.await(run.done)), { _tag: "ShellThenRun", shell: st.shell, run }] as const
+            }
+            case "Idle": {
+              const done = yield* Deferred.make<A, E | Cancelled>()
+              const run = yield* startRun(work, done)
+              return [
+                (opts?._testHooks?.beforeRunStart ?? Effect.void).pipe(
+                  Effect.andThen(Effect.sync(() => Deferred.doneUnsafe(run.start, Effect.void))),
+                  Effect.andThen(restore(Deferred.await(done))),
+                ),
+                { _tag: "Running", run },
+              ] as const
+            }
           }
-          case "Idle": {
-            const done = yield* Deferred.make<A, E | Cancelled>()
-            const run = yield* startRun(work, done)
-            return [Deferred.await(done), { _tag: "Running", run }] as const
-          }
-        }
-      }),
+        }),
+      ).pipe(Effect.flatten),
     ).pipe(
-      Effect.flatten,
       Effect.catch(
         (e): Effect.Effect<A, E> => (e instanceof Cancelled ? (onInterrupt ?? Effect.die(e)) : Effect.fail(e as E)),
       ),

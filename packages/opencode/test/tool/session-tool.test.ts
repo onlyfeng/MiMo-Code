@@ -1171,7 +1171,7 @@ describe("session tool ask (fork-query) functional", () => {
           title: "Target with history",
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
-        yield* sessions.updateMessage({
+        const targetUser = yield* sessions.updateMessage({
           id: MessageID.ascending(),
           role: "user" as const,
           sessionID: target.id,
@@ -1180,6 +1180,13 @@ describe("session tool ask (fork-query) functional", () => {
           agent: "build",
           model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
         } as unknown as MessageV2.Info)
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: targetUser.id,
+          sessionID: target.id,
+          type: "text",
+          text: "Set up the login page.",
+        })
 
         // The fork's single turn answers from the frozen snapshot.
         yield* llm.text("The session is setting up a login page.")
@@ -1222,6 +1229,61 @@ describe("session tool ask (fork-query) functional", () => {
     60000,
   )
 
+  askIt.live("ask fails closed when a removed agent makes prefix capture empty", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* () {
+        const sessions = yield* Session.Service
+        const target = yield* sessions.create({
+          title: "Target whose agent was removed",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const user = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user" as const,
+          sessionID: target.id,
+          agentID: "main",
+          time: { created: Date.now() },
+          agent: "build",
+          model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+        } as unknown as MessageV2.Info)
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: user.id,
+          sessionID: target.id,
+          type: "text",
+          text: "Continue the removed agent's task.",
+        })
+        yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "assistant" as const,
+          parentID: user.id,
+          sessionID: target.id,
+          agentID: "main",
+          mode: "removed-agent",
+          agent: "removed-agent",
+          path: { cwd: "/tmp", root: "/tmp" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: ModelID.make("test-model"),
+          providerID: ProviderID.make("test"),
+          time: { created: Date.now() + 1 },
+        } as unknown as MessageV2.Info)
+
+        const tool = yield* (yield* SessionTool).init()
+        const result = yield* tool.execute(
+          { operation: { action: "ask", session_id: target.id, question: "what is this session doing?" } },
+          ctx(target.id),
+        )
+
+        expect(result.output).toContain("fork-query unavailable")
+        expect(result.output).toContain("prefix capture returned no inherited messages")
+        expect(yield* sessions.children(target.id)).toHaveLength(0)
+      }),
+      { git: true, config: askProviderCfg },
+    ),
+    60_000,
+  )
+
   // Regression: a PEER child (created via `session create`) persists its turns
   // under agent_id = <its own sessionID>, NOT "main". The old forkQuery read
   // only the "main" slice, so `ask` reported "no activity yet" for every peer
@@ -1239,7 +1301,7 @@ describe("session tool ask (fork-query) functional", () => {
         // History lives under agent_id === target.id (the peer's own slice),
         // exactly as SessionPrompt persists a peer actor's turns — the "main"
         // slice is left empty on purpose to mirror a real peer child.
-        yield* sessions.updateMessage({
+        const targetUser = yield* sessions.updateMessage({
           id: MessageID.ascending(),
           role: "user" as const,
           sessionID: target.id,
@@ -1248,6 +1310,13 @@ describe("session tool ask (fork-query) functional", () => {
           agent: "build",
           model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
         } as unknown as MessageV2.Info)
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: targetUser.id,
+          sessionID: target.id,
+          type: "text",
+          text: "Read the config and wire the login route.",
+        })
 
         yield* llm.text("The child read the config and is wiring the login route.")
 

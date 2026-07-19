@@ -753,9 +753,10 @@ export const layer: Layer.Layer<
       // (ToolRegistry → SessionCheckpoint → ToolRegistry) layer cycle.
       const buildPrefix = prefixCaptureRef.current
       if (!buildPrefix) {
-        log.warn("tryStartCheckpointWriter: prefixCaptureRef not set, spawning without forkContext", {
+        log.warn("tryStartCheckpointWriter: prefixCaptureRef not set, skipping", {
           sessionID: input.sessionID,
         })
+        return "skipped" as const
       }
       const forkCtx: ForkContext | undefined = yield* (buildPrefix
         ? Effect.gen(function* () {
@@ -768,7 +769,7 @@ export const layer: Layer.Layer<
             if (forkMode) {
               if (!parentAgentName) {
                 log.warn(
-                  "tryStartCheckpointWriter: watermark has no agent, fork:true requires parent agent — falling back to no forkContext",
+                  "tryStartCheckpointWriter: watermark has no agent, fork:true requires parent agent — skipping",
                   { sessionID: input.sessionID, endMessageID },
                 )
                 return undefined as ForkContext | undefined
@@ -831,6 +832,15 @@ export const layer: Layer.Layer<
             } satisfies ForkContext
           })
         : Effect.succeed(undefined as ForkContext | undefined))
+
+      if (!forkCtx) return "skipped" as const
+      if (forkCtx.inheritedMessages.length === 0) {
+        log.warn("tryStartCheckpointWriter: prefix capture returned no inherited messages, skipping", {
+          sessionID: input.sessionID,
+          endMessageID,
+        })
+        return "skipped" as const
+      }
 
       // Axis A: writer always runs in a fresh child session. This isolates the
       // writer's messages and actor registration from the parent so:

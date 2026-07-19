@@ -86,6 +86,7 @@ import {
 } from "./trajectory"
 import { prefixCaptureRef } from "./prefix-capture-ref"
 import { spawnRef } from "@/actor/spawn-ref"
+import type { Interface as ActorInterface } from "@/actor/spawn"
 import { Inbox } from "@/inbox"
 import { sessionPromptRef, defaultModelRef } from "@/inbox/inbox-ref"
 import { Tool } from "@/tool"
@@ -265,6 +266,8 @@ export interface Interface {
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
   readonly sweepOrphanAssistants: (sessionID: SessionID, immediate?: boolean) => Effect.Effect<void>
   readonly predict: (input: { sessionID: SessionID }) => Effect.Effect<string>
+  /** Internal cycle-breaker: binds this prompt layer to its owning Actor layer. */
+  readonly bindActor?: (actor: ActorInterface) => () => void
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
@@ -302,6 +305,14 @@ export const layer = Layer.effect(
     const llm = yield* LLM.Service
     const actorRegistry = yield* ActorRegistry.Service
     const inbox = yield* Inbox.Service
+    let boundActor: ActorInterface | undefined
+    const bindActor = (actor: ActorInterface) => {
+      const previous = boundActor
+      boundActor = actor
+      return () => {
+        if (boundActor === actor) boundActor = previous
+      }
+    }
 
     // Late-bound ref (see tool-script-ref.ts): tool_script dispatches MCP tools
     // through the same live client set the agent sees. Populated here (not in
@@ -3283,16 +3294,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // If forkCtx is missing (race / cleanup bug / spawn skipped), fail the
             // actor so the next prune turn can spawn a fresh fork.
             if (isForkAgent) {
-              const forkCtxEffect = spawnRef.current?.getForkContext(sessionID, lastUser.agentID!)
+              const forkCtxEffect = (boundActor ?? spawnRef.current)?.getForkContext(sessionID, lastUser.agentID!)
               const forkCtx = forkCtxEffect ? yield* forkCtxEffect : undefined
               if (!forkCtx) {
                 yield* slog.warn("fork agent runLoop: missing forkContext, failing actor", {
                   sessionID,
                   agentID: lastUser.agentID,
                 })
-                yield* actorRegistry
-                  .updateStatus(sessionID, lastUser.agentID!, { status: "idle", lastOutcome: "failure", lastError: "missing fork context" })
-                  .pipe(Effect.ignore)
+                yield* writeModelError({ assistant: handle.message, reason: "missing fork context" })
                 return "break" as const
               }
               const ownNew = msgs.filter(
@@ -3849,20 +3858,26 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     )(function* (input: z.infer<typeof LoopInput>) {
       const agentID = input.agentID ?? "main"
       const work = runLoop(input.sessionID, agentID, input.task_id)
-      const managed = spawnRef.current?.runPersistentTurn
-        ? spawnRef.current.runPersistentTurn({
-            sessionID: input.sessionID,
-            actorID: agentID,
-            work,
-            notifyParentOnComplete: input.notifyParentOnComplete ?? false,
-          })
-        : work
-      return yield* state.ensureRunning(
-        input.sessionID,
-        agentID,
-        lastAssistant(input.sessionID, agentID),
-        managed,
-      )
+      const actor = boundActor ?? spawnRef.current
+      if (input.notifyParentOnComplete === true && agentID !== "main" && actor?.runPersistentTurn) {
+        return yield* actor.runPersistentTurn({
+          sessionID: input.sessionID,
+          actorID: agentID,
+          work,
+          onInterrupt: lastAssistant(input.sessionID, agentID),
+          notifyParentOnComplete: true,
+          inboxID: input.inboxID,
+        })
+      }
+      while (true) {
+        const result = yield* state.ensureRunning(
+          input.sessionID,
+          agentID,
+          lastAssistant(input.sessionID, agentID),
+          work,
+        )
+        if (!input.inboxID || !(yield* inbox.has(input.inboxID))) return result
+      }
     })
 
     const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.shell")(
@@ -4075,18 +4090,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       resolvePromptParts,
       sweepOrphanAssistants,
       predict,
+      bindActor,
     })
-    sessionPromptRef.current = { loop: impl.loop }
+    const promptLoopRef = { loop: impl.loop }
     // Expose the project default-model resolver to Inbox.drain's option-2
     // fallback (seed a synthetic message for a turnCount-0 standing peer whose
     // slice has no model-bearing message yet). Reads Provider, which is already
     // in scope here — Inbox.layer stays free of a Provider dependency.
     const defaultModelResolver = { defaultModel: () => provider.defaultModel() }
+    const restoreInboxPrompt = inbox.bindPrompt?.(promptLoopRef, defaultModelResolver)
+    const previousPromptRef = sessionPromptRef.current
+    const previousDefaultModelRef = defaultModelRef.current
+    sessionPromptRef.current = promptLoopRef
     defaultModelRef.current = defaultModelResolver
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
-        if (sessionPromptRef.current?.loop === impl.loop) sessionPromptRef.current = undefined
-        if (defaultModelRef.current === defaultModelResolver) defaultModelRef.current = undefined
+        restoreInboxPrompt?.()
+        if (sessionPromptRef.current === promptLoopRef) sessionPromptRef.current = previousPromptRef
+        if (defaultModelRef.current === defaultModelResolver) defaultModelRef.current = previousDefaultModelRef
       }),
     )
     return impl
@@ -4216,6 +4237,7 @@ export const LoopInput = z.object({
   // the FIRST/spawn turn). Left false on spawn/user-driven loops to avoid
   // double-notifying the spawn turn that forkWork already covers.
   notifyParentOnComplete: z.boolean().optional(),
+  inboxID: z.string().optional(),
 })
 
 export const ShellInput = z.object({

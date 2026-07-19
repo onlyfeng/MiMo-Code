@@ -15,9 +15,11 @@ import { Config } from "../config"
 import { ActorRegistry } from "@/actor/registry"
 import { ActorWaiter } from "@/actor/waiter"
 import { spawnRef } from "@/actor/spawn-ref"
+import type { ForkContext } from "@/actor/spawn"
 import { TaskRegistry } from "@/task/registry"
 import { TaskID } from "@/task/schema"
 import { SessionCheckpoint } from "@/session/checkpoint"
+import { prefixCaptureRef } from "@/session/prefix-capture-ref"
 import { inboxServiceRef } from "@/inbox/inbox-ref"
 import { Effect, Deferred } from "effect"
 
@@ -721,6 +723,43 @@ export const ActorTool = Tool.define(
               providerID: msg.info.providerID,
             })
 
+        const forkContext: ForkContext | undefined = yield* (op.context === "full"
+          ? Effect.gen(function* () {
+              const buildPrefix = prefixCaptureRef.current
+              if (!buildPrefix) {
+                return yield* Effect.fail(
+                  new RecoverableError("Full context is unavailable because the session prefix captor is not ready."),
+                )
+              }
+              const watermarkMsgID = ctx.messages.at(-1)?.info.id
+              if (!watermarkMsgID) {
+                return yield* Effect.fail(
+                  new RecoverableError("Full context requires a non-empty caller-visible message history."),
+                )
+              }
+              const prefix = yield* buildPrefix({
+                sessionID: ctx.sessionID,
+                agentName: ctx.agent,
+                providerID: model.providerID,
+                modelID: model.modelID,
+                msgs: ctx.messages,
+              })
+              if (prefix.inheritedMessages.length === 0) {
+                return yield* Effect.fail(
+                  new RecoverableError("Full context capture produced no inherited messages."),
+                )
+              }
+              return {
+                system: prefix.system,
+                tools: prefix.tools,
+                inheritedMessages: prefix.inheritedMessages,
+                parentPermission: prefix.parentPermission,
+                watermarkMsgID,
+                model,
+              }
+            })
+          : Effect.succeed(undefined))
+
         // Validate task_id by reference at execute time (NOT in the schema, so a
         // bad value degrades instead of hard-failing the call). A malformed shape
         // or an ID that names no task in this session ⇒ run ad-hoc (task_id
@@ -756,6 +795,7 @@ export const ActorTool = Tool.define(
           tools: next.toolAllowlist ? [...next.toolAllowlist] : "INHERIT",
           model,
           background,
+          ...(forkContext ? { forkContext } : {}),
           task_id: effectiveTaskId,
           onReady: ({ actorID, sessionID }) =>
             ctx.metadata({

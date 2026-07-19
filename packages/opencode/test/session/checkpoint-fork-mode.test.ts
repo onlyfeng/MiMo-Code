@@ -17,7 +17,7 @@ import { Log } from "../../src/util"
 import { Plugin } from "../../src/plugin"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { Session as SessionNs } from "../../src/session"
-import { MessageID, PartID } from "../../src/session/schema"
+import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { ProviderTest } from "../fake/provider"
 import { testEffect } from "../lib/effect"
@@ -140,7 +140,7 @@ const reset = Effect.sync(() => {
 // unified on assistants), so we use `as never` to bypass the discriminated
 // union — the helper only inspects part.type as a string.
 const PAD = "x ".repeat(25_000)  // ~50K chars → ~12.5K tokens
-const seedFourMessages = Effect.fn("seedFourMessages")(function* () {
+const seedFourMessages = Effect.fn("seedFourMessages")(function* (missingWatermarkAgent = false) {
   const ssn = yield* SessionNs.Service
   const info = yield* ssn.create({})
   const t0 = Date.now()
@@ -197,7 +197,7 @@ const seedFourMessages = Effect.fn("seedFourMessages")(function* () {
     id: MessageID.ascending(),
     role: "user",
     sessionID: info.id,
-    agent: "build",
+    agent: missingWatermarkAgent ? (undefined as unknown as string) : "build",
     model: ref,
     time: { created: t0 + 3 },
   })
@@ -239,6 +239,18 @@ const seedFourMessages = Effect.fn("seedFourMessages")(function* () {
   })
 
   return { info, u1, a1, u2, a2 }
+})
+
+const expectWriterNotStarted = Effect.fn("expectWriterNotStarted")(function* (sessionID: SessionID) {
+  expect(spawnLog.count).toBe(0)
+  const state = yield* Effect.sync(() =>
+    Database.use((d) => ({
+      parent: d.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get(),
+      children: d.select().from(SessionTable).where(eq(SessionTable.parent_id, sessionID)).all(),
+    })),
+  )
+  expect(state.children).toHaveLength(0)
+  expect(state.parent?.last_checkpoint_message_id ?? null).toBeNull()
 })
 
 describe("checkpoint writer forkContext shape per mode", () => {
@@ -516,6 +528,89 @@ describe("checkpoint writer forkContext shape per mode", () => {
           expect(fc?.watermarkMsgID).toBe(u2.id)
         }),
       // Default config (fork unset) → fork: false. Explicitly setting for clarity.
+      { config: { checkpoint: { fork: false } } },
+    ),
+  )
+
+  it.live(
+    "missing prefix capture ref skips without spawning, creating a child, or advancing the watermark",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          const svc = yield* SessionCheckpoint.Service
+          const { info } = yield* seedFourMessages()
+
+          const outcome = yield* svc.tryStartCheckpointWriter({
+            sessionID: info.id,
+            model: { providerID: "test", modelID: "test-model" },
+            promptOps: {} as never,
+          })
+
+          expect(outcome).toBe("skipped")
+          yield* expectWriterNotStarted(info.id)
+        }),
+      { config: { checkpoint: { fork: false } } },
+    ),
+  )
+
+  it.live(
+    "fork:true without a parent agent skips without spawning, creating a child, or advancing the watermark",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          installRecordingCapture()
+          const svc = yield* SessionCheckpoint.Service
+          const { info } = yield* seedFourMessages(true)
+
+          const outcome = yield* svc.tryStartCheckpointWriter({
+            sessionID: info.id,
+            model: { providerID: "test", modelID: "test-model" },
+            promptOps: {} as never,
+          })
+
+          expect(outcome).toBe("skipped")
+          expect(captureLog.calls).toHaveLength(0)
+          yield* expectWriterNotStarted(info.id)
+        }),
+      { config: { checkpoint: { fork: true } } },
+    ),
+  )
+
+  it.live(
+    "an empty inherited prefix skips without spawning, creating a child, or advancing the watermark",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          prefixCaptureRef.current = (input) =>
+            Effect.sync(() => {
+              captureLog.calls.push({
+                sessionID: input.sessionID,
+                agentName: input.agentName,
+                msgsLen: input.msgs.length,
+              })
+              return {
+                system: ["sys-canned"],
+                tools: {},
+                inheritedMessages: [],
+                parentPermission: [],
+              }
+            })
+          const svc = yield* SessionCheckpoint.Service
+          const { info } = yield* seedFourMessages()
+
+          const outcome = yield* svc.tryStartCheckpointWriter({
+            sessionID: info.id,
+            model: { providerID: "test", modelID: "test-model" },
+            promptOps: {} as never,
+          })
+
+          expect(outcome).toBe("skipped")
+          expect(captureLog.calls).toHaveLength(1)
+          yield* expectWriterNotStarted(info.id)
+        }),
       { config: { checkpoint: { fork: false } } },
     ),
   )

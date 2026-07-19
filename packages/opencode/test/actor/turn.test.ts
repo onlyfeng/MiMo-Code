@@ -15,7 +15,9 @@ afterEach(async () => {
 
 async function withTurn(
   directory: string,
-  fn: (rt: ManagedRuntime.ManagedRuntime<ActorRegistry.Service | Bus.Service | Session.Service, never>) => Promise<void>,
+  fn: (
+    rt: ManagedRuntime.ManagedRuntime<ActorRegistry.Service | Bus.Service | Session.Service, never>,
+  ) => Promise<void>,
 ) {
   return Instance.provide({
     directory,
@@ -58,6 +60,48 @@ describe("runTurn (Plan 1 / Task 3)", () => {
       expect(entry?.status).toBe("idle")
       expect(entry?.lastOutcome).toBe("success")
       expect(entry?.lastError).toBeUndefined()
+    })
+  })
+
+  test("finalize false leaves the generation owner responsible for the terminal registry write", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withTurn(tmp.path, async (rt) => {
+      const parent = await rt.runPromise(Session.Service.use((s) => s.create()))
+      const sid = parent.id
+      await rt.runPromise(
+        ActorRegistry.Service.use((reg) =>
+          reg.register({
+            sessionID: sid,
+            actorID: "turn-generation-owned",
+            mode: "subagent",
+            parentActorID: undefined,
+            agent: "main",
+            description: "main",
+            contextMode: "full",
+            contextWatermark: undefined,
+            background: false,
+            lifecycle: "persistent",
+          }),
+        ),
+      )
+      await rt.runPromise(
+        ActorRegistry.Service.use((reg) =>
+          reg.updateStatus(sid, "turn-generation-owned", {
+            status: "idle",
+            lastOutcome: "failure",
+            lastError: "previous generation",
+          }),
+        ),
+      )
+
+      const result = await rt.runPromise(
+        runTurn(sid, "turn-generation-owned", Effect.succeed("hello"), { finalize: false }),
+      )
+      expect(result).toBe("hello")
+      const entry = await rt.runPromise(ActorRegistry.Service.use((reg) => reg.get(sid, "turn-generation-owned")))
+      expect(entry?.status).toBe("running")
+      expect(entry?.lastOutcome).toBe("failure")
+      expect(entry?.lastError).toBe("previous generation")
     })
   })
 
@@ -150,9 +194,14 @@ describe("runTurn (Plan 1 / Task 3)", () => {
         release.current = () => resolve("late success")
       })
       const fiber = rt.runFork(
-        runTurn(sid, "turn-actor-d", Effect.promise(() => lateWork), {
-          isCancelled: Effect.sync(() => cancelled.current),
-        }),
+        runTurn(
+          sid,
+          "turn-actor-d",
+          Effect.promise(() => lateWork),
+          {
+            isCancelled: Effect.sync(() => cancelled.current),
+          },
+        ),
       )
       await new Promise((res) => setTimeout(res, 50))
       cancelled.current = true

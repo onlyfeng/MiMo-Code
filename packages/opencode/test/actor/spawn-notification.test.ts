@@ -53,6 +53,8 @@ import { TuiEvent } from "../../src/cli/cmd/tui/event"
 import { Database } from "../../src/storage"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { Instance } from "../../src/project/instance"
+import { EffectBridge, InstanceState } from "../../src/effect"
+import { InstanceRef } from "../../src/effect/instance-ref"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Ripgrep } from "../../src/file/ripgrep"
 import { Format } from "../../src/format"
@@ -559,6 +561,210 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
       }),
       { git: true, config: providerCfg },
     ),
+  )
+
+  it.live(
+    "a woken peer toast is routed to the parent directory rather than the sender ambient instance",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const actor = yield* Actor.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "woken-toast-parent-route",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+
+          yield* llm.text("spawn turn complete")
+          const result = yield* actor.spawn({
+            mode: "peer",
+            sessionID: parent.id,
+            agentType: "build",
+            task: "stand by for a routed wake",
+            description: "woken routed peer",
+            context: "none",
+            tools: ["read"],
+            background: true,
+            model: ref,
+          })
+          expect((yield* Deferred.await(result.outcome)).status).toBe("success")
+          const previous = (yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })).findLast(
+            (message) => message.info.role === "assistant",
+          )
+          if (!previous) return yield* Effect.die("spawn did not persist an assistant message")
+          yield* Effect.sync(() =>
+            Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).run()),
+          )
+
+          const toast = yield* Deferred.make<GlobalEvent>()
+          const onGlobal = (event: GlobalEvent) => {
+            if (event.payload?.type !== TuiEvent.ToastShow.type) return
+            if (event.payload.properties?.message !== 'Child "woken routed peer" completed') return
+            Effect.runFork(Deferred.succeed(toast, event))
+          }
+          GlobalBus.on("event", onGlobal)
+          yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", onGlobal)))
+
+          const senderDir = join(dir, "sibling-sender")
+          yield* Effect.promise(() => mkdir(senderDir, { recursive: true }))
+          const parentInstance = yield* InstanceState.context
+          const senderInstance = yield* Effect.promise(() =>
+            Instance.provide({ directory: senderDir, fn: () => Instance.current }),
+          )
+          const senderBridge = yield* EffectBridge.make().pipe(Effect.provideService(InstanceRef, senderInstance))
+          yield* Effect.promise(() =>
+            senderBridge.promise(
+              actor.runPersistentTurn!({
+                sessionID: result.sessionID,
+                actorID: result.actorID,
+                notifyParentOnComplete: true,
+                onInterrupt: Effect.succeed(previous),
+                work: Effect.succeed(previous),
+              }).pipe(Effect.provideService(InstanceRef, parentInstance)),
+            ),
+          )
+
+          const event = yield* Deferred.await(toast).pipe(Effect.timeout("5 seconds"))
+          expect(event.directory).toBe(dir)
+        }),
+        { git: true, config: providerCfg },
+      ),
+    15_000,
+  )
+
+  it.live(
+    "an initial full-context spawn without forkContext fails and never reports completed",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* () {
+          const actor = yield* Actor.Service
+          const actorReg = yield* ActorRegistry.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "initial-missing-fork-context-parent",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+
+          const result = yield* actor.spawn({
+            mode: "subagent",
+            sessionID: parent.id,
+            agentType: "build",
+            task: "this full-context spawn is missing its captured prefix",
+            context: "full",
+            tools: ["read"],
+            background: true,
+            model: ref,
+          })
+          const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("5 seconds"))
+
+          expect(outcome.status).toBe("failure")
+          const row = yield* actorReg.get(result.sessionID, result.actorID)
+          expect(row?.lastOutcome).toBe("failure")
+          expect(row?.lastError).toContain("missing fork context")
+
+          const rows = yield* Effect.sync(() =>
+            Database.use((db) =>
+              db
+                .select()
+                .from(InboxTable)
+                .where(
+                  and(
+                    eq(InboxTable.receiver_session_id, parent.id),
+                    eq(InboxTable.receiver_actor_id, "main"),
+                    eq(InboxTable.sender_actor_id, result.actorID),
+                  ),
+                )
+                .all(),
+            ),
+          )
+          expect(rows).toHaveLength(1)
+          expect((rows[0]?.content as { text?: string } | undefined)?.text).toContain("failed")
+          expect((rows[0]?.content as { text?: string } | undefined)?.text).not.toContain("completed")
+        }),
+        { git: true, config: providerCfg },
+      ),
+    15_000,
+  )
+
+  it.live(
+    "a reconstructed full-context persistent peer without forkContext fails visibly and never reports success",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* () {
+          const actorReg = yield* ActorRegistry.Service
+          const session = yield* Session.Service
+          const inbox = yield* Inbox.Service
+          const bus = yield* Bus.Service
+          const parent = yield* session.create({
+            title: "missing-fork-context-parent",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          const child = yield* session.create({
+            parentID: parent.id,
+            contextFrom: parent.id,
+            title: "reconstructed-full-context-peer",
+          })
+          yield* actorReg.register({
+            sessionID: child.id,
+            actorID: child.id,
+            mode: "peer",
+            parentActorID: "main",
+            agent: "build",
+            description: "missing fork context peer",
+            contextMode: "full",
+            contextWatermark: undefined,
+            background: true,
+            lifecycle: "persistent",
+            tools: ["read"],
+          })
+
+          const notified = yield* Deferred.make<void>()
+          let notifications = 0
+          const off = yield* bus.subscribeCallback(InboxArrived, (event) => {
+            if (event.properties.receiverSessionID !== parent.id) return
+            if (event.properties.senderSessionID !== child.id) return
+            if (event.properties.senderActorID !== child.id) return
+            notifications++
+            Effect.runFork(Deferred.succeed(notified, undefined))
+          })
+          yield* Effect.addFinalizer(() => Effect.sync(off))
+
+          yield* inbox
+            .send({
+              receiverSessionID: child.id,
+              receiverActorID: child.id,
+              senderSessionID: parent.id,
+              senderActorID: "main",
+              content: "wake reconstructed full-context peer",
+            })
+            .pipe(Effect.orDie)
+          yield* Deferred.await(notified).pipe(Effect.timeout("5 seconds"))
+
+          const row = yield* actorReg.get(child.id, child.id)
+          expect(row?.status).toBe("idle")
+          expect(row?.lastOutcome).toBe("failure")
+          expect(row?.lastError).toContain("missing fork context")
+          expect(notifications).toBe(1)
+
+          const messages = yield* session.messages({ sessionID: child.id, agentID: child.id })
+          const assistant = messages.findLast((message) => message.info.role === "assistant")
+          expect(assistant?.info.role === "assistant" ? assistant.info.error?.name : undefined).toBe("ModelError")
+
+          const rows = yield* Effect.sync(() =>
+            Database.use((db) =>
+              db
+                .select()
+                .from(InboxTable)
+                .where(and(eq(InboxTable.receiver_session_id, parent.id), eq(InboxTable.receiver_actor_id, "main")))
+                .all(),
+            ),
+          )
+          expect((rows[0]?.content as { text?: string } | undefined)?.text).toContain("failed")
+          expect((rows[0]?.content as { text?: string } | undefined)?.text).not.toContain("completed")
+        }),
+        { git: true, config: providerCfg },
+      ),
+    15_000,
   )
 
   // T12 gate: a SYSTEM subagent agentType (checkpoint-writer) spawned as a peer
