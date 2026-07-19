@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { tool, jsonSchema, type Tool as AITool } from "ai"
+import { asSchema, tool, jsonSchema, type Tool as AITool } from "ai"
 import z from "zod"
 import { MessageV2 } from "./message-v2"
 import type { SessionID } from "./schema"
@@ -9,6 +9,7 @@ import type { Provider } from "../provider"
 import { LLM } from "./llm"
 import { ToolRegistry } from "../tool"
 import { ProviderTransform } from "../provider"
+import type { Permission } from "../permission"
 
 /**
  * Build the LLM request prefix (system + tools + inheritedMessages) from the
@@ -16,12 +17,10 @@ import { ProviderTransform } from "../provider"
  * (modulo plugin trigger determinism, which is the only external non-determinism
  * source).
  *
- * Used by:
- *   - parent runLoop, to construct its own request
- *   - tryStartCheckpointWriter, to capture a frozen ForkContext at spawn time
- *
- * Both call sites must use this same function — the byte-equal invariant
- * across parent and fork is a structural consequence, not a separate assertion.
+ * The parent runLoop uses this for its prebuilt system/messages; prefix capture
+ * also consumes the returned schema-only tools to freeze a ForkContext. Callers
+ * provide the current MCP tool set explicitly so this helper stays outside the
+ * MCP layer cycle while applying the same provider transform as the live path.
  *
  * Slicing (e.g. for fork capture at a watermark) is a caller concern; callers
  * pass the already-sliced msgs. ForkContext.watermarkMsgID is a boundary marker
@@ -32,6 +31,8 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   agent: Agent.Info
   model: Provider.Model
   msgs: MessageV2.WithParts[]
+  permission?: Permission.Ruleset
+  mcpTools?: Record<string, AITool>
   /**
    * Caller-built system parts to splice into the system array (after agent.prompt
    * and before memory instructions). Currently env, skills, instructions in that
@@ -68,15 +69,30 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     modelID: ModelID.make(input.model.api.id),
     providerID: input.model.providerID,
     agent: input.agent,
+    permission: input.permission,
   })
-  const tools: Record<string, AITool> = {}
+  const rawTools: Record<string, AITool> = {}
   for (const item of toolDefs) {
     const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
-    tools[item.id] = tool({
+    rawTools[item.id] = tool({
       description: item.description,
       inputSchema: jsonSchema(schema),
     })
   }
+  for (const [id, item] of Object.entries(input.mcpTools ?? {})) {
+    if (!item.execute) continue
+    const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
+    rawTools[id] = tool({
+      description: item.description,
+      inputSchema: jsonSchema(ProviderTransform.schema(input.model, schema)),
+    })
+  }
+  const tools = LLM.resolveTools({
+    tools: rawTools,
+    agent: input.agent,
+    permission: input.permission,
+    user: lastUser,
+  })
 
   return { system, tools, inheritedMessages }
 })

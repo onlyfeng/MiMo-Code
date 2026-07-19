@@ -74,11 +74,13 @@ export function renderToolScriptDeclarations(defs: Tool.Def[], mcp: Record<strin
       const input = schemaToTs(z.toJSONSchema(def.parameters))
       return `  /** ${summary.trim().slice(0, 200)} */\n  ${def.id}(input: ${input}): Promise<ToolResult>`
     })
-  const mcpLines = Object.entries(mcp).map(([id, tool]) => {
-    const summary = (tool.description ?? "").split("\n").find((l) => l.trim()) ?? ""
-    const input = schemaToTs(asSchema(tool.inputSchema).jsonSchema)
-    return `  /** [MCP] ${summary.trim().slice(0, 200)} */\n  ${id}(input: ${input}): Promise<ToolResult>`
-  })
+  const mcpLines = Object.entries(mcp)
+    .filter(([id]) => !TOOL_SCRIPT_EXCLUDED.has(id))
+    .map(([id, tool]) => {
+      const summary = (tool.description ?? "").split("\n").find((l) => l.trim()) ?? ""
+      const input = schemaToTs(asSchema(tool.inputSchema).jsonSchema)
+      return `  /** [MCP] ${summary.trim().slice(0, 200)} */\n  ${id}(input: ${input}): Promise<ToolResult>`
+    })
   return [
     "```ts",
     "type ToolResult = { title: string; output: string; metadata: Record<string, unknown> }",
@@ -341,7 +343,9 @@ export const ToolScriptTool = Tool.define(
           // MCP tools (late-bound ref, populated by SessionPrompt). Builtin ids
           // win on collision — an MCP server must not shadow `read`/`grep`.
           const mcpTools = toolScriptMcp.current ? yield* toolScriptMcp.current() : {}
-          const mcpById = new Map(Object.entries(mcpTools).filter(([id]) => !byId.has(id)))
+          const mcpById = new Map(
+            Object.entries(mcpTools).filter(([id]) => !TOOL_SCRIPT_EXCLUDED.has(id) && !byId.has(id)),
+          )
           const agentInfo = yield* agents.get(ctx.agent)
           // Non-git projects report worktree === "/" (see Instance.containsPath) —
           // "/" as a jail root would allow EVERYTHING. Fall back to the project

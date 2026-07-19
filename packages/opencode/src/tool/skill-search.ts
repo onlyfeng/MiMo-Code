@@ -2,7 +2,9 @@ import z from "zod"
 import { Effect } from "effect"
 import { Ripgrep } from "../file/ripgrep"
 import { Flag } from "../flag/flag"
+import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
+import { canSearchSkills } from "../skill/search-access"
 import { searchSkills } from "../skill/search"
 import * as Tool from "./tool"
 import { renderSkillContent } from "./skill-content"
@@ -19,6 +21,7 @@ export const SkillSearchTool = Tool.define(
   "skill_search",
   Effect.gen(function* () {
     const skill = yield* Skill.Service
+    const agents = yield* Agent.Service
     const rg = yield* Ripgrep.Service
 
     return {
@@ -31,7 +34,21 @@ export const SkillSearchTool = Tool.define(
       parameters: Parameters,
       execute: (params: z.infer<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
-          const all = yield* skill.all()
+          const agent = yield* agents.get(ctx.agent)
+          const permission = Agent.runtimePermission(agent, ctx.permission)
+          const user = ctx.messages.findLast((message) => message.info.role === "user")
+          if (
+            !canSearchSkills({
+              permission,
+              toolAllowlist: agent.toolAllowlist,
+              tools: user?.info.role === "user" ? user.info.tools : undefined,
+            })
+          )
+            throw new Error("Skill search tool is not available in this context.")
+          const all = yield* skill.available({
+            ...agent,
+            permission,
+          })
           const results = searchSkills(params.query, all)
           if (results.length === 0) {
             return {

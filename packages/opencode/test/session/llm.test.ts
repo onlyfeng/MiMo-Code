@@ -119,6 +119,52 @@ describe("session.llm.hasToolCalls", () => {
   })
 })
 
+describe("session.llm.resolveTools", () => {
+  test("a skill deny also removes skill_search", () => {
+    const sessionID = SessionID.make("session-skill-deny")
+    const agent = {
+      name: "build",
+      mode: "primary",
+      options: {},
+      permission: [],
+    } satisfies Agent.Info
+    const user = {
+      id: MessageID.make("user-skill-deny"),
+      sessionID,
+      role: "user",
+      time: { created: Date.now() },
+      agent: agent.name,
+      model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test") },
+    } satisfies MessageV2.User
+    const noop = tool({ inputSchema: z.object({}) })
+
+    expect(
+      Object.keys(
+        LLM.resolveTools({
+          tools: { skill: noop, skill_search: noop, read: noop },
+          agent,
+          permission: [{ permission: "skill", pattern: "*", action: "deny" }],
+          user,
+        }),
+      ),
+    ).toEqual(["read"])
+
+    expect(
+      Object.keys(
+        LLM.resolveTools({
+          tools: { skill: noop, skill_search: noop, read: noop },
+          agent: {
+            ...agent,
+            hardPermission: [{ permission: "skill", pattern: "*", action: "deny" }],
+          },
+          permission: [{ permission: "skill", pattern: "*", action: "allow" }],
+          user,
+        }),
+      ),
+    ).toEqual(["read"])
+  })
+})
+
 type Capture = {
   url: URL
   headers: Headers

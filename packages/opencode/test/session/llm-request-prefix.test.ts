@@ -11,6 +11,8 @@ import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
 import { ProviderTest } from "../fake/provider"
 import type { Agent } from "../../src/agent/agent"
+import { Permission } from "../../src/permission"
+import { dynamicTool, jsonSchema } from "ai"
 
 void Log.init({ print: false })
 
@@ -28,6 +30,86 @@ function makeAgent(): Agent.Info {
 }
 
 describe("buildLLMRequestPrefix", () => {
+  test("frozen full-context tools honor session permission and message-level disables", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) => svc.create({})),
+        )
+        const userID = MessageID.ascending()
+        await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) =>
+            svc.updateMessage({
+              id: userID,
+              sessionID: session.id,
+              role: "user",
+              time: { created: Date.now() },
+              agent: "build",
+              model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test") },
+              tools: { skill_search: false, mcp_blocked: false },
+              mode: "",
+            } as unknown as MessageV2.Info),
+          ),
+        )
+        await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) =>
+            svc.updatePart({
+              id: PartID.ascending(),
+              sessionID: session.id,
+              messageID: userID,
+              type: "text",
+              text: "hello",
+            }),
+          ),
+        )
+
+        const permission: Permission.Ruleset = [{ permission: "skill", pattern: "*", action: "deny" }]
+        const input = {
+          sessionID: session.id,
+          agent: makeAgent(),
+          model: ProviderTest.model(),
+          msgs: await AppRuntime.runPromise(
+            SessionNs.Service.use((svc) => svc.messages({ sessionID: session.id })),
+          ),
+          additions: [],
+          permission,
+          mcpTools: {
+            mcp_visible: dynamicTool({
+              description: "captured visible MCP tool",
+              inputSchema: jsonSchema({
+                type: "object",
+                properties: { query: { type: "string" } },
+                required: ["query"],
+                additionalProperties: false,
+              }),
+              execute: async (input) => (input as { query: string }).query,
+            }),
+            mcp_blocked: dynamicTool({
+              description: "message-disabled MCP tool",
+              inputSchema: jsonSchema({ type: "object", properties: {} }),
+              execute: async () => "blocked",
+            }),
+          },
+        }
+        const prefix = await AppRuntime.runPromise(buildLLMRequestPrefix(input))
+
+        expect(prefix.tools.skill).toBeUndefined()
+        expect(prefix.tools.skill_search).toBeUndefined()
+        expect(prefix.tools.mcp_visible?.description).toBe("captured visible MCP tool")
+        expect(prefix.tools.mcp_visible?.execute).toBeUndefined()
+        expect(prefix.tools.mcp_blocked).toBeUndefined()
+
+        const messageDisabled = await AppRuntime.runPromise(
+          buildLLMRequestPrefix({ ...input, permission: [] }),
+        )
+        expect(messageDisabled.tools.skill).toBeDefined()
+        expect(messageDisabled.tools.skill_search).toBeUndefined()
+      },
+    })
+  })
+
   test("two consecutive calls with identical inputs produce deep-equal output", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({

@@ -41,6 +41,14 @@ describe("skill.search", () => {
     expect(results[0]).toMatchObject({ skill_id: "data-analytics", score: 1 })
   })
 
+  test("matches the renamed mimocode-docs skill by its localized alias", () => {
+    const results = searchSkills("请打开MiMoCode文档查看配置说明", [
+      { ...skill("mimocode-docs", "MiMoCode feature and configuration documentation."), bundled: true },
+    ])
+
+    expect(results[0]).toMatchObject({ skill_id: "mimocode-docs", score: 1 })
+  })
+
   test("ranks description matches with BM25 and returns at most three results", () => {
     const results = searchSkills(
       "action analyze and generate input sales spreadsheet output business review presentation audience executives",

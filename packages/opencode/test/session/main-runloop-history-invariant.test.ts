@@ -30,6 +30,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
+import { SessionCompaction } from "../../src/session/compaction"
 import { SessionPrompt } from "../../src/session/prompt"
 import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
@@ -41,9 +42,14 @@ afterEach(async () => {
   await Instance.disposeAll()
 })
 
-function run<A, E>(fx: Effect.Effect<A, E, SessionPrompt.Service | Session.Service>) {
+function run<A, E>(fx: Effect.Effect<A, E, SessionPrompt.Service | Session.Service | SessionCompaction.Service>) {
   return Effect.runPromise(
-    fx.pipe(Effect.scoped, Effect.provide(Layer.mergeAll(SessionPrompt.defaultLayer, Session.defaultLayer))),
+    fx.pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(SessionPrompt.defaultLayer, Session.defaultLayer, SessionCompaction.defaultLayer),
+      ),
+    ),
   )
 }
 
@@ -172,11 +178,106 @@ describe("main runLoop history monotonic-growth invariant", () => {
               expect(stub.captures.length).toBe(2)
               expect(JSON.stringify(stub.captures[1].messages)).toContain("output token limit")
               expect(final.parts.some((part) => part.type === "text" && part.text === "done.")).toBe(true)
+              const users = (yield* sessions.messages({ sessionID: session.id })).filter(
+                (message) => message.info.role === "user",
+              )
+              expect(users.map((message) => message.info.role === "user" && message.info.source)).toEqual([
+                "user",
+                "hook",
+              ])
             }),
           ),
       })
     } finally {
       await stub.stop()
     }
-  })
+  }, 20_000)
+
+  test("overflow replay marks replayed user input as an internal hook", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const stub = startScriptedLLMServer([{ lines: textStopResponse("summary") }])
+
+    try {
+      await Bun.write(
+        path.join(tmp.path, "mimocode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          enabled_providers: ["alibaba"],
+          provider: {
+            alibaba: {
+              options: {
+                apiKey: "test-key",
+                baseURL: `${stub.origin}/v1`,
+              },
+            },
+          },
+          agent: {
+            build: { model: "alibaba/qwen-plus" },
+          },
+        }),
+      )
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const compaction = yield* SessionCompaction.Service
+              const session = yield* sessions.create({ title: "hook-overflow-replay" })
+
+              yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                noReply: true,
+                parts: [{ type: "text", text: "Older user context." }],
+              })
+              const original = yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                noReply: true,
+                parts: [{ type: "text", text: "Run /restricted-user after overflow." }],
+              })
+              if (original.info.role !== "user") throw new Error("expected hook user message")
+
+              yield* compaction.create({
+                sessionID: session.id,
+                agent: original.info.agent,
+                model: original.info.model,
+                auto: true,
+                overflow: true,
+              })
+              const before = yield* sessions.messages({ sessionID: session.id })
+              const boundary = before.findLast((message) =>
+                message.parts.some((part) => part.type === "compaction"),
+              )
+              if (!boundary || boundary.info.role !== "user") throw new Error("expected compaction boundary")
+
+              expect(
+                yield* compaction.process({
+                  parentID: boundary.info.id,
+                  messages: before,
+                  sessionID: session.id,
+                  auto: true,
+                  overflow: true,
+                }),
+              ).toBe("continue")
+
+              const replay = (yield* sessions.messages({ sessionID: session.id })).findLast(
+                (message) =>
+                  message.info.role === "user" &&
+                  message.info.id > boundary.info.id &&
+                  message.parts.some(
+                    (part) => part.type === "text" && part.text.includes("restricted-user"),
+                  ),
+              )
+              expect(replay?.info.role === "user" && replay.info.source).toBe("hook")
+            }),
+          ),
+      })
+    } finally {
+      await stub.stop()
+    }
+  }, 20_000)
 })

@@ -1,4 +1,6 @@
 import { Flag } from "../flag/flag"
+import type { Permission } from "../permission"
+import { canSearchSkills } from "../skill/search-access"
 
 export const SKILL_SEARCH_REMINDER_MARKER = "Skill search trigger:"
 
@@ -15,8 +17,30 @@ const SKILL_QUERY_GUIDANCE = [
 ]
 
 type ReminderMessage = {
-  info: { role: string; id: string; parentID?: string; time: { created: number } }
-  parts: { type: string; text?: string; synthetic?: boolean }[]
+  info: {
+    role: string
+    id: string
+    parentID?: string
+    agentID?: string
+    source?: "user" | "spawn" | "hook"
+    provenance?: unknown
+    time: { created: number }
+  }
+  parts: {
+    type: string
+    text?: string
+    synthetic?: boolean
+    metadata?: { origin?: { kind?: string; [key: string]: unknown } }
+  }[]
+}
+
+export function isDirectUserMessage(message: ReminderMessage | undefined) {
+  if (!message || message.info.role !== "user") return false
+  if (message.info.agentID && message.info.agentID !== "main") return false
+  if (message.info.provenance) return false
+  if (message.parts.some((part) => part.metadata?.origin?.kind === "cron")) return false
+  if (message.info.source) return message.info.source === "user"
+  return message.parts.some((part) => (part.type === "text" || part.type === "file") && !part.synthetic)
 }
 
 export function skillSearchReminder(input: { currentUserAt: number; previousUserAt?: number }) {
@@ -53,7 +77,7 @@ export function skillSearchReminder(input: { currentUserAt: number; previousUser
 
 export function skillSearchReminderForMessages(messages: ReminderMessage[]) {
   const users = messages.filter(
-    (message) => message.info.role === "user" && message.parts.some((part) => !part.synthetic),
+    (message) => isDirectUserMessage(message) && message.parts.some((part) => !part.synthetic),
   )
   const current = users.at(-1)
   if (!current) return
@@ -72,9 +96,21 @@ export function skillSearchReminderForMessages(messages: ReminderMessage[]) {
 
 export function skillSearchReminderForSession(input: {
   session: { parentID?: string }
-  agent: { name: string; mode: "subagent" | "primary" | "all" }
+  agent: { name: string; mode: "subagent" | "primary" | "all"; toolAllowlist?: string[] }
   messages: ReminderMessage[]
+  permission?: Permission.Ruleset
+  tools?: Record<string, boolean>
 }) {
   if (input.session.parentID || input.agent.mode === "subagent" || input.agent.name === "compose") return
+  const current = input.messages.findLast((message) => message.info.role === "user")
+  if (!isDirectUserMessage(current)) return
+  if (
+    !canSearchSkills({
+      permission: input.permission,
+      toolAllowlist: input.agent.toolAllowlist,
+      tools: input.tools,
+    })
+  )
+    return
   return skillSearchReminderForMessages(input.messages)
 }

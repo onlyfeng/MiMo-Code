@@ -1459,6 +1459,7 @@ export const layer: Layer.Layer<
         model: { providerID: input.model.providerID as ProviderID, modelID: input.model.modelID as ModelID },
         sessionID: input.sessionID,
         agent: input.agent,
+        source: "hook",
         time: { created: syntheticTime },
       })
 

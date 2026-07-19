@@ -86,5 +86,151 @@ describe("skillSearchReminder", () => {
         messages,
       }),
     ).toBeUndefined()
+    expect(
+      skillSearchReminderForSession({
+        session: {},
+        agent: { name: "build", mode: "primary" },
+        messages: [
+          {
+            info: { role: "user", id: "user-actor", agentID: "actor-1", time: { created: 1_000 } },
+            parts: [{ type: "text", text: "Analyze a CSV" }],
+          },
+        ],
+      }),
+    ).toBeUndefined()
+  })
+
+  test("treats a persisted main-slice user row as a direct user query", () => {
+    expect(
+      skillSearchReminderForSession({
+        session: {},
+        agent: { name: "build", mode: "primary" },
+        messages: [
+          {
+            info: {
+              role: "user",
+              id: "persisted-user",
+              agentID: "main",
+              source: "user",
+              time: { created: 1_000 },
+            },
+            parts: [{ type: "text", text: "Analyze a CSV" }],
+          },
+        ],
+      }),
+    ).toContain("first user query")
+  })
+
+  test("does not treat a legacy synthetic cron row without source as a direct user query", () => {
+    expect(
+      skillSearchReminderForSession({
+        session: {},
+        agent: { name: "build", mode: "primary" },
+        messages: [
+          {
+            info: { role: "user", id: "legacy-cron", agentID: "main", time: { created: 1_000 } },
+            parts: [
+              {
+                type: "text",
+                text: "Run /restricted-skill",
+                synthetic: true,
+                metadata: { origin: { kind: "cron", taskId: "task-1", kindOfTask: "cron" } },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBeUndefined()
+  })
+
+  test("does not treat legacy compaction or checkpoint boundaries as direct user queries", () => {
+    for (const type of ["compaction", "checkpoint"]) {
+      expect(
+        skillSearchReminderForSession({
+          session: {},
+          agent: { name: "build", mode: "primary" },
+          messages: [
+            {
+              info: { role: "user", id: `legacy-${type}`, agentID: "main", time: { created: 1_000 } },
+              parts: [{ type }],
+            },
+          ],
+        }),
+      ).toBeUndefined()
+    }
+  })
+
+  test("hook provenance wins over an inconsistent explicit user source", () => {
+    expect(
+      skillSearchReminderForSession({
+        session: {},
+        agent: { name: "build", mode: "primary" },
+        messages: [
+          {
+            info: {
+              role: "user",
+              id: "inconsistent-hook",
+              agentID: "main",
+              source: "user",
+              provenance: { hookPhase: "pre" },
+              time: { created: 1_000 },
+            },
+            parts: [{ type: "text", text: "Run /restricted-skill" }],
+          },
+        ],
+      }),
+    ).toBeUndefined()
+  })
+
+  test("ignores hook rows when locating the previous direct user query", () => {
+    expect(
+      skillSearchReminderForMessages([
+        {
+          info: { role: "user", id: "hook", source: "hook", time: { created: 1_000 } },
+          parts: [{ type: "text", text: "Automated hook" }],
+        },
+        {
+          info: { role: "user", id: "user", agentID: "main", source: "user", time: { created: 2_000 } },
+          parts: [{ type: "text", text: "Analyze a CSV" }],
+        },
+      ]),
+    ).toContain("first user query")
+  })
+
+  test("does not inject when skill search is disabled by permission, allowlist, or message tools", () => {
+    const messages = [
+      {
+        info: { role: "user", id: "user-1", time: { created: 1_000 } },
+        parts: [{ type: "text", text: "Analyze a CSV" }],
+      },
+    ]
+    const session = {}
+    const agent = { name: "build", mode: "primary" as const }
+
+    expect(
+      skillSearchReminderForSession({
+        session,
+        agent,
+        messages,
+        permission: [{ permission: "skill", pattern: "*", action: "deny" }],
+      }),
+    ).toBeUndefined()
+    expect(
+      skillSearchReminderForSession({
+        session,
+        agent: { ...agent, toolAllowlist: ["read"] },
+        messages,
+        permission: [],
+      }),
+    ).toBeUndefined()
+    expect(
+      skillSearchReminderForSession({
+        session,
+        agent,
+        messages,
+        permission: [],
+        tools: { skill_search: false },
+      }),
+    ).toBeUndefined()
   })
 })

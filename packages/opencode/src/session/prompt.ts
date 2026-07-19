@@ -60,6 +60,7 @@ import {
   isEmptyStep,
 } from "../session/prompt/empty-step-detection"
 import { builtinSkillRoot, matchDocumentSkills } from "@/skill/builtin/extract"
+import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
 import { ToolRegistry } from "../tool"
 import { MCP } from "../mcp"
 import { normalizeToolResult } from "../mcp/tool-result"
@@ -113,7 +114,7 @@ import { Metrics } from "@/metrics"
 import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
 import { ToolResultError } from "../tool/result-error"
 import { shouldAutoDream, shouldAutoDistill, DREAM_TASK, DISTILL_TASK, AUTO_DREAM_TITLE, AUTO_DISTILL_TITLE } from "./auto-dream"
-import { skillSearchReminderForSession } from "./skill-search-reminder"
+import { isDirectUserMessage, skillSearchReminderForSession } from "./skill-search-reminder"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -346,26 +347,35 @@ export const layer = Layer.effect(
         // parity, so fall through to empty rather than emit a divergent date.
         const captureSession = yield* sessions.get(input.sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
         if (!captureSession) return empty
-        const [skills, env, instructions] = yield* Effect.all([
-          sys.skills(ag),
+        const captureMessages = input.msgs as Parameters<typeof buildLLMRequestPrefix>[0]["msgs"]
+        const captureUser = captureMessages.findLast((message) => message.info.role === "user")
+        const capturePermission = Agent.runtimePermission(ag, captureSession.permission)
+        const [skills, env, instructions, mcpTools] = yield* Effect.all([
+          sys.skills(ag, {
+            permission: capturePermission,
+            tools: captureUser?.info.role === "user" ? captureUser.info.tools : undefined,
+          }),
           sys.environment(model, captureSession.time.created),
           instruction.system().pipe(Effect.orDie),
+          mcp.tools(),
         ])
-        // (checkpoint-writer never requests json_schema output, so STRUCTURED_OUTPUT_SYSTEM_PROMPT
-        // is not included; parent's runLoop adds it conditionally based on user.format)
+        // StructuredOutput belongs to the fork's request-local format, not the
+        // watermark prefix. The fork runLoop appends it after the frozen tools.
         const additions = [...env, ...(skills ? [skills] : []), ...instructions.content]
         const prefix = yield* buildLLMRequestPrefix({
           sessionID: input.sessionID,
           agent: ag,
           model,
-          msgs: input.msgs as Parameters<typeof buildLLMRequestPrefix>[0]["msgs"],
+          msgs: captureMessages,
           additions,
+          permission: captureSession.permission,
+          mcpTools,
         }).pipe(
           Effect.provideService(LLM.Service, llm),
           Effect.provideService(ToolRegistry.Service, registry),
           Effect.catch(() => Effect.succeed(empty)),
         )
-        return { ...prefix, parentPermission: ag.permission }
+        return { ...prefix, parentPermission: capturePermission }
       })
     prefixCaptureRef.current = capture
     yield* Effect.addFinalizer(() =>
@@ -663,7 +673,11 @@ export const layer = Layer.effect(
 
       // Search reminders apply only to direct user sessions. They advise the
       // primary agent when to search; the model still decides whether to call.
-      const reminder = skillSearchReminderForSession(input)
+      const reminder = skillSearchReminderForSession({
+        ...input,
+        permission: Agent.runtimePermission(input.agent, input.session.permission),
+        tools: userMessage.info.role === "user" ? userMessage.info.tools : undefined,
+      })
       if (reminder) {
         const part = yield* sessions.updatePart({
           id: PartID.ascending(),
@@ -696,14 +710,29 @@ export const layer = Layer.effect(
       }
 
       const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
-      if (!Flag.MIMOCODE_DISABLE_BUILTIN_SKILLS && !Flag.MIMOCODE_DISABLE_OFFICIAL_SKILLS) {
+      const directUser = isDirectUserMessage(userMessage)
+      if (
+        directUser &&
+        !Flag.MIMOCODE_DISABLE_BUILTIN_SKILLS &&
+        !Flag.MIMOCODE_DISABLE_OFFICIAL_SKILLS
+      ) {
         const fileCandidates = userMessage.parts.flatMap((p) => {
           if (p.type !== "file") return []
           const filenameFromSource =
             p.source?.type === "file" && p.source.path ? path.basename(p.source.path) : undefined
           return [{ mime: p.mime, filename: p.filename ?? filenameFromSource }]
         })
-        const skills = matchDocumentSkills(fileCandidates)
+        const effectivePermission = Agent.runtimePermission(input.agent, input.session.permission)
+        const skillAccess = {
+          permission: effectivePermission,
+          toolAllowlist: input.agent.toolAllowlist,
+          tools: userMessage.info.role === "user" ? userMessage.info.tools : undefined,
+        }
+        const available =
+          canLoadSkills(skillAccess) || canSearchSkills(skillAccess)
+            ? new Set((yield* sys.available({ ...input.agent, permission: effectivePermission })).map((skill) => skill.name))
+            : new Set<string>()
+        const skills = matchDocumentSkills(fileCandidates).filter((skill) => available.has(skill))
         if (skills.length > 0) {
           const root = builtinSkillRoot()
           const entries = skills.map((skill) => `- ${skill}: ${path.join(root, skill, "SKILL.md")}`).join("\n")
@@ -729,7 +758,7 @@ ${entries}
       const alreadyWrapped = userMessage.parts.some(
         (p) => p.type === "text" && p.text.startsWith('<skill_content name="'),
       )
-      if (!alreadyWrapped) {
+      if (directUser && !alreadyWrapped) {
         // Use all() to bypass per-agent permission filtering — respect the user's explicit /mention action
         const allSkills = yield* sys.all()
         if (allSkills.length > 0) {
@@ -925,11 +954,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       messages: MessageV2.WithParts[]
       agentID?: string
       task_id?: string
+      permission?: Permission.Ruleset
+      preserveToolMembership?: boolean
     }) {
       using _ = log.time("resolveTools")
       const tools: Record<string, AITool> = {}
       const run = yield* runner()
       const promptOps = yield* ops()
+      const effectivePermission = Agent.runtimePermission(
+        input.agent,
+        input.permission ?? input.session.permission,
+      )
 
       // Per-tool runtime whitelist: when the LLM call is being made on behalf
       // of a registered actor (subagent or peer), look up the actor row and,
@@ -941,7 +976,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         if (!actor || !Array.isArray(actor.tools)) return undefined
         return new Set(actor.tools)
       })
-      const whitelist = yield* whitelistFor()
+      const actorWhitelist = yield* whitelistFor()
+      const agentWhitelist =
+        input.preserveToolMembership && input.agent.toolAllowlist
+          ? new Set(input.agent.toolAllowlist)
+          : undefined
+      const whitelist =
+        actorWhitelist && agentWhitelist
+          ? new Set([...actorWhitelist].filter((id) => agentWhitelist.has(id)))
+          : actorWhitelist ?? agentWhitelist
       // Whether a permission ask must be non-interactive (fail clean, never hang):
       // true for system-spawned actors (checkpoint-writer/dream/distill) AND any
       // background actor such as compose workflow subagents (spawned as "general"
@@ -972,16 +1015,26 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const askInteractive = askRouting.interactive
       const askForward = askRouting.forward
       const askInherit = askRouting.inherit
-      const rejectionFor = (toolID: string) => ({
-        title: "Tool not permitted",
-        output: `The "${toolID}" tool is not in this actor's whitelist. Allowed tools: ${
-          whitelist ? [...whitelist].join(", ") : "(none)"
-        }.`,
-        metadata: { rejected: true, reason: "tool-whitelist" as const },
-      })
+      const blockedByIdentity = (toolID: string) =>
+        input.preserveToolMembership && toolID === "session" && input.agent.name !== "orchestrator"
+      const rejectionFor = (toolID: string) =>
+        blockedByIdentity(toolID)
+          ? {
+              title: "Tool not permitted",
+              output: 'The "session" tool is only available to the orchestrator agent.',
+              metadata: { rejected: true, reason: "agent-identity" as const },
+            }
+          : {
+              title: "Tool not permitted",
+              output: `The "${toolID}" tool is not in this actor's whitelist. Allowed tools: ${
+                whitelist ? [...whitelist].join(", ") : "(none)"
+              }.`,
+              metadata: { rejected: true, reason: "tool-whitelist" as const },
+            }
 
       const context = (args: any, options: ToolExecutionOptions): Tool.Context => ({
         sessionID: input.session.id,
+        permission: effectivePermission,
         abort: options.abortSignal!,
         messageID: input.processor.message.id,
         callID: options.toolCallId,
@@ -1011,7 +1064,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 ...req,
                 sessionID: input.session.id,
                 tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-                ruleset: Agent.runtimePermission(input.agent, input.session.permission),
+                ruleset: effectivePermission,
                 // System-spawned + non-peer background agents have no human to answer
                 // → fail clean, don't hang. Orchestrator peers FORWARD for approval;
                 // ordinary background subagents INHERIT the parent's held grants.
@@ -1027,7 +1080,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       for (const item of yield* registry.tools({
         modelID: ModelID.make(input.model.api.id),
         providerID: input.model.providerID,
+        // A full-context fork inherits the parent's frozen wire membership.
+        // Keep the child allowlist as an execution-time gate above instead of
+        // using it to delete parent-visible definitions before they can be
+        // rebound to their current implementation.
         agent: input.agent,
+        permission: input.permission ?? input.session.permission,
+        preserveMembership: input.preserveToolMembership,
       })) {
         const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
         tools[item.id] = tool({
@@ -1044,7 +1103,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   sessionID: input.session.id,
                 })
                 const ctx = context(args, options)
-                if (whitelist && !whitelist.has(item.id)) {
+                if (blockedByIdentity(item.id) || (whitelist && !whitelist.has(item.id))) {
                   const output = rejectionFor(item.id)
                   log.debug("tool execute rejected", {
                     tool: item.id,
@@ -1145,7 +1204,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 sessionID: input.session.id,
               })
               const ctx = context(args, opts)
-              if (whitelist && !whitelist.has(key)) {
+              if (blockedByIdentity(key) || (whitelist && !whitelist.has(key))) {
                 const rejection = rejectionFor(key)
                 const output = {
                   title: rejection.title,
@@ -1443,6 +1502,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         time: { created: Date.now() },
         agent: lastUser.agent,
         model: lastUser.model,
+        source: "hook",
       }
       yield* sessions.updateMessage(summaryUserMsg)
       yield* sessions.updatePart({
@@ -1488,6 +1548,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         role: "user",
         agent: input.agent,
         model: { providerID: model.providerID, modelID: model.modelID },
+        source: "user",
       }
       yield* sessions.updateMessage(userMsg)
       const userPart: MessageV2.Part = {
@@ -1725,6 +1786,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         },
         system: input.system,
         format: input.format,
+        source: input.source ?? "user",
         provenance: input.provenance,
       }
 
@@ -2322,6 +2384,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: input.lastUser.model,
             tools: input.lastUser.tools,
             format: input.lastUser.format,
+            source: "hook",
             time: { created: Date.now() },
           })
           yield* sessions.updatePart({
@@ -2432,6 +2495,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: lastUser.model,
             tools: lastUser.tools,
             format: lastUser.format,
+            source: "hook",
             time: { created: Date.now() },
           })
           yield* sessions.updatePart({
@@ -2484,6 +2548,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: input.lastUser.model,
             tools: input.lastUser.tools,
             format: input.lastUser.format,
+            source: "hook",
             time: { created: Date.now() },
           })
           yield* sessions.updatePart({
@@ -2547,6 +2612,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: input.lastUser.model,
             tools: input.lastUser.tools,
             format: input.lastUser.format,
+            source: "hook",
             time: { created: Date.now() },
           })
           yield* sessions.updatePart({
@@ -2603,6 +2669,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             tools: input.lastUser.tools,
             // Must carry format so the next iteration re-registers the StructuredOutput tool.
             format: input.lastUser.format,
+            source: "hook",
             time: { created: Date.now() },
           })
           yield* sessions.updatePart({
@@ -2650,6 +2717,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: input.lastUser.model,
             tools: input.lastUser.tools,
             format: input.lastUser.format,
+            source: "hook",
             time: { created: Date.now() },
           })
           yield* sessions.updatePart({
@@ -2734,6 +2802,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: input.lastUser.model,
             tools: input.lastUser.tools,
             format: input.lastUser.format,
+            source: "hook",
             time: { created: Date.now() },
           })
           yield* sessions.updatePart({
@@ -2943,7 +3012,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     Effect.gen(function* () {
                       const s = yield* svc.create({ title: AUTO_DREAM_TITLE })
                       const sp = yield* Service
-                      yield* sp.prompt({ sessionID: s.id, agent: "dream", model: mdl, parts: [{ type: "text", text: DREAM_TASK }] })
+                      yield* sp.prompt({
+                        sessionID: s.id,
+                        agent: "dream",
+                        source: "hook",
+                        model: mdl,
+                        parts: [{ type: "text", text: DREAM_TASK }],
+                      })
                     }),
                   ),
                 ).catch((err) => log.error("auto-dream prompt failed", { error: String(err) }))
@@ -2954,7 +3029,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     Effect.gen(function* () {
                       const s = yield* svc.create({ title: AUTO_DISTILL_TITLE })
                       const sp = yield* Service
-                      yield* sp.prompt({ sessionID: s.id, agent: "distill", model: mdl, parts: [{ type: "text", text: DISTILL_TASK }] })
+                      yield* sp.prompt({
+                        sessionID: s.id,
+                        agent: "distill",
+                        source: "hook",
+                        model: mdl,
+                        parts: [{ type: "text", text: DISTILL_TASK }],
+                      })
                     }),
                   ),
                 ).catch((err) => log.error("auto-distill prompt failed", { error: String(err) }))
@@ -3243,6 +3324,27 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
 
+            const actorRecord = lastUser.agentID
+              ? yield* actorRegistry.get(sessionID, lastUser.agentID).pipe(
+                  Effect.orElseSucceed(() => undefined),
+                )
+              : undefined
+            const isForkAgent =
+              actorRecord?.contextMode === "full" &&
+              (actorRecord.mode === "subagent" || actorRecord.mode === "peer")
+            const forkCtxEffect = isForkAgent
+              ? (boundActor ?? spawnRef.current)?.getForkContext(sessionID, lastUser.agentID!)
+              : undefined
+            const forkCtx = forkCtxEffect ? yield* forkCtxEffect : undefined
+            if (isForkAgent && !forkCtx) {
+              yield* slog.warn("fork agent runLoop: missing forkContext, failing actor", {
+                sessionID,
+                agentID: lastUser.agentID,
+              })
+              yield* writeModelError({ assistant: handle.message, reason: "missing fork context" })
+              return "break" as const
+            }
+
             const tools = yield* resolveTools({
               agent,
               session,
@@ -3253,6 +3355,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               messages: msgs,
               agentID: lastUser.agentID,
               task_id,
+              permission: forkCtx?.parentPermission,
+              preserveToolMembership: Boolean(forkCtx),
             })
 
             if (lastUser.format?.type === "json_schema") {
@@ -3289,38 +3393,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             const format = lastUser.format ?? { type: "text" as const }
 
-            // Determine if this iteration is for a fork agent (contextMode === "full").
-            // Fork agents use the frozen ForkContext snapshot captured at spawn time
-            // (system + inheritedMessages) rather than recomputing from their own
-            // agent identity — which would diverge from the parent and break the
-            // prefix cache.
-            const actorRecord = lastUser.agentID
-              ? yield* actorRegistry.get(sessionID, lastUser.agentID).pipe(
-                  Effect.orElseSucceed(() => undefined),
-                )
-              : undefined
-            // v9 registers main as `mode: "main"` with `contextMode: "full"`.
-            // Only spawned actors (subagent/peer) carry a frozen ForkContext;
-            // main is the captor, never the captured.
-            const isForkAgent =
-              actorRecord?.contextMode === "full" &&
-              (actorRecord.mode === "subagent" || actorRecord.mode === "peer")
-
-            // Fork path: read frozen ForkContext from Actor service (late-bound via
-            // spawnRef to break the Actor → SessionPrompt → Actor layer cycle).
-            // If forkCtx is missing (race / cleanup bug / spawn skipped), fail the
-            // actor so the next prune turn can spawn a fresh fork.
-            if (isForkAgent) {
-              const forkCtxEffect = (boundActor ?? spawnRef.current)?.getForkContext(sessionID, lastUser.agentID!)
-              const forkCtx = forkCtxEffect ? yield* forkCtxEffect : undefined
-              if (!forkCtx) {
-                yield* slog.warn("fork agent runLoop: missing forkContext, failing actor", {
-                  sessionID,
-                  agentID: lastUser.agentID,
-                })
-                yield* writeModelError({ assistant: handle.message, reason: "missing fork context" })
-                return "break" as const
-              }
+            // Full-context actors use the frozen parent request prefix resolved above.
+            // Main also has contextMode="full", but has no forkCtx and stays on the
+            // normal path because only spawned subagent/peer records qualify.
+            if (forkCtx) {
               const ownNew = msgs.filter(
                 (m) => m.info.id > forkCtx.watermarkMsgID && m.info.agentID === lastUser.agentID,
               )
@@ -3331,11 +3407,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // additions is empty for fork agents: system is taken verbatim from
               // forkCtx.system. Passed as `system` to handle.process for logging/replay.
               const additions: string[] = []
-              // Note: fork uses `tools` from resolveTools (not `forkCtx.tools`) — runtime
-              // tool dispatch needs execute closures, which `forkCtx.tools` does not carry.
-              // Schema parity with parent is currently a consequence of checkpoint-writer
-              // having no toolAllowlist (Task 2.6 + agent.test.ts guard). See ForkContext.tools
-              // JSDoc in packages/opencode/src/actor/spawn.ts for the full contract.
+              // Preserve the parent-visible order and schema bytes while rebinding each
+              // entry to the current runtime implementation. A missing live tool fails
+              // closed. StructuredOutput is request-local to this fork turn, so it is
+              // appended after the frozen prefix only when json_schema created it above.
+              const structuredOutput = format.type === "json_schema" ? tools.StructuredOutput : undefined
+              const forkTools = Object.fromEntries(
+                Object.entries(forkCtx.tools).flatMap(([id, frozen]): [string, AITool][] => {
+                  if (structuredOutput && id === "StructuredOutput") return []
+                  const live = tools[id]
+                  if (!live) return []
+                  return [[
+                    id,
+                    { ...live, description: frozen.description, inputSchema: frozen.inputSchema } as AITool,
+                  ]]
+                }),
+              )
+              if (structuredOutput) forkTools.StructuredOutput = structuredOutput
               const queryParts =
                 msgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
               const query = userQueryText(queryParts)
@@ -3377,18 +3465,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               const result = yield* handle
                 .process({
                   user: lastUser,
-                  agent,
-                  // Fork inherits the parent agent's permission (captured at spawn into
-                  // ForkContext). This drives llm.ts resolveTools/disabled() to the SAME
-                  // visible tool set as the parent → prompt-cache parity on the inherited
-                  // prefix. Scope: this affects tool VISIBILITY only; the per-call ask
-                  // ruleset (built separately in resolveTools' ask closure) is unchanged.
-                  // Parity is exact modulo non-default `session.permission`: the parent's
-                  // visibility ruleset is merge(parent.permission, session.permission)
-                  // while the fork's is merge(writer.permission, parentPermission) — so a
-                  // session-level rule pins the parent but not the fork. Still a strict
-                  // improvement over the old bespoke "*":"deny" block (which always
-                  // diverged). The `?? session.permission` is defense-in-depth only:
+                  // LLM.resolveTools must not apply the child allowlist a
+                  // second time: forkTools already carries the exact frozen
+                  // parent membership. Live closures still enforce that
+                  // allowlist before dispatch in resolveTools above.
+                  agent: { ...agent, toolAllowlist: undefined },
+                  // Fork inherits the parent's effective permission (agent + session +
+                  // hardPermission), captured at spawn into ForkContext. Together with
+                  // forkTools above, this keeps the frozen system, tool schemas, and live
+                  // execute closures aligned with the parent's visibility boundary. The
+                  // `?? session.permission` is defense-in-depth only:
                   // parentPermission is a required field (empty `[]` on a missed capture,
                   // which `??` does NOT override), so the fallback fires solely if a future
                   // refactor makes the field optional.
@@ -3398,7 +3484,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   system: additions,
                   prebuiltSystem,
                   messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
-                  tools,
+                  tools: forkTools,
                   model,
                   toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
                   agentID: lastUser.agentID,
@@ -3513,7 +3599,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
 
             const [skills, env, instructions] = yield* Effect.all([
-              sys.skills(agent),
+              sys.skills(agent, {
+                permission: Agent.runtimePermission(agent, session.permission),
+                tools: lastUser.tools,
+              }),
               sys.environment(model, session.time.created),
               instruction.system().pipe(Effect.orDie),
             ])
@@ -3533,12 +3622,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               ...instructions.content,
               ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
             ]
-            // Note: `buildLLMRequestPrefix` also returns a `tools` field, but we
-            // intentionally don't use it here — the `tools` variable from `resolveTools`
-            // (set earlier via `handle.process({tools: ...})`) carries `execute` closures
-            // the AI SDK needs for runtime tool dispatch, while `buildLLMRequestPrefix`
-            // produces schema-only tools. Schema bytes match between both paths (both call
-            // registry.tools with identical args), so prefix cache parity holds.
+            // `buildLLMRequestPrefix` also returns schema-only tools for frozen fork
+            // capture. The main request keeps `tools` from resolveTools because those
+            // entries carry the live execute closures needed for dispatch.
             // Main runLoop: no watermark — LLM must see the full msgs list,
             // including this turn's intermediate assistant turns (tool reads,
             // task creates, etc.) so each step doesn't replay from the bare
@@ -3551,6 +3637,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 model,
                 msgs,
                 additions,
+                permission: session.permission,
               }).pipe(
                 Effect.provideService(LLM.Service, llm),
                 Effect.provideService(ToolRegistry.Service, registry),
@@ -3814,6 +3901,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   model: lastUser.model,
                   tools: lastUser.tools,
                   format: lastUser.format,
+                  source: "hook",
                   time: { created: Date.now() },
                 })
                 yield* sessions.updatePart({

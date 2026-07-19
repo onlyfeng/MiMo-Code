@@ -30,6 +30,7 @@ import { Global } from "@/global"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { ActorRegistry } from "@/actor/registry"
+import { canSearchSkills } from "@/skill/search-access"
 import { Memory } from "@/memory"
 import { isRetryableTransientError } from "./retry"
 
@@ -793,12 +794,17 @@ export const defaultLayer = Layer.suspend(() =>
   ),
 )
 
-function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
-  const disabled = Permission.disabled(
-    Object.keys(input.tools),
-    Agent.runtimePermission(input.agent, input.permission),
+export function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
+  const permission = Agent.runtimePermission(input.agent, input.permission)
+  const disabled = Permission.disabled(Object.keys(input.tools), permission)
+  return Record.filter(
+    input.tools,
+    (_, key) =>
+      input.user.tools?.[key] !== false &&
+      !disabled.has(key) &&
+      (key !== "skill_search" ||
+        canSearchSkills({ permission, toolAllowlist: input.agent.toolAllowlist, tools: input.user.tools })),
   )
-  return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
 }
 
 // Check if messages contain any tool-call content

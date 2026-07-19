@@ -71,16 +71,11 @@ This format lets the spawning agent and the checkpoint writer extract your progr
 export interface ForkContext {
   readonly system: string[]
   /**
-   * Tool schema as parent would emit at watermark, captured for invariant
-   * verification only. NOT consumed by fork's runLoop for the actual LLM
-   * request — that uses `resolveTools(forkAgent)` for executable tools with
-   * dispatch closures. Schema parity is currently enforced because
-   * checkpoint-writer has no `toolAllowlist` (Task 2.6); both paths call
-   * `registry.tools` with equivalent agent inputs and produce identical
-   * schemas. If `toolAllowlist` is ever re-added, this field would still
-   * snapshot parent's schema while the runtime tools would diverge, silently
-   * breaking cache parity. Test guard: `test/agent/agent.test.ts` asserts
-   * `cp.toolAllowlist === undefined` for checkpoint-writer.
+   * Ordered parent-visible builtin and MCP tool schemas captured at the
+   * watermark. The fork runLoop uses this as its allowset and model-facing
+   * description/inputSchema source, while rebinding matching live tools for
+   * execution. Missing live implementations fail closed. Request-local
+   * StructuredOutput is appended separately when the fork asks for JSON.
    */
   readonly tools: Record<string, AITool>
   /**

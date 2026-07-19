@@ -9,13 +9,32 @@ import { SkillSearchTool } from "../../src/tool/skill-search"
 import { ToolRegistry } from "../../src/tool"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 import { testEffect } from "../lib/effect"
+import { MessageV2 } from "../../src/session/message-v2"
 
 afterEach(async () => {
   await Instance.disposeAll()
 })
 
 const it = testEffect(Layer.mergeAll(ToolRegistry.defaultLayer, CrossSpawnSpawner.defaultLayer))
+
+function messages(tools: Record<string, boolean>): MessageV2.WithParts[] {
+  return [
+    {
+      info: {
+        id: MessageID.make("msg_user"),
+        sessionID: SessionID.make("ses_test"),
+        role: "user",
+        time: { created: Date.now() },
+        agent: "build",
+        model: { providerID: ProviderID.make("opencode"), modelID: ModelID.make("gpt-5") },
+        tools,
+      },
+      parts: [],
+    },
+  ]
+}
 
 describe("tool.skill_search", () => {
   it.live("loads the highest-confidence exact match", () =>
@@ -55,8 +74,8 @@ Build the management presentation.
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
           const tool = (yield* registry.tools({
-            providerID: "opencode" as any,
-            modelID: "gpt-5" as any,
+            providerID: ProviderID.make("opencode"),
+            modelID: ModelID.make("gpt-5"),
             agent,
           })).find((item) => item.id === SkillSearchTool.id)
           if (!tool) throw new Error("Skill search tool not found")
@@ -98,8 +117,8 @@ Build the management presentation.
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
           const tool = (yield* registry.tools({
-            providerID: "opencode" as any,
-            modelID: "gpt-5" as any,
+            providerID: ProviderID.make("opencode"),
+            modelID: ModelID.make("gpt-5"),
             agent,
           })).find((item) => item.id === SkillSearchTool.id)
           if (!tool) throw new Error("Skill search tool not found")
@@ -159,8 +178,8 @@ description: Analyze quasar telemetry and operational metrics.
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
           const tool = (yield* registry.tools({
-            providerID: "opencode" as any,
-            modelID: "gpt-5" as any,
+            providerID: ProviderID.make("opencode"),
+            modelID: ModelID.make("gpt-5"),
             agent,
           })).find((item) => item.id === SkillSearchTool.id)
           if (!tool) throw new Error("Skill search tool not found")
@@ -184,6 +203,135 @@ description: Analyze quasar telemetry and operational metrics.
           expect(payload.results[0].skill_id).toBe("quasar-analysis")
           expect(payload.results.length).toBeLessThanOrEqual(3)
           expect(requests).toEqual([])
+        }),
+      { git: true },
+    ),
+  )
+
+  it.live("excludes skills denied by the effective session permission", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(dir, ".mimocode", "skill", "restricted-quasar", "SKILL.md"),
+              `---
+name: restricted-quasar
+description: Inspect restricted quasar telemetry.
+---
+
+# Restricted Quasar
+`,
+            ),
+          )
+          const home = process.env.HOME
+          const userProfile = process.env.USERPROFILE
+          process.env.HOME = dir
+          process.env.USERPROFILE = dir
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              process.env.HOME = home
+              process.env.USERPROFILE = userProfile
+            }),
+          )
+
+          const registry = yield* ToolRegistry.Service
+          const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
+          const permission: Permission.Ruleset = [
+            { permission: "skill", pattern: "restricted-quasar", action: "deny" },
+          ]
+          const tools = yield* registry.tools({
+            providerID: ProviderID.make("opencode"),
+            modelID: ModelID.make("gpt-5"),
+            agent,
+            permission,
+          })
+          const skillDef = tools.find((item) => item.id === "skill")
+          expect(skillDef?.description).not.toContain("restricted-quasar")
+
+          const tool = tools.find((item) => item.id === SkillSearchTool.id)
+          if (!tool) throw new Error("Skill search tool not found")
+
+          const result = yield* tool.execute(
+            { query: "restricted-quasar" },
+            {
+              sessionID: SessionID.make("ses_test"),
+              messageID: MessageID.make("msg_test"),
+              agent: "build",
+              permission,
+              abort: AbortSignal.any([]),
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
+
+          expect(JSON.parse(result.output)).toEqual({
+            status: "no_match",
+            results: [],
+            loaded_skill_id: null,
+          })
+        }),
+      { git: true },
+    ),
+  )
+
+  it.live("direct execution fails when skill_search is hidden", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(dir, ".mimocode", "skill", "direct-search", "SKILL.md"),
+              `---
+name: direct-search
+description: Exact skill for direct execution boundary tests.
+---
+
+# Direct Search
+`,
+            ),
+          )
+          const registry = yield* ToolRegistry.Service
+          const tool = (yield* registry.all()).find((item) => item.id === SkillSearchTool.id)
+          if (!tool) throw new Error("Skill search tool not found")
+          const base = {
+            sessionID: SessionID.make("ses_test"),
+            messageID: MessageID.make("msg_test"),
+            abort: AbortSignal.any([]),
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          }
+
+          const denied = yield* Effect.exit(
+            tool.execute(
+              { query: "direct-search" },
+              {
+                ...base,
+                agent: "build",
+                permission: [{ permission: "skill_search", pattern: "*", action: "deny" }],
+                messages: [],
+              },
+            ),
+          )
+          const messageDisabled = yield* Effect.exit(
+            tool.execute(
+              { query: "direct-search" },
+              { ...base, agent: "build", permission: [], messages: messages({ skill_search: false }) },
+            ),
+          )
+          const allowlistHidden = yield* Effect.exit(
+            tool.execute(
+              { query: "direct-search" },
+              { ...base, agent: "title", permission: [], messages: [] },
+            ),
+          )
+
+          expect([denied, messageDisabled, allowlistHidden].map((exit) => exit._tag)).toEqual([
+            "Failure",
+            "Failure",
+            "Failure",
+          ])
         }),
       { git: true },
     ),
