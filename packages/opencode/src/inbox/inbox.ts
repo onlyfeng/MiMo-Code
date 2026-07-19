@@ -335,6 +335,7 @@ export const layer: Layer.Layer<
         time: { created: now },
         agent: seed.agent,
         model: seed.model,
+        source: "spawn",
       })
       for (const row of rows) {
         yield* sessions.updatePart({

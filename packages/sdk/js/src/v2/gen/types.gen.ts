@@ -1000,6 +1000,7 @@ export type UserMessage = {
   tools?: {
     [key: string]: boolean
   }
+  source?: "user" | "spawn" | "hook"
   provenance?: Provenance
 }
 
@@ -6783,6 +6784,7 @@ export type AppSkillsResponses = {
   200: Array<{
     name: string
     description: string
+    aliases?: Array<string>
     location: string
     content: string
     hidden?: boolean

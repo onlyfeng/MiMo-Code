@@ -462,6 +462,7 @@ export const User = Base.extend({
   }),
   system: z.string().optional(),
   tools: z.record(z.string(), z.boolean()).optional(),
+  source: z.enum(["user", "spawn", "hook"]).optional(),
   provenance: Provenance.optional(),
 }).meta({
   ref: "UserMessage",

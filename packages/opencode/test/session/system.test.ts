@@ -11,6 +11,69 @@ function load<A>(dir: string, fn: (svc: Agent.Interface) => Effect.Effect<A>) {
 }
 
 describe("session.system", () => {
+  test("prompts the model to search skills from the first user query", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const home = process.env.HOME
+    const userProfile = process.env.USERPROFILE
+    process.env.HOME = tmp.path
+    process.env.USERPROFILE = tmp.path
+
+    try {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const build = await load(tmp.path, (svc) => svc.get("build"))
+          const prompt = await Effect.runPromise(
+            Effect.gen(function* () {
+              return yield* (yield* SystemPrompt.Service).skills(build!)
+            }).pipe(Effect.provide(SystemPrompt.defaultLayer)),
+          )
+
+          expect(prompt).toContain("first user query")
+          expect(prompt).toContain("might benefit from a specialized workflow")
+          expect(prompt).toContain("skill_search")
+          expect(prompt).toContain("action")
+          expect(prompt).toContain("input")
+          expect(prompt).toContain("output")
+          expect(prompt).toContain("audience")
+        },
+      })
+    } finally {
+      process.env.HOME = home
+      process.env.USERPROFILE = userProfile
+    }
+  })
+
+  test("omits skill search guidance when the tool is unavailable", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const build = await load(tmp.path, (svc) => svc.get("build"))
+        const run = (agent: Agent.Info, permission = agent.permission, tools?: Record<string, boolean>) =>
+          Effect.runPromise(
+            Effect.gen(function* () {
+              return yield* (yield* SystemPrompt.Service).skills(agent, { permission, tools })
+            }).pipe(Effect.provide(SystemPrompt.defaultLayer)),
+          )
+
+        expect(await run({ ...build!, toolAllowlist: ["read"] })).toBeUndefined()
+        expect(await run(build!, build!.permission, { skill: false, skill_search: false })).toBeUndefined()
+        expect(await run({ ...build!, toolAllowlist: ["skill"] })).not.toContain("skill_search")
+        expect(await run({ ...build!, toolAllowlist: ["skill"] })).toContain("Use the skill tool")
+        expect(await run({ ...build!, toolAllowlist: ["skill_search"] })).toContain("skill_search")
+        expect(await run({ ...build!, toolAllowlist: ["skill_search"] })).not.toContain("Use the skill tool")
+        expect(
+          await run(build!, [{ permission: "skill", pattern: "*", action: "deny" }]),
+        ).toBeUndefined()
+        expect(
+          await run(build!, [{ permission: "skill", pattern: "mimocode-docs", action: "deny" }]),
+        ).not.toContain("<name>mimocode-docs</name>")
+      },
+    })
+  })
+
   test("skills output is sorted by name and stable across calls", async () => {
     await using tmp = await tmpdir({
       git: true,

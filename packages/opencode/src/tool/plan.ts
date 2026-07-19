@@ -77,6 +77,7 @@ export const PlanEnterTool = Tool.define(
             time: { created: Date.now() },
             agent: "plan",
             model,
+            source: "hook",
           }
           yield* session.updateMessage(msg)
           yield* session.updatePart({
@@ -157,6 +158,7 @@ export const PlanExitTool = Tool.define(
             time: { created: Date.now() },
             agent: "build",
             model,
+            source: "hook",
           }
           yield* session.updateMessage(msg)
           yield* session.updatePart({

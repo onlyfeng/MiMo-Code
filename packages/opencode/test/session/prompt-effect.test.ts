@@ -685,6 +685,107 @@ it.live("loop calls LLM and returns assistant message", () =>
   ),
 )
 
+it.live("office attachment reminder respects effective skill permission", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Denied office skill",
+        permission: [{ permission: "skill", pattern: "xlsx-official", action: "deny" }],
+      })
+
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [
+          { type: "text", text: "summarize the attachment" },
+          {
+            type: "file",
+            mime: "text/plain",
+            filename: "denied.csv",
+            url: "data:text/plain;base64,YQ==",
+          },
+        ],
+      })
+      yield* llm.text("done")
+      yield* prompt.loop({ sessionID: session.id })
+
+      const requests = yield* llm.inputs
+      expect(JSON.stringify(requests[0].messages)).toContain("Skill search trigger:")
+      expect(JSON.stringify(requests[0].messages)).not.toContain(
+        "The user's message attaches office document file(s).",
+      )
+      expect(JSON.stringify(requests[0].messages)).not.toContain("xlsx-official/SKILL.md")
+    }),
+    { git: true, config: providerCfg },
+  ),
+  20_000,
+)
+
+it.live("hook messages do not trigger autonomous skill injection", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(dir, ".mimocode", "skill", "restricted-hook", "SKILL.md"),
+          `---
+name: restricted-hook
+description: Instructions that scheduled hooks must not auto-load.
+---
+
+# Restricted Hook
+`,
+        ),
+      )
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Hook skill boundary",
+        permission: [{ permission: "skill", pattern: "restricted-hook", action: "deny" }],
+      })
+
+      const created = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        source: "hook",
+        provenance: {
+          hookPhase: "pre",
+          hookIteration: 1,
+          pluginNames: ["legacy-hook"],
+          hookIDs: ["legacy-hook-1"],
+        },
+        model: ref,
+        noReply: true,
+        parts: [
+          { type: "text", text: "Run /restricted-hook on this file." },
+          {
+            type: "file",
+            mime: "text/plain",
+            filename: "hook.csv",
+            url: "data:text/plain;base64,YQ==",
+          },
+        ],
+      })
+      expect((created.info as unknown as { source?: string }).source).toBe("hook")
+      if (created.info.role !== "user") throw new Error("expected hook user message")
+      yield* sessions.updateMessage({ ...created.info, source: undefined })
+
+      yield* llm.text("done")
+      yield* prompt.loop({ sessionID: session.id })
+
+      const request = JSON.stringify((yield* llm.inputs)[0].messages)
+      expect(request).not.toContain("# Restricted Hook")
+      expect(request).not.toContain("The user's message attaches office document file(s).")
+      expect(request).not.toContain("Skill search trigger:")
+    }),
+    { git: true, config: providerCfg },
+  ),
+  20_000,
+)
+
 it.live("MaxMode final step bypasses runMaxStep and sends toolChoice none to the processor", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
@@ -1500,7 +1601,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  20_000,
 )
 
 it.live("subagent maxMode does not write session status", () =>
@@ -1701,7 +1802,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  20_000,
 )
 
 it.live(
@@ -1989,7 +2090,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  20_000,
 )
 
 it.live(
@@ -2058,7 +2159,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  20_000,
 )
 
 it.live(

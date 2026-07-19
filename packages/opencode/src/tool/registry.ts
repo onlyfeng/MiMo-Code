@@ -18,6 +18,7 @@ import { WriteTool } from "./write"
 import { NotebookEditTool } from "./notebook-edit"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
+import { SkillSearchTool } from "./skill-search"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@mimo-ai/plugin"
@@ -113,7 +114,13 @@ export interface Interface {
   readonly ids: () => Effect.Effect<string[]>
   readonly all: () => Effect.Effect<Tool.Def[]>
   readonly named: () => Effect.Effect<{ actor: ActorDef; read: ReadDef }>
-  readonly tools: (model: { providerID: ProviderID; modelID: ModelID; agent: Agent.Info }) => Effect.Effect<Tool.Def[]>
+  readonly tools: (model: {
+    providerID: ProviderID
+    modelID: ModelID
+    agent: Agent.Info
+    permission?: Permission.Ruleset
+    preserveMembership?: boolean
+  }) => Effect.Effect<Tool.Def[]>
   readonly reload: () => Effect.Effect<void>
 }
 
@@ -151,6 +158,7 @@ export const layer = Layer.effect(
     const patchtool = yield* ApplyPatchTool
     const changedirtool = yield* ChangeDirectoryTool
     const skilltool = yield* SkillTool
+    const skillsearch = yield* SkillSearchTool
     const historytool = yield* HistoryTool
     const memorytool = yield* MemoryTool
     const tasktool = yield* TaskTool
@@ -242,6 +250,7 @@ export const layer = Layer.effect(
           search: Tool.init(websearch),
           code: Tool.init(codesearch),
           skill: Tool.init(skilltool),
+          skillsearch: Tool.init(skillsearch),
           patch: Tool.init(patchtool),
           changedir: Tool.init(changedirtool),
           question: Tool.init(question),
@@ -273,6 +282,7 @@ export const layer = Layer.effect(
             tool.fetch,
             tool.search,
             tool.code,
+            tool.skillsearch,
             tool.skill,
             tool.patch,
             tool.changedir,
@@ -309,8 +319,11 @@ export const layer = Layer.effect(
       return (yield* all()).map((tool) => tool.id)
     })
 
-    const describeSkill = Effect.fn("ToolRegistry.describeSkill")(function* (agent: Agent.Info) {
-      const list = yield* skill.available(agent)
+    const describeSkill = Effect.fn("ToolRegistry.describeSkill")(function* (
+      agent: Agent.Info,
+      permission: Permission.Ruleset,
+    ) {
+      const list = yield* skill.available({ ...agent, permission })
       if (list.length === 0) return "No skills are currently available."
       return [
         "Load a specialized skill that provides domain-specific instructions and workflows.",
@@ -357,6 +370,7 @@ export const layer = Layer.effect(
     })
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
+      const permission = Agent.runtimePermission(input.agent, input.permission)
       let filtered = (yield* all()).filter((tool) => {
         if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
           if (tool.id === WebSearchTool.id) {
@@ -377,7 +391,7 @@ export const layer = Layer.effect(
         return true
       })
 
-      if (input.agent.toolAllowlist) {
+      if (input.agent.toolAllowlist && !input.preserveMembership) {
         const allowed = new Set(input.agent.toolAllowlist)
         filtered = filtered.filter((tool) => tool.id === "invalid" || allowed.has(tool.id))
       }
@@ -386,7 +400,8 @@ export const layer = Layer.effect(
       // full-capability agent (no toolAllowlist), so gate on the agent name
       // rather than an allowlist: every other agent — primaries without an
       // allowlist (build/plan/compose) and subagents — must not see `session`.
-      filtered = filtered.filter((tool) => tool.id !== "session" || input.agent.name === "orchestrator")
+      if (!input.preserveMembership)
+        filtered = filtered.filter((tool) => tool.id !== "session" || input.agent.name === "orchestrator")
 
       const cfg = yield* config.get()
       const resolveStyle = (toolId: string): "json" | "shell" => resolveInvocationStyle(cfg.tool, toolId)
@@ -412,7 +427,7 @@ export const layer = Layer.effect(
             description: [
               description,
               tool.id === ActorTool.id ? yield* describeTask(input.agent) : undefined,
-              tool.id === SkillTool.id ? yield* describeSkill(input.agent) : undefined,
+              tool.id === SkillTool.id ? yield* describeSkill(input.agent, permission) : undefined,
               tool.id === WorkflowTool.id ? yield* describeWorkflow() : undefined,
               tool.id === ToolScriptTool.id ? yield* describeToolScript() : undefined,
             ]

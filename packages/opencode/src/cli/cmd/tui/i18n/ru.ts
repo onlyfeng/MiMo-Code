@@ -278,7 +278,7 @@ export const dict = {
   "tui.skill.xlsx-official.description": "Создание, редактирование и чтение книг Microsoft Excel (.xlsx)",
   "tui.skill.pdf-official.description": "Создание, редактирование, преобразование и чтение PDF-файлов",
   "tui.skill.pptx-official.description": "Создание, редактирование и чтение презентаций Microsoft PowerPoint (.pptx)",
-  "tui.skill.mimocode.description": "Самодокументация функций, конфигурации и команд MiMoCode",
+  "tui.skill.mimocode-docs.description": "Самодокументация функций, конфигурации и команд MiMoCode",
   "tui.skill.evolve.description": "Перепишите любой свой слой — инструменты, hooks, знания, workflows и даже UI",
   "tui.skill.frontend-design.description": "Руководство по выразительному, осмысленному визуальному дизайну UI",
   "tui.skill.loop.description": "Запланировать запуск промпта с периодичностью",

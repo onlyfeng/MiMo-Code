@@ -20,6 +20,7 @@ import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
 import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "@/util/text-truncate"
+import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
 
 function capAvailableSkills(text: string) {
   return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, "available skills")
@@ -46,7 +47,10 @@ export function provider(model: Provider.Model) {
 
 export interface Interface {
   readonly environment: (model: Provider.Model, now: number) => Effect.Effect<string[]>
-  readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
+  readonly skills: (
+    agent: Agent.Info,
+    input?: { permission?: Permission.Ruleset; tools?: Record<string, boolean> },
+  ) => Effect.Effect<string | undefined>
   readonly available: (agent?: Agent.Info) => Effect.Effect<Skill.Info[]>
   readonly all: () => Effect.Effect<Skill.Info[]>
 }
@@ -116,14 +120,37 @@ export const layer = Layer.effect(
         return base
       }),
 
-      skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {
-        if (Permission.disabled(["skill"], agent.permission).has("skill")) return
+      skills: Effect.fn("SystemPrompt.skills")(function* (
+        agent: Agent.Info,
+        input?: { permission?: Permission.Ruleset; tools?: Record<string, boolean> },
+      ) {
+        const permission = input?.permission ?? agent.permission
+        const load = canLoadSkills({
+          permission,
+          toolAllowlist: agent.toolAllowlist,
+          tools: input?.tools,
+        })
+        const search = canSearchSkills({
+          permission,
+          toolAllowlist: agent.toolAllowlist,
+          tools: input?.tools,
+        })
+        if (!load && !search) return
 
-        const list = yield* skill.available(agent)
+        const list = yield* skill.available({ ...agent, permission })
 
         return [
           "Skills provide specialized instructions and workflows for specific tasks.",
-          "Use the skill tool to load a skill when a task matches its description.",
+          ...(search
+            ? [
+                "On the first user query in a session, when the task might benefit from a specialized workflow, call skill_search to find the best matching non-Compose skill.",
+                "Rewrite the user's request into a concise Skill Query with these dimensions when available: action, input, output, audience.",
+                "Preserve an explicitly mentioned skill ID, name, or alias verbatim in the Skill Query so exact matching can take priority over BM25.",
+                "If skill_search returns a loaded_skill_id, follow the loaded instructions. If it returns uncertain candidates, choose the best fit or continue without a skill. If it returns no_match, continue normally.",
+                "Compose skills are not searchable; load an explicitly requested Compose skill directly with the skill tool.",
+              ]
+            : []),
+          ...(load ? ["Use the skill tool to load a skill when a task matches its description."] : []),
           // the agents seem to ingest the information about skills a bit better if we present a more verbose
           // version of them here and a less verbose version in tool description, rather than vice versa.
           capAvailableSkills(Skill.fmt(list, { verbose: true })),

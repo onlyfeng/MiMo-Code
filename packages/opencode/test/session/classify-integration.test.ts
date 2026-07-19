@@ -27,7 +27,9 @@ import { spawnRef } from "../../src/actor/spawn-ref"
 import type { Actor } from "../../src/actor/spawn"
 import { MessageID } from "../../src/session/schema"
 import { ProviderID, ModelID } from "../../src/provider/schema"
+import { Flag } from "../../src/flag/flag"
 import { Log } from "../../src/util"
+import { jsonSchema, tool } from "ai"
 import { tmpdir } from "../fixture/fixture"
 import {
   startScriptedLLMServer,
@@ -71,7 +73,14 @@ function writeConfig(dir: string, origin: string) {
       provider: {
         alibaba: { options: { apiKey: "test-key", baseURL: `${origin}/v1` } },
       },
-      agent: { build: { model: "alibaba/qwen-plus" } },
+      agent: {
+        build: { model: "alibaba/qwen-plus" },
+        bounded: {
+          model: "alibaba/qwen-plus",
+          mode: "subagent",
+          tool_allowlist: ["read"],
+        },
+      },
     }),
   )
 }
@@ -117,7 +126,7 @@ describe("classifier routing — integration", () => {
     } finally {
       await stub.stop()
     }
-  })
+  }, 20_000)
 
   test("main json_schema gate: non-continue classification writes StructuredOutputError", async () => {
     await using tmp = await tmpdir({ git: true })
@@ -372,6 +381,7 @@ describe("classifier routing — integration", () => {
                 spawn: () => Effect.die("spawn not used in fork-gate test"),
                 cancel: () => Effect.die("cancel not used in fork-gate test"),
               } as unknown as NonNullable<typeof spawnRef.current>
+              const releaseActor = prompt.bindActor?.(spawnRef.current)
 
               const result = yield* prompt.prompt({
                 sessionID: session.id,
@@ -380,6 +390,7 @@ describe("classifier routing — integration", () => {
                 parts: [{ type: "text", text: "Answer in the requested schema." }],
                 format: JSON_SCHEMA,
               })
+              releaseActor?.()
 
               // Prove we went through the FORK branch, not the main path: the fork
               // branch sends `forkCtx.system` verbatim as the request system, whereas
@@ -388,6 +399,10 @@ describe("classifier routing — integration", () => {
               // the main gate and also write StructuredOutputError — a false pass.
               const systemMsg = stub.captures[0]?.messages.find((m) => m.role === "system")
               expect(JSON.stringify(systemMsg?.content ?? "")).toContain("fork-system-prompt")
+              const structured = stub.captures[0]?.tools?.find(
+                (item) => item.function.name === "StructuredOutput",
+              )
+              expect(JSON.stringify(structured?.function.parameters)).toContain("answer")
 
               // Reaching prompt.ts:2050 in the fork branch: classifier returns a
               // non-`continue` result for the plain-text stop, and json_schema mode
@@ -447,6 +462,7 @@ describe("classifier routing — integration", () => {
                 spawn: () => Effect.die("spawn not used in fork content-filter test"),
                 cancel: () => Effect.die("cancel not used in fork content-filter test"),
               } as unknown as NonNullable<typeof spawnRef.current>
+              const releaseActor = prompt.bindActor?.(spawnRef.current)
 
               const result = yield* prompt.prompt({
                 sessionID: session.id,
@@ -455,6 +471,7 @@ describe("classifier routing — integration", () => {
                 parts: [{ type: "text", text: "Answer in the requested schema." }],
                 format: JSON_SCHEMA,
               })
+              releaseActor?.()
 
               // Prove we went through the FORK branch (see sibling fork test).
               const systemMsg = stub.captures[0]?.messages.find((m) => m.role === "system")
@@ -473,4 +490,315 @@ describe("classifier routing — integration", () => {
       await stub.stop()
     }
   })
+
+  test("full-context fork sends frozen parent tool schemas with live dispatch", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const readmePath = path.join(tmp.path, "README.md")
+    const stub = startScriptedLLMServer([
+      {
+        lines: toolCallResponse({
+          id: "call_frozen_grep",
+          name: "grep",
+          args: JSON.stringify({ pattern: "Frozen" }),
+        }),
+      },
+      {
+        lines: toolCallResponse({
+          id: "call_frozen_read",
+          name: "read",
+          args: JSON.stringify({ file_path: readmePath }),
+        }),
+      },
+      { lines: textStopResponse("done") },
+    ])
+    const forkActorID = "explore-fork-frozen-tools"
+    const prevSpawnRef = spawnRef.current
+    const prevOrchestrator = Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR
+    try {
+      Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR = true
+      await Bun.write(readmePath, "# Frozen Tool Dispatch\n")
+      await writeConfig(tmp.path, stub.origin)
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          runFork(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const registry = yield* ActorRegistry.Service
+              const session = yield* sessions.create({ title: "fork-frozen-tools" })
+
+              yield* registry.register({
+                sessionID: session.id,
+                actorID: forkActorID,
+                mode: "subagent",
+                agent: "bounded",
+                description: "fork frozen tool test",
+                contextMode: "full",
+                background: false,
+                lifecycle: "ephemeral",
+              })
+
+              const forkCtx: Actor.ForkContext = {
+                system: ["fork-system-prompt"],
+                tools: {
+                  session: tool({
+                    description: "frozen parent session description",
+                    inputSchema: jsonSchema({
+                      type: "object",
+                      properties: { command: { type: "string" } },
+                      required: ["command"],
+                      additionalProperties: false,
+                    }),
+                  }),
+                  grep: tool({
+                    description: "frozen parent grep description",
+                    inputSchema: jsonSchema({
+                      type: "object",
+                      properties: { pattern: { type: "string" } },
+                      required: ["pattern"],
+                      additionalProperties: false,
+                    }),
+                  }),
+                  read: tool({
+                    description: "frozen parent read description",
+                    inputSchema: jsonSchema({
+                      type: "object",
+                      properties: {
+                        file_path: { type: "string" },
+                        frozen_arg: { type: "string" },
+                      },
+                      required: ["file_path"],
+                      additionalProperties: false,
+                    }),
+                  }),
+                },
+                inheritedMessages: [],
+                parentPermission: [],
+                watermarkMsgID: MessageID.ascending(),
+                model: { providerID: ProviderID.make("alibaba"), modelID: ModelID.make("qwen-plus") },
+              }
+              spawnRef.current = {
+                getForkContext: (_sessionID: string, id: string) =>
+                  Effect.succeed(id === forkActorID ? forkCtx : undefined),
+                spawn: () => Effect.die("spawn not used in fork frozen tool test"),
+                cancel: () => Effect.die("cancel not used in fork frozen tool test"),
+              } as unknown as NonNullable<typeof spawnRef.current>
+              const releaseActor = prompt.bindActor?.(spawnRef.current)
+
+              yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "bounded",
+                agentID: forkActorID,
+                parts: [{ type: "text", text: "Read the requested file." }],
+              })
+              releaseActor?.()
+
+              const read = stub.captures[0]?.tools?.find((item) => item.function.name === "read")
+              expect(stub.captures[0]?.tools?.map((item) => item.function.name)).toEqual([
+                "session",
+                "grep",
+                "read",
+              ])
+              expect(read?.function.description).toBe("frozen parent read description")
+              expect(JSON.stringify(read?.function.parameters)).toContain("frozen_arg")
+              expect(stub.captures).toHaveLength(3)
+              expect(JSON.stringify(stub.captures[1].messages)).toContain("not in this actor's whitelist")
+              expect(JSON.stringify(stub.captures[2].messages)).toContain("Frozen Tool Dispatch")
+            }),
+          ),
+      })
+    } finally {
+      Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR = prevOrchestrator
+      spawnRef.current = prevSpawnRef
+      await stub.stop()
+    }
+  }, 20_000)
+
+  test("full-context fork exposes parent session schema but rejects it for a non-orchestrator child", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const stub = startScriptedLLMServer([
+      {
+        lines: toolCallResponse({
+          id: "call_frozen_session",
+          name: "session",
+          args: JSON.stringify({ command: "list" }),
+        }),
+      },
+      { lines: textStopResponse("done") },
+    ])
+    const forkActorID = "build-fork-frozen-session"
+    const prevSpawnRef = spawnRef.current
+    const prevOrchestrator = Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR
+    try {
+      Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR = true
+      await writeConfig(tmp.path, stub.origin)
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          runFork(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const registry = yield* ActorRegistry.Service
+              const session = yield* sessions.create({ title: "fork-frozen-session" })
+
+              yield* registry.register({
+                sessionID: session.id,
+                actorID: forkActorID,
+                mode: "subagent",
+                agent: "build",
+                description: "fork identity gate test",
+                contextMode: "full",
+                background: false,
+                lifecycle: "ephemeral",
+                tools: "INHERIT",
+              })
+
+              const forkCtx: Actor.ForkContext = {
+                system: ["fork-system-prompt"],
+                tools: {
+                  session: tool({
+                    description: "frozen parent session description",
+                    inputSchema: jsonSchema({
+                      type: "object",
+                      properties: { command: { type: "string" } },
+                      required: ["command"],
+                      additionalProperties: false,
+                    }),
+                  }),
+                },
+                inheritedMessages: [],
+                parentPermission: [],
+                watermarkMsgID: MessageID.ascending(),
+                model: { providerID: ProviderID.make("alibaba"), modelID: ModelID.make("qwen-plus") },
+              }
+              spawnRef.current = {
+                getForkContext: (_sessionID: string, id: string) =>
+                  Effect.succeed(id === forkActorID ? forkCtx : undefined),
+                spawn: () => Effect.die("spawn not used in fork identity test"),
+                cancel: () => Effect.die("cancel not used in fork identity test"),
+              } as unknown as NonNullable<typeof spawnRef.current>
+              const releaseActor = prompt.bindActor?.(spawnRef.current)
+
+              yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                agentID: forkActorID,
+                parts: [{ type: "text", text: "List peer sessions." }],
+              })
+              releaseActor?.()
+
+              expect(stub.captures[0]?.tools?.map((item) => item.function.name)).toEqual(["session"])
+              expect(JSON.stringify(stub.captures[1].messages)).toContain(
+                "only available to the orchestrator agent",
+              )
+            }),
+          ),
+      })
+    } finally {
+      Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR = prevOrchestrator
+      spawnRef.current = prevSpawnRef
+      await stub.stop()
+    }
+  }, 20_000)
+
+  test("full-context fork executes skill_search with the captured parent permission", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const stub = startScriptedLLMServer([
+      {
+        lines: toolCallResponse({
+          id: "call_skill_search",
+          name: "skill_search",
+          args: JSON.stringify({ query: "restricted-quasar" }),
+        }),
+      },
+      { lines: textStopResponse("done") },
+    ])
+    const forkActorID = "explore-fork-skill-permission"
+    const prevSpawnRef = spawnRef.current
+    try {
+      await Bun.write(
+        path.join(tmp.path, ".mimocode", "skill", "restricted-quasar", "SKILL.md"),
+        `---
+name: restricted-quasar
+description: Inspect restricted quasar telemetry.
+---
+
+# Restricted Quasar
+`,
+      )
+      await writeConfig(tmp.path, stub.origin)
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          runFork(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const registry = yield* ActorRegistry.Service
+              const session = yield* sessions.create({
+                title: "fork-skill-permission",
+                permission: [{ permission: "skill", pattern: "*", action: "allow" }],
+              })
+
+              yield* registry.register({
+                sessionID: session.id,
+                actorID: forkActorID,
+                mode: "subagent",
+                agent: "build",
+                description: "fork skill permission test",
+                contextMode: "full",
+                background: false,
+                lifecycle: "ephemeral",
+              })
+
+              const forkCtx: Actor.ForkContext = {
+                system: ["fork-system-prompt"],
+                tools: { skill_search: {} as Actor.ForkContext["tools"][string] },
+                inheritedMessages: [],
+                parentPermission: [
+                  { permission: "skill", pattern: "restricted-quasar", action: "deny" },
+                ],
+                watermarkMsgID: MessageID.ascending(),
+                model: { providerID: ProviderID.make("alibaba"), modelID: ModelID.make("qwen-plus") },
+              }
+              spawnRef.current = {
+                getForkContext: (_sessionID: string, id: string) =>
+                  Effect.succeed(id === forkActorID ? forkCtx : undefined),
+                spawn: () => Effect.die("spawn not used in fork skill permission test"),
+                cancel: () => Effect.die("cancel not used in fork skill permission test"),
+              } as unknown as NonNullable<typeof spawnRef.current>
+              const releaseActor = prompt.bindActor?.(spawnRef.current)
+
+              yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                agentID: forkActorID,
+                parts: [
+                  { type: "text", text: "Find /restricted-quasar for this task." },
+                  {
+                    type: "file",
+                    mime: "text/plain",
+                    filename: "actor.csv",
+                    url: "data:text/plain;base64,YQ==",
+                  },
+                ],
+              })
+              releaseActor?.()
+
+              expect(stub.captures).toHaveLength(2)
+              expect(JSON.stringify(stub.captures[1].messages)).toContain("no_match")
+              expect(JSON.stringify(stub.captures[1].messages)).not.toContain("# Restricted Quasar")
+              expect(JSON.stringify(stub.captures)).not.toContain(
+                "The user's message attaches office document file(s).",
+              )
+            }),
+          ),
+      })
+    } finally {
+      spawnRef.current = prevSpawnRef
+      await stub.stop()
+    }
+  }, 20_000)
 })

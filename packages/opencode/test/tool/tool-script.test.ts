@@ -272,6 +272,43 @@ describe("tool_script", () => {
     expect(result.output).toContain("unknown tool: task")
   })
 
+  test("skill_search is not dispatchable through the sandbox", async () => {
+    let called = false
+    const defs = [
+      fakeDef("skill_search", async () => {
+        called = true
+        return "should never run"
+      }),
+    ]
+    const result = await runToolScript(
+      `try { await tools.skill_search({ value: "restricted" }) } catch (e) { return e.message }`,
+      defs,
+    )
+    expect(result.output).toContain("unknown tool: skill_search")
+    expect(called).toBe(false)
+
+    let mcpCalled = false
+    const mcpResult = await runToolScript(
+      `try { await tools.skill_search({ value: "restricted" }) } catch (e) { return e.message }`,
+      [],
+      undefined,
+      {
+        mcp: {
+          skill_search: {
+            description: "must stay excluded",
+            inputSchema: jsonSchema({ type: "object", properties: {} }),
+            execute: async () => {
+              mcpCalled = true
+              return { content: [{ type: "text", text: "should never run" }] }
+            },
+          },
+        },
+      },
+    )
+    expect(mcpResult.output).toContain("unknown tool: skill_search")
+    expect(mcpCalled).toBe(false)
+  })
+
   test("bash is excluded from the sandbox", async () => {
     const defs = [fakeDef("bash", async () => "should never run")]
     const result = await runToolScript(
@@ -593,16 +630,18 @@ describe("renderToolScriptDeclarations", () => {
       fakeDef("read", async () => "x"),
       fakeDef("task", async () => "x"),
       fakeDef("question", async () => "x"),
+      fakeDef("skill_search", async () => "x"),
     ]
     const text = renderToolScriptDeclarations(defs)
     expect(text).toContain("read(input:")
     expect(text).not.toContain("task(input:")
     expect(text).not.toContain("question(input:")
+    expect(text).not.toContain("skill_search(input:")
     expect(text).toContain("declare const tools")
   })
 
   test("exclusion list covers agent control-flow tools and bash", () => {
-    for (const id of ["task", "question", "actor", "skill", "plan_enter", "plan_exit", "tool_script", "bash"]) {
+    for (const id of ["task", "question", "actor", "skill", "skill_search", "plan_enter", "plan_exit", "tool_script", "bash"]) {
       expect(TOOL_SCRIPT_EXCLUDED.has(id)).toBe(true)
     }
   })

@@ -15,6 +15,11 @@
 export interface LLMCapture {
   /** Raw messages array from the OpenAI-compatible request body */
   messages: Array<{ role: string; content: unknown }>
+  /** Raw client tool declarations from the OpenAI-compatible request body. */
+  tools?: Array<{
+    type: string
+    function: { name: string; description?: string; parameters?: unknown }
+  }>
 }
 
 type ScriptedResponse = {
@@ -213,8 +218,8 @@ export function startScriptedLLMServer(responses: ScriptedResponse[]): ScriptedL
         return new Response("not found", { status: 404 })
       }
 
-      const body = (await req.json()) as { messages: Array<{ role: string; content: unknown }> }
-      captures.push({ messages: body.messages })
+      const body = (await req.json()) as LLMCapture
+      captures.push({ messages: body.messages, tools: body.tools })
 
       const response = responses[Math.min(callIdx, responses.length - 1)]
       callIdx++

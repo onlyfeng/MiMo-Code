@@ -417,6 +417,7 @@ export const layer: Layer.Layer<
             format: original.format,
             tools: original.tools,
             system: original.system,
+            source: "hook",
           })
           for (const part of replay.parts) {
             if (part.type === "compaction") continue
@@ -461,6 +462,7 @@ export const layer: Layer.Layer<
               time: { created: Date.now() },
               agent: userMessage.agent,
               model: userMessage.model,
+              source: "hook",
             })
             const text =
               (input.overflow
@@ -514,6 +516,7 @@ export const layer: Layer.Layer<
         sessionID: input.sessionID,
         agentID: input.agentID ?? undefined,
         agent: input.agent,
+        source: "hook",
         time: { created: Date.now() },
       })
       yield* session.updatePart({

@@ -16,6 +16,7 @@ export type DynamicDescription = (agent: Agent.Info) => Effect.Effect<string>
 
 export type Context<M extends Metadata = Metadata> = {
   sessionID: SessionID
+  permission?: Permission.Ruleset
   messageID: MessageID
   agent: string
   actorID?: string
