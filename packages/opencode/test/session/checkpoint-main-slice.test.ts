@@ -66,7 +66,7 @@ const recordingActor = Layer.effect(
 
     // Stand-in prefix capture: records what msgs[] was passed in (which is
     // the slice tryStartCheckpointWriter sliced from `msgs` at the watermark)
-    // and returns an empty prefix so the fork capture path completes.
+    // and returns a minimal non-empty prefix so the fork-context gate passes.
     const capture: typeof prefixCaptureRef.current = (input) =>
       Effect.sync(() => {
         captures.prefixMsgs = (input.msgs as Array<{ info: { id: string; agentID?: string } }>).map((m) => ({
@@ -76,7 +76,7 @@ const recordingActor = Layer.effect(
         return {
           system: [] as string[],
           tools: {},
-          inheritedMessages: [],
+          inheritedMessages: [{ role: "user", content: "checkpoint fixture" }],
           parentPermission: [],
         }
       })

@@ -16,6 +16,7 @@ import { ProviderID, ModelID } from "../../src/provider/schema"
 import { startScriptedLLMServer, textStopResponse } from "../lib/scripted-llm-server"
 import * as CheckpointContext from "../../src/session/checkpoint-context"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
+import { bindCheckpointPrefixCapture } from "./checkpoint-prefix-capture-fixture"
 
 void Log.init({ print: false })
 
@@ -266,6 +267,7 @@ describe("CheckpointContext producer (tryStartCheckpointWriter)", () => {
         fn: async () =>
           AppRuntime.runPromise(
             Effect.gen(function* () {
+              yield* bindCheckpointPrefixCapture
               const sessions = yield* Session.Service
               const sess = yield* sessions.create({ title: "ctx producer test" })
               sessionIDForCleanup = sess.id
@@ -433,6 +435,7 @@ describe("parentSessionID end-to-end (Axis A wiring)", () => {
         fn: async () =>
           AppRuntime.runPromise(
             Effect.gen(function* () {
+              yield* bindCheckpointPrefixCapture
               const bus = yield* Bus.Service
               const reenteredEvents: Array<{
                 phase: string
