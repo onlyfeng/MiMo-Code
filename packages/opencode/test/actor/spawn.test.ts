@@ -434,7 +434,18 @@ describe("Actor.spawn subagent mode", () => {
           tools: ["read", "edit"],
           background: true,
           model: ref,
+          forkContext: {
+            system: ["test-system"],
+            tools: {},
+            inheritedMessages: [],
+            parentPermission: [],
+            watermarkMsgID: MessageID.ascending(),
+            model: ref,
+          },
         })
+
+        yield* llm.wait(1).pipe(Effect.timeout("5 seconds"))
+        expect((yield* Deferred.await(result.outcome).pipe(Effect.timeout("5 seconds"))).status).toBe("success")
 
         expect(result.sessionID).toBe(parent.id)
         expect(result.actorID).toBe("build-1")
@@ -831,6 +842,9 @@ describe("Actor.spawn description field (F2a)", () => {
           model: ref,
         })
 
+        yield* llm.wait(1).pipe(Effect.timeout("5 seconds"))
+        expect((yield* Deferred.await(result.outcome).pipe(Effect.timeout("5 seconds"))).status).toBe("success")
+
         const row = yield* reg.get(result.sessionID, result.actorID)
         expect(row?.description).toBe("build")  // agentType, NOT first 200 chars of task
       }),
@@ -863,6 +877,9 @@ describe("Actor.spawn description field (F2a)", () => {
           background: true,
           model: ref,
         })
+
+        yield* llm.wait(1).pipe(Effect.timeout("5 seconds"))
+        expect((yield* Deferred.await(result.outcome).pipe(Effect.timeout("5 seconds"))).status).toBe("success")
 
         const row = yield* reg.get(result.sessionID, result.actorID)
         expect(row?.description).toBe("explore: find lexer files")

@@ -490,6 +490,7 @@ describe("Actor.spawn completion gate (B)", () => {
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         const actor = yield* Actor.Service
+        const actorReg = yield* ActorRegistry.Service
         const session = yield* Session.Service
         const tasks = yield* TaskRegistry.Service
 
@@ -519,10 +520,29 @@ describe("Actor.spawn completion gate (B)", () => {
         })
         expect(result.actorID).toBe("general-1")
 
-        yield* llm.wait(2).pipe(Effect.timeout("10 seconds"))
-        yield* actor.cancel(result.sessionID, result.actorID, "graceful").pipe(Effect.timeout("1 second"))
+        yield* llm.wait(2).pipe(
+          Effect.timeoutOrElse({
+            duration: "10 seconds",
+            orElse: () => Effect.fail(new Error("gate re-entry never reached the second LLM request")),
+          }),
+        )
+        yield* actor.cancel(result.sessionID, result.actorID, "graceful").pipe(
+          Effect.timeoutOrElse({
+            duration: "1 second",
+            orElse: () => Effect.fail(new Error("graceful cancel did not return")),
+          }),
+        )
 
-        const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("10 seconds"))
+        const terminal = yield* actorReg.get(result.sessionID, result.actorID)
+        expect(terminal?.status).toBe("idle")
+        expect(terminal?.lastOutcome).toBe("cancelled")
+
+        const outcome = yield* Deferred.await(result.outcome).pipe(
+          Effect.timeoutOrElse({
+            duration: "10 seconds",
+            orElse: () => Effect.fail(new Error("cancel committed terminal but AgentOutcome remained pending")),
+          }),
+        )
         expect(outcome.status).toBe("cancelled")
       }),
       { git: true, config: providerCfg },

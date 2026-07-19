@@ -8,7 +8,6 @@ import { Memory } from "../../src/memory"
 import { ActorRegistry } from "../../src/actor/registry"
 import { Actor, type AgentOutcome } from "../../src/actor/spawn"
 import { spawnRef } from "../../src/actor/spawn-ref"
-import { prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 import { TaskRegistry } from "../../src/task/registry"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { SessionPrune } from "../../src/session/prune"
@@ -22,6 +21,7 @@ import { MessageID, PartID } from "../../src/session/schema"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { ProviderTest } from "../fake/provider"
 import { testEffect } from "../lib/effect"
+import { bindCheckpointPrefixCapture } from "./checkpoint-prefix-capture-fixture"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 
 void Log.init({ print: false })
@@ -51,6 +51,7 @@ const pendingOutcomes: Array<Deferred.Deferred<AgentOutcome>> = []
 const recordingActor = Layer.effect(
   Actor.Service,
   Effect.gen(function* () {
+    yield* bindCheckpointPrefixCapture
     const prevSpawnRef = spawnRef.current
     let counter = 0
     const impl = Actor.Service.of({
@@ -117,17 +118,11 @@ const env = Layer.mergeAll(
 const it = testEffect(env)
 
 // Reset closure state before every test (Effect.sync inside the test body).
-// Also clear prefixCaptureRef — it's a global mutable ref that other tests in
-// the full suite may have populated via SessionPrompt.layer initialisation.
-// Leaving it set causes tryStartCheckpointWriter to attempt a real prefix
-// capture (which needs a live Provider for the providerID we pass) and fail.
-// See src/session/prefix-capture-ref.ts.
 const resetSpawnLog = Effect.sync(() => {
   spawnLog.count = 0
   spawnLog.lastInput = undefined
   settleNextSuccess.value = false
   pendingOutcomes.length = 0
-  prefixCaptureRef.current = undefined
 })
 
 // Seeds a parent session with a single user message + text part — same

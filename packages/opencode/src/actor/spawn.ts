@@ -780,7 +780,7 @@ export const layer = Layer.effect(
             onFailure: settleFailure,
           }),
           Effect.onExit((exit) => {
-            if (input.generation.terminal || Exit.isSuccess(exit)) return Effect.void
+            if (Exit.isSuccess(exit)) return Effect.void
             return settleFailure(exit.cause)
           }),
           Effect.ensuring(finishForkWork(key, input.generation, input.lifecycle)),

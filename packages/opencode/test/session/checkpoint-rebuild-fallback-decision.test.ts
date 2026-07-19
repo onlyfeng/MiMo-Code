@@ -18,6 +18,7 @@ import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { ProviderTest } from "../fake/provider"
 import { testEffect } from "../lib/effect"
+import { bindCheckpointPrefixCapture } from "./checkpoint-prefix-capture-fixture"
 import * as fs from "fs/promises"
 import path from "path"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -32,6 +33,7 @@ const outcomes: Deferred.Deferred<AgentOutcome>[] = []
 const controllableActor = Layer.effect(
   Actor.Service,
   Effect.gen(function* () {
+    yield* bindCheckpointPrefixCapture
     const prev = spawnRef.current
     let counter = 0
     const impl = Actor.Service.of({
