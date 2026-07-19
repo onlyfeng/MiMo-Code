@@ -69,7 +69,7 @@ import * as BashInteractive from "./bash-interactive"
 import { resolveInvocationStyle } from "./invocation-style"
 import { BuiltinWorkflow } from "@/workflow/builtin"
 import { ToolScriptTool, renderToolScriptDeclarations } from "./tool-script"
-import { toolScriptRegistry, toolScriptMcp } from "./tool-script-ref"
+import { bindToolScriptRef, toolScriptRegistry, toolScriptMcp } from "./tool-script-ref"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -302,7 +302,8 @@ export const layer = Layer.effect(
 
     // Late-bound ref (see tool-script-ref.ts): tool_script dispatches guest RPC
     // calls through the same def list the agent sees, without a module cycle.
-    toolScriptRegistry.current = all
+    const releaseToolScriptRegistry = bindToolScriptRef(toolScriptRegistry, all)
+    yield* Effect.addFinalizer(() => Effect.sync(releaseToolScriptRegistry))
 
     const ids: Interface["ids"] = Effect.fn("ToolRegistry.ids")(function* () {
       return (yield* all()).map((tool) => tool.id)

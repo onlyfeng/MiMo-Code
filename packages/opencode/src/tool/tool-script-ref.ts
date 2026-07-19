@@ -9,6 +9,30 @@ import type { Effect } from "effect"
 import type { Tool as AiTool } from "ai"
 import type * as Tool from "./tool"
 
+type LateBoundRef<T> = { current: T | undefined }
+type Binding = { value: unknown }
+const bindings = new WeakMap<object, { base: unknown; entries: Binding[] }>()
+
+// Managed runtimes can overlap and dispose out of order. Track active owners
+// so a finalizer restores the newest live binding, never a closed runtime.
+export function bindToolScriptRef<T>(ref: LateBoundRef<T>, value: T) {
+  const current = bindings.get(ref)
+  const state = current && ref.current === current.entries.at(-1)?.value ? current : { base: ref.current, entries: [] }
+  if (state !== current) bindings.set(ref, state)
+  const binding = { value }
+  state.entries.push(binding)
+  ref.current = value
+
+  return () => {
+    const index = state.entries.indexOf(binding)
+    if (index === -1) return
+    state.entries.splice(index, 1)
+    if (bindings.get(ref) !== state) return
+    if (ref.current === value) ref.current = (state.entries.at(-1)?.value ?? state.base) as T | undefined
+    if (state.entries.length === 0) bindings.delete(ref)
+  }
+}
+
 export const toolScriptRegistry: {
   current: (() => Effect.Effect<Tool.Def[]>) | undefined
 } = { current: undefined }
