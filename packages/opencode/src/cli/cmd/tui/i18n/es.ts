@@ -45,25 +45,28 @@ export const dict = {
 
   // Tips
   "tui.tips.label": "Sugerencia",
-  "tui.tips.plain_terminal": "Recomendamos usar iTerm o la terminal de VS Code",
+  "tui.tips.plain_terminal":
+    "La terminal predeterminada de Mac tiene limitaciones de renderizado. Usa iTerm2 o la terminal de VS Code",
   "tui.tips.attach_file":
     "Escribe {highlight}@{/highlight} seguido del nombre de archivo para buscar de forma difusa y adjuntar archivos",
   "tui.tips.shell_prefix":
     "Empieza un mensaje con {highlight}!{/highlight} para ejecutar comandos del shell directamente (p. ej., {highlight}!ls -la{/highlight})",
   "tui.tips.tab_agent":
+    "Pulsa {highlight}Tab{/highlight} o {highlight}Shift+Tab{/highlight} para alternar entre los agentes Build, Plan y Compose",
+  "tui.tips.tab_agent_orchestrator":
     "Pulsa {highlight}Tab{/highlight} o {highlight}Shift+Tab{/highlight} para alternar entre los agentes Build, Plan, Compose y Orchestrator",
   "tui.tips.theme_mode":
     "Ejecuta {highlight}/dark{/highlight} para el modo oscuro o {highlight}/light{/highlight} para el modo claro",
   "tui.tips.doc": "Ejecuta {highlight}/doc{/highlight} para abrir la documentación de usuario",
   "tui.tips.free_models": "Modelos gratuitos disponibles por tiempo limitado — ¡pruébalos ahora!",
+  "tui.tips.multi_skills":
+    "Combina varios {highlight}/skill-name{/highlight} en un mismo mensaje para usar varias Skills a la vez",
   "tui.tips.background":
     "Ejecuta {highlight}/background{/highlight} para usar una imagen personalizada como fondo de inicio",
   "tui.tips.undo":
     "Usa {highlight}/undo{/highlight} para revertir el último mensaje y los cambios en archivos",
   "tui.tips.redo":
     "Usa {highlight}/redo{/highlight} para restaurar mensajes y cambios deshechos previamente",
-  "tui.tips.share":
-    "Ejecuta {highlight}/share{/highlight} para crear un enlace público a tu conversación en opencode.ai",
   "tui.tips.drag_drop": "Arrastra y suelta imágenes o PDF en el terminal para añadirlos como contexto",
   "tui.tips.paste_image":
     "Pulsa {highlight}Ctrl+V{/highlight} para pegar imágenes desde el portapapeles (en macOS usa Ctrl+V, no Cmd+V — la terminal intercepta Cmd+V)",
@@ -178,8 +181,6 @@ export const dict = {
     "Ejecuta {highlight}mimo auth list{/highlight} para ver todos los proveedores configurados",
   "tui.tips.agent_create":
     "Ejecuta {highlight}mimo agent create{/highlight} para crear un agente con asistente guiado",
-  "tui.tips.github_trigger":
-    "Usa {highlight}/opencode{/highlight} en issues/PR de GitHub para disparar acciones de IA",
   "tui.tips.github_install":
     "Ejecuta {highlight}mimo github install{/highlight} para configurar el workflow de GitHub",
   "tui.tips.github_oc":
@@ -230,8 +231,6 @@ export const dict = {
     "Activa {highlight}scroll_acceleration{/highlight} en {highlight}tui.json{/highlight} para un desplazamiento suave",
   "tui.tips.username_toggle":
     "Activa/desactiva la visualización del nombre de usuario desde la paleta de comandos ({highlight}Ctrl+P{/highlight})",
-  "tui.tips.docker":
-    "Ejecuta {highlight}docker run -it --rm ghcr.io/anomalyco/opencode{/highlight} para uso en contenedor",
   "tui.tips.zen":
     "Usa {highlight}/connect{/highlight} con MiMo Code para modelos seleccionados y probados",
   "tui.tips.agents_md":
@@ -284,7 +283,10 @@ export const dict = {
   "tui.skill.html-to-video-pipeline.description": "El arma definitiva para vídeos cortos — crea vídeos cortos con HTML",
   "tui.skill.arxiv.description": "Busca, cita, descarga y sigue artículos de arXiv",
   "tui.skill.skill-creator.description": "Crea, revisa y mejora skills de agente",
+  "tui.skill.drive-mimo.description": "Controla programáticamente otro proceso MiMoCode — eventos JSON headless o TUI interactiva vía tmux",
   "tui.skill.research-paper-writing.description": "Redacta, pule y critica artículos académicos con perspectiva de revisor",
+  "tui.skill.codex.description": "Ejecuta Codex CLI de forma autónoma en scripts, CI, Docker y Kubernetes",
+  "tui.skill.claude-code.description": "Delega tareas de programación a Claude Code CLI",
   "tui.skill.design-blueprint.description":
     "Producir un plano de diseño (DESIGN.md + Decision Trace) antes de crear cualquier mockup",
   "tui.skill.super-research.description":
@@ -293,6 +295,11 @@ export const dict = {
     "Investigación multi-fuente profunda con informe citado y verificado",
   "tui.skill.modern-python-toolchain.description":
     "Configuración de proyecto Python moderno con uv, ruff y pyright",
+  "tui.skill.data-analytics.description":
+    "Analizar datos de producto y negocio, diseñar KPI y crear dashboards e informes",
+  "tui.skill.product-design.description": "Investigar, auditar, prototipar y validar diseños de producto y UX",
+  "tui.skill.sales.description":
+    "Preparar reuniones, investigar cuentas, planificar ventas y usar sistemas comerciales",
   "tui.skill.compose:ask.description": "Solicitar decisiones o aclaraciones al usuario",
   "tui.skill.compose:brainstorm.description": "Explorar requisitos y diseño antes de implementar",
   "tui.skill.compose:debug.description": "Depuración sistemática antes de proponer correcciones",
@@ -346,6 +353,8 @@ export const dict = {
   "tui.command.variant.cycle.title": "Ciclo de variantes",
   "tui.command.variant.list.title": "Cambiar variante de modelo",
   "tui.command.agent.cycle.reverse.title": "Ciclo de agentes (inverso)",
+  "tui.agent.locked": "No se puede cambiar de modo después de entrar en modo {{mode}}",
+  "tui.agent.locked.subset": "En esta sesión, solo puede cambiar entre {{agents}}",
   "tui.command.provider.login.title": "Iniciar sesión",
   "tui.command.provider.connect.title": "Conectar proveedor",
   "tui.command.provider.logout.title": "Cerrar sesión",
@@ -402,6 +411,24 @@ export const dict = {
   "tui.dialog.export.hint.confirm_action": "para confirmar",
   "tui.dialog.export.hint.options_action": "para opciones",
   "tui.toast.copied_to_clipboard": "Copiado al portapapeles",
+  "tui.toast.try_best.paused_other": "Se detectó un bucle try-best; la sesión {{session}} se ha pausado.",
+  "tui.toast.try_best.handoff_failed": "No se pudo iniciar la transferencia al entorno seleccionado.",
+  "tui.toast.try_best.continue_failed": "No se pudo continuar la sesión",
+  "tui.dialog.try_best.title": "Bucle try-best detectado — turno pausado",
+  "tui.dialog.try_best.reason.edit_repeat": "Se repitieron ediciones casi idénticas {{count}} veces.",
+  "tui.dialog.try_best.reason.edit_repeat_path":
+    "Se repitieron ediciones casi idénticas {{count}} veces en {{path}}.",
+  "tui.dialog.try_best.reason.bash_retry":
+    "El mismo comando fallido se reintentó {{count}} veces sin una edición correcta.",
+  "tui.dialog.try_best.reason.action_streak":
+    "{{count}} acciones consecutivas de {{action}} no produjeron ningún progreso observable.",
+  "tui.dialog.try_best.action.edit": "edición",
+  "tui.dialog.try_best.action.verify": "verificación",
+  "tui.dialog.try_best.action.same_kind": "la misma clase",
+  "tui.dialog.try_best.handoff.title": "Transferir a {{target}}",
+  "tui.dialog.try_best.handoff.description": "Pedir a MiMo que delegue el trabajo pendiente en este entorno",
+  "tui.dialog.try_best.continue.title": "Continuar con {{model}}",
+  "tui.dialog.try_best.continue.description": "Pedir al modelo actual que abandone este enfoque y vuelva a planificar",
   "tui.toast.instructions_loaded": "Cargado {{files}}",
   "tui.toast.update_available.title": "Actualización disponible",
   "tui.toast.update_available.confirm": "La nueva versión v{{version}} está disponible. ¿Desea actualizar ahora?",
@@ -438,6 +465,7 @@ export const dict = {
   "tui.command.session.ask.title": "Hacer una pregunta lateral",
   "tui.command.session.ask.description": "Pregunta a la sesión actual sin interrumpirla",
   "tui.command.session.ask.placeholder": "Haz una pregunta lateral…",
+  "tui.command.session.ask.busy": "Pensando…",
   "tui.command.session.unshare.title": "Dejar de compartir",
   "tui.command.session.undo.title": "Deshacer mensaje anterior",
   "tui.command.session.redo.title": "Rehacer",
