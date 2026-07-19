@@ -18,6 +18,7 @@ import { WriteTool } from "./write"
 import { NotebookEditTool } from "./notebook-edit"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
+import { SkillSearchTool } from "./skill-search"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@mimo-ai/plugin"
@@ -151,6 +152,7 @@ export const layer = Layer.effect(
     const patchtool = yield* ApplyPatchTool
     const changedirtool = yield* ChangeDirectoryTool
     const skilltool = yield* SkillTool
+    const skillsearch = yield* SkillSearchTool
     const historytool = yield* HistoryTool
     const memorytool = yield* MemoryTool
     const tasktool = yield* TaskTool
@@ -242,6 +244,7 @@ export const layer = Layer.effect(
           search: Tool.init(websearch),
           code: Tool.init(codesearch),
           skill: Tool.init(skilltool),
+          skillsearch: Tool.init(skillsearch),
           patch: Tool.init(patchtool),
           changedir: Tool.init(changedirtool),
           question: Tool.init(question),
@@ -273,6 +276,7 @@ export const layer = Layer.effect(
             tool.fetch,
             tool.search,
             tool.code,
+            tool.skillsearch,
             tool.skill,
             tool.patch,
             tool.changedir,

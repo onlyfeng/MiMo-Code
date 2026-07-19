@@ -113,6 +113,7 @@ import { Metrics } from "@/metrics"
 import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
 import { ToolResultError } from "../tool/result-error"
 import { shouldAutoDream, shouldAutoDistill, DREAM_TASK, DISTILL_TASK, AUTO_DREAM_TITLE, AUTO_DISTILL_TITLE } from "./auto-dream"
+import { skillSearchReminderForSession } from "./skill-search-reminder"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -659,6 +660,21 @@ export const layer = Layer.effect(
     }) {
       const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
       if (!userMessage) return input.messages
+
+      // Search reminders apply only to direct user sessions. They advise the
+      // primary agent when to search; the model still decides whether to call.
+      const reminder = skillSearchReminderForSession(input)
+      if (reminder) {
+        const part = yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: userMessage.info.id,
+          sessionID: userMessage.info.sessionID,
+          type: "text",
+          text: reminder,
+          synthetic: true,
+        })
+        userMessage.parts.push(part)
+      }
 
       const composeModeMsg = input.messages.find(
         (msg) => msg.info.role === "user" && msg.info.agent === "compose",
