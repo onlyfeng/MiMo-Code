@@ -1,4 +1,4 @@
-import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit } from "effect"
+import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit, Schedule } from "effect"
 import type { SessionID, MessageID } from "@/session/schema"
 import type { ProviderID, ModelID } from "@/provider/schema"
 import type { Tool as AITool, ModelMessage } from "ai"
@@ -10,9 +10,12 @@ import { TaskRegistry } from "@/task/registry"
 import { TaskGate, MAX_TASK_GATE_SUBAGENT_REACT } from "@/task/gate"
 import { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
-import type { SpawnMode, ContextMode, ToolWhitelist, Lifecycle } from "@/actor/schema"
+import type { Actor, SpawnMode, ContextMode, ToolWhitelist, Lifecycle } from "@/actor/schema"
+import { deriveLiveness, DEFAULT_LIVENESS_STALL_MS } from "@/actor/schema"
+import * as ActorEvents from "@/actor/events"
 import { runTurn } from "@/actor/turn"
 import { spawnRef } from "@/actor/spawn-ref"
+import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import { MessageV2 } from "@/session/message-v2"
@@ -20,6 +23,7 @@ import { Inbox } from "@/inbox"
 import { renderActorNotification } from "@/inbox/render"
 import { Plugin, HookEvent } from "@/plugin"
 import { parseReturnHeader, type ReturnStatus } from "./return-header"
+import { assistantFinalText, sessionErrorText } from "@/session/trajectory"
 import { Log } from "@/util"
 import { Instance, type InstanceContext } from "@/project/instance"
 import { InstanceState } from "@/effect"
@@ -36,6 +40,13 @@ const log = Log.create({ service: "actor.spawn" })
 export const MAX_PRE_REACT = 3
 /** Cap on postStop ReAct re-entries per spawn. See MAX_PRE_REACT TODO. */
 export const MAX_POST_REACT = 3
+/**
+ * T40 stall watchdog scan cadence. Sits between the per-step turn heartbeat and
+ * the DEFAULT_LIVENESS_STALL_MS (90s) window, and just under the registry's own
+ * 60s stuck-scan, so a genuinely stalled child is caught within ~one window of
+ * flipping to `stalled` without hammering the DB.
+ */
+export const WATCHDOG_SCAN_INTERVAL_MS = 45_000
 const RETURN_FORMAT_INSTRUCTION = `
 
 ---
@@ -187,6 +198,23 @@ export interface Interface {
   readonly spawn: (input: SpawnInput) => Effect.Effect<SpawnResult>
   readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
   readonly getForkContext: (sessionID: SessionID, actorID: string) => Effect.Effect<ForkContext | undefined>
+  readonly runPersistentTurn?: (input: {
+    sessionID: SessionID
+    actorID: string
+    work: Effect.Effect<MessageV2.WithParts>
+    onInterrupt: Effect.Effect<MessageV2.WithParts>
+    notifyParentOnComplete: boolean
+    inboxID?: string
+  }) => Effect.Effect<MessageV2.WithParts>
+  /**
+   * Run ONE stall-watchdog scan pass synchronously (the same body the background
+   * fiber repeats every WATCHDOG_SCAN_INTERVAL_MS). Exposed for deterministic
+   * tests that can't wait a real scan interval — it shares the same `notified`
+   * debounce set as the fiber, so driving it repeatedly exercises the real
+   * one-shot / re-arm semantics without touching wall-clock scheduling.
+   * Optional so lightweight test mocks of this Service need not implement it.
+   */
+  readonly scanStalledOnce?: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Actor") {}
@@ -205,33 +233,90 @@ export const layer = Layer.effect(
     const taskRegistry = yield* TaskRegistry.Service
     const scope = yield* Scope.Scope
 
-    // ForkContext snapshot per actor, captured at spawn for fork agents
-    // (contextMode = "full"). Read by fork's runLoop (see prompt.ts) and
-    // cleared on terminal status. Keyed by (sessionID, actorID): subagent
-    // actorIDs (`<type>-<n>`) are only unique within a session, so a bare
-    // actorID would collide across concurrent sessions. Fiber tracking moved to
-    // SessionRunState.
+    // ForkContext is actor-lifetime state. Persistent actors retain it while
+    // standing idle after either a successful or failed turn; only explicit
+    // retirement deletes it. Ephemeral actors release it when forkWork ends.
     const forkContexts = new Map<string, ForkContext>()
     const cancelledActors = new Set<string>()
-    const deliveredActors = new Set<string>()
-    // Actors that are live locally — added at spawn BEFORE the actor becomes
-    // observable (registry row / onActorID reclaim exposure) and removed in the
-    // work fiber's onExit. Because there is no observable-but-not-live window, a
-    // cancel racing a spawn always sees the actor as live (and arms isCancelled),
-    // while "not live" reliably means finished (onExit ran, after runTurn stamped
-    // the terminal status) or registered by another path. cancel() relies on this
-    // to avoid clobbering a finished actor's recorded outcome.
-    const liveActors = new Set<string>()
+    const deliveredActors = new Map<string, number>()
+    const liveActors = new Map<string, number>()
+    const generationCounters = new Map<string, number>()
+    const persistentActors = new Set<string>()
+    type TerminalStatus = "completed" | "failed" | "cancelled"
+    type GenerationOwner = {
+      generation: number
+      kind: "fork" | "wake"
+      done: Deferred.Deferred<void>
+      result?: Deferred.Deferred<Exit.Exit<MessageV2.WithParts>>
+      terminalDone: Deferred.Deferred<void>
+      terminal?: {
+        status: TerminalStatus
+        owner: "turn" | "cancel"
+        error?: string
+      }
+    }
+    const generationOwners = new Map<string, GenerationOwner>()
+    type CancelEpisode = { id: number; done: Deferred.Deferred<void> }
+    const cancelEpisodes = new Map<string, CancelEpisode>()
+    let cancelEpisodeID = 0
     const actorKey = (sessionID: SessionID, actorID: string) => `${sessionID}:${actorID}`
     const isCancelled = (sessionID: SessionID, actorID: string) =>
       Effect.sync(() => cancelledActors.has(actorKey(sessionID, actorID)))
-    const clearActorState = (key: string) =>
+    const startGeneration = (key: string, kind: GenerationOwner["kind"]) =>
       Effect.sync(() => {
-        forkContexts.delete(key)
-        cancelledActors.delete(key)
-        deliveredActors.delete(key)
-        liveActors.delete(key)
+        const generation = (generationCounters.get(key) ?? 0) + 1
+        generationCounters.set(key, generation)
+        liveActors.set(key, generation)
+        const owner: GenerationOwner = {
+          generation,
+          kind,
+          done: Deferred.makeUnsafe<void>(),
+          terminalDone: Deferred.makeUnsafe<void>(),
+        }
+        generationOwners.set(key, owner)
+        return owner
       })
+    const finishGeneration = (key: string, owner: GenerationOwner, result?: Exit.Exit<MessageV2.WithParts>) =>
+      Effect.sync(() => {
+        // Followers must observe the terminal-processing Exit before a new
+        // generation becomes claimable. All publications and map cleanup stay
+        // in one synchronous section so no fiber can see an owner-less gap.
+        if (owner.result && result) Deferred.doneUnsafe(owner.result, Effect.succeed(result))
+        if (generationOwners.get(key) === owner) generationOwners.delete(key)
+        if (liveActors.get(key) === owner.generation) liveActors.delete(key)
+        if (deliveredActors.get(key) === owner.generation) deliveredActors.delete(key)
+        if (owner.terminal?.status === "cancelled") cancelledActors.delete(key)
+        if (!persistentActors.has(key) && !generationOwners.has(key) && !liveActors.has(key)) {
+          generationCounters.delete(key)
+        }
+        Deferred.doneUnsafe(owner.done, Effect.void)
+      })
+    const finishForkWork = (key: string, owner: GenerationOwner, lifecycle: "ephemeral" | "persistent") =>
+      Effect.gen(function* () {
+        yield* finishGeneration(key, owner)
+        if (lifecycle === "persistent") return
+        yield* Effect.sync(() => {
+          forkContexts.delete(key)
+          persistentActors.delete(key)
+          if (!liveActors.has(key)) generationCounters.delete(key)
+        })
+      })
+    const claimTerminal = (
+      key: string,
+      owner: GenerationOwner,
+      status: TerminalStatus,
+      claimant: "turn" | "cancel",
+      error?: string,
+    ) =>
+      Effect.sync(() => {
+        if (generationOwners.get(key) !== owner) return false
+        if (owner.terminal) return false
+        owner.terminal = { status, owner: claimant, ...(error ? { error } : {}) }
+        if (status === "cancelled") cancelledActors.add(key)
+        return true
+      })
+    const settleTerminal = (owner: GenerationOwner) =>
+      Deferred.succeed(owner.terminalDone, undefined).pipe(Effect.ignore)
 
     // Real agent loop: marks the actor running, then drives a SessionPrompt.prompt
     // turn. The user message persisted by SessionPrompt carries the actor's
@@ -267,6 +352,9 @@ export const layer = Layer.effect(
       // last text part (often a pre-tool-call preamble) is dropped to avoid
       // duplicating the result downstream. See spec §5.2.
       const info = (result as MessageV2.WithParts | undefined)?.info
+      if (info?.role === "assistant" && info.error) {
+        return yield* Effect.fail(new Error(sessionErrorText(info.error) ?? "actor session failed"))
+      }
       const structured = info?.role === "assistant" ? info.structured : undefined
       const finalText =
         structured !== undefined
@@ -288,6 +376,7 @@ export const layer = Layer.effect(
       background: boolean
       model?: { providerID: ProviderID; modelID: ModelID }
       lifecycle: "ephemeral" | "persistent"
+      generation: GenerationOwner
       task_id?: string
       // True for non-specialized subagents (those that received
       // RETURN_FORMAT_INSTRUCTION). Only these are subject to the completion
@@ -323,58 +412,67 @@ export const layer = Layer.effect(
           status: "completed" | "failed" | "cancelled",
           extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string },
         ) =>
-          input.background && input.agentType !== "checkpoint-writer"
-            ? Effect.all(
-                [
-                  inbox
-                    .send({
-                      receiverSessionID: input.parentSessionID,
-                      receiverActorID: input.parentActorID ?? "main",
-                      senderSessionID: input.sessionID,
-                      senderActorID: input.actorID,
-                      type: "actor_notification",
-                      content: renderActorNotification({
-                        actorID: input.actorID,
-                        description,
-                        status,
-                        ...extra,
-                      }),
-                    })
-                    .pipe(Effect.ignoreCause({ log: "Warn", message: "actor inbox notification failed" })),
-                  bus
-                    .publish(TuiEvent.ToastShow, {
-                      message: `Child "${description}" ${status}`,
-                      variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
-                    })
-                    .pipe(Effect.provideService(InstanceRef, parentInstance))
-                    .pipe(Effect.ignoreCause({ log: "Warn", message: "actor toast notification failed" })),
-                ],
-                { concurrency: "unbounded", discard: true },
-              )
-            : Effect.void
-        const commitCancelled = Effect.fn("Actor.commitCancelled")(function* () {
-          yield* actorReg
-            .updateStatus(input.sessionID, input.actorID, {
-              status: "idle",
-              lastOutcome: "cancelled",
-              lastError: undefined,
-            })
-            .pipe(Effect.ignore)
-          yield* notify("cancelled", {})
-          yield* Deferred.succeed(outcome, { status: "cancelled" as const })
-        })
+          Effect.gen(function* () {
+            if (!input.background || input.agentType === "checkpoint-writer") return
+            yield* Effect.all(
+              [
+                inbox
+                  .send({
+                    receiverSessionID: input.parentSessionID,
+                    receiverActorID: input.parentActorID ?? "main",
+                    senderSessionID: input.sessionID,
+                    senderActorID: input.actorID,
+                    type: "actor_notification",
+                    content: renderActorNotification({
+                      actorID: input.actorID,
+                      description,
+                      status,
+                      ...extra,
+                    }),
+                  })
+                  .pipe(Effect.ignoreCause({ log: "Warn", message: "actor inbox notification failed" })),
+                bus
+                  .publish(TuiEvent.ToastShow, {
+                    message: `Child "${description}" ${status}`,
+                    variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
+                  })
+                  .pipe(Effect.provideService(InstanceRef, parentInstance))
+                  .pipe(Effect.ignoreCause({ log: "Warn", message: "actor toast notification failed" })),
+              ],
+              { concurrency: "unbounded", discard: true },
+            )
+          })
         const settleFailure = (cause: Cause.Cause<unknown>) =>
           Effect.gen(function* () {
-            if (!(yield* Deferred.isDone(outcome))) {
-              const cancelled = Cause.hasInterruptsOnly(cause)
-              const error = Cause.pretty(cause)
+            const cancelled = Cause.hasInterruptsOnly(cause)
+            const error = Cause.pretty(cause)
+            const status = cancelled ? ("cancelled" as const) : ("failed" as const)
+            const claimed = yield* claimTerminal(key, input.generation, status, "turn", cancelled ? undefined : error)
+            if (!claimed) {
+              yield* Deferred.await(input.generation.terminalDone)
+              const terminal = input.generation.terminal
+              yield* Deferred.succeed(
+                outcome,
+                terminal?.status === "cancelled"
+                  ? { status: "cancelled" as const }
+                  : { status: "failure" as const, error: terminal?.error ?? error },
+              )
+              return
+            }
+            yield* Effect.gen(function* () {
+              yield* actorReg
+                .updateStatus(input.sessionID, input.actorID, {
+                  status: "idle",
+                  lastOutcome: cancelled ? "cancelled" : "failure",
+                  lastError: cancelled ? undefined : error,
+                })
+                .pipe(Effect.ignoreCause)
               yield* notify(cancelled ? "cancelled" : "failed", cancelled ? {} : { error })
               yield* Deferred.succeed(
                 outcome,
                 cancelled ? { status: "cancelled" as const } : { status: "failure" as const, error },
               )
-            }
-            yield* clearActorState(key)
+            }).pipe(Effect.ensuring(settleTerminal(input.generation)))
           })
 
         // Derive actor mode from spawn shape: peer creates a new session, subagent shares parent's
@@ -393,6 +491,12 @@ export const layer = Layer.effect(
         // rewrite session.permission). See spec §Decision. Unknown agent → fail-open (true).
         const forkAgentInfo = yield* agents.get(input.agentType)
         const canWrite = forkAgentInfo ? !Permission.disabled(["write"], forkAgentInfo.permission).has("write") : true
+        const runManagedTurn = <A, E>(turn: Effect.Effect<A, E>, markRunning = true) =>
+          runTurn(input.sessionID, input.actorID, turn, {
+            isCancelled: isCancelled(input.sessionID, input.actorID),
+            finalize: false,
+            markRunning,
+          })
 
         const work = Effect.gen(function* () {
           let finalText: string | undefined
@@ -404,9 +508,7 @@ export const layer = Layer.effect(
 
           while (true) {
             const reentryDecision = iteration > 0 ? lastDecision : undefined
-            const turn = yield* runTurn(
-              input.sessionID,
-              input.actorID,
+            const turn = yield* runManagedTurn(
               runAgentLoop({
                 ...input,
                 task: reentryDecision ? reentryDecision.reason : input.task,
@@ -420,7 +522,6 @@ export const layer = Layer.effect(
                     }
                   : undefined,
               }),
-              { isCancelled: isCancelled(input.sessionID, input.actorID) },
             )
             finalText = turn.finalText
             structured = turn.structured
@@ -479,8 +580,7 @@ export const layer = Layer.effect(
             onSuccess: ({ finalText, structured }) =>
               Effect.gen(function* () {
                 // === COMPLETION GATE (B) + structured parse (A) ===
-                // Delegates the list/decide step to TaskGate.decide so the
-                // logic is shared with the main-session taskGate (prompt.ts).
+                // Delegates the list/decide step to TaskGate.decide.
                 // We retain the runTurn re-entry + delivered-text update here
                 // because that is gate-policy, not list-policy.
                 let deliveredText = finalText
@@ -492,20 +592,16 @@ export const layer = Layer.effect(
                       owner: input.actorID,
                       reactCount: gateIter,
                       maxReact: MAX_TASK_GATE_SUBAGENT_REACT,
-                      mode: "subagent",
                     }).pipe(Effect.provideService(TaskRegistry.Service, taskRegistry))
                     if (!decision.needReentry) break
                     gateIter++
-                    const gateTurn = yield* runTurn(
-                      input.sessionID,
-                      input.actorID,
+                    const gateTurn = yield* runManagedTurn(
                       runAgentLoop({
                         ...input,
                         task: decision.reentryText,
                         source: "hook",
                         provenance: { hookPhase: "post", hookIteration: gateIter, pluginNames: [], hookIDs: [] },
                       }),
-                      { isCancelled: isCancelled(input.sessionID, input.actorID) },
                     ).pipe(
                       Effect.catch(() =>
                         Effect.gen(function* () {
@@ -545,29 +641,50 @@ export const layer = Layer.effect(
                 // notification body (DW spec P3 §5.2); otherwise deliver the gate's
                 // reconciled text. The success outcome carries both the reconciled
                 // text + completion-gate fields AND structured when present.
-                const delivery = yield* Effect.sync(() => {
-                  deliveredActors.add(key)
-                  return cancelledActors.has(key) ? "cancelled" as const : "success" as const
-                })
-                if (delivery === "cancelled") {
-                  yield* commitCancelled()
-                  return
-                }
                 const deliveryText =
                   structured !== undefined ? JSON.stringify(structured) : (reconciledText ?? "(no output)")
-                yield* notify("completed", {
-                  result: deliveryText,
-                  ...(reportedStatus ? { reportedStatus } : {}),
-                  ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
-                })
-                yield* Deferred.succeed(outcome, {
-                  status: "success" as const,
-                  ...(reconciledText !== undefined ? { finalText: reconciledText } : {}),
-                  ...(structured !== undefined ? { structured } : {}),
-                  ...(reportedStatus ? { reportedStatus } : {}),
-                  ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
-                  ...(incompleteTasks.length > 0 ? { incompleteTasks } : {}),
-                })
+                const claimed = yield* claimTerminal(key, input.generation, "completed", "turn")
+                if (!claimed) {
+                  yield* Deferred.await(input.generation.terminalDone)
+                  const terminal = input.generation.terminal
+                  yield* Deferred.succeed(
+                    outcome,
+                    terminal?.status === "cancelled"
+                      ? { status: "cancelled" as const }
+                      : terminal?.status === "failed"
+                        ? { status: "failure" as const, error: terminal.error ?? "unknown" }
+                        : {
+                            status: "success" as const,
+                            ...(reconciledText !== undefined ? { finalText: reconciledText } : {}),
+                            ...(structured !== undefined ? { structured } : {}),
+                          },
+                  )
+                  return
+                }
+                yield* Effect.gen(function* () {
+                  yield* actorReg
+                    .updateStatus(input.sessionID, input.actorID, {
+                      status: "idle",
+                      lastOutcome: "success",
+                      lastError: undefined,
+                    })
+                    .pipe(Effect.ignoreCause)
+                  yield* Effect.sync(() => deliveredActors.set(key, input.generation.generation))
+                  yield* notify("completed", {
+                    result: deliveryText,
+                    ...(reportedStatus ? { reportedStatus } : {}),
+                    ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                  })
+                  yield* settleTerminal(input.generation)
+                  yield* Deferred.succeed(outcome, {
+                    status: "success" as const,
+                    ...(reconciledText !== undefined ? { finalText: reconciledText } : {}),
+                    ...(structured !== undefined ? { structured } : {}),
+                    ...(reportedStatus ? { reportedStatus } : {}),
+                    ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                    ...(incompleteTasks.length > 0 ? { incompleteTasks } : {}),
+                  })
+                }).pipe(Effect.ensuring(settleTerminal(input.generation)))
 
                 // === postStop ReAct loop ===
                 // Caller has already resolved; new finalTexts are not propagated.
@@ -629,9 +746,7 @@ export const layer = Layer.effect(
                   }
 
                   // Run another turn (new finalText is not written back to outcome)
-                  const newTurn = yield* runTurn(
-                    input.sessionID,
-                    input.actorID,
+                  const newTurn = yield* runManagedTurn(
                     runAgentLoop({
                       ...input,
                       task: postReentry.reason,
@@ -643,7 +758,7 @@ export const layer = Layer.effect(
                         hookIDs: postReentry.contributingHookIDs,
                       },
                     }),
-                    { isCancelled: isCancelled(input.sessionID, input.actorID) },
+                    false,
                   ).pipe(
                     // postStop LLM failure: log + break loop, do NOT propagate
                     Effect.catch(() =>
@@ -659,14 +774,16 @@ export const layer = Layer.effect(
 
                   if (newTurn.finalText === undefined) break
                   lastFinalText = newTurn.finalText
-                }
 
+                }
               }),
             onFailure: settleFailure,
           }),
-          Effect.onExit((exit) =>
-            Exit.isFailure(exit) ? settleFailure(exit.cause) : clearActorState(key),
-          ),
+          Effect.onExit((exit) => {
+            if (input.generation.terminal || Exit.isSuccess(exit)) return Effect.void
+            return settleFailure(exit.cause)
+          }),
+          Effect.ensuring(finishForkWork(key, input.generation, input.lifecycle)),
         )
         const boundWork = input.instanceRef
           ? work.pipe(Effect.provideService(InstanceRef, input.instanceRef))
@@ -674,6 +791,36 @@ export const layer = Layer.effect(
         const fiber = yield* boundWork.pipe(Effect.forkIn(scope))
         return { fiber, outcome }
       })
+
+    const abortSetup = (
+      key: string,
+      owner: GenerationOwner,
+      sessionID: SessionID,
+      actorID: string,
+      cause: Cause.Cause<unknown>,
+    ) =>
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const error = Cause.pretty(cause)
+          if (yield* claimTerminal(key, owner, "failed", "turn", error)) {
+            yield* actorReg
+              .updateStatus(sessionID, actorID, {
+                status: "idle",
+                lastOutcome: "failure",
+                lastError: error,
+              })
+              .pipe(Effect.ignoreCause)
+          }
+          yield* settleTerminal(owner)
+          yield* finishGeneration(key, owner)
+          yield* Effect.sync(() => {
+            forkContexts.delete(key)
+            persistentActors.delete(key)
+            deliveredActors.delete(key)
+            generationCounters.delete(key)
+          })
+        }),
+      )
 
     const spawnPeer = Effect.fn("Actor.spawnPeer")(function* (input: SpawnInput) {
       // When the caller gives the child its own directory (e.g. a worktree the
@@ -693,100 +840,120 @@ export const layer = Layer.effect(
         title: `${input.agentType}: ${input.task.slice(0, 40)}`,
         ...(input.cwd ? { directory: input.cwd } : {}),
       })
-      // Mark live before registration so a racing cancel always observes it (see
-      // spawnSubagent). Peer actorID === child session id. Removed in onExit.
-      yield* Effect.sync(() => liveActors.add(actorKey(child.id, child.id)))
-      yield* actorReg.register({
-        sessionID: child.id,
-        actorID: child.id,
-        mode: "peer",
-        parentActorID: input.parentActorID,
-        agent: input.agentType,
-        description: input.description ?? input.agentType,
-        contextMode: input.context,
-        contextWatermark: undefined,
-        background: input.background,
-        lifecycle: input.lifecycle ?? "persistent",
-        tools: input.tools,
-      })
-      if (input.forkContext) {
-        forkContexts.set(actorKey(child.id, child.id), input.forkContext) // peer's actorID === child.id === sessionID
-      }
-      const { fiber, outcome } = yield* forkWork({
-        sessionID: child.id,
-        parentSessionID: input.sessionID,
-        parentActorID: input.parentActorID,
-        actorID: child.id,
-        agentType: input.agentType,
-        task: input.task,
-        description: input.description,
-        background: input.background,
-        model: input.model,
-        lifecycle: input.lifecycle ?? "persistent",
-        task_id: input.task_id,
-        format: input.format,
-        ...(instanceRef ? { instanceRef } : {}),
-      })
+      const key = actorKey(child.id, child.id)
+      const lifecycle = input.lifecycle ?? "persistent"
+      if (lifecycle === "persistent") yield* Effect.sync(() => persistentActors.add(key))
+      // Arm generation 1 before registration so a racing cancel cannot observe
+      // an addressable actor without an owned lifecycle token.
+      const generation = yield* startGeneration(key, "fork")
+      // T42: register the peer's receiver/actor-registry row (session_id ===
+      // actor_id === child.id, mode "peer") SYNCHRONOUSLY here — before spawn
+      // resolves and before the child's first turn. This is the single
+      // spawn-time registration that makes a child addressable the instant
+      // `session create` returns: Inbox.send's ESRCH pre-check (reg.get) and
+      // `session send` both resolve against this row without waiting for the
+      // child to arm anything on its first turn. turn_count/status start at 0/
+      // "pending"; the per-step turn heartbeat (registry.updateTurn) advances
+      // them later. No double-registration: nothing on the first-turn path
+      // (prompt.ts) re-registers a peer — it only reads (reg.get) and updates
+      // (updateTurn/updateStatus). Prerequisite for T43 (--topic reuse).
+      const { fiber, outcome } = yield* Effect.gen(function* () {
+        yield* actorReg.register({
+          sessionID: child.id,
+          actorID: child.id,
+          mode: "peer",
+          parentActorID: input.parentActorID,
+          agent: input.agentType,
+          description: input.description ?? input.agentType,
+          contextMode: input.context,
+          contextWatermark: undefined,
+          background: input.background,
+          lifecycle,
+          tools: input.tools,
+        })
+        if (input.forkContext) forkContexts.set(key, input.forkContext)
+        return yield* forkWork({
+          sessionID: child.id,
+          parentSessionID: input.sessionID,
+          parentActorID: input.parentActorID,
+          actorID: child.id,
+          agentType: input.agentType,
+          task: input.task,
+          description: input.description,
+          background: input.background,
+          model: input.model,
+          lifecycle,
+          generation,
+          task_id: input.task_id,
+          format: input.format,
+          ...(instanceRef ? { instanceRef } : {}),
+        })
+      }).pipe(
+        Effect.catchCause((cause) =>
+          abortSetup(key, generation, child.id, child.id, cause).pipe(Effect.andThen(Effect.failCause(cause))),
+        ),
+      )
       if (!input.background) yield* Fiber.join(fiber).pipe(Effect.ignore)
       return { actorID: child.id, sessionID: child.id, outcome }
     })
 
     const spawnSubagent = Effect.fn("Actor.spawnSubagent")(function* (input: SpawnInput) {
       const actorID = yield* actorReg.allocateActorID(input.sessionID, input.agentType)
-      // Mark live BEFORE the actor becomes observable (registry row below, then the
-      // onActorID reclaim callback) so a cancel racing the spawn always sees it as
-      // live and arms isCancelled. Removed in the work fiber's onExit.
-      yield* Effect.sync(() => liveActors.add(actorKey(input.sessionID, actorID)))
+      const key = actorKey(input.sessionID, actorID)
+      const lifecycle = input.lifecycle ?? "ephemeral"
+      if (lifecycle === "persistent") yield* Effect.sync(() => persistentActors.add(key))
+      const generation = yield* startGeneration(key, "fork")
 
-      const watermark = input.context === "full" ? yield* session.lastMainMessageID(input.sessionID) : undefined
+      const { fiber, outcome } = yield* Effect.gen(function* () {
+        const watermark = input.context === "full" ? yield* session.lastMainMessageID(input.sessionID) : undefined
+        yield* actorReg.register({
+          sessionID: input.sessionID,
+          actorID,
+          mode: "subagent",
+          parentActorID: input.parentActorID,
+          agent: input.agentType,
+          description: input.description ?? input.agentType,
+          contextMode: input.context,
+          contextWatermark: watermark,
+          background: input.background,
+          lifecycle,
+          tools: input.tools,
+        })
 
-      yield* actorReg.register({
-        sessionID: input.sessionID,
-        actorID,
-        mode: "subagent",
-        parentActorID: input.parentActorID,
-        agent: input.agentType,
-        description: input.description ?? input.agentType,
-        contextMode: input.context,
-        contextWatermark: watermark,
-        background: input.background,
-        lifecycle: input.lifecycle ?? "ephemeral",
-        tools: input.tools,
-      })
+        // The actor now EXISTS in the registry. Hand the caller its id before the
+        // work fiber detaches below, so a concurrent reclaim can see it (MR104 #2).
+        // Synchronous + best-effort: a throwing callback must not fail the spawn.
+        if (input.onActorID) yield* Effect.sync(() => input.onActorID!(actorID)).pipe(Effect.ignore)
+        if (input.forkContext) forkContexts.set(key, input.forkContext)
 
-      // The actor now EXISTS in the registry. Hand the caller its id before the
-      // work fiber detaches below, so a concurrent reclaim can see it (MR104 #2).
-      // Synchronous + best-effort: a throwing callback must not fail the spawn.
-      if (input.onActorID) yield* Effect.sync(() => input.onActorID!(actorID)).pipe(Effect.ignore)
-
-      if (input.forkContext) {
-        forkContexts.set(actorKey(input.sessionID, actorID), input.forkContext)
-      }
-
-      // Auto-inject return-format instruction for non-specialized subagents.
-      // Excluded: agents with hardcoded `prompt` (explore/title/summary — own
-      // contracts), checkpoint-writer (special — task is itself a complete
-      // writer-instruction string), and peer mode (routes via spawnPeer).
-      const agentInfo = yield* agents.get(input.agentType)
-      const gateEligible =
-        agentInfo?.mode === "subagent" && !agentInfo?.prompt && input.agentType !== "checkpoint-writer"
-      const taskWithFormat = gateEligible ? input.task + RETURN_FORMAT_INSTRUCTION : input.task
-
-      const { fiber, outcome } = yield* forkWork({
-        sessionID: input.sessionID,
-        parentSessionID: input.parentSessionID ?? input.sessionID,
-        parentActorID: input.parentActorID,
-        actorID,
-        agentType: input.agentType,
-        task: taskWithFormat,
-        description: input.description,
-        background: input.background,
-        model: input.model,
-        lifecycle: input.lifecycle ?? "ephemeral",
-        task_id: input.task_id,
-        gateEligible,
-        format: input.format,
-      })
+        // Auto-inject return-format instruction for non-specialized subagents.
+        // Excluded: agents with hardcoded `prompt` (explore/title/summary — own
+        // contracts), checkpoint-writer (special — task is itself a complete
+        // writer-instruction string), and peer mode (routes via spawnPeer).
+        const agentInfo = yield* agents.get(input.agentType)
+        const gateEligible =
+          agentInfo?.mode === "subagent" && !agentInfo?.prompt && input.agentType !== "checkpoint-writer"
+        return yield* forkWork({
+          sessionID: input.sessionID,
+          parentSessionID: input.parentSessionID ?? input.sessionID,
+          parentActorID: input.parentActorID,
+          actorID,
+          agentType: input.agentType,
+          task: gateEligible ? input.task + RETURN_FORMAT_INSTRUCTION : input.task,
+          description: input.description,
+          background: input.background,
+          model: input.model,
+          lifecycle,
+          generation,
+          task_id: input.task_id,
+          gateEligible,
+          format: input.format,
+        })
+      }).pipe(
+        Effect.catchCause((cause) =>
+          abortSetup(key, generation, input.sessionID, actorID, cause).pipe(Effect.andThen(Effect.failCause(cause))),
+        ),
+      )
       if (input.onReady) yield* Effect.ignore(input.onReady({ actorID, sessionID: input.sessionID }))
       if (!input.background) yield* Fiber.join(fiber).pipe(Effect.ignore)
       return { actorID, sessionID: input.sessionID, outcome }
@@ -797,59 +964,469 @@ export const layer = Layer.effect(
       return yield* spawnSubagent(input)
     })
 
+    // Unified parent notification used by woken persistent turns and by the
+    // explicit cancel owner. Spawn-turn delivery remains in forkWork because it
+    // also resolves AgentOutcome and runs completion-gate reconciliation.
+    const notifyTerminal = (
+      sessionID: SessionID,
+      actorID: string,
+      actor: Actor | undefined,
+      status: "completed" | "failed" | "cancelled",
+      extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string } = {},
+    ) =>
+      Effect.gen(function* () {
+        if (!actor) return
+        if (!actor.background) return
+        if (actor.mode !== "peer" && actor.mode !== "subagent") return
+        if (SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)) return
+        // Resolve the parent session: a peer runs in its own child session (notify
+        // its parentID); a subagent shares the parent's session.
+        const parentSessionID =
+          actor.mode === "peer" ? (yield* session.get(sessionID)).parentID : sessionID
+        if (!parentSessionID) return
+        const parent = yield* session.get(parentSessionID)
+        const parentInstance = yield* Effect.promise(() =>
+          Instance.provide({ directory: parent.directory, fn: () => Instance.current }),
+        )
+        yield* inbox
+          .send({
+            receiverSessionID: parentSessionID,
+            receiverActorID: actor.parentActorID ?? "main",
+            senderSessionID: sessionID,
+            senderActorID: actorID,
+            type: "actor_notification",
+            content: renderActorNotification({
+              actorID,
+              description: actor.description,
+              status,
+              ...extra,
+            }),
+          })
+          .pipe(Effect.ignore)
+        yield* bus
+          .publish(TuiEvent.ToastShow, {
+            message: `Child "${actor.description}" ${status}`,
+            variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
+          })
+          .pipe(Effect.provideService(InstanceRef, parentInstance), Effect.ignoreCause)
+      }).pipe(Effect.catchCause((cause) => Effect.logError(`terminal notify failed: ${cause}`)))
+
+    const runPersistentTurn = Effect.fn("Actor.runPersistentTurn")(function* (input: {
+      sessionID: SessionID
+      actorID: string
+      work: Effect.Effect<MessageV2.WithParts>
+      onInterrupt: Effect.Effect<MessageV2.WithParts>
+      notifyParentOnComplete: boolean
+      inboxID?: string
+    }) {
+      const actor = yield* actorReg.get(input.sessionID, input.actorID)
+      const key = actorKey(input.sessionID, input.actorID)
+      if (!actor || actor.lifecycle !== "persistent" || (actor.mode !== "peer" && actor.mode !== "subagent")) {
+        while (true) {
+          const active = yield* Effect.sync(() => generationOwners.get(key))
+          if (active?.kind === "fork") yield* Deferred.await(active.done)
+          if (input.inboxID && !(yield* inbox.has(input.inboxID))) return yield* input.onInterrupt
+          const result = yield* state.ensureRunning(input.sessionID, input.actorID, input.onInterrupt, input.work)
+          if (!input.inboxID || !(yield* inbox.has(input.inboxID))) return result
+        }
+      }
+      if (actor.status === "idle" && actor.lastOutcome === "cancelled") {
+        yield* inbox.drain(input.sessionID, input.actorID).pipe(Effect.ignore)
+        yield* Effect.sync(() => persistentActors.delete(key))
+        return yield* Effect.interrupt
+      }
+      yield* Effect.sync(() => persistentActors.add(key))
+
+      return yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          while (true) {
+            const ownership = yield* Effect.sync(() => {
+              const cancelling = cancelEpisodes.get(key)
+              if (cancelling) return { _tag: "episode" as const, episode: cancelling }
+              if (!persistentActors.has(key) || cancelledActors.has(key)) {
+                return { _tag: "blocked" as const }
+              }
+              const active = generationOwners.get(key)
+              if (active?.kind === "fork") return { _tag: "fork" as const, active }
+              if (active) return { _tag: "follower" as const, active }
+              const generation = (generationCounters.get(key) ?? 0) + 1
+              generationCounters.set(key, generation)
+              liveActors.set(key, generation)
+              const owner: GenerationOwner = {
+                generation,
+                kind: "wake",
+                done: Deferred.makeUnsafe<void>(),
+                result: Deferred.makeUnsafe<Exit.Exit<MessageV2.WithParts>>(),
+                terminalDone: Deferred.makeUnsafe<void>(),
+              }
+              generationOwners.set(key, owner)
+              return { _tag: "owner" as const, owner }
+            })
+
+            if (ownership._tag === "blocked") return yield* Effect.interrupt
+            if (ownership._tag === "episode") {
+              yield* Deferred.await(ownership.episode.done)
+              if (input.inboxID && (yield* inbox.has(input.inboxID))) continue
+              return yield* Effect.interrupt
+            }
+            if (ownership._tag === "fork") {
+              yield* Deferred.await(ownership.active.done)
+              continue
+            }
+            if (ownership._tag === "follower") {
+              const result = yield* Deferred.await(ownership.active.result!)
+              if (input.inboxID && (yield* inbox.has(input.inboxID))) continue
+              if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
+              return result.value
+            }
+
+            const owner = ownership.owner
+            const guardedWork = Effect.gen(function* () {
+              if (yield* Effect.sync(() => generationOwners.get(key) !== owner || owner.terminal !== undefined)) {
+                return yield* Effect.interrupt
+              }
+              yield* actorReg
+                .updateStatus(input.sessionID, input.actorID, { status: "running" })
+                .pipe(Effect.ignoreCause)
+              return yield* input.work
+            })
+            const result = yield* state
+              .ensureRunning(input.sessionID, input.actorID, input.onInterrupt, guardedWork)
+              .pipe(Effect.interruptible, Effect.exit)
+            const terminalResult = yield* Effect.gen(function* () {
+              const value = Exit.isSuccess(result) ? result.value : undefined
+              const assistant = value?.info.role === "assistant" ? value.info : undefined
+              const effectFailure = Exit.isFailure(result) && !Cause.hasInterruptsOnly(result.cause)
+              const assistantFailure = assistant?.error !== undefined
+              const cancelled =
+                !effectFailure &&
+                !assistantFailure &&
+                (cancelledActors.has(key) || (Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)))
+              const status =
+                effectFailure || assistantFailure
+                  ? ("failed" as const)
+                  : cancelled
+                    ? ("cancelled" as const)
+                    : ("completed" as const)
+              const error = effectFailure
+                ? Cause.pretty(result.cause)
+                : assistantFailure
+                  ? (sessionErrorText(assistant.error) ?? "unknown")
+                  : undefined
+              const claimed = yield* claimTerminal(key, owner, status, "turn", error)
+              if (claimed) {
+                yield* Effect.gen(function* () {
+                  yield* actorReg
+                    .updateStatus(input.sessionID, input.actorID, {
+                      status: "idle",
+                      lastOutcome: status === "completed" ? "success" : status === "failed" ? "failure" : "cancelled",
+                      lastError: status === "failed" ? error : undefined,
+                    })
+                    .pipe(Effect.ignoreCause)
+                  if (input.notifyParentOnComplete) {
+                    const finalText = assistant && value ? assistantFinalText(assistant, value.parts) : undefined
+                    const parsed = parseReturnHeader(finalText)
+                    yield* notifyTerminal(
+                      input.sessionID,
+                      input.actorID,
+                      actor,
+                      status,
+                      status === "completed"
+                        ? {
+                            result: finalText ?? "(no output)",
+                            ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                            ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                          }
+                        : status === "failed"
+                          ? { error }
+                          : {},
+                    )
+                  }
+                }).pipe(Effect.ensuring(settleTerminal(owner)))
+              } else {
+                yield* Deferred.await(owner.terminalDone)
+              }
+              if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
+              return result.value
+            }).pipe(Effect.exit)
+            yield* finishGeneration(key, owner, terminalResult)
+            if (Exit.isFailure(terminalResult)) return yield* Effect.failCause(terminalResult.cause)
+            return terminalResult.value
+          }
+        }),
+      )
+    })
+
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
-        // Arm the cancel flag iff the actor is live, atomically with the liveness
-        // check (so it is never marked after its onExit cleanup → no stale flag) and
-        // BEFORE cascading. `isCancelled` is the mode-agnostic turn-boundary signal
-        // runTurn observes, so BOTH modes arm it: it stops the actor at its next
-        // turn even when there is no busy runner to interrupt — e.g. a cancel
-        // arriving in the idle/gap between preStop/gate/postStop re-entries, or a
-        // parent cancelled while the child cascade is still running. Forced mode
-        // additionally interrupts the current turn immediately below.
         const key = actorKey(sessionID, actorID)
-        const live = yield* Effect.sync(() => {
-          if (!liveActors.has(key)) return false
-          if (deliveredActors.has(key)) return false
+        const ownership = yield* Effect.sync(() => {
+          if (deliveredActors.has(key) && !persistentActors.has(key)) return { _tag: "noop" as const }
+          const activeEpisode = cancelEpisodes.get(key)
+          if (activeEpisode) return { _tag: "follower" as const, episode: activeEpisode }
+          const episode = { id: ++cancelEpisodeID, done: Deferred.makeUnsafe<void>() }
+          cancelEpisodes.set(key, episode)
+          const generation = generationOwners.get(key)
+          if (!generation) return { _tag: "owner" as const, episode, generation, claimed: false }
+          if (generation.terminal) return { _tag: "owner" as const, episode, generation, claimed: false }
+          generation.terminal = { status: "cancelled", owner: "cancel" }
           cancelledActors.add(key)
-          return true
+          return { _tag: "owner" as const, episode, generation, claimed: true }
         })
-        // Cascade regardless — children may be live even when this actor is not.
-        const children = yield* actorReg.listByParent(sessionID, actorID)
-        yield* Effect.forEach(children, (c) => cancel(sessionID, c.actorID, mode), {
-          concurrency: "unbounded",
-          discard: true,
+        if (ownership._tag === "noop") return
+        if (ownership._tag === "follower") {
+          yield* Deferred.await(ownership.episode.done)
+          return
+        }
+
+        const releaseEpisode = Effect.gen(function* () {
+          yield* Effect.sync(() => {
+            if (cancelEpisodes.get(key) === ownership.episode) cancelEpisodes.delete(key)
+          })
+          yield* Deferred.succeed(ownership.episode.done, undefined).pipe(Effect.ignore)
         })
-        // Interrupt the live work: graceful detaches (non-blocking), forced is
-        // immediate. Not-live actors have no local fiber to interrupt.
-        if (live) yield* (mode === "graceful" ? state.cancelActorDetached(sessionID, actorID) : state.cancelActor(sessionID, actorID))
-        // Never clobber an already-delivered or finished terminal outcome. A FRESH
-        // read right before the stamp is the single guard that covers every state:
-        //  - finished / externally-terminal → skip (preserve the outcome);
-        //  - a delivered background actor still running its postStop loop → skip;
-        //  - the between-turns / final-delivery gap → stamp cancelled (the actor is
-        //    still live and not delivered, so cancel must win even if runTurn has
-        //    already written idle/success);
-        //  - running / pending / external-running (non-terminal) → stamp cancelled.
-        const delivered = yield* Effect.sync(() => deliveredActors.has(key))
-        if (delivered) return
-        const existing = yield* actorReg.get(sessionID, actorID)
-        const terminalShouldStay =
-          existing?.status === "idle" &&
-          existing.lastOutcome != null &&
-          (!live || existing.lastOutcome !== "success")
-        if (terminalShouldStay) return
-        yield* actorReg
-          .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
-          .pipe(Effect.ignore)
-        yield* Effect.sync(() => forkContexts.delete(actorKey(sessionID, actorID)))
+        const retire = Effect.sync(() => {
+          forkContexts.delete(key)
+          persistentActors.delete(key)
+          deliveredActors.delete(key)
+          if (!generationOwners.has(key)) generationCounters.delete(key)
+        })
+
+        const settleClaim =
+          ownership.claimed && ownership.generation ? settleTerminal(ownership.generation) : Effect.void
+
+        yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            const children = yield* actorReg.listByParent(sessionID, actorID).pipe(
+              Effect.catchCause((cause) =>
+                Effect.sync(() =>
+                  log.warn("actor child lookup failed during cancel; continuing parent cleanup", {
+                    sessionID,
+                    actorID,
+                    cause: Cause.pretty(cause),
+                  }),
+                ).pipe(Effect.as([] as Actor[])),
+              ),
+            )
+            yield* Effect.forEach(
+              children,
+              (child) =>
+                cancel(sessionID, child.actorID, mode).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.sync(() =>
+                      log.warn("actor child cancellation failed; continuing parent cleanup", {
+                        sessionID,
+                        actorID,
+                        childActorID: child.actorID,
+                        cause: Cause.pretty(cause),
+                      }),
+                    ),
+                  ),
+                ),
+              {
+                concurrency: "unbounded",
+                discard: true,
+              },
+            )
+            if (ownership.generation?.terminal && !ownership.claimed) {
+              yield* Deferred.await(ownership.generation.done)
+              return
+            }
+            yield* (
+              mode === "graceful"
+                ? state.cancelActorDetached(sessionID, actorID)
+                : state.cancelActor(sessionID, actorID)
+            ).pipe(Effect.ignoreCause({ log: "Warn", message: "actor runner interrupt failed during cancel" }))
+            const actor = yield* actorReg.get(sessionID, actorID).pipe(
+              Effect.catchCause((cause) => {
+                log.warn("actor lookup failed during cancel; retrying before cleanup", {
+                  sessionID,
+                  actorID,
+                  cause: Cause.pretty(cause),
+                })
+                return actorReg.get(sessionID, actorID).pipe(
+                  Effect.catchCause((retryCause) =>
+                    Effect.sync(() =>
+                      log.error("actor lookup retry failed during cancel; continuing without notification", {
+                        sessionID,
+                        actorID,
+                        cause: Cause.pretty(retryCause),
+                      }),
+                    ).pipe(Effect.as(undefined)),
+                  ),
+                )
+              }),
+            )
+            if (!actor) {
+              if (actorID === "main") return
+              yield* actorReg
+                .updateStatus(sessionID, actorID, {
+                  status: "idle",
+                  lastOutcome: "cancelled",
+                  lastError: undefined,
+                })
+                .pipe(Effect.ignoreCause)
+              yield* inbox.drain(sessionID, actorID).pipe(Effect.ignoreCause)
+              yield* retire
+              return
+            }
+
+            // Main-session cancellation is an execution concern, never a
+            // persistent-actor retirement. It must not leave a durable tombstone.
+            if (actor.mode === "main") return
+
+            if (ownership.claimed && ownership.generation) {
+              yield* Effect.gen(function* () {
+                yield* actorReg
+                  .updateStatus(sessionID, actorID, {
+                    status: "idle",
+                    lastOutcome: "cancelled",
+                    lastError: undefined,
+                  })
+                  .pipe(Effect.ignoreCause)
+                yield* inbox.drain(sessionID, actorID).pipe(Effect.ignoreCause)
+                yield* notifyTerminal(sessionID, actorID, actor, "cancelled")
+                yield* retire
+              })
+              return
+            }
+
+            const live = generationOwners.has(key)
+            if (actor.lifecycle !== "persistent" && actor.status === "idle" && actor.lastOutcome != null && !live)
+              return
+            if (actor.lifecycle === "persistent" && actor.status === "idle" && actor.lastOutcome === "cancelled") {
+              yield* inbox.drain(sessionID, actorID).pipe(Effect.ignoreCause)
+              yield* retire
+              return
+            }
+            yield* actorReg
+              .updateStatus(sessionID, actorID, {
+                status: "idle",
+                lastOutcome: "cancelled",
+                lastError: undefined,
+              })
+              .pipe(Effect.ignoreCause)
+            yield* inbox.drain(sessionID, actorID).pipe(Effect.ignoreCause)
+            yield* notifyTerminal(sessionID, actorID, actor, "cancelled")
+            yield* retire
+          }).pipe(Effect.ensuring(settleClaim), Effect.ensuring(releaseEpisode)),
+        )
       })
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
       return forkContexts.get(actorKey(sessionID, actorID))
     })
 
-    const impl = Service.of({ spawn, cancel, getForkContext })
+    // === T40 stall watchdog ===
+    // Event-driven stall detection: a background fiber periodically scans active
+    // background actors (ActorRegistry.listActive → pending/running + background),
+    // computes deriveLiveness for each, and when a PEER/subagent flips to
+    // `stalled` (running/pending but now-lastTurnTime > DEFAULT_LIVENESS_STALL_MS
+    // AND turnCount not advancing — deriveLiveness encodes exactly that) pushes
+    // ONE actor_notification{stalled} to its parent. Reuses the notifyTerminal
+    // shape (inbox.send actor_notification + renderActorNotification + a TUI
+    // toast) so stalled joins completed/failed/cancelled on one contract.
+    //
+    // Debounce — the crux: `notified` holds the "sessionID:actorID" of actors we
+    // have ALREADY warned about for their CURRENT stall episode. We emit only on
+    // the not-yet-notified → stalled edge; while it STAYS stalled across ticks it
+    // is in `notified` and we skip. We re-arm (delete the key) the moment the
+    // actor is no longer stalled — it resumed (turnCount advanced so
+    // deriveLiveness reads `progressing`), went terminal, or vanished — so a
+    // later re-stall notifies again. One notification per stall episode.
+    const notified = new Set<string>()
+
+    // Emit the single stalled notification for one actor. Same gating +
+    // parent-resolution as notifyTerminal: background only, peer/subagent only,
+    // exclude SYSTEM_SPAWNED_AGENT_TYPES, address the parent's main inbox.
+    const notifyStalled = (actor: Actor, stalledForMs: number) =>
+      Effect.gen(function* () {
+        if (!actor.background) return
+        if (actor.mode !== "peer" && actor.mode !== "subagent") return
+        if (SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)) return
+        const parentSessionID =
+          actor.mode === "peer" ? (yield* session.get(actor.sessionID)).parentID : actor.sessionID
+        if (!parentSessionID) return
+        yield* inbox
+          .send({
+            receiverSessionID: parentSessionID,
+            receiverActorID: actor.parentActorID ?? "main",
+            senderSessionID: actor.sessionID,
+            senderActorID: actor.actorID,
+            type: "actor_notification",
+            content: renderActorNotification({
+              actorID: actor.actorID,
+              description: actor.description,
+              status: "stalled",
+              stalledForMs,
+            }),
+          })
+          .pipe(Effect.ignore)
+        yield* bus
+          .publish(ActorEvents.ActorStalled, {
+            sessionID: actor.sessionID,
+            actorID: actor.actorID,
+            description: actor.description,
+            lastTurnTime: actor.lastTurnTime,
+            stalledDuration: stalledForMs,
+          })
+          .pipe(Effect.ignore)
+        yield* Effect.promise(() =>
+          Bus.publish(TuiEvent.ToastShow, {
+            message: `Child "${actor.description}" appears stalled`,
+            variant: "info",
+          }),
+        ).pipe(Effect.ignore)
+      }).pipe(Effect.catchCause((cause) => Effect.logError(`stall notify failed: ${cause}`)))
+
+    const scanStalled = Effect.gen(function* () {
+      const now = Date.now()
+      const active = yield* actorReg.listActive().pipe(Effect.orElseSucceed(() => [] as Actor[]))
+      const seen = new Set<string>()
+      for (const actor of active) {
+        const key = `${actor.sessionID}:${actor.actorID}`
+        seen.add(key)
+        const live = deriveLiveness(actor, now)
+        if (live === "stalled") {
+          if (notified.has(key)) continue // already warned this episode — debounce
+          notified.add(key)
+          yield* notifyStalled(actor, now - actor.lastTurnTime)
+          continue
+        }
+        // Not stalled (progressing/terminal) → re-arm so a future re-stall notifies.
+        notified.delete(key)
+      }
+      // Drop debounce keys for actors that fell out of listActive entirely
+      // (went terminal / row gone) so the set can't grow unbounded and a
+      // recycled id re-arms cleanly.
+      for (const key of notified) if (!seen.has(key)) notified.delete(key)
+    }).pipe(Effect.catchCause((cause) => Effect.logError(`stall watchdog scan failed: ${cause}`)))
+
+    // Fork the watchdog into the instance (layer) scope. CRITICAL (T41 lesson):
+    // once the fiber detaches, Instance.current ALS context is lost, so
+    // actorReg.listActive / inbox.send → Database.use → Client() →
+    // InstanceState.bind would throw NotFound(instance). We capture the instance
+    // context that is ALS-bound HERE at layer-build time and re-provide it via
+    // InstanceRef, whose fallback path InstanceState.bind reads off the fiber
+    // context. `undefined` (no instance at build, e.g. some test harnesses) is a
+    // safe no-op — Database.use then takes its own NotFound fallback.
+    const watchdogInstance = yield* Effect.sync(() => {
+      try {
+        return Instance.current
+      } catch {
+        return undefined
+      }
+    })
+    yield* scanStalled.pipe(
+      Effect.repeat(Schedule.spaced(WATCHDOG_SCAN_INTERVAL_MS)),
+      Effect.provideService(InstanceRef, watchdogInstance),
+      Effect.ignore,
+      Effect.forkIn(scope),
+    )
+
+    const impl = Service.of({ spawn, cancel, getForkContext, runPersistentTurn, scanStalledOnce: () => scanStalled })
+    const restorePromptActor = sessionPrompt.bindActor?.(impl)
+    const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it
     // without forming a layer cycle. See spawn-ref.ts for rationale.
     // Save the previous binding so the finalizer can restore it: when the same
@@ -861,6 +1438,8 @@ export const layer = Layer.effect(
     spawnRef.current = impl
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
+        restoreInboxPrompt?.()
+        restorePromptActor?.()
         if (spawnRef.current === impl) spawnRef.current = prevSpawnRef
       }),
     )

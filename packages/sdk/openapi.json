@@ -11823,6 +11823,12 @@
               }
             },
             "required": ["start", "end"]
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilePart"
+            }
           }
         },
         "required": ["status", "input", "error", "time"]

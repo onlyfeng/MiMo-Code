@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect } from "bun:test"
-import { Deferred, Effect, Layer } from "effect"
+import { Deferred, Effect, Exit, Layer } from "effect"
 import z from "zod"
 import { schema as transformSchema } from "../../src/provider/transform"
 import { Agent } from "../../src/agent/agent"
@@ -20,6 +20,7 @@ import { TaskRegistry } from "../../src/task/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import type { SpawnInput, AgentOutcome } from "../../src/actor/spawn"
+import { prefixCaptureRef, type PrefixCaptureFn } from "../../src/session/prefix-capture-ref"
 import { Team } from "../../src/team"
 import { Truncate } from "../../src/tool"
 import { ToolRegistry } from "../../src/tool"
@@ -27,12 +28,15 @@ import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 let prevSpawnRef: typeof spawnRef.current
+let prevPrefixCaptureRef: typeof prefixCaptureRef.current
 beforeAll(() => {
   prevSpawnRef = spawnRef.current
+  prevPrefixCaptureRef = prefixCaptureRef.current
 })
 
 afterEach(async () => {
   spawnRef.current = prevSpawnRef
+  prefixCaptureRef.current = prevPrefixCaptureRef
   await Instance.disposeAll()
 })
 
@@ -707,6 +711,145 @@ describe("Actor tool subagent_type enum (F36)", () => {
   )
 })
 
+describe("Actor tool full context", () => {
+  it.live("captures the caller-visible prefix at the context watermark", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        let capturedInput: SpawnInput | undefined
+        let capturedPrefixInput: Parameters<PrefixCaptureFn>[0] | undefined
+        yield* installMockSpawn((input) => {
+          capturedInput = input
+        })
+
+        const { chat, assistant } = yield* seed()
+        const session = yield* Session.Service
+        const watermark = yield* session.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          time: { created: Date.now() + 1 },
+        })
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          messageID: watermark.id,
+          sessionID: chat.id,
+          type: "text",
+          text: "visible after the tool-call message",
+        })
+        const messages = yield* session.messages({ sessionID: chat.id })
+        const inheritedMessages = [{ role: "user" as const, content: "captured parent prefix" } as never]
+        prefixCaptureRef.current = (input) =>
+          Effect.sync(() => {
+            capturedPrefixInput = input
+            return {
+              system: ["captured system"],
+              tools: {},
+              inheritedMessages,
+              parentPermission: [],
+            }
+          })
+
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+        yield* def.execute(
+          {
+            operation: {
+              action: "run",
+              description: "inspect with context",
+              prompt: "continue from the visible transcript",
+              subagent_type: "general",
+              context: "full",
+            },
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: {},
+            messages,
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(capturedPrefixInput).toEqual({
+          sessionID: chat.id,
+          agentName: "build",
+          providerID: ref.providerID,
+          modelID: ref.modelID,
+          msgs: messages,
+        })
+        expect(capturedInput?.forkContext).toEqual({
+          system: ["captured system"],
+          tools: {},
+          inheritedMessages,
+          parentPermission: [],
+          watermarkMsgID: watermark.id,
+          model: ref,
+        })
+      }),
+    ),
+  )
+
+  for (const scenario of ["missing capture ref", "empty inherited messages"] as const) {
+    it.live(`${scenario} fails before spawning`, () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          let spawnCount = 0
+          yield* installMockSpawn(() => {
+            spawnCount += 1
+          })
+          const { chat, assistant } = yield* seed()
+          const session = yield* Session.Service
+          const messages = yield* session.messages({ sessionID: chat.id })
+          prefixCaptureRef.current =
+            scenario === "missing capture ref"
+              ? undefined
+              : () =>
+                  Effect.succeed({
+                    system: ["captured system"],
+                    tools: {},
+                    inheritedMessages: [],
+                    parentPermission: [],
+                  })
+
+          const tool = yield* ActorTool
+          const def = yield* tool.init()
+          const exit = yield* def
+            .execute(
+              {
+                operation: {
+                  action: "run",
+                  description: "inspect with context",
+                  prompt: "continue from the visible transcript",
+                  subagent_type: "general",
+                  context: "full",
+                },
+              },
+              {
+                sessionID: chat.id,
+                messageID: assistant.id,
+                agent: "build",
+                abort: new AbortController().signal,
+                extra: {},
+                messages,
+                metadata: () => Effect.void,
+                ask: () => Effect.void,
+              },
+            )
+            .pipe(Effect.exit)
+
+          expect(Exit.isFailure(exit)).toBe(true)
+          expect(spawnCount).toBe(0)
+        }),
+      ),
+    )
+  }
+})
+
 describe("Actor tool task_id degradation", () => {
   it.live("malformed task_id degrades to ad-hoc with a notice", () =>
     provideTmpdirInstance(() =>
@@ -857,7 +1000,7 @@ describe("Actor tool task_id degradation", () => {
 
         expect(result.output).toContain("not-a-task")
         expect(result.output.toLowerCase()).toContain("ad-hoc")
-        expect(result.output).toContain("Background actor started")
+        expect(result.output).toContain("Background sub-session started")
       }),
     ),
   )

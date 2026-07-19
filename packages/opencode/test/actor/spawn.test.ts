@@ -27,7 +27,6 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
-import { TaskGateState } from "../../src/task/gate-state"
 import { SessionStatus } from "../../src/session/status"
 import { Skill } from "../../src/skill"
 import { SystemPrompt } from "../../src/session/system"
@@ -36,6 +35,7 @@ import { ToolRegistry } from "../../src/tool"
 import { Truncate } from "../../src/tool"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
+import { InboxArrived } from "../../src/actor/events"
 import { Actor } from "../../src/actor/spawn"
 import { Worktree } from "../../src/worktree"
 import { Memory } from "../../src/memory"
@@ -59,8 +59,12 @@ import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
 import { reply } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
+import { inboxServiceRef } from "../../src/inbox/inbox-ref"
+
+let agentLookupFailure: { agent: string; armed: boolean } | undefined
 
 afterEach(async () => {
+  agentLookupFailure = undefined
   await Instance.disposeAll()
 })
 
@@ -121,12 +125,27 @@ const run = SessionRunState.layer.pipe(Layer.provide(status))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 
 function makeLayer(pluginLayer = Plugin.defaultLayer) {
+  const controlledAgent = Layer.effect(
+    AgentSvc.Service,
+    Effect.gen(function* () {
+      const base = yield* AgentSvc.Service
+      return AgentSvc.Service.of({
+        ...base,
+        get: (agent) => {
+          const failure = agentLookupFailure
+          if (!failure?.armed || failure.agent !== agent) return base.get(agent)
+          failure.armed = false
+          return Effect.die(new Error("deterministic agent lookup setup failure"))
+        },
+      })
+    }),
+  ).pipe(Layer.provide(AgentSvc.defaultLayer))
   const deps = Layer.mergeAll(
     Session.defaultLayer,
     Snapshot.defaultLayer,
     LLM.defaultLayer,
     Env.defaultLayer,
-    AgentSvc.defaultLayer,
+    controlledAgent,
     Command.defaultLayer,
     Permission.defaultLayer,
     pluginLayer,
@@ -167,7 +186,6 @@ function makeLayer(pluginLayer = Plugin.defaultLayer) {
   const prune = SessionPrune.layer.pipe(Layer.provide(checkpoint), Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
     Layer.provide(Goal.defaultLayer),
-    Layer.provide(TaskGateState.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(summary),
     Layer.provide(checkpoint),
@@ -200,6 +218,7 @@ function makeLayer(pluginLayer = Plugin.defaultLayer) {
 const it = testEffect(makeLayer())
 let preStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
 let postStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
+let postStopReentry: { calls: number; finished: Deferred.Deferred<void> } | undefined
 const pausePreStopPlugin = Layer.succeed(
   Plugin.Service,
   Plugin.Service.of({
@@ -218,6 +237,19 @@ const pausePreStopPlugin = Layer.succeed(
       }),
     triggerActorPostStop: () =>
       Effect.gen(function* () {
+        const reentry = postStopReentry
+        if (reentry) {
+          reentry.calls++
+          if (reentry.calls === 1) {
+            return {
+              continue: true,
+              reason: "run one postStop follow-up turn",
+              contributingPluginNames: ["poststop-registry-test"],
+              contributingHookIDs: ["poststop-registry-test"],
+            }
+          }
+          yield* Deferred.succeed(reentry.finished, undefined).pipe(Effect.ignore)
+        }
         const pause = postStopPause
         if (pause) {
           yield* Deferred.succeed(pause.hit, undefined)
@@ -314,6 +346,64 @@ describe("Actor.spawn peer mode", () => {
         const row = yield* reg.get(result.sessionID, result.actorID)
         expect(row?.mode).toBe("peer")
         expect(row?.agent).toBe("build")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
+  // T42: a freshly-created peer is addressable the instant spawn returns —
+  // spawnPeer registers the receiver/actor-registry row (session_id === actor_id
+  // === child.id, mode "peer") SYNCHRONOUSLY before spawn resolves, so Inbox.send's
+  // ESRCH pre-check (reg.get) resolves even against a turnCount-0, never-run child.
+  // Guards the T43 --topic reuse prerequisite. LLM is hung so the child's first
+  // turn never runs: the row can ONLY come from spawn-time registration.
+  it.live("send to a just-created, never-run peer (turnCount 0) does NOT ESRCH and enqueues", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const reg = yield* ActorRegistry.Service
+        const inbox = inboxServiceRef.current!
+
+        const parent = yield* session.create({
+          title: "T42 parent",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        // Hang so the child's spawn turn never completes — the receiver row must
+        // exist purely from spawn-time registration, not first-turn arming.
+        yield* llm.hang
+
+        const result = yield* actor.spawn({
+          mode: "peer",
+          sessionID: parent.id,
+          agentType: "build",
+          task: "peer task",
+          context: "none",
+          tools: ["read"],
+          background: true,
+          model: ref,
+        })
+
+        // Row present at spawn: pending, zero turns (never ran).
+        const row = yield* reg.get(result.sessionID, result.actorID)
+        expect(row?.mode).toBe("peer")
+        expect(row?.turnCount).toBe(0)
+        expect(row?.status).toBe("pending")
+
+        // Both addressing forms resolve without ESRCH and enqueue a durable row.
+        const sent = yield* inbox
+          .send({
+            receiverSessionID: result.sessionID,
+            receiverActorID: result.actorID,
+            senderSessionID: parent.id,
+            senderActorID: "main",
+            content: "relayed while never-run",
+          })
+          .pipe(Effect.exit)
+        expect(sent._tag).toBe("Success")
+        if (sent._tag === "Success") expect(sent.value.inboxID).toBeTruthy()
+
+        yield* actor.cancel(result.sessionID, result.actorID, "forced")
       }),
       { git: true, config: providerCfg },
     ),
@@ -566,7 +656,9 @@ describe("Actor.cancel", () => {
               orElse: () => Effect.fail(new Error("timed out waiting for actor.preStop pause")),
             }),
           )
-          expect((yield* reg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("success")
+          const paused = yield* reg.get(result.sessionID, result.actorID)
+          expect(paused?.status).toBe("running")
+          expect(paused?.lastOutcome).toBeUndefined()
 
           yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(
             Effect.timeoutOrElse({
@@ -781,6 +873,60 @@ describe("Actor.spawn description field (F2a)", () => {
 })
 
 describe("Actor forkContext lifecycle", () => {
+  it.live(
+    "persistent setup failure releases generation and forkContext ownership before a later cancel",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* () {
+          const actor = yield* Actor.Service
+          const session = yield* Session.Service
+          const reg = yield* ActorRegistry.Service
+          const parent = yield* session.create({
+            title: "persistent setup failure",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          const forkContext = {
+            system: ["setup-failure-context"],
+            tools: {},
+            inheritedMessages: [],
+            parentPermission: [],
+            watermarkMsgID: MessageID.ascending(),
+            model: ref,
+          }
+          agentLookupFailure = { agent: "build", armed: true }
+
+          const exit = yield* actor
+            .spawn({
+              mode: "peer",
+              sessionID: parent.id,
+              agentType: "build",
+              task: "fail before the actor fiber is established",
+              description: "setup failure peer",
+              context: "full",
+              tools: ["read"],
+              background: true,
+              model: ref,
+              forkContext,
+            })
+            .pipe(Effect.exit)
+          expect(exit._tag).toBe("Failure")
+
+          const children = yield* session.children(parent.id)
+          expect(children).toHaveLength(1)
+          const child = children[0]
+          expect(yield* actor.getForkContext(child.id, child.id)).toBeUndefined()
+          const failed = yield* reg.get(child.id, child.id)
+          expect(failed?.status).toBe("idle")
+          expect(failed?.lastOutcome).toBe("failure")
+
+          yield* actor.cancel(child.id, child.id, "forced").pipe(Effect.timeout("5 seconds"))
+          expect((yield* reg.get(child.id, child.id))?.lastOutcome).toBe("cancelled")
+        }),
+        { git: true, config: providerCfg },
+      ),
+    10_000,
+  )
+
   it.live("forkContext is cleared after actor is cancelled (cancel path)", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -874,11 +1020,32 @@ describe("Actor forkContext lifecycle", () => {
             forkContext,
           })
 
-          const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("1 second"))
+          yield* llm.wait(1).pipe(
+            Effect.timeoutOrElse({
+              duration: "3 seconds",
+              orElse: () => Effect.fail(new Error("timed out waiting for the first test-LLM request")),
+            }),
+          )
+          const outcome = yield* Deferred.await(result.outcome).pipe(
+            Effect.timeoutOrElse({
+              duration: "1 second",
+              orElse: () => Effect.fail(new Error("timed out waiting for delivered actor outcome")),
+            }),
+          )
           expect(outcome.status).toBe("success")
-          yield* Deferred.await(hit).pipe(Effect.timeout("1 second"))
+          yield* Deferred.await(hit).pipe(
+            Effect.timeoutOrElse({
+              duration: "1 second",
+              orElse: () => Effect.fail(new Error("timed out waiting for actor.postStop pause")),
+            }),
+          )
 
-          yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.timeout("1 second"))
+          yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(
+            Effect.timeoutOrElse({
+              duration: "1 second",
+              orElse: () => Effect.fail(new Error("timed out waiting for delivered actor no-op cancellation")),
+            }),
+          )
           expect((yield* actor.getForkContext(result.sessionID, result.actorID))?.system).toEqual(["test-system"])
 
           yield* Deferred.succeed(release, undefined)
@@ -886,6 +1053,239 @@ describe("Actor forkContext lifecycle", () => {
         { git: true, config: providerCfg },
       )
     }),
+    // above bun's 5s default so the stage-specific timeouts fire first and name the stuck stage
+    15_000,
+  )
+
+  pauseIt.live(
+    "persistent inbox wake waits for initial postStop to finish and then runs without a third wake",
+    () =>
+      Effect.gen(function* () {
+        const hit = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        postStopPause = { hit, release }
+        yield* Effect.addFinalizer(() =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(release, undefined).pipe(Effect.ignore)
+            yield* Effect.sync(() => {
+              postStopPause = undefined
+            })
+          }),
+        )
+        yield* provideTmpdirServer(
+          Effect.fnUntraced(function* ({ llm }) {
+            const actor = yield* Actor.Service
+            const actorReg = yield* ActorRegistry.Service
+            const inbox = inboxServiceRef.current
+            if (!inbox) return yield* Effect.die("inbox service was not initialized")
+            const session = yield* Session.Service
+            const parent = yield* session.create({
+              title: "persistent-poststop-wake",
+              permission: [{ permission: "*", pattern: "*", action: "allow" }],
+            })
+
+            yield* llm.text("spawn turn complete")
+            const wokenStarted = yield* Deferred.make<void>()
+            let wokenRequests = 0
+            yield* llm.textMatch((request) => {
+              if (!JSON.stringify(request.body).includes("wake-after-poststop")) return false
+              wokenRequests++
+              Effect.runFork(Deferred.succeed(wokenStarted, undefined))
+              return true
+            }, "woken turn complete")
+
+            const result = yield* actor.spawn({
+              mode: "peer",
+              sessionID: parent.id,
+              agentType: "build",
+              task: "stand by after the first turn",
+              description: "postStop-serialized peer",
+              context: "none",
+              tools: ["read"],
+              background: true,
+              model: ref,
+            })
+            expect((yield* Deferred.await(result.outcome)).status).toBe("success")
+            yield* Deferred.await(hit).pipe(
+              Effect.timeoutOrElse({
+                duration: "2 seconds",
+                orElse: () => Effect.fail(new Error("timed out waiting for persistent actor.postStop pause")),
+              }),
+            )
+
+            yield* inbox
+              .send({
+                receiverSessionID: result.sessionID,
+                receiverActorID: result.actorID,
+                senderSessionID: parent.id,
+                senderActorID: "main",
+                content: "wake-after-poststop",
+              })
+              .pipe(Effect.orDie)
+
+            const startedBeforeRelease = yield* Deferred.await(wokenStarted).pipe(
+              Effect.as(true),
+              Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.succeed(false) }),
+            )
+            expect(startedBeforeRelease).toBe(false)
+            expect((yield* actorReg.get(result.sessionID, result.actorID))?.status).not.toBe("running")
+
+            yield* Deferred.succeed(release, undefined)
+            yield* Deferred.await(wokenStarted).pipe(Effect.timeout("5 seconds"))
+            expect(wokenRequests).toBe(1)
+          }),
+          { git: true, config: providerCfg },
+        )
+      }),
+    10_000,
+  )
+
+  pauseIt.live(
+    "ephemeral inbox wake waits for generation done and consumes its row without duplicate notification",
+    () =>
+      Effect.gen(function* () {
+        const hit = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        postStopPause = { hit, release }
+        yield* Effect.addFinalizer(() =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(release, undefined).pipe(Effect.ignore)
+            yield* Effect.sync(() => {
+              postStopPause = undefined
+            })
+          }),
+        )
+        yield* provideTmpdirServer(
+          Effect.fnUntraced(function* ({ llm }) {
+            const actor = yield* Actor.Service
+            const bus = yield* Bus.Service
+            const inbox = inboxServiceRef.current
+            if (!inbox) return yield* Effect.die("inbox service was not initialized")
+            const session = yield* Session.Service
+            const parent = yield* session.create({
+              title: "ephemeral-poststop-wake",
+              permission: [{ permission: "*", pattern: "*", action: "allow" }],
+            })
+            let notifications = 0
+            const off = yield* bus.subscribeCallback(InboxArrived, (event) => {
+              if (event.properties.receiverSessionID !== parent.id) return
+              if (event.properties.receiverActorID !== "main") return
+              if (event.properties.type !== "actor_notification") return
+              notifications++
+            })
+            yield* Effect.addFinalizer(() => Effect.sync(off))
+
+            yield* llm.text("spawn turn complete")
+            const wokenStarted = yield* Deferred.make<void>()
+            let wokenRequests = 0
+            yield* llm.textMatch((request) => {
+              if (!JSON.stringify(request.body).includes("ephemeral-wake-after-poststop")) return false
+              wokenRequests++
+              Effect.runFork(Deferred.succeed(wokenStarted, undefined))
+              return true
+            }, "woken turn complete")
+
+            const result = yield* actor.spawn({
+              mode: "subagent",
+              sessionID: parent.id,
+              agentType: "build",
+              task: "finish before accepting the queued follow-up",
+              description: "postStop-serialized ephemeral",
+              context: "none",
+              tools: ["read"],
+              background: true,
+              lifecycle: "ephemeral",
+              model: ref,
+            })
+            expect((yield* Deferred.await(result.outcome)).status).toBe("success")
+            yield* Deferred.await(hit).pipe(
+              Effect.timeoutOrElse({
+                duration: "2 seconds",
+                orElse: () => Effect.fail(new Error("timed out waiting for ephemeral actor.postStop pause")),
+              }),
+            )
+            expect(notifications).toBe(1)
+
+            const sent = yield* inbox
+              .send({
+                receiverSessionID: result.sessionID,
+                receiverActorID: result.actorID,
+                senderSessionID: parent.id,
+                senderActorID: "main",
+                content: "ephemeral-wake-after-poststop",
+              })
+              .pipe(Effect.orDie)
+
+            const startedBeforeRelease = yield* Deferred.await(wokenStarted).pipe(
+              Effect.as(true),
+              Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.succeed(false) }),
+            )
+            expect(startedBeforeRelease).toBe(false)
+            expect(yield* inbox.has(sent.inboxID)).toBe(true)
+
+            yield* Deferred.succeed(release, undefined)
+            yield* Deferred.await(wokenStarted).pipe(
+              Effect.timeoutOrElse({
+                duration: "5 seconds",
+                orElse: () => Effect.fail(new Error("timed out waiting for serialized ephemeral wake request")),
+              }),
+            )
+
+            expect(wokenRequests).toBe(1)
+            expect(yield* inbox.has(sent.inboxID)).toBe(false)
+            expect(notifications).toBe(1)
+          }),
+          { git: true, config: providerCfg },
+        )
+      }),
+    15_000,
+  )
+
+  pauseIt.live(
+    "postStop reentry cannot overwrite the completed registry state with running",
+    () =>
+      Effect.gen(function* () {
+        const finished = yield* Deferred.make<void>()
+        postStopReentry = { calls: 0, finished }
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            postStopReentry = undefined
+          }),
+        )
+        yield* provideTmpdirServer(
+          Effect.fnUntraced(function* ({ llm }) {
+            const actor = yield* Actor.Service
+            const actorReg = yield* ActorRegistry.Service
+            const session = yield* Session.Service
+            const parent = yield* session.create({
+              title: "postStop registry terminal ownership",
+              permission: [{ permission: "*", pattern: "*", action: "allow" }],
+            })
+
+            yield* llm.text("initial turn complete")
+            yield* llm.text("postStop follow-up complete")
+            const result = yield* actor.spawn({
+              mode: "peer",
+              sessionID: parent.id,
+              agentType: "build",
+              task: "complete and run one postStop follow-up",
+              description: "postStop registry peer",
+              context: "none",
+              tools: ["read"],
+              background: true,
+              model: ref,
+            })
+
+            expect((yield* Deferred.await(result.outcome).pipe(Effect.timeout("2 seconds"))).status).toBe("success")
+            yield* Deferred.await(finished).pipe(Effect.timeout("5 seconds"))
+            const row = yield* actorReg.get(result.sessionID, result.actorID)
+            expect(row?.status).toBe("idle")
+            expect(row?.lastOutcome).toBe("success")
+          }),
+          { git: true, config: providerCfg },
+        )
+      }),
+    10_000,
   )
 })
 

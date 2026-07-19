@@ -1,8 +1,10 @@
 import { Worktree } from "../../src/worktree"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
-import { expect } from "bun:test"
-import { Cause, Effect, Exit, Fiber, Layer } from "effect"
+import { afterEach, expect } from "bun:test"
+import { dynamicTool, jsonSchema, type Tool as AITool } from "ai"
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
 import { mkdir } from "fs/promises"
 import { Agent as AgentSvc } from "../../src/agent/agent"
@@ -31,7 +33,6 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
-import { TaskGateState } from "../../src/task/gate-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { Skill } from "../../src/skill"
@@ -59,6 +60,10 @@ import { provideTmpdirInstance, provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
+import { inboxServiceRef } from "../../src/inbox/inbox-ref"
+import { InboxTable } from "../../src/inbox/inbox.sql"
+import { Metrics } from "../../src/metrics"
+import { Database } from "../../src/storage"
 
 void Log.init({ print: false })
 
@@ -121,13 +126,13 @@ function errorTool(parts: MessageV2.Part[]) {
   return part?.state.status === "error" ? (part as ErrorToolPart) : undefined
 }
 
-function makeMcp(input?: { resourceText?: string }) {
+function mcpLayer(tools: () => Record<string, AITool> = () => ({}), input?: { resourceText?: string }) {
   return Layer.succeed(
     MCP.Service,
     MCP.Service.of({
       status: () => Effect.succeed({}),
       clients: () => Effect.succeed({}),
-      tools: () => Effect.succeed({}),
+      tools: () => Effect.sync(tools),
       prompts: () => Effect.succeed({}),
       resources: () => Effect.succeed({}),
       add: () => Effect.succeed({ status: { status: "disabled" as const } }),
@@ -150,6 +155,7 @@ function makeMcp(input?: { resourceText?: string }) {
     }),
   )
 }
+const mcp = mcpLayer()
 
 const lsp = Layer.succeed(
   LSP.Service,
@@ -172,10 +178,64 @@ const lsp = Layer.succeed(
 )
 
 const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
-const run = SessionRunState.layer.pipe(Layer.provide(status))
+const baseRun = SessionRunState.layer.pipe(Layer.provide(status))
+let lateRunGate:
+  | {
+      sessionID: SessionID
+      actorID: string
+      ownerArmed: boolean
+      followerArmed: boolean
+      ownerExit: Deferred.Deferred<void>
+      releaseOwner: Deferred.Deferred<void>
+      followerAttached: Deferred.Deferred<void>
+    }
+  | undefined
+const run = Layer.effect(
+  SessionRunState.Service,
+  Effect.gen(function* () {
+    const state = yield* SessionRunState.Service
+    return SessionRunState.Service.of({
+      ...state,
+      ensureRunning: (sessionID, actorID, onInterrupt, work) => {
+        const gate = lateRunGate
+        if (!gate || gate.sessionID !== sessionID || gate.actorID !== actorID) {
+          return state.ensureRunning(sessionID, actorID, onInterrupt, work)
+        }
+        if (gate.ownerArmed) {
+          gate.ownerArmed = false
+          return state.ensureRunning(
+            sessionID,
+            actorID,
+            onInterrupt,
+            work.pipe(
+              Effect.ensuring(
+                Deferred.succeed(gate.ownerExit, undefined).pipe(
+                  Effect.andThen(Deferred.await(gate.releaseOwner)),
+                ),
+              ),
+            ),
+          )
+        }
+        if (gate.followerArmed) {
+          gate.followerArmed = false
+          return Effect.gen(function* () {
+            const fiber = yield* Effect.forkChild(state.ensureRunning(sessionID, actorID, onInterrupt, work), {
+              startImmediately: true,
+            })
+            yield* Deferred.succeed(gate.followerAttached, undefined)
+            return yield* Fiber.join(fiber)
+          })
+        }
+        return state.ensureRunning(sessionID, actorID, onInterrupt, work)
+      },
+    })
+  }),
+).pipe(Layer.provide(baseRun))
+afterEach(() => {
+  lateRunGate = undefined
+})
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
-function makeHttp(input?: { actor?: boolean; mcpResourceText?: string }) {
-  const mcp = makeMcp({ resourceText: input?.mcpResourceText })
+function makeHttp(mcpService = mcp, input?: { actor?: boolean }) {
   const taskRegistry = ActorRegistry.defaultLayer
   const deps = Layer.mergeAll(
     Session.defaultLayer,
@@ -189,7 +249,7 @@ function makeHttp(input?: { actor?: boolean; mcpResourceText?: string }) {
     Config.defaultLayer,
     ProviderSvc.defaultLayer,
     lsp,
-    mcp,
+    mcpService,
     AppFileSystem.defaultLayer,
     status,
     taskRegistry,
@@ -243,7 +303,6 @@ function makeHttp(input?: { actor?: boolean; mcpResourceText?: string }) {
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
     Layer.provide(Goal.defaultLayer),
-    Layer.provide(TaskGateState.defaultLayer),
     Layer.provide(TaskRegistry.defaultLayer),
     Layer.provide(SchedulerDefaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
@@ -273,9 +332,61 @@ function makeHttp(input?: { actor?: boolean; mcpResourceText?: string }) {
 }
 
 const it = testEffect(makeHttp())
-const itActor = testEffect(makeHttp({ actor: true }))
+const itActor = testEffect(makeHttp(mcp, { actor: true }))
 const longMcpResourceText = "x".repeat(60 * 1024)
-const itMcp = testEffect(makeHttp({ mcpResourceText: longMcpResourceText }))
+const itMcp = testEffect(makeHttp(mcpLayer(() => ({}), { resourceText: longMcpResourceText })))
+const mcpLegacyMetadata = { interrupted: true, output: "must not become a successful result" }
+const mcpErrorImage = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+const mcpErrorAudio = "UklGRiUAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQEAAACA"
+const mcpErrorBinary = "AQIDBAUGBwgJ"
+const mcpErrorImageURL = `data:image/png;base64,${mcpErrorImage}`
+const mcpErrorResult: CallToolResult = {
+  content: [
+    { type: "text", text: "Message was not sent" },
+    { type: "image", data: mcpErrorImage, mimeType: "image/png" },
+    {
+      type: "resource",
+      resource: {
+        uri: "mcp://diagnostic.txt",
+        text: "Resource diagnostic",
+        mimeType: "text/plain",
+      },
+    },
+    { type: "audio", data: mcpErrorAudio, mimeType: "audio/wav" },
+    {
+      type: "resource",
+      resource: {
+        uri: "mcp://diagnostic.bin",
+        blob: mcpErrorBinary,
+      },
+    },
+  ],
+  structuredContent: { sent: false, reason: "composer rejected the request" },
+  isError: true,
+  _meta: { privateToken: "do-not-send-to-model" },
+  metadata: mcpLegacyMetadata,
+}
+const mcpSuccessResult: CallToolResult = {
+  content: [{ type: "text", text: "Window updated" }],
+  structuredContent: { changed: true, windowID: 42 },
+  _meta: { privateToken: "success-meta-is-client-only" },
+}
+const mcpIt = testEffect(
+  makeHttp(
+    mcpLayer(() => ({
+      mcp_result: dynamicTool({
+        description: "Return a standard MCP tool execution error",
+        inputSchema: jsonSchema({ type: "object", properties: {}, additionalProperties: false }),
+        execute: async () => mcpErrorResult,
+      }),
+      mcp_success: dynamicTool({
+        description: "Return a standard structured MCP success result",
+        inputSchema: jsonSchema({ type: "object", properties: {}, additionalProperties: false }),
+        execute: async () => mcpSuccessResult,
+      }),
+    })),
+  ),
+)
 const unix = process.platform !== "win32" ? it.live : it.live.skip
 
 // Config that registers a custom "test" provider with a "test-model" model
@@ -418,6 +529,44 @@ function maxModeLastStepProviderCfg(url: string) {
   }
 }
 
+function builtInMaxModeLastStepProviderCfg(url: string) {
+  return {
+    ...providerCfg(url),
+    experimental: {
+      maxMode: { candidates: 2 },
+    },
+    agent: {
+      max: {
+        steps: 1,
+      },
+    },
+  }
+}
+
+function mediaProviderCfg(url: string) {
+  const config = providerCfg(url)
+  return {
+    ...config,
+    provider: {
+      ...config.provider,
+      test: {
+        ...config.provider.test,
+        models: {
+          ...config.provider.test.models,
+          "test-model": {
+            ...config.provider.test.models["test-model"],
+            attachment: true,
+            modalities: {
+              input: ["text", "image", "audio"] as ("text" | "image" | "audio")[],
+              output: ["text"] as "text"[],
+            },
+          },
+        },
+      },
+    },
+  }
+}
+
 const user = Effect.fn("test.user")(function* (sessionID: SessionID, text: string, agent = "build") {
   const session = yield* Session.Service
   const msg = yield* session.updateMessage({
@@ -533,6 +682,35 @@ it.live("loop calls LLM and returns assistant message", () =>
       expect(yield* llm.hits).toHaveLength(1)
     }),
     { git: true, config: providerCfg },
+  ),
+)
+
+it.live("MaxMode final step bypasses runMaxStep and sends toolChoice none to the processor", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "MaxMode final step",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "max",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "text", text: "finish without another tool call" }],
+      })
+      yield* llm.text("final answer")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      expect(result.info.role).toBe("assistant")
+
+      const inputs = yield* llm.inputs
+      expect(inputs).toHaveLength(1)
+      expect(inputs[0].tool_choice).toBe("none")
+    }),
+    { git: true, config: builtInMaxModeLastStepProviderCfg },
   ),
 )
 
@@ -798,6 +976,57 @@ it.live("caps skill command content before storing synthetic skill text", () =>
   ),
 )
 
+it.live("caps free-text skill mention content before storing synthetic skill text", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Skill mention cap" })
+      const skillDir = path.join(dir, "local-skills", "huge-mention")
+      const longSkillBody = "x".repeat(60 * 1024)
+
+      yield* Effect.promise(async () => {
+        await mkdir(skillDir, { recursive: true })
+        await Bun.write(
+          path.join(skillDir, "SKILL.md"),
+          [
+            "---",
+            "name: huge-mention",
+            "description: Huge mentioned skill",
+            "---",
+            longSkillBody,
+          ].join("\n"),
+        )
+      })
+
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "Please use /huge-mention for this task." }],
+      })
+      yield* llm.text("done")
+      yield* prompt.loop({ sessionID: chat.id })
+
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      const textParts = messages.flatMap((message) => message.parts.filter((part) => part.type === "text"))
+      const skillContent = textParts.find(
+        (part) => part.type === "text" && part.text.includes("skill mention content truncated before model injection"),
+      )
+
+      expect(skillContent).toBeDefined()
+      if (skillContent?.type === "text") expect(skillContent.text.length).toBeLessThan(longSkillBody.length)
+    }),
+    {
+      git: true,
+      config: (url) => ({
+        ...providerCfg(url),
+        skills: { paths: ["local-skills"] },
+      }),
+    },
+  ),
+)
+
 it.live("static loop returns assistant text through local provider", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
@@ -922,6 +1151,171 @@ it.live("loop continues when finish is tool-calls", () =>
         expect(result.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
         expect(result.info.finish).toBe("stop")
       }
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+mcpIt.live("MCP isError becomes a tool error without losing standard result fields", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const bus = yield* Bus.Service
+      const metricSeen = defer<void>()
+      const statuses: string[] = []
+      const session = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const off = yield* bus.subscribeCallback(Metrics.ToolCall, (event) => {
+        if (event.properties.sessionID !== session.id || event.properties.tool_name !== "mcp_result") return
+        statuses.push(event.properties.tool_call_status)
+        metricSeen.resolve()
+      })
+
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "send the message" }],
+      })
+      yield* llm.tool("mcp_result", {})
+      yield* llm.text("I saw that sending failed")
+
+      const result = yield* prompt.loop({ sessionID: session.id })
+      yield* Effect.promise(() => metricSeen.promise)
+      off()
+
+      const tool = (yield* MessageV2.filterCompactedEffect(session.id))
+        .flatMap((message) => message.parts)
+        .find(
+          (part): part is ErrorToolPart =>
+            part.type === "tool" && part.tool === "mcp_result" && part.state.status === "error",
+        )
+      expect(tool).toBeDefined()
+      if (!tool) return
+
+      expect(tool.state.error).toBe(
+        'Message was not sent\n\nResource diagnostic\n\nStructured content:\n{"sent":false,"reason":"composer rejected the request"}',
+      )
+      expect(tool.state.metadata?.mcp).toEqual({
+        structuredContent: mcpErrorResult.structuredContent,
+        isError: true,
+        _meta: mcpErrorResult._meta,
+        legacyMetadata: mcpLegacyMetadata,
+      })
+      expect(tool.state.attachments).toHaveLength(3)
+      expect(tool.state.attachments?.[0]).toMatchObject({
+        type: "file",
+        mime: "image/png",
+        url: mcpErrorImageURL,
+        sessionID: session.id,
+        messageID: tool.messageID,
+      })
+      expect(tool.state.attachments?.[1]).toMatchObject({
+        type: "file",
+        mime: "audio/wav",
+        url: `data:audio/wav;base64,${mcpErrorAudio}`,
+        sessionID: session.id,
+        messageID: tool.messageID,
+      })
+      expect(tool.state.attachments?.[2]).toMatchObject({
+        type: "file",
+        mime: "application/octet-stream",
+        url: `data:application/octet-stream;base64,${mcpErrorBinary}`,
+        filename: "mcp://diagnostic.bin",
+        sessionID: session.id,
+        messageID: tool.messageID,
+      })
+      expect(statuses).toEqual(["error"])
+      expect(result.parts.some((part) => part.type === "text" && part.text === "I saw that sending failed")).toBe(true)
+
+      const requests = yield* llm.inputs
+      const followup = JSON.stringify(requests[1])
+      expect(followup).toContain("Message was not sent")
+      expect(followup).toContain("Resource diagnostic")
+      expect(followup).toContain("composer rejected the request")
+      expect(followup).toContain('Tool \\"mcp_result\\" call')
+      expect(followup).toContain("failed:")
+      expect(followup).toContain("diagnostic.bin")
+      expect(followup).not.toContain("mcp://diagnostic.bin")
+      expect(followup).toContain("application/octet-stream")
+      expect(followup).not.toContain(mcpErrorBinary)
+      expect(followup).not.toContain("must not become a successful result")
+      expect(followup).not.toContain("do-not-send-to-model")
+      expect(requests[1]).toMatchObject({
+        messages: expect.arrayContaining([
+          {
+            role: "user",
+            content: expect.arrayContaining([
+              { type: "text", text: MessageV2.SYNTHETIC_ATTACHMENT_PROMPT },
+              { type: "image_url", image_url: { url: mcpErrorImageURL } },
+              { type: "input_audio", input_audio: { data: mcpErrorAudio, format: "wav" } },
+            ]),
+          },
+        ]),
+      })
+    }),
+    { git: true, config: mediaProviderCfg },
+  ),
+)
+
+mcpIt.live("MCP structuredContent is persisted and reaches the model alongside text", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const bus = yield* Bus.Service
+      const metricSeen = defer<void>()
+      const statuses: string[] = []
+      const session = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const off = yield* bus.subscribeCallback(Metrics.ToolCall, (event) => {
+        if (event.properties.sessionID !== session.id || event.properties.tool_name !== "mcp_success") return
+        statuses.push(event.properties.tool_call_status)
+        metricSeen.resolve()
+      })
+
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "inspect the window" }],
+      })
+      yield* llm.tool("mcp_success", {})
+      yield* llm.text("The window changed")
+
+      yield* prompt.loop({ sessionID: session.id })
+      yield* Effect.promise(() => metricSeen.promise)
+      off()
+
+      const tool = (yield* MessageV2.filterCompactedEffect(session.id))
+        .flatMap((message) => message.parts)
+        .find(
+          (part): part is CompletedToolPart =>
+            part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed",
+        )
+      expect(tool).toBeDefined()
+      if (!tool) return
+
+      expect(tool.state.output).toBe(
+        'Window updated\n\nStructured content:\n{"changed":true,"windowID":42}',
+      )
+      expect(tool.state.metadata.mcp).toEqual({
+        structuredContent: mcpSuccessResult.structuredContent,
+        isError: false,
+        _meta: mcpSuccessResult._meta,
+      })
+      expect(statuses).toEqual(["success"])
+
+      const requests = yield* llm.inputs
+      const followup = JSON.stringify(requests[1])
+      expect(followup).toContain("Window updated")
+      expect(followup).toContain('{\\"changed\\":true,\\"windowID\\":42}')
+      expect(followup).not.toContain("success-meta-is-client-only")
     }),
     { git: true, config: providerCfg },
   ),
@@ -1414,6 +1808,144 @@ it.live(
       { git: true, config: providerCfg },
     ),
   3_000,
+)
+
+itActor.live(
+  "cancelling main only stops the active run and the same session remains runnable and inbox-addressable",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const inbox = inboxServiceRef.current
+        expect(inbox).toBeDefined()
+        if (!inbox) return
+        const chat = yield* sessions.create({ title: "main-cancel-rerun" })
+
+        yield* llm.hang
+        const first = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "first request hangs" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* llm.wait(1)
+
+        yield* prompt.cancel(chat.id)
+        yield* Fiber.join(first)
+
+        yield* llm.text("second request completed")
+        const second = yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "second request must run" }],
+        })
+        expect(second.parts.findLast((part) => part.type === "text")?.text).toBe("second request completed")
+
+        const wakeStarted = yield* Deferred.make<void>()
+        yield* llm.textMatch((hit) => {
+          if (!JSON.stringify(hit.body).includes("main-inbox-after-cancel")) return false
+          Effect.runFork(Deferred.succeed(wakeStarted, undefined))
+          return true
+        }, "main inbox wake completed")
+        const sent = yield* inbox
+          .send({
+            receiverSessionID: chat.id,
+            receiverActorID: "main",
+            content: "main-inbox-after-cancel",
+          })
+          .pipe(
+            Effect.as("accepted" as const),
+            Effect.catchTag("InboxReceiverNotFound", () => Effect.succeed("retired" as const)),
+          )
+        expect(sent).toBe("accepted")
+        yield* Deferred.await(wakeStarted).pipe(Effect.timeout("5 seconds"))
+      }),
+      { git: true, config: providerCfg },
+    ),
+  10_000,
+)
+
+itActor.live(
+  "a main inbox wake retries its own late row after joining an active run",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const inbox = inboxServiceRef.current
+        if (!inbox) return yield* Effect.die("inbox service ref was not initialized")
+        const chat = yield* sessions.create({ title: "main-inbox-late-row" })
+        yield* user(chat.id, "seed main model")
+        const ownerExit = yield* Deferred.make<void>()
+        const releaseOwner = yield* Deferred.make<void>()
+        const followerAttached = yield* Deferred.make<void>()
+        lateRunGate = {
+          sessionID: chat.id,
+          actorID: "main",
+          ownerArmed: true,
+          followerArmed: true,
+          ownerExit,
+          releaseOwner,
+          followerAttached,
+        }
+        yield* Effect.addFinalizer(() => Deferred.succeed(releaseOwner, undefined).pipe(Effect.ignore))
+
+        yield* llm.text("first wake complete")
+        const insert = (id: string, text: string) =>
+          Effect.sync(() =>
+            Database.use((db) =>
+              db
+                .insert(InboxTable)
+                .values({
+                  id,
+                  receiver_session_id: chat.id,
+                  receiver_actor_id: "main",
+                  sender_session_id: null,
+                  sender_actor_id: null,
+                  type: "text",
+                  content: { text },
+                  created_at: Date.now(),
+                })
+                .run(),
+            ),
+          )
+        yield* insert("first-main-row", "first-main-row")
+        const owner = yield* prompt
+          .loop({ sessionID: chat.id, agentID: "main", inboxID: "first-main-row" })
+          .pipe(Effect.forkChild)
+        yield* llm.wait(1).pipe(Effect.timeout("5 seconds"))
+        yield* Deferred.await(ownerExit).pipe(Effect.timeout("5 seconds"))
+
+        yield* llm.text("second wake complete")
+        yield* insert("late-main-row", "late-main-row")
+        const follower = yield* prompt
+          .loop({ sessionID: chat.id, agentID: "main", inboxID: "late-main-row" })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(followerAttached).pipe(Effect.timeout("5 seconds"))
+        expect(yield* inbox.has("late-main-row")).toBe(true)
+
+        yield* Deferred.succeed(releaseOwner, undefined)
+        const reachedSecond = yield* llm.wait(2).pipe(
+          Effect.as(true),
+          Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.succeed(false) }),
+        )
+        yield* Fiber.join(owner).pipe(Effect.timeout("5 seconds"))
+        yield* Fiber.join(follower).pipe(Effect.timeout("5 seconds"))
+
+        expect({ reachedSecond, calls: yield* llm.calls, lateExists: yield* inbox.has("late-main-row") }).toEqual({
+          reachedSecond: true,
+          calls: 2,
+          lateExists: false,
+        })
+        expect(yield* inbox.has("first-main-row")).toBe(false)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  15_000,
 )
 
 // Queue semantics

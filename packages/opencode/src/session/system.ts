@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect"
 
-import { Instance } from "../project/instance"
+import { InstanceState } from "@/effect"
 
 import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_DEFAULT from "./prompt/default.txt"
@@ -47,6 +47,8 @@ export function provider(model: Provider.Model) {
 export interface Interface {
   readonly environment: (model: Provider.Model, now: number) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
+  readonly available: (agent?: Agent.Info) => Effect.Effect<Skill.Info[]>
+  readonly all: () => Effect.Effect<Skill.Info[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
@@ -59,15 +61,16 @@ export const layer = Layer.effect(
 
     return Service.of({
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model, now: number) {
-        const project = Instance.project
+        const instance = yield* InstanceState.context
+        const project = instance.project
         const base = [
           [
             `You are MiMo Code Agent, built by Xiaomi MiMo Team. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.`,
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
             `Here is some useful information about the environment you are running in:`,
             `<env>`,
-            `  Working directory: ${Instance.directory}`,
-            `  Workspace root folder: ${Instance.worktree}`,
+            `  Working directory: ${instance.directory}`,
+            `  Workspace root folder: ${instance.worktree}`,
             `  Is directory a git repo: ${project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
             // Anchored to the session's creation time (not request time) so this block
@@ -125,6 +128,14 @@ export const layer = Layer.effect(
           // version of them here and a less verbose version in tool description, rather than vice versa.
           capAvailableSkills(Skill.fmt(list, { verbose: true })),
         ].join("\n")
+      }),
+
+      available: Effect.fn("SystemPrompt.available")(function* (agent?: Agent.Info) {
+        return yield* skill.available(agent)
+      }),
+
+      all: Effect.fn("SystemPrompt.all")(function* () {
+        return yield* skill.all()
       }),
     })
   }),

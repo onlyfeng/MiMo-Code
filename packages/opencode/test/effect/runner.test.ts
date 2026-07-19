@@ -19,6 +19,89 @@ describe("Runner", () => {
   )
 
   it.live(
+    "ensureRunning publishes Running before work executes its first instruction",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const observed = yield* runner.ensureRunning(Effect.sync(() => runner.state._tag))
+      expect(observed).toBe("Running")
+      expect(runner.state._tag).toBe("Idle")
+    }),
+  )
+
+  it.live(
+    "caller interruption after Running publish cannot strand the runner",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const beforeStart = yield* Deferred.make<void>()
+      const releaseStart = yield* Deferred.make<void>()
+      const workStarted = yield* Deferred.make<void>()
+      const releaseWork = yield* Deferred.make<void>()
+      const workFinished = yield* Deferred.make<void>()
+      const idled = yield* Deferred.make<void>()
+      const runner = Runner.make<string>(s, {
+        onIdle: Deferred.succeed(idled, undefined).pipe(Effect.asVoid),
+        _testHooks: {
+          beforeRunStart: Deferred.succeed(beforeStart, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseStart)),
+          ),
+        },
+      })
+      const work = Deferred.succeed(workStarted, undefined).pipe(
+        Effect.andThen(Deferred.await(releaseWork)),
+        Effect.as("first"),
+        Effect.ensuring(Deferred.succeed(workFinished, undefined).pipe(Effect.ignore)),
+      )
+
+      const caller = yield* runner.ensureRunning(work).pipe(Effect.forkChild)
+      yield* Deferred.await(beforeStart).pipe(Effect.timeout("250 millis"))
+      expect(runner.state._tag).toBe("Running")
+      const interrupt = yield* Effect.forkDetach(Fiber.interrupt(caller), { startImmediately: true })
+      yield* Deferred.succeed(releaseStart, undefined)
+      yield* Deferred.await(workStarted).pipe(Effect.timeout("250 millis"))
+      yield* Deferred.succeed(releaseWork, undefined)
+      yield* Deferred.await(workFinished).pipe(Effect.timeout("250 millis"))
+      yield* Fiber.await(interrupt).pipe(Effect.timeout("250 millis"))
+      yield* Deferred.await(idled).pipe(Effect.timeout("250 millis"))
+
+      expect(runner.state._tag).toBe("Idle")
+      expect(yield* runner.ensureRunning(Effect.succeed("second"))).toBe("second")
+    }),
+  )
+
+  it.live(
+    "scope close before Running publish cannot strand the runner",
+    Effect.gen(function* () {
+      const runnerScope = yield* Scope.make()
+      const beforePublish = yield* Deferred.make<void>()
+      const releasePublish = yield* Deferred.make<void>()
+      const beforeStart = yield* Deferred.make<void>()
+      const runExit = yield* Deferred.make<void>()
+      const runner = Runner.make<string>(runnerScope, {
+        _testHooks: {
+          beforeRunPublish: Deferred.succeed(beforePublish, undefined).pipe(
+            Effect.andThen(Deferred.await(releasePublish)),
+          ),
+          beforeRunStart: Deferred.succeed(beforeStart, undefined).pipe(Effect.asVoid),
+          onRunExit: Deferred.succeed(runExit, undefined).pipe(Effect.asVoid),
+        },
+      })
+
+      const caller = yield* runner.ensureRunning(Effect.never.pipe(Effect.as("never"))).pipe(Effect.forkChild)
+      yield* Deferred.await(beforePublish).pipe(Effect.timeout("250 millis"))
+      const close = yield* Scope.close(runnerScope, Exit.void).pipe(Effect.forkChild)
+      yield* Deferred.await(runExit).pipe(Effect.timeout("250 millis"))
+      yield* Deferred.succeed(releasePublish, undefined)
+      yield* Deferred.await(beforeStart).pipe(Effect.timeout("250 millis"))
+      yield* Fiber.await(close).pipe(Effect.timeout("250 millis"))
+      const exit = yield* Fiber.await(caller).pipe(Effect.timeout("250 millis"))
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(runner.state._tag).toBe("Idle")
+    }),
+  )
+
+  it.live(
     "ensureRunning propagates work failures",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
@@ -228,7 +311,10 @@ describe("Runner", () => {
       const releaseCleanup = yield* Deferred.make<void>()
       // Work whose interruption cleanup blocks until releaseCleanup fires. A
       // blocking `cancel` would await that cleanup; `cancelDetached` must not.
-      const work = Effect.never.pipe(Effect.onInterrupt(() => Deferred.await(releaseCleanup)), Effect.as("never"))
+      const work = Effect.never.pipe(
+        Effect.onInterrupt(() => Deferred.await(releaseCleanup)),
+        Effect.as("never"),
+      )
       const fiber = yield* runner.ensureRunning(work).pipe(Effect.forkChild)
       yield* Effect.sleep("10 millis")
       expect(runner.busy).toBe(true)
