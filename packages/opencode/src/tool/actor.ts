@@ -21,6 +21,7 @@ import { TaskID } from "@/task/schema"
 import { SessionCheckpoint } from "@/session/checkpoint"
 import { prefixCaptureRef } from "@/session/prefix-capture-ref"
 import { inboxServiceRef } from "@/inbox/inbox-ref"
+import { takeUtf8PrefixByBytes, takeUtf8SuffixByBytes } from "@/util/text-truncate"
 import { Effect, Deferred } from "effect"
 import { Token } from "../util"
 
@@ -42,37 +43,13 @@ function estimateStateTokens(text: string) {
   return Math.max(Token.estimate(text), Math.round(Buffer.byteLength(text, "utf8") / 3))
 }
 
-function takeUtf8Prefix(text: string, maxBytes: number) {
-  let usedBytes = 0
-  let result = ""
-  for (const char of text) {
-    const bytes = Buffer.byteLength(char, "utf8")
-    if (usedBytes + bytes > maxBytes) break
-    result += char
-    usedBytes += bytes
-  }
-  return result
-}
-
-function takeUtf8Suffix(text: string, maxBytes: number) {
-  let usedBytes = 0
-  let result = ""
-  for (const char of Array.from(text).reverse()) {
-    const bytes = Buffer.byteLength(char, "utf8")
-    if (usedBytes + bytes > maxBytes) break
-    result = char + result
-    usedBytes += bytes
-  }
-  return result
-}
-
 function capStateContext(text: string, maxTokens: number) {
   if (estimateStateTokens(text) <= maxTokens) return text
   const marker = `\n\n[... checkpoint truncated to ${maxTokens} tokens for actor context=state ...]\n\n`
   const budget = Math.max(0, maxTokens * 3 - Buffer.byteLength(marker, "utf8"))
   const head = Math.floor(budget * 0.6)
   const tail = budget - head
-  return takeUtf8Prefix(text, head) + marker + (tail > 0 ? takeUtf8Suffix(text, tail) : "")
+  return takeUtf8PrefixByBytes(text, head) + marker + (tail > 0 ? takeUtf8SuffixByBytes(text, tail) : "")
 }
 
 function levenshteinActor(a: string, b: string): number {

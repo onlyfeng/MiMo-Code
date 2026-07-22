@@ -485,13 +485,20 @@ describe("tool.actor", () => {
             },
           )
 
-          expect(capturedTask).toContain("[... checkpoint truncated")
-          expect(capturedTask).not.toContain("state-block-90")
-          expect(capturedTask).toContain("continue from state")
-        }).pipe(Effect.provideService(SessionCheckpoint.Service, checkpointStub(Array.from({ length: 100 }, (_, i) => `state-block-${i}`).join("\n")))),
+          expect(capturedTask).toBe(`<session-state>
+Here is a summary of the parent session's progress:
+
+HHHHHHHHHHH
+
+[... checkpoint truncated to 30 tokens for actor context=state ...]
+
+TTTTTTTT
+</session-state>
+continue from state`)
+        }).pipe(Effect.provideService(SessionCheckpoint.Service, checkpointStub("H".repeat(60) + "T".repeat(60)))),
       {
         config: {
-          checkpoint: { push_caps: { checkpoint: 20 } },
+          checkpoint: { push_caps: { checkpoint: 30 } },
         },
       },
     ),
