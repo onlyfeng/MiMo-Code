@@ -2,7 +2,7 @@
 - To regenerate the JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
 - ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE.
 - The default branch in this repo is `main`.
-- CI triggers on both `main` and `dev` branches.
+- CI triggers on `main`, `dev`, and `dev/compat` branches.
 - Prefer automation: execute requested actions without confirmation unless blocked by missing info or safety/irreversibility.
 - Install deps with `bun ci` (= `bun install --frozen-lockfile`) — install per `bun.lock`, don't mutate the lockfile. ⛔ Do NOT use `bun install`/`npm install`.
 
