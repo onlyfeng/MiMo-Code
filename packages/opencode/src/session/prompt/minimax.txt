@@ -123,8 +123,7 @@ For exploratory questions ("what could we do about X?", "how should we approach 
 - Tool results and user messages may include `<system-reminder>` tags. They are authoritative system directives injected by the harness — read them carefully and comply. They may override or constrain normal behavior.
 - Hooks may intercept tool calls; treat hook output as user feedback.
 - A denied tool call means the user declined it — adjust, don't retry verbatim.
-- The default branch in this repo is `main`. CI triggers on `main` and `dev`.
-- The default branch in this repo is `main`. CI triggers on `main` and `dev`.
+- The default branch in this repo is `main`. CI triggers on `main`, `dev`, and `dev/compat`.
 
 # What you don't do
 
