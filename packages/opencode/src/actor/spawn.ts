@@ -6,12 +6,7 @@ import { Session } from "@/session"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRunState } from "@/session/run-state"
 import { ActorRegistry } from "@/actor/registry"
-import {
-  createActorLifecycle,
-  type ForkGenerationOwner,
-  type GenerationOwner,
-  type TerminalStatus,
-} from "@/actor/lifecycle"
+import { createActorLifecycle, type ForkGenerationOwner, type TerminalStatus } from "@/actor/lifecycle"
 import { TaskRegistry } from "@/task/registry"
 import { TaskGate, MAX_TASK_GATE_SUBAGENT_REACT } from "@/task/gate"
 import { Agent } from "@/agent/agent"
@@ -941,7 +936,7 @@ export const layer = Layer.effect(
       const key = actorKey(input.sessionID, input.actorID)
       if (!actor || actor.lifecycle !== "persistent" || (actor.mode !== "peer" && actor.mode !== "subagent")) {
         while (true) {
-          const active: GenerationOwner<MessageV2.WithParts> | undefined = yield* lifecycleState.currentGeneration(key)
+          const active = yield* lifecycleState.currentGeneration(key)
           if (active?.kind === "fork") yield* Deferred.await(active.done)
           if (input.inboxID && !(yield* inbox.has(input.inboxID))) return yield* input.onInterrupt
           const result = yield* state.ensureRunning(input.sessionID, input.actorID, input.onInterrupt, input.work)

@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { Deferred, Effect, Exit } from "effect"
+import { Deferred, Effect, Exit, Layer } from "effect"
 import { SessionID } from "../../src/session/schema"
 import { createActorLifecycle } from "../../src/actor/lifecycle"
+import { testEffect } from "../lib/effect"
 
-const run = Effect.runPromise
+const it = testEffect(Layer.empty)
 
 describe("actor lifecycle coordinator", () => {
   test("keys include both the session and actor identity", () => {
@@ -20,94 +21,106 @@ describe("actor lifecycle coordinator", () => {
     expect(lifecycle.key(SessionID.make("ses:a"), "b")).not.toBe(lifecycle.key(SessionID.make("ses"), "a:b"))
   })
 
-  test("publishes a wake result before releasing generation followers", async () => {
-    const lifecycle = createActorLifecycle<string, string>()
-    const key = lifecycle.key(SessionID.make("session"), "actor")
-    await run(lifecycle.retainPersistent(key))
+  it.effect(
+    "publishes a wake result before releasing generation followers",
+    Effect.gen(function* () {
+      const lifecycle = createActorLifecycle<string, string>()
+      const key = lifecycle.key(SessionID.make("session"), "actor")
+      yield* lifecycle.retainPersistent(key)
 
-    const ownership = await run(lifecycle.acquireWake(key))
-    expect(ownership._tag).toBe("owner")
-    if (ownership._tag !== "owner") throw new Error("expected wake owner")
+      const ownership = yield* lifecycle.acquireWake(key)
+      expect(ownership._tag).toBe("owner")
+      if (ownership._tag !== "owner") throw new Error("expected wake owner")
 
-    const follower = await run(lifecycle.acquireWake(key))
-    expect(follower._tag).toBe("follower")
-    if (follower._tag !== "follower") throw new Error("expected wake follower")
+      const follower = yield* lifecycle.acquireWake(key)
+      expect(follower._tag).toBe("follower")
+      if (follower._tag !== "follower") throw new Error("expected wake follower")
 
-    // @ts-expect-error wake completion must publish its shared terminal Exit
-    lifecycle.finishWake(key, ownership.owner)
-    await run(lifecycle.finishWake(key, ownership.owner, Exit.succeed("done")))
+      // @ts-expect-error wake completion must publish its shared terminal Exit
+      lifecycle.finishWake(key, ownership.owner)
+      yield* lifecycle.finishWake(key, ownership.owner, Exit.succeed("done"))
 
-    expect(await run(Deferred.isDone(follower.active.result))).toBe(true)
-    expect(await run(Deferred.isDone(follower.active.done))).toBe(true)
-    const result = await run(Deferred.await(follower.active.result))
-    expect(Exit.isSuccess(result) ? result.value : undefined).toBe("done")
-  })
+      expect(yield* Deferred.isDone(follower.active.result)).toBe(true)
+      expect(yield* Deferred.isDone(follower.active.done)).toBe(true)
+      const result = yield* Deferred.await(follower.active.result)
+      expect(Exit.isSuccess(result) ? result.value : undefined).toBe("done")
+    }),
+  )
 
-  test("allows exactly one terminal claimant and clears cancellation with its generation", async () => {
-    const lifecycle = createActorLifecycle<string, string>()
-    const key = lifecycle.key(SessionID.make("session"), "actor")
-    const owner = await run(lifecycle.startFork(key))
+  it.effect(
+    "allows exactly one terminal claimant and clears cancellation with its generation",
+    Effect.gen(function* () {
+      const lifecycle = createActorLifecycle<string, string>()
+      const key = lifecycle.key(SessionID.make("session"), "actor")
+      const owner = yield* lifecycle.startFork(key)
 
-    expect(await run(lifecycle.claimTerminal(key, owner, "cancelled", "cancel"))).toBe(true)
-    expect(await run(lifecycle.claimTerminal(key, owner, "completed", "turn"))).toBe(false)
-    expect(await run(lifecycle.isCancelled(key))).toBe(true)
+      expect(yield* lifecycle.claimTerminal(key, owner, "cancelled", "cancel")).toBe(true)
+      expect(yield* lifecycle.claimTerminal(key, owner, "completed", "turn")).toBe(false)
+      expect(yield* lifecycle.isCancelled(key)).toBe(true)
 
-    await run(lifecycle.settleTerminal(owner))
-    expect(await run(Deferred.isDone(owner.terminalDone))).toBe(true)
-    await run(lifecycle.finishFork(key, owner))
-    expect(await run(lifecycle.isCancelled(key))).toBe(false)
-  })
+      yield* lifecycle.settleTerminal(owner)
+      expect(yield* Deferred.isDone(owner.terminalDone)).toBe(true)
+      yield* lifecycle.finishFork(key, owner)
+      expect(yield* lifecycle.isCancelled(key)).toBe(false)
+    }),
+  )
 
-  test("retains persistent context and numbering but releases ephemeral ownership", async () => {
-    const lifecycle = createActorLifecycle<string, string>()
-    const persistent = lifecycle.key(SessionID.make("session"), "persistent")
-    await run(lifecycle.retainPersistent(persistent))
-    await run(lifecycle.setForkContext(persistent, "persistent-context"))
-    const first = await run(lifecycle.startFork(persistent))
-    await run(lifecycle.finishForkWork(persistent, first, "persistent"))
+  it.effect(
+    "retains persistent context and numbering but releases ephemeral ownership",
+    Effect.gen(function* () {
+      const lifecycle = createActorLifecycle<string, string>()
+      const persistent = lifecycle.key(SessionID.make("session"), "persistent")
+      yield* lifecycle.retainPersistent(persistent)
+      yield* lifecycle.setForkContext(persistent, "persistent-context")
+      const first = yield* lifecycle.startFork(persistent)
+      yield* lifecycle.finishForkWork(persistent, first, "persistent")
 
-    expect(await run(lifecycle.getForkContext(persistent))).toBe("persistent-context")
-    const wake = await run(lifecycle.acquireWake(persistent))
-    expect(wake._tag).toBe("owner")
-    if (wake._tag !== "owner") throw new Error("expected persistent wake owner")
-    expect(wake.owner.generation).toBe(2)
-    await run(lifecycle.finishWake(persistent, wake.owner, Exit.succeed("done")))
-    await run(lifecycle.retire(persistent))
-    expect(await run(lifecycle.getForkContext(persistent))).toBeUndefined()
-    expect((await run(lifecycle.startFork(persistent))).generation).toBe(1)
+      expect(yield* lifecycle.getForkContext(persistent)).toBe("persistent-context")
+      const wake = yield* lifecycle.acquireWake(persistent)
+      expect(wake._tag).toBe("owner")
+      if (wake._tag !== "owner") throw new Error("expected persistent wake owner")
+      expect(wake.owner.generation).toBe(2)
+      yield* lifecycle.finishWake(persistent, wake.owner, Exit.succeed("done"))
+      yield* lifecycle.retire(persistent)
+      expect(yield* lifecycle.getForkContext(persistent)).toBeUndefined()
+      expect((yield* lifecycle.startFork(persistent)).generation).toBe(1)
 
-    const ephemeral = lifecycle.key(SessionID.make("session"), "ephemeral")
-    await run(lifecycle.setForkContext(ephemeral, "ephemeral-context"))
-    const ephemeralOwner = await run(lifecycle.startFork(ephemeral))
-    await run(lifecycle.finishForkWork(ephemeral, ephemeralOwner, "ephemeral"))
-    expect(await run(lifecycle.getForkContext(ephemeral))).toBeUndefined()
-    expect((await run(lifecycle.startFork(ephemeral))).generation).toBe(1)
-  })
+      const ephemeral = lifecycle.key(SessionID.make("session"), "ephemeral")
+      yield* lifecycle.setForkContext(ephemeral, "ephemeral-context")
+      const ephemeralOwner = yield* lifecycle.startFork(ephemeral)
+      yield* lifecycle.finishForkWork(ephemeral, ephemeralOwner, "ephemeral")
+      expect(yield* lifecycle.getForkContext(ephemeral)).toBeUndefined()
+      expect((yield* lifecycle.startFork(ephemeral)).generation).toBe(1)
+    }),
+  )
 
-  test("serializes cancel owners and followers and preserves delivered no-op behavior", async () => {
-    const lifecycle = createActorLifecycle<string, string>()
-    const key = lifecycle.key(SessionID.make("session"), "persistent")
-    await run(lifecycle.retainPersistent(key))
-    const generation = await run(lifecycle.startFork(key))
+  it.effect(
+    "serializes cancel owners and followers and preserves delivered no-op behavior",
+    Effect.gen(function* () {
+      const lifecycle = createActorLifecycle<string, string>()
+      const key = lifecycle.key(SessionID.make("session"), "persistent")
+      yield* lifecycle.retainPersistent(key)
+      const generation = yield* lifecycle.startFork(key)
 
-    const owner = await run(lifecycle.acquireCancel(key))
-    expect(owner._tag).toBe("owner")
-    if (owner._tag !== "owner") throw new Error("expected cancel owner")
-    expect(owner.claimed).toBe(true)
+      const owner = yield* lifecycle.acquireCancel(key)
+      expect(owner._tag).toBe("owner")
+      if (owner._tag !== "owner") throw new Error("expected cancel owner")
+      expect(owner.claimed).toBe(true)
 
-    const follower = await run(lifecycle.acquireCancel(key))
-    expect(follower._tag).toBe("follower")
-    if (follower._tag !== "follower") throw new Error("expected cancel follower")
-    expect(follower.episode).toBe(owner.episode)
+      const follower = yield* lifecycle.acquireCancel(key)
+      expect(follower._tag).toBe("follower")
+      if (follower._tag !== "follower") throw new Error("expected cancel follower")
+      expect(follower.episode).toBe(owner.episode)
 
-    await run(lifecycle.releaseCancel(key, owner.episode))
-    expect(await run(Deferred.isDone(follower.episode.done))).toBe(true)
-    await run(lifecycle.settleTerminal(generation))
-    await run(lifecycle.finishFork(key, generation))
+      yield* lifecycle.releaseCancel(key, owner.episode)
+      expect(yield* Deferred.isDone(follower.episode.done)).toBe(true)
+      yield* lifecycle.settleTerminal(generation)
+      yield* lifecycle.finishFork(key, generation)
 
-    const deliveredKey = lifecycle.key(SessionID.make("session"), "ephemeral")
-    const delivered = await run(lifecycle.startFork(deliveredKey))
-    await run(lifecycle.markDelivered(deliveredKey, delivered))
-    expect((await run(lifecycle.acquireCancel(deliveredKey)))._tag).toBe("noop")
-  })
+      const deliveredKey = lifecycle.key(SessionID.make("session"), "ephemeral")
+      const delivered = yield* lifecycle.startFork(deliveredKey)
+      yield* lifecycle.markDelivered(deliveredKey, delivered)
+      expect((yield* lifecycle.acquireCancel(deliveredKey))._tag).toBe("noop")
+    }),
+  )
 })
