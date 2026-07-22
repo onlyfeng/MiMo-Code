@@ -11,9 +11,15 @@ describe("actor lifecycle coordinator", () => {
     const first = lifecycle.key(SessionID.make("session-a"), "actor")
     const second = lifecycle.key(SessionID.make("session-b"), "actor")
 
-    expect(first).toBe("session-a:actor")
-    expect(second).toBe("session-b:actor")
     expect(first).not.toBe(second)
+  })
+
+  test("keys cannot collide when either identity component contains a separator", () => {
+    const lifecycle = createActorLifecycle<string, string>()
+
+    expect(lifecycle.key(SessionID.make("ses:a"), "b")).not.toBe(
+      lifecycle.key(SessionID.make("ses"), "a:b"),
+    )
   })
 
   test("publishes a wake result before releasing generation followers", async () => {
@@ -29,7 +35,9 @@ describe("actor lifecycle coordinator", () => {
     expect(follower._tag).toBe("follower")
     if (follower._tag !== "follower") throw new Error("expected wake follower")
 
-    await run(lifecycle.finishGeneration(key, ownership.owner, Exit.succeed("done")))
+    // @ts-expect-error wake completion must publish its shared terminal Exit
+    lifecycle.finishWake(key, ownership.owner)
+    await run(lifecycle.finishWake(key, ownership.owner, Exit.succeed("done")))
 
     expect(await run(Deferred.isDone(follower.active.result))).toBe(true)
     expect(await run(Deferred.isDone(follower.active.done))).toBe(true)
@@ -48,7 +56,7 @@ describe("actor lifecycle coordinator", () => {
 
     await run(lifecycle.settleTerminal(owner))
     expect(await run(Deferred.isDone(owner.terminalDone))).toBe(true)
-    await run(lifecycle.finishGeneration(key, owner))
+    await run(lifecycle.finishFork(key, owner))
     expect(await run(lifecycle.isCancelled(key))).toBe(false)
   })
 
@@ -65,7 +73,7 @@ describe("actor lifecycle coordinator", () => {
     expect(wake._tag).toBe("owner")
     if (wake._tag !== "owner") throw new Error("expected persistent wake owner")
     expect(wake.owner.generation).toBe(2)
-    await run(lifecycle.finishGeneration(persistent, wake.owner, Exit.succeed("done")))
+    await run(lifecycle.finishWake(persistent, wake.owner, Exit.succeed("done")))
     await run(lifecycle.retire(persistent))
     expect(await run(lifecycle.getForkContext(persistent))).toBeUndefined()
     expect((await run(lifecycle.startFork(persistent))).generation).toBe(1)
@@ -97,7 +105,7 @@ describe("actor lifecycle coordinator", () => {
     await run(lifecycle.releaseCancel(key, owner.episode))
     expect(await run(Deferred.isDone(follower.episode.done))).toBe(true)
     await run(lifecycle.settleTerminal(generation))
-    await run(lifecycle.finishGeneration(key, generation))
+    await run(lifecycle.finishFork(key, generation))
 
     const deliveredKey = lifecycle.key(SessionID.make("session"), "ephemeral")
     const delivered = await run(lifecycle.startFork(deliveredKey))

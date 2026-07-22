@@ -56,7 +56,7 @@ export function createActorLifecycle<Result, ContextValue>() {
   const cancelEpisodes = new Map<string, CancelEpisode>()
   const cancelEpisodeID = { current: 0 }
 
-  const key = (sessionID: SessionID, actorID: string) => sessionID + ":" + actorID
+  const key = (sessionID: SessionID, actorID: string) => JSON.stringify([sessionID, actorID])
   const nextGeneration = (actorKey: string) => {
     const generation = (generationCounters.get(actorKey) ?? 0) + 1
     generationCounters.set(actorKey, generation)
@@ -95,21 +95,28 @@ export function createActorLifecycle<Result, ContextValue>() {
       return { _tag: "owner", owner }
     })
 
-  const finishGeneration = (
+  const finishGenerationState = (actorKey: string, owner: GenerationOwner<Result>) => {
+    if (generationOwners.get(actorKey) === owner) generationOwners.delete(actorKey)
+    if (liveActors.get(actorKey) === owner.generation) liveActors.delete(actorKey)
+    if (deliveredActors.get(actorKey) === owner.generation) deliveredActors.delete(actorKey)
+    if (owner.terminal?.status === "cancelled") cancelledActors.delete(actorKey)
+    if (!persistentActors.has(actorKey) && !generationOwners.has(actorKey) && !liveActors.has(actorKey)) {
+      generationCounters.delete(actorKey)
+    }
+    Deferred.doneUnsafe(owner.done, Effect.void)
+  }
+
+  const finishFork = (actorKey: string, owner: ForkGenerationOwner) =>
+    Effect.sync(() => finishGenerationState(actorKey, owner))
+
+  const finishWake = (
     actorKey: string,
-    owner: GenerationOwner<Result>,
-    result?: Exit.Exit<Result>,
+    owner: WakeGenerationOwner<Result>,
+    result: Exit.Exit<Result>,
   ) =>
     Effect.sync(() => {
-      if (owner.kind === "wake" && result) Deferred.doneUnsafe(owner.result, Effect.succeed(result))
-      if (generationOwners.get(actorKey) === owner) generationOwners.delete(actorKey)
-      if (liveActors.get(actorKey) === owner.generation) liveActors.delete(actorKey)
-      if (deliveredActors.get(actorKey) === owner.generation) deliveredActors.delete(actorKey)
-      if (owner.terminal?.status === "cancelled") cancelledActors.delete(actorKey)
-      if (!persistentActors.has(actorKey) && !generationOwners.has(actorKey) && !liveActors.has(actorKey)) {
-        generationCounters.delete(actorKey)
-      }
-      Deferred.doneUnsafe(owner.done, Effect.void)
+      Deferred.doneUnsafe(owner.result, Effect.succeed(result))
+      finishGenerationState(actorKey, owner)
     })
 
   const finishForkWork = (
@@ -117,14 +124,13 @@ export function createActorLifecycle<Result, ContextValue>() {
     owner: ForkGenerationOwner,
     lifecycle: "ephemeral" | "persistent",
   ) =>
-    Effect.gen(function* () {
-      yield* finishGeneration(actorKey, owner)
+    Effect.sync(() => {
+      finishGenerationState(actorKey, owner)
       if (lifecycle === "persistent") return
-      yield* Effect.sync(() => {
-        forkContexts.delete(actorKey)
-        persistentActors.delete(actorKey)
-        if (!liveActors.has(actorKey)) generationCounters.delete(actorKey)
-      })
+      forkContexts.delete(actorKey)
+      persistentActors.delete(actorKey)
+      deliveredActors.delete(actorKey)
+      if (!liveActors.has(actorKey)) generationCounters.delete(actorKey)
     })
 
   const claimTerminal = (
@@ -195,7 +201,8 @@ export function createActorLifecycle<Result, ContextValue>() {
       Effect.sync(() => deliveredActors.set(actorKey, owner.generation)),
     claimTerminal,
     settleTerminal,
-    finishGeneration,
+    finishFork,
+    finishWake,
     finishForkWork,
     acquireCancel,
     releaseCancel,
