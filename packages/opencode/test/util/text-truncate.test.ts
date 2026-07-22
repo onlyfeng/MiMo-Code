@@ -47,9 +47,13 @@ describe("UTF-8 byte slices", () => {
   test("preserves isolated UTF-16 surrogates under actor-compatible budgets", () => {
     ;["\uD800", "\uDC00"].forEach((surrogate) => {
       const malformed = `A${surrogate}Z`
+      const fullBudget = Buffer.byteLength(surrogate, "utf8") + 2
+      const partialBudget = fullBudget - 1
 
-      expect(takeUtf8PrefixByBytes(malformed, 4)).toBe(malformed)
-      expect(takeUtf8SuffixByBytes(malformed, 4)).toBe(malformed)
+      expect(takeUtf8PrefixByBytes(malformed, fullBudget)).toBe(malformed)
+      expect(takeUtf8SuffixByBytes(malformed, fullBudget)).toBe(malformed)
+      expect(takeUtf8PrefixByBytes(malformed, partialBudget)).toBe(`A${surrogate}`)
+      expect(takeUtf8SuffixByBytes(malformed, partialBudget)).toBe(`${surrogate}Z`)
     })
   })
 })
