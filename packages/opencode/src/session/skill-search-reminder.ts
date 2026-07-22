@@ -54,21 +54,11 @@ export function skillSearchReminder(input: { currentUserAt: number; previousUser
       "</system-reminder>",
     ].join("\n")
   }
-  if (input.currentUserAt - input.previousUserAt > Flag.MIMOCODE_SKILL_SEARCH_REFRESH_INTERVAL_MS) {
-    return [
-      "<system-reminder>",
-      "Skill search trigger: more than 2 hours passed since the previous user query.",
-      "By default: call skill_search before acting, unless the user explicitly references the current task or current artifact.",
-      "When searching, rewrite the request as a Skill Query containing action, input, output, and audience when available.",
-      ...SKILL_QUERY_GUIDANCE,
-      "</system-reminder>",
-    ].join("\n")
-  }
+  if (input.currentUserAt - input.previousUserAt < Flag.MIMOCODE_SKILL_SEARCH_REFRESH_INTERVAL_MS) return
   return [
     "<system-reminder>",
-    "Skill search trigger: classify this later user query before acting.",
-    "- If it is a continuation, modification, or retry of the current task, do not call skill_search.",
-    "- If the output type, primary action, business object, or required capability changed, call skill_search.",
+    "Skill search trigger: at least 12 hours passed since the previous user query.",
+    "By default: call skill_search before acting, unless the user explicitly references the current task or current artifact.",
     "When searching, rewrite the request as a Skill Query containing action, input, output, and audience when available.",
     ...SKILL_QUERY_GUIDANCE,
     "</system-reminder>",
@@ -97,11 +87,21 @@ export function skillSearchReminderForMessages(messages: ReminderMessage[]) {
 export function skillSearchReminderForSession(input: {
   session: { parentID?: string }
   agent: { name: string; mode: "subagent" | "primary" | "all"; toolAllowlist?: string[] }
+  model: { id: string; name?: string; family?: string; api: { id: string } }
   messages: ReminderMessage[]
   permission?: Permission.Ruleset
   tools?: Record<string, boolean>
 }) {
-  if (input.session.parentID || input.agent.mode === "subagent" || input.agent.name === "compose") return
+  if (
+    !Flag.MIMOCODE_ENABLE_SKILL_SEARCH_REMINDER ||
+    input.session.parentID ||
+    input.agent.mode === "subagent" ||
+    input.agent.name === "compose" ||
+    [input.model.id, input.model.api.id, input.model.name, input.model.family]
+      .filter((value) => value !== undefined)
+      .some((value) => /(^|[^a-z0-9])(claude|gpt)($|[^a-z0-9])/i.test(value))
+  )
+    return
   const current = input.messages.findLast((message) => message.info.role === "user")
   if (!isDirectUserMessage(current)) return
   if (

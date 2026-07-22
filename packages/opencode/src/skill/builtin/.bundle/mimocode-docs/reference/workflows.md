@@ -95,6 +95,7 @@ Runnable by `name` without writing a file:
 - **`compose`** — full spec→ship pipeline (brainstorm → design → implement (TDD) → verify → review → merge). Pass `args.task`. Auto-parallelizes independent subtasks into per-task worktrees and chains each phase's structured output to the next. Re-running on existing docs reuses them and scopes the fan-out to the actual diff (incremental amend).
 - **`deep-research`** — comprehensive research report generator (brief → plan → parallel sub-agent research → reflect gap-check → single-writer cited Markdown report → cold review). Pass `args: { dir, question, today, depth?, context? }`. Convergent: file checkpoints enable resume after interruption.
 - **`fact-check`** — adversarial fact verification (plan → parallel web search → source extraction → group duplicates → 3-juror crosscheck → structured JSON findings). Pass the question as `args`. Best for verifying specific claims.
+- **`research-experiment`** — autonomous loop for improving a mechanically verifiable metric. Pass `args: { dir, goal, metric, evalCmd, editable, guardCmd?, lowerIsBetter?, maxIters?, targetValue? }` and use the same `dir` as the workflow workspace. It records a baseline, runs guarded hypothesis/implementation/evaluation iterations, audits metric gaming, and writes a traceable report. Do not use it when success cannot be reduced to one numeric metric.
 
 ### `compose` workflow vs `compose` agent
 

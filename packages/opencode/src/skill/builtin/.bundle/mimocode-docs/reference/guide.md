@@ -8,6 +8,8 @@ How-to for the features users most often ask about. For config keys see @config.
 2. **Pick a model** — set `"model": "provider/model"` in config, or switch live in the TUI model dialog. Provider API keys are auto-detected from environment variables (unless `MIMOCODE_MIMO_ONLY=1`).
 3. **List what's available** — `mimo models`, `mimo providers`.
 
+For a custom base URL, API key, or OpenAI-/Anthropic-compatible model, read @providers.md before editing config; it covers protocol selection, adapter names, provider reuse, secret handling, and local verification.
+
 ## Memory: making MiMoCode remember
 
 Memory persists across sessions and is auto-injected on resume, so the agent doesn't relearn project context.
