@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { Instance } from "../../src/project/instance"
 import { SystemPrompt } from "../../src/session/system"
+import PROMPT_MINIMAX from "../../src/session/prompt/minimax.txt"
 import { provideInstance, tmpdir } from "../fixture/fixture"
 
 function load<A>(dir: string, fn: (svc: Agent.Interface) => Effect.Effect<A>) {
@@ -11,6 +12,15 @@ function load<A>(dir: string, fn: (svc: Agent.Interface) => Effect.Effect<A>) {
 }
 
 describe("session.system", () => {
+  test("keeps MiniMax CI branch guidance current and singular", () => {
+    const current = "The default branch in this repo is `main`. CI triggers on `main`, `dev`, and `dev/compat`."
+    const legacy = "The default branch in this repo is `main`. CI triggers on `main` and `dev`."
+
+    expect(PROMPT_MINIMAX).toContain(current)
+    expect(PROMPT_MINIMAX).not.toContain(legacy)
+    expect(PROMPT_MINIMAX.split(current)).toHaveLength(2)
+  })
+
   test("prompts the model to search skills from the first user query", async () => {
     await using tmp = await tmpdir({ git: true })
     const home = process.env.HOME
