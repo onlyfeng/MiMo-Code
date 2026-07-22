@@ -5,7 +5,7 @@
 Config is JSON or JSONC. MiMoCode discovers it by walking up from the cwd to the worktree root, then falls back to global.
 
 - Project: `.mimocode/mimocode.json` or `.mimocode/mimocode.jsonc`
-- Global: `~/.config/mimocode/mimocode.json` (XDG config dir)
+- Global: `~/.config/mimocode/mimocode.jsonc` or `mimocode.json` (XDG config dir). New installs seed `mimocode.jsonc`.
 - Extra config dirs are also searched via `$MIMOCODE_CONFIG_DIR`.
 
 Project config merges **over** global. Always include `"$schema": "https://mimo.xiaomi.com/mimocode/config.json"` for validation.
@@ -17,7 +17,7 @@ Base directories resolve from `MIMOCODE_HOME` if set (must be absolute → `<hom
 | Kind | Default location | Holds |
 |------|------------------|-------|
 | data | `~/.local/share/mimocode/` | memory, logs, `builtin_skills/<version>/`, bin |
-| config | `~/.config/mimocode/` | global `mimocode.json` |
+| config | `~/.config/mimocode/` | global `mimocode.jsonc` / `mimocode.json` |
 | cache | `~/.cache/mimocode/` | caches, downloaded bins |
 | state | `~/.local/state/mimocode/` | runtime state |
 
@@ -50,6 +50,8 @@ All optional.
 | `model_groups` | Named capability tiers usable anywhere a model string is accepted — see [Model groups](#model-groups) |
 | `provider` | Custom provider configs & model overrides |
 | `enabled_providers` / `disabled_providers` | Allowlist / blocklist providers |
+
+For custom endpoints, adapter selection, provider reuse, credential handling, and verification, read @providers.md before editing.
 
 ### Model groups
 

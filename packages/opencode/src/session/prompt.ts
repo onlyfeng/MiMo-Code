@@ -675,13 +675,14 @@ export const layer = Layer.effect(
     const insertReminders = Effect.fn("SessionPrompt.insertReminders")(function* (input: {
       messages: MessageV2.WithParts[]
       agent: Agent.Info
+      model: Provider.Model
       session: Session.Info
     }) {
       const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
       if (!userMessage) return input.messages
 
-      // Search reminders apply only to direct user sessions. They advise the
-      // primary agent when to search; the model still decides whether to call.
+      // Search reminders apply only to eligible direct user sessions and models.
+      // They advise the primary agent when to search; the model still decides whether to call.
       const reminder = skillSearchReminderForSession({
         ...input,
         permission: Agent.runtimePermission(input.agent, input.session.permission),
@@ -2077,6 +2078,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         Effect.map((x) => x.flat().map(assign)),
       )
 
+      // Guard: reject the message if no resolved part carries substantive content.
+      // A message with only empty/ignored text or only droppable file types
+      // (text/plain, application/x-directory) would become an empty-content user
+      // message after the send-side filter (message-v2.ts), which Bedrock/Anthropic
+      // reject with 400.  Catch it here so no empty row is ever persisted.
+      if (!hasSubstantiveContent(parts as MessageV2.Part[])) {
+        log.info("dropping empty-content user message (no substantive parts)", {
+          sessionID: input.sessionID,
+          messageID: info.id,
+          partCount: parts.length,
+          partTypes: parts.map((p) => p.type),
+        })
+        return { info, parts: [] }
+      }
+
       yield* plugin.trigger(
         "chat.message",
         {
@@ -2191,6 +2207,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
 
         if (input.noReply === true) return message
+        // Short-circuit: when the message was dropped for being empty-content
+        // (hasSubstantiveContent returned false → parts: []), skip the model
+        // turn entirely. Running loop() here would produce a spurious assistant
+        // response with no user turn.
+        if (message.parts.length === 0) return message
         return yield* loop({ sessionID: input.sessionID, agentID: input.agentID ?? "main", task_id: input.task_id })
       },
     )
@@ -3308,7 +3329,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
           const maxSteps = agent.steps ?? Infinity
           const isLastStep = step >= maxSteps
-          msgs = yield* insertReminders({ messages: msgs, agent, session })
+          msgs = yield* insertReminders({ messages: msgs, agent, model, session })
 
           const msg: MessageV2.Assistant = {
             id: MessageID.ascending(),
@@ -4361,6 +4382,21 @@ export const defaultLayer = Layer.suspend(() =>
     ),
   ),
 )
+/**
+ * Returns true when at least one resolved user-message part carries substantive
+ * content that will survive the send-side filter (message-v2.ts).  Used by
+ * createUserMessage to reject empty-content messages before they are persisted.
+ */
+export function hasSubstantiveContent(parts: readonly MessageV2.Part[]): boolean {
+  return parts.some((p) => {
+    if (p.type === "text" && !p.ignored && p.text.trim().length > 0) return true
+    if (p.type === "file" && p.mime !== "text/plain" && p.mime !== "application/x-directory") return true
+    // checkpoint / compaction / subtask parts always produce text at send time
+    if (p.type === "checkpoint" || p.type === "compaction" || p.type === "subtask") return true
+    return false
+  })
+}
+
 export const PromptInput = z.object({
   sessionID: SessionID.zod,
   messageID: MessageID.zod.optional(),
@@ -4433,7 +4469,7 @@ export const PromptInput = z.object({
           ref: "SubtaskPartInput",
         }),
     ]),
-  ),
+  ).min(1, "parts must contain at least one element"),
 })
 export type PromptInput = z.infer<typeof PromptInput>
 
