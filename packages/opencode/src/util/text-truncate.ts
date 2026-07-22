@@ -23,6 +23,18 @@ function utf8TailBoundary(buf: Buffer, start: number) {
   return i
 }
 
+export function takeUtf8PrefixByBytes(text: string, maxBytes: number) {
+  const buf = Buffer.from(text, "utf8")
+  if (buf.length <= maxBytes) return text
+  return buf.subarray(0, utf8HeadBoundary(buf, Math.max(0, maxBytes))).toString("utf8")
+}
+
+export function takeUtf8SuffixByBytes(text: string, maxBytes: number) {
+  const buf = Buffer.from(text, "utf8")
+  if (buf.length <= maxBytes) return text
+  return buf.subarray(utf8TailBoundary(buf, buf.length - Math.max(0, maxBytes))).toString("utf8")
+}
+
 // UTF-8 safe, O(n) byte cap. `keep` selects which slice survives — use
 // `head+tail` for tool errors / tracebacks whose signal sits at the tail.
 // The marker always contains `<label> truncated <suffix>` so callers (and
