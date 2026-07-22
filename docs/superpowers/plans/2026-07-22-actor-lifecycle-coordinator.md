@@ -31,7 +31,7 @@
 **Interfaces:**
 - Produces: createActorLifecycle<Result, ContextValue>()
 - Produces: TerminalStatus, GenerationOwner<Result>, ForkGenerationOwner, WakeGenerationOwner<Result>, CancelEpisode, WakeOwnership<Result>, and CancelOwnership<Result>
-- The coordinator methods are key, isCancelled, retainPersistent, releasePersistent, setForkContext, getForkContext, startFork, currentGeneration, hasGeneration, isCurrentOpen, acquireWake, markDelivered, claimTerminal, settleTerminal, finishGeneration, finishForkWork, acquireCancel, releaseCancel, and retire.
+- The coordinator methods are key, isCancelled, retainPersistent, releasePersistent, setForkContext, getForkContext, startFork, currentGeneration, hasGeneration, isCurrentOpen, acquireWake, markDelivered, claimTerminal, settleTerminal, finishFork, finishWake, finishForkWork, acquireCancel, releaseCancel, and retire.
 
 - [ ] **Step 1: Write the failing lifecycle tests**
 
@@ -51,9 +51,15 @@ describe("actor lifecycle coordinator", () => {
     const first = lifecycle.key(SessionID.make("session-a"), "actor")
     const second = lifecycle.key(SessionID.make("session-b"), "actor")
 
-    expect(first).toBe("session-a:actor")
-    expect(second).toBe("session-b:actor")
     expect(first).not.toBe(second)
+  })
+
+  test("keys cannot collide when either identity component contains a separator", () => {
+    const lifecycle = createActorLifecycle<string, string>()
+
+    expect(lifecycle.key(SessionID.make("ses:a"), "b")).not.toBe(
+      lifecycle.key(SessionID.make("ses"), "a:b"),
+    )
   })
 
   test("publishes a wake result before releasing generation followers", async () => {
@@ -69,7 +75,9 @@ describe("actor lifecycle coordinator", () => {
     expect(follower._tag).toBe("follower")
     if (follower._tag !== "follower") throw new Error("expected wake follower")
 
-    await run(lifecycle.finishGeneration(key, ownership.owner, Exit.succeed("done")))
+    // @ts-expect-error wake completion must publish its shared terminal Exit
+    lifecycle.finishWake(key, ownership.owner)
+    await run(lifecycle.finishWake(key, ownership.owner, Exit.succeed("done")))
 
     expect(await run(Deferred.isDone(follower.active.result))).toBe(true)
     expect(await run(Deferred.isDone(follower.active.done))).toBe(true)
@@ -88,7 +96,7 @@ describe("actor lifecycle coordinator", () => {
 
     await run(lifecycle.settleTerminal(owner))
     expect(await run(Deferred.isDone(owner.terminalDone))).toBe(true)
-    await run(lifecycle.finishGeneration(key, owner))
+    await run(lifecycle.finishFork(key, owner))
     expect(await run(lifecycle.isCancelled(key))).toBe(false)
   })
 
@@ -105,7 +113,7 @@ describe("actor lifecycle coordinator", () => {
     expect(wake._tag).toBe("owner")
     if (wake._tag !== "owner") throw new Error("expected persistent wake owner")
     expect(wake.owner.generation).toBe(2)
-    await run(lifecycle.finishGeneration(persistent, wake.owner, Exit.succeed("done")))
+    await run(lifecycle.finishWake(persistent, wake.owner, Exit.succeed("done")))
     await run(lifecycle.retire(persistent))
     expect(await run(lifecycle.getForkContext(persistent))).toBeUndefined()
     expect((await run(lifecycle.startFork(persistent))).generation).toBe(1)
@@ -137,7 +145,7 @@ describe("actor lifecycle coordinator", () => {
     await run(lifecycle.releaseCancel(key, owner.episode))
     expect(await run(Deferred.isDone(follower.episode.done))).toBe(true)
     await run(lifecycle.settleTerminal(generation))
-    await run(lifecycle.finishGeneration(key, generation))
+    await run(lifecycle.finishFork(key, generation))
 
     const deliveredKey = lifecycle.key(SessionID.make("session"), "ephemeral")
     const delivered = await run(lifecycle.startFork(deliveredKey))
@@ -220,7 +228,7 @@ export function createActorLifecycle<Result, ContextValue>() {
   const cancelEpisodes = new Map<string, CancelEpisode>()
   const cancelEpisodeID = { current: 0 }
 
-  const key = (sessionID: SessionID, actorID: string) => sessionID + ":" + actorID
+  const key = (sessionID: SessionID, actorID: string) => JSON.stringify([sessionID, actorID])
   const nextGeneration = (actorKey: string) => {
     const generation = (generationCounters.get(actorKey) ?? 0) + 1
     generationCounters.set(actorKey, generation)
@@ -259,21 +267,31 @@ export function createActorLifecycle<Result, ContextValue>() {
       return { _tag: "owner", owner }
     })
 
-  const finishGeneration = (
+  const finishGenerationState = (
     actorKey: string,
     owner: GenerationOwner<Result>,
-    result?: Exit.Exit<Result>,
+  ) => {
+    if (generationOwners.get(actorKey) === owner) generationOwners.delete(actorKey)
+    if (liveActors.get(actorKey) === owner.generation) liveActors.delete(actorKey)
+    if (deliveredActors.get(actorKey) === owner.generation) deliveredActors.delete(actorKey)
+    if (owner.terminal?.status === "cancelled") cancelledActors.delete(actorKey)
+    if (!persistentActors.has(actorKey) && !generationOwners.has(actorKey) && !liveActors.has(actorKey)) {
+      generationCounters.delete(actorKey)
+    }
+    Deferred.doneUnsafe(owner.done, Effect.void)
+  }
+
+  const finishFork = (actorKey: string, owner: ForkGenerationOwner) =>
+    Effect.sync(() => finishGenerationState(actorKey, owner))
+
+  const finishWake = (
+    actorKey: string,
+    owner: WakeGenerationOwner<Result>,
+    result: Exit.Exit<Result>,
   ) =>
     Effect.sync(() => {
-      if (owner.kind === "wake" && result) Deferred.doneUnsafe(owner.result, Effect.succeed(result))
-      if (generationOwners.get(actorKey) === owner) generationOwners.delete(actorKey)
-      if (liveActors.get(actorKey) === owner.generation) liveActors.delete(actorKey)
-      if (deliveredActors.get(actorKey) === owner.generation) deliveredActors.delete(actorKey)
-      if (owner.terminal?.status === "cancelled") cancelledActors.delete(actorKey)
-      if (!persistentActors.has(actorKey) && !generationOwners.has(actorKey) && !liveActors.has(actorKey)) {
-        generationCounters.delete(actorKey)
-      }
-      Deferred.doneUnsafe(owner.done, Effect.void)
+      Deferred.doneUnsafe(owner.result, Effect.succeed(result))
+      finishGenerationState(actorKey, owner)
     })
 
   const finishForkWork = (
@@ -281,14 +299,12 @@ export function createActorLifecycle<Result, ContextValue>() {
     owner: ForkGenerationOwner,
     lifecycle: "ephemeral" | "persistent",
   ) =>
-    Effect.gen(function* () {
-      yield* finishGeneration(actorKey, owner)
+    Effect.sync(() => {
+      finishGenerationState(actorKey, owner)
       if (lifecycle === "persistent") return
-      yield* Effect.sync(() => {
-        forkContexts.delete(actorKey)
-        persistentActors.delete(actorKey)
-        if (!liveActors.has(actorKey)) generationCounters.delete(actorKey)
-      })
+      forkContexts.delete(actorKey)
+      persistentActors.delete(actorKey)
+      if (!liveActors.has(actorKey)) generationCounters.delete(actorKey)
     })
 
   const claimTerminal = (
@@ -359,7 +375,8 @@ export function createActorLifecycle<Result, ContextValue>() {
       Effect.sync(() => deliveredActors.set(actorKey, owner.generation)),
     claimTerminal,
     settleTerminal,
-    finishGeneration,
+    finishFork,
+    finishWake,
     finishForkWork,
     acquireCancel,
     releaseCancel,
@@ -376,7 +393,7 @@ Run from packages/opencode:
 bun test test/actor/lifecycle.test.ts
 ~~~
 
-Expected: 5 pass, 0 fail, with no warnings or unhandled errors.
+Expected: 6 pass, 0 fail, with no warnings or unhandled errors.
 
 - [ ] **Step 5: Run typecheck for the new public-internal types**
 
@@ -442,7 +459,7 @@ yield* lifecycleState.finishForkWork(key, input.generation, input.lifecycle)
 yield* lifecycleState.retire(key)
 ~~~
 
-Replace all inline claim/settle/finish calls with lifecycleState.claimTerminal, lifecycleState.settleTerminal, and lifecycleState.finishGeneration. Preserve their current ordering relative to registry writes, notifications, Deferred outcome completion, and finalizers.
+Replace all inline claim/settle/finish calls with lifecycleState.claimTerminal, lifecycleState.settleTerminal, lifecycleState.finishFork, and lifecycleState.finishWake. Preserve their current ordering relative to registry writes, notifications, Deferred outcome completion, and finalizers.
 
 The spawn-setup failure path remains:
 
@@ -457,7 +474,7 @@ if (yield* lifecycleState.claimTerminal(key, owner, "failed", "turn", error)) {
     .pipe(Effect.ignoreCause)
 }
 yield* lifecycleState.settleTerminal(owner)
-yield* lifecycleState.finishGeneration(key, owner)
+yield* lifecycleState.finishFork(key, owner)
 yield* lifecycleState.retire(key)
 ~~~
 
@@ -490,7 +507,7 @@ const cancelled =
   ((yield* lifecycleState.isCancelled(key)) || (Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)))
 ~~~
 
-Finish a wake by passing terminalResult to lifecycleState.finishGeneration before returning or failing exactly as the current code does.
+Finish a wake by passing terminalResult to lifecycleState.finishWake before returning or failing exactly as the current code does.
 
 - [ ] **Step 4: Replace cancel ownership with one atomic coordinator call**
 
@@ -545,7 +562,7 @@ Run from packages/opencode:
 bun test test/actor/lifecycle.test.ts test/actor/spawn-lifecycle.test.ts test/actor/spawn-no-deadlock.test.ts test/actor/cancel-notification.test.ts test/actor/cancel-cascade.test.ts test/actor/spawn-notification.test.ts test/actor/stall-watchdog.test.ts test/session/main-lifecycle.test.ts --timeout 30000
 ~~~
 
-Expected: 48 pass, 0 fail. In particular, preserve the existing assertions for main cancellation without a tombstone, completed-versus-cancelled ownership, lost-wake retry, persistent fork-context retention, ephemeral cleanup, cancel episode release, and watchdog visibility of wake generations.
+Expected: 49 pass, 0 fail. In particular, preserve the existing assertions for main cancellation without a tombstone, completed-versus-cancelled ownership, lost-wake retry, persistent fork-context retention, ephemeral cleanup, cancel episode release, and watchdog visibility of wake generations.
 
 - [ ] **Step 7: Run typecheck**
 

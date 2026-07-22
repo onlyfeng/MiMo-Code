@@ -30,14 +30,14 @@ Add `packages/opencode/src/actor/lifecycle.ts` with a factory that creates one c
 
 The coordinator owns all lifecycle maps and the cancellation-episode counter. It exposes operations that correspond to the existing synchronous linearization regions rather than exposing the maps:
 
-- form a session-scoped actor key;
+- form a collision-free key from the complete session and actor string tuple;
 - store, read, retain, and retire persistent fork-context ownership;
 - start a fork generation;
 - atomically acquire a wake as blocked, cancel-episode follower, fork follower, wake follower, or new wake owner;
 - inspect whether a generation is still current and unclaimed;
 - claim and settle one terminal outcome;
-- finish a generation and publish its shared `Exit` before releasing ownership;
-- finish ephemeral fork work or retain persistent state;
+- finish a fork generation, or finish a wake generation only when its shared `Exit` is supplied;
+- finish ephemeral fork work and release its actor-lifetime state in one synchronous transition, or retain persistent state;
 - atomically acquire cancellation as no-op, episode follower, or episode owner;
 - release a cancellation episode and retire actor-lifetime state;
 - expose the narrow cancelled/delivered/live queries and mutations required by existing orchestration and watchdog logic.
@@ -48,13 +48,13 @@ The coordinator owns all lifecycle maps and the cancellation-episode counter. It
 
 The refactor must preserve these invariants exactly:
 
-1. Actor identity remains scoped by both `sessionID` and `actorID`.
+1. Actor identity remains scoped by both `sessionID` and `actorID`; key encoding is injective for arbitrary string values in either component and cannot collide when a component contains the separator used by the former implementation.
 2. Generation numbers increase monotonically while an actor has retained lifecycle ownership.
-3. Fork and wake followers observe the active generation's completion barrier; wake followers also receive the same terminal-processing `Exit` before a new generation can be acquired.
+3. Fork and wake followers observe the active generation's completion barrier; the type-level API requires every wake completion to supply the same terminal-processing `Exit`, and that result is published before a new generation can be acquired.
 4. At most one claimant owns a generation's terminal status. A later turn or cancel observes the existing claim and cannot overwrite it.
 5. The terminal-settlement barrier completes after registry and notification work associated with the winning claim, including failure paths.
 6. A cancel episode has one owner. Concurrent cancellers wait on the same episode barrier, and the barrier is released even when cancellation orchestration defects.
-7. A persistent actor retains its fork context and generation counter while idle. An ephemeral actor releases fork context after fork work finishes.
+7. A persistent actor retains its fork context and generation counter while idle. An ephemeral actor releases generation ownership, fork context, persistent membership, delivery state, and its unowned generation counter in one synchronous transition after fork work finishes.
 8. Explicit persistent retirement removes fork context, persistent membership, delivered state, and any unowned generation counter.
 9. Cancelling the main actor may interrupt its active Runner but must not retire it or write a cancelled tombstone.
 10. Delivery and generation cleanup remain ordered so no fiber can observe an owner-less gap before the shared terminal result is published.
