@@ -5,7 +5,7 @@
 Config is JSON or JSONC. MiMoCode discovers it by walking up from the cwd to the worktree root, then falls back to global.
 
 - Project: `.mimocode/mimocode.json` or `.mimocode/mimocode.jsonc`
-- Global: `~/.config/mimocode/mimocode.json` (XDG config dir)
+- Global: `~/.config/mimocode/mimocode.jsonc` or `mimocode.json` (XDG config dir). New installs seed `mimocode.jsonc`.
 - Extra config dirs are also searched via `$MIMOCODE_CONFIG_DIR`.
 
 Project config merges **over** global. Always include `"$schema": "https://mimo.xiaomi.com/mimocode/config.json"` for validation.
@@ -17,7 +17,7 @@ Base directories resolve from `MIMOCODE_HOME` if set (must be absolute → `<hom
 | Kind | Default location | Holds |
 |------|------------------|-------|
 | data | `~/.local/share/mimocode/` | memory, logs, `builtin_skills/<version>/`, bin |
-| config | `~/.config/mimocode/` | global `mimocode.json` |
+| config | `~/.config/mimocode/` | global `mimocode.jsonc` / `mimocode.json` |
 | cache | `~/.cache/mimocode/` | caches, downloaded bins |
 | state | `~/.local/state/mimocode/` | runtime state |
 
@@ -51,46 +51,7 @@ All optional.
 | `provider` | Custom provider configs & model overrides |
 | `enabled_providers` / `disabled_providers` | Allowlist / blocklist providers |
 
-### Custom OpenAI-compatible endpoint
-
-MiMoCode can configure a provider that is absent from the built-in model catalog. Given a base URL, API key, and model name, use this shape:
-
-```jsonc
-{
-  "$schema": "https://mimo.xiaomi.com/mimocode/config.json",
-  "model": "custom/MODEL_NAME",
-  "provider": {
-    "custom": {
-      "name": "Custom",
-      "npm": "@ai-sdk/openai-compatible",
-      "only_configured_models": true,
-      "models": {
-        "MODEL_NAME": {
-          "name": "MODEL_NAME"
-        }
-      },
-      "options": {
-        "baseURL": "BASE_URL",
-        "apiKey": "API_KEY"
-      }
-    }
-  }
-}
-```
-
-Field semantics:
-
-- `provider.custom` — `custom` is the provider ID. It may be replaced with a user-specified or unused lowercase ID, but the prefix in the top-level `model` must match it.
-- `npm` — selects the wire-protocol adapter. `@ai-sdk/openai-compatible` supports OpenAI-compatible APIs; a non-compatible service needs its own adapter.
-- `models.MODEL_NAME` — the map key is the exact upstream model ID, not merely a display name. Model IDs containing `/` are supported.
-- `options.baseURL` — the exact request base URL. The runtime gives this precedence over a catalog URL and does not require a known provider.
-- `options.apiKey` — the credential passed to the provider SDK. This is a plaintext secret in the config, so never echo it and keep the file user-readable only. As an alternative, known providers can obtain credentials from their documented environment variable or the provider login flow.
-- `only_configured_models: true` — limits the provider to the explicitly configured model instead of augmenting a known catalog.
-- `model` — selects the configured model using `<provider-id>/<model-id>`; only the first `/` separates the provider, so the model ID itself may contain `/`.
-
-Use `~/.config/mimocode/mimocode.json` for user-wide settings and `.mimocode/mimocode.json` for project-only settings. Merge into the existing JSON/JSONC rather than replacing unrelated keys. Preserve the supplied base URL and model ID exactly; do not infer or append `/v1`.
-
-After editing, verify with `mimo models` or the TUI model picker. Configuration is read on the next turn; select the configured model again or start a new session if the current session has already pinned another model.
+For custom endpoints, adapter selection, provider reuse, credential handling, and verification, read @providers.md before editing.
 
 ### Model groups
 

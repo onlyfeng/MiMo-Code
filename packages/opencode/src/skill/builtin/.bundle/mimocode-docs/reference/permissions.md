@@ -40,6 +40,8 @@ Path/command-keyed (accept the glob-map form): `read`, `edit`, `glob`, `grep`, `
 
 Simple action-only: `question`, `webfetch`, `websearch`, `codesearch`, `doom_loop`.
 
+`doom_loop` is the safety gate raised when repeated identical tool calls look like an infinite loop. Keep it at `ask` (the default) unless the surrounding automation has another reliable stop condition.
+
 Unknown keys fall through to a catch-all record, so future/custom tools can be named too.
 
 ## Common recipes
