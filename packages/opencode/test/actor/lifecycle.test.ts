@@ -17,9 +17,7 @@ describe("actor lifecycle coordinator", () => {
   test("keys cannot collide when either identity component contains a separator", () => {
     const lifecycle = createActorLifecycle<string, string>()
 
-    expect(lifecycle.key(SessionID.make("ses:a"), "b")).not.toBe(
-      lifecycle.key(SessionID.make("ses"), "a:b"),
-    )
+    expect(lifecycle.key(SessionID.make("ses:a"), "b")).not.toBe(lifecycle.key(SessionID.make("ses"), "a:b"))
   })
 
   test("publishes a wake result before releasing generation followers", async () => {

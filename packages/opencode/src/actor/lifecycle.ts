@@ -109,21 +109,13 @@ export function createActorLifecycle<Result, ContextValue>() {
   const finishFork = (actorKey: string, owner: ForkGenerationOwner) =>
     Effect.sync(() => finishGenerationState(actorKey, owner))
 
-  const finishWake = (
-    actorKey: string,
-    owner: WakeGenerationOwner<Result>,
-    result: Exit.Exit<Result>,
-  ) =>
+  const finishWake = (actorKey: string, owner: WakeGenerationOwner<Result>, result: Exit.Exit<Result>) =>
     Effect.sync(() => {
       Deferred.doneUnsafe(owner.result, Effect.succeed(result))
       finishGenerationState(actorKey, owner)
     })
 
-  const finishForkWork = (
-    actorKey: string,
-    owner: ForkGenerationOwner,
-    lifecycle: "ephemeral" | "persistent",
-  ) =>
+  const finishForkWork = (actorKey: string, owner: ForkGenerationOwner, lifecycle: "ephemeral" | "persistent") =>
     Effect.sync(() => {
       finishGenerationState(actorKey, owner)
       if (lifecycle === "persistent") return
@@ -188,8 +180,7 @@ export function createActorLifecycle<Result, ContextValue>() {
     isCancelled: (actorKey: string) => Effect.sync(() => cancelledActors.has(actorKey)),
     retainPersistent: (actorKey: string) => Effect.sync(() => persistentActors.add(actorKey)),
     releasePersistent: (actorKey: string) => Effect.sync(() => persistentActors.delete(actorKey)),
-    setForkContext: (actorKey: string, context: ContextValue) =>
-      Effect.sync(() => forkContexts.set(actorKey, context)),
+    setForkContext: (actorKey: string, context: ContextValue) => Effect.sync(() => forkContexts.set(actorKey, context)),
     getForkContext: (actorKey: string) => Effect.sync(() => forkContexts.get(actorKey)),
     startFork,
     currentGeneration: (actorKey: string) => Effect.sync(() => generationOwners.get(actorKey)),

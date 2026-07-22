@@ -25,10 +25,12 @@
 ### Task 1: Add the lifecycle coordinator with state-machine tests
 
 **Files:**
+
 - Create: packages/opencode/test/actor/lifecycle.test.ts
 - Create: packages/opencode/src/actor/lifecycle.ts
 
 **Interfaces:**
+
 - Produces: createActorLifecycle<Result, ContextValue>()
 - Produces: TerminalStatus, GenerationOwner<Result>, ForkGenerationOwner, WakeGenerationOwner<Result>, CancelEpisode, WakeOwnership<Result>, and CancelOwnership<Result>
 - The coordinator methods are key, isCancelled, retainPersistent, releasePersistent, setForkContext, getForkContext, startFork, currentGeneration, hasGeneration, isCurrentOpen, acquireWake, markDelivered, claimTerminal, settleTerminal, finishFork, finishWake, finishForkWork, acquireCancel, releaseCancel, and retire.
@@ -37,7 +39,7 @@
 
 Create packages/opencode/test/actor/lifecycle.test.ts with the following tests:
 
-~~~typescript
+```typescript
 import { describe, expect, test } from "bun:test"
 import { Deferred, Effect, Exit } from "effect"
 import { SessionID } from "../../src/session/schema"
@@ -57,9 +59,7 @@ describe("actor lifecycle coordinator", () => {
   test("keys cannot collide when either identity component contains a separator", () => {
     const lifecycle = createActorLifecycle<string, string>()
 
-    expect(lifecycle.key(SessionID.make("ses:a"), "b")).not.toBe(
-      lifecycle.key(SessionID.make("ses"), "a:b"),
-    )
+    expect(lifecycle.key(SessionID.make("ses:a"), "b")).not.toBe(lifecycle.key(SessionID.make("ses"), "a:b"))
   })
 
   test("publishes a wake result before releasing generation followers", async () => {
@@ -153,15 +153,15 @@ describe("actor lifecycle coordinator", () => {
     expect((await run(lifecycle.acquireCancel(deliveredKey)))._tag).toBe("noop")
   })
 })
-~~~
+```
 
 - [ ] **Step 2: Run the test and verify RED**
 
 Run from packages/opencode:
 
-~~~bash
+```bash
 bun test test/actor/lifecycle.test.ts
-~~~
+```
 
 Expected: FAIL because ../../src/actor/lifecycle cannot be resolved. A syntax error or unrelated dependency failure is not an acceptable RED result.
 
@@ -169,7 +169,7 @@ Expected: FAIL because ../../src/actor/lifecycle cannot be resolved. A syntax er
 
 Create packages/opencode/src/actor/lifecycle.ts:
 
-~~~typescript
+```typescript
 import { Deferred, Effect, Exit } from "effect"
 import type { SessionID } from "@/session/schema"
 
@@ -267,10 +267,7 @@ export function createActorLifecycle<Result, ContextValue>() {
       return { _tag: "owner", owner }
     })
 
-  const finishGenerationState = (
-    actorKey: string,
-    owner: GenerationOwner<Result>,
-  ) => {
+  const finishGenerationState = (actorKey: string, owner: GenerationOwner<Result>) => {
     if (generationOwners.get(actorKey) === owner) generationOwners.delete(actorKey)
     if (liveActors.get(actorKey) === owner.generation) liveActors.delete(actorKey)
     if (deliveredActors.get(actorKey) === owner.generation) deliveredActors.delete(actorKey)
@@ -284,21 +281,13 @@ export function createActorLifecycle<Result, ContextValue>() {
   const finishFork = (actorKey: string, owner: ForkGenerationOwner) =>
     Effect.sync(() => finishGenerationState(actorKey, owner))
 
-  const finishWake = (
-    actorKey: string,
-    owner: WakeGenerationOwner<Result>,
-    result: Exit.Exit<Result>,
-  ) =>
+  const finishWake = (actorKey: string, owner: WakeGenerationOwner<Result>, result: Exit.Exit<Result>) =>
     Effect.sync(() => {
       Deferred.doneUnsafe(owner.result, Effect.succeed(result))
       finishGenerationState(actorKey, owner)
     })
 
-  const finishForkWork = (
-    actorKey: string,
-    owner: ForkGenerationOwner,
-    lifecycle: "ephemeral" | "persistent",
-  ) =>
+  const finishForkWork = (actorKey: string, owner: ForkGenerationOwner, lifecycle: "ephemeral" | "persistent") =>
     Effect.sync(() => {
       finishGenerationState(actorKey, owner)
       if (lifecycle === "persistent") return
@@ -362,8 +351,7 @@ export function createActorLifecycle<Result, ContextValue>() {
     isCancelled: (actorKey: string) => Effect.sync(() => cancelledActors.has(actorKey)),
     retainPersistent: (actorKey: string) => Effect.sync(() => persistentActors.add(actorKey)),
     releasePersistent: (actorKey: string) => Effect.sync(() => persistentActors.delete(actorKey)),
-    setForkContext: (actorKey: string, context: ContextValue) =>
-      Effect.sync(() => forkContexts.set(actorKey, context)),
+    setForkContext: (actorKey: string, context: ContextValue) => Effect.sync(() => forkContexts.set(actorKey, context)),
     getForkContext: (actorKey: string) => Effect.sync(() => forkContexts.get(actorKey)),
     startFork,
     currentGeneration: (actorKey: string) => Effect.sync(() => generationOwners.get(actorKey)),
@@ -383,15 +371,15 @@ export function createActorLifecycle<Result, ContextValue>() {
     retire,
   }
 }
-~~~
+```
 
 - [ ] **Step 4: Run the coordinator tests and verify GREEN**
 
 Run from packages/opencode:
 
-~~~bash
+```bash
 bun test test/actor/lifecycle.test.ts
-~~~
+```
 
 Expected: 6 pass, 0 fail, with no warnings or unhandled errors.
 
@@ -399,25 +387,27 @@ Expected: 6 pass, 0 fail, with no warnings or unhandled errors.
 
 Run from packages/opencode:
 
-~~~bash
+```bash
 bun typecheck
-~~~
+```
 
 Expected: exit 0.
 
 - [ ] **Step 6: Commit the coordinator**
 
-~~~bash
+```bash
 git add packages/opencode/src/actor/lifecycle.ts packages/opencode/test/actor/lifecycle.test.ts
 git commit -m "refactor(actor): add lifecycle coordinator"
-~~~
+```
 
 ### Task 2: Route spawn orchestration through the coordinator
 
 **Files:**
+
 - Modify: packages/opencode/src/actor/spawn.ts
 
 **Interfaces:**
+
 - Consumes: createActorLifecycle<MessageV2.WithParts, ForkContext>()
 - Consumes: GenerationOwner<MessageV2.WithParts>, ForkGenerationOwner, and TerminalStatus
 - Produces: the unchanged Actor.Interface service.
@@ -426,23 +416,22 @@ git commit -m "refactor(actor): add lifecycle coordinator"
 
 Add this import:
 
-~~~typescript
+```typescript
 import {
   createActorLifecycle,
   type ForkGenerationOwner,
   type GenerationOwner,
   type TerminalStatus,
 } from "@/actor/lifecycle"
-~~~
+```
 
 Replace the lifecycle maps, inline owner types, counter, actorKey, and helper functions near the start of Actor.layer with:
 
-~~~typescript
+```typescript
 const lifecycleState = createActorLifecycle<MessageV2.WithParts, ForkContext>()
 const actorKey = lifecycleState.key
-const isCancelled = (sessionID: SessionID, actorID: string) =>
-  lifecycleState.isCancelled(actorKey(sessionID, actorID))
-~~~
+const isCancelled = (sessionID: SessionID, actorID: string) => lifecycleState.isCancelled(actorKey(sessionID, actorID))
+```
 
 Change forkWork input.generation and abortSetup owner to ForkGenerationOwner. Other orchestration values that accept either owner kind use GenerationOwner<MessageV2.WithParts>.
 
@@ -450,33 +439,34 @@ Change forkWork input.generation and abortSetup owner to ForkGenerationOwner. Ot
 
 Use these exact coordinator operations:
 
-~~~typescript
-yield* lifecycleState.retainPersistent(key)
-const generation = yield* lifecycleState.startFork(key)
-yield* lifecycleState.setForkContext(key, input.forkContext)
-yield* lifecycleState.markDelivered(key, input.generation)
-yield* lifecycleState.finishForkWork(key, input.generation, input.lifecycle)
-yield* lifecycleState.retire(key)
-~~~
+```typescript
+yield * lifecycleState.retainPersistent(key)
+const generation = yield * lifecycleState.startFork(key)
+yield * lifecycleState.setForkContext(key, input.forkContext)
+yield * lifecycleState.markDelivered(key, input.generation)
+yield * lifecycleState.finishForkWork(key, input.generation, input.lifecycle)
+yield * lifecycleState.retire(key)
+```
 
 Replace all inline claim/settle/finish calls with lifecycleState.claimTerminal, lifecycleState.settleTerminal, lifecycleState.finishFork, and lifecycleState.finishWake. Preserve their current ordering relative to registry writes, notifications, Deferred outcome completion, and finalizers.
 
 The spawn-setup failure path remains:
 
-~~~typescript
-if (yield* lifecycleState.claimTerminal(key, owner, "failed", "turn", error)) {
-  yield* actorReg
-    .updateStatus(sessionID, actorID, {
-      status: "idle",
-      lastOutcome: "failure",
-      lastError: error,
-    })
-    .pipe(Effect.ignoreCause)
+```typescript
+if (yield * lifecycleState.claimTerminal(key, owner, "failed", "turn", error)) {
+  yield *
+    actorReg
+      .updateStatus(sessionID, actorID, {
+        status: "idle",
+        lastOutcome: "failure",
+        lastError: error,
+      })
+      .pipe(Effect.ignoreCause)
 }
-yield* lifecycleState.settleTerminal(owner)
-yield* lifecycleState.finishFork(key, owner)
-yield* lifecycleState.retire(key)
-~~~
+yield * lifecycleState.settleTerminal(owner)
+yield * lifecycleState.finishFork(key, owner)
+yield * lifecycleState.retire(key)
+```
 
 - [ ] **Step 3: Replace wake ownership with one atomic coordinator call**
 
@@ -486,26 +476,26 @@ For a persistent actor already carrying a cancelled terminal row, call lifecycle
 
 Replace the entire multi-map wake acquisition Effect.sync block with:
 
-~~~typescript
-const ownership = yield* lifecycleState.acquireWake(key)
-~~~
+```typescript
+const ownership = yield * lifecycleState.acquireWake(key)
+```
 
 Keep the existing blocked, episode, fork, follower, and owner branches. The follower branch reads ownership.active.result without a non-null assertion because the discriminated type is a WakeGenerationOwner.
 
 Before starting guarded work, replace the generation-owner comparison with:
 
-~~~typescript
-if (!(yield* lifecycleState.isCurrentOpen(key, owner))) return yield* Effect.interrupt
-~~~
+```typescript
+if (!(yield * lifecycleState.isCurrentOpen(key, owner))) return yield * Effect.interrupt
+```
 
 Compute the cancellation component of terminal status with:
 
-~~~typescript
+```typescript
 const cancelled =
   !effectFailure &&
   !assistantFailure &&
-  ((yield* lifecycleState.isCancelled(key)) || (Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)))
-~~~
+  (yield * lifecycleState.isCancelled(key) || (Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)))
+```
 
 Finish a wake by passing terminalResult to lifecycleState.finishWake before returning or failing exactly as the current code does.
 
@@ -513,26 +503,24 @@ Finish a wake by passing terminalResult to lifecycleState.finishWake before retu
 
 Replace the cancel ownership Effect.sync block with:
 
-~~~typescript
-const ownership = yield* lifecycleState.acquireCancel(key)
-~~~
+```typescript
+const ownership = yield * lifecycleState.acquireCancel(key)
+```
 
 Keep the no-op and follower behavior unchanged. Replace the local releaseEpisode and retire Effects with:
 
-~~~typescript
+```typescript
 const releaseEpisode = lifecycleState.releaseCancel(key, ownership.episode)
 const retire = lifecycleState.retire(key)
 const settleClaim =
-  ownership.claimed && ownership.generation
-    ? lifecycleState.settleTerminal(ownership.generation)
-    : Effect.void
-~~~
+  ownership.claimed && ownership.generation ? lifecycleState.settleTerminal(ownership.generation) : Effect.void
+```
 
 Replace the live generation query with:
 
-~~~typescript
-const live = yield* lifecycleState.hasGeneration(key)
-~~~
+```typescript
+const live = yield * lifecycleState.hasGeneration(key)
+```
 
 Do not move any child cascade, registry lookup, Runner cancellation, inbox drain, terminal notification, main-mode guard, uninterruptible region, or ensuring finalizer into lifecycle.ts.
 
@@ -540,17 +528,17 @@ Do not move any child cascade, registry lookup, Runner cancellation, inbox drain
 
 Implement getForkContext with:
 
-~~~typescript
+```typescript
 const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
   return yield* lifecycleState.getForkContext(actorKey(sessionID, actorID))
 })
-~~~
+```
 
 Run:
 
-~~~bash
+```bash
 rg -n "forkContexts|cancelledActors|deliveredActors|liveActors|generationCounters|persistentActors|generationOwners|cancelEpisodes|cancelEpisodeID" packages/opencode/src/actor/spawn.ts
-~~~
+```
 
 Expected: no matches. Mentions inside lifecycle.ts are expected.
 
@@ -558,9 +546,9 @@ Expected: no matches. Mentions inside lifecycle.ts are expected.
 
 Run from packages/opencode:
 
-~~~bash
+```bash
 bun test test/actor/lifecycle.test.ts test/actor/spawn-lifecycle.test.ts test/actor/spawn-no-deadlock.test.ts test/actor/cancel-notification.test.ts test/actor/cancel-cascade.test.ts test/actor/spawn-notification.test.ts test/actor/stall-watchdog.test.ts test/session/main-lifecycle.test.ts --timeout 30000
-~~~
+```
 
 Expected: 49 pass, 0 fail. In particular, preserve the existing assertions for main cancellation without a tombstone, completed-versus-cancelled ownership, lost-wake retry, persistent fork-context retention, ephemeral cleanup, cancel episode release, and watchdog visibility of wake generations.
 
@@ -568,60 +556,62 @@ Expected: 49 pass, 0 fail. In particular, preserve the existing assertions for m
 
 Run from packages/opencode:
 
-~~~bash
+```bash
 bun typecheck
-~~~
+```
 
 Expected: exit 0.
 
 - [ ] **Step 8: Commit the spawn integration**
 
-~~~bash
+```bash
 git add packages/opencode/src/actor/spawn.ts
 git commit -m "refactor(actor): centralize lifecycle state"
-~~~
+```
 
 ### Task 3: Verify the complete PR branch
 
 **Files:**
+
 - Verify only; no new files or behavior.
 
 **Interfaces:**
+
 - Consumes: the complete branch diff from origin/main.
 - Produces: fresh evidence suitable for PR publication.
 
 - [ ] **Step 1: Inspect scope**
 
-~~~bash
+```bash
 git status --short --branch
 git diff --stat origin/main...HEAD
 git diff --name-only origin/main...HEAD
-~~~
+```
 
 Expected changed paths only:
 
-~~~text
+```text
 docs/superpowers/plans/2026-07-22-actor-lifecycle-coordinator.md
 docs/superpowers/specs/2026-07-22-actor-lifecycle-coordinator-design.md
 packages/opencode/src/actor/lifecycle.ts
 packages/opencode/src/actor/spawn.ts
 packages/opencode/test/actor/lifecycle.test.ts
-~~~
+```
 
 - [ ] **Step 2: Run fresh final verification**
 
 Run from packages/opencode:
 
-~~~bash
+```bash
 bun test test/actor/lifecycle.test.ts test/actor/spawn-lifecycle.test.ts test/actor/spawn-no-deadlock.test.ts test/actor/cancel-notification.test.ts test/actor/cancel-cascade.test.ts test/actor/spawn-notification.test.ts test/actor/stall-watchdog.test.ts test/session/main-lifecycle.test.ts --timeout 30000
 bun typecheck
-~~~
+```
 
 Run from the worktree root:
 
-~~~bash
+```bash
 git diff --check origin/main...HEAD
-~~~
+```
 
 Expected: tests and typecheck exit 0, and git diff --check prints nothing.
 
@@ -629,9 +619,9 @@ Expected: tests and typecheck exit 0, and git diff --check prints nothing.
 
 Generate a review package:
 
-~~~bash
+```bash
 /Users/a4399/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package origin/main HEAD
-~~~
+```
 
 Pass the printed package path, this plan path, and the design-spec path to an independent reviewer. Require separate specification-compliance and code-quality verdicts. Resolve every Critical or Important finding and rerun its named covering tests before publishing.
 
@@ -639,14 +629,14 @@ Pass the printed package path, this plan path, and the design-spec path to an in
 
 Push the branch:
 
-~~~bash
+```bash
 git push -u origin refactor/actor-lifecycle-coordinator
-~~~
+```
 
 Open a draft pull request in onlyfeng/MiMo-Code against main titled:
 
-~~~text
+```text
 refactor(actor): extract lifecycle coordination state
-~~~
+```
 
 The PR body must summarize the behavior-preserving extraction, list the invariants protected, state that no public API or behavior changed, and include the exact test and typecheck commands used.
