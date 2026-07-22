@@ -23,9 +23,12 @@ _MAC_STANDALONE = Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")
 
 
 def _find_soffice() -> str:
-    override = os.environ.get("DOCX_SKILL_SOFFICE") or os.environ.get("MIMO_SOFFICE")
+    override = os.environ.get("DOCX_SKILL_SOFFICE")
     if override:
         return override
+    bundled = os.environ.get("MIMO_SOFFICE")  # bundled runtime: use only when present, else fall through
+    if bundled and Path(bundled).is_file():
+        return bundled
     for candidate in ("soffice", "libreoffice"):
         path = shutil.which(candidate)
         if path:

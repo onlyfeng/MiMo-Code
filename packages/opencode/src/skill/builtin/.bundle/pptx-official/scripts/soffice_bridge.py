@@ -41,7 +41,7 @@ class BridgeError(RuntimeError):
 
 
 def _which_soffice() -> str:
-    bundled = os.environ.get("MIMO_SOFFICE")  # bundled runtime override, preferred when present
+    bundled = os.environ.get("MIMO_SOFFICE")  # bundled runtime: use only when present, else fall through
     if bundled and Path(bundled).is_file():
         return bundled
     for name in ("soffice", "libreoffice"):
@@ -141,33 +141,37 @@ def _rasterize_pypdfium2(pdf_path: Path, out_dir: Path, file_ext: str, *,
                          last: int | None) -> list[Path]:
     """Poppler-free fallback: render via pypdfium2 in the bundled interpreter.
 
-    Renders all pages (pypdfium2_cli page-range syntax varies across versions),
-    then trims to [first, last] and renames to the `slide-N.<ext>` convention
-    the pdftoppm path produces, so downstream globs keep working.
+    Renders all pages into a scratch directory (pypdfium2_cli page-range syntax
+    varies across versions; pre-existing files in `out_dir` are never touched),
+    trims to [first, last], then moves the pages to `slide-<NN>.<ext>` — keeping
+    pypdfium2's zero-padded page numbers so lexicographic sorting matches page
+    order and the naming convention matches the pdftoppm path.
     """
     python_bin = os.environ["MIMO_PYTHON"]
-    fmt = "jpg" if file_ext == "jpg" else file_ext
-    result = subprocess.run(
-        [python_bin, "-m", "pypdfium2_cli", "render", str(pdf_path),
-         "--output", str(out_dir), "--format", fmt, "--scale", str(dpi / 72.0)],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        raise BridgeError(
-            f"pypdfium2 fallback exited {result.returncode}: {result.stderr}")
-
     kept: list[Path] = []
-    for page in sorted(out_dir.glob(f"{pdf_path.stem}_*.{fmt}")):
-        try:
-            number = int(page.stem.rsplit("_", 1)[1])
-        except ValueError:
-            continue
-        if (first is not None and number < first) or (last is not None and number > last):
-            page.unlink()
-            continue
-        target = out_dir / f"slide-{number}.{file_ext}"
-        page.replace(target)
-        kept.append(target)
+    with tempfile.TemporaryDirectory(prefix="pypdfium2-render-") as scratch_str:
+        scratch = Path(scratch_str)
+        result = subprocess.run(
+            [python_bin, "-m", "pypdfium2_cli", "render", str(pdf_path),
+             "--output", str(scratch), "--format", file_ext, "--scale", str(dpi / 72.0)],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise BridgeError(
+                f"pypdfium2 fallback exited {result.returncode}: {result.stderr}\n"
+                "(is pypdfium2 with its pypdfium2_cli module available in the "
+                "MIMO_PYTHON interpreter?)")
+
+        for page in sorted(scratch.glob(f"{pdf_path.stem}_*.{file_ext}")):
+            digits = page.stem.rsplit("_", 1)[1]
+            if not digits.isdigit():
+                continue
+            number = int(digits)
+            if (first is not None and number < first) or (last is not None and number > last):
+                continue  # out-of-range pages die with the scratch dir
+            target = out_dir / f"slide-{digits}.{file_ext}"
+            shutil.move(str(page), target)
+            kept.append(target)
     if not kept:
         raise BridgeError("pypdfium2 fallback produced no images")
     return sorted(kept)
