@@ -290,8 +290,8 @@ Run:
 ```bash
 git fetch --no-tags --prune origin
 git status --short --branch
-git diff --quiet main origin/main
-git diff --quiet dev/compat origin/dev/compat
+test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
+test "$(git rev-parse dev/compat)" = "$(git rev-parse origin/dev/compat)"
 git merge-base --is-ancestor main dev/compat
 git branch --format='%(refname:short)|%(objectname:short)|%(upstream:short)|%(upstream:trackshort)'
 ```
