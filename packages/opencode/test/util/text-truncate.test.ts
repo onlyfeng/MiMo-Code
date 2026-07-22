@@ -43,4 +43,13 @@ describe("UTF-8 byte slices", () => {
       expect(suffix).not.toContain("\uFFFD")
     })
   })
+
+  test("preserves isolated UTF-16 surrogates under actor-compatible budgets", () => {
+    ;["\uD800", "\uDC00"].forEach((surrogate) => {
+      const malformed = `A${surrogate}Z`
+
+      expect(takeUtf8PrefixByBytes(malformed, 4)).toBe(malformed)
+      expect(takeUtf8SuffixByBytes(malformed, 4)).toBe(malformed)
+    })
+  })
 })
