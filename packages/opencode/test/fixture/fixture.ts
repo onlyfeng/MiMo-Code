@@ -44,6 +44,22 @@ export async function cleanupTmpdir(dir: string, cleanup = clean) {
   })
 }
 
+export async function prepareConfigDependencies(dir: string) {
+  const dependencies = { "@mimo-ai/plugin": "^0.0.0" }
+  await fs.mkdir(path.join(dir, "node_modules"), { recursive: true })
+  await Promise.all([
+    Bun.write(path.join(dir, "package.json"), JSON.stringify({ name: "mimocode-test-config", dependencies })),
+    Bun.write(
+      path.join(dir, "package-lock.json"),
+      JSON.stringify({
+        name: "mimocode-test-config",
+        lockfileVersion: 3,
+        packages: { "": { dependencies } },
+      }),
+    ),
+  ])
+}
+
 function outsideGitTmpRoot() {
   if (process.platform === "win32") return os.tmpdir()
   return "/tmp"

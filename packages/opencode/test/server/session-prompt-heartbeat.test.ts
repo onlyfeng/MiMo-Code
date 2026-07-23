@@ -38,9 +38,13 @@ it.live(
 
         // Model emits a single `question` tool call → the turn blocks in
         // Question.ask waiting for a human reply, holding the stream open.
-        yield* llm.tool("question", {
-          questions: [{ question: "proceed?", header: "confirm", options: [{ label: "yes", description: "go" }] }],
-        })
+        yield* llm.toolMatch(
+          (hit) => JSON.stringify(hit.body).includes("HEARTBEAT_QUESTION_TEST"),
+          "question",
+          {
+            questions: [{ question: "proceed?", header: "confirm", options: [{ label: "yes", description: "go" }] }],
+          },
+        )
 
         const sessions = yield* Session.Service
         const session = yield* sessions.create({
@@ -57,7 +61,7 @@ it.live(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               model: { providerID: ref.providerID, modelID: ref.modelID },
-              parts: [{ type: "text", text: "hi" }],
+              parts: [{ type: "text", text: "HEARTBEAT_QUESTION_TEST" }],
             }),
           }),
         )
@@ -67,12 +71,16 @@ it.live(
         const reader = res.body!.getReader()
         const decoder = new TextDecoder()
 
+        let pendingRead = reader.read()
         const readChunk = () =>
           Effect.promise(() =>
             Promise.race([
-              reader.read().then((r) => ({ timeout: false as const, ...r })),
+              pendingRead.then((r) => ({ timeout: false as const, ...r })),
               new Promise<{ timeout: true }>((r) => setTimeout(() => r({ timeout: true as const }), 100)),
-            ]),
+            ]).then((result) => {
+              if (!result.timeout) pendingRead = reader.read()
+              return result
+            }),
           )
 
         const listPending = () =>
@@ -87,7 +95,8 @@ it.live(
         let buffer = ""
         let sawHeartbeat = false
         let pendingID: string | undefined
-        for (let i = 0; i < 300 && !(sawHeartbeat && pendingID); i++) {
+        const pendingDeadline = Date.now() + 15_000
+        while (Date.now() < pendingDeadline && !(sawHeartbeat && pendingID)) {
           if (!pendingID) {
             const pending = yield* listPending()
             if (pending.length > 0) pendingID = pending[0]!.id
@@ -113,7 +122,8 @@ it.live(
 
         // Drain the rest of the stream.
         let done = false
-        for (let i = 0; i < 2000 && !done; i++) {
+        const drainDeadline = Date.now() + 5_000
+        while (Date.now() < drainDeadline && !done) {
           const read = yield* readChunk()
           if (read.timeout) continue
           if (read.done) done = true
@@ -121,6 +131,7 @@ it.live(
         }
 
         // Leading whitespace + trailing JSON still parses as the whole body.
+        expect(done).toBe(true)
         const parsed = JSON.parse(buffer)
         expect(parsed).toBeDefined()
         expect(parsed.info).toBeDefined()
@@ -128,7 +139,15 @@ it.live(
       // root: "cwd" keeps the fixture inside cwd so the server security middleware
       // (which rejects directories outside cwd on unauthenticated servers) serves it;
       // git: true gives it its own .git so VCS detection stays scoped to the fixture.
-      { git: true, config: providerCfg, root: "cwd" },
+      {
+        git: true,
+        config: (url) => ({
+          ...providerCfg(url),
+          dream: { auto: false },
+          distill: { auto: false },
+        }),
+        root: "cwd",
+      },
     ),
   30_000,
 )

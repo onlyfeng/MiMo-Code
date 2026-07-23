@@ -3,6 +3,10 @@ import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
+import fs from "fs/promises"
+import path from "path"
+import { tool } from "ai"
+import z from "zod"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
 import { Command } from "../../src/command"
@@ -71,7 +75,14 @@ const mcp = Layer.succeed(
   MCP.Service.of({
     status: () => Effect.succeed({}),
     clients: () => Effect.succeed({}),
-    tools: () => Effect.succeed({}),
+    tools: () =>
+      Effect.succeed({
+        secret_mcp: tool({
+          description: "test-only MCP tool",
+          inputSchema: z.object({}),
+          execute: async () => ({ content: [{ type: "text" as const, text: "mcp ran" }] }),
+        }),
+      }),
     prompts: () => Effect.succeed({}),
     resources: () => Effect.succeed({}),
     add: () => Effect.succeed({ status: { status: "disabled" as const } }),
@@ -209,6 +220,11 @@ const ref = {
   modelID: ModelID.make("test-model"),
 }
 
+const gptRef = {
+  providerID: ProviderID.make("test"),
+  modelID: ModelID.make("gpt-5"),
+}
+
 const cfg = {
   provider: {
     test: {
@@ -220,6 +236,18 @@ const cfg = {
         "test-model": {
           id: "test-model",
           name: "Test Model",
+          attachment: false,
+          reasoning: false,
+          temperature: false,
+          tool_call: true,
+          release_date: "2025-01-01",
+          limit: { context: 1_000_000, output: 10000 },
+          cost: { input: 0, output: 0 },
+          options: {},
+        },
+        "gpt-5": {
+          id: "gpt-5",
+          name: "GPT Test Model",
           attachment: false,
           reasoning: false,
           temperature: false,
@@ -317,6 +345,85 @@ describe("Tool whitelist (Task 14)", () => {
       }),
       { git: true, config: providerCfg },
     ),
+  )
+
+  it.live("exec cannot bypass actor or message tool restrictions", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ dir, llm }) {
+        yield* Effect.promise(() => fs.mkdir(path.join(dir, ".mimocode", "tool"), { recursive: true }))
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(dir, ".mimocode", "tool", "secret_custom.ts"),
+            [
+              "export default {",
+              "  description: 'test-only custom tool',",
+              "  args: {},",
+              "  execute: async () => 'custom ran',",
+              "}",
+            ].join("\n"),
+          ),
+        )
+
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const reg = yield* ActorRegistry.Service
+        const session = yield* sessions.create({
+          title: "nested whitelist test",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const actorID = "build-exec"
+        yield* reg.register({
+          sessionID: session.id,
+          actorID,
+          mode: "subagent",
+          agent: "build",
+          description: "nested whitelist test actor",
+          contextMode: "none",
+          background: false,
+          lifecycle: "ephemeral",
+          tools: ["exec", "secret_custom"],
+        })
+
+        yield* llm.tool("exec", {
+          code: `
+            const errors = []
+            for (const name of ["secret_custom", "secret_mcp"]) {
+              try { await tools[name]({}) } catch (error) { errors.push(error.message) }
+            }
+            return errors
+          `,
+        })
+        yield* llm.text("done")
+
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          agentID: actorID,
+          model: gptRef,
+          tools: { secret_custom: false },
+          parts: [{ type: "text", text: "try the nested tools" }],
+        })
+
+        expect(JSON.stringify(yield* llm.inputs)).toContain("secret_mcp")
+        const messages = yield* MessageV2.filterCompactedEffect(session.id, { agentID: "*" })
+        const exec = messages
+          .flatMap((message) => message.parts)
+          .find(
+            (part): part is MessageV2.ToolPart & { state: MessageV2.ToolStateCompleted } =>
+              part.type === "tool" && part.tool === "exec" && part.state.status === "completed",
+          )
+
+        expect(exec).toBeDefined()
+        if (!exec) return
+        expect(exec.state.output).toContain("unknown tool: secret_custom")
+        expect(exec.state.output).toContain("unknown tool: secret_mcp")
+        expect(exec.state.metadata?.toolCalls).toBe(0)
+        expect(exec.state.output).not.toContain("custom ran")
+        expect(exec.state.output).not.toContain("mcp ran")
+      }),
+      { git: true, config: providerCfg },
+    ),
+    30000,
   )
 
   it.live("permits bash when actor.tools = 'INHERIT' (no runtime restriction)", () =>

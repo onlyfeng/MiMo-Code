@@ -5,6 +5,7 @@ import { spawnRef } from "@/actor/spawn-ref"
 import { workflowRef } from "./runtime-ref"
 import { Config } from "@/config"
 import { EffectBridge } from "@/effect"
+import { awaitWithHardTimeout } from "@/effect/hard-timeout"
 import { Bus } from "@/bus"
 import { Inbox } from "@/inbox"
 import { Worktree } from "@/worktree"
@@ -439,7 +440,9 @@ export const layer = Layer.effect(
     // Worktree removal is bounded by RECLAIM_WORKTREE_TIMEOUT_MS so a hung
     // git worktree remove (e.g. processes using the worktree) cannot block
     // cancel indefinitely. Actor cancel is bounded by RECLAIM_ACTOR_TIMEOUT_MS
-    // so a hung child actor cannot block reclaim indefinitely.
+    // so a hung child actor cannot block reclaim indefinitely. Actor.cancel is
+    // intentionally uninterruptible, so its hard bound must limit Fiber.join
+    // while the detached cleanup continues rather than timeout cancel directly.
     const RECLAIM_WORKTREE_TIMEOUT_MS = 10_000
     const RECLAIM_ACTOR_TIMEOUT_MS = 5_000
     const reclaim = (entry: RunEntry) =>
@@ -449,12 +452,14 @@ export const layer = Layer.effect(
           yield* Effect.forEach(
             [...entry.childActorIDs],
             (childID) =>
-              actor.cancel(entry.sessionID, childID, "graceful").pipe(
-                Effect.timeout(RECLAIM_ACTOR_TIMEOUT_MS),
+              awaitWithHardTimeout(
+                actor.cancel(entry.sessionID, childID, "graceful"),
+                RECLAIM_ACTOR_TIMEOUT_MS,
+              ).pipe(
                 Effect.catchTag("TimeoutError", () =>
                   Effect.sync(() => log.warn("actor cancel timed out during reclaim", { childID })),
                 ),
-                Effect.ignore,
+                Effect.ignoreCause({ log: "Warn", message: "actor cancel failed during reclaim" }),
               ),
             { concurrency: "unbounded", discard: true },
           )

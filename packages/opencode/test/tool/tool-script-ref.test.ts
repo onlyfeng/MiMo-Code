@@ -55,7 +55,7 @@ test("a binding created after an external takeover restores that external owner"
   expect(reverse.current).toBe(external)
 })
 
-test("Actor layer releases its tool_script registry and MCP bindings", async () => {
+test("Actor layer releases its exec registry and MCP bindings", async () => {
   await using dir = await tmpdir()
   const previousRegistry = toolScriptRegistry.current
   const previousMcp = toolScriptMcp.current

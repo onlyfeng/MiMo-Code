@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { Effect } from "effect"
 import { Instance } from "../../src/project/instance"
 import { Session as SessionNs } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"

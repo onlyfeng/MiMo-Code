@@ -40,4 +40,20 @@ describe("mimocode-docs provider guidance", () => {
     expect(providers).toContain("`config.json`, `mimocode.json`, then `mimocode.jsonc`; later files win")
     expect(providers).toContain("create `mimocode.jsonc` when none exists")
   })
+
+  test("keeps a newly configured API model in TUI recents without clobbering state", async () => {
+    const skill = await Bun.file(path.join(root, "SKILL.md")).text()
+    const config = await Bun.file(path.join(root, "reference/config.md")).text()
+    const providers = await Bun.file(path.join(root, "reference/providers.md")).text()
+
+    expect(skill).toContain("put that exact `provider/model` at the front of the TUI recent-model state")
+    expect(config).toContain("TUI recent/favorite models in `model.json`")
+    expect(providers).toContain("$MIMOCODE_HOME/state/model.json")
+    expect(providers).toContain("Respect `XDG_STATE_HOME`")
+    expect(providers).toContain("Preserve every top-level field, especially `favorite` and `variant`")
+    expect(providers).toContain("remove any later entry with the same `providerID` and `modelID`")
+    expect(providers).toContain("keep at most 10 entries")
+    expect(providers).toContain("Write the recent state only after `mimo models PROVIDER_ID`")
+    expect(providers).toContain("Never put the API key, base URL, display name, or combined `provider/model` string")
+  })
 })

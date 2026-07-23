@@ -19,7 +19,7 @@ Base directories resolve from `MIMOCODE_HOME` if set (must be absolute → `<hom
 | data | `~/.local/share/mimocode/` | memory, logs, `builtin_skills/<version>/`, bin |
 | config | `~/.config/mimocode/` | global `mimocode.jsonc` / `mimocode.json` |
 | cache | `~/.cache/mimocode/` | caches, downloaded bins |
-| state | `~/.local/state/mimocode/` | runtime state |
+| state | `~/.local/state/mimocode/` | runtime state, including TUI recent/favorite models in `model.json` |
 
 Memory files live under `~/.local/share/mimocode/memory/`:
 - `projects/global/MEMORY.md` — project memory
