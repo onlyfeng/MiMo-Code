@@ -70,6 +70,8 @@ function writeConfig(dir: string, origin: string) {
     JSON.stringify({
       $schema: "https://opencode.ai/config.json",
       enabled_providers: ["alibaba"],
+      dream: { auto: false },
+      distill: { auto: false },
       provider: {
         alibaba: { options: { apiKey: "test-key", baseURL: `${origin}/v1` } },
       },
