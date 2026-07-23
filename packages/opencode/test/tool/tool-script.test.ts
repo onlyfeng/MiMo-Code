@@ -1,5 +1,5 @@
 import { describe, expect, test, afterAll } from "bun:test"
-import { Effect, Layer, ManagedRuntime } from "effect"
+import { Effect, Layer, ManagedRuntime, Stream } from "effect"
 import z from "zod"
 import os from "os"
 import fs from "fs/promises"
@@ -11,6 +11,9 @@ import { Truncate, Tool } from "../../src/tool"
 import { ToolScriptTool, renderToolScriptDeclarations } from "../../src/tool/tool-script"
 import { toolScriptRegistry, toolScriptMcp, TOOL_SCRIPT_EXCLUDED } from "../../src/tool/tool-script-ref"
 import { Instance } from "../../src/project/instance"
+import { Plugin } from "../../src/plugin"
+import { Bus } from "../../src/bus"
+import { Metrics } from "../../src/metrics"
 
 describe("sandbox non-deterministic mode", () => {
   test("deterministic:false keeps Date and Math.random", async () => {
@@ -66,7 +69,48 @@ describe("sandbox non-deterministic mode", () => {
   })
 })
 
-const runtime = ManagedRuntime.make(Layer.mergeAll(Truncate.defaultLayer, Agent.defaultLayer))
+let cancelledTool: string | undefined
+const hookCalls = { before: [] as string[], after: [] as string[] }
+const plugin = Layer.succeed(
+  Plugin.Service,
+  Plugin.Service.of({
+    trigger: (name, input, output) =>
+      Effect.sync(() => {
+        const tool = (input as { tool?: string }).tool
+        if (name === "tool.execute.before" && tool) {
+          hookCalls.before.push(tool)
+          if (tool === cancelledTool && output && typeof output === "object")
+            Object.assign(output, { cancel: true, cancelReason: "blocked by test hook" })
+        }
+        if (name === "tool.execute.after" && tool) hookCalls.after.push(tool)
+        return output
+      }),
+    list: () => Effect.succeed([]),
+    init: () => Effect.void,
+    reloadFileHooks: () => Effect.void,
+    triggerActorPreStop: () =>
+      Effect.succeed({ continue: false, contributingPluginNames: [], contributingHookIDs: [] }),
+    triggerActorPostStop: () =>
+      Effect.succeed({ continue: false, contributingPluginNames: [], contributingHookIDs: [] }),
+  }),
+)
+const metricEvents: z.infer<typeof Metrics.ToolCall.properties>[] = []
+const bus = Layer.succeed(
+  Bus.Service,
+  Bus.Service.of({
+    publish: (def, properties) =>
+      Effect.sync(() => {
+        if (def.type === Metrics.ToolCall.type) metricEvents.push(Metrics.ToolCall.properties.parse(properties))
+      }),
+    subscribe: () => Stream.empty,
+    subscribeAll: () => Stream.empty,
+    subscribeCallback: () => Effect.succeed(() => {}),
+    subscribeAllCallback: () => Effect.succeed(() => {}),
+  }),
+)
+const runtime = ManagedRuntime.make(
+  Layer.mergeAll(Truncate.defaultLayer, Agent.defaultLayer, plugin, bus),
+)
 
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mimocode-test-toolscript-"))
 afterAll(async () => {
@@ -90,7 +134,13 @@ async function runToolScript(
   code: string,
   defs: Tool.Def[],
   abort?: AbortSignal,
-  opts?: { mcp?: Record<string, any>; ask?: () => Effect.Effect<void>; maxToolCalls?: number; timeoutSeconds?: number },
+  opts?: {
+    mcp?: Record<string, any>
+    ask?: () => Effect.Effect<void>
+    maxToolCalls?: number
+    timeoutSeconds?: number
+    toolWhitelist?: Set<string>
+  },
 ) {
   const prev = toolScriptRegistry.current
   const prevMcp = toolScriptMcp.current
@@ -116,6 +166,7 @@ async function runToolScript(
               abort: abort ?? new AbortController().signal,
               callID: "call_test",
               messages: [],
+              extra: opts?.toolWhitelist ? { toolWhitelist: opts.toolWhitelist } : undefined,
               metadata: () => Effect.void,
               ask: opts?.ask ?? (() => Effect.void),
             },
@@ -129,7 +180,7 @@ async function runToolScript(
   }
 }
 
-describe("tool_script", () => {
+describe("exec", () => {
   test("executes code, calls tools, returns aggregated result", async () => {
     const seen: string[] = []
     const defs = [
@@ -182,6 +233,69 @@ describe("tool_script", () => {
     expect(result.metadata.status).toBe("completed")
     expect(result.output).toContain("caught:")
     expect(result.output).toContain("unknown tool: nope")
+  })
+
+  test("actor whitelist blocks nested builtin tools", async () => {
+    let called = false
+    const result = await runToolScript(
+      `try { await tools.secret({}) } catch (error) { return error.message }`,
+      [
+        fakeDef("secret", async () => {
+          called = true
+          return "should never run"
+        }),
+      ],
+      undefined,
+      { toolWhitelist: new Set(["exec"]) },
+    )
+    expect(result.metadata.status).toBe("completed")
+    expect(result.metadata.toolCalls).toBe(0)
+    expect(result.output).toContain("unknown tool: secret")
+    expect(called).toBe(false)
+  })
+
+  test("plugin cancellation prevents nested tool execution", async () => {
+    let called = false
+    cancelledTool = "secret"
+    hookCalls.before.length = 0
+    hookCalls.after.length = 0
+    try {
+      const result = await runToolScript(
+        `return (await tools.secret({})).output`,
+        [
+          fakeDef("secret", async () => {
+            called = true
+            return "should never run"
+          }),
+        ],
+      )
+      expect(result.metadata.status).toBe("completed")
+      expect(result.output).toContain("blocked by test hook")
+      expect(called).toBe(false)
+      expect(hookCalls.before).toEqual(["secret"])
+      expect(hookCalls.after).toEqual([])
+    } finally {
+      cancelledTool = undefined
+      hookCalls.before.length = 0
+      hookCalls.after.length = 0
+    }
+  })
+
+  test("plugin after hook observes nested tool success", async () => {
+    hookCalls.before.length = 0
+    hookCalls.after.length = 0
+    try {
+      const result = await runToolScript(
+        `return (await tools.echo({ value: "ok" })).output`,
+        [fakeDef("echo", async (args) => args.value)],
+      )
+      expect(result.output).toContain("ok")
+      expect(hookCalls.before).toEqual(["echo"])
+      expect(hookCalls.after).toEqual(["echo"])
+    } finally {
+      hookCalls.before.length = 0
+      hookCalls.after.length = 0
+    }
   })
 
   test("tool failure rejects the guest promise with tool name prefix", async () => {
@@ -309,14 +423,28 @@ describe("tool_script", () => {
     expect(mcpCalled).toBe(false)
   })
 
-  test("bash is excluded from the sandbox", async () => {
-    const defs = [fakeDef("bash", async () => "should never run")]
+  test("bash and exec_command stay outside the aggregate sandbox", async () => {
+    let called = false
+    const defs = [
+      fakeDef("bash", async () => {
+        called = true
+        return "should never run"
+      }),
+    ]
     const result = await runToolScript(
-      `try { await tools.bash({ value: "ls" }) } catch (e) { return e.message }`,
+      `
+      const errors = []
+      try { await tools.bash({ value: "direct" }) } catch (error) { errors.push(error.message) }
+      try { await tools.exec_command({ value: "alias" }) } catch (error) { errors.push(error.message) }
+      return errors
+      `,
       defs,
     )
     expect(result.metadata.status).toBe("completed")
+    expect(result.metadata.toolCalls).toBe(0)
     expect(result.output).toContain("unknown tool: bash")
+    expect(result.output).toContain("unknown tool: exec_command")
+    expect(called).toBe(false)
   })
 
   test("concurrency is capped at 8", async () => {
@@ -343,7 +471,7 @@ describe("tool_script", () => {
     expect(peak).toBeGreaterThan(1)
   })
 
-  test("Date works inside tool_script guest", async () => {
+  test("Date works inside exec guest", async () => {
     const result = await runToolScript(`return typeof Date.now()`, [])
     expect(result.output).toContain("number")
   })
@@ -522,7 +650,7 @@ describe("tool_script", () => {
   })
 })
 
-describe("tool_script MCP dispatch", () => {
+describe("exec MCP dispatch", () => {
   function fakeMcpTool(execute: (args: any) => Promise<any>) {
     return {
       description: "fake mcp tool",
@@ -551,6 +679,58 @@ describe("tool_script MCP dispatch", () => {
     expect(seen).toEqual([{ q: "x" }])
   })
 
+  test("actor whitelist blocks nested MCP tools", async () => {
+    let called = false
+    const result = await runToolScript(
+      `try { await tools.srv_secret({}) } catch (error) { return error.message }`,
+      [],
+      undefined,
+      {
+        mcp: {
+          srv_secret: fakeMcpTool(async () => {
+            called = true
+            return { content: [{ type: "text", text: "should never run" }] }
+          }),
+        },
+        toolWhitelist: new Set(["exec"]),
+      },
+    )
+    expect(result.metadata.status).toBe("completed")
+    expect(result.metadata.toolCalls).toBe(0)
+    expect(result.output).toContain("unknown tool: srv_secret")
+    expect(called).toBe(false)
+  })
+
+  test("plugin cancellation prevents nested MCP execution", async () => {
+    let called = false
+    cancelledTool = "srv_secret"
+    hookCalls.before.length = 0
+    hookCalls.after.length = 0
+    try {
+      const result = await runToolScript(
+        `return (await tools.srv_secret({})).output`,
+        [],
+        undefined,
+        {
+          mcp: {
+            srv_secret: fakeMcpTool(async () => {
+              called = true
+              return { content: [{ type: "text", text: "should never run" }] }
+            }),
+          },
+        },
+      )
+      expect(result.output).toContain("blocked by test hook")
+      expect(called).toBe(false)
+      expect(hookCalls.before).toEqual(["srv_secret"])
+      expect(hookCalls.after).toEqual([])
+    } finally {
+      cancelledTool = undefined
+      hookCalls.before.length = 0
+      hookCalls.after.length = 0
+    }
+  })
+
   test("MCP call goes through permission ask", async () => {
     const asked: string[] = []
     const mcp = {
@@ -568,6 +748,7 @@ describe("tool_script MCP dispatch", () => {
   })
 
   test("MCP isError result rejects catchably", async () => {
+    metricEvents.length = 0
     const mcp = {
       srv_fail: fakeMcpTool(async () => ({
         isError: true,
@@ -582,6 +763,11 @@ describe("tool_script MCP dispatch", () => {
     )
     expect(result.metadata.status).toBe("completed")
     expect(result.output).toContain("caught: srv_fail: server exploded")
+    expect(
+      metricEvents
+        .filter((event) => event.tool_name === "srv_fail")
+        .map((event) => event.tool_call_status),
+    ).toEqual(["error"])
   })
 
   test("non-text MCP content is dropped with a note", async () => {
@@ -641,9 +827,15 @@ describe("renderToolScriptDeclarations", () => {
   })
 
   test("exclusion list covers agent control-flow tools and bash", () => {
-    for (const id of ["task", "question", "actor", "skill", "skill_search", "plan_enter", "plan_exit", "tool_script", "bash"]) {
+    for (const id of ["task", "question", "actor", "skill", "skill_search", "plan_enter", "plan_exit", "exec", "bash"]) {
       expect(TOOL_SCRIPT_EXCLUDED.has(id)).toBe(true)
     }
+  })
+
+  test("does not render bash or exec_command inside exec", () => {
+    const text = renderToolScriptDeclarations([fakeDef("bash", async () => "x")])
+    expect(text).not.toContain("bash(input:")
+    expect(text).not.toContain("exec_command(input:")
   })
 
   test("MCP tools are rendered into the declaration block", () => {

@@ -589,6 +589,7 @@ export function merge(...rulesets: Ruleset[]): Ruleset {
 }
 
 const EDIT_TOOLS = ["edit", "write", "apply_patch", "multiedit"]
+const READ_TOOLS = ["read", "view_image"]
 
 export function disabled(tools: string[], ruleset: Ruleset): Set<string> {
   const result = new Set<string>()
@@ -602,7 +603,8 @@ export function disabled(tools: string[], ruleset: Ruleset): Set<string> {
     const rule = ruleset.findLast(
       (r) =>
         Wildcard.match(tool, r.permission) ||
-        (EDIT_TOOLS.includes(tool) && Wildcard.match("edit", r.permission)),
+        (EDIT_TOOLS.includes(tool) && Wildcard.match("edit", r.permission)) ||
+        (READ_TOOLS.includes(tool) && Wildcard.match("read", r.permission)),
     )
     if (!rule) continue
     if (rule.pattern === "*" && rule.action === "deny") result.add(tool)

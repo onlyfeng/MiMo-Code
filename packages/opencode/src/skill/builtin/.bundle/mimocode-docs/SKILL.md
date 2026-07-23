@@ -15,19 +15,20 @@ MiMoCode (CLI binary `mimo`) is an agentic coding tool with a terminal UI, built
 
 | Feature | What it is | How to reach it |
 |---------|-----------|-----------------|
-| **Agents / modes** | `build` (default, full tools), `plan` (read-only analysis), `compose` (specs-driven orchestration), plus custom modes you define | `Tab` cycles primary agents; add your own via `.mimocode/agent/<name>.md` (see @reference/guide.md) |
+| **Agents / modes** | `build` (default, full tools), `plan` (read-only analysis), `compose` (specs-driven orchestration), plus custom modes you define. Mode locks after the first message (Build↔Plan still switch freely; Compose is isolated) | `Tab` cycles primary agents; add your own via `.mimocode/agent/<name>.md` (see @reference/guide.md) |
 | **Subagents** | Primary agent spawns `general`/`explore` helpers, parallel + background, with lifecycle/cancel | automatic; `actor` tooling |
 | **Persistent memory** | Markdown-backed memory with indexed search across `MEMORY.md`, `checkpoint.md`, `notes.md`, and `tasks/<id>/progress.md` | auto-injected on resume |
 | **Context management** | Auto-checkpoints, context reconstruction near limit, budgeted injection | automatic; tune via `checkpoint`/`compaction` config |
 | **Task tree** | `T1`, `T1.1`… tree, integrated with checkpoints | `task` tooling |
 | **Goal / stop condition** | Judge model verifies a stop condition before the agent halts | `/goal` |
-| **Compose mode** | Structured spec→ship lifecycle with built-in plan/tdd/debug/review/verify/merge skills | `compose` agent |
+| **Compose mode** | Structured spec→ship lifecycle; recommended entry is the `/compose-next` skill on Build | `/compose-next` (see @reference/guide.md) |
 | **Voice input** | Streaming ASR (TenVAD + MiMo ASR); needs `sox` | `/voice` |
 | **Dream** | Consolidates recent traces into project memory | `/dream` |
 | **Distill** | Packages repeated manual workflows into skills/subagents/commands | `/distill` |
 | **Scheduled prompts** | Cron/loop: inject a prompt on a schedule or repeating loop (UTC, 5-field) | `cron` tool · `/loop` · `/loops` |
 | **Dynamic workflows** | JS scripts that orchestrate many subagents deterministically (fan-out, pipelines, nesting); built-ins include `compose`, `deep-research`, `fact-check`, and `research-experiment` | `.mimocode/workflows/*.js` + `workflow` tool |
 | **Skills / self-extension** | Add tools, hooks, skills under `.mimocode/` | see the `evolve` skill |
+| **Skill discovery** | `/skill-name` slash invocation (2+ in one message auto-load with an orchestration plan); `skill_search` tool matches by exact name/alias + BM25 and auto-loads high-confidence hits; some builtins (`claude-code`, `codex`) only appear when their CLI is installed | `/` autocomplete · automatic |
 | **MCP** | Local & remote Model Context Protocol servers | `mcp` config + `mimo mcp` |
 
 ## Configuration Basics
@@ -83,7 +84,8 @@ When asked to change a behavior:
 3. Inspect only the exact config candidates. Never recursively search the user's home directory. Prefer an existing higher-precedence `.jsonc` file and preserve comments, `$schema`, unrelated providers, and other settings.
 4. Keep secrets out of tool output and the final response. When inspecting a config, redact values for keys such as `apiKey`, `token`, `secret`, and `password`; never dump the whole unredacted file merely to find its shape.
 5. Edit minimally. If the request says configure, use, or make default, also set the top-level `model`; if it only says add, leave the current selection unchanged.
-6. Validate the parsed configuration with the narrowest relevant command and report the file changed, selected provider/model, and whether a new session or re-selection is needed. Never include the credential in the summary.
+6. When persisting a newly supplied API key and model, also put that exact `provider/model` at the front of the TUI recent-model state so the user can switch to it immediately. Follow the merge procedure in @reference/providers.md; never replace favorites, variants, or unrelated recent models.
+7. Validate the parsed configuration with the narrowest relevant command and report the config and recent-model state files changed, selected provider/model, and whether a new session or re-selection is needed. Never include the credential in the summary.
 
 Don't invent config keys, model limits, context windows, output limits, modalities, reasoning support, or tool-call capabilities. Add optional model metadata only when the user supplied it or a current authoritative source verifies it. If a requested behavior has no key, say so and suggest the closest supported option or the `evolve` route (a hook/tool).
 

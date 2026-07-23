@@ -316,7 +316,7 @@ export const layer = Layer.effect(
       }
     }
 
-    // Late-bound ref (see tool-script-ref.ts): tool_script dispatches MCP tools
+    // Late-bound ref (see tool-script-ref.ts): exec dispatches MCP tools
     // through the same live client set the agent sees. Populated here (not in
     // ToolRegistry) because MCP's layer lives in this graph — the registry
     // providing MCP.defaultLayer itself would duplicate client connections.
@@ -352,6 +352,7 @@ export const layer = Layer.effect(
         const capturePermission = Agent.runtimePermission(ag, captureSession.permission)
         const [skills, env, instructions, mcpTools] = yield* Effect.all([
           sys.skills(ag, {
+            model,
             permission: capturePermission,
             tools: captureUser?.info.role === "user" ? captureUser.info.tools : undefined,
           }),
@@ -986,6 +987,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         actorWhitelist && agentWhitelist
           ? new Set([...actorWhitelist].filter((id) => agentWhitelist.has(id)))
           : actorWhitelist ?? agentWhitelist
+      const disabledTools = new Set(
+        Object.entries(input.tools ?? {}).flatMap(([id, enabled]) => (enabled ? [] : [id])),
+      )
       // Whether a permission ask must be non-interactive (fail clean, never hang):
       // true for system-spawned actors (checkpoint-writer/dream/distill) AND any
       // background actor such as compose workflow subagents (spawned as "general"
@@ -1039,7 +1043,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         abort: options.abortSignal!,
         messageID: input.processor.message.id,
         callID: options.toolCallId,
-        extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps },
+        extra: {
+          model: input.model,
+          bypassAgentCheck: input.bypassAgentCheck,
+          promptOps,
+          ...(whitelist ? { toolWhitelist: whitelist } : {}),
+          ...(disabledTools.size ? { disabledTools } : {}),
+        },
         agent: input.agent.name,
         actorID: input.agentID,
         taskId: input.task_id,
@@ -1250,7 +1260,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
               yield* plugin.trigger(
                 "tool.execute.after",
-                { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args },
+                { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args: mcpBeforeOutput.args },
                 result,
               )
 
@@ -1294,7 +1304,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 .publish(Metrics.ToolCall, {
                   sessionID: ctx.sessionID,
                   tool_name: key,
-                  input_bytes: Metrics.jsonByteLength(args),
+                  input_bytes: Metrics.jsonByteLength(mcpBeforeOutput.args),
                   output_bytes: Metrics.jsonByteLength({
                     content: normalized.content,
                     structuredContent: normalized.structuredContent,
@@ -3637,6 +3647,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             const [skills, env, instructions] = yield* Effect.all([
               sys.skills(agent, {
+                model,
                 permission: Agent.runtimePermission(agent, session.permission),
                 tools: lastUser.tools,
               }),

@@ -1,11 +1,10 @@
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Effect, Layer } from "effect"
-import { afterAll, afterEach, beforeAll, describe, expect } from "bun:test"
+import { afterAll, beforeAll, describe, expect } from "bun:test"
 import path from "path"
 import type { Permission } from "../../src/permission"
 import type { Tool } from "../../src/tool"
 import { Agent } from "../../src/agent/agent"
-import { Instance } from "../../src/project/instance"
 import { Skill } from "../../src/skill"
 import { SkillSearchTool } from "../../src/tool/skill-search"
 import { ToolRegistry } from "../../src/tool"
@@ -15,9 +14,6 @@ import { ModelID, ProviderID } from "../../src/provider/schema"
 import { testEffect } from "../lib/effect"
 import { MessageV2 } from "../../src/session/message-v2"
 
-afterEach(async () => {
-  await Instance.disposeAll()
-})
 
 // The compose-next invisibility test below needs the builtin bundle extracted;
 // other test files in the same process (e.g. test/skill/skill.test.ts) set

@@ -20,6 +20,7 @@ import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
 import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
+import { isSkillSearchDisabled, type SkillSearchModel } from "@/skill/search"
 
 export function provider(model: Provider.Model) {
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
@@ -44,7 +45,11 @@ export interface Interface {
   readonly environment: (model: Provider.Model, now: number) => Effect.Effect<string[]>
   readonly skills: (
     agent: Agent.Info,
-    input?: { permission?: Permission.Ruleset; tools?: Record<string, boolean> },
+    input?: {
+      model?: SkillSearchModel
+      permission?: Permission.Ruleset
+      tools?: Record<string, boolean>
+    },
   ) => Effect.Effect<string | undefined>
   readonly available: (agent?: Agent.Info) => Effect.Effect<Skill.Info[]>
   readonly all: () => Effect.Effect<Skill.Info[]>
@@ -80,7 +85,10 @@ export const layer = Layer.effect(
           ].join("\n"),
           `IMPORTANT: Your response must ALWAYS strictly follow the same major language as the user.`,
         ]
-        if (!model.capabilities.input.image) {
+        const maskVisionCapability = [model.id, model.api.id, model.providerID].some((id) =>
+          /(^|[^a-z0-9])(gpt|claude|gemini)($|[^a-z0-9])/i.test(id),
+        )
+        if (!model.capabilities.input.image && !maskVisionCapability) {
           // NOTE: vision models are resolved per-call (lazy). If provider list changes
           // mid-session, this block may differ between turns and break cached system prefix.
           // In practice provider config is stable within a session.
@@ -117,7 +125,11 @@ export const layer = Layer.effect(
 
       skills: Effect.fn("SystemPrompt.skills")(function* (
         agent: Agent.Info,
-        input?: { permission?: Permission.Ruleset; tools?: Record<string, boolean> },
+        input?: {
+          model?: SkillSearchModel
+          permission?: Permission.Ruleset
+          tools?: Record<string, boolean>
+        },
       ) {
         const permission = input?.permission ?? agent.permission
         const load = canLoadSkills({
@@ -125,11 +137,13 @@ export const layer = Layer.effect(
           toolAllowlist: agent.toolAllowlist,
           tools: input?.tools,
         })
-        const search = canSearchSkills({
-          permission,
-          toolAllowlist: agent.toolAllowlist,
-          tools: input?.tools,
-        })
+        const search =
+          (!input?.model || !isSkillSearchDisabled(input.model)) &&
+          canSearchSkills({
+            permission,
+            toolAllowlist: agent.toolAllowlist,
+            tools: input?.tools,
+          })
         if (!load && !search) return
 
         const list = yield* skill.available({ ...agent, permission })

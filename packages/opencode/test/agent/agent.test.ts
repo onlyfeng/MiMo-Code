@@ -987,7 +987,7 @@ test("title/summary/checkpoint-writer are mode=subagent + hidden (spawnable filt
 // Regression for ses_19d1aa927: the fork agent (checkpoint-writer) inherits
 // compose's tool list verbatim (Task 2.6 removed toolAllowlist). This test
 // confirms the patch-swap in registry.ts fires correctly per model family.
-itTool.live("compose's tool list contains apply_patch on GPT-5+ but not on Claude", () =>
+itTool.live("compose's tool list swaps GPT-specific file tools", () =>
   provideTmpdirInstance((dir) =>
     Effect.gen(function* () {
       const agents = yield* Agent.Service
@@ -1003,8 +1003,10 @@ itTool.live("compose's tool list contains apply_patch on GPT-5+ but not on Claud
       })
       const gptIDs = gptTools.map((t) => t.id)
       expect(gptIDs).toContain("apply_patch")
+      expect(gptIDs).toContain("view_image")
       expect(gptIDs).not.toContain("edit")
       expect(gptIDs).not.toContain("write")
+      expect(gptIDs).not.toContain("read")
 
       const claudeTools = yield* registry.tools({
         modelID: ModelID.make("claude-opus-4-7"),
@@ -1014,7 +1016,9 @@ itTool.live("compose's tool list contains apply_patch on GPT-5+ but not on Claud
       const claudeIDs = claudeTools.map((t) => t.id)
       expect(claudeIDs).toContain("edit")
       expect(claudeIDs).toContain("write")
+      expect(claudeIDs).toContain("read")
       expect(claudeIDs).not.toContain("apply_patch")
+      expect(claudeIDs).not.toContain("view_image")
     }),
   ),
 )
