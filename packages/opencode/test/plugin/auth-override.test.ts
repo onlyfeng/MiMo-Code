@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { Effect } from "effect"
-import { tmpdir } from "../fixture/fixture"
+import { prepareConfigDependencies, tmpdir } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 import { ProviderAuth } from "../../src/provider"
 import { ProviderID } from "../../src/provider/schema"
@@ -11,7 +11,9 @@ describe("plugin.auth-override", () => {
   test("user plugin overrides built-in github-copilot auth", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
-        const pluginDir = path.join(dir, ".mimocode", "plugin")
+        const configDir = path.join(dir, ".mimocode")
+        await prepareConfigDependencies(configDir)
+        const pluginDir = path.join(configDir, "plugin")
         await fs.mkdir(pluginDir, { recursive: true })
 
         await Bun.write(
@@ -60,7 +62,7 @@ describe("plugin.auth-override", () => {
     expect(copilot.length).toBe(1)
     expect(copilot[0].label).toBe("Test Override Auth")
     expect(plainMethods[ProviderID.make("github-copilot")][0].label).not.toBe("Test Override Auth")
-  }, 30000) // Increased timeout for plugin installation
+  }, 30000)
 })
 
 const file = path.join(import.meta.dir, "../../src/plugin/index.ts")
