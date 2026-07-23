@@ -8,7 +8,7 @@ import { Log } from "../util"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Agent } from "../agent/agent"
-import { decideAskRouting } from "@/agent/config"
+import { decideAskRouting, resolveInvalidOutputPolicy } from "@/agent/config"
 import { Provider } from "../provider"
 import { ModelID, ProviderID } from "../provider/schema"
 import {
@@ -2569,6 +2569,28 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           invalidContinuations++
           yield* slog.info("auto-continuing invalid output", { attempt: invalidContinuations, reason: input.reason })
+          const policy = resolveInvalidOutputPolicy({
+            agentName: input.lastUser.agent,
+            agentID: input.lastUser.agentID,
+          })
+          const reminder =
+            policy === "checkpoint"
+              ? [
+                  "Your checkpoint writer turn ended without a completion signal.",
+                  "Do not answer or continue the parent session's task. Work only on the authorized checkpoint and memory paths already provided to you.",
+                  "If any authorized edits remain, finish them now. If they are complete, call no more tools and reply exactly CHECKPOINT_COMPLETE.",
+                ]
+              : policy === "actor"
+                ? [
+                    "Your previous response contained no usable result for the parent agent (it had only reasoning, or was empty).",
+                    "Provide a final result to the parent agent now, or call a valid tool to complete the delegated task.",
+                    "Do not respond with only reasoning/thinking.",
+                  ]
+                : [
+                    "Your previous response contained no usable answer (it had only reasoning, or was empty).",
+                    "Provide a final answer to the user now, or call a valid tool to make progress on the task.",
+                    "Do not respond with only reasoning/thinking.",
+                  ]
           const msg = yield* sessions.updateMessage({
             id: MessageID.ascending(),
             role: "user" as const,
@@ -2587,13 +2609,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             sessionID: msg.sessionID,
             type: "text",
             synthetic: true,
-            text: [
-              "<system-reminder>",
-              "Your previous response contained no usable answer (it had only reasoning, or was empty).",
-              "Provide a final answer to the user now, or call a valid tool to make progress on the task.",
-              "Do not respond with only reasoning/thinking.",
-              "</system-reminder>",
-            ].join("\n"),
+            text: ["<system-reminder>", ...reminder, "</system-reminder>"].join("\n"),
           } satisfies MessageV2.TextPart)
           return true
         })
