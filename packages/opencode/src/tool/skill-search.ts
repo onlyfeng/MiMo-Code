@@ -45,11 +45,11 @@ export const SkillSearchTool = Tool.define(
             })
           )
             throw new Error("Skill search tool is not available in this context.")
-          const all = yield* skill.available({
+          const available = yield* skill.available({
             ...agent,
             permission,
           })
-          const results = searchSkills(params.query, all)
+          const results = searchSkills(params.query, available)
           if (results.length === 0) {
             return {
               title: "No matching skill",
@@ -59,7 +59,7 @@ export const SkillSearchTool = Tool.define(
           }
           const loaded =
             results[0].score >= Flag.MIMOCODE_SKILL_SEARCH_AUTO_LOAD_THRESHOLD
-              ? all.find((item) => item.name === results[0].skill_id)
+              ? available.find((item) => item.name === results[0].skill_id)
               : undefined
           const payload = {
             status: "matched",
