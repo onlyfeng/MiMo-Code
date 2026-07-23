@@ -12,6 +12,22 @@ const node = CrossSpawnSpawner.defaultLayer
 
 const it = testEffect(Layer.mergeAll(ToolRegistry.defaultLayer, node))
 
+async function preparePluginDependency(dir: string) {
+  const dependencies = { "@mimo-ai/plugin": "^0.0.0" }
+  await fs.mkdir(path.join(dir, "node_modules"), { recursive: true })
+  await Promise.all([
+    Bun.write(path.join(dir, "package.json"), JSON.stringify({ name: "custom-tools", dependencies })),
+    Bun.write(
+      path.join(dir, "package-lock.json"),
+      JSON.stringify({
+        name: "custom-tools",
+        lockfileVersion: 3,
+        packages: { "": { dependencies } },
+      }),
+    ),
+  ])
+}
+
 afterEach(async () => {
   await Instance.disposeAll()
 })
@@ -22,6 +38,7 @@ describe("tool.registry", () => {
       Effect.gen(function* () {
         const opencode = path.join(dir, ".mimocode")
         const tool = path.join(opencode, "tool")
+        yield* Effect.promise(() => preparePluginDependency(opencode))
         yield* Effect.promise(() => fs.mkdir(tool, { recursive: true }))
         yield* Effect.promise(() =>
           Bun.write(
@@ -50,6 +67,7 @@ describe("tool.registry", () => {
       Effect.gen(function* () {
         const opencode = path.join(dir, ".mimocode")
         const tools = path.join(opencode, "tools")
+        yield* Effect.promise(() => preparePluginDependency(opencode))
         yield* Effect.promise(() => fs.mkdir(tools, { recursive: true }))
         yield* Effect.promise(() =>
           Bun.write(
