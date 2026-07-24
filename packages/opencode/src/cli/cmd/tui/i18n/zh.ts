@@ -56,8 +56,12 @@ export const dict = {
     "运行 {highlight}/dark{/highlight} 切换到深色模式，{highlight}/light{/highlight} 切换到浅色模式",
   "tui.tips.doc": "运行 {highlight}/doc{/highlight} 打开使用文档",
   "tui.tips.free_models": "限时提供免费模型中，立即体验！",
+  "tui.tips.free_api_sunset":
+    "免费 API 服务已终止。请使用 {highlight}/login{/highlight} 登录，欢迎订阅MiMo Token Plan或配置第三方 API 后使用 MiMo Code。",
   "tui.tips.multi_skills":
     "在同一条消息中输入多个 {highlight}/skill-name{/highlight} 可以同时组合使用多个 Skills",
+  "tui.tips.ask_slash_commands":
+    "想找快捷指令？直接在聊天中问 {highlight}有哪些 slash 快捷指令？{/highlight}",
   "tui.tips.background": "运行 {highlight}/background{/highlight} 设置自定义图片作为主页背景",
   "tui.tips.compose_next":
     "推荐前沿模型使用 {highlight}/compose-next{/highlight} 代替 Compose 智能体",
@@ -340,11 +344,15 @@ export const dict = {
   "tui.dialog.agreement.title": "服务协议与隐私政策",
   "tui.dialog.agreement.message": "请阅读并同意后继续使用。",
   "tui.dialog.agreement.confirm": "同意并继续",
+  "tui.dialog.free_api_sunset.title": "免费 API 服务已终止",
+  "tui.dialog.free_api_sunset.message":
+    "请使用 /login 登录，欢迎订阅MiMo Token Plan或配置第三方 API 后使用 MiMo Code。",
   "tui.command.consent.revoke.title": "撤销免费模型协议",
   "tui.consent.revoked": "已撤销免费模型协议 — 下次使用时将再次请求同意",
   "tui.dialog.select.placeholder": "搜索",
   "tui.dialog.model.login_hint": "提示：先 /login 登录再切换模型",
-  "tui.model.mimo_auto.name": "MiMo Auto（MiMo-V2.5 限免中）",
+  "tui.model.mimo_auto.name": "MiMo Auto（MiMo-V2.5 限免至 7 月 26 日 18:00 · UTC+8）",
+  "tui.model.mimo_auto.sunset_name": "MiMo Auto（MiMo-V2.5）",
   "tui.dialog.token_plan.title": "订阅token plan或排队等待",
   "tui.dialog.token_plan.line1": "免费模式下当前需要排队等待，如果想要稳定获取高质量服务，",
   "tui.dialog.token_plan.subscribe": "欢迎订阅 ",

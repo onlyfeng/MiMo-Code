@@ -26,6 +26,7 @@ import { InstanceState } from "@/effect"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { isRecord } from "@/util/record"
 import { withStatics } from "@/util/schema"
+import { isFreeApiModel, isFreeApiSunset } from "@/util/free-api-sunset"
 
 import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
@@ -38,6 +39,7 @@ const BUILTIN_TIERS = new Set(["ultra", "standard", "lite"])
 // F41: warn once per (providerID, modelID) when limit.context falls back to default
 const warnedContextDefaults = new Set<string>()
 
+export const DEFAULT_OPENAI_HEADER_TIMEOUT = 300_000
 export const DEFAULT_CHUNK_TIMEOUT = 480_000 // 8 minutes — bounds single-attempt SSE stall.
 // Tuned for mimo-v2.5-pro on MiMo Router whose cold-path TTFT after context
 // rebuild can dip to ~5 minutes silent. Reasoning models with multi-minute
@@ -97,6 +99,18 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
     status: res.status,
     statusText: res.statusText,
   })
+}
+
+function timeoutController(ms: number) {
+  const ctl = new AbortController()
+  const id = setTimeout(
+    () => ctl.abort(Object.assign(new Error(`Response header timed out after ${ms}ms`), { code: "ETIMEDOUT" })),
+    ms,
+  )
+  return {
+    signal: ctl.signal,
+    clear: () => clearTimeout(id),
+  }
 }
 
 type BundledSDK = {
@@ -193,7 +207,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         async getModel(sdk: any, modelID: string, _options?: Record<string, any>) {
           return sdk.responses(modelID)
         },
-        options: {},
+        options: { headerTimeout: DEFAULT_OPENAI_HEADER_TIMEOUT },
       }),
     xai: () =>
       Effect.succeed({
@@ -927,6 +941,7 @@ export const ListResult = Schema.Struct({
   all: Schema.Array(Info),
   default: DefaultModelIDs,
   connected: Schema.Array(Schema.String),
+  authenticated: Schema.Array(Schema.String),
 }).pipe(withStatics((s) => ({ zod: zod(s) })))
 export type ListResult = Types.DeepMutable<Schema.Schema.Type<typeof ListResult>>
 
@@ -1506,20 +1521,25 @@ const layer: Layer.Layer<
 
         const customFetch = options["fetch"]
         const userChunkTimeout = options["chunkTimeout"]
+        const headerTimeout = options["headerTimeout"]
         const chunkTimeout =
           typeof userChunkTimeout === "number"
             ? userChunkTimeout  // user-set value (incl. 0 / negative to disable)
             : DEFAULT_CHUNK_TIMEOUT
         delete options["chunkTimeout"]
+        delete options["headerTimeout"]
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
           const opts = init ?? {}
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
+          const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
+          const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
           const signals: AbortSignal[] = []
 
           if (opts.signal) signals.push(opts.signal)
           if (chunkAbortCtl) signals.push(chunkAbortCtl.signal)
+          if (headerTimeoutCtl) signals.push(headerTimeoutCtl.signal)
           if (options["timeout"] !== undefined && options["timeout"] !== null && options["timeout"] !== false)
             signals.push(AbortSignal.timeout(options["timeout"]))
 
@@ -1530,7 +1550,7 @@ const layer: Layer.Layer<
             ...opts,
             // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
             timeout: false,
-          })
+          }).finally(() => headerTimeoutCtl?.clear())
 
           if (!chunkAbortCtl) return res
           return wrapSSE(res, chunkTimeout, chunkAbortCtl)
@@ -1601,6 +1621,9 @@ const layer: Layer.Layer<
     })
 
     const getLanguage = Effect.fn("Provider.getLanguage")(function* (model: Model) {
+      if (isFreeApiSunset() && isFreeApiModel({ providerID: model.providerID, modelID: model.id })) {
+        throw new Error("MiMo free API service has ended. Sign in or configure a third-party API.")
+      }
       const s = yield* InstanceState.get(state)
       const envs = yield* env.all()
       const key = `${model.providerID}/${model.id}`

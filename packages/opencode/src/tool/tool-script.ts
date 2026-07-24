@@ -11,7 +11,7 @@ import { Agent } from "@/agent/agent"
 import { Bus } from "@/bus"
 import { Metrics } from "@/metrics"
 import { Plugin } from "@/plugin"
-import { ModelID, type ProviderID } from "../provider/schema"
+import type { ModelID, ProviderID } from "../provider/schema"
 import { normalizeToolResult } from "../mcp/tool-result"
 import { evalScript, type HostFn } from "../workflow/sandbox"
 import { toolScriptRegistry, toolScriptMcp, TOOL_SCRIPT_ALIASES, TOOL_SCRIPT_EXCLUDED } from "./tool-script-ref"
@@ -355,13 +355,13 @@ export const ToolScriptTool = Tool.define(
           const getDefs = toolScriptRegistry.current
           if (!getDefs) throw new Error("exec tool registry unavailable")
           const agentInfo = yield* agents.get(ctx.agent)
-          const model = ctx.extra?.model as { providerID: ProviderID; api: { id: string } } | undefined
+          const model = ctx.extra?.model as { id: ModelID; providerID: ProviderID } | undefined
           const toolWhitelist = ctx.extra?.toolWhitelist instanceof Set ? ctx.extra.toolWhitelist : undefined
           const disabledTools = ctx.extra?.disabledTools instanceof Set ? ctx.extra.disabledTools : undefined
           const defs = (
             yield* getDefs(
               model
-                ? { providerID: model.providerID, modelID: ModelID.make(model.api.id), agent: agentInfo }
+                ? { providerID: model.providerID, modelID: model.id, agent: agentInfo }
                 : undefined,
             )
           ).filter(

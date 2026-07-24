@@ -847,7 +847,26 @@ Keep planning proportional to task complexity: for simple combinations, two or t
         return input.messages
       }
 
-      if (input.agent.name !== "plan" || assistantMessage?.info.agent === "plan") return input.messages
+      if (input.agent.name !== "plan") return input.messages
+
+      if (assistantMessage?.info.agent === "plan") {
+        // Only on a fresh user turn: at step 1 the user message is the last
+        // message; at step 2+ this turn's own assistant message follows it.
+        // insertReminders runs every step and updatePart persists, so
+        // injecting past step 1 would stack duplicate reminders.
+        if (input.messages.at(-1) !== userMessage) return input.messages
+        const plan = Session.plan(input.session)
+        const part = yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: userMessage.info.id,
+          sessionID: userMessage.info.sessionID,
+          type: "text",
+          text: `<system-reminder>Plan mode is still active (read-only; only writable file: ${plan}). Do NOT implement. End your turn with the question tool or plan_exit.</system-reminder>`,
+          synthetic: true,
+        })
+        userMessage.parts.push(part)
+        return input.messages
+      }
 
       const plan = Session.plan(input.session)
       const exists = yield* fsys.existsSafe(plan)
@@ -1089,7 +1108,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       })
 
       for (const item of yield* registry.tools({
-        modelID: ModelID.make(input.model.api.id),
+        modelID: input.model.id,
         providerID: input.model.providerID,
         // A full-context fork inherits the parent's frozen wire membership.
         // Keep the child allowlist as an execution-time gate above instead of

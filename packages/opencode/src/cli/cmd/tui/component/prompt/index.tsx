@@ -48,6 +48,11 @@ import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { DialogAgreement, FREE_AGREEMENT_KEY, FREE_MODEL_IDS } from "../dialog-agreement"
 import { useArgs } from "@tui/context/args"
 import { resolveSkillSlash } from "@tui/i18n/skill"
+import {
+  isFreeApiModel,
+  isFreeApiSunset,
+  shouldBlockFreeApiRequest,
+} from "@tui/util/free-api-sunset"
 
 export type PromptProps = {
   sessionID?: string
@@ -1031,10 +1036,34 @@ export function Prompt(props: PromptProps) {
       return false
     }
 
+    const clientSlashSubmission =
+      store.mode !== "shell" && trimmed.startsWith("/") && command.slashes().some((slash) => slash.display === trimmed)
+    const modelClientSlash = ["/btw", "/compact", "/summarize"].includes(trimmed)
+    const freeApiSunset = isFreeApiSunset()
+    const sunsetFreeApi = freeApiSunset && isFreeApiModel(selectedModel)
+    if (
+      shouldBlockFreeApiRequest(selectedModel, {
+        sunset: freeApiSunset,
+        localOnly: clientSlashSubmission && !modelClientSlash,
+        shell: store.mode === "shell",
+      })
+    ) {
+      void DialogAlert.show(
+        dialog,
+        t("tui.dialog.free_api_sunset.title"),
+        t("tui.dialog.free_api_sunset.message"),
+      )
+      return false
+    }
+
     // Free models require a one-time acknowledgment of the terms and privacy
     // policy. Gate submission until the user accepts; the flag is stored in KV.
     const isFreeModel = FREE_MODEL_IDS.has(selectedModel.modelID)
-    if (isFreeModel && !kv.get(FREE_AGREEMENT_KEY)) {
+    if (
+      isFreeModel &&
+      !kv.get(FREE_AGREEMENT_KEY) &&
+      !(sunsetFreeApi && ((clientSlashSubmission && !modelClientSlash) || store.mode === "shell"))
+    ) {
       submitLock = true
       DialogAgreement.show(dialog, {
         onConfirm: () => {
@@ -1173,7 +1202,12 @@ export function Prompt(props: PromptProps) {
           question,
           (active) =>
             sdk.client.session
-              .ask({ sessionID, question })
+              .ask({
+                sessionID,
+                question,
+                providerID: selectedModel.providerID,
+                modelID: selectedModel.modelID,
+              })
               .then((res) => {
                 if (!active()) return
                 return DialogAlert.show(dialog, "/btw", res.data?.answer ?? "(no answer)")
