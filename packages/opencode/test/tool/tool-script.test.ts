@@ -181,6 +181,19 @@ async function runToolScript(
 }
 
 describe("exec", () => {
+  test("cannot call tools outside the actor runtime whitelist", async () => {
+    const result = await runToolScript(
+      `return await tools.echo({ value: "blocked" })`,
+      [fakeDef("echo", async () => "unexpected")],
+      undefined,
+      { toolWhitelist: new Set(["exec"]) },
+    )
+
+    expect(result.metadata.status).toBe("code_error")
+    expect(result.output).toContain("echo")
+    expect(result.output).not.toContain("unexpected")
+  })
+
   test("executes code, calls tools, returns aggregated result", async () => {
     const seen: string[] = []
     const defs = [
