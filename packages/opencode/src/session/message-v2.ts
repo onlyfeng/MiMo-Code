@@ -39,10 +39,6 @@ function capModelReplayToolText(text: string, label = "tool output", keep: "head
   return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, label, "before model replay", keep)
 }
 
-// Maximum iterations for the budget reduction loop. In practice, the 0.9
-// shrink factor converges in ~5 iterations for typical JSON re-escaping overhead.
-const CAP_TOOL_INPUT_MAX_ITERATIONS = 10
-
 function capModelReplayToolInput(input: unknown) {
   const { serialized, transformed } = safeStringify(input, { bigint: true })
   if (Buffer.byteLength(serialized, "utf8") <= MODEL_VISIBLE_TEXT_CAP_BYTES) {
@@ -54,7 +50,12 @@ function capModelReplayToolInput(input: unknown) {
   const wrap = (s: string) => ({ truncated: s })
   let budget = MODEL_VISIBLE_TEXT_CAP_BYTES - Buffer.byteLength(JSON.stringify(wrap("")), "utf8")
   let result = wrap(capUtf8TextByBytes(serialized, budget, "tool input", "before model replay"))
-  for (let i = 0; i < CAP_TOOL_INPUT_MAX_ITERATIONS && budget > 0 && Buffer.byteLength(JSON.stringify(result), "utf8") > MODEL_VISIBLE_TEXT_CAP_BYTES; i++) {
+  // The 0.9 shrink factor is monotonically decreasing toward 0, guaranteeing
+  // termination. In practice the loop runs ~3-5 times for typical JSON
+  // re-escaping overhead (upper bound: 7 iterations from 50KB at 1.1x
+  // 膨胀 ratio).
+  const exceedsCap = () => Buffer.byteLength(JSON.stringify(result), "utf8") > MODEL_VISIBLE_TEXT_CAP_BYTES
+  while (budget > 0 && exceedsCap()) {
     budget = Math.floor(budget * 0.9)
     result = wrap(capUtf8TextByBytes(serialized, budget, "tool input", "before model replay"))
   }

@@ -105,9 +105,14 @@ export function capTextByChars(
 ) {
   if (text.length <= maxChars) return text
   const marker = `\n\n[... ${label} truncated ${suffix} ...]\n\n`
-  const budget = Math.max(0, maxChars - marker.length)
+  // When the marker alone exceeds maxChars, return just the marker — the
+  // caller's cap is too small for any meaningful content plus truncation
+  // notice. The marker still signals that truncation occurred.
+  if (marker.length >= maxChars) return marker.trimEnd()
+  const budget = maxChars - marker.length
   const headEnd = Math.floor(budget * 0.65)
   const head = text.slice(0, headEnd).replace(/[\uD800-\uDBFF]$/, "")
-  const tail = text.slice(-(budget - headEnd)).replace(/^[\uDC00-\uDFFF]/, "")
+  const tailBudget = budget - headEnd
+  const tail = tailBudget > 0 ? text.slice(-tailBudget).replace(/^[\uDC00-\uDFFF]/, "") : ""
   return head + marker + tail
 }

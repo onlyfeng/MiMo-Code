@@ -205,9 +205,14 @@ async function requiresRipgrepFallback(cwd: string) {
 }
 
 // Maximum directory depth for the marker scan. Prevents unbounded recursion on
-// deep trees (e.g. node_modules) when no markers are found. The default 15
-// covers all reasonable project layouts while capping work to ~O(branching^15).
-const MARKER_SCAN_MAX_DEPTH = 15
+// deep trees (e.g. node_modules) when no markers are found. The default 20
+// covers all reasonable project layouts while capping work.
+const MARKER_SCAN_MAX_DEPTH = 20
+// Maximum directory depth for the fallback file walker. Must be >=
+// MARKER_SCAN_MAX_DEPTH so the walker can traverse at least as far as the
+// marker pre-scan. Deeper trees get an actionable error instead of silent
+// truncation.
+const WALKDIR_MAX_DEPTH = 50
 
 async function hasFallbackRipgrepMarker(dir: string, hidden: boolean, depth = 0): Promise<boolean> {
   // When the depth limit is reached, conservatively require ripgrep rather than
@@ -416,16 +421,12 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           cwd: string
           hidden: boolean
         },
-        visited?: Set<string>,
         depth = 0,
       ): AsyncGenerator<string> {
         // Safety: cap recursion depth to prevent stack issues on deeply nested trees.
-        if (depth > 50) throw new Error(INSTALL_RIPGREP_MESSAGE)
-        // Resolve real path to detect symlink cycles.
-        const realDir = await nodeFs.promises.realpath(dir).catch(() => dir)
-        if (!visited) visited = new Set<string>()
-        if (visited.has(realDir)) return
-        visited.add(realDir)
+        // Symlink cycles are not a concern: readdir(withFileTypes) reports symlinks
+        // with isDirectory()=false, so they never enter the recursive branch.
+        if (depth > WALKDIR_MAX_DEPTH) throw new Error(INSTALL_RIPGREP_MESSAGE)
 
         const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true })
         for (const entry of entries) {
@@ -435,9 +436,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 
           const fullPath = path.join(dir, name)
           if (entry.isDirectory()) {
-            // Skip symlinks to directories to prevent infinite loops on circular links.
-            if (entry.isSymbolicLink()) continue
-            yield* walkDir(fullPath, options, visited, depth + 1)
+            yield* walkDir(fullPath, options, depth + 1)
           } else if (entry.isFile()) {
             yield fullPath
           }

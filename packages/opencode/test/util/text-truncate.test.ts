@@ -134,11 +134,22 @@ describe("capTextByChars", () => {
 
   test("handles emoji/astral characters without splitting surrogates", () => {
     const emoji = "🙂".repeat(100) // Each emoji is 2 UTF-16 code units
-    const result = capTextByChars(emoji, 50, "test")
+    const result = capTextByChars(emoji, 200, "test")
     expect(result).not.toContain("\uFFFD")
-    // Result should contain complete emoji characters
+    // Result must be capped at maxChars, not return full text
+    expect(result.length).toBeLessThanOrEqual(300)
     const emojiCount = (result.match(/🙂/g) || []).length
     expect(emojiCount).toBeGreaterThan(0)
+  })
+
+  test("small maxChars below marker length returns marker only instead of full text", () => {
+    const text = "x".repeat(200)
+    const result = capTextByChars(text, 50, "test")
+    // When maxChars < marker.length, must not return full text
+    expect(result.length).toBeLessThanOrEqual(text.length)
+    expect(result).toContain("truncated")
+    // Should not contain any content from the original text
+    expect(result).not.toContain("xxx")
   })
 
   test("full budget is used (no 10% leak)", () => {

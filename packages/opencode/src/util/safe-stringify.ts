@@ -2,15 +2,12 @@
 // symbols, and optionally bigint. Used by overflow estimation, message replay,
 // and max-mode judge to avoid duplicating replacer logic across modules.
 
-interface SafeStringifyOptions {
+export type SafeStringifyOptions = {
   /** Convert bigint values to string instead of throwing. Default: false. */
   bigint?: boolean
 }
 
-export function safeStringify(
-  input: unknown,
-  opts?: SafeStringifyOptions,
-): { serialized: string; transformed: boolean } {
+export function safeStringify(input: unknown, opts?: SafeStringifyOptions) {
   const seen = new WeakSet<object>()
   let transformed = false
   const serialized =
@@ -39,7 +36,16 @@ export function safeStringify(
   return { serialized, transformed }
 }
 
-/** Simple safe stringify that returns just the string (no transform tracking). */
-export function safeStringifySimple(input: unknown): string {
+/** Returns just the serialized string (no transform tracking). */
+export function safeStringifySimple(input: unknown) {
   return safeStringify(input).serialized
+}
+
+/** Non-throwing variant: returns a fallback string on serialization errors. */
+export function safeStringifyNoThrow(input: unknown, fallback = "[unserializable]") {
+  try {
+    return safeStringify(input, { bigint: true }).serialized
+  } catch {
+    return fallback
+  }
 }
