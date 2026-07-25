@@ -37,6 +37,9 @@ const MODEL_PARAM_DESCRIPTION =
   "(optional) Model for this subagent: a model group name (e.g. ultra/standard/lite) or a literal provider/model (e.g. mimo-v2.5-pro). Overrides the agent's configured model; defaults to the agent's model, else the parent's. If no model_groups are configured, the tier names resolve to the default model. To discover valid provider/model values (e.g. a vision-capable model for image tasks), run `actor models` (or `actor models --vision`)."
 
 const KNOWN_ACTOR_VERBS = ["run", "spawn", "status", "wait", "cancel", "send", "models"]
+// Default token budget for checkpoint context injected into subagent prompts.
+// ~11K tokens ≈ 44KB UTF-8, enough for a concise progress summary without
+// overwhelming the subagent's context window.
 const DEFAULT_STATE_CONTEXT_TOKENS = 11_000
 
 function estimateStateTokens(text: string) {
@@ -47,7 +50,7 @@ function capStateContext(text: string, maxTokens: number) {
   if (estimateStateTokens(text) <= maxTokens) return text
   const marker = `\n\n[... checkpoint truncated to ${maxTokens} tokens for actor context=state ...]\n\n`
   const budget = Math.max(0, maxTokens * 3 - Buffer.byteLength(marker, "utf8"))
-  const head = Math.floor(budget * 0.6)
+  const head = Math.floor(budget * 0.65)
   const tail = budget - head
   return takeUtf8PrefixByBytes(text, head) + marker + (tail > 0 ? takeUtf8SuffixByBytes(text, tail) : "")
 }

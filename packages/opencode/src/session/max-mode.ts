@@ -15,6 +15,7 @@ import {
 import type { Permission } from "@/permission"
 import { Log } from "@/util"
 import { capTextByChars, JUDGE_FIELD_MAX_CHARS, JUDGE_TOOL_INPUT_MAX_CHARS } from "@/util/text-truncate"
+import { safeStringifyNoThrow } from "@/util/safe-stringify"
 
 const log = Log.create({ service: "session.max-mode" })
 
@@ -36,14 +37,6 @@ export function shouldRunMaxModeStep(input: {
   if (input.maxMode === undefined) return false
   if (input.format.type === "json_schema") return false
   return input.agent.name === MAX_MODE_AGENT || input.agent.maxMode === true
-}
-
-function stringifyToolInput(input: unknown) {
-  try {
-    return JSON.stringify(input)
-  } catch {
-    return JSON.stringify("[unserializable tool input]")
-  }
 }
 
 /** One candidate's collected output from a propose-only stream. */
@@ -233,7 +226,11 @@ export function renderCandidate(c: Candidate, label: number): string {
       ? "(no tool calls — final answer / text only)"
       : c.toolCalls
           .map((t) => {
-            const input = capTextByChars(stringifyToolInput(t.input), JUDGE_TOOL_INPUT_MAX_CHARS, "tool input")
+            const input = capTextByChars(
+              safeStringifyNoThrow(t.input, "[unserializable tool input]"),
+              JUDGE_TOOL_INPUT_MAX_CHARS,
+              "tool input",
+            )
             return `  - ${t.toolName}(${input})`
           })
           .join("\n")

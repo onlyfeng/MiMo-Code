@@ -95,7 +95,8 @@ export function capUtf8TextByBytes(
 
 // Character-budget variant for the max-mode judge (counts visible chars, not
 // bytes) and keeps both ends. Splits on UTF-16 surrogate boundaries so an
-// emoji / astral char is never cut in half.
+// emoji / astral char is never cut in half. Head gets ~65% of budget; tail
+// gets the remainder (~35%) to use the full budget.
 export function capTextByChars(
   text: string,
   maxChars: number,
@@ -104,8 +105,13 @@ export function capTextByChars(
 ) {
   if (text.length <= maxChars) return text
   const marker = `\n\n[... ${label} truncated ${suffix} ...]\n\n`
-  const budget = Math.max(0, maxChars - marker.length)
-  const head = text.slice(0, Math.floor(budget * 0.65)).replace(/[\uD800-\uDBFF]$/, "")
-  const tail = text.slice(-Math.floor(budget * 0.25)).replace(/^[\uDC00-\uDFFF]/, "")
+  // When the marker alone exceeds maxChars, slice it to fit. The truncated
+  // marker still signals that truncation occurred.
+  if (marker.length >= maxChars) return marker.trimEnd().slice(0, maxChars)
+  const budget = maxChars - marker.length
+  const headEnd = Math.floor(budget * 0.65)
+  const head = text.slice(0, headEnd).replace(/[\uD800-\uDBFF]$/, "")
+  const tailBudget = budget - headEnd
+  const tail = tailBudget > 0 ? text.slice(-tailBudget).replace(/^[\uDC00-\uDFFF]/, "") : ""
   return head + marker + tail
 }

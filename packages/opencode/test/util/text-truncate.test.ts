@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { takeUtf8PrefixByBytes, takeUtf8SuffixByBytes } from "../../src/util/text-truncate"
+import {
+  capUtf8TextByBytes,
+  capTextByChars,
+  takeUtf8PrefixByBytes,
+  takeUtf8SuffixByBytes,
+} from "../../src/util/text-truncate"
 
 const text = "A界🙂Z"
 
@@ -55,5 +60,101 @@ describe("UTF-8 byte slices", () => {
       expect(takeUtf8PrefixByBytes(malformed, partialBudget)).toBe(`A${surrogate}`)
       expect(takeUtf8SuffixByBytes(malformed, partialBudget)).toBe(`${surrogate}Z`)
     })
+  })
+})
+
+describe("capUtf8TextByBytes", () => {
+  test("returns text unchanged when under budget", () => {
+    expect(capUtf8TextByBytes("hello", 100, "test")).toBe("hello")
+  })
+
+  test("passes through non-string values", () => {
+    expect(capUtf8TextByBytes(undefined as any, 100, "test")).toBeUndefined()
+    expect(capUtf8TextByBytes(null as any, 100, "test")).toBeNull()
+  })
+
+  test("head mode keeps prefix and truncates tail", () => {
+    const long = "a".repeat(1000)
+    const result = capUtf8TextByBytes(long, 100, "test", "suffix", "head")
+    expect(result).toContain("truncated suffix")
+    expect(result).not.toContain("a".repeat(100))
+    expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(120) // cap + marker overhead
+  })
+
+  test("tail mode keeps suffix and truncates head", () => {
+    const long = "a".repeat(1000)
+    const result = capUtf8TextByBytes(long, 100, "test", "suffix", "tail")
+    expect(result).toContain("truncated suffix")
+    expect(result).toContain("a".repeat(50)) // tail portion preserved
+    expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(120)
+  })
+
+  test("head+tail mode keeps both ends", () => {
+    const long = "a".repeat(500) + "MIDDLE" + "b".repeat(500)
+    const result = capUtf8TextByBytes(long, 100, "test", "suffix", "head+tail")
+    expect(result).toContain("truncated suffix")
+    expect(result).toContain("aaa") // head portion
+    expect(result).toContain("bbb") // tail portion
+    expect(result).not.toContain("MIDDLE")
+  })
+
+  test("handles multibyte characters without splitting", () => {
+    const cjk = "界".repeat(200) // 3 bytes each = 600 bytes
+    const result = capUtf8TextByBytes(cjk, 100, "test")
+    expect(result).not.toContain("\uFFFD")
+    expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(120)
+  })
+
+  test("empty string returns empty", () => {
+    expect(capUtf8TextByBytes("", 100, "test")).toBe("")
+  })
+})
+
+describe("capTextByChars", () => {
+  test("returns text unchanged when under budget", () => {
+    expect(capTextByChars("hello", 100, "test")).toBe("hello")
+  })
+
+  test("truncates long text with marker", () => {
+    const long = "x".repeat(20_000)
+    const result = capTextByChars(long, 1000, "test")
+    expect(result).toContain("truncated")
+    expect(result.length).toBeLessThan(20_000)
+  })
+
+  test("preserves head and tail portions", () => {
+    const head = "A".repeat(100)
+    const tail = "Z".repeat(100)
+    const long = head + "MIDDLE".repeat(500) + tail
+    const result = capTextByChars(long, 300, "test")
+    expect(result).toContain("AAA")
+    expect(result).toContain("ZZZ")
+    expect(result).not.toContain("MIDDLE".repeat(10))
+  })
+
+  test("handles emoji/astral characters without splitting surrogates", () => {
+    const emoji = "🙂".repeat(100) // Each emoji is 2 UTF-16 code units
+    const result = capTextByChars(emoji, 200, "test")
+    expect(result).not.toContain("\uFFFD")
+    expect(result.length).toBeLessThanOrEqual(200)
+    const emojiCount = (result.match(/🙂/g) || []).length
+    expect(emojiCount).toBeGreaterThan(0)
+  })
+
+  test.each([10, 50, 60, 100, 2000])("small maxChars=%i never exceeds cap", (maxChars) => {
+    const text = "x".repeat(10_000)
+    const result = capTextByChars(text, maxChars, "test")
+    expect(result.length).toBeLessThanOrEqual(maxChars)
+    // For maxChars >= marker length, truncated marker is intact
+    if (maxChars >= 60) expect(result).toContain("truncated")
+  })
+
+  test("full budget is used (no 10% leak)", () => {
+    const long = "x".repeat(10_000)
+    const maxChars = 1000
+    const result = capTextByChars(long, maxChars, "test")
+    // The result should be close to maxChars (within marker overhead)
+    expect(result.length).toBeGreaterThan(maxChars * 0.85)
+    expect(result.length).toBeLessThanOrEqual(maxChars + 100) // marker can add some chars
   })
 })

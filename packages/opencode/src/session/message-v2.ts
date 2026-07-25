@@ -12,6 +12,7 @@ import { ProviderError } from "@/provider"
 import { errorMessage } from "@/util/error"
 import { isMedia } from "@/util/media"
 import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "@/util/text-truncate"
+import { safeStringify } from "@/util/safe-stringify"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
@@ -38,37 +39,8 @@ function capModelReplayToolText(text: string, label = "tool output", keep: "head
   return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, label, "before model replay", keep)
 }
 
-function stringifyReplayToolInput(input: unknown) {
-  const seen = new WeakSet<object>()
-  let transformed = false
-  const serialized =
-    JSON.stringify(input, (_key, value) => {
-      if (typeof value === "bigint") {
-        transformed = true
-        return value.toString()
-      }
-      if (typeof value === "function") {
-        transformed = true
-        return "[function]"
-      }
-      if (typeof value === "symbol") {
-        transformed = true
-        return value.toString()
-      }
-      if (value && typeof value === "object") {
-        if (seen.has(value)) {
-          transformed = true
-          return "[circular]"
-        }
-        seen.add(value)
-      }
-      return value
-    }) ?? String(input)
-  return { serialized, transformed }
-}
-
 function capModelReplayToolInput(input: unknown) {
-  const { serialized, transformed } = stringifyReplayToolInput(input)
+  const { serialized, transformed } = safeStringify(input, { bigint: true })
   if (Buffer.byteLength(serialized, "utf8") <= MODEL_VISIBLE_TEXT_CAP_BYTES) {
     return transformed ? JSON.parse(serialized) : input
   }
@@ -78,7 +50,12 @@ function capModelReplayToolInput(input: unknown) {
   const wrap = (s: string) => ({ truncated: s })
   let budget = MODEL_VISIBLE_TEXT_CAP_BYTES - Buffer.byteLength(JSON.stringify(wrap("")), "utf8")
   let result = wrap(capUtf8TextByBytes(serialized, budget, "tool input", "before model replay"))
-  while (budget > 0 && Buffer.byteLength(JSON.stringify(result), "utf8") > MODEL_VISIBLE_TEXT_CAP_BYTES) {
+  // The 0.9 shrink factor is monotonically decreasing toward 0, guaranteeing
+  // termination. In practice the loop runs ~2 times for typical JSON
+  // re-escaping overhead (upper bound: 7 iterations at the 2x worst-case
+  // re-escape ratio).
+  const exceedsCap = () => Buffer.byteLength(JSON.stringify(result), "utf8") > MODEL_VISIBLE_TEXT_CAP_BYTES
+  while (budget > 0 && exceedsCap()) {
     budget = Math.floor(budget * 0.9)
     result = wrap(capUtf8TextByBytes(serialized, budget, "tool input", "before model replay"))
   }

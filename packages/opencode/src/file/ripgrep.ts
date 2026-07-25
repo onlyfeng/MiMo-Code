@@ -204,7 +204,20 @@ async function requiresRipgrepFallback(cwd: string) {
   }
 }
 
-async function hasFallbackRipgrepMarker(dir: string, hidden: boolean): Promise<boolean> {
+// Maximum directory depth for the marker scan. Prevents unbounded recursion on
+// deep trees (e.g. node_modules) when no markers are found. The default 20
+// covers all reasonable project layouts while capping work.
+const MARKER_SCAN_MAX_DEPTH = 20
+// Maximum directory depth for the fallback file walker. Must be >=
+// MARKER_SCAN_MAX_DEPTH so the walker can traverse at least as far as the
+// marker pre-scan. Deeper trees get an actionable error instead of silent
+// truncation.
+const WALKDIR_MAX_DEPTH = 50
+
+async function hasFallbackRipgrepMarker(dir: string, hidden: boolean, depth = 0): Promise<boolean> {
+  // When the depth limit is reached, conservatively require ripgrep rather than
+  // risk an incomplete fallback listing that misses ignore semantics.
+  if (depth > MARKER_SCAN_MAX_DEPTH) return true
   const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true })
   for (const entry of entries) {
     if (FALLBACK_RIPGREP_MARKERS.includes(entry.name)) return true
@@ -212,7 +225,7 @@ async function hasFallbackRipgrepMarker(dir: string, hidden: boolean): Promise<b
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     if (!hidden && entry.name.startsWith(".")) continue
-    if (await hasFallbackRipgrepMarker(path.join(dir, entry.name), hidden)) return true
+    if (await hasFallbackRipgrepMarker(path.join(dir, entry.name), hidden, depth + 1)) return true
   }
   return false
 }
@@ -408,7 +421,13 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           cwd: string
           hidden: boolean
         },
+        depth = 0,
       ): AsyncGenerator<string> {
+        // Safety: cap recursion depth to prevent stack issues on deeply nested trees.
+        // Symlink cycles are not a concern: readdir(withFileTypes) reports symlinks
+        // with isDirectory()=false, so they never enter the recursive branch.
+        if (depth > WALKDIR_MAX_DEPTH) throw new Error(INSTALL_RIPGREP_MESSAGE)
+
         const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true })
         for (const entry of entries) {
           const name = entry.name
@@ -417,7 +436,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 
           const fullPath = path.join(dir, name)
           if (entry.isDirectory()) {
-            yield* walkDir(fullPath, options)
+            yield* walkDir(fullPath, options, depth + 1)
           } else if (entry.isFile()) {
             yield fullPath
           }

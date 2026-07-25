@@ -488,11 +488,11 @@ describe("tool.actor", () => {
           expect(capturedTask).toBe(`<session-state>
 Here is a summary of the parent session's progress:
 
-HHHHHHHHHHH
+HHHHHHHHHHHH
 
 [... checkpoint truncated to 30 tokens for actor context=state ...]
 
-TTTTTTTT
+TTTTTTT
 </session-state>
 continue from state`)
         }).pipe(Effect.provideService(SessionCheckpoint.Service, checkpointStub("H".repeat(60) + "T".repeat(60)))),
