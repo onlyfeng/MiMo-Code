@@ -2,11 +2,7 @@
 // symbols, and optionally bigint. Used by overflow estimation, message replay,
 // and max-mode judge to avoid duplicating replacer logic across modules.
 
-export function safeStringify(
-  input: unknown,
-  opts?: { /** Convert bigint values to string instead of throwing. Default: false. */
-    bigint?: boolean },
-) {
+export function safeStringify(input: unknown, opts?: { bigint?: boolean }) {
   const seen = new WeakSet<object>()
   let transformed = false
   const serialized =
@@ -41,7 +37,7 @@ export function safeStringifySimple(input: unknown) {
 }
 
 /** Non-throwing variant: returns a fallback string on serialization errors. */
-export function safeStringifyNoThrow(input: unknown, fallback = "[unserializable tool input]") {
+export function safeStringifyNoThrow(input: unknown, fallback = "[unserializable]") {
   try {
     return safeStringify(input, { bigint: true }).serialized
   } catch {

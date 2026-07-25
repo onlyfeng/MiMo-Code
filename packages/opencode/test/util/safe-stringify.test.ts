@@ -80,13 +80,21 @@ describe("safeStringifyNoThrow", () => {
   })
 
   test("returns default fallback on toJSON error", () => {
-    const bad = { toJSON: () => { throw new Error("boom") } }
+    const bad = {
+      toJSON: () => {
+        throw new Error("boom")
+      },
+    }
     const result = safeStringifyNoThrow(bad)
-    expect(result).toBe("[unserializable tool input]")
+    expect(result).toBe("[unserializable]")
   })
 
   test("returns custom fallback when provided", () => {
-    const bad = { toJSON: () => { throw new Error("boom") } }
+    const bad = {
+      toJSON: () => {
+        throw new Error("boom")
+      },
+    }
     const result = safeStringifyNoThrow(bad, "[custom fallback]")
     expect(result).toBe("[custom fallback]")
   })

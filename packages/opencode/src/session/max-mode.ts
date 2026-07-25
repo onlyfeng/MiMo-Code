@@ -226,7 +226,11 @@ export function renderCandidate(c: Candidate, label: number): string {
       ? "(no tool calls — final answer / text only)"
       : c.toolCalls
           .map((t) => {
-            const input = capTextByChars(safeStringifyNoThrow(t.input), JUDGE_TOOL_INPUT_MAX_CHARS, "tool input")
+            const input = capTextByChars(
+              safeStringifyNoThrow(t.input, "[unserializable tool input]"),
+              JUDGE_TOOL_INPUT_MAX_CHARS,
+              "tool input",
+            )
             return `  - ${t.toolName}(${input})`
           })
           .join("\n")

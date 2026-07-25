@@ -141,16 +141,13 @@ describe("capTextByChars", () => {
     expect(emojiCount).toBeGreaterThan(0)
   })
 
-  test.each([10, 50, 60, 100, 2000])(
-    "small maxChars=%i never exceeds cap",
-    (maxChars) => {
-      const text = "x".repeat(10_000)
-      const result = capTextByChars(text, maxChars, "test")
-      expect(result.length).toBeLessThanOrEqual(maxChars)
-      // For maxChars >= marker length, truncated marker is intact
-      if (maxChars >= 60) expect(result).toContain("truncated")
-    },
-  )
+  test.each([10, 50, 60, 100, 2000])("small maxChars=%i never exceeds cap", (maxChars) => {
+    const text = "x".repeat(10_000)
+    const result = capTextByChars(text, maxChars, "test")
+    expect(result.length).toBeLessThanOrEqual(maxChars)
+    // For maxChars >= marker length, truncated marker is intact
+    if (maxChars >= 60) expect(result).toContain("truncated")
+  })
 
   test("full budget is used (no 10% leak)", () => {
     const long = "x".repeat(10_000)
