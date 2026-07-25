@@ -5,6 +5,7 @@ import type { MessageV2 } from "./message-v2"
 import type { ModelMessage } from "ai"
 import { Token } from "../util"
 import { capUtf8TextByBytes } from "../util/text-truncate"
+import { safeStringifySimple } from "../util/safe-stringify"
 
 const COMPACTION_BUFFER = 20_000
 
@@ -12,7 +13,15 @@ const COMPACTION_BUFFER = 20_000
 // don't strangle the usable input window. 20K covers >99.99% of compaction
 // summary outputs based on production telemetry of summary token counts.
 const OUTPUT_CAP = 20_000
+// Safety margin for request preflight overflow detection. The preflight
+// estimates tokens before the provider call; this guard prevents false-tripping
+// overflow when the request is near (but not over) the usable window. Capped
+// at 10% of usable for small-context models.
 const REQUEST_PREFLIGHT_GUARD = 5_000
+// Cap tool schema bytes for overflow estimation. Tool schemas are static and
+// compaction cannot shrink them, so oversized schemas must be detected at
+// preflight time. 80KB covers the worst-case toolset (~30 tools with verbose
+// descriptions) while keeping the estimate tractable.
 const REQUEST_PREFLIGHT_TOOL_SCHEMA_MAX_BYTES = 80 * 1024
 
 type RequestEstimateInput = {
@@ -27,19 +36,6 @@ export type RequestOverflowClassification =
   | { type: "ok" }
   | { type: "overflow"; requestTokens: number; staticTokens: number }
   | { type: "overflow-static"; requestTokens: number; staticTokens: number }
-
-function safeStringify(input: unknown) {
-  const seen = new WeakSet<object>()
-  return JSON.stringify(input, (_key, value) => {
-    if (typeof value === "function") return "[function]"
-    if (typeof value === "symbol") return value.toString()
-    if (value && typeof value === "object") {
-      if (seen.has(value)) return "[circular]"
-      seen.add(value)
-    }
-    return value
-  }) ?? ""
-}
 
 export function usable(input: { cfg: Config.Info; model: Provider.Model }) {
   const context = input.model.limit.context
@@ -64,8 +60,8 @@ export function isOverflow(input: { cfg: Config.Info; tokens: MessageV2.Assistan
 }
 
 export function estimateRequestTokens(input: RequestEstimateInput) {
-  const tools = safeStringify(input.tools ?? {})
-  const serialized = safeStringify({
+  const tools = safeStringifySimple(input.tools ?? {})
+  const serialized = safeStringifySimple({
     system: input.prebuiltSystem ?? input.system ?? [],
     messages: input.messages,
     tools: capUtf8TextByBytes(tools, REQUEST_PREFLIGHT_TOOL_SCHEMA_MAX_BYTES, "tool schemas"),
