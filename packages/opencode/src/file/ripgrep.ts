@@ -204,20 +204,18 @@ async function requiresRipgrepFallback(cwd: string) {
   }
 }
 
-// Maximum directory depth for the marker scan. Prevents unbounded recursion on
-// deep trees (e.g. node_modules) when no markers are found. The default 20
-// covers all reasonable project layouts while capping work.
-const MARKER_SCAN_MAX_DEPTH = 20
-// Maximum directory depth for the fallback file walker. Must be >=
-// MARKER_SCAN_MAX_DEPTH so the walker can traverse at least as far as the
-// marker pre-scan. Deeper trees get an actionable error instead of silent
-// truncation.
-const WALKDIR_MAX_DEPTH = 50
+// Maximum directory depth for the fallback file walker and its marker pre-scan.
+// The pre-scan must cover the same depth range as walkDir: it ensures no files
+// are yielded before marker safety is established (walkDir yields as it walks
+// and only throws on marker encounter, so a short-circuiting consumer like
+// Stream.take(1) could otherwise accept a listing with broken ignore semantics).
+// Deeper trees get an actionable error.
+const FALLBACK_MAX_DEPTH = 50
 
 async function hasFallbackRipgrepMarker(dir: string, hidden: boolean, depth = 0): Promise<boolean> {
-  // When the depth limit is reached, conservatively require ripgrep rather than
-  // risk an incomplete fallback listing that misses ignore semantics.
-  if (depth > MARKER_SCAN_MAX_DEPTH) return true
+  // Conservative: pretend we found a marker so the caller requires ripgrep
+  // rather than risk an incomplete fallback listing.
+  if (depth > FALLBACK_MAX_DEPTH) return true
   const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true })
   for (const entry of entries) {
     if (FALLBACK_RIPGREP_MARKERS.includes(entry.name)) return true
@@ -426,7 +424,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
         // Safety: cap recursion depth to prevent stack issues on deeply nested trees.
         // Symlink cycles are not a concern: readdir(withFileTypes) reports symlinks
         // with isDirectory()=false, so they never enter the recursive branch.
-        if (depth > WALKDIR_MAX_DEPTH) throw new Error(INSTALL_RIPGREP_MESSAGE)
+        if (depth > FALLBACK_MAX_DEPTH) throw new Error(INSTALL_RIPGREP_MESSAGE)
 
         const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true })
         for (const entry of entries) {

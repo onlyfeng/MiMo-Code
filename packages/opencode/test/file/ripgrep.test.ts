@@ -403,6 +403,25 @@ describe("file.ripgrep", () => {
     })
   })
 
+  test("fallback files works for deep trees without markers", async () => {
+    // Build a directory tree 25 levels deep with no .git/.ignore/.rgignore
+    // anywhere. The pre-scan and walkDir share the same depth limit, so the
+    // fallback should succeed for any depth within that limit.
+    const segments = Array.from({ length: 25 }, (_, i) => `d${i}`)
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        const deepDir = path.join(dir, ...segments)
+        await fs.mkdir(deepDir, { recursive: true })
+        await Bun.write(path.join(deepDir, "deep.txt"), "deep")
+      },
+    })
+
+    await withNoRipgrep(tmp.path, async () => {
+      const files = await fallbackFiles(tmp.path)
+      expect(files).toContain(path.join(...segments, "deep.txt"))
+    })
+  })
+
   test("files dies on nonexistent directory", async () => {
     const exit = await Ripgrep.Service.use((rg) =>
       rg.files({ cwd: "/tmp/nonexistent-dir-12345" }).pipe(Stream.runCollect),
