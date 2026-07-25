@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { safeStringify, safeStringifySimple } from "../../src/util/safe-stringify"
+import { safeStringify, safeStringifySimple, safeStringifyNoThrow } from "../../src/util/safe-stringify"
 
 describe("safeStringify", () => {
   test("serializes plain objects", () => {
@@ -52,7 +52,7 @@ describe("safeStringify", () => {
     expect(result.transformed).toBe(true)
   })
 
-  test("returns empty string for undefined input", () => {
+  test("returns String(undefined) for undefined input", () => {
     const result = safeStringify(undefined)
     expect(result.serialized).toBe("undefined")
   })
@@ -67,5 +67,27 @@ describe("safeStringifySimple", () => {
     const obj: Record<string, unknown> = { a: 1 }
     obj.self = obj
     expect(safeStringifySimple(obj)).toContain('"self":"[circular]"')
+  })
+})
+
+describe("safeStringifyNoThrow", () => {
+  test("serializes normal objects", () => {
+    expect(safeStringifyNoThrow({ cmd: "ls" })).toBe('{"cmd":"ls"}')
+  })
+
+  test("handles bigint via bigint option", () => {
+    expect(safeStringifyNoThrow({ n: 42n })).toBe('{"n":"42"}')
+  })
+
+  test("returns default fallback on toJSON error", () => {
+    const bad = { toJSON: () => { throw new Error("boom") } }
+    const result = safeStringifyNoThrow(bad)
+    expect(result).toBe("[unserializable tool input]")
+  })
+
+  test("returns custom fallback when provided", () => {
+    const bad = { toJSON: () => { throw new Error("boom") } }
+    const result = safeStringifyNoThrow(bad, "[custom fallback]")
+    expect(result).toBe("[custom fallback]")
   })
 })

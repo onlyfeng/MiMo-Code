@@ -136,21 +136,21 @@ describe("capTextByChars", () => {
     const emoji = "🙂".repeat(100) // Each emoji is 2 UTF-16 code units
     const result = capTextByChars(emoji, 200, "test")
     expect(result).not.toContain("\uFFFD")
-    // Result must be capped at maxChars, not return full text
-    expect(result.length).toBeLessThanOrEqual(300)
+    expect(result.length).toBeLessThanOrEqual(200)
     const emojiCount = (result.match(/🙂/g) || []).length
     expect(emojiCount).toBeGreaterThan(0)
   })
 
-  test("small maxChars below marker length returns marker only instead of full text", () => {
-    const text = "x".repeat(200)
-    const result = capTextByChars(text, 50, "test")
-    // When maxChars < marker.length, must not return full text
-    expect(result.length).toBeLessThanOrEqual(text.length)
-    expect(result).toContain("truncated")
-    // Should not contain any content from the original text
-    expect(result).not.toContain("xxx")
-  })
+  test.each([10, 50, 60, 100, 2000])(
+    "small maxChars=%i never exceeds cap",
+    (maxChars) => {
+      const text = "x".repeat(10_000)
+      const result = capTextByChars(text, maxChars, "test")
+      expect(result.length).toBeLessThanOrEqual(maxChars)
+      // For maxChars >= marker length, truncated marker is intact
+      if (maxChars >= 60) expect(result).toContain("truncated")
+    },
+  )
 
   test("full budget is used (no 10% leak)", () => {
     const long = "x".repeat(10_000)
