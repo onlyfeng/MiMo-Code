@@ -210,7 +210,9 @@ async function requiresRipgrepFallback(cwd: string) {
 const MARKER_SCAN_MAX_DEPTH = 15
 
 async function hasFallbackRipgrepMarker(dir: string, hidden: boolean, depth = 0): Promise<boolean> {
-  if (depth > MARKER_SCAN_MAX_DEPTH) return false
+  // When the depth limit is reached, conservatively require ripgrep rather than
+  // risk an incomplete fallback listing that misses ignore semantics.
+  if (depth > MARKER_SCAN_MAX_DEPTH) return true
   const entries = await nodeFs.promises.readdir(dir, { withFileTypes: true })
   for (const entry of entries) {
     if (FALLBACK_RIPGREP_MARKERS.includes(entry.name)) return true
@@ -418,7 +420,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
         depth = 0,
       ): AsyncGenerator<string> {
         // Safety: cap recursion depth to prevent stack issues on deeply nested trees.
-        if (depth > 50) return
+        if (depth > 50) throw new Error(INSTALL_RIPGREP_MESSAGE)
         // Resolve real path to detect symlink cycles.
         const realDir = await nodeFs.promises.realpath(dir).catch(() => dir)
         if (!visited) visited = new Set<string>()
