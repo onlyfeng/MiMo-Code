@@ -1086,6 +1086,149 @@ describe("ProviderTransform.message - DeepSeek reasoning content", () => {
   })
 })
 
+describe("ProviderTransform.message - forced Anthropic reasoning content", () => {
+  const flag = "MIMOCODE_FORCE_ANTHROPIC_REASONING_CONTENT"
+  const model = {
+    id: ModelID.make("anthropic/claude-sonnet-4"),
+    providerID: ProviderID.make("anthropic"),
+    api: {
+      id: "claude-sonnet-4",
+      url: "https://api.anthropic.com",
+      npm: "@ai-sdk/anthropic",
+    },
+    name: "Claude Sonnet 4",
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: true,
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: 200_000, output: 8_192 },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: "2025-05-22",
+  } as Provider.Model
+
+  test("is disabled by default", () => {
+    const previous = process.env[flag]
+    delete process.env[flag]
+    try {
+      const result = ProviderTransform.message(
+        [
+          {
+            role: "assistant",
+            content: [{ type: "reasoning", text: "unsigned thinking" }],
+          },
+          { role: "user", content: "next" },
+        ],
+        model,
+        {},
+      )
+
+      expect(result[0].content).toEqual([{ type: "reasoning", text: "unsigned thinking" }])
+    } finally {
+      if (previous === undefined) delete process.env[flag]
+      else process.env[flag] = previous
+    }
+  })
+
+  test("replays unsigned Anthropic reasoning through the signed thinking path when enabled", () => {
+    const previous = process.env[flag]
+    process.env[flag] = "true"
+    try {
+      const result = ProviderTransform.message(
+        [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "reasoning",
+                text: "unsigned thinking",
+              },
+              { type: "text", text: "final answer" },
+            ],
+          },
+          { role: "user", content: "next" },
+        ],
+        model,
+        {},
+      )
+
+      expect(result[0].content).toEqual([
+        {
+          type: "reasoning",
+          text: "unsigned thinking",
+          providerOptions: { anthropic: { signature: "" } },
+        },
+        { type: "text", text: "final answer" },
+      ])
+    } finally {
+      if (previous === undefined) delete process.env[flag]
+      else process.env[flag] = previous
+    }
+  })
+
+  test("preserves signed Anthropic reasoning when enabled", () => {
+    const previous = process.env[flag]
+    process.env[flag] = "true"
+    try {
+      const reasoning = {
+        type: "reasoning" as const,
+        text: "signed thinking",
+        providerOptions: { anthropic: { signature: "signature" } },
+      }
+      const result = ProviderTransform.message(
+        [
+          { role: "assistant", content: [reasoning] },
+          { role: "user", content: "next" },
+        ],
+        model,
+        {},
+      )
+
+      expect(result[0].content).toEqual([reasoning])
+    } finally {
+      if (previous === undefined) delete process.env[flag]
+      else process.env[flag] = previous
+    }
+  })
+
+  test("does not affect non-Anthropic reasoning when enabled", () => {
+    const previous = process.env[flag]
+    process.env[flag] = "true"
+    try {
+      const reasoning = {
+        type: "reasoning" as const,
+        text: "OpenAI reasoning",
+      }
+      const result = ProviderTransform.message(
+        [
+          { role: "assistant", content: [reasoning] },
+          { role: "user", content: "next" },
+        ],
+        {
+          ...model,
+          id: ModelID.make("openai/gpt-5"),
+          providerID: ProviderID.make("openai"),
+          api: { id: "gpt-5", url: "https://api.openai.com", npm: "@ai-sdk/openai" },
+        },
+        {},
+      )
+
+      expect(result[0].content).toEqual([reasoning])
+    } finally {
+      if (previous === undefined) delete process.env[flag]
+      else process.env[flag] = previous
+    }
+  })
+
+})
+
 describe("ProviderTransform.message - empty image handling", () => {
   const mockModel = {
     id: "anthropic/claude-3-5-sonnet",
@@ -2983,13 +3126,30 @@ describe("ProviderTransform.variants", () => {
     expect(result).toEqual({})
   })
 
-  test("deepseek returns empty object", () => {
+  test("official deepseek V4 returns high and max variants", () => {
     const model = createMockModel({
-      id: "deepseek/deepseek-chat",
+      id: "deepseek/deepseek-v4-pro",
       providerID: "deepseek",
       api: {
-        id: "deepseek-chat",
+        id: "deepseek-v4-pro",
         url: "https://api.deepseek.com",
+        npm: "@ai-sdk/openai-compatible",
+      },
+    })
+    const result = ProviderTransform.variants(model)
+    expect(result).toEqual({
+      high: { reasoningEffort: "high" },
+      max: { reasoningEffort: "max" },
+    })
+  })
+
+  test("deepseek variants remain disabled for non-official openai-compatible providers", () => {
+    const model = createMockModel({
+      id: "custom/deepseek-v4-pro",
+      providerID: "custom",
+      api: {
+        id: "deepseek-v4-pro",
+        url: "https://api.example.com",
         npm: "@ai-sdk/openai-compatible",
       },
     })
@@ -3040,6 +3200,20 @@ describe("ProviderTransform.variants", () => {
   })
 
   describe("@openrouter/ai-sdk-provider", () => {
+    test("deepseek variants remain disabled", () => {
+      const model = createMockModel({
+        id: "openrouter/deepseek/deepseek-v4-pro",
+        providerID: "openrouter",
+        api: {
+          id: "deepseek/deepseek-v4-pro",
+          url: "https://openrouter.ai",
+          npm: "@openrouter/ai-sdk-provider",
+        },
+      })
+      const result = ProviderTransform.variants(model)
+      expect(result).toEqual({})
+    })
+
     test("returns empty object for non-qualifying models", () => {
       const model = createMockModel({
         id: "openrouter/test-model",

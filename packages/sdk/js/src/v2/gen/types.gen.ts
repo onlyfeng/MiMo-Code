@@ -2303,7 +2303,7 @@ export type Config = {
   }
   dream?: {
     /**
-     * Auto-trigger dream memory consolidation on new session start. Default: true.
+     * Auto-trigger dream memory consolidation on new session start. Default: false.
      */
     auto?: boolean
     /**
@@ -2313,7 +2313,7 @@ export type Config = {
   }
   distill?: {
     /**
-     * Auto-trigger distill workflow packaging on new session start. Default: true.
+     * Auto-trigger distill workflow packaging on new session start. Default: false.
      */
     auto?: boolean
     /**
