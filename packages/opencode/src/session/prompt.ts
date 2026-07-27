@@ -4,7 +4,7 @@ import z from "zod"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { classifyAssistantStep } from "./classify"
-import { Log } from "../util"
+import { Log, Token } from "../util"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Agent } from "../agent/agent"
@@ -22,12 +22,12 @@ import {
   wrapLanguageModel,
 } from "ai"
 import { InstallationVersion } from "@/installation/version"
-import type { JSONSchema7 } from "@ai-sdk/provider"
+import type { JSONObject, JSONSchema7 } from "@ai-sdk/provider"
 import { SessionPrune } from "./prune"
 import { SessionCheckpoint } from "./checkpoint"
 import { SessionCompaction } from "./compaction"
 import { computeLastMessageInfo } from "./last-message-info"
-import { pressureLevel, isOverflow as overflowCheck } from "./overflow"
+import { contextPressureLevel, pressureLevel, usable, isOverflow as overflowCheck } from "./overflow"
 import { Config } from "@/config"
 import { Global } from "@/global"
 import { Bus } from "../bus"
@@ -64,7 +64,6 @@ import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
 import { ToolRegistry } from "../tool"
 import { MCP } from "../mcp"
 import { normalizeToolResult } from "../mcp/tool-result"
-import { bindToolScriptRef, toolScriptMcp } from "../tool/tool-script-ref"
 import { LSP } from "../lsp"
 import { Flag } from "../flag/flag"
 import { ulid } from "ulid"
@@ -113,8 +112,19 @@ import { ActorRegistry } from "@/actor/registry"
 import { Metrics } from "@/metrics"
 import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
 import { ToolResultError } from "../tool/result-error"
+import { RecoverableError } from "../tool/recoverable"
 import { shouldAutoDream, shouldAutoDistill, DREAM_TASK, DISTILL_TASK, AUTO_DREAM_TITLE, AUTO_DISTILL_TITLE } from "./auto-dream"
 import { isDirectUserMessage, skillSearchReminderForSession } from "./skill-search-reminder"
+import {
+  createMcpToolSearchCatalog,
+  mcpToolCatalogBudget,
+  MCP_TOOL_SEARCH_ID,
+  MCP_TOOL_SEARCH_MAX_LOADED,
+  mcpToolSearchDescription,
+  type McpToolSearchEntry,
+  type McpToolSearchMetadata,
+} from "@/tool/mcp-tool-search"
+import { isMcpToolSearchEnabled } from "@/tool/gpt"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -315,13 +325,6 @@ export const layer = Layer.effect(
         if (boundActor === actor) boundActor = previous
       }
     }
-
-    // Late-bound ref (see tool-script-ref.ts): exec dispatches MCP tools
-    // through the same live client set the agent sees. Populated here (not in
-    // ToolRegistry) because MCP's layer lives in this graph — the registry
-    // providing MCP.defaultLayer itself would duplicate client connections.
-    const releaseToolScriptMcp = bindToolScriptRef(toolScriptMcp, () => mcp.tools())
-    yield* Effect.addFinalizer(() => Effect.sync(releaseToolScriptMcp))
 
     // Track sessions that have already shown the "loaded instructions" toast so we
     // surface it once per primary session rather than on every run-loop turn.
@@ -980,6 +983,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     }) {
       using _ = log.time("resolveTools")
       const tools: Record<string, AITool> = {}
+      const activeTools = new Set<string>()
+      const loadedMcpTools = new Set<string>()
+      const mcpSearchEntries: McpToolSearchEntry[] = []
+      const mcpCatalog = { current: createMcpToolSearchCatalog([]) }
+      const useMcpToolSearch = isMcpToolSearchEnabled(
+        Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
+        input.model.id,
+        input.model.api.id,
+        input.model.family,
+      )
       const run = yield* runner()
       const promptOps = yield* ops()
       const effectivePermission = Agent.runtimePermission(
@@ -1066,8 +1079,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           model: input.model,
           bypassAgentCheck: input.bypassAgentCheck,
           promptOps,
-          ...(whitelist ? { toolWhitelist: whitelist } : {}),
+          ...(whitelist ? { toolWhitelist: [...whitelist] } : {}),
           ...(disabledTools.size ? { disabledTools } : {}),
+          mcpToolSearch: mcpCatalog.current,
         },
         agent: input.agent.name,
         actorID: input.agentID,
@@ -1133,7 +1147,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   sessionID: input.session.id,
                 })
                 const ctx = context(args, options)
-                if (blockedByIdentity(item.id) || (whitelist && !whitelist.has(item.id))) {
+                if (
+                  blockedByIdentity(item.id) ||
+                  (whitelist && !whitelist.has(item.id) && item.id !== MCP_TOOL_SEARCH_ID)
+                ) {
                   const output = rejectionFor(item.id)
                   log.debug("tool execute rejected", {
                     tool: item.id,
@@ -1214,15 +1231,41 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             )
           },
         })
+        if (item.id !== MCP_TOOL_SEARCH_ID) activeTools.add(item.id)
       }
 
-      for (const [key, item] of Object.entries(yield* mcp.tools())) {
+      const localToolNames = new Set(Object.keys(tools))
+      const mcpTools = Object.entries(yield* mcp.tools())
+      const agentToolAllowlist = input.agent.toolAllowlist ? new Set(input.agent.toolAllowlist) : undefined
+      const disabledMcpTools = Permission.disabled(
+        mcpTools.map(([key]) => key),
+        Agent.runtimePermission(input.agent, input.session.permission),
+      )
+      for (const [key, item] of mcpTools) {
         const execute = item.execute
         if (!execute) continue
+
+        if (localToolNames.has(key)) {
+          log.warn("MCP tool conflicts with a local tool and was ignored", { tool: key })
+          continue
+        }
 
         const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
         const transformed = ProviderTransform.schema(input.model, schema)
         item.inputSchema = jsonSchema(transformed)
+        const available =
+          input.tools?.[key] !== false &&
+          !disabledMcpTools.has(key) &&
+          (!agentToolAllowlist || agentToolAllowlist.has(key))
+        const searchable = available && (!whitelist || whitelist.has(key))
+        if (searchable && useMcpToolSearch) {
+          mcpSearchEntries.push({
+            name: key,
+            description: item.description ?? "",
+            parameters: transformed as unknown as JSONObject,
+          })
+        }
+        if (searchable && !useMcpToolSearch && input.model.capabilities.toolcall) activeTools.add(key)
         item.execute = (args, opts) =>
           run.promise(
             Effect.gen(function* () {
@@ -1234,6 +1277,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 sessionID: input.session.id,
               })
               const ctx = context(args, opts)
+              if (!useMcpToolSearch && (!available || !input.model.capabilities.toolcall)) {
+                return yield* Effect.fail(
+                  new RecoverableError(`The MCP tool "${key}" is unavailable for this request.`),
+                )
+              }
+              if (useMcpToolSearch && !loadedMcpTools.has(key)) {
+                return yield* Effect.fail(
+                  new RecoverableError(
+                    `The MCP tool "${key}" is not loaded for this request. Call ${MCP_TOOL_SEARCH_ID} first, then retry on the next step.`,
+                  ),
+                )
+              }
               if (blockedByIdentity(key) || (whitelist && !whitelist.has(key))) {
                 const rejection = rejectionFor(key)
                 const output = {
@@ -1347,8 +1402,74 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           )
         tools[key] = item
       }
+      mcpCatalog.current = createMcpToolSearchCatalog(
+        mcpSearchEntries.toSorted((a, b) => a.name.localeCompare(b.name)),
+      )
+      if (useMcpToolSearch && tools[MCP_TOOL_SEARCH_ID]) {
+        const cfg = yield* config.get()
+        const usableTokens = usable({ cfg, model: input.model })
+        const lastFinished = input.messages.findLast(
+          (message): message is MessageV2.WithParts & { info: MessageV2.Assistant } =>
+            message.info.role === "assistant" && !!message.info.finish,
+        )
+        const lastFinishedIndex = lastFinished
+          ? input.messages.findIndex((message) => message.info.id === lastFinished.info.id)
+          : -1
+        tools[MCP_TOOL_SEARCH_ID] = {
+          ...tools[MCP_TOOL_SEARCH_ID],
+          description: mcpToolSearchDescription(mcpCatalog.current.entries, {
+            rich:
+              contextPressureLevel({
+                cfg,
+                tokens: lastFinished?.info.tokens ?? {
+                  input: 0,
+                  output: 0,
+                  reasoning: 0,
+                  cache: { read: 0, write: 0 },
+                },
+                model: input.model,
+                additionalTokens: Token.estimate(
+                  JSON.stringify(input.messages.slice(lastFinishedIndex + 1)),
+                ),
+              }) < 2,
+            budget: mcpToolCatalogBudget({ usable: usableTokens, context: input.model.limit.context }),
+          }),
+        }
+      }
+      const searchable = new Set(mcpCatalog.current.entries.map((entry) => entry.name))
+      const currentUser = input.messages.findLast((message) => message.info.role === "user")
+      if (currentUser && useMcpToolSearch) {
+        for (const message of input.messages) {
+          if (message.info.role !== "assistant" || message.info.parentID !== currentUser.info.id) continue
+          for (const part of message.parts) {
+            if (part.type !== "tool" || part.tool !== MCP_TOOL_SEARCH_ID || part.state.status !== "completed") continue
+            const metadata = part.state.metadata as Partial<McpToolSearchMetadata>
+            if (metadata.catalogKey !== mcpCatalog.current.key || !Array.isArray(metadata.matchedTools)) continue
+            for (const name of metadata.matchedTools) {
+              if (typeof name !== "string" || !searchable.has(name)) continue
+              loadedMcpTools.add(name)
+              if (loadedMcpTools.size >= MCP_TOOL_SEARCH_MAX_LOADED) break
+            }
+            if (loadedMcpTools.size >= MCP_TOOL_SEARCH_MAX_LOADED) break
+          }
+          if (loadedMcpTools.size >= MCP_TOOL_SEARCH_MAX_LOADED) break
+        }
+      }
 
-      return tools
+      if (
+        useMcpToolSearch &&
+        input.model.capabilities.toolcall &&
+        mcpCatalog.current.entries.length > 0 &&
+        tools[MCP_TOOL_SEARCH_ID]
+      ) {
+        activeTools.add(MCP_TOOL_SEARCH_ID)
+      }
+      loadedMcpTools.forEach((name) => activeTools.add(name))
+
+      return {
+        tools,
+        activeTools: [...activeTools].filter((name) => tools[name]),
+      }
     })
 
     const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
@@ -3411,7 +3532,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return "break" as const
             }
 
-            const tools = yield* resolveTools({
+            const resolvedTools = yield* resolveTools({
               agent,
               session,
               model,
@@ -3424,6 +3545,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               permission: forkCtx?.parentPermission,
               preserveToolMembership: Boolean(forkCtx),
             })
+            const tools = resolvedTools.tools
+            const activeTools = resolvedTools.activeTools
 
             if (lastUser.format?.type === "json_schema") {
               tools["StructuredOutput"] = createStructuredOutputTool({
@@ -3432,6 +3555,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   structured = output
                 },
               })
+              activeTools.push("StructuredOutput")
             }
 
             if (step === 1)
@@ -3551,6 +3675,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   prebuiltSystem,
                   messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
                   tools: forkTools,
+                  activeTools: Object.keys(forkTools),
                   model,
                   toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
                   agentID: lastUser.agentID,
@@ -3726,6 +3851,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               prebuiltSystem,
               messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
               tools,
+              activeTools,
               model,
               toolChoice: isLastStep ? ("none" as const) : format.type === "json_schema" ? ("required" as const) : undefined,
               agentID: lastUser.agentID,

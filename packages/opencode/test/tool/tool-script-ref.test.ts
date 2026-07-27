@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { Effect, ManagedRuntime } from "effect"
 import { Actor } from "../../src/actor/spawn"
 import { Instance } from "../../src/project/instance"
-import { bindToolScriptRef, toolScriptMcp, toolScriptRegistry } from "../../src/tool/tool-script-ref"
+import { bindToolScriptRef, toolScriptRegistry } from "../../src/tool/tool-script-ref"
 import { tmpdir } from "../fixture/fixture"
 
 test("late-bound refs restore the previous binding after owners dispose out of order", () => {
@@ -55,10 +55,9 @@ test("a binding created after an external takeover restores that external owner"
   expect(reverse.current).toBe(external)
 })
 
-test("Actor layer releases its exec registry and MCP bindings", async () => {
+test("Actor layer releases its exec registry binding", async () => {
   await using dir = await tmpdir()
   const previousRegistry = toolScriptRegistry.current
-  const previousMcp = toolScriptMcp.current
   const runtime = ManagedRuntime.make(Actor.defaultLayer)
 
   try {
@@ -72,12 +71,10 @@ test("Actor layer releases its exec registry and MCP bindings", async () => {
         ),
     })
     expect(toolScriptRegistry.current).not.toBe(previousRegistry)
-    expect(toolScriptMcp.current).not.toBe(previousMcp)
   } finally {
     await runtime.dispose()
     await Instance.disposeAll()
   }
 
   expect(toolScriptRegistry.current).toBe(previousRegistry)
-  expect(toolScriptMcp.current).toBe(previousMcp)
 })
