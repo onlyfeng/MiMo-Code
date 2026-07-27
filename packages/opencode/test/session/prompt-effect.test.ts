@@ -1148,7 +1148,7 @@ it.live("caps command shell expansion before storing command prompt", () =>
   ),
 )
 
-it.live("caps skill command content before storing synthetic skill text", () =>
+it.live("caps slash-command skill content through the mention injector", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ dir, llm }) {
       const prompt = yield* SessionPrompt.Service
@@ -1182,7 +1182,7 @@ it.live("caps skill command content before storing synthetic skill text", () =>
       const messages = yield* sessions.messages({ sessionID: chat.id })
       const textParts = messages.flatMap((message) => message.parts.filter((part) => part.type === "text"))
       const skillContent = textParts.find(
-        (part) => part.type === "text" && part.text.includes("skill command content truncated before model injection"),
+        (part) => part.type === "text" && part.text.includes("skill mention content truncated before model injection"),
       )
 
       expect(skillContent).toBeDefined()
