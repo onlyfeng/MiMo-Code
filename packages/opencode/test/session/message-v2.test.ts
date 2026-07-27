@@ -6,6 +6,7 @@ import type { Provider } from "../../src/provider"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { SessionID, MessageID, PartID } from "../../src/session/schema"
 import { Question } from "../../src/question"
+import { MODEL_VISIBLE_TEXT_CAP_BYTES } from "../../src/util/text-truncate"
 
 const sessionID = SessionID.make("session")
 const providerID = ProviderID.make("test")
@@ -130,6 +131,105 @@ function basePart(messageID: string, id: string) {
 }
 
 describe("session.message-v2.toModelMessage", () => {
+  test("preserves structured provider-executed outputs", async () => {
+    const userID = "m-provider-user"
+    const assistantID = "m-provider-assistant"
+    const providerOutput = { results: [{ title: "Result", url: "https://example.com" }] }
+    const messages = await MessageV2.toModelMessages(
+      [
+        {
+          info: userInfo(userID),
+          parts: [{ ...basePart(userID, "u-provider"), type: "text", text: "search" }],
+        },
+        {
+          info: assistantInfo(assistantID, userID),
+          parts: [
+            {
+              ...basePart(assistantID, "a-provider"),
+              type: "tool",
+              tool: "web_search",
+              callID: "provider-call",
+              metadata: { providerExecuted: true, test: { itemId: "call-item" } },
+              state: {
+                status: "completed",
+                input: { query: "example" },
+                output: JSON.stringify(providerOutput),
+                providerOutput,
+                providerMetadata: { test: { itemId: "result-item" } },
+                title: "",
+                metadata: {},
+                time: { start: 0, end: 1 },
+              },
+            },
+          ],
+        },
+      ] as MessageV2.WithParts[],
+      model,
+    )
+
+    expect(messages[1]).toMatchObject({
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolName: "web_search",
+          providerExecuted: true,
+          providerOptions: { test: { itemId: "call-item" } },
+        },
+        {
+          type: "tool-result",
+          toolName: "web_search",
+          output: { type: "json", value: providerOutput },
+          providerOptions: { test: { itemId: "result-item" } },
+        },
+      ],
+    })
+  })
+
+  test("caps oversized structured provider output before model replay", async () => {
+    const userID = "m-provider-large-user"
+    const assistantID = "m-provider-large-assistant"
+    const providerOutput = { value: "界".repeat(60 * 1024) }
+    const messages = await MessageV2.toModelMessages(
+      [
+        {
+          info: userInfo(userID),
+          parts: [{ ...basePart(userID, "u-provider-large"), type: "text", text: "search" }],
+        },
+        {
+          info: assistantInfo(assistantID, userID),
+          parts: [
+            {
+              ...basePart(assistantID, "a-provider-large"),
+              type: "tool",
+              tool: "web_search",
+              callID: "provider-large-call",
+              state: {
+                status: "completed",
+                input: { query: "example" },
+                output: JSON.stringify(providerOutput),
+                providerOutput,
+                title: "",
+                metadata: {},
+                time: { start: 0, end: 1 },
+              },
+            },
+          ],
+        },
+      ] as MessageV2.WithParts[],
+      model,
+    )
+
+    const message = messages[2]
+    if (message.role !== "tool") throw new Error("expected tool result message")
+    const result = message.content[0]
+    if (result.type !== "tool-result" || result.output.type !== "text") {
+      throw new Error("expected text fallback for oversized provider output")
+    }
+    expect(Buffer.byteLength(result.output.value, "utf8")).toBeLessThanOrEqual(MODEL_VISIBLE_TEXT_CAP_BYTES)
+    expect(result.output.value).toContain("tool output truncated before model replay")
+  })
+
   test("filters out messages with no parts", async () => {
     const input: MessageV2.WithParts[] = [
       {
@@ -528,6 +628,8 @@ describe("session.message-v2.toModelMessage", () => {
               status: "completed",
               input: { cmd: "ls" },
               output: "ok",
+              providerOutput: { private: "structured output for the original model" },
+              providerMetadata: { openai: { result: "meta" } },
               title: "Bash",
               metadata: {},
               time: { start: 0, end: 1 },
@@ -597,6 +699,7 @@ describe("session.message-v2.toModelMessage", () => {
               status: "completed",
               input: { cmd: "ls" },
               output: "this should be cleared",
+              providerOutput: { private: "this should also be cleared" },
               title: "Bash",
               metadata: {},
               time: { start: 0, end: 1, compacted: 1 },

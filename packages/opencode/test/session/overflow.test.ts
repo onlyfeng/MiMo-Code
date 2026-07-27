@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
   classifyRequestOverflow,
+  contextPressureLevel,
   estimateRequestTokens,
   isOverflow,
   isRequestOverflow,
@@ -97,6 +98,19 @@ describe("pressureLevel", () => {
     const limit = usable({ cfg, model })
     const tokens = { input: Math.floor(limit * 0.9), output: 0, cache: { read: 0, write: 0 } } as any
     expect(pressureLevel({ cfg, tokens, model })).toBe(0)
+    expect(contextPressureLevel({ cfg, tokens, model })).toBe(3)
+  })
+
+  test("uses exact context pressure boundaries independently of compaction policy", () => {
+    const model = createModel({ context: 200_000 })
+    const cfg = mockCfg({ auto: false })
+    const limit = usable({ cfg, model })
+    const tokens = (ratio: number) =>
+      ({ input: limit * ratio, output: 0, cache: { read: 0, write: 0 } }) as any
+
+    expect(contextPressureLevel({ cfg, tokens: tokens(0.5), model })).toBe(1)
+    expect(contextPressureLevel({ cfg, tokens: tokens(0.7), model })).toBe(2)
+    expect(contextPressureLevel({ cfg, tokens: tokens(0.85), model })).toBe(3)
   })
 
   test("returns 0 when context limit is 0", () => {
@@ -689,6 +703,22 @@ describe("request preflight overflow tool filtering", () => {
       user: {},
     } as any)
 
+    expect(Object.keys(filtered)).toEqual(["keep"])
+    const requestTokens = estimateRequestTokens({ messages, tools: filtered })
+    expect(isRequestOverflow({ cfg, model, requestTokens })).toBe(false)
+  })
+
+  test("inactive request-scoped tool is excluded from the estimate", () => {
+    const resolved = LLM.resolveTools({
+      tools: { bigTool: bigTool(), keep: keepTool() },
+      activeTools: ["keep"],
+      agent: { name: "test", permission: [], hardPermission: [] },
+      permission: undefined,
+      user: {},
+    } as any)
+    const filtered = LLM.filterActiveTools(resolved, ["keep"])
+
+    expect(Object.keys(resolved)).toEqual(["bigTool", "keep"])
     expect(Object.keys(filtered)).toEqual(["keep"])
     const requestTokens = estimateRequestTokens({ messages, tools: filtered })
     expect(isRequestOverflow({ cfg, model, requestTokens })).toBe(false)
