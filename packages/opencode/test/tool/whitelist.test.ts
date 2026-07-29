@@ -23,6 +23,7 @@ import { Todo } from "../../src/session/todo"
 import { Session } from "../../src/session"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
+import { MessageID } from "../../src/session/schema"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { SessionPrune } from "../../src/session/prune"
 import { SessionSummary } from "../../src/session/summary"
@@ -56,6 +57,8 @@ import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
+import { spawnRef } from "../../src/actor/spawn-ref"
+import { Flag } from "../../src/flag/flag"
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -81,6 +84,11 @@ const mcp = Layer.succeed(
           description: "test-only MCP tool",
           inputSchema: z.object({}),
           execute: async () => ({ content: [{ type: "text" as const, text: "mcp ran" }] }),
+        }),
+        late_mcp: tool({
+          description: "test-only MCP tool connected after the frozen parent capture",
+          inputSchema: z.object({}),
+          execute: async () => ({ content: [{ type: "text" as const, text: "late mcp ran" }] }),
         }),
       }),
     prompts: () => Effect.succeed({}),
@@ -424,6 +432,122 @@ describe("Tool whitelist (Task 14)", () => {
       { git: true, config: providerCfg },
     ),
     30000,
+  )
+
+  it.live("full-context fork keeps nested exec MCP calls inside the frozen parent membership", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const reg = yield* ActorRegistry.Service
+        const previousSpawnRef = spawnRef.current
+        const previousExecFlag = Flag.MIMOCODE_ENABLE_EXEC_TOOL
+        const previousSearchFlag = Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            spawnRef.current = previousSpawnRef
+            Flag.MIMOCODE_ENABLE_EXEC_TOOL = previousExecFlag
+            Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH = previousSearchFlag
+          }),
+        )
+        Flag.MIMOCODE_ENABLE_EXEC_TOOL = true
+        Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH = true
+
+        const session = yield* sessions.create({
+          title: "frozen nested MCP membership",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const actorID = "build-frozen-exec-mcp"
+        yield* reg.register({
+          sessionID: session.id,
+          actorID,
+          mode: "subagent",
+          agent: "build",
+          description: "frozen nested MCP membership actor",
+          contextMode: "full",
+          background: false,
+          lifecycle: "ephemeral",
+          tools: "INHERIT",
+        })
+
+        spawnRef.current = {
+          getForkContext: (_sessionID: string, id: string) =>
+            Effect.succeed(
+              id === actorID
+                ? {
+                    system: ["frozen parent system"],
+                    tools: {
+                      exec: tool({
+                        description: "frozen parent exec",
+                        inputSchema: z.object({ code: z.string() }),
+                      }),
+                      mcp_tool_search: tool({
+                        description: "frozen parent MCP discovery",
+                        inputSchema: z.object({ query: z.string() }),
+                      }),
+                      secret_mcp: tool({
+                        description: "MCP present at parent capture",
+                        inputSchema: z.object({}),
+                      }),
+                      late_mcp: tool({
+                        description: "MCP searchable but not loaded at parent capture",
+                        inputSchema: z.object({}),
+                      }),
+                    },
+                    loadedMcpTools: ["secret_mcp"],
+                    inheritedMessages: [],
+                    parentPermission: [{ permission: "*", pattern: "*", action: "allow" }],
+                    watermarkMsgID: MessageID.ascending(),
+                    model: ref,
+                  }
+                : undefined,
+            ),
+          spawn: () => Effect.die("spawn not used in frozen nested MCP test"),
+          cancel: () => Effect.die("cancel not used in frozen nested MCP test"),
+        } as unknown as NonNullable<typeof spawnRef.current>
+        const releaseActor = prompt.bindActor?.(spawnRef.current)
+        yield* Effect.addFinalizer(() => Effect.sync(() => releaseActor?.()))
+
+        yield* llm.tool("exec", {
+          code: `
+            const captured = await tools.secret_mcp({})
+            let late
+            try { await tools.late_mcp({}) } catch (error) { late = error.message }
+            return { captured: captured.output, late }
+          `,
+        })
+        yield* llm.text("done")
+
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          agentID: actorID,
+          model: ref,
+          parts: [{ type: "text", text: "use only the frozen parent tools" }],
+        })
+
+        const inputs = yield* llm.inputs
+        const firstTools = (inputs[0].tools as Array<Record<string, unknown>>).map((item) =>
+          typeof item.name === "string" ? item.name : (item.function as { name?: string } | undefined)?.name,
+        )
+        expect(firstTools).toEqual(["exec", "mcp_tool_search", "secret_mcp"])
+
+        const messages = yield* MessageV2.filterCompactedEffect(session.id, { agentID: "*" })
+        const exec = messages
+          .flatMap((message) => message.parts)
+          .find((part): part is MessageV2.ToolPart => part.type === "tool" && part.tool === "exec")
+        expect(exec).toBeDefined()
+        if (!exec) return
+        expect(exec.state.status).toBe("completed")
+        if (exec.state.status !== "completed") return
+        expect(exec.state.output).toContain("mcp ran")
+        expect(exec.state.output).toContain("unknown tool: late_mcp")
+        expect(exec.state.output).not.toContain("late mcp ran")
+        expect(exec.state.metadata?.toolCalls).toBe(1)
+      }),
+      { git: true, config: providerCfg },
+    ),
+    30_000,
   )
 
   it.live("permits bash when actor.tools = 'INHERIT' (no runtime restriction)", () =>

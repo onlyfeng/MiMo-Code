@@ -2,6 +2,18 @@ import { describe, expect, test } from "bun:test"
 import { renderActorNotification, renderInboxRow } from "../../src/inbox/render"
 
 describe("inbox.render", () => {
+  test("applies blank fallbacks before the model-visible byte cap", () => {
+    const row = {
+      content: { text: " ".repeat(60 * 1024) },
+      sender_session_id: null,
+      sender_actor_id: null,
+      created_at: Date.now(),
+    }
+
+    expect(renderInboxRow({ ...row, type: "actor_notification" } as any)).toBe("(no notification body)")
+    expect(renderInboxRow({ ...row, type: "text" } as any)).toContain("\n(empty)\n")
+  })
+
   test("caps actor notification rows before model-visible rendering", () => {
     const longResult = "x".repeat(60 * 1024)
     const rendered = renderInboxRow({

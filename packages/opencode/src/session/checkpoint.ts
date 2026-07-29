@@ -794,6 +794,7 @@ export const layer: Layer.Layer<
               return {
                 system: prefix.system,
                 tools: prefix.tools,
+                loadedMcpTools: prefix.loadedMcpTools,
                 inheritedMessages: prefix.inheritedMessages,
                 parentPermission: prefix.parentPermission,
                 watermarkMsgID: endMessageID as MessageID,
@@ -827,6 +828,7 @@ export const layer: Layer.Layer<
             return {
               system: writerPrefix.system,
               tools: writerPrefix.tools,
+              loadedMcpTools: writerPrefix.loadedMcpTools,
               inheritedMessages: writerPrefix.inheritedMessages,
               parentPermission: writerPrefix.parentPermission,
               watermarkMsgID: endMessageID as MessageID,

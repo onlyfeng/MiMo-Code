@@ -72,13 +72,21 @@ This format lets the spawning agent and the checkpoint writer extract your progr
 export interface ForkContext {
   readonly system: string[]
   /**
-   * Ordered parent-visible builtin and MCP tool schemas captured at the
-   * watermark. The fork runLoop uses this as its allowset and model-facing
-   * description/inputSchema source, while rebinding matching live tools for
-   * execution. Missing live implementations fail closed. Request-local
-   * StructuredOutput is appended separately when the fork asks for JSON.
+   * Ordered parent-captured builtin and MCP schema pool at the watermark.
+   * With MCP Tool Search this includes the parent's then-searchable MCP pool;
+   * `loadedMcpTools` records which members were active. The fork runLoop uses
+   * this as its immutable allowset and schema source, while exposing only the
+   * active intersection and rebinding matching live tools for execution.
+   * Missing live implementations fail closed. Request-local StructuredOutput
+   * is appended separately when the fork asks for JSON.
    */
   readonly tools: Record<string, AITool>
+  /**
+   * MCP members that were search-loaded in the parent request. Kept separate
+   * from `tools` so the fork can restore discovery state without treating every
+   * frozen MCP schema as implicitly loaded.
+   */
+  readonly loadedMcpTools?: readonly string[]
   /**
    * Parent agent's permission ruleset, captured at spawn. The fork evaluates
    * permissions and filters its LLM-visible tool list against THIS (the parent's)

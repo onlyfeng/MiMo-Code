@@ -21,6 +21,7 @@ import type { Permission } from "../permission"
 export interface PrefixCaptureResult {
   readonly system: string[]
   readonly tools: Record<string, AITool>
+  readonly loadedMcpTools?: readonly string[]
   readonly inheritedMessages: ModelMessage[]
   readonly parentPermission: Permission.Ruleset
 }
