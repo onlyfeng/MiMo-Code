@@ -172,6 +172,22 @@ export function createMcpToolSearchCatalog(entries: McpToolSearchEntry[]): McpTo
   }
 }
 
+export function restoreMcpToolSearchMatches(catalog: McpToolSearchCatalog, metadata: unknown[]) {
+  const searchable = new Set(catalog.entries.map((entry) => entry.name))
+  const loaded = new Set<string>()
+  for (const item of metadata) {
+    if (!item || typeof item !== "object") continue
+    const value = item as Partial<McpToolSearchMetadata>
+    if (value.catalogKey !== catalog.key || !Array.isArray(value.matchedTools)) continue
+    for (const name of value.matchedTools) {
+      if (typeof name !== "string" || !searchable.has(name)) continue
+      loaded.add(name)
+      if (loaded.size >= MCP_TOOL_SEARCH_MAX_LOADED) return loaded
+    }
+  }
+  return loaded
+}
+
 export function searchMcpTools(entries: McpToolSearchEntry[], input: { query: string; limit?: number }): SearchResult[] {
   const query = input.query.trim()
   if (!query) throw new Error("query must not be empty")

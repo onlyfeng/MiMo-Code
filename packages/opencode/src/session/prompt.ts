@@ -121,8 +121,8 @@ import {
   MCP_TOOL_SEARCH_ID,
   MCP_TOOL_SEARCH_MAX_LOADED,
   mcpToolSearchDescription,
+  restoreMcpToolSearchMatches,
   type McpToolSearchEntry,
-  type McpToolSearchMetadata,
 } from "@/tool/mcp-tool-search"
 import { isMcpToolSearchEnabled } from "@/tool/gpt"
 
@@ -337,7 +337,13 @@ export const layer = Layer.effect(
     // only needs to pass string IDs.
     const capture: typeof prefixCaptureRef.current = (input) =>
       Effect.gen(function* () {
-        const empty = { system: [] as string[], tools: {} as Record<string, AITool>, inheritedMessages: [] as ModelMessage[], parentPermission: [] as Permission.Ruleset }
+        const empty = {
+          system: [] as string[],
+          tools: {} as Record<string, AITool>,
+          loadedMcpTools: [] as string[],
+          inheritedMessages: [] as ModelMessage[],
+          parentPermission: [] as Permission.Ruleset,
+        }
         const ag = yield* agents.get(input.agentName).pipe(Effect.catch(() => Effect.succeed(undefined)))
         if (!ag) return empty
         const model = yield* provider
@@ -374,6 +380,12 @@ export const layer = Layer.effect(
           additions,
           permission: captureSession.permission,
           mcpTools,
+          useMcpToolSearch: isMcpToolSearchEnabled(
+            Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
+            model.id,
+            model.api.id,
+            model.family,
+          ),
         }).pipe(
           Effect.provideService(LLM.Service, llm),
           Effect.provideService(ToolRegistry.Service, registry),
@@ -978,6 +990,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       task_id?: string
       permission?: Permission.Ruleset
       preserveToolMembership?: boolean
+      frozenToolMembership?: ReadonlySet<string>
+      frozenLoadedMcpTools?: ReadonlySet<string>
+      mcpContext: MCP.TurnContext
     }) {
       using _ = log.time("resolveTools")
       const tools: Record<string, AITool> = {}
@@ -985,6 +1000,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const loadedMcpTools = new Set<string>()
       const mcpSearchEntries: McpToolSearchEntry[] = []
       const mcpCatalog = { current: createMcpToolSearchCatalog([]) }
+      // exec's request-scoped MCP view. Holder object (same pattern as
+      // mcpCatalog above): referenced by the context() closure below, filled
+      // at the end of this pass once activeTools is settled. Travels through
+      // ctx.extra — NOT a module-level ref, which concurrent sessions in the
+      // same process would overwrite (request state must never live in a
+      // global; see toolWhitelist/mcpToolSearch precedent).
+      const execMcp: { current: Record<string, AITool> } = { current: {} }
       const useMcpToolSearch = isMcpToolSearchEnabled(
         Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
         input.model.id,
@@ -1013,10 +1035,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input.preserveToolMembership && input.agent.toolAllowlist
           ? new Set(input.agent.toolAllowlist)
           : undefined
+      const runtimeWhitelists = [
+        actorWhitelist,
+        agentWhitelist,
+        input.frozenToolMembership,
+      ].filter((value): value is ReadonlySet<string> => value !== undefined)
       const whitelist =
-        actorWhitelist && agentWhitelist
-          ? new Set([...actorWhitelist].filter((id) => agentWhitelist.has(id)))
-          : actorWhitelist ?? agentWhitelist
+        runtimeWhitelists.length > 0
+          ? new Set([...runtimeWhitelists[0]].filter((id) => runtimeWhitelists.every((value) => value.has(id))))
+          : undefined
       const disabledTools = new Set(
         Object.entries(input.tools ?? {}).flatMap(([id, enabled]) => (enabled ? [] : [id])),
       )
@@ -1080,6 +1107,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           ...(whitelist ? { toolWhitelist: [...whitelist] } : {}),
           ...(disabledTools.size ? { disabledTools } : {}),
           mcpToolSearch: mcpCatalog.current,
+          execMcp,
         },
         agent: input.agent.name,
         actorID: input.agentID,
@@ -1233,11 +1261,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
 
       const localToolNames = new Set(Object.keys(tools))
-      const mcpTools = Object.entries(yield* mcp.tools())
+      const mcpTools = Object.entries(yield* mcp.tools(input.mcpContext))
       const agentToolAllowlist = input.agent.toolAllowlist ? new Set(input.agent.toolAllowlist) : undefined
       const disabledMcpTools = Permission.disabled(
         mcpTools.map(([key]) => key),
-        Agent.runtimePermission(input.agent, input.session.permission),
+        effectivePermission,
       )
       for (const [key, item] of mcpTools) {
         const execute = item.execute
@@ -1434,22 +1462,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }),
         }
       }
-      const searchable = new Set(mcpCatalog.current.entries.map((entry) => entry.name))
+      if (useMcpToolSearch && input.frozenLoadedMcpTools) {
+        const searchable = new Set(mcpCatalog.current.entries.map((entry) => entry.name))
+        for (const name of input.frozenLoadedMcpTools) {
+          if (!searchable.has(name) || !input.frozenToolMembership?.has(name)) continue
+          loadedMcpTools.add(name)
+          if (loadedMcpTools.size >= MCP_TOOL_SEARCH_MAX_LOADED) break
+        }
+      }
       const currentUser = input.messages.findLast((message) => message.info.role === "user")
       if (currentUser && useMcpToolSearch) {
-        for (const message of input.messages) {
-          if (message.info.role !== "assistant" || message.info.parentID !== currentUser.info.id) continue
-          for (const part of message.parts) {
-            if (part.type !== "tool" || part.tool !== MCP_TOOL_SEARCH_ID || part.state.status !== "completed") continue
-            const metadata = part.state.metadata as Partial<McpToolSearchMetadata>
-            if (metadata.catalogKey !== mcpCatalog.current.key || !Array.isArray(metadata.matchedTools)) continue
-            for (const name of metadata.matchedTools) {
-              if (typeof name !== "string" || !searchable.has(name)) continue
-              loadedMcpTools.add(name)
-              if (loadedMcpTools.size >= MCP_TOOL_SEARCH_MAX_LOADED) break
-            }
-            if (loadedMcpTools.size >= MCP_TOOL_SEARCH_MAX_LOADED) break
-          }
+        for (const name of restoreMcpToolSearchMatches(
+          mcpCatalog.current,
+          input.messages.flatMap((message) => {
+            if (message.info.role !== "assistant" || message.info.parentID !== currentUser.info.id) return []
+            return message.parts.flatMap((part) =>
+              part.type === "tool" &&
+              part.tool === MCP_TOOL_SEARCH_ID &&
+              part.state.status === "completed"
+                ? [part.state.metadata]
+                : [],
+            )
+          }),
+        )) {
+          loadedMcpTools.add(name)
           if (loadedMcpTools.size >= MCP_TOOL_SEARCH_MAX_LOADED) break
         }
       }
@@ -1463,6 +1499,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         activeTools.add(MCP_TOOL_SEARCH_ID)
       }
       loadedMcpTools.forEach((name) => activeTools.add(name))
+
+      // Fill exec's request-scoped MCP view (holder declared at the top of
+      // this pass, delivered via ctx.extra.execMcp): exactly the MCP tools
+      // active for this request. Under mcp_tool_search gating that means only
+      // search-loaded tools — exec must not bypass the discovery gate.
+      for (const [key] of mcpTools) {
+        if (!tools[key] || !activeTools.has(key)) continue
+        if (key === MCP_TOOL_SEARCH_ID) continue
+        execMcp.current[key] = tools[key]
+      }
 
       return {
         tools,
@@ -2416,6 +2462,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // into the same loop.
         let hardHalt = false
         const resolvedAgentID = agentID ?? "main"
+        const mcpContext: MCP.TurnContext = {
+          sessionId: sessionID,
+          turnId: ulid(),
+          actorId: resolvedAgentID,
+        }
         // Tracks plugin-driven cancellation (session.pre OR any session.userQuery.pre)
         // so session.post reports outcome="cancelled" instead of "error".
         let cancelled = false
@@ -2455,20 +2506,36 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 : finalAsst
                   ? sessionErrorText(finalAsst.error)
                   : undefined
-            yield* plugin.trigger(
-              "session.post",
-              {
-                sessionID,
-                agentID: resolvedAgentID,
-                task_id,
-                outcome,
-                error,
-                finalText: finalAsst ? assistantFinalText(finalAsst, finalParts) : undefined,
-                assistantMessageID: finalAsst?.id,
-                trajectory: serializeTrajectoryMessages(sliceMsgs),
-                systemPrompt: lastSystemPrompt,
-              },
-              {},
+            const interrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
+            const lifecycleStatus: MCP.TurnStatus =
+              cancelled || interrupted ? "cancelled" : failed || finalIsError ? "error" : "completed"
+            yield* Effect.all(
+              [
+                plugin
+                  .trigger(
+                    "session.post",
+                    {
+                      sessionID,
+                      agentID: resolvedAgentID,
+                      task_id,
+                      outcome,
+                      error,
+                      finalText: finalAsst ? assistantFinalText(finalAsst, finalParts) : undefined,
+                      assistantMessageID: finalAsst?.id,
+                      trajectory: serializeTrajectoryMessages(sliceMsgs),
+                      systemPrompt: lastSystemPrompt,
+                    },
+                    {},
+                  )
+                  .pipe(Effect.ignore),
+                mcp
+                  .clients()
+                  .pipe(
+                    Effect.flatMap((clients) => MCP.notifyTurnLifecycle(clients, mcpContext, lifecycleStatus)),
+                    Effect.ignore,
+                  ),
+              ],
+              { concurrency: "unbounded", discard: true },
             )
           }).pipe(Effect.ignore)
 
@@ -3542,6 +3609,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               task_id,
               permission: forkCtx?.parentPermission,
               preserveToolMembership: Boolean(forkCtx),
+              frozenToolMembership: forkCtx ? new Set(Object.keys(forkCtx.tools)) : undefined,
+              frozenLoadedMcpTools: forkCtx?.loadedMcpTools
+                ? new Set(forkCtx.loadedMcpTools)
+                : undefined,
+              mcpContext,
             })
             const tools = resolvedTools.tools
             const activeTools = resolvedTools.activeTools
@@ -3673,7 +3745,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   prebuiltSystem,
                   messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
                   tools: forkTools,
-                  activeTools: Object.keys(forkTools),
+                  activeTools: activeTools.filter((id) => forkTools[id]),
                   model,
                   toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
                   agentID: lastUser.agentID,

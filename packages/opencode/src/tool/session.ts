@@ -117,6 +117,7 @@ export function forkQuery(deps: {
     const forkCtx = {
       system: prefix.system,
       tools: prefix.tools,
+      loadedMcpTools: prefix.loadedMcpTools,
       inheritedMessages: prefix.inheritedMessages,
       parentPermission: prefix.parentPermission,
       watermarkMsgID: watermark as MessageID,

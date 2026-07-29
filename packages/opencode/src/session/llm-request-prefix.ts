@@ -9,6 +9,13 @@ import { LLM } from "./llm"
 import { ToolRegistry } from "../tool"
 import { ProviderTransform } from "../provider"
 import type { Permission } from "../permission"
+import type { JSONObject } from "@ai-sdk/provider"
+import {
+  createMcpToolSearchCatalog,
+  MCP_TOOL_SEARCH_ID,
+  restoreMcpToolSearchMatches,
+  type McpToolSearchEntry,
+} from "../tool/mcp-tool-search"
 
 /**
  * Build the LLM request prefix (system + tools + inheritedMessages) from the
@@ -32,6 +39,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   msgs: MessageV2.WithParts[]
   permission?: Permission.Ruleset
   mcpTools?: Record<string, AITool>
+  useMcpToolSearch?: boolean
   /**
    * Caller-built system parts to splice into the system array (after agent.prompt
    * and before memory instructions). Currently env, skills, instructions in that
@@ -78,20 +86,59 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
       inputSchema: jsonSchema(schema),
     })
   }
+  const localToolNames = new Set(Object.keys(rawTools))
+  const mcpSearchEntries: McpToolSearchEntry[] = []
+  const agentToolAllowlist = input.agent.toolAllowlist ? new Set(input.agent.toolAllowlist) : undefined
   for (const [id, item] of Object.entries(input.mcpTools ?? {})) {
-    if (!item.execute) continue
+    if (!item.execute || localToolNames.has(id) || (agentToolAllowlist && !agentToolAllowlist.has(id))) continue
     const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
+    const transformed = ProviderTransform.schema(input.model, schema)
     rawTools[id] = tool({
       description: item.description,
-      inputSchema: jsonSchema(ProviderTransform.schema(input.model, schema)),
+      inputSchema: jsonSchema(transformed),
+    })
+    mcpSearchEntries.push({
+      name: id,
+      description: item.description ?? "",
+      parameters: transformed as JSONObject,
     })
   }
-  const tools = LLM.resolveTools({
+  const resolved = LLM.resolveTools({
     tools: rawTools,
+    activeTools: input.useMcpToolSearch ? [MCP_TOOL_SEARCH_ID] : undefined,
     agent: input.agent,
     permission: input.permission,
     user: lastUser,
   })
+  if (!input.useMcpToolSearch) {
+    return { system, tools: resolved, inheritedMessages, loadedMcpTools: [] }
+  }
 
-  return { system, tools, inheritedMessages }
+  const catalog = createMcpToolSearchCatalog(
+    mcpSearchEntries
+      .filter((entry) => resolved[entry.name])
+      .toSorted((a, b) => a.name.localeCompare(b.name)),
+  )
+  const loadedMcpTools = restoreMcpToolSearchMatches(
+    catalog,
+    input.msgs.flatMap((message) => {
+      if (message.info.role !== "assistant" || message.info.parentID !== lastUser.id) return []
+      return message.parts.flatMap((part) =>
+        part.type === "tool" &&
+        part.tool === MCP_TOOL_SEARCH_ID &&
+        part.state.status === "completed"
+          ? [part.state.metadata]
+          : [],
+      )
+    }),
+  )
+  const searchActive =
+    input.model.capabilities.toolcall &&
+    catalog.entries.length > 0 &&
+    resolved[MCP_TOOL_SEARCH_ID] !== undefined
+  const tools = Object.fromEntries(
+    Object.entries(resolved).filter(([id]) => id !== MCP_TOOL_SEARCH_ID || searchActive),
+  )
+
+  return { system, tools, inheritedMessages, loadedMcpTools: [...loadedMcpTools] }
 })
