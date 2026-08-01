@@ -5,8 +5,9 @@ import DESCRIPTION from "./session.txt"
 import SHELL_DESCRIPTION from "./session.shell.txt"
 import { tokenize } from "./shell-tokenize"
 import z from "zod"
-import { Effect, Deferred } from "effect"
+import { Cause, Effect, Deferred } from "effect"
 import { Session } from "@/session"
+import { classifySession, classifyUnreadableActors } from "@/session/visibility"
 import { Worktree } from "@/worktree"
 import { Instance } from "@/project/instance"
 import { InstanceRef } from "@/effect/instance-ref"
@@ -932,6 +933,47 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
       }
 
       if (op.action === "switch") {
+        // Same prohibition the renderer enforces (cli/cmd/tui/routes/session/index.tsx).
+        // The renderer is the choke point, but refusing here too is what reaches
+        // the model mid-turn: a silent no-op would just make it retry.
+        // NotFoundError is a synchronous throw inside an Effect.fn (a DEFECT, not
+        // a typed failure — see the Worktree.create note above), so Effect.catch
+        // can't see it; Effect.exit captures any non-success.
+        const targetExit = yield* Effect.exit(sessions.get(op.sessionID as SessionID))
+        if (targetExit._tag !== "Success")
+          return {
+            title: `Refused switch to ${op.sessionID}`,
+            output: `Refused to move the UI to ${op.sessionID}: no such session. Run \`session list\` to see the child sessions you can switch to.`,
+            metadata: { sessionID: op.sessionID } as Metadata,
+          }
+        const target = targetExit.value
+        // Same shared helpers the renderer uses, so the criterion cannot drift
+        // between the two enforcement points: they read the TARGET's own actor
+        // rows, not its parent's child list.
+        //
+        // listBySession is typed as never-failing, so a DB error surfaces as a
+        // defect — the same shape as the NotFoundError above, and equally
+        // invisible to Effect.catch. Left unwrapped it would abort the whole tool
+        // call, which reaches the model as a crash rather than as a decision; and
+        // "rows could not be read" must NOT reach classifySession, because there
+        // it would be indistinguishable from "this session has no rows" and would
+        // fail open onto exactly the population the prohibition exists to refuse.
+        const actorsExit = yield* Effect.exit(actorReg.listBySession(target.id as SessionID))
+        const verdict =
+          actorsExit._tag === "Success"
+            ? classifySession(target, actorsExit.value)
+            : classifyUnreadableActors(target, Cause.pretty(actorsExit.cause))
+        if (!verdict.renderable)
+          return {
+            title: `Refused switch to ${op.sessionID}`,
+            output:
+              `Refused to move the UI to ${op.sessionID}: ${verdict.reason}. ` +
+              (actorsExit._tag === "Success"
+                ? `A session hosting a runtime-spawned agent is never rendered. `
+                : `That is a read failure, not a prohibition: retry the switch, and if it keeps failing the actor registry is broken. `) +
+              `Run \`session list\` to see the child sessions you can switch to, or switch to this session's parent instead.`,
+            metadata: { sessionID: op.sessionID } as Metadata,
+          }
         yield* Effect.promise(() => Bus.publish(TuiEvent.SessionSelect, { sessionID: op.sessionID as SessionID }))
         return {
           title: `Switched to ${op.sessionID}`,
@@ -958,10 +1000,10 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
           return { title: "Child sessions: 0", output: "No child sessions.", metadata: {} as Metadata }
         // The actor row's status enum is only pending|running|idle; a terminal
         // idle carries a lastOutcome (success/failure/cancelled). deriveLiveness
-        // maps (status, lastOutcome, lastTurnTime) to a display bucket:
-        // running/pending split into progressing vs stalled by whether the last
-        // turn advanced within the staleness window (updateTurn bumps
-        // last_turn_time per step — recent == progressing); terminal idle rows
+        // maps (status, lastOutcome, lastActivityTime) to a display bucket:
+        // running/pending split into progressing vs stalled by whether anything
+        // LANDED within the staleness window (the PartUpdated projector bumps
+        // last_activity_time per part — recent == progressing); terminal idle rows
         // map to success(→idle)/failure/cancelled. Never fabricate a state the
         // data lacks: a missing actor row is a plain idle.
         const now = Date.now()
@@ -984,7 +1026,7 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
         }
         const groups: { bucket: keyof typeof counts; heading: string }[] = [
           { bucket: "progressing", heading: "In progress — progressing (running/pending, advancing)" },
-          { bucket: "stalled", heading: "In progress — stalled (running/pending, no recent turn)" },
+          { bucket: "stalled", heading: "In progress — stalled (running/pending, no recent activity)" },
           { bucket: "idle", heading: "Finished / idle" },
           { bucket: "failed", heading: "Failed" },
           { bucket: "cancelled", heading: "Cancelled" },
@@ -1059,8 +1101,9 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
         // Derived pull-side liveness for one child. A peer registers with
         // session_id === actor_id === its own child id (see the create branch /
         // Actor.spawnPeer), so key the row by (childID, childID). deriveLiveness
-        // turns the honest registry fields (status/lastOutcome/lastTurnTime) into
-        // progressing|stalled|terminal — never fabricating a state the row lacks.
+        // turns the honest registry fields (status/lastOutcome/lastActivityTime)
+        // into progressing|stalled|terminal — never fabricating a state the row
+        // lacks.
         const childID = op.sessionID
         const found = yield* actorReg.liveness(childID as SessionID, childID)
         if (!found)
@@ -1069,16 +1112,24 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
             output: `No actor registered for ${childID}. It may not exist or never started.`,
             metadata: { sessionID: childID } as Metadata,
           }
-        const ageMs = Date.now() - found.actor.lastTurnTime
-        const ageStr = ageMs < 60_000 ? `${Math.floor(ageMs / 1000)}s` : `${Math.floor(ageMs / 60_000)}m`
+        const age = (ms: number) => (ms < 60_000 ? `${Math.floor(ms / 1000)}s` : `${Math.floor(ms / 60_000)}m`)
+        const nowMs = Date.now()
+        // Report the age the verdict was computed from FIRST. `?? time.created` is
+        // the same fallback deriveLiveness uses, and the column is nullable so it
+        // arrives as `null` — see AGENTS.md "Reading a nullable column".
+        const activityAge = age(nowMs - (found.actor.lastActivityTime ?? found.actor.time.created))
+        // turnCount/lastTurnTime stay on the dump as step bookkeeping, explicitly
+        // labelled as not being what the liveness above was derived from.
+        const turnAge = age(nowMs - found.actor.lastTurnTime)
         const outcome = found.actor.lastOutcome ? ` (last outcome: ${found.actor.lastOutcome})` : ""
         return {
           title: `Status ${childID}: ${found.liveness}`,
           output:
             `${childID} — ${found.liveness}${outcome}\n` +
             `  raw status: ${found.actor.status}\n` +
+            `  lastActivityTime: ${found.actor.lastActivityTime ?? "(none)"} (${activityAge} ago) — liveness derives from this\n` +
             `  turnCount: ${found.actor.turnCount}\n` +
-            `  lastTurnTime: ${found.actor.lastTurnTime} (${ageStr} ago)`,
+            `  lastTurnTime: ${found.actor.lastTurnTime} (${turnAge} ago) — last COMPLETED step, not the liveness input`,
           metadata: { sessionID: childID } as Metadata,
         }
       }

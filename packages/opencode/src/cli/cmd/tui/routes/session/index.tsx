@@ -16,7 +16,7 @@ import { Dynamic } from "solid-js/web"
 import path from "path"
 import { useCurrentAgentID, useRoute, useRouteData } from "@tui/context/route"
 import { useProject } from "@tui/context/project"
-import { useSync } from "@tui/context/sync"
+import { selectMessages, useSync } from "@tui/context/sync"
 import { useEvent } from "@tui/context/event"
 import { SplitBorder } from "@tui/component/border"
 import { Spinner } from "@tui/component/spinner"
@@ -34,6 +34,7 @@ import type {
 } from "@mimo-ai/sdk/v2"
 import { useLocal } from "@tui/context/local"
 import { Locale } from "@/util"
+import { verifySessionRenderable, type SessionActorInput } from "@/session/visibility"
 import type { Tool } from "@/tool"
 import type { ReadTool } from "@/tool/read"
 import type { WriteTool } from "@/tool/write"
@@ -100,6 +101,7 @@ import { DialogTokenPlan } from "../../component/dialog-token-plan"
 import { SessionRetry } from "@/session/retry"
 import { getRevertDiffFiles } from "../../util/revert-diff"
 import * as Collapse from "../../util/collapse"
+import { planSwitchTarget } from "./plan-switch"
 import {
   createFreeApiSunsetSignal,
   freeApiModelNameKey,
@@ -172,16 +174,9 @@ export function Session() {
   const session = createMemo(() => sync.session.get(route.sessionID))
   const currentAgentID = useCurrentAgentID()
   const actors = createMemo(() => sync.data.actor[route.sessionID] ?? [])
-  const messages = createMemo(() => {
-    const buckets = sync.data.message[route.sessionID]
-    const agentID = currentAgentID()
-    // A peer child runs its own turns under agentID == its own sessionID
-    // (spawn.ts), so its messages bucket under [sessionID] not ["main"]. When
-    // attaching to such a child at "main", fall back to its own-id bucket so the
-    // full session renders instead of an empty "main" view.
-    if (agentID === "main" && !buckets?.["main"]?.length) return buckets?.[route.sessionID] ?? []
-    return buckets?.[agentID] ?? []
-  })
+  const messages = createMemo(() =>
+    selectMessages(sync.data.message[route.sessionID], currentAgentID(), route.sessionID),
+  )
   const permissions = createMemo(() => sync.data.permission[route.sessionID] ?? [])
   const questions = createMemo(() => sync.data.question[route.sessionID] ?? [])
   const visible = createMemo(
@@ -260,6 +255,37 @@ export function Session() {
       return
     }
 
+    // The prohibition. Every way of reaching this route hands a raw session id
+    // straight to the renderer and bypasses both hiding layers: -s/--session
+    // (thread.ts → app.tsx), `attach --session`, POST /tui/select-session, POST
+    // /tui/event, the session tool's `switch`, MIMOCODE_ROUTE, plugin
+    // navigate("session", …) and the session-list dialog's child injection. This
+    // effect is the one point all of them must pass, so the refusal lives here
+    // rather than on any single entry point. What counts as forbidden lives in
+    // session/visibility.ts: a host for a RUNTIME-spawned agent, which today
+    // means the checkpoint writer. It reads the session's own actor rows, so no
+    // parent round-trip is needed.
+    const verdict = await verifySessionRenderable(result.data, (sessionID) =>
+      // `throwOnError` is load-bearing, not tidiness: without it this client
+      // RESOLVES `{ data: undefined }` on an HTTP error, which the classifier
+      // reads as "this session has no actor rows" and renders. The failure has to
+      // arrive as a rejection for the gate to see it as unverified rather than as
+      // verified-absent.
+      // SessionActorsResponses[200] is generated as `unknown`, so the shape is
+      // asserted here exactly as sync.tsx does for the same endpoint.
+      sdk.client.session
+        .actors({ sessionID }, { throwOnError: true })
+        .then((res) => res.data as SessionActorInput[] | undefined),
+    )
+    if (!verdict.renderable) {
+      toast.show({
+        message: `Cannot open session: ${verdict.reason}`,
+        variant: "error",
+      })
+      navigate({ type: "home" })
+      return
+    }
+
     if (result.data.workspaceID !== previousWorkspace) {
       project.workspace.set(result.data.workspaceID)
 
@@ -280,16 +306,12 @@ export function Session() {
     const part = evt.properties.part
     if (part.type !== "tool") return
     if (part.sessionID !== route.sessionID) return
-    if (part.state.status !== "completed") return
     if (part.id === lastSwitch) return
 
-    if (part.tool === "plan_exit" && part.state.metadata?.switched) {
-      local.agent.set("build")
-      lastSwitch = part.id
-    } else if (part.tool === "plan_enter") {
-      local.agent.set("plan")
-      lastSwitch = part.id
-    }
+    const agent = planSwitchTarget(part)
+    if (!agent) return
+    local.agent.set(agent)
+    lastSwitch = part.id
   })
 
   let seeded = false
@@ -1537,7 +1559,16 @@ function UserMessage(props: {
       return parsed ? [parsed] : []
     })[0]
   })
+  // A context rebuild (`/rebuild`) inserts a single user message carrying a
+  // `checkpoint` part plus `synthetic: true` text parts (the rendered context
+  // and index). Neither renders — `checkpoint` has no PART_MAPPING entry and
+  // synthetic text is excluded from `text()` above — so the boundary used to be
+  // completely invisible in the transcript, unlike compaction which at least
+  // leaves a visible summary message behind. Surface it as a one-line marker
+  // row so the user can see that a rebuild happened and where.
+  const rebuildBoundary = createMemo(() => props.parts.some((x) => x.type === "checkpoint"))
   const { theme } = useTheme()
+  const t = useLanguage().t
   const [hover, setHover] = createSignal(false)
   const queued = createMemo(() => props.pending && props.message.id > props.pending)
   const color = createMemo(() => local.agent.color(props.message.agent))
@@ -1603,6 +1634,17 @@ function UserMessage(props: {
             </box>
           )
         }}
+      </Show>
+      <Show when={rebuildBoundary()}>
+        <box id={props.message.id} marginTop={props.index === 0 ? 0 : 1} paddingLeft={2} flexDirection="row" gap={1}>
+          <text fg={theme.textMuted}>
+            <span style={{ bg: theme.backgroundElement, fg: theme.primary, bold: true }}>
+              {" "}
+              ⟲ {t("tui.session.rebuild_boundary.label")}{" "}
+            </span>
+            <span style={{ fg: theme.textMuted }}> {t("tui.session.rebuild_boundary.detail")}</span>
+          </text>
+        </box>
       </Show>
       <Show when={text() && !actorNotification()}>
         <box

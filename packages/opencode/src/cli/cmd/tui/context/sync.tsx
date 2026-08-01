@@ -30,6 +30,8 @@ import { useExit } from "./exit"
 import { useArgs } from "./args"
 import { batch, onMount } from "solid-js"
 import { Log } from "@/util"
+import { isDirectoryDeniedError } from "@/server/routes/instance/access"
+import { useToastOptional } from "../ui/toast"
 import { emptyConsoleState, type ConsoleState } from "@/config/console-state"
 
 /**
@@ -155,6 +157,56 @@ export function bucketMessages<M extends { agentID?: string | null }>(
   return out
 }
 
+/**
+ * A `session.status` event is authoritative for the WHOLE status object.
+ *
+ * Solid's store setter merges plain objects into the existing node
+ * (`mergeStoreNode` only writes `Object.keys(next)`), so writing a bare
+ * `{ type: "busy" }` — which is what the runner emits at the start of every turn
+ * (session/run-state.ts:74) — inherits the `message` of whatever status was
+ * written before it. That latched `/rebuild` outcome text
+ * (session/prompt.ts:4173) into the following turn's spinner. `reconcile()`
+ * drops the fields the new status omits, so each status stands alone.
+ */
+export function nextSessionStatus(status: SessionStatus) {
+  return reconcile(status)
+}
+
+// Pick the bucket the session view should render. `main` is the normal case; a
+// peer child (spawn.ts) runs its turns under agentID == its own sessionID, so
+// attaching to one lands on agentID "main" with an empty main bucket and must
+// fall back to the self-id bucket. A session whose turns ran under an ACTOR id
+// has neither key — its bucket is "build-1" / "compose-1" / "general-1" — so
+// without the last arm it renders a blank pane over a full transcript.
+//
+// ⚠️Do not delete the last arm again. An earlier revision of this branch removed
+// it on the reasoning that its only population was internal machinery. That
+// inference is now backwards: the route refuses a machinery session BEFORE the
+// transcript is selected (routes/session/index.tsx → session/visibility.ts), so
+// this fallback can no longer be the thing that renders a checkpoint-writer
+// transcript. Everything that still reaches it is a session the product has
+// already decided to show. Measured on the live DB, the 1313 sessions this arm
+// serves split 1302 checkpoint-writer hosts (refused upstream, never arrive
+// here) and 11 `session ask` fork-query hosts whose buckets are build-1 ×7,
+// compose-1 ×3, general-1 ×1 — those 11 are model-spawned read-only transcripts
+// and a blank pane for them is the original bug (#1964). Those counts are one
+// read-only local-DB snapshot and they drift — this arm's population grew
+// 1294 → 1313 across this branch's own revisions — so trust the split's shape,
+// not the absolute numbers.
+export function selectMessages<M extends { id: string }>(
+  buckets: Record<string, M[]> | undefined,
+  agentID: string,
+  sessionID: string,
+): M[] {
+  if (agentID !== "main" || buckets?.["main"]?.length) return buckets?.[agentID] ?? []
+  if (buckets?.[sessionID]?.length) return buckets[sessionID]
+  const newest = Object.entries(buckets ?? {})
+    .filter(([key, msgs]) => key !== "main" && msgs.length > 0)
+    .sort(([, a], [, b]) => (b.at(-1)?.id ?? "").localeCompare(a.at(-1)?.id ?? ""))
+    .at(0)
+  return newest?.[1] ?? []
+}
+
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
   name: "Sync",
   init: () => {
@@ -264,6 +316,22 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     const event = useEvent()
     const project = useProject()
     const sdk = useSDK()
+    const toast = useToastOptional()
+
+    // A bootstrap that nobody awaits still must not fail silently when the
+    // server's directory whitelist is the reason. `bootstrap` rethrows the
+    // recoverable policy rejection so an interactive caller can restore the
+    // previous directory and explain itself; the two fire-and-forget callers
+    // below have no such caller, so without this the TUI would sit with stale
+    // data and no indication why. Genuinely fatal failures already exited
+    // inside bootstrap, and anything else is logged there.
+    const reportDenied = (e: unknown) => {
+      if (!isDirectoryDeniedError(e)) return
+      toast?.show({
+        message: `Cannot use ${sdk.directory ?? "this directory"}: outside this server's working directory`,
+        variant: "error",
+      })
+    }
 
     const fullSyncedSessions = new Set<string>()
     let syncedWorkspace = project.workspace.current()
@@ -272,7 +340,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     event.subscribe((event) => {
       switch (event.type) {
         case "server.instance.disposed":
-          void bootstrap()
+          void bootstrap().catch(reportDenied)
           break
         case "permission.replied": {
           const requests = store.permission[event.properties.sessionID]
@@ -453,7 +521,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
 
         case "session.status": {
-          setStore("session_status", event.properties.sessionID, event.properties.status)
+          setStore("session_status", event.properties.sessionID, nextSessionStatus(event.properties.status))
           break
         }
 
@@ -819,20 +887,28 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         })
         .catch(async (e) => {
           Log.Default.error("tui bootstrap failed", {
-            error: e instanceof Error ? e.message : String(e),
+            error: isDirectoryDeniedError(e) ? e.error : e instanceof Error ? e.message : String(e),
             name: e instanceof Error ? e.name : undefined,
             stack: e instanceof Error ? e.stack : undefined,
           })
-          if (fatal) {
+          // The server's directory whitelist rejecting the requested directory is a
+          // recoverable policy decision, not a broken TUI: exiting here would take
+          // the user's whole session down over a mistyped/untrusted path. Always
+          // rethrow so the switch caller can restore the previous directory and show
+          // the error. Genuinely fatal bootstrap failures still exit.
+          if (fatal && !isDirectoryDeniedError(e)) {
             await exit(e)
-          } else {
-            throw e
+            return
           }
+          throw e
         })
     }
 
     onMount(() => {
-      void bootstrap()
+      // Errors are already logged (and exited on, when fatal) inside bootstrap; the
+      // rethrown recoverable case has no caller here, so swallow it rather than
+      // emitting an unhandled rejection.
+      void bootstrap().catch(reportDenied)
     })
 
     const result = {
@@ -894,6 +970,14 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           if (fullSyncedSessions.has(sessionID)) return
           const [session, messages, todo, diff, actors, task, children] = await Promise.all([
             sdk.client.session.get({ sessionID }, { throwOnError: true }),
+            // ⚠️`limit` is ONE budget shared across every agent bucket, not a
+            // per-bucket limit. A session whose real `main` history is crowded out
+            // of the newest 100 therefore arrives with an empty `main` and falls
+            // through to a non-main bucket in selectMessages above. Measured on the
+            // live DB: 1 of 4613 sessions with messages. Left as-is deliberately —
+            // a separate concern from the render prohibition — and no server work
+            // is needed to fix it, since this endpoint already returns up to 1000
+            // when `limit` is omitted.
             sdk.client.session.messages({ sessionID, limit: 100, agent_id: "*" }),
             sdk.client.session.todo({ sessionID }),
             sdk.client.session.diff({ sessionID }),
@@ -901,9 +985,11 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             sdk.client.session.task({ sessionID }),
             // children aren't in the root-only session list; fetch them so the
             // session dialog can show the current session's child sessions.
-            // visible: true hides internal machinery children (checkpoint-writer
-            // hosts, ask-tool forks, workflow subagent sessions) — only peer
-            // sessions the user should see are returned.
+            // visible: true returns only peer children, dropping the two other
+            // kinds of child session that exist — the checkpoint-writer host
+            // (session/checkpoint.ts:851) and the `session ask` fork-query host
+            // (tool/session.ts:128). See Session.children for why "workflow
+            // subagent sessions" is not a third kind.
             sdk.client.session.children({ sessionID, visible: true }).catch(() => undefined),
           ])
           setStore(
@@ -919,6 +1005,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
               draft.todo[sessionID] = todo.data ?? []
               draft.task[sessionID] = task.data ?? []
               const flat = (messages.data ?? []).map((x) => x.info)
+              // Server returns messages id-ordered and message.updated keeps that order; the footer's post-/rebuild pending-detection deliberately does NOT depend on it (it keys off checkpoint coveredUpTo, model.ts), so reordering here won't resurface the stale-context bug.
               draft.message[sessionID] = bucketMessages(flat)
               for (const message of messages.data ?? []) {
                 draft.part[message.info.id] = message.parts
