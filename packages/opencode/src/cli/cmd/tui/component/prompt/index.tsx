@@ -18,6 +18,7 @@ import { useKeybind } from "@tui/context/keybind"
 import { usePromptHistory, type PromptInfo } from "./history"
 import { assign, expandPlaceholders } from "./part"
 import { usePromptStash } from "./stash"
+import { clampStatusMessage } from "./footer"
 import { DialogStash } from "../dialog-stash"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useCommandDialog } from "../dialog-command"
@@ -31,7 +32,7 @@ import * as Clipboard from "../../util/clipboard"
 import type { AssistantMessage, FilePart, UserMessage } from "@mimo-ai/sdk/v2"
 import { TuiEvent } from "../../event"
 import { iife } from "@/util/iife"
-import { Locale, Token } from "@/util"
+import { Locale } from "@/util"
 import { formatDuration } from "@/util/format"
 import { SessionRetry } from "@/session/retry"
 import { createColors, createFrames } from "../../ui/spinner.ts"
@@ -470,25 +471,29 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID]?.["main"] ?? []
+    // Resolve the window from the last measured assistant turn's model, matching
+    // the record `computeContextUsage` reads for the token count.
     const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
     if (!last) return
-
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    if (tokens <= 0) return
-
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     const win = Model.contextWindow(sync.data.config, model)
-    const cost = msg.reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0)
+    // A /rebuild boundary is a message carrying a `checkpoint` part (stored in
+    // sync.data.part, keyed by message id). Its `coveredUpTo` is the watermark it
+    // collapsed up to; computeContextUsage uses that (not message order) to decide
+    // the measured turn is stale and report pending until the next assistant turn.
+    const result = Model.computeContextUsage({
+      messages: msg,
+      window: win,
+      checkpointCoverage: (id) =>
+        (sync.data.part[id] ?? []).find((p) => p.type === "checkpoint")?.coveredUpTo,
+    })
+    if (!result) return
     return {
-      // Denominator is the compaction trigger, not the raw window — otherwise the
-      // percentage never reaches 100% and a configured budget looks ignored.
-      context: win
-        ? `${Locale.number(tokens)}/${Token.format(win.usable)}${win.source === "config" ? "↓" : ""} (${Math.round(
-            (tokens / win.usable) * 100,
-          )}%)`
-        : Locale.number(tokens),
-      cost: cost > 0 ? money.format(cost) : undefined,
+      // computeContextUsage owns the pending placeholder (it renders `—/<win>`
+      // so the footer stops asserting the pre-rebuild fill while keeping the
+      // frame), so `context` is the final string in every case — render it as-is.
+      context: result.context,
+      cost: result.cost > 0 ? money.format(result.cost) : undefined,
     }
   })
 
@@ -1897,11 +1902,13 @@ export function Prompt(props: PromptProps) {
                 {(() => {
                   const busyMessage = createMemo(() => {
                     const s = status()
-                    return s.type === "busy" ? s.message : undefined
+                    return s.type === "busy" ? clampStatusMessage(s.message) : undefined
                   })
                   return (
                     <Show when={busyMessage()}>
-                      <text fg={theme.textMuted}>{busyMessage()}</text>
+                      <text fg={theme.textMuted} wrapMode="none" flexShrink={1}>
+                        {busyMessage()}
+                      </text>
                     </Show>
                   )
                 })()}
@@ -1992,7 +1999,10 @@ export function Prompt(props: PromptProps) {
                   <box gap={2} flexDirection="row">
                     <Show when={usage()}>
                       {(item) => (
-                        <text fg={theme.textMuted} wrapMode="none">
+                        // flexShrink=0: the context counter is the one number the
+                        // footer must never clip (`52.4K/96` instead of
+                        // `52.4K/960K`); the hints beside it can give way first.
+                        <text fg={theme.textMuted} wrapMode="none" flexShrink={0}>
                           {[item().context, item().cost].filter(Boolean).join(" · ")}
                         </text>
                       )}

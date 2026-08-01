@@ -387,6 +387,25 @@ export const ToolStateError = z
   })
 export type ToolStateError = z.infer<typeof ToolStateError>
 
+/**
+ * The terminal state for a tool part that was left unfinished by an
+ * interruption. A `pending`/`running` part is persisted the moment the tool
+ * starts (so the TUI can stream progress) and is only rewritten by whoever
+ * finalizes the turn — so every finalizer must produce the SAME shape, or the
+ * transcript renders interrupted calls inconsistently. Callers: the abort
+ * finalizer in `SessionProcessor.cleanup` and `SessionPrompt.sweepOrphanToolParts`.
+ */
+export function abortedToolState(state: ToolPart["state"], error = "Tool execution aborted"): ToolStateError {
+  const end = Date.now()
+  return {
+    status: "error",
+    input: state.input,
+    error,
+    metadata: { ...("metadata" in state && state.metadata ? state.metadata : {}), interrupted: true },
+    time: { start: "time" in state ? state.time.start : end, end },
+  }
+}
+
 export const ToolState = z
   .discriminatedUnion("status", [ToolStatePending, ToolStateRunning, ToolStateCompleted, ToolStateError])
   .meta({
@@ -1114,12 +1133,7 @@ export function fromError(
 ): NonNullable<Assistant["error"]> {
   switch (true) {
     case e instanceof DOMException && e.name === "AbortError":
-      return new AbortedError(
-        { message: e.message },
-        {
-          cause: e,
-        },
-      ).toObject()
+      return new AbortedError({ message: e.message }, { cause: e }).toObject()
     // The AI SDK wraps the real failure in AI_RetryError after exhausting its
     // own maxRetries. Unwrap to the underlying error (.lastError) so the
     // APICallError branch below can extract statusCode/isRetryable/responseBody.
@@ -1153,6 +1167,18 @@ export function fromError(
           metadata: {
             code: (e as SystemError).code ?? "",
             syscall: (e as SystemError).syscall ?? "",
+            message: (e as SystemError).message ?? "",
+          },
+        },
+        { cause: e },
+      ).toObject()
+    case (e as SystemError)?.code === "ETIMEDOUT":
+      return new APIError(
+        {
+          message: (e as SystemError).message || "Request timed out",
+          isRetryable: true,
+          metadata: {
+            code: "ETIMEDOUT",
             message: (e as SystemError).message ?? "",
           },
         },
