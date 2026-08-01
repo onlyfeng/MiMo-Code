@@ -83,6 +83,7 @@ function checkpointStub(latest: string | undefined) {
   return SessionCheckpoint.Service.of({
     tryStartCheckpointWriter: () => Effect.succeed("skipped" as const),
     waitForWriter: () => Effect.succeed("no-writer" as const),
+    waitForWriterSettlement: () => Effect.succeed({ outcome: "no-writer" as const }),
     drainWriters: () => Effect.succeed({ drained: 0, timedOut: 0 }),
     hasCheckpoint: () => Effect.succeed(latest !== undefined),
     hasMemoryOrTasks: () => Effect.succeed(latest !== undefined),
