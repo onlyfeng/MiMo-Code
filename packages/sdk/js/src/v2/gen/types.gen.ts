@@ -125,7 +125,7 @@ export type EventActorStalled = {
     sessionID: string
     actorID: string
     description: string
-    lastTurnTime: number
+    lastActivityTime: number
     stalledDuration: number
   }
 }
@@ -1196,6 +1196,10 @@ export type ToolStateCompleted = {
     [key: string]: unknown
   }
   output: string
+  providerOutput?: unknown
+  providerMetadata?: {
+    [key: string]: unknown
+  }
   title: string
   metadata: {
     [key: string]: unknown
@@ -1884,6 +1888,11 @@ export type ProviderConfig = {
   only_configured_models?: boolean
 }
 
+/**
+ * Policy for MCP client-side sampling (`sampling/createMessage`) from this server: deny, ask (default), or allow.
+ */
+export type McpSamplingPolicy = "deny" | "ask" | "allow"
+
 export type McpLocalConfig = {
   /**
    * Type of MCP server connection
@@ -1907,6 +1916,7 @@ export type McpLocalConfig = {
    * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
    */
   timeout?: number
+  sampling?: McpSamplingPolicy
 }
 
 export type McpOAuthConfig = {
@@ -1955,6 +1965,7 @@ export type McpRemoteConfig = {
    * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
    */
   timeout?: number
+  sampling?: McpSamplingPolicy
 }
 
 /**
@@ -2194,6 +2205,15 @@ export type Config = {
      * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
      */
     reserved?: number
+    /**
+     * Compact earlier than the model window. A token count (300000), a shorthand string ("300K", "1M", "50%"), or a map keyed by "<providerID>/<modelID>" with wildcards ("openai/gpt-5*"). Always clamped to the model's real window — it can only lower the compaction trigger, never raise it. 0 means no budget.
+     */
+    max_context?:
+      | number
+      | string
+      | {
+          [key: string]: number | string
+        }
   }
   checkpoint?: {
     /**
@@ -6785,7 +6805,7 @@ export type AppSkillsResponses = {
     aliases?: Array<string>
     location: string
     content: string
-    hidden?: boolean
+    disable_model_invocation?: boolean
     bundled?: boolean
   }>
 }

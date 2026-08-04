@@ -45,7 +45,7 @@ export const SkillSearchTool = Tool.define(
             })
           )
             throw new Error("Skill search tool is not available in this context.")
-          const available = yield* skill.available({
+          const available = yield* skill.modelInvocable({
             ...agent,
             permission,
           })
