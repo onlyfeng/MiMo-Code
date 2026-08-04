@@ -1,7 +1,30 @@
 import { describe, expect, test } from "bun:test"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID, PartID } from "../../src/session/schema"
-import { serializeTrajectoryMessages } from "../../src/session/trajectory"
+import { serializeTrajectoryMessages, sessionErrorText } from "../../src/session/trajectory"
+
+describe("sessionErrorText", () => {
+  test("returns a named error's concise message without serializing provider payload", () => {
+    expect(
+      sessionErrorText(
+        new MessageV2.APIError({
+          message: "Too Many Requests",
+          statusCode: 429,
+          isRetryable: true,
+          responseHeaders: { authorization: "sensitive-header" },
+          responseBody: "sensitive-response-body",
+          metadata: { requestID: "sensitive-request-id" },
+        }).toObject(),
+      ),
+    ).toBe("Too Many Requests")
+  })
+
+  test("serializes named errors without a message", () => {
+    expect(sessionErrorText(new MessageV2.OutputLengthError({}).toObject())).toBe(
+      '{"name":"MessageOutputLengthError","data":{}}',
+    )
+  })
+})
 
 describe("serializeTrajectoryMessages", () => {
   test("preserves all fields for replay (synthetic reminders, tool state, reasoning, IDs, timing, metadata)", () => {
