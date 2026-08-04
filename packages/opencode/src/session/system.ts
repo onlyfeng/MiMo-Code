@@ -213,7 +213,7 @@ export const layer = Layer.effect(
           })
         if (!load && !search) return
 
-        const list = yield* skill.available({ ...agent, permission })
+        const list = yield* skill.modelInvocable({ ...agent, permission })
 
         return [
           "Skills provide specialized instructions and workflows for specific tasks.",
@@ -233,6 +233,9 @@ export const layer = Layer.effect(
         ].join("\n")
       }),
 
+      // The user surface: authorization-filtered but NOT model-reachability
+      // filtered, because it backs the mention scan that loads a skill the user
+      // invoked explicitly. Do not switch this to modelInvocable.
       available: Effect.fn("SystemPrompt.available")(function* (agent?: Agent.Info) {
         return yield* skill.available(agent)
       }),

@@ -1,9 +1,9 @@
 import z from "zod"
 import { Effect } from "effect"
+import { Agent } from "../agent/agent"
 import { Ripgrep } from "../file/ripgrep"
 import { Skill } from "../skill"
 import { canLoadSkills } from "../skill/search-access"
-import { Agent } from "../agent/agent"
 import { BuiltinWorkflow } from "../workflow/builtin"
 import * as Tool from "./tool"
 import { renderSkillContent } from "./skill-content"
@@ -52,8 +52,23 @@ export const SkillTool = Tool.define(
                   `workflow({ operation: "run", name: "${params.name}", args: { ... } }). Do NOT use the skill tool for it.`,
               )
             }
-            const names = available.map((item) => item.name).join(", ")
+            // Same set the tool description advertises, so a near miss cannot
+            // reveal a skill the model is not allowed to see.
+            const names = (yield* skill.modelInvocable({ ...agent, permission }))
+              .map((item) => item.name)
+              .join(", ")
             throw new Error(`Skill "${params.name}" not found. Available skills: ${names || "none"}`)
+          }
+
+          // Model reachability gate. The user can still load this skill by
+          // typing /name; redirect there instead of dead-ending, so the model
+          // reports the option rather than retrying and giving up.
+          if (info.disable_model_invocation) {
+            throw new Error(
+              `Skill "${info.name}" sets disable-model-invocation, so it cannot be loaded with the skill tool. ` +
+                `Only the user can start it by typing /${info.name}. Do not retry this tool — tell the user to run ` +
+                `/${info.name} if that is the workflow they want.`,
+            )
           }
 
           yield* ctx.ask({

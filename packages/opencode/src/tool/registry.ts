@@ -334,7 +334,7 @@ export const layer = Layer.effect(
       agent: Agent.Info,
       permission: Permission.Ruleset,
     ) {
-      const list = yield* skill.available({ ...agent, permission })
+      const list = yield* skill.modelInvocable({ ...agent, permission })
       if (list.length === 0) return "No skills are currently available."
       return [
         "Load a specialized skill that provides domain-specific instructions and workflows.",

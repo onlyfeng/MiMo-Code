@@ -341,12 +341,12 @@ description: Exact skill for direct execution boundary tests.
     ),
   )
 
-  // Regression: compose-next is a builtin skill that ships in Skill.all() so
-  // the /compose-next slash command works, but the default agent's
-  // "compose-next: deny" skill permission must keep it out of
-  // Skill.available(agent) — and skill_search reads from available(), not all().
-  // A model asking a query that would otherwise match compose-next must get
-  // no hit under Build, Plan, or Compose.
+  // Regression: compose-next is a builtin skill that ships in Skill.all() and
+  // is permission-allowed so the /compose-next slash command works, but its
+  // SKILL.md sets disable-model-invocation, which must keep it out of
+  // Skill.modelInvocable(agent) — and skill_search reads from modelInvocable,
+  // not available() or all(). A model asking a query that would otherwise match
+  // compose-next must get no hit under Build, Plan, or Compose.
   it.live("does not surface compose-next to any primary agent's skill_search", () =>
     provideTmpdirInstance(
       () =>
@@ -370,11 +370,18 @@ description: Exact skill for direct execution boundary tests.
             const agent = yield* agents.get(agentName)
             if (!agent) throw new Error(`Agent not found: ${agentName}`)
 
-            // Sanity: compose-next is filtered out of the agent's available skills.
+            // The user surface keeps it: a slash invocation must still resolve.
             const available = yield* skills.available(agent)
             expect(
-              available.every((s) => s.name !== "compose-next"),
-              `compose-next must be absent from Skill.available(${agentName}) via the default agent's exact-name deny rule`,
+              available.some((s) => s.name === "compose-next"),
+              `compose-next must stay in Skill.available(${agentName}) so /compose-next injects its body`,
+            ).toBe(true)
+
+            // The model surface drops it, via disable-model-invocation.
+            const modelInvocable = yield* skills.modelInvocable(agent)
+            expect(
+              modelInvocable.every((s) => s.name !== "compose-next"),
+              `compose-next must be absent from Skill.modelInvocable(${agentName}) via disable-model-invocation`,
             ).toBe(true)
 
             const tool = (yield* registry.tools({
