@@ -39,11 +39,20 @@ export function serializePart(part: MessageV2.Part): TrajectoryPart {
   return part as unknown as TrajectoryPart
 }
 
-/** Stringify an assistant error blob (NamedError, AbortedError, etc.) for plugin payloads. */
+/** Extract an assistant error summary for plugin payloads, preserving message-less errors as JSON. */
 export function sessionErrorText(error: MessageV2.Assistant["error"]): string | undefined {
   if (!error) return undefined
-  if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
-    return error.message
+  if (typeof error === "object" && error !== null) {
+    if ("message" in error && typeof error.message === "string") return error.message
+    if (
+      "data" in error &&
+      typeof error.data === "object" &&
+      error.data !== null &&
+      "message" in error.data &&
+      typeof error.data.message === "string"
+    ) {
+      return error.data.message
+    }
   }
   return JSON.stringify(error)
 }
