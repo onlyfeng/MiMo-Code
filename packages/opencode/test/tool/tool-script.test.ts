@@ -702,7 +702,6 @@ describe("renderToolScriptDeclarations", () => {
       "actor",
       "skill",
       "skill_search",
-      "plan_enter",
       "plan_exit",
       "exec",
       "mcp_tool_search",

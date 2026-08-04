@@ -53,7 +53,6 @@ export const TOOL_SCRIPT_EXCLUDED = new Set([
   "actor",
   "skill",
   "skill_search",
-  "plan_enter",
   "plan_exit",
   "cron",
   "session",
