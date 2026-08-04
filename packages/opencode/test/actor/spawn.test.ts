@@ -2082,7 +2082,14 @@ describe("AgentOutcome failure classification", () => {
         // A 429 the provider SDK itself marked retryable — SessionRetry.retryable
         // returns a status for it, which is the oracle spawn.ts reuses.
         settled = new MessageV2.APIError(
-          { message: "Too Many Requests", statusCode: 429, isRetryable: true },
+          {
+            message: "Too Many Requests",
+            statusCode: 429,
+            isRetryable: true,
+            responseHeaders: { authorization: "sensitive-header" },
+            responseBody: "sensitive-response-body",
+            metadata: { requestID: "sensitive-request-id" },
+          },
         ).toObject()
         const result = yield* actor.spawn({
           mode: "subagent",
@@ -2097,8 +2104,12 @@ describe("AgentOutcome failure classification", () => {
         const outcome = yield* Deferred.await(result.outcome)
         expect(outcome.status).toBe("failure")
         if (outcome.status !== "failure") throw new Error("expected failure")
-        // The human string is still there and unchanged.
-        expect(outcome.error).toContain("Actor assistant failed: APIError")
+        // The human string keeps the concise provider message without leaking
+        // response headers, bodies, or metadata from the persisted API error.
+        expect(outcome.error).toContain("Actor assistant failed: APIError: Too Many Requests")
+        expect(outcome.error).not.toContain("sensitive-header")
+        expect(outcome.error).not.toContain("sensitive-response-body")
+        expect(outcome.error).not.toContain("sensitive-request-id")
         // ...and the classification is there alongside it.
         expect(outcome.failure).toBeTruthy()
         expect(outcome.failure?.retryable).toBe(true)
