@@ -182,7 +182,13 @@ function mimocodeConfig(baseURL: string, maxContext = 40_000, checkpoint?: { thr
     $schema: "https://opencode.ai/config.json",
     enabled_providers: ["alibaba"],
     provider: { alibaba: { options: { apiKey: "test-key", baseURL: `${baseURL}/v1` } } },
-    agent: { build: { model: "alibaba/qwen-plus" } },
+    agent: {
+      build: {
+        model: "alibaba/qwen-plus",
+        prompt: "Checkpoint threshold integration fixture.",
+        tool_allowlist: [],
+      },
+    },
     compaction: { reserved: 100, max_context: maxContext },
     checkpoint,
   })
@@ -305,6 +311,7 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
                   parts: [{ type: "text", text: "initialize the actor layer" }],
                   agent: "build",
                 })
+                expect(llm.calls).toBe(1)
 
                 // usable = 50K - 20.1K reserves = 29.9K. The single 24K
                 // checkpoint threshold is below it, so 25K must write a
