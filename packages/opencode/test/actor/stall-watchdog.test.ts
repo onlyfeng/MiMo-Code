@@ -412,7 +412,7 @@ describe("Actor stall watchdog (T40)", () => {
         yield* actor.scanStalledOnce!()
         expect((yield* parentInboxRows(parent.id)).length).toBe(1)
 
-        yield* actorReg.updateTurn(result.sessionID, result.actorID)
+        yield* freshenActivity(result.sessionID, result.actorID)
         yield* actor.scanStalledOnce!()
         yield* backdateTurn(result.sessionID, result.actorID, DEFAULT_LIVENESS_STALL_MS + 60_000)
         yield* actor.scanStalledOnce!()

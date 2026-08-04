@@ -362,7 +362,7 @@ export const layer = Layer.effect(
         // so re-deriving the class there would mean re-parsing prose.
         return yield* Effect.fail(
           new AssistantSettledError(
-            `Actor assistant failed: ${info.error.name}`,
+            `Actor assistant failed: ${info.error.name}: ${sessionErrorText(info.error) ?? "actor session failed"}`,
             classifyAssistantError(info.error),
           ),
         )
