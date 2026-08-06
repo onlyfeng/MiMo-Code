@@ -12,7 +12,6 @@ import PROMPT_BEAST from "./prompt/beast.txt"
 import PROMPT_GEMINI from "./prompt/gemini.txt"
 import PROMPT_GPT from "./prompt/gpt.txt"
 import PROMPT_KIMI from "./prompt/kimi.txt"
-import PROMPT_GPT_SUBAGENT_TOOLS from "../agent/prompt/gpt-tools.txt"
 
 import PROMPT_CODEX from "./prompt/codex.txt"
 import PROMPT_DEEPSEEK from "./prompt/deepseek.txt"
@@ -26,7 +25,6 @@ import { Permission } from "@/permission"
 import { Skill } from "@/skill"
 import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
 import { isSkillSearchDisabled, type SkillSearchModel } from "@/skill/search"
-import { usesGPTToolset } from "@/tool/gpt"
 
 function renderGitResult(result: Git.Result, fallback = "(none)") {
   if (result.exitCode !== 0) return fallback
@@ -51,10 +49,7 @@ export function provider(model: Provider.Model) {
 }
 
 export function agent(agent: Agent.Info, model: Provider.Model) {
-  const base = agent.prompt ? [agent.prompt] : provider(model)
-  if (agent.mode !== "subagent" || agent.toolAllowlist?.length === 0 || !usesGPTToolset(model.id)) return base
-  if (!agent.prompt && base.includes(PROMPT_GPT)) return base
-  return [...base, PROMPT_GPT_SUBAGENT_TOOLS]
+  return agent.prompt ? [agent.prompt] : provider(model)
 }
 
 export interface Interface {

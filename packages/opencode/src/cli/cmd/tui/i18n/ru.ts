@@ -66,6 +66,8 @@ export const dict = {
     "Ищете команду? Спросите {highlight}Какие slash-команды я могу использовать?{/highlight} прямо в чате",
   "tui.tips.background":
     "Выполните {highlight}/background{/highlight}, чтобы установить произвольное изображение в качестве фона главной страницы",
+  "tui.tips.vivid":
+    "Выполните {highlight}/vivid{/highlight}, чтобы при необходимости переключаться между расширенным и минимальным оформлением",
   "tui.tips.compose_next":
     "Попробуйте {highlight}/compose-next{/highlight} вместо агента Compose для передовых моделей",
   "tui.tips.undo":
@@ -375,6 +377,10 @@ export const dict = {
   "tui.command.opencode.status.title": "Посмотреть статус",
   "tui.command.theme.switch.title": "Сменить тему",
   "tui.command.logo.switch.title": "Сменить дизайн логотипа",
+  "tui.command.visual_mode.title_on": "Расширенное оформление - перейти к минимальному",
+  "tui.command.visual_mode.title_off": "Минимальное оформление - перейти к расширенному",
+  "tui.visual_mode.enabled": "Расширенное оформление включено: звёздный фон и эффекты логотипа восстановлены; метеоры и анимация индикаторов зависят от настройки анимации",
+  "tui.visual_mode.disabled": "Расширенное оформление выключено: звёзды, метеоры и эффекты логотипа скрыты; индикаторы остаются неподвижными",
   "tui.dialog.logo.title": "Дизайн логотипа",
   "tui.dialog.logo.option.classic": "Классический (жирный)",
   "tui.dialog.logo.option.thin": "Тонкий (полублок)",

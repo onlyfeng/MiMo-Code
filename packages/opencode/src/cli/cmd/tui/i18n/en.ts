@@ -61,6 +61,7 @@ export const dict: Record<string, string> = {
     "Looking for a shortcut? Ask {highlight}Which slash commands can I use?{/highlight} directly in chat",
   "tui.tips.background":
     "Run {highlight}/background{/highlight} to set a custom image as your home background",
+  "tui.tips.vivid": "Run {highlight}/vivid{/highlight} to switch between Vivid and Minimal visuals as needed",
   "tui.tips.compose_next":
     "Try {highlight}/compose-next{/highlight} instead of the Compose agent for frontier models",
   "tui.tips.undo": "Use {highlight}/undo{/highlight} to revert the last message and file changes",
@@ -329,6 +330,10 @@ export const dict: Record<string, string> = {
   "tui.dialog.image.import.success": "Background image imported",
   "tui.dialog.image.none": "None (use starry background)",
   "tui.command.logo.switch.title": "Switch logo design",
+  "tui.command.visual_mode.title_on": "Vivid visuals - switch to Minimal",
+  "tui.command.visual_mode.title_off": "Minimal visuals - switch to Vivid",
+  "tui.visual_mode.enabled": "Vivid display enabled: star field and logo effects restored; meteors and animated activity follow the animation setting",
+  "tui.visual_mode.disabled": "Vivid display disabled: stars, meteors, and logo effects hidden; activity indicators remain stable",
   "tui.dialog.logo.title": "Logo design",
   "tui.dialog.logo.option.classic": "Classic (bold)",
   "tui.dialog.logo.option.thin": "Thin (half-block)",

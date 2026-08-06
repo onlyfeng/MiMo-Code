@@ -2955,6 +2955,7 @@ export type Agent = {
   modelRef?: string
   variant?: string
   prompt?: string
+  completionGate?: boolean
   options: {
     [key: string]: unknown
   }

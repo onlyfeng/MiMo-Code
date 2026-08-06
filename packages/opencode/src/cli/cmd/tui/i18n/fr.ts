@@ -67,6 +67,8 @@ export const dict = {
     "Vous cherchez un raccourci ? Demandez {highlight}Quelles commandes slash puis-je utiliser ?{/highlight} directement dans le chat",
   "tui.tips.background":
     "Exécutez {highlight}/background{/highlight} pour définir une image personnalisée comme fond d'écran d'accueil",
+  "tui.tips.vivid":
+    "Exécutez {highlight}/vivid{/highlight} pour basculer entre les affichages enrichi et minimal selon vos besoins",
   "tui.tips.compose_next":
     "Essayez {highlight}/compose-next{/highlight} au lieu de l'agent Compose pour les modèles avancés",
   "tui.tips.undo": "Utilisez {highlight}/undo{/highlight} pour annuler le dernier message et ses modifications",
@@ -360,6 +362,10 @@ export const dict = {
   "tui.command.opencode.status.title": "Voir l'état",
   "tui.command.theme.switch.title": "Changer de thème",
   "tui.command.logo.switch.title": "Changer le design du logo",
+  "tui.command.visual_mode.title_on": "Affichage enrichi - passer en mode minimal",
+  "tui.command.visual_mode.title_off": "Affichage minimal - passer en mode enrichi",
+  "tui.visual_mode.enabled": "Affichage enrichi activé : ciel étoilé et effets du logo restaurés ; météores et indicateurs animés suivent le réglage des animations",
+  "tui.visual_mode.disabled": "Affichage enrichi désactivé : étoiles, météores et effets du logo masqués ; indicateurs stabilisés",
   "tui.dialog.logo.title": "Design du logo",
   "tui.dialog.logo.option.classic": "Classique (gras)",
   "tui.dialog.logo.option.thin": "Fin (demi-bloc)",
