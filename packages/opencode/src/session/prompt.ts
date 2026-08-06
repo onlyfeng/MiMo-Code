@@ -3279,6 +3279,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+          const usageRecovered =
+            !!lastFinished &&
+            msgs.some(
+              (msg) =>
+                msg.info.id > lastFinished.id &&
+                msg.parts.some((part) => part.type === "checkpoint" || part.type === "compaction"),
+            )
 
           // Per-user-message active recall reminder. Once the session has
           // any memory artifacts (memory dir populated OR tasks recorded),
@@ -3458,7 +3465,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID, lastUser)
           lastModelForPrune = model
-          lastFinishedForPrune = lastFinished
+          lastFinishedForPrune = usageRecovered ? undefined : lastFinished
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
@@ -3545,7 +3552,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // based on the latest completed assistant message's tokens. These
           // thresholds only keep the checkpoint fresh; `overflowCheck` below is
           // the single trigger for rebuilding the active context.
-          if (!skipOverflowCheck && !isBoundedComputation && lastFinished && lastFinished.tokens) {
+          if (!skipOverflowCheck && !usageRecovered && !isBoundedComputation && lastFinished && lastFinished.tokens) {
             const fireOps = yield* ops()
             yield* prune
               .fireCheckpoints({
@@ -3560,6 +3567,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           if (
             !skipOverflowCheck &&
+            !usageRecovered &&
             !isBoundedComputation &&
             lastFinished &&
             lastFinished.summary !== true &&
@@ -4060,6 +4068,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     agentID: lastUser.agentID,
                   })
                   .pipe(Effect.ignore)
+                skipOverflowCheck = true
               }
               return "continue" as const
             }
@@ -4272,6 +4281,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     agentID: lastUser.agentID,
                   })
                   .pipe(Effect.ignore)
+                skipOverflowCheck = true
                 return "continue" as const
               }
 
@@ -4290,7 +4300,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   .set(sessionID, { type: "busy", message: "Writing checkpoint\u2026" })
                   .pipe(Effect.catch(() => Effect.void)),
               })
-              if (attempt2 === "rebuilt") return "continue" as const
+              if (attempt2 === "rebuilt") {
+                skipOverflowCheck = true
+                return "continue" as const
+              }
 
               // Same as above: the writer ran and failed — not "no checkpoint".
               if (attempt2 === "writer-failed") {
@@ -4305,6 +4318,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     agentID: lastUser.agentID,
                   })
                   .pipe(Effect.ignore)
+                skipOverflowCheck = true
               }
               // "insert-failed" → a checkpoint exists; must not compact.
             }

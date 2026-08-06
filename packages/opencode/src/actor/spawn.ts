@@ -944,13 +944,13 @@ export const layer = Layer.effect(
         if (input.onActorID) yield* Effect.sync(() => input.onActorID!(actorID)).pipe(Effect.ignore)
         if (input.forkContext) yield* lifecycleState.setForkContext(key, input.forkContext)
 
-        // Auto-inject return-format instruction for non-specialized subagents.
-        // Excluded: agents with hardcoded `prompt` (explore/title/summary — own
-        // contracts), checkpoint-writer (special — task is itself a complete
-        // writer-instruction string), and peer mode (routes via spawnPeer).
+        // Auto-inject return-format instruction for lifecycle-managed subagents.
+        // Agents with an explicit completionGate keep this behavior even when
+        // they also provide a dedicated system prompt.
         const agentInfo = yield* agents.get(input.agentType)
         const gateEligible =
-          agentInfo?.mode === "subagent" && !agentInfo?.prompt && input.agentType !== "checkpoint-writer"
+          agentInfo?.mode === "subagent" &&
+          (agentInfo.completionGate === true || (!agentInfo.prompt && input.agentType !== "checkpoint-writer"))
         return yield* forkWork({
           sessionID: input.sessionID,
           parentSessionID: input.parentSessionID ?? input.sessionID,

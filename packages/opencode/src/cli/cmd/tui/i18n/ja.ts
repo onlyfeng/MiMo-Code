@@ -64,6 +64,7 @@ export const dict = {
   "tui.tips.ask_slash_commands":
     "ショートカットを探すには、チャットで {highlight}使えるスラッシュコマンドは？{/highlight} と直接質問できます",
   "tui.tips.background": "{highlight}/background{/highlight} を実行してホーム背景にお好みの画像を設定できます",
+  "tui.tips.vivid": "{highlight}/vivid{/highlight} で必要に応じてリッチ表示とミニマル表示を切り替えます",
   "tui.tips.compose_next":
     "{highlight}/compose-next{/highlight} を推奨（強力なモデル向け・Compose 代替）",
   "tui.tips.undo": "{highlight}/undo{/highlight} で直前のメッセージとファイル変更を取り消します",
@@ -304,6 +305,10 @@ export const dict = {
   "tui.command.opencode.status.title": "ステータスを表示",
   "tui.command.theme.switch.title": "テーマを切り替え",
   "tui.command.logo.switch.title": "ロゴデザインを切り替え",
+  "tui.command.visual_mode.title_on": "リッチ表示中 - ミニマル表示に切り替え",
+  "tui.command.visual_mode.title_off": "ミニマル表示中 - リッチ表示に切り替え",
+  "tui.visual_mode.enabled": "リッチ表示を有効化：星空とロゴ効果を復元しました。流星と進行状況のアニメーションはアニメーション設定に従います",
+  "tui.visual_mode.disabled": "リッチ表示を無効化：星空、流星、ロゴ効果を非表示にし、進行状況表示を固定しました",
   "tui.dialog.logo.title": "ロゴデザイン",
   "tui.dialog.logo.option.classic": "クラシック（太字）",
   "tui.dialog.logo.option.thin": "細字（ハーフブロック）",

@@ -56,6 +56,36 @@ sudo apt install xsel
 </details>
 
 <details>
+<summary><strong>macOS：默认终端渲染异常</strong></summary>
+
+MiMoCode 不支持 macOS 自带的“终端”（Terminal.app）。如果界面出现错位、闪烁或其他渲染异常，请改用 [iTerm2](https://iterm2.com/) 或 VS Code 集成终端：
+
+```bash
+brew install --cask iterm2
+```
+</details>
+
+<details>
+<summary><strong>TUI 卡顿与视觉动画问题</strong></summary>
+
+如果通过 SSH 直接运行 TUI 时卡顿，可以让 TUI 在本地渲染，远端只运行 MiMoCode 服务。先在远端项目目录中启动服务：
+
+```bash
+# 远端主机
+mimo serve --port 4096
+
+# 本地主机：建立 SSH 端口转发
+ssh -N -L 4096:127.0.0.1:4096 user@remote-host
+
+# 本地主机：在另一个终端连接远端 MiMoCode
+mimo attach http://127.0.0.1:4096
+```
+
+如果卡顿来自装饰性动画，可以运行 `/vivid`，或在 `ctrl+p` 命令面板中设置“丰富显示”，根据实际情况在丰富视觉模式和简洁模式间切换。
+
+</details>
+
+<details>
 <summary><strong>Windows：shell 输出中文（CJK）乱码</strong></summary>
 
 在系统区域为非 UTF-8 的 Windows 上（如简体中文，活动代码页为 936/GBK），命令输出里的

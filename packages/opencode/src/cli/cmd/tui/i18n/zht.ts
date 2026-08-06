@@ -63,6 +63,7 @@ export const dict = {
   "tui.tips.ask_slash_commands":
     "想找快捷指令？直接在聊天中問 {highlight}有哪些 slash 快捷指令？{/highlight}",
   "tui.tips.background": "執行 {highlight}/background{/highlight} 設定自訂圖片作為主頁背景",
+  "tui.tips.vivid": "執行 {highlight}/vivid{/highlight}，根據需要在豐富視覺模式和簡潔模式間切換",
   "tui.tips.compose_next":
     "推薦前沿模型使用 {highlight}/compose-next{/highlight} 代替 Compose 智慧體",
   "tui.tips.undo": "使用 {highlight}/undo{/highlight} 復原最後一條訊息及其檔案變更",
@@ -352,6 +353,10 @@ export const dict = {
   "tui.dialog.image.import.success": "背景圖片已匯入",
   "tui.dialog.image.none": "無（使用星空背景）",
   "tui.command.logo.switch.title": "切換 Logo 樣式",
+  "tui.command.visual_mode.title_on": "豐富顯示中 - 點擊使用極簡模式",
+  "tui.command.visual_mode.title_off": "極簡顯示中 - 點擊使用豐富模式",
+  "tui.visual_mode.enabled": "已開啟豐富顯示：星空和標誌特效已恢復，流星與動態進行中標記仍受動畫設定控制",
+  "tui.visual_mode.disabled": "已關閉豐富顯示：星空、流星和標誌特效已隱藏，進行中標記將保持穩定",
   "tui.dialog.logo.title": "Logo 樣式",
   "tui.dialog.logo.option.classic": "經典（粗體）",
   "tui.dialog.logo.option.thin": "纖細（半塊）",
