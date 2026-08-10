@@ -274,6 +274,10 @@ export type ActorPostStopInput = ActorStopBaseInput & {
   // false → the spawned agent cannot use the Write tool (read-only, e.g. explore).
   // Absent/undefined → unknown; hooks must NOT suppress on absence (fail-open).
   canWrite?: boolean
+  // false → the current instance has disabled new memory writes. The plugin
+  // service derives this from the same Config.Service used by write gates.
+  // Absent/undefined → unknown; hooks must fail open for direct/manual calls.
+  memoryWriteEnabled?: boolean
 }
 
 export type ActorStopOutput = {

@@ -110,6 +110,15 @@ export async function SubagentProgressCheckerPlugin(_pluginInput: PluginInput): 
         // `=== false` (not falsy): an absent canWrite must NOT suppress (fail-open).
         if ((input as { canWrite?: boolean }).canWrite === false) return
 
+        // Memory writing off — the write gate (memory-path-guard) hard-rejects
+        // progress.md, so asking the subagent to write it would spin the postStop
+        // ReAct loop forever: nudge → write rejected → nudge again, burning a model
+        // turn per iteration. Plugin.Service derives this bit from the same
+        // instance-local Config.Service used by the write gate, avoiding an HTTP
+        // round-trip that can be denied for valid out-of-cwd worktree instances.
+        // Absent stays fail-open for direct/manual hook calls.
+        if (input.memoryWriteEnabled === false) return
+
         const sessionID = input.sessionID as SessionID
         const filePath = progressPath(sessionID, taskId)
 

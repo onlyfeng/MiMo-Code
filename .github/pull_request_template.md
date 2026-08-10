@@ -1,21 +1,23 @@
-### Issue for this PR
+> [!IMPORTANT]
+> This pull request must target `onlyfeng/MiMo-Code`. Do not submit fork changes to `XiaomiMiMo/MiMo-Code`.
 
-Closes #
+### Issue / context (if applicable)
+
+<!--
+Link any relevant context. GitHub Issues are currently disabled in this fork. For an external contribution that introduces a new feature or significant design change, summarize how the direction was confirmed with a fork maintainer. An upstream issue is background context, not approval for a fork change.
+-->
 
 ### Type of change
 
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Refactor / code improvement
-- [ ] Documentation
+Bug fix / New feature / Refactor / Documentation — keep the ones that apply and delete the rest.
 
 ### What does this PR do?
 
-Please provide a description of the issue, the changes you made to fix it, and why they work. It is expected that you understand why your changes work and if you do not understand why at least say as much so a maintainer knows how much to value the PR.
-
-**If you paste a large clearly AI generated description here your PR may be IGNORED or CLOSED!**
+Briefly describe the problem, what changed, and why this approach works.
 
 ### How did you verify your code works?
+
+What did you test, and how can a reviewer reproduce the result?
 
 ### Screenshots / recordings
 
@@ -25,5 +27,4 @@ _If this is a UI change, please include a screenshot or recording._
 
 - [ ] I have tested my changes locally
 - [ ] I have not included unrelated changes in this PR
-
-_If you do not follow this template your PR will be automatically rejected._
+- [ ] This PR targets `onlyfeng/MiMo-Code`
