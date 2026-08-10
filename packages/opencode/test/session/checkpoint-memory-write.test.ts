@@ -9,7 +9,6 @@ import { Memory } from "../../src/memory"
 import { ActorRegistry } from "../../src/actor/registry"
 import { Actor, type AgentOutcome } from "../../src/actor/spawn"
 import { spawnRef } from "../../src/actor/spawn-ref"
-import { prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 import { TaskRegistry } from "../../src/task/registry"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { checkpointPath, notesPath, tasksDir } from "../../src/session/checkpoint-paths"
@@ -21,6 +20,7 @@ import { MessageID, PartID } from "../../src/session/schema"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { ProviderTest } from "../fake/provider"
 import { testEffect } from "../lib/effect"
+import { bindCheckpointPrefixCapture } from "./checkpoint-prefix-capture-fixture"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 
 void Log.init({ print: false })
@@ -38,6 +38,7 @@ const spawnLog: { count: number } = { count: 0 }
 const recordingActor = Layer.effect(
   Actor.Service,
   Effect.gen(function* () {
+    yield* bindCheckpointPrefixCapture
     const prevSpawnRef = spawnRef.current
     const impl = Actor.Service.of({
       spawn: (input) =>
@@ -82,7 +83,6 @@ const it = testEffect(env)
 
 const reset = Effect.sync(() => {
   spawnLog.count = 0
-  prefixCaptureRef.current = undefined
 })
 
 const seedSession = Effect.fn("seedSession")(function* () {

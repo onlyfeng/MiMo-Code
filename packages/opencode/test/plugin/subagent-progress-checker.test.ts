@@ -21,21 +21,11 @@ async function withTmpHome<T>(fn: (sessionID: SessionID) => Promise<T>): Promise
   }
 }
 
-// The hook reads the memory write switch through the plugin client, so the stub
-// has to answer /config. `disableWrite: undefined` models a config with no memory
-// section at all — the backward-compatible default (writing enabled).
-async function getHooks(disableWrite?: boolean) {
-  const client = {
-    config: {
-      get: async () => ({
-        data: disableWrite === undefined ? {} : { memory: { disable_write: disableWrite } },
-      }),
-    },
-  }
-  return await SubagentProgressCheckerPlugin({ client } as never)
+async function getHooks() {
+  return await SubagentProgressCheckerPlugin({} as never)
 }
 
-function makeInput(sessionID: SessionID, task_id?: string, canWrite?: boolean) {
+function makeInput(sessionID: SessionID, task_id?: string, canWrite?: boolean, memoryWriteEnabled?: boolean) {
   return {
     sessionID: sessionID as unknown as string,
     actorID: "actor-test",
@@ -49,6 +39,7 @@ function makeInput(sessionID: SessionID, task_id?: string, canWrite?: boolean) {
     iteration: 0,
     ...(task_id !== undefined ? { task_id } : {}),
     ...(canWrite !== undefined ? { canWrite } : {}),
+    ...(memoryWriteEnabled !== undefined ? { memoryWriteEnabled } : {}),
   }
 }
 
@@ -199,12 +190,12 @@ describe("SubagentProgressCheckerPlugin postStop", () => {
   // nudge → rejected write → nudge, burning a model turn each pass.
   test("disable_write=true → no nudge even though the file is missing", async () => {
     await withTmpHome(async (sid) => {
-      const hooks = await getHooks(true)
+      const hooks = await getHooks()
       const reg = hooks["actor.postStop"]
       if (!reg || typeof reg === "function") throw new Error("expected object form with run")
       const fn = (reg as { run: (...args: any[]) => Promise<void> }).run
       const output: { continue?: boolean; reason?: string } = {}
-      await fn(makeInput(sid, "T4", true), output)
+      await fn(makeInput(sid, "T4", true, false), output)
       expect(output.continue).toBeUndefined()
       expect(output.reason).toBeUndefined()
     })
@@ -212,23 +203,23 @@ describe("SubagentProgressCheckerPlugin postStop", () => {
 
   test("disable_write=true → no file is created for a complete-looking task", async () => {
     await withTmpHome(async (sid) => {
-      const hooks = await getHooks(true)
+      const hooks = await getHooks()
       const reg = hooks["actor.postStop"]
       if (!reg || typeof reg === "function") throw new Error("expected object form with run")
       const fn = (reg as { run: (...args: any[]) => Promise<void> }).run
-      await fn(makeInput(sid, "T4"), {})
+      await fn(makeInput(sid, "T4", undefined, false), {})
       expect(await Bun.file(progressPath(sid, "T4")).exists()).toBe(false)
     })
   })
 
   test("disable_write=false → nudges exactly as with no config", async () => {
     await withTmpHome(async (sid) => {
-      const hooks = await getHooks(false)
+      const hooks = await getHooks()
       const reg = hooks["actor.postStop"]
       if (!reg || typeof reg === "function") throw new Error("expected object form with run")
       const fn = (reg as { run: (...args: any[]) => Promise<void> }).run
       const output: { continue?: boolean; reason?: string } = {}
-      await fn(makeInput(sid, "T4"), output)
+      await fn(makeInput(sid, "T4", undefined, true), output)
       expect(output.continue).toBe(true)
       expect(output.reason).toContain(progressPath(sid, "T4"))
     })

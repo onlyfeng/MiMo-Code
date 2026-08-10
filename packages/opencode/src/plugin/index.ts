@@ -29,6 +29,7 @@ import { PoeAuthPlugin } from "opencode-poe-auth"
 import { CloudflareAIGatewayAuthPlugin, CloudflareWorkersAuthPlugin } from "./cloudflare"
 import { CheckpointSplitoverPlugin } from "./checkpoint-splitover"
 import { SubagentProgressCheckerPlugin } from "./subagent-progress-checker"
+import { isMemoryWriteEnabled } from "../memory/write-gate"
 import { Effect, Layer, Context, Stream } from "effect"
 import { EffectBridge } from "@/effect"
 import { InstanceState } from "@/effect"
@@ -649,7 +650,13 @@ export const layer = Layer.effect(
     const triggerActorPostStop = Effect.fn("Plugin.triggerActorPostStop")(function* (
       input: ActorPostStopInput,
     ) {
-      return yield* aggregateDecision(input, "actor.postStop")
+      return yield* aggregateDecision(
+        {
+          ...input,
+          memoryWriteEnabled: isMemoryWriteEnabled(yield* config.get()),
+        },
+        "actor.postStop",
+      )
     })
 
     const HOOK_TIMEOUT_MS = 5000

@@ -1,7 +1,10 @@
+> [!IMPORTANT]
+> This pull request must target `onlyfeng/MiMo-Code`. Do not submit fork changes to `XiaomiMiMo/MiMo-Code`.
+
 ### Issue / context (if applicable)
 
 <!--
-Link any relevant issue or discussion. For an external contribution that introduces a new feature or significant design change, include the issue where the direction was agreed. Use `Fixes #123` or `Closes #123` only when this PR fully resolves that issue.
+Link any relevant context. GitHub Issues are currently disabled in this fork. For an external contribution that introduces a new feature or significant design change, summarize how the direction was confirmed with a fork maintainer. An upstream issue is background context, not approval for a fork change.
 -->
 
 ### Type of change
@@ -24,3 +27,4 @@ _If this is a UI change, please include a screenshot or recording._
 
 - [ ] I have tested my changes locally
 - [ ] I have not included unrelated changes in this PR
+- [ ] This PR targets `onlyfeng/MiMo-Code`

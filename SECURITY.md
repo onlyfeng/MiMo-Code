@@ -34,9 +34,11 @@ Do not expose server mode to an untrusted network without authentication and app
 
 Do not report a suspected vulnerability in a public GitHub issue, discussion, or pull request.
 
-Use GitHub's private [vulnerability reporting form](https://github.com/XiaomiMiMo/MiMo-Code/security/advisories/new). This keeps the report and subsequent discussion private between the reporter and the repository maintainers.
+This fork does not currently expose a public private-reporting endpoint. For a vulnerability that reproduces on upstream `XiaomiMiMo/MiMo-Code`, use upstream's private [vulnerability reporting form](https://github.com/XiaomiMiMo/MiMo-Code/security/advisories/new). That report goes to the upstream maintainers, not the maintainers of this fork.
 
-If you cannot use the GitHub form, contact the team privately at [support-mimo@xiaomi.com](mailto:support-mimo@xiaomi.com) with the subject `[MiMoCode Security] <brief summary>`. This address is a general team support mailbox rather than a dedicated security response service.
+If you cannot use the upstream GitHub form, contact the upstream team privately at [support-mimo@xiaomi.com](mailto:support-mimo@xiaomi.com) with the subject `[MiMoCode Security] <brief summary>`. This address is a general upstream support mailbox rather than a dedicated security response service; do not use it for vulnerabilities that exist only in this fork.
+
+For a fork-only vulnerability, use an existing private channel with the fork maintainer. If no such channel is available, request one without disclosing vulnerability details; do not publish the report in a pull request or an upstream tracker.
 
 Include the affected version, environment, impact, reproduction steps, and any suggested mitigation. The initial message should not include credentials, personal data, or exploit code beyond what is needed to reproduce the issue. If the report requires sensitive supporting material, first send a minimal description and ask the team to coordinate a suitable transfer method.
 

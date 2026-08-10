@@ -2,6 +2,9 @@
 
 MiMoCode's codebase moves quickly. Outside contributions are welcome, especially focused improvements to the terminal experience and developer compatibility.
 
+> [!IMPORTANT]
+> This repository is the `onlyfeng/MiMo-Code` fork. Submit pull requests only to this repository; do not submit fork changes to `XiaomiMiMo/MiMo-Code`.
+
 ## What we accept
 
 Good contributions include:
@@ -12,31 +15,25 @@ Good contributions include:
 - Environment-specific quirks (terminal, OS, shell, locale compatibility)
 - Documentation fixes and corrections
 
-Please discuss these in an issue before writing code:
+Please confirm the direction with a fork maintainer before writing code for:
 
 - New features, new commands, new configuration surface
 - Significant TUI layout, keybinding, or interaction-design changes
 - Changes to agent prompts, agent behavior, memory, checkpoints, or tool execution
 - Broad refactors, renames, "cleanup", or dependency bumps
 
-These proposals can overlap with ongoing work or require product decisions that are difficult to settle in a pull request. Opening an issue first helps avoid implementing a direction the project cannot adopt.
+These proposals can overlap with ongoing work or require product decisions that are difficult to settle in a pull request. Confirming the direction first helps avoid implementing a change the fork cannot adopt.
 
 > [!NOTE]
-> If you are unsure whether we would take your change, ask in an issue before writing it.
+> If you are unsure whether we would take your change, confirm with a fork maintainer before writing it.
 
-## When to open an issue
+## Before starting larger work
 
-Small bug fixes and documentation corrections can go directly to a pull request. Link an existing issue with `Fixes #123` or `Closes #123` when there is one. For a new feature or a significant design change, open an issue and wait for a maintainer to confirm the direction before implementation.
+Small bug fixes and documentation corrections can go directly to a pull request. For a new feature or a significant design change, wait for a fork maintainer to confirm the direction before implementation.
 
-Good places to start:
+GitHub Issues are currently disabled in this fork. Upstream issues can be useful for discovering bugs and background context, but they do not approve a change for this fork, and fork-only requests must not be filed upstream.
 
-- [`bug`](https://github.com/XiaomiMiMo/MiMo-Code/issues?q=is%3Aissue+state%3Aopen+label%3Abug)
-- [`help wanted`](https://github.com/XiaomiMiMo/MiMo-Code/issues?q=is%3Aissue+state%3Aopen+label%3A%22help+wanted%22)
-- [`good first issue`](https://github.com/XiaomiMiMo/MiMo-Code/issues?q=is%3Aissue+state%3Aopen+label%3A%22good+first+issue%22)
-
-Want to work on an existing issue? Leave a comment first so we can tell you if it is already being worked on.
-
-For security problems, do **not** open an issue. Follow [SECURITY.md](./SECURITY.md).
+For security problems, do **not** disclose details in a public pull request or upstream issue. Follow [SECURITY.md](./SECURITY.md).
 
 ## Models and providers
 
@@ -92,13 +89,13 @@ Replace `<platform>` with your platform, e.g. `darwin-arm64` or `linux-x64`.
 ### Checks before you push
 
 ```bash
-bun typecheck                        # from the repo root
+bun run --cwd packages/opencode typecheck
 bun lint
-bun run --cwd packages/opencode test # tests cannot run from the repo root
-./script/format.ts                   # prettier, if your editor does not do it
+bun run --cwd packages/opencode test
+./script/format.ts # prettier, if your editor does not do it
 ```
 
-A `pre-push` hook runs `bun typecheck`, so a broken build will not reach the remote.
+Run the corresponding package-local `typecheck` script when changing another package. The `pre-push` hook also runs repository-wide typechecks, so a broken build will not reach the remote.
 
 If you change the server API, regenerate the SDK and OpenAPI schema:
 
@@ -142,9 +139,7 @@ test: cover checkpoint rebuild
 
 ## Issues
 
-Blank issues are disabled — use one of the templates: **bug report**, **feature request**, or **question**. Fill the required fields with real content; template-shaped placeholder text, walls of generated prose, and issues with no reproduction will be closed.
-
-A feature request is a place to discuss an idea, not a commitment that the project will adopt it. For significant features and design changes, wait for a maintainer to confirm the direction before opening a PR.
+GitHub Issues are currently disabled in this fork. Existing upstream issues may be used as background, but do not file fork-specific requests upstream. For significant features and design changes, wait for a fork maintainer to confirm the direction before opening a PR.
 
 ## Community
 
