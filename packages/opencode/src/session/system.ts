@@ -208,11 +208,10 @@ export const layer = Layer.effect(
           "Skills provide specialized instructions and workflows for specific tasks.",
           ...(search
             ? [
-                "On the first user query in a session, when the task might benefit from a specialized workflow, call skill_search to find the best matching non-Compose skill.",
+                "On the first user query in a session, when the task might benefit from a specialized workflow, call skill_search to find the best matching skill.",
                 "Rewrite the user's request into a concise Skill Query with these dimensions when available: action, input, output, audience.",
                 "Preserve an explicitly mentioned skill ID, name, or alias verbatim in the Skill Query so exact matching can take priority over BM25.",
                 "If skill_search returns a loaded_skill_id, follow the loaded instructions. If it returns uncertain candidates, choose the best fit or continue without a skill. If it returns no_match, continue normally.",
-                "Compose skills are not searchable; load an explicitly requested Compose skill directly with the skill tool.",
               ]
             : []),
           ...(load ? ["Use the skill tool to load a skill when a task matches its description."] : []),
