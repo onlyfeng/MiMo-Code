@@ -1,4 +1,4 @@
-import { Cause, Effect } from "effect"
+import { Cause, Duration, Effect, Pull, Schedule } from "effect"
 import * as Stream from "effect/Stream"
 import type { ModelMessage, Tool as AITool } from "ai"
 import { LLM } from "./llm"
@@ -6,12 +6,9 @@ import { SessionProcessor } from "./processor"
 import * as Session from "./session"
 import type { Provider } from "@/provider"
 import type { Agent } from "@/agent/agent"
-import type { MessageV2 } from "./message-v2"
-import {
-  createTextNgramMonitor,
-  isTextNgramRepeat,
-  textNgramRepeat,
-} from "./prompt/text-ngram-detection"
+import { MessageV2 } from "./message-v2"
+import { SessionRetry } from "./retry"
+import { createTextNgramMonitor, isTextNgramRepeat, textNgramRepeat } from "./prompt/text-ngram-detection"
 import type { Permission } from "@/permission"
 import { Log } from "@/util"
 import { capTextByChars, JUDGE_FIELD_MAX_CHARS, JUDGE_TOOL_INPUT_MAX_CHARS } from "@/util/text-truncate"
@@ -93,6 +90,46 @@ export type MaxStepInput = {
   setStatus?: (message: string | undefined) => Effect.Effect<void>
 }
 
+/** Match the processor's exact GPT Responses overload policy for raw stream error parts. */
+function isGptServerOverloaded(input: MaxStepInput, error: unknown) {
+  try {
+    if (!SessionRetry.isGptModel(input.model)) return false
+    const parsed = MessageV2.APIError.Schema.safeParse(error)
+    return SessionRetry.isGptServerOverloadedError(
+      parsed.success
+        ? parsed.data
+        : MessageV2.fromError(error, {
+            providerID: input.model.providerID,
+          }),
+    )
+  } catch {
+    return false
+  }
+}
+
+function retrySchedule(input: MaxStepInput) {
+  return Schedule.fromStep(
+    Effect.gen(function* () {
+      const persistent = yield* Schedule.toStep(LLM.persistentRetrySchedule)
+      let overloadRetries = 0
+
+      return (now: number, error: unknown) => {
+        if (isGptServerOverloaded(input, error)) {
+          overloadRetries++
+          if (overloadRetries > SessionRetry.GPT_OVERLOAD_RETRIES) return Cause.done(undefined)
+          return Effect.succeed([undefined, Duration.zero] as [undefined, Duration.Duration])
+        }
+        if (!LLM.isTransientCapacityError(error)) return Cause.done(undefined)
+        return Pull.matchEffect(persistent(now, error), {
+          onSuccess: ([, delay]) => Effect.succeed([undefined, delay] as [undefined, Duration.Duration]),
+          onFailure: Effect.failCause,
+          onDone: () => Cause.done(undefined),
+        })
+      }
+    }),
+  )
+}
+
 /**
  * Strip the `execute` closure from each tool, yielding "schema-only" tools.
  * The AI SDK stops the step and emits a `tool-call` event (without executing)
@@ -124,10 +161,7 @@ export function toSchemaOnlyTools(tools: Record<string, AITool>): Record<string,
  */
 // Exported for integration tests (drives the real candidate path with a mock
 // llm.stream). Not part of the public surface — call sites use runMaxStep.
-export const runCandidate = (
-  input: MaxStepInput,
-  index: number,
-): Effect.Effect<Candidate | null | "text-repeat"> =>
+export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<Candidate | null | "text-repeat"> =>
   Effect.gen(function* () {
     const monitor = createTextNgramMonitor()
     // Fresh accumulator per attempt: the retry below re-runs this whole block,
@@ -209,10 +243,10 @@ export const runCandidate = (
       (cause) => !Cause.hasInterruptsOnly(cause),
       (cause) => Effect.fail(Cause.squash(cause)),
     ),
-    Effect.retry({
-      while: LLM.isTransientCapacityError,
-      schedule: LLM.persistentRetrySchedule,
-    }),
+    // OpenAI Responses emits overloads as raw stream parts. The unified
+    // schedule keeps one three-retry overload budget across interleaved errors,
+    // while delegating every other transient to the existing persistent step.
+    Effect.retry(retrySchedule(input)),
     Effect.catchIf(isTextNgramRepeat, () => Effect.succeed("text-repeat" as const)),
     Effect.catch((e) =>
       Effect.sync(() => {
@@ -332,10 +366,7 @@ export const judge = (input: MaxStepInput, candidates: Candidate[]): Effect.Effe
     // `out`/`usage` locally and emits nothing externally until it returns, so
     // re-streaming after a mid-stream reset is safe. Without this, a single
     // ECONNRESET during judging silently collapses the whole step to pick 0.
-    Effect.retry({
-      while: LLM.isTransientCapacityError,
-      schedule: LLM.persistentRetrySchedule,
-    }),
+    Effect.retry(retrySchedule(input)),
     Effect.catch((e) => {
       log.warn("judge failed, defaulting to candidate 0", {
         error: e instanceof Error ? e.message : String(e),
@@ -355,8 +386,7 @@ export const judge = (input: MaxStepInput, candidates: Candidate[]): Effect.Effe
 export const runMaxStep = (input: MaxStepInput): Effect.Effect<SessionProcessor.Result> =>
   Effect.gen(function* () {
     const n = Math.max(1, input.candidates ?? DEFAULT_CANDIDATES)
-    const setStatus = (message: string | undefined) =>
-      input.setStatus ? input.setStatus(message) : Effect.void
+    const setStatus = (message: string | undefined) => (input.setStatus ? input.setStatus(message) : Effect.void)
 
     // Total wall-clock of the whole ensemble phase (N parallel candidates +
     // judge), measured from just before the candidates start until just before
@@ -393,7 +423,12 @@ export const runMaxStep = (input: MaxStepInput): Effect.Effect<SessionProcessor.
     yield* setStatus(`judging ${survivors.length} candidates`)
     const { pick, usage: judgeUsage } = yield* judge(input, survivors)
     const winner = survivors[pick]
-    log.info("max step", { candidates: n, survivors: survivors.length, winner: pick, toolCalls: winner.toolCalls.length })
+    log.info("max step", {
+      candidates: n,
+      survivors: survivors.length,
+      winner: pick,
+      toolCalls: winner.toolCalls.length,
+    })
 
     // The winner's own usage is what actually enters history, so it (and only
     // it) must drive the message's `tokens` — that field feeds the context

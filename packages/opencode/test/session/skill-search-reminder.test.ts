@@ -6,7 +6,7 @@ import {
 } from "../../src/session/skill-search-reminder"
 import { Flag } from "../../src/flag/flag"
 
-const model = { id: "mimo-v2", name: "MiMo V2", api: { id: "mimo-v2" } }
+const model = { id: "deepseek-v3.2", name: "DeepSeek V3.2", api: { id: "deepseek-v3.2" } }
 
 function withReminderFlag<T>(enabled: boolean, run: () => T) {
   const previous = Flag.MIMOCODE_ENABLE_SKILL_SEARCH_REMINDER
@@ -287,9 +287,9 @@ describe("skillSearchReminder", () => {
       ).toBeUndefined()
     }))
 
-  test("does not inject for Claude or GPT models", () =>
+  test("does not inject first-query or twelve-hour reminders for blacklisted models", () =>
     withReminderFlag(true, () => {
-      const input = {
+      const firstQuery = {
         session: {},
         agent: { name: "build", mode: "primary" as const },
         messages: [
@@ -299,18 +299,27 @@ describe("skillSearchReminder", () => {
           },
         ],
       }
+      const twelveHoursLater = {
+        ...firstQuery,
+        messages: [
+          firstQuery.messages[0],
+          {
+            info: { role: "user", id: "user-2", time: { created: 43_201_000 } },
+            parts: [{ type: "text", text: "Build another report" }],
+          },
+        ],
+      }
+      const models = [
+        { id: "claude-sonnet-4", api: { id: "claude-sonnet-4" } },
+        { id: "custom-openai-model", api: { id: "gpt-5.4" } },
+        { id: "kimi-k2.5", api: { id: "kimi-k2.5" } },
+        { id: "k2p5", family: "kimi-thinking", api: { id: "k2p5" } },
+        { id: "mimo-v2", api: { id: "mimo-v2" } },
+      ]
 
-      expect(
-        skillSearchReminderForSession({
-          ...input,
-          model: { id: "claude-sonnet-4", api: { id: "claude-sonnet-4" } },
-        }),
-      ).toBeUndefined()
-      expect(
-        skillSearchReminderForSession({
-          ...input,
-          model: { id: "custom-openai-model", api: { id: "gpt-5.4" } },
-        }),
-      ).toBeUndefined()
+      for (const model of models) {
+        expect(skillSearchReminderForSession({ ...firstQuery, model })).toBeUndefined()
+        expect(skillSearchReminderForSession({ ...twelveHoursLater, model })).toBeUndefined()
+      }
     }))
 })
