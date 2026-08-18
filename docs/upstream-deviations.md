@@ -45,9 +45,9 @@ upstream synchronization re-evaluates an entry.
   `packages/opencode/src/permission/index.ts`,
   `packages/opencode/src/server/routes/instance/permission.ts`,
   `packages/opencode/src/session/prompt.ts`,
-  `packages/opencode/src/tool/bash.ts`, the CLI/TUI yolo, permission, and Bash
-  regression tests, and generated SDK/API artifacts if the API contract
-  changes.
+  `packages/opencode/src/tool/bash.ts`, the related CLI/TUI yolo, permission,
+  Bash, and HTTP route regression tests, and the generated SDK/API artifacts
+  for the explicit instance control.
 - Reconsider only if: delete authorization becomes request- or session-scoped,
   ownership and restoration are linearizable, caller loss cannot leave a
   capability enabled, and the Bash decision is bound to the same immutable
@@ -60,19 +60,39 @@ upstream synchronization re-evaluates an entry.
   `8fa7e8d4`
 - Fork contract: do not add a default-off
   `MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT` gate around runtime environment or
-  instruction-file additions. Environment and instruction content reported as
-  loaded must be present in the corresponding model request.
+  instruction-file additions. Runtime environment additions must be present in
+  the corresponding model request, and every non-empty instruction file shown
+  by the TUI's `TuiEvent.InstructionsLoaded` toast must contribute its loaded
+  content to that request.
 - Rationale: the upstream gate can publish an `InstructionsLoaded` UI event
   while omitting the same `AGENTS.md`, `CLAUDE.md`, or environment content from
   the model's system prompt. That is a false capability signal and silently
   removes constraints the user believes are active.
 - Required sync check: inspect
+  `packages/opencode/src/cli/cmd/tui/app.tsx`,
   `packages/opencode/src/flag/flag.ts`,
-  `packages/opencode/src/session/system.ts`,
+  `packages/opencode/src/session/instruction.ts`,
+  `packages/opencode/src/session/llm-request-prefix.ts`,
+  `packages/opencode/src/session/llm.ts`,
+  `packages/opencode/src/session/max-mode.ts`,
   `packages/opencode/src/session/prompt.ts`,
+  `packages/opencode/src/session/processor.ts`,
+  `packages/opencode/src/session/system.ts`,
+  `packages/opencode/test/session/instruction.test.ts`,
+  `packages/opencode/test/session/llm-request-prefix.test.ts`,
+  `packages/opencode/test/session/llm-system-prompt.test.ts`,
+  `packages/opencode/test/session/llm.test.ts`,
+  `packages/opencode/test/session/max-mode.test.ts`,
+  `packages/opencode/test/session/processor-effect.test.ts`,
   `packages/opencode/test/session/prompt-effect.test.ts`, and
-  `packages/opencode/test/session/system.test.ts`. Verify both the displayed
-  loaded files and the actual model-request additions.
+  `packages/opencode/test/session/system.test.ts`. Verify both the published
+  instruction paths and the actual model-request additions on normal and
+  MaxMode paths.
+- Follow-up verification gap: no current regression binds the user-visible
+  `InstructionsLoaded` file list to the downstream `streamText` system request
+  in one scenario. Before adopting an upstream change to these surfaces, add
+  that coupled regression and prove the MaxMode candidate forwards the same
+  system content.
 - Reconsider only if: one immutable per-request decision gates both the UI
   signal and model payload, and tests prove that both surfaces contain the same
   instruction set.
