@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { $ } from "bun"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import fs from "fs/promises"
 import os from "os"
@@ -589,6 +590,93 @@ describe("tool.bash permissions", () => {
       },
     })
     await fs.rm(project, { recursive: true, force: true })
+  })
+
+  each("still asks for bash_delete for a project file whose name starts with two dots", async () => {
+    const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "mimocode-bash-tmpproj-"))
+    const project = await fs.realpath(projectRoot)
+    await Bun.write(path.join(project, "..victim"), "x")
+    try {
+      await Instance.provide({
+        directory: project,
+        fn: async () => {
+          const bash = await initBash()
+          const err = new Error("stop after permission")
+          const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+          const failure = await Effect.runPromise(
+            bash.execute({ command: "rm ..victim", description: "Remove victim" }, capture(requests, err)),
+          ).catch((error) => error)
+          expect(failure).toBe(err)
+          expect(requests[0]?.permission).toBe("bash_delete")
+        },
+      })
+    } finally {
+      await fs.rm(project, { recursive: true, force: true })
+    }
+  })
+
+  each("still asks for bash_delete when a temp target contains the project", async () => {
+    const container = await fs.mkdtemp(
+      path.join(process.platform === "win32" ? os.tmpdir() : "/tmp", "mimocode-bash-tmpancestor-"),
+    )
+    const project = path.join(container, "repo")
+    await fs.mkdir(project)
+    try {
+      await Instance.provide({
+        directory: await fs.realpath(project),
+        fn: async () => {
+          const bash = await initBash()
+          const err = new Error("stop after permission")
+          const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+          const failure = await Effect.runPromise(
+            bash.execute(
+              { command: `rm -rf ${quote(container)}`, description: "Remove project container" },
+              capture(requests, err),
+            ),
+          ).catch((error) => error)
+          expect(failure).toBe(err)
+          expect(requests[0]?.permission).toBe("bash_delete")
+        },
+      })
+    } finally {
+      await fs.rm(container, { recursive: true, force: true })
+    }
+  })
+
+  each("still asks for bash_delete for a temp target elsewhere in the project worktree", async () => {
+    const root = process.platform === "win32" ? os.tmpdir() : "/tmp"
+    const project = await fs.mkdtemp(path.join(root, "mimocode-bash-tmpworktree-"))
+    const directory = path.join(project, "packages", "app")
+    const victim = path.join(project, "victim.txt")
+    await fs.mkdir(directory, { recursive: true })
+    try {
+      await $`git init`.cwd(project).quiet()
+      await $`git config core.fsmonitor false`.cwd(project).quiet()
+      await $`git config commit.gpgsign false`.cwd(project).quiet()
+      await $`git config user.email test@mimocode.test`.cwd(project).quiet()
+      await $`git config user.name Test`.cwd(project).quiet()
+      await $`git commit --allow-empty -m root`.cwd(project).quiet()
+      await Bun.write(victim, "x")
+      await Instance.provide({
+        directory: await fs.realpath(directory),
+        fn: async () => {
+          expect(Instance.worktree).toBe(await fs.realpath(project))
+          const bash = await initBash()
+          const err = new Error("stop after permission")
+          const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+          const failure = await Effect.runPromise(
+            bash.execute(
+              { command: `rm ${quote(victim)}`, description: "Remove worktree file" },
+              capture(requests, err),
+            ),
+          ).catch((error) => error)
+          expect(failure).toBe(err)
+          expect(requests[0]?.permission).toBe("bash_delete")
+        },
+      })
+    } finally {
+      await fs.rm(project, { recursive: true, force: true })
+    }
   })
 
   each("still asks for bash_delete on a destructive git subcommand run from temp", async () => {
