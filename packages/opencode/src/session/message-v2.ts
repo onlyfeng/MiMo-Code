@@ -24,6 +24,7 @@ import {
   toolAttachmentFilename,
   toolAttachmentPlaceholder,
 } from "./tool-attachment"
+import { isSkillCatalogReminder } from "./skill-catalog"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -676,6 +677,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
+  let skillCatalogSeen = false
 
   const toModelOutput = (options: { toolCallId: string; input: unknown; output: unknown }) => {
     const output = options.output
@@ -735,7 +737,16 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
         parts: [],
       }
       result.push(userMessage)
-      for (const part of msg.parts) {
+      const parts = msg.parts.toSorted((a, b) => {
+        const aCatalog = a.type === "text" && isSkillCatalogReminder(a.text)
+        const bCatalog = b.type === "text" && isSkillCatalogReminder(b.text)
+        return Number(aCatalog) - Number(bCatalog)
+      })
+      for (const part of parts) {
+        if (part.type === "text" && isSkillCatalogReminder(part.text)) {
+          if (skillCatalogSeen || part.ignored) continue
+          skillCatalogSeen = true
+        }
         if (part.type === "text" && !part.ignored)
           userMessage.parts.push({
             type: "text",

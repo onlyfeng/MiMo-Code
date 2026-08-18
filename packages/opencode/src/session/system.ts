@@ -138,10 +138,6 @@ export const layer = Layer.effect(
             `  Workspace root folder: ${instance.worktree}`,
             `  Is directory a git repo: ${project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
-            // Anchored to the session's creation time (not request time) so this block
-            // stays byte-identical across every turn of a session — including ones that
-            // cross midnight — keeping it inside the Anthropic cached system prefix.
-            `  Today's date: ${new Date(now).toDateString()}`,
             `</env>`,
           ].join("\n"),
           `IMPORTANT: Your response must ALWAYS strictly follow the same major language as the user.`,
@@ -220,8 +216,9 @@ export const layer = Layer.effect(
               ]
             : []),
           ...(load ? ["Use the skill tool to load a skill when a task matches its description."] : []),
-          // the agents seem to ingest the information about skills a bit better if we present a more verbose
-          // version of them here and a less verbose version in tool description, rather than vice versa.
+          // Keep the full permission-filtered catalog in the per-turn message;
+          // the skill tool schema is deliberately static for cache stability,
+          // while compat still caps model-visible catalog bytes.
           capAvailableSkills(Skill.fmt(list, { verbose: true })),
         ].join("\n")
       }),
