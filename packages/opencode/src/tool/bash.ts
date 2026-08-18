@@ -70,6 +70,16 @@ function insideTmp(resolved: string) {
     .some((root) => abs !== root && abs.startsWith(root + path.sep))
 }
 
+function pathsOverlap(a: string, b: string) {
+  const contains = (parent: string, child: string) => {
+    const relative = path.relative(parent, child)
+    if (!relative) return true
+    if (path.isAbsolute(relative)) return false
+    return relative !== ".." && !relative.startsWith(`..${path.sep}`)
+  }
+  return contains(a, b) || contains(b, a)
+}
+
 const CWD = new Set(["cd", "push-location", "set-location"])
 const FILES = new Set([
   ...CWD,
@@ -577,7 +587,7 @@ export const BashTool = Tool.define(
     // Whether EVERY delete in this command line is a plain removal confined to a
     // temp root — the one case where the forced-ask confirmation is skipped.
     //
-    // Fails closed on purpose, in four ways. Any single miss means "ask":
+    // Fails closed on purpose, in five ways. Any single miss means "ask":
     //   1. Only DELETE_COMMANDS qualify. Destructive git subcommands
     //      (reset --hard, push --force, stash drop, …) act on repository state,
     //      not on a path in tmp, so they can never earn the exemption.
@@ -587,16 +597,21 @@ export const BashTool = Tool.define(
     //      This is the load-bearing case: `rm -rf $BUILD_DIR/*` must still ask.
     //   4. A resolved path outside a temp root, including a root itself
     //      (`insideTmp` requires a strict descendant, so `rm -rf /tmp` asks).
-    //   5. A path inside the PROJECT, even when the project itself lives under a
-    //      temp root (a real configuration — the test fixtures do exactly this).
-    //      Scratch space earns the exemption because it holds no durable work;
-    //      a checkout's own files are durable wherever they happen to sit.
+    //   5. A path overlapping the PROJECT, even when the project itself lives
+    //      under a temp root (a real configuration — the test fixtures do
+    //      exactly this). This includes both files inside the checkout and an
+    //      ancestor whose deletion would take the checkout with it. Scratch
+    //      space earns the exemption because it holds no durable work; a
+    //      checkout's own files are durable wherever they happen to sit.
     const tmpOnlyDelete = Effect.fn("BashTool.tmpOnlyDelete")(function* (
       root: Node,
       cwd: string,
       ps: boolean,
       shell: string,
     ) {
+      const boundaries = [Instance.directory, ...(Instance.worktree === "/" ? [] : [Instance.worktree])].map(
+        realpathBestEffort,
+      )
       for (const node of commands(root)) {
         const command = parts(node)
         const tokens = command.map((item) => item.text)
@@ -607,7 +622,9 @@ export const BashTool = Tool.define(
         if (args.length === 0) return false
         for (const arg of args) {
           const resolved = yield* argPath(arg, cwd, ps, shell)
-          if (!resolved || !insideTmp(resolved) || Instance.containsPath(resolved)) return false
+          if (!resolved || !insideTmp(resolved)) return false
+          const target = realpathBestEffort(resolved)
+          if (boundaries.some((boundary) => pathsOverlap(target, boundary))) return false
         }
       }
       return true
