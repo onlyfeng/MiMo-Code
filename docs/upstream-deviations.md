@@ -23,9 +23,11 @@ upstream synchronization re-evaluates an entry.
 - Status: active
 - Upstream anchors: `2bff8074b572aee6dd0d0bc5e86fe5db9bff8013`, merged by
   `c8048b7c`
-- Fork contract: `run --dangerously-skip-permissions` may answer permission
-  requests belonging to that run, but it must not call
-  `permission.setAutoApproveDelete(true)` or install a callback that later
+- Fork contract: the `run` and TUI `--dangerously-skip-permissions` entry
+  points may auto-approve ordinary permission requests through their existing
+  command-scoped mechanisms, but neither may implicitly enable delete
+  approval. They must not set `MIMOCODE_AUTO_APPROVE_DELETE`, call
+  `permission.setAutoApproveDelete(true)`, or install a callback that later
   restores a shared instance value. The explicit
   `MIMOCODE_AUTO_APPROVE_DELETE` setting and instance API remain supported;
   they are separate, deliberate controls and are not implicitly enabled by
@@ -37,9 +39,13 @@ upstream synchronization re-evaluates an entry.
   decision.
 - Required sync check: inspect
   `packages/opencode/src/cli/cmd/run.ts`,
+  `packages/opencode/src/cli/cmd/tui/thread.ts`,
+  `packages/opencode/src/flag/flag.ts`,
+  `packages/opencode/src/config/config.ts`,
   `packages/opencode/src/permission/index.ts`,
-  `packages/opencode/src/tool/bash.ts`, the permission and Bash regression
-  tests, and generated SDK/API artifacts if the API contract changes.
+  `packages/opencode/src/tool/bash.ts`, the CLI/TUI yolo, permission, and Bash
+  regression tests, and generated SDK/API artifacts if the API contract
+  changes.
 - Reconsider only if: delete authorization becomes request- or session-scoped,
   ownership and restoration are linearizable, caller loss cannot leave a
   capability enabled, and the Bash decision is bound to the same immutable
