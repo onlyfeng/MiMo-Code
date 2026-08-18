@@ -7,6 +7,7 @@
 - ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE.
 - The default branch in this repo is `main`.
 - CI triggers on `main`, `dev`, and `dev/compat` branches.
+- Before every upstream sync, review active entries in [docs/upstream-deviations.md](docs/upstream-deviations.md) for incoming changes to their listed surfaces, including changes that merge cleanly.
 - Prefer automation: execute requested actions without confirmation unless blocked by missing info or safety/irreversibility.
 - Install deps with `bun ci` (= `bun install --frozen-lockfile`) — install per `bun.lock`, don't mutate the lockfile. ⛔ Do NOT use `bun install`/`npm install`.
 
