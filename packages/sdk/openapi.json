@@ -5312,7 +5312,7 @@
             "name": "runID",
             "schema": {
               "type": "string",
-              "pattern": "^wf_[0-9A-Za-z]{26}$"
+              "pattern": "^wf_[0-9A-Za-z-]{26}$"
             },
             "required": true
           }
@@ -5371,7 +5371,7 @@
             "name": "runID",
             "schema": {
               "type": "string",
-              "pattern": "^wf_(?:[0-9A-Za-z]{26}|[0-9a-f]{64})$"
+              "pattern": "^wf_(?:[0-9A-Za-z-]{26}|[0-9a-f]{64})$"
             },
             "required": true
           }
@@ -5443,7 +5443,7 @@
             "name": "runID",
             "schema": {
               "type": "string",
-              "pattern": "^wf_(?:[0-9A-Za-z]{26}|[0-9a-f]{64})$"
+              "pattern": "^wf_(?:[0-9A-Za-z-]{26}|[0-9a-f]{64})$"
             },
             "required": true
           }

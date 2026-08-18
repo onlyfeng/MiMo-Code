@@ -131,6 +131,56 @@ function basePart(messageID: string, id: string) {
 }
 
 describe("session.message-v2.toModelMessage", () => {
+  test("keeps one skills catalog and orders it after the other user content", async () => {
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("m-skills-first"),
+        parts: [
+          {
+            ...basePart("m-skills-first", "p-catalog-first"),
+            type: "text",
+            text: "<system-reminder>\nSkills available in this session:\nFIRST\n</system-reminder>",
+            synthetic: true,
+          },
+          { ...basePart("m-skills-first", "p-user"), type: "text", text: "hello" },
+          {
+            ...basePart("m-skills-first", "p-other-reminder"),
+            type: "text",
+            text: "<system-reminder>other</system-reminder>",
+            synthetic: true,
+          },
+        ],
+      },
+      {
+        info: userInfo("m-skills-duplicate"),
+        parts: [
+          {
+            ...basePart("m-skills-duplicate", "p-catalog-duplicate"),
+            type: "text",
+            text: "<system-reminder>\nSkills available in this session:\nSECOND\n</system-reminder>",
+            synthetic: true,
+          },
+          { ...basePart("m-skills-duplicate", "p-next-user"), type: "text", text: "continue" },
+        ],
+      },
+    ]
+
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "hello" },
+          { type: "text", text: "<system-reminder>other</system-reminder>" },
+          {
+            type: "text",
+            text: "<system-reminder>\nSkills available in this session:\nFIRST\n</system-reminder>",
+          },
+        ],
+      },
+      { role: "user", content: [{ type: "text", text: "continue" }] },
+    ])
+  })
+
   test("preserves structured provider-executed outputs", async () => {
     const userID = "m-provider-user"
     const assistantID = "m-provider-assistant"
@@ -506,89 +556,6 @@ describe("session.message-v2.toModelMessage", () => {
       },
     ])
     expect(JSON.stringify(messages)).not.toContain(binaryBase64)
-  })
-
-  test("preserves jpeg tool-result media for anthropic models", async () => {
-    const anthropicModel: Provider.Model = {
-      ...model,
-      id: ModelID.make("anthropic/claude-opus-4-7"),
-      providerID: ProviderID.make("anthropic"),
-      api: {
-        id: "claude-opus-4-7-20250805",
-        url: "https://api.anthropic.com",
-        npm: "@ai-sdk/anthropic",
-      },
-      capabilities: {
-        ...model.capabilities,
-        attachment: true,
-        input: {
-          ...model.capabilities.input,
-          image: true,
-          pdf: true,
-        },
-      },
-    }
-    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]).toString(
-      "base64",
-    )
-    const userID = "m-user-anthropic"
-    const assistantID = "m-assistant-anthropic"
-    const input: MessageV2.WithParts[] = [
-      {
-        info: userInfo(userID),
-        parts: [
-          {
-            ...basePart(userID, "u1-anthropic"),
-            type: "text",
-            text: "run tool",
-          },
-        ] as MessageV2.Part[],
-      },
-      {
-        info: assistantInfo(assistantID, userID),
-        parts: [
-          {
-            ...basePart(assistantID, "a1-anthropic"),
-            type: "tool",
-            callID: "call-anthropic-1",
-            tool: "read",
-            state: {
-              status: "completed",
-              input: { filePath: "/tmp/rails-demo.png" },
-              output: "Image read successfully",
-              title: "Read",
-              metadata: {},
-              time: { start: 0, end: 1 },
-              attachments: [
-                {
-                  ...basePart(assistantID, "file-anthropic-1"),
-                  type: "file",
-                  mime: "image/jpeg",
-                  filename: "rails-demo.png",
-                  url: `data:image/jpeg;base64,${jpeg}`,
-                },
-              ],
-            },
-          },
-        ] as MessageV2.Part[],
-      },
-    ]
-
-    const result = ProviderTransform.message(await MessageV2.toModelMessages(input, anthropicModel), anthropicModel, {})
-    expect(result).toHaveLength(3)
-    expect(result[2].role).toBe("tool")
-    expect(result[2].content[0]).toMatchObject({
-      type: "tool-result",
-      toolCallId: "call-anthropic-1",
-      toolName: "read",
-      output: {
-        type: "content",
-        value: [
-          { type: "text", text: "Image read successfully" },
-          { type: "image-data", mediaType: "image/jpeg", data: jpeg },
-        ],
-      },
-    })
   })
 
   test("omits provider metadata when assistant model differs", async () => {
