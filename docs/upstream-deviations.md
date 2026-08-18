@@ -44,6 +44,7 @@ upstream synchronization re-evaluates an entry.
   `packages/opencode/src/config/config.ts`,
   `packages/opencode/src/permission/index.ts`,
   `packages/opencode/src/server/routes/instance/permission.ts`,
+  `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/tool/bash.ts`, the CLI/TUI yolo, permission, and Bash
   regression tests, and generated SDK/API artifacts if the API contract
   changes.
