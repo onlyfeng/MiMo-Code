@@ -12,11 +12,11 @@ export const SYSTEM_SPAWNED_AGENT_TYPES: ReadonlySet<string> = new Set(["checkpo
  *  applies the mask) and by prompt surfaces that would otherwise name the tool, so
  *  the schema and the prose can't drift apart. Accepts undefined because
  *  `Agent.Service.get` is typed `Info` but returns `agents[name]`, which is absent
- *  for a name no longer in config; an unresolvable agent keeps the tool, matching
- *  prior behavior.
+ *  for a name no longer in config; an unresolvable agent loses the tool so stale
+ *  schema and prompt surfaces fail closed.
  */
 export function hasActorTool(agent: Pick<Info, "name" | "mode" | "toolAllowlist"> | undefined) {
-  if (!agent) return true
+  if (!agent) return false
   if (agent.toolAllowlist && !agent.toolAllowlist.includes("actor")) return false
   return agent.mode !== "subagent" || SYSTEM_SPAWNED_AGENT_TYPES.has(agent.name)
 }

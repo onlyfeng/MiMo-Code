@@ -19,7 +19,6 @@ import { ActorWaiter } from "@/actor/waiter"
 import { spawnRef } from "@/actor/spawn-ref"
 import type { ForkContext } from "@/actor/spawn"
 import { TaskRegistry } from "@/task/registry"
-import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 import { TaskID } from "@/task/schema"
 import { SessionCheckpoint } from "@/session/checkpoint"
 import { prefixCaptureRef } from "@/session/prefix-capture-ref"
@@ -710,8 +709,19 @@ export const ActorTool = Tool.define(
         // spawned, not the caller) and explicit user @agent mentions — so those
         // legitimately pass through.
         if (!ctx.extra?.bypassAgentCheck) {
-          const caller = yield* agent.get(ctx.agent)
-          if (caller?.mode === "subagent" && !SYSTEM_SPAWNED_AGENT_TYPES.has(caller.name)) {
+          // Tool.Context carries the configured display name, not the config key.
+          // Require a unique match so renamed agents work without letting duplicate
+          // names weaken the final no-nested-delegation check.
+          const callers = (yield* agent.list()).filter((item) => item.name === ctx.agent)
+          const caller = callers.length === 1 ? callers[0] : undefined
+          if (!caller) {
+            return yield* Effect.fail(
+              new RecoverableError(
+                `Cannot delegate because the calling agent "${ctx.agent}" cannot be resolved uniquely. Choose an available agent and try again.`,
+              ),
+            )
+          }
+          if (caller.mode === "subagent") {
             return yield* Effect.fail(
               new RecoverableError(
                 `Subagents cannot spawn other subagents. You are running as "${caller.name}"; complete this task yourself with the tools available to you.`,

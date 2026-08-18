@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect } from "bun:test"
-import { Deferred, Effect, Exit, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer } from "effect"
 import z from "zod"
 import { schema as transformSchema } from "../../src/provider/transform"
 import { Agent } from "../../src/agent/agent"
@@ -338,6 +338,216 @@ describe("tool.actor", () => {
           },
         })
       }),
+    ),
+  )
+
+  it.live("execute fails closed before asking or spawning when the caller cannot be resolved", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const spawns: SpawnInput[] = []
+        const asks: unknown[] = []
+        yield* installMockSpawn((input) => {
+          spawns.push(input)
+        })
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        const exit = yield* def
+          .execute(
+            {
+              operation: {
+                action: "run",
+                description: "inspect bug",
+                prompt: "look into the cache key path",
+                subagent_type: "general",
+              },
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "removed-helper",
+              abort: new AbortController().signal,
+              extra: {},
+              messages: [],
+              metadata: () => Effect.void,
+              ask: (input) =>
+                Effect.sync(() => {
+                  asks.push(input)
+                }),
+            },
+          )
+          .pipe(Effect.exit)
+
+        expect(exit._tag).toBe("Failure")
+        expect(exit._tag === "Failure" ? Cause.pretty(exit.cause) : "").toContain("removed-helper")
+        expect(asks).toHaveLength(0)
+        expect(spawns).toHaveLength(0)
+      }),
+    ),
+  )
+
+  it.live("execute resolves a uniquely renamed caller before applying the nesting gate", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawns: SpawnInput[] = []
+          const asks: unknown[] = []
+          yield* installMockSpawn((input) => {
+            spawns.push(input)
+          })
+          const { chat, assistant } = yield* seed()
+          const tool = yield* ActorTool
+          const def = yield* tool.init()
+
+          const result = yield* def.execute(
+            {
+              operation: {
+                action: "run",
+                description: "inspect bug",
+                prompt: "look into the cache key path",
+                subagent_type: "general",
+              },
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "Builder",
+              abort: new AbortController().signal,
+              extra: {},
+              messages: [],
+              metadata: () => Effect.void,
+              ask: (input) =>
+                Effect.sync(() => {
+                  asks.push(input)
+                }),
+            },
+          )
+
+          expect(result.metadata.sessionId).toBe(chat.id)
+          expect(asks).toHaveLength(1)
+          expect(spawns).toHaveLength(1)
+        }),
+      { config: { agent: { build: { name: "Builder" } } } },
+    ),
+  )
+
+  it.live("execute fails closed when the caller display name is ambiguous", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawns: SpawnInput[] = []
+          const asks: unknown[] = []
+          yield* installMockSpawn((input) => {
+            spawns.push(input)
+          })
+          const { chat, assistant } = yield* seed()
+          const tool = yield* ActorTool
+          const def = yield* tool.init()
+
+          const exit = yield* def
+            .execute(
+              {
+                operation: {
+                  action: "run",
+                  description: "inspect bug",
+                  prompt: "look into the cache key path",
+                  subagent_type: "general",
+                },
+              },
+              {
+                sessionID: chat.id,
+                messageID: assistant.id,
+                agent: "Shared",
+                abort: new AbortController().signal,
+                extra: {},
+                messages: [],
+                metadata: () => Effect.void,
+                ask: (input) =>
+                  Effect.sync(() => {
+                    asks.push(input)
+                  }),
+              },
+            )
+            .pipe(Effect.exit)
+
+          expect(exit._tag).toBe("Failure")
+          expect(exit._tag === "Failure" ? Cause.pretty(exit.cause) : "").toContain("Shared")
+          expect(asks).toHaveLength(0)
+          expect(spawns).toHaveLength(0)
+        }),
+      {
+        config: {
+          agent: {
+            build: { name: "Shared" },
+            explore: { name: "Shared" },
+          },
+        },
+      },
+    ),
+  )
+
+  it.live("execute rejects system and renamed subagents at the final nesting gate", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawns: SpawnInput[] = []
+          const asks: unknown[] = []
+          yield* installMockSpawn((input) => {
+            spawns.push(input)
+          })
+          const { chat, assistant } = yield* seed()
+          const tool = yield* ActorTool
+          const def = yield* tool.init()
+
+          const execute = (caller: string) =>
+            def.execute(
+              {
+                operation: {
+                  action: "run",
+                  description: "inspect bug",
+                  prompt: "look into the cache key path",
+                  subagent_type: "general",
+                },
+              },
+              {
+                sessionID: chat.id,
+                messageID: assistant.id,
+                agent: caller,
+                abort: new AbortController().signal,
+                extra: {},
+                messages: [],
+                metadata: () => Effect.void,
+                ask: (input) =>
+                  Effect.sync(() => {
+                    asks.push(input)
+                  }),
+              },
+            )
+            .pipe(Effect.exit)
+
+          const renamed = yield* execute("dream")
+          const system = yield* execute("checkpoint-writer")
+
+          expect(renamed._tag).toBe("Failure")
+          expect(renamed._tag === "Failure" ? Cause.pretty(renamed.cause) : "").toContain(
+            "Subagents cannot spawn other subagents",
+          )
+          expect(system._tag).toBe("Failure")
+          expect(system._tag === "Failure" ? Cause.pretty(system.cause) : "").toContain(
+            "Subagents cannot spawn other subagents",
+          )
+          expect(asks).toHaveLength(0)
+          expect(spawns).toHaveLength(0)
+        }),
+      {
+        config: {
+          agent: {
+            dream: { name: "Dream Worker" },
+            explore: { name: "dream" },
+          },
+        },
+      },
     ),
   )
 
