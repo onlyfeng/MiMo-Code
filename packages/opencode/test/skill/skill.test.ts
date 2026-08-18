@@ -1,7 +1,12 @@
 import { describe, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Skill } from "../../src/skill"
+import { Discovery } from "../../src/skill/discovery"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
+import { EffectBridge } from "../../src/effect"
+import { Config } from "../../src/config"
+import { Bus } from "../../src/bus"
+import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { provideInstance, provideTmpdirInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { withEnv } from "../lib/env"
@@ -13,6 +18,42 @@ withEnv({ MIMOCODE_DISABLE_COMPOSE_SKILLS: "true", MIMOCODE_DISABLE_BUILTIN_SKIL
 const node = CrossSpawnSpawner.defaultLayer
 
 const it = testEffect(Layer.mergeAll(Skill.defaultLayer, node))
+
+type StableScanGate = {
+  started: Deferred.Deferred<void>
+  release: Deferred.Deferred<void>
+  attempts: number
+  failure?: Error
+}
+
+let stableScanGate: StableScanGate | undefined
+
+const gatedFileSystem = Layer.effect(
+  AppFileSystem.Service,
+  Effect.gen(function* () {
+    const fsys = yield* AppFileSystem.Service
+    return AppFileSystem.Service.of({
+      ...fsys,
+      isDir(target) {
+        const gate = stableScanGate
+        const home = process.env.HOME ?? process.env.USERPROFILE
+        if (!gate || !home || target !== path.join(home, ".claude")) return fsys.isDir(target)
+        gate.attempts += 1
+        const attempt = gate.attempts
+        Deferred.doneUnsafe(gate.started, Effect.void)
+        return Deferred.await(gate.release).pipe(
+          Effect.andThen(gate.failure && attempt === 1 ? Effect.die(gate.failure) : fsys.isDir(target)),
+        )
+      },
+    })
+  }),
+).pipe(Layer.provide(AppFileSystem.defaultLayer))
+
+const gatedSkill = Skill.layer.pipe(
+  Layer.provide(Layer.mergeAll(Discovery.defaultLayer, Config.defaultLayer, Bus.defaultLayer, gatedFileSystem)),
+)
+
+const itGated = testEffect(gatedSkill)
 
 async function createGlobalSkill(homeDir: string) {
   const skillDir = path.join(homeDir, ".claude", "skills", "global-test-skill")
@@ -60,6 +101,41 @@ const withHome = <A, E, R>(home: string, self: Effect.Effect<A, E, R>) =>
         process.env.USERPROFILE = prevUserProfile
       }),
   )
+
+const stableScanFixture = (failure?: Error) =>
+  Effect.gen(function* () {
+    const home = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir({ git: true })),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    )
+    const firstProject = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir({ git: true })),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    )
+    const secondProject = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir({ git: true })),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    )
+    const thirdProject = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir({ git: true })),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    )
+    const projects = [firstProject.path, secondProject.path, thirdProject.path] as const
+    const gate = {
+      started: yield* Deferred.make<void>(),
+      release: yield* Deferred.make<void>(),
+      attempts: 0,
+      failure,
+    }
+    stableScanGate = gate
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        if (stableScanGate === gate) stableScanGate = undefined
+        Deferred.doneUnsafe(gate.release, Effect.void)
+      }),
+    )
+    return { home: home.path, projects, gate }
+  })
 
 describe("skill", () => {
   it.live("discovers skills from .mimocode/skill/ directory", () =>
@@ -268,6 +344,64 @@ description: A skill in the .claude/skills directory.
             "first-global",
             "second-global",
           ])
+        }),
+      )
+    }),
+    30_000,
+  )
+
+  itGated.live("keeps global discovery alive when the initiating caller is interrupted", () =>
+    Effect.gen(function* () {
+      const fixture = yield* stableScanFixture()
+
+      yield* withHome(
+        fixture.home,
+        Effect.gen(function* () {
+          const skill = yield* Skill.Service
+          const firstBridge = yield* EffectBridge.make().pipe(provideInstance(fixture.projects[0]))
+          const secondBridge = yield* EffectBridge.make().pipe(provideInstance(fixture.projects[1]))
+          const thirdBridge = yield* EffectBridge.make().pipe(provideInstance(fixture.projects[2]))
+
+          const first = firstBridge.fork(skill.all())
+          yield* Deferred.await(fixture.gate.started)
+          yield* Fiber.interrupt(first)
+
+          const second = secondBridge.fork(skill.all())
+          yield* Deferred.succeed(fixture.gate.release, undefined)
+          expect(yield* Fiber.join(second)).toEqual([])
+          expect(fixture.gate.attempts).toBe(1)
+
+          expect(yield* Effect.promise(() => thirdBridge.promise(skill.all()))).toEqual([])
+          expect(fixture.gate.attempts).toBe(1)
+        }),
+      )
+    }),
+    30_000,
+  )
+
+  itGated.live("retries global discovery after a producer failure", () =>
+    Effect.gen(function* () {
+      const failure = new Error("stable discovery failed")
+      const fixture = yield* stableScanFixture(failure)
+
+      yield* withHome(
+        fixture.home,
+        Effect.gen(function* () {
+          const skill = yield* Skill.Service
+          const firstBridge = yield* EffectBridge.make().pipe(provideInstance(fixture.projects[0]))
+          const secondBridge = yield* EffectBridge.make().pipe(provideInstance(fixture.projects[1]))
+          const thirdBridge = yield* EffectBridge.make().pipe(provideInstance(fixture.projects[2]))
+
+          const first = firstBridge.fork(skill.all())
+          yield* Deferred.await(fixture.gate.started)
+          yield* Deferred.succeed(fixture.gate.release, undefined)
+          const firstExit = yield* Fiber.await(first)
+          expect(Exit.isFailure(firstExit) && Cause.pretty(firstExit.cause).includes(failure.message)).toBe(true)
+
+          expect(yield* Effect.promise(() => secondBridge.promise(skill.all()))).toEqual([])
+          expect(fixture.gate.attempts).toBe(2)
+          expect(yield* Effect.promise(() => thirdBridge.promise(skill.all()))).toEqual([])
+          expect(fixture.gate.attempts).toBe(2)
         }),
       )
     }),

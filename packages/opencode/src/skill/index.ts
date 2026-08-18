@@ -2,7 +2,7 @@ import os from "os"
 import path from "path"
 import { pathToFileURL } from "url"
 import z from "zod"
-import { Duration, Effect, Layer, Context } from "effect"
+import { Effect, Exit, Fiber, Layer, Scope, SynchronizedRef, Context } from "effect"
 import { NamedError } from "@mimo-ai/shared/util/error"
 import type { Agent } from "@/agent/agent"
 import { Bus } from "@/bus"
@@ -310,17 +310,38 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Sk
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const scope = yield* Scope.Scope
     const discovery = yield* Discovery.Service
     const config = yield* Config.Service
     const bus = yield* Bus.Service
     const fsys = yield* AppFileSystem.Service
-    const [stable, invalidateStable] = yield* Effect.cachedInvalidateWithTTL(
-      discoverStableSkills(fsys),
-      Duration.infinity,
+    const stable = yield* SynchronizedRef.make<{
+      generation: number
+      fiber?: Fiber.Fiber<DiscoveryState>
+    }>({ generation: 0 })
+    const getStable = Effect.uninterruptibleMask((restore) =>
+      SynchronizedRef.modifyEffect(
+        stable,
+        Effect.fnUntraced(function* (current) {
+          if (current.fiber) return [current.fiber, current] as const
+          const fiber = yield* discoverStableSkills(fsys).pipe(
+            Effect.onExit((exit) => {
+              if (!Exit.isFailure(exit)) return Effect.void
+              return SynchronizedRef.update(stable, (latest) =>
+                latest.generation === current.generation
+                  ? { generation: latest.generation + 1 }
+                  : latest,
+              )
+            }),
+            Effect.forkIn(scope, { startImmediately: true }),
+          )
+          return [fiber, { generation: current.generation, fiber }] as const
+        }),
+      ).pipe(Effect.flatMap((fiber) => restore(Fiber.join(fiber)))),
     )
     const discovered = yield* InstanceState.make(
       Effect.fn("Skill.discovery")(function* (ctx) {
-        return yield* discoverSkills(config, discovery, fsys, yield* stable, ctx.directory, ctx.worktree)
+        return yield* discoverSkills(config, discovery, fsys, yield* getStable, ctx.directory, ctx.worktree)
       }),
     )
     const state = yield* InstanceState.make(
@@ -363,7 +384,7 @@ export const layer = Layer.effect(
     })
 
     const reload = Effect.fn("Skill.reload")(function* () {
-      yield* invalidateStable
+      yield* SynchronizedRef.update(stable, (current) => ({ generation: current.generation + 1 }))
       yield* InstanceState.invalidate(discovered)
       yield* InstanceState.invalidate(state)
     })
