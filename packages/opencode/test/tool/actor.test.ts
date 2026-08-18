@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect } from "bun:test"
-import { Deferred, Effect, Exit, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer } from "effect"
 import z from "zod"
 import { schema as transformSchema } from "../../src/provider/transform"
 import { Agent } from "../../src/agent/agent"
@@ -337,6 +337,52 @@ describe("tool.actor", () => {
             subagent_type: "general",
           },
         })
+      }),
+    ),
+  )
+
+  it.live("execute fails closed before asking or spawning when the caller cannot be resolved", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const spawns: SpawnInput[] = []
+        const asks: unknown[] = []
+        yield* installMockSpawn((input) => {
+          spawns.push(input)
+        })
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        const exit = yield* def
+          .execute(
+            {
+              operation: {
+                action: "run",
+                description: "inspect bug",
+                prompt: "look into the cache key path",
+                subagent_type: "general",
+              },
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "removed-helper",
+              abort: new AbortController().signal,
+              extra: {},
+              messages: [],
+              metadata: () => Effect.void,
+              ask: (input) =>
+                Effect.sync(() => {
+                  asks.push(input)
+                }),
+            },
+          )
+          .pipe(Effect.exit)
+
+        expect(exit._tag).toBe("Failure")
+        expect(exit._tag === "Failure" ? Cause.pretty(exit.cause) : "").toContain("removed-helper")
+        expect(asks).toHaveLength(0)
+        expect(spawns).toHaveLength(0)
       }),
     ),
   )

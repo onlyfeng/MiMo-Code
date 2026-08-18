@@ -711,7 +711,14 @@ export const ActorTool = Tool.define(
         // legitimately pass through.
         if (!ctx.extra?.bypassAgentCheck) {
           const caller = yield* agent.get(ctx.agent)
-          if (caller?.mode === "subagent" && !SYSTEM_SPAWNED_AGENT_TYPES.has(caller.name)) {
+          if (!caller) {
+            return yield* Effect.fail(
+              new RecoverableError(
+                `Cannot delegate because the calling agent "${ctx.agent}" is no longer configured. Choose an available agent and try again.`,
+              ),
+            )
+          }
+          if (caller.mode === "subagent" && !SYSTEM_SPAWNED_AGENT_TYPES.has(caller.name)) {
             return yield* Effect.fail(
               new RecoverableError(
                 `Subagents cannot spawn other subagents. You are running as "${caller.name}"; complete this task yourself with the tools available to you.`,

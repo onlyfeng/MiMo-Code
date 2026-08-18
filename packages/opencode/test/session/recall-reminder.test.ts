@@ -61,8 +61,8 @@ describe("hasActorTool", () => {
   })
 
   // Agent.Service.get is typed `Info` but returns agents[name], absent for a name
-  // no longer in config. The reminder must degrade, not throw, in a runLoop turn.
-  test("an unresolvable agent keeps the hint instead of throwing", () => {
-    expect(hasActorTool(undefined)).toBe(true)
+  // no longer in config. Unknown callers must not be told they can delegate.
+  test("an unresolvable agent loses the hint without throwing", () => {
+    expect(hasActorTool(undefined)).toBe(false)
   })
 })
