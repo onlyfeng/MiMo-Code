@@ -1,6 +1,6 @@
 import nodeFs from "fs"
 import path from "path"
-import { withoutCredentials } from "@/util/credential-env"
+import { childProcessEnv } from "@/util/child-process-env"
 import z from "zod"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { Cause, Context, Effect, Fiber, Layer, Queue, Stream } from "effect"
@@ -13,7 +13,6 @@ import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { Global } from "@/global"
 import { Log } from "@/util"
 import { windowsZipExtractCommand } from "@/util/archive"
-import { sanitizedProcessEnv } from "@/util/mimo-process"
 import { which } from "@/util/which"
 
 const log = Log.create({ service: "ripgrep" })
@@ -149,9 +148,7 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/Ripgrep") {}
 
 function env() {
-  // sanitizedProcessEnv only drops undefined values — it does not drop credentials, and ripgrep
-  // has no use for them.
-  const env = withoutCredentials(sanitizedProcessEnv())
+  const env = childProcessEnv()
   delete env.RIPGREP_CONFIG_PATH
   return env
 }
@@ -411,7 +408,6 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
         return ChildProcess.make(binary, args, {
           cwd,
           env: env(),
-          extendEnv: true,
           stdin: "ignore",
         })
       })

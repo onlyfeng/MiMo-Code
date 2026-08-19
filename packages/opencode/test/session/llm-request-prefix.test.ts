@@ -33,6 +33,64 @@ function makeAgent(): Agent.Info {
 }
 
 describe("buildLLMRequestPrefix", () => {
+  test("keeps MiMo v2.5 API aliases on the normal frozen toolset", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.create({})))
+        const userID = MessageID.ascending()
+        await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) =>
+            svc.updateMessage({
+              id: userID,
+              sessionID: session.id,
+              role: "user",
+              time: { created: Date.now() },
+              agent: "build",
+              model: { providerID: ProviderID.make("xiaomi"), modelID: ModelID.make("mimo") },
+              tools: {},
+              mode: "",
+            } as unknown as MessageV2.Info),
+          ),
+        )
+        await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) =>
+            svc.updatePart({
+              id: PartID.ascending(),
+              sessionID: session.id,
+              messageID: userID,
+              type: "text",
+              text: "hello",
+            }),
+          ),
+        )
+        const prefix = await AppRuntime.runPromise(
+          buildLLMRequestPrefix({
+            sessionID: session.id,
+            agent: makeAgent(),
+            model: ProviderTest.model({
+              id: ModelID.make("mimo"),
+              providerID: ProviderID.make("xiaomi"),
+              api: { id: "mimo-v2.5-pro" } as never,
+              family: "mimo-v2.6",
+            }),
+            msgs: await AppRuntime.runPromise(
+              SessionNs.Service.use((svc) => svc.messages({ sessionID: session.id })),
+            ),
+            additions: [],
+          }),
+        )
+
+        expect(prefix.tools.exec).toBeUndefined()
+        expect(prefix.tools.apply_patch).toBeUndefined()
+        expect(prefix.tools.edit).toBeDefined()
+        expect(prefix.tools.write).toBeDefined()
+        expect(prefix.tools.read).toBeDefined()
+      },
+    })
+  })
+
   test("frozen full-context tools honor session permission and message-level disables", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({

@@ -13,7 +13,6 @@ import PROMPT_GEMINI from "./prompt/gemini.txt"
 import PROMPT_GPT from "./prompt/gpt.txt"
 import PROMPT_KIMI from "./prompt/kimi.txt"
 
-import PROMPT_CODEX from "./prompt/codex.txt"
 import PROMPT_DEEPSEEK from "./prompt/deepseek.txt"
 import PROMPT_GLM from "./prompt/glm.txt"
 import PROMPT_MINIMAX from "./prompt/minimax.txt"
@@ -26,6 +25,8 @@ import { Skill } from "@/skill"
 import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "@/util/text-truncate"
 import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
 import { isSkillSearchDisabled, type SkillSearchModel } from "@/skill/search"
+import { Flag } from "@/flag/flag"
+import { isMimoV25Model, usesMimoCodexMode } from "@/tool/gpt"
 
 function capAvailableSkills(text: string) {
   return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, "available skills")
@@ -39,9 +40,13 @@ function renderGitResult(result: Git.Result, fallback = "(none)") {
 const anthropicEnvironment = new Map<string, string>()
 
 export function provider(model: Provider.Model) {
+  if (Flag.MIMOCODE_CODEX_MODE) return [PROMPT_GPT]
+  const ids = [model.id, model.api.id, model.family]
+  if (isMimoV25Model(...ids)) return [PROMPT_DEFAULT]
+  if (usesMimoCodexMode(...ids)) return [PROMPT_GPT]
   const prompt = (id: string) => {
     if (id.includes("gpt-4") || id.includes("o1") || id.includes("o3")) return PROMPT_BEAST
-    if (id.includes("gpt")) return id.includes("codex") ? PROMPT_CODEX : PROMPT_GPT
+    if (id.includes("gpt")) return PROMPT_GPT
     if (id.includes("gemini-")) return PROMPT_GEMINI
     if (id.includes("claude")) return PROMPT_ANTHROPIC
     if (id.toLowerCase().includes("trinity")) return PROMPT_TRINITY

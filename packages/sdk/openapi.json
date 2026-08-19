@@ -2903,6 +2903,14 @@
               "pattern": "^ses.*"
             },
             "required": true
+          },
+          {
+            "in": "query",
+            "name": "visible",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Only return user-visible children (peer sessions); hides internal subagent hosts"
           }
         ],
         "summary": "Get session children",
@@ -3652,6 +3660,104 @@
         ]
       }
     },
+    "/session/{sessionID}/ask": {
+      "post": {
+        "operationId": "session.ask",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Ask session a side question",
+        "description": "Ask the session a one-shot, read-only side question over a frozen snapshot of its history and return the answer text. Does NOT inject a message into the conversation or disturb the session's turn.",
+        "responses": {
+          "200": {
+            "description": "Side question answer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "answer": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["answer"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "providerID": {
+                    "type": "string"
+                  },
+                  "modelID": {
+                    "type": "string"
+                  }
+                },
+                "required": ["question"]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.ask({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/session/{sessionID}/message": {
       "get": {
         "operationId": "session.messages",
@@ -3910,6 +4016,7 @@
                     "type": "string"
                   },
                   "parts": {
+                    "minItems": 1,
                     "type": "array",
                     "items": {
                       "anyOf": [
@@ -4412,6 +4519,7 @@
                     "type": "string"
                   },
                   "parts": {
+                    "minItems": 1,
                     "type": "array",
                     "items": {
                       "anyOf": [
@@ -5238,6 +5346,347 @@
         ]
       }
     },
+    "/permission/skip-all": {
+      "get": {
+        "operationId": "permission.skipAll",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Get skip-all state",
+        "description": "Whether permission asks are auto-allowed at runtime. Explicit deny rules and forced-ask permissions are unaffected.",
+        "responses": {
+          "200": {
+            "description": "Current skip-all state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.permission.skipAll({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "operationId": "permission.setSkipAll",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Set skip-all state",
+        "description": "Enable or disable runtime auto-allow for permission asks in this directory instance. Same-directory subagents share the state; isolated worktrees and other directories do not. Explicit deny rules and forced-ask permissions (e.g. bash_delete) still apply.",
+        "responses": {
+          "200": {
+            "description": "Updated skip-all state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "description": "Whether skip-all is enabled",
+                    "type": "boolean"
+                  }
+                },
+                "required": ["enabled"]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.permission.setSkipAll({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/permission/auto-approve-delete": {
+      "get": {
+        "operationId": "permission.autoApproveDelete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Get auto-approve-delete state",
+        "description": "Whether irreversible deletes skip the extra bash_delete confirmation. Instance-scoped; defaults to the MIMOCODE_AUTO_APPROVE_DELETE env var.",
+        "responses": {
+          "200": {
+            "description": "Current auto-approve-delete state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.permission.autoApproveDelete({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "operationId": "permission.setAutoApproveDelete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Set auto-approve-delete state",
+        "description": "Trust the model with irreversible deletes, skipping the extra bash_delete confirmation. Distinct from skip-all, which deliberately does NOT cover forced-ask permissions. Applies to this directory instance: same-directory subagents share it, while isolated worktrees and other directories do not. Explicit `bash: deny` rules still block. Already-pending delete asks are left for a human — the command they guard is irreversible.",
+        "responses": {
+          "200": {
+            "description": "Updated auto-approve-delete state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "description": "Whether auto-approve-delete is enabled",
+                    "type": "boolean"
+                  }
+                },
+                "required": ["enabled"]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.permission.setAutoApproveDelete({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/permission/ask-timeout": {
+      "get": {
+        "operationId": "permission.askTimeout",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Get permission ask timeout",
+        "description": "Timeout in milliseconds for permission asks that require human confirmation. null means no timeout (wait indefinitely). Applies to all asks — normal and forced-ask. Orthogonal to skip-all.",
+        "responses": {
+          "200": {
+            "description": "Current ask timeout in ms, or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.permission.askTimeout({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "operationId": "permission.setAskTimeout",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Set permission ask timeout",
+        "description": "Set the timeout in milliseconds for permission asks that require human confirmation. null disables the timeout (wait indefinitely). Applies to this directory instance; same-directory subagents share it, while isolated worktrees and other directories do not. Orthogonal to skip-all — both can be enabled independently.",
+        "responses": {
+          "200": {
+            "description": "Updated ask timeout in ms, or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ms": {
+                    "description": "Timeout in ms, or null to disable",
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["ms"]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.permission.setAskTimeout({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/workflows": {
       "get": {
         "operationId": "workflow.list",
@@ -5986,9 +6435,15 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "authenticated": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
-                  "required": ["all", "default", "connected"]
+                  "required": ["all", "default", "connected", "authenticated"]
                 }
               }
             }
@@ -8387,13 +8842,22 @@
                       "description": {
                         "type": "string"
                       },
+                      "aliases": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "location": {
                         "type": "string"
                       },
                       "content": {
                         "type": "string"
                       },
-                      "hidden": {
+                      "disable_model_invocation": {
+                        "type": "boolean"
+                      },
+                      "bundled": {
                         "type": "boolean"
                       }
                     },
@@ -8531,6 +8995,144 @@
         },
         "required": ["type", "properties"]
       },
+      "Event.tui.prompt.append": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tui.prompt.append"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": ["text"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.tui.command.execute": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tui.command.execute"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "session.list",
+                      "session.new",
+                      "session.share",
+                      "session.interrupt",
+                      "session.compact",
+                      "session.page.up",
+                      "session.page.down",
+                      "session.line.up",
+                      "session.line.down",
+                      "session.half.page.up",
+                      "session.half.page.down",
+                      "session.first",
+                      "session.last",
+                      "prompt.clear",
+                      "prompt.submit",
+                      "agent.cycle"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              }
+            },
+            "required": ["command"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.tui.toast.show": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tui.toast.show"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string",
+                "enum": ["info", "success", "warning", "error"]
+              },
+              "duration": {
+                "description": "Duration in milliseconds",
+                "default": 5000,
+                "type": "number"
+              }
+            },
+            "required": ["message", "variant"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.tui.session.select": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tui.session.select"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "description": "Session ID to navigate to",
+                "type": "string",
+                "pattern": "^ses.*"
+              }
+            },
+            "required": ["sessionID"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.tui.instructions.loaded": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tui.instructions.loaded"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "description": "Display labels of loaded instruction files: worktree-relative path, ~-path, or absolute",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["files"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
       "Event.actor.registered": {
         "type": "object",
         "properties": {
@@ -8638,6 +9240,38 @@
               }
             },
             "required": ["sessionID", "actorID", "description", "lastTurnTime", "stuckDuration"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.actor.stalled": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "actor.stalled"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "actorID": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "lastActivityTime": {
+                "type": "number"
+              },
+              "stalledDuration": {
+                "type": "number"
+              }
+            },
+            "required": ["sessionID", "actorID", "description", "lastActivityTime", "stalledDuration"]
           }
         },
         "required": ["type", "properties"]
@@ -8853,58 +9487,6 @@
         },
         "required": ["type", "properties"]
       },
-      "Event.team.created": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "team.created"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "teamID": {
-                "type": "string"
-              },
-              "creatorSessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              }
-            },
-            "required": ["teamID", "creatorSessionID"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.team.member.joined": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "team.member.joined"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "teamID": {
-                "type": "string"
-              },
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "agent": {
-                "type": "string"
-              },
-              "role": {
-                "type": "string"
-              }
-            },
-            "required": ["teamID", "sessionID", "agent", "role"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
       "Event.metrics.model_call": {
         "type": "object",
         "properties": {
@@ -9041,140 +9623,95 @@
         },
         "required": ["type", "properties"]
       },
-      "Event.tui.prompt.append": {
+      "Event.metrics.try_best_detected": {
         "type": "object",
         "properties": {
           "type": {
             "type": "string",
-            "const": "tui.prompt.append"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "text": {
-                "type": "string"
-              }
-            },
-            "required": ["text"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.tui.command.execute": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "tui.command.execute"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "command": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "session.list",
-                      "session.new",
-                      "session.share",
-                      "session.interrupt",
-                      "session.compact",
-                      "session.page.up",
-                      "session.page.down",
-                      "session.line.up",
-                      "session.line.down",
-                      "session.half.page.up",
-                      "session.half.page.down",
-                      "session.first",
-                      "session.last",
-                      "prompt.clear",
-                      "prompt.submit",
-                      "agent.cycle"
-                    ]
-                  },
-                  {
-                    "type": "string"
-                  }
-                ]
-              }
-            },
-            "required": ["command"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.tui.toast.show": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "tui.toast.show"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "title": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              },
-              "variant": {
-                "type": "string",
-                "enum": ["info", "success", "warning", "error"]
-              },
-              "duration": {
-                "description": "Duration in milliseconds",
-                "default": 5000,
-                "type": "number"
-              }
-            },
-            "required": ["message", "variant"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.tui.session.select": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "tui.session.select"
+            "const": "metrics.try_best_detected"
           },
           "properties": {
             "type": "object",
             "properties": {
               "sessionID": {
-                "description": "Session ID to navigate to",
+                "type": "string"
+              },
+              "reason": {
                 "type": "string",
-                "pattern": "^ses.*"
+                "enum": ["edit_repeat", "bash_retry", "action_streak"]
+              },
+              "provider": {
+                "type": "string"
+              },
+              "model_id": {
+                "type": "string"
+              },
+              "count": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "similarity": {
+                "type": "number"
+              },
+              "action": {
+                "type": "string",
+                "enum": ["edit", "verify"]
               }
             },
-            "required": ["sessionID"]
+            "required": ["sessionID", "reason", "provider", "model_id", "count"]
           }
         },
         "required": ["type", "properties"]
       },
-      "Event.tui.instructions.loaded": {
+      "Event.team.created": {
         "type": "object",
         "properties": {
           "type": {
             "type": "string",
-            "const": "tui.instructions.loaded"
+            "const": "team.created"
           },
           "properties": {
             "type": "object",
             "properties": {
-              "files": {
-                "description": "Display labels of loaded instruction files: worktree-relative path, ~-path, or absolute",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
+              "teamID": {
+                "type": "string"
+              },
+              "creatorSessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
               }
             },
-            "required": ["files"]
+            "required": ["teamID", "creatorSessionID"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.team.member.joined": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "team.member.joined"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "teamID": {
+                "type": "string"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              }
+            },
+            "required": ["teamID", "sessionID", "agent", "role"]
           }
         },
         "required": ["type", "properties"]
@@ -9562,6 +10099,9 @@
             "properties": {
               "version": {
                 "type": "string"
+              },
+              "method": {
+                "type": "string"
               }
             },
             "required": ["version"]
@@ -9580,6 +10120,9 @@
             "type": "object",
             "properties": {
               "version": {
+                "type": "string"
+              },
+              "method": {
                 "type": "string"
               }
             },
@@ -10097,6 +10640,68 @@
         },
         "required": ["type", "properties"]
       },
+      "Event.session.try_best.detected": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "session.try_best.detected"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "agentID": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "modelID": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["edit_repeat", "bash_retry", "action_streak"]
+              },
+              "evidence": {
+                "type": "object",
+                "properties": {
+                  "tool": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "similarity": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": ["edit", "verify"]
+                  }
+                },
+                "required": ["tool", "count"]
+              }
+            },
+            "required": ["sessionID", "providerID", "modelID", "reason", "evidence"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
       "Event.hook.executed": {
         "type": "object",
         "properties": {
@@ -10474,46 +11079,6 @@
         },
         "required": ["type", "properties"]
       },
-      "Todo": {
-        "type": "object",
-        "properties": {
-          "content": {
-            "description": "Brief description of the task",
-            "type": "string"
-          },
-          "status": {
-            "description": "Current status of the task: pending, in_progress, completed, cancelled",
-            "type": "string"
-          }
-        },
-        "required": ["content", "status"]
-      },
-      "Event.todo.updated": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "todo.updated"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "todos": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/Todo"
-                }
-              }
-            },
-            "required": ["sessionID", "todos"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
       "SessionStatus": {
         "anyOf": [
           {
@@ -10603,75 +11168,20 @@
         },
         "required": ["type", "properties"]
       },
-      "Event.session.goal": {
+      "Event.vcs.branch.updated": {
         "type": "object",
         "properties": {
           "type": {
             "type": "string",
-            "const": "session.goal"
+            "const": "vcs.branch.updated"
           },
           "properties": {
             "type": "object",
             "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "goal": {
-                "type": "object",
-                "properties": {
-                  "condition": {
-                    "type": "string"
-                  }
-                },
-                "required": ["condition"]
-              },
-              "lastVerdict": {
-                "type": "object",
-                "properties": {
-                  "ok": {
-                    "type": "boolean"
-                  },
-                  "impossible": {
-                    "type": "boolean"
-                  },
-                  "reason": {
-                    "type": "string"
-                  },
-                  "attempt": {
-                    "type": "number"
-                  },
-                  "messageID": {
-                    "type": "string"
-                  },
-                  "error": {
-                    "type": "boolean"
-                  }
-                },
-                "required": ["ok", "reason", "attempt"]
+              "branch": {
+                "type": "string"
               }
-            },
-            "required": ["sessionID"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.session.compacted": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "session.compacted"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              }
-            },
-            "required": ["sessionID"]
+            }
           }
         },
         "required": ["type", "properties"]
@@ -10747,24 +11257,6 @@
         },
         "required": ["type", "properties"]
       },
-      "Event.vcs.branch.updated": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "vcs.branch.updated"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "branch": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "required": ["type", "properties"]
-      },
       "Event.worktree.ready": {
         "type": "object",
         "properties": {
@@ -10802,6 +11294,122 @@
               }
             },
             "required": ["message"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Todo": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "Brief description of the task",
+            "type": "string"
+          },
+          "status": {
+            "description": "Current status of the task: pending, in_progress, completed, cancelled",
+            "type": "string"
+          }
+        },
+        "required": ["content", "status"]
+      },
+      "Event.todo.updated": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "todo.updated"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "todos": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            },
+            "required": ["sessionID", "todos"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.session.goal": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "session.goal"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "goal": {
+                "type": "object",
+                "properties": {
+                  "condition": {
+                    "type": "string"
+                  }
+                },
+                "required": ["condition"]
+              },
+              "lastVerdict": {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "impossible": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "attempt": {
+                    "type": "number"
+                  },
+                  "messageID": {
+                    "type": "string"
+                  },
+                  "error": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["ok", "reason", "attempt"]
+              }
+            },
+            "required": ["sessionID"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.session.compacted": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "session.compacted"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "agentID": {
+                "type": "string"
+              }
+            },
+            "required": ["sessionID"]
           }
         },
         "required": ["type", "properties"]
@@ -11165,6 +11773,10 @@
             "additionalProperties": {
               "type": "boolean"
             }
+          },
+          "source": {
+            "type": "string",
+            "enum": ["user", "spawn", "hook"]
           },
           "provenance": {
             "$ref": "#/components/schemas/Provenance"
@@ -11753,6 +12365,14 @@
           },
           "output": {
             "type": "string"
+          },
+          "providerOutput": {},
+          "providerMetadata": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
           },
           "title": {
             "type": "string"
@@ -13015,6 +13635,21 @@
                 "$ref": "#/components/schemas/Event.global.disposed"
               },
               {
+                "$ref": "#/components/schemas/Event.tui.prompt.append"
+              },
+              {
+                "$ref": "#/components/schemas/Event.tui.command.execute"
+              },
+              {
+                "$ref": "#/components/schemas/Event.tui.toast.show"
+              },
+              {
+                "$ref": "#/components/schemas/Event.tui.session.select"
+              },
+              {
+                "$ref": "#/components/schemas/Event.tui.instructions.loaded"
+              },
+              {
                 "$ref": "#/components/schemas/Event.actor.registered"
               },
               {
@@ -13022,6 +13657,9 @@
               },
               {
                 "$ref": "#/components/schemas/Event.actor.stuck"
+              },
+              {
+                "$ref": "#/components/schemas/Event.actor.stalled"
               },
               {
                 "$ref": "#/components/schemas/Event.writer.cache_perf"
@@ -13036,12 +13674,6 @@
                 "$ref": "#/components/schemas/Event.task.updated"
               },
               {
-                "$ref": "#/components/schemas/Event.team.created"
-              },
-              {
-                "$ref": "#/components/schemas/Event.team.member.joined"
-              },
-              {
                 "$ref": "#/components/schemas/Event.metrics.model_call"
               },
               {
@@ -13051,19 +13683,13 @@
                 "$ref": "#/components/schemas/Event.metrics.agent_request"
               },
               {
-                "$ref": "#/components/schemas/Event.tui.prompt.append"
+                "$ref": "#/components/schemas/Event.metrics.try_best_detected"
               },
               {
-                "$ref": "#/components/schemas/Event.tui.command.execute"
+                "$ref": "#/components/schemas/Event.team.created"
               },
               {
-                "$ref": "#/components/schemas/Event.tui.toast.show"
-              },
-              {
-                "$ref": "#/components/schemas/Event.tui.session.select"
-              },
-              {
-                "$ref": "#/components/schemas/Event.tui.instructions.loaded"
+                "$ref": "#/components/schemas/Event.team.member.joined"
               },
               {
                 "$ref": "#/components/schemas/Event.workflow.phase"
@@ -13126,6 +13752,9 @@
                 "$ref": "#/components/schemas/Event.session.retry.attempt"
               },
               {
+                "$ref": "#/components/schemas/Event.session.try_best.detected"
+              },
+              {
                 "$ref": "#/components/schemas/Event.hook.executed"
               },
               {
@@ -13153,19 +13782,13 @@
                 "$ref": "#/components/schemas/Event.bash.interactive.replied"
               },
               {
-                "$ref": "#/components/schemas/Event.todo.updated"
-              },
-              {
                 "$ref": "#/components/schemas/Event.session.status"
               },
               {
                 "$ref": "#/components/schemas/Event.session.idle"
               },
               {
-                "$ref": "#/components/schemas/Event.session.goal"
-              },
-              {
-                "$ref": "#/components/schemas/Event.session.compacted"
+                "$ref": "#/components/schemas/Event.vcs.branch.updated"
               },
               {
                 "$ref": "#/components/schemas/Event.mcp.tools.changed"
@@ -13177,13 +13800,19 @@
                 "$ref": "#/components/schemas/Event.command.executed"
               },
               {
-                "$ref": "#/components/schemas/Event.vcs.branch.updated"
-              },
-              {
                 "$ref": "#/components/schemas/Event.worktree.ready"
               },
               {
                 "$ref": "#/components/schemas/Event.worktree.failed"
+              },
+              {
+                "$ref": "#/components/schemas/Event.todo.updated"
+              },
+              {
+                "$ref": "#/components/schemas/Event.session.goal"
+              },
+              {
+                "$ref": "#/components/schemas/Event.session.compacted"
               },
               {
                 "$ref": "#/components/schemas/Event.pty.created"
@@ -13542,6 +14171,20 @@
                   }
                 ]
               },
+              "headerTimeout": {
+                "description": "Timeout in milliseconds while waiting for response headers. OpenAI defaults to 300000 (5 minutes). Set to false to disable.",
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "boolean",
+                    "const": false
+                  }
+                ]
+              },
               "chunkTimeout": {
                 "description": "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.",
                 "type": "integer",
@@ -13594,7 +14237,7 @@
                       "properties": {
                         "field": {
                           "type": "string",
-                          "enum": ["reasoning_content", "reasoning_details"]
+                          "enum": ["reasoning", "reasoning_content", "reasoning_details"]
                         }
                       },
                       "required": ["field"]
@@ -13730,8 +14373,17 @@
                 }
               }
             }
+          },
+          "only_configured_models": {
+            "description": "When true, show only the models listed in this provider's `models` map and hide the rest of the catalog (acts as an implicit whitelist). Defaults to false: `models` only augments/overrides the catalog without filtering it.",
+            "type": "boolean"
           }
         }
+      },
+      "McpSamplingPolicy": {
+        "description": "Policy for MCP client-side sampling (`sampling/createMessage`) from this server: deny, ask (default), or allow.",
+        "type": "string",
+        "enum": ["deny", "ask", "allow"]
       },
       "McpLocalConfig": {
         "type": "object",
@@ -13765,6 +14417,9 @@
           "timeout": {
             "description": "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
             "type": "number"
+          },
+          "sampling": {
+            "$ref": "#/components/schemas/McpSamplingPolicy"
           }
         },
         "required": ["type", "command"]
@@ -13831,6 +14486,9 @@
           "timeout": {
             "description": "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
             "type": "number"
+          },
+          "sampling": {
+            "$ref": "#/components/schemas/McpSamplingPolicy"
           }
         },
         "required": ["type", "url"]
@@ -13854,7 +14512,7 @@
             "$ref": "#/components/schemas/ServerConfig"
           },
           "command": {
-            "description": "Command configuration, see https://opencode.ai/docs/commands",
+            "description": "Command configuration, see https://mimo.xiaomi.com/mimocode/commands",
             "type": "object",
             "propertyNames": {
               "type": "string"
@@ -13998,6 +14656,10 @@
             "description": "Small model to use for tasks like title generation in the format of provider/model",
             "type": "string"
           },
+          "vision_model": {
+            "description": "Model to use for image/vision subagent tasks in the format of provider/model. If unset, a vision-capable model is chosen automatically (in-house models preferred, then cheapest).",
+            "type": "string"
+          },
           "model_groups": {
             "description": "Named model groups (capability tiers, e.g. ultra/standard/lite). Each group has a default model and optional member models. A group name can be used anywhere a provider/model string is accepted.",
             "type": "object",
@@ -14051,7 +14713,7 @@
             }
           },
           "agent": {
-            "description": "Agent configuration, see https://opencode.ai/docs/agents",
+            "description": "Agent configuration, see https://mimo.xiaomi.com/mimocode/agents",
             "type": "object",
             "properties": {
               "plan": {
@@ -14308,6 +14970,41 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "max_context": {
+                "description": "Compact earlier than the model window. A token count (300000), a shorthand string (\"300K\", \"1M\", \"50%\"), or a map keyed by \"<providerID>/<modelID>\" with wildcards (\"openai/gpt-5*\"). Always clamped to the model's real window — it can only lower the compaction trigger, never raise it. 0 means no budget.",
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  }
+                ]
               }
             }
           },
@@ -14326,6 +15023,10 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "fork": {
+                "description": "Whether to fork the parent agent's message prefix into the writer session for prefix-cache reuse. Requires provider cache-breakpoint support. Default: false.",
+                "type": "boolean"
               },
               "push_caps": {
                 "description": "Per-section token caps for rebuild context (renderRebuildContext). Each section is loaded up to its cap so the rebuild stays within a predictable budget.",
@@ -14430,6 +15131,10 @@
           "memory": {
             "type": "object",
             "properties": {
+              "disable_write": {
+                "description": "Stop WRITING new memory. Default: false (memory is written). When true, no new memory is produced — session checkpoint.md, project MEMORY.md, notes.md and per-task progress.md are never written, the high-pressure 'save your learnings to memory' nudge is suppressed, and automatic dream/distill runs are skipped. Existing memory stays READABLE on demand: the builtin `memory` search tool keeps working and the files can still be read directly. What does stop is the AUTOMATIC injection — checkpoint rebuild is short-circuited to compaction while writing is off, and the memory dumps that a rebuild would have placed in context are only produced by that rebuild, so nothing is loaded on its own; an agent that wants memory has to search or read for it. Nothing is ever deleted — set it back to false to resume writing on top of the existing files.",
+                "type": "boolean"
+              },
               "cc_index": {
                 "description": "Index Claude Code memory (~/.claude/projects/<slug>/memory) and expose under scope='cc'. Default: false. Note: when enabled, every mimocode agent (build/explore/subagents) can search these memories via the builtin `memory` tool — including CC's `type: user` (your role/preferences) and `type: feedback` (your guidance) categories. CC originally writes them for future CC sessions; flipping this on widens the consumer set to mimocode agents on the same machine. Leave disabled (default) if you don't want personal context recallable from a prompt-injection-vulnerable agent.",
                 "type": "boolean"
@@ -14454,7 +15159,7 @@
             "type": "object",
             "properties": {
               "auto": {
-                "description": "Auto-trigger dream memory consolidation on new session start. Default: true.",
+                "description": "Auto-trigger dream memory consolidation on new session start. Default: false.",
                 "type": "boolean"
               },
               "interval_days": {
@@ -14469,7 +15174,7 @@
             "type": "object",
             "properties": {
               "auto": {
-                "description": "Auto-trigger distill workflow packaging on new session start. Default: true.",
+                "description": "Auto-trigger distill workflow packaging on new session start. Default: false.",
                 "type": "boolean"
               },
               "interval_days": {
@@ -14518,6 +15223,34 @@
               "continue_loop_on_deny": {
                 "description": "Continue the agent loop when a tool call is denied",
                 "type": "boolean"
+              },
+              "try_best": {
+                "description": "Try-best loop detector thresholds.",
+                "type": "object",
+                "properties": {
+                  "edit_window": {
+                    "description": "Recent edit events to compare (default 12).",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "edit_similarity": {
+                    "description": "Jaccard threshold for near-identical edit detection (default 0.8).",
+                    "type": "number"
+                  },
+                  "edit_matches": {
+                    "description": "Prior similar edits required before pausing (default 2).",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "action_streak": {
+                    "description": "Consecutive edit or verify actions without progress before pausing (default 4).",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                }
               },
               "mcp_timeout": {
                 "description": "Timeout in milliseconds for model context protocol (MCP) requests",
@@ -14828,7 +15561,7 @@
                     "properties": {
                       "field": {
                         "type": "string",
-                        "enum": ["reasoning_content", "reasoning_details"]
+                        "enum": ["reasoning", "reasoning_content", "reasoning_details"]
                       }
                     },
                     "required": ["field"]
@@ -15677,6 +16410,21 @@
             "$ref": "#/components/schemas/Event.global.disposed"
           },
           {
+            "$ref": "#/components/schemas/Event.tui.prompt.append"
+          },
+          {
+            "$ref": "#/components/schemas/Event.tui.command.execute"
+          },
+          {
+            "$ref": "#/components/schemas/Event.tui.toast.show"
+          },
+          {
+            "$ref": "#/components/schemas/Event.tui.session.select"
+          },
+          {
+            "$ref": "#/components/schemas/Event.tui.instructions.loaded"
+          },
+          {
             "$ref": "#/components/schemas/Event.actor.registered"
           },
           {
@@ -15684,6 +16432,9 @@
           },
           {
             "$ref": "#/components/schemas/Event.actor.stuck"
+          },
+          {
+            "$ref": "#/components/schemas/Event.actor.stalled"
           },
           {
             "$ref": "#/components/schemas/Event.writer.cache_perf"
@@ -15698,12 +16449,6 @@
             "$ref": "#/components/schemas/Event.task.updated"
           },
           {
-            "$ref": "#/components/schemas/Event.team.created"
-          },
-          {
-            "$ref": "#/components/schemas/Event.team.member.joined"
-          },
-          {
             "$ref": "#/components/schemas/Event.metrics.model_call"
           },
           {
@@ -15713,19 +16458,13 @@
             "$ref": "#/components/schemas/Event.metrics.agent_request"
           },
           {
-            "$ref": "#/components/schemas/Event.tui.prompt.append"
+            "$ref": "#/components/schemas/Event.metrics.try_best_detected"
           },
           {
-            "$ref": "#/components/schemas/Event.tui.command.execute"
+            "$ref": "#/components/schemas/Event.team.created"
           },
           {
-            "$ref": "#/components/schemas/Event.tui.toast.show"
-          },
-          {
-            "$ref": "#/components/schemas/Event.tui.session.select"
-          },
-          {
-            "$ref": "#/components/schemas/Event.tui.instructions.loaded"
+            "$ref": "#/components/schemas/Event.team.member.joined"
           },
           {
             "$ref": "#/components/schemas/Event.workflow.phase"
@@ -15788,6 +16527,9 @@
             "$ref": "#/components/schemas/Event.session.retry.attempt"
           },
           {
+            "$ref": "#/components/schemas/Event.session.try_best.detected"
+          },
+          {
             "$ref": "#/components/schemas/Event.hook.executed"
           },
           {
@@ -15815,19 +16557,13 @@
             "$ref": "#/components/schemas/Event.bash.interactive.replied"
           },
           {
-            "$ref": "#/components/schemas/Event.todo.updated"
-          },
-          {
             "$ref": "#/components/schemas/Event.session.status"
           },
           {
             "$ref": "#/components/schemas/Event.session.idle"
           },
           {
-            "$ref": "#/components/schemas/Event.session.goal"
-          },
-          {
-            "$ref": "#/components/schemas/Event.session.compacted"
+            "$ref": "#/components/schemas/Event.vcs.branch.updated"
           },
           {
             "$ref": "#/components/schemas/Event.mcp.tools.changed"
@@ -15839,13 +16575,19 @@
             "$ref": "#/components/schemas/Event.command.executed"
           },
           {
-            "$ref": "#/components/schemas/Event.vcs.branch.updated"
-          },
-          {
             "$ref": "#/components/schemas/Event.worktree.ready"
           },
           {
             "$ref": "#/components/schemas/Event.worktree.failed"
+          },
+          {
+            "$ref": "#/components/schemas/Event.todo.updated"
+          },
+          {
+            "$ref": "#/components/schemas/Event.session.goal"
+          },
+          {
+            "$ref": "#/components/schemas/Event.session.compacted"
           },
           {
             "$ref": "#/components/schemas/Event.pty.created"
@@ -16055,6 +16797,9 @@
             "type": "string",
             "enum": ["command", "mcp", "skill"]
           },
+          "bundled": {
+            "type": "boolean"
+          },
           "template": {
             "anyOf": [
               {
@@ -16131,6 +16876,9 @@
           },
           "prompt": {
             "type": "string"
+          },
+          "completionGate": {
+            "type": "boolean"
           },
           "options": {
             "type": "object",

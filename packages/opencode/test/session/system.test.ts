@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { $ } from "bun"
 import os from "os"
 import path from "path"
@@ -15,6 +15,17 @@ import { ProviderTest } from "../fake/provider"
 function load<A>(dir: string, fn: (svc: Agent.Interface) => Effect.Effect<A>) {
   return Effect.runPromise(provideInstance(dir)(Agent.Service.use(fn)).pipe(Effect.provide(Agent.defaultLayer)))
 }
+
+const codexMode = process.env.MIMOCODE_CODEX_MODE
+
+beforeEach(() => {
+  delete process.env.MIMOCODE_CODEX_MODE
+})
+
+afterEach(() => {
+  if (codexMode === undefined) delete process.env.MIMOCODE_CODEX_MODE
+  else process.env.MIMOCODE_CODEX_MODE = codexMode
+})
 
 describe("session.system", () => {
   test("keeps MiniMax CI branch guidance current and singular", () => {
@@ -164,6 +175,61 @@ describe("session.system", () => {
     expect(prompt).not.toContain("When possible, prefer parallelization over sequential tool calls")
   })
 
+  test("uses the GPT prompt for Codex models and the normal prompt for MiMo v2.5 models", () => {
+    const gpt = SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("gpt-5.4") }))[0]
+    const normal = SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("model-default") }))[0]
+    const prompts = ["mimo-v2.5", "mimo-v2.5-pro"].map(
+      (id) =>
+        SystemPrompt.provider(
+          ProviderTest.model({
+            id: ModelID.make(id),
+          }),
+        )[0],
+    )
+
+    expect(SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("gpt-5.4-codex") }))[0]).toBe(gpt)
+    expect(prompts).toEqual([normal, normal])
+    expect(SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("mimo-v2.6") }))[0]).toBe(gpt)
+  })
+
+  test("keeps every MiMo v2.5 alias on the normal prompt", () => {
+    const normal = SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("model-default") }))[0]
+    const models = [
+      ProviderTest.model({
+        id: ModelID.make("mimo-v2.5"),
+        api: { id: "mimo" } as never,
+      }),
+      ProviderTest.model({
+        id: ModelID.make("mimo"),
+        api: { id: "mimo-v2.5-pro" } as never,
+      }),
+      ProviderTest.model({
+        id: ModelID.make("vendor_mimo-v2.5"),
+        api: { id: "mimo" } as never,
+      }),
+      ProviderTest.model({
+        id: ModelID.make("mimo"),
+        family: "vendor-mimo-v2.5-pro",
+      }),
+    ]
+
+    expect(models.map((model) => SystemPrompt.provider(model)[0])).toEqual(models.map(() => normal))
+  })
+
+  test("Codex mode forces the GPT prompt for non-GPT models", () => {
+    const gpt = SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("gpt-5.4") }))[0]
+    process.env.MIMOCODE_CODEX_MODE = "true"
+    const prompt = SystemPrompt.provider(
+      ProviderTest.model({
+        id: ModelID.make("claude-sonnet-4-6"),
+        providerID: ProviderID.make("anthropic"),
+      }),
+    )[0]
+
+    expect(prompt).toBe(gpt)
+    expect(SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("mimo-v2.5") }))[0]).toBe(gpt)
+  })
+
   test("uses the same prompted subagent system across models", () => {
     const subagent = {
       name: "general",
@@ -193,7 +259,7 @@ describe("session.system", () => {
       }),
     )[0]
 
-    expect(prompt).toContain("You are MiMoCode, an agent based on the GPT-5 family")
+    expect(prompt).toBe(SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("gpt-5.4") }))[0])
   })
 
   test("does not inject vision capability guidance for GPT, Claude, or Gemini models", async () => {

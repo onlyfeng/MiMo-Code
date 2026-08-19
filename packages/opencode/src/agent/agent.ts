@@ -568,7 +568,10 @@ export const layer = Layer.effect(
           ? Option.getOrUndefined(yield* Effect.serviceOption(OtelTracer.OtelTracer))
           : undefined
 
-        const system = [PROMPT_GENERATE, ...(usesGPTToolset(resolved.id) ? [PROMPT_GENERATE_GPT] : [])]
+        const system = [
+          PROMPT_GENERATE,
+          ...(usesGPTToolset(resolved.id, resolved.api.id, resolved.family) ? [PROMPT_GENERATE_GPT] : []),
+        ]
         yield* plugin.trigger("experimental.chat.system.transform", { model: resolved }, { system })
         const existing = yield* InstanceState.useEffect(state, (s) => s.list())
 

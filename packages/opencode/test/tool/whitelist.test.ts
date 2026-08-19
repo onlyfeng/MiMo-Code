@@ -90,6 +90,11 @@ const mcp = Layer.succeed(
           inputSchema: z.object({}),
           execute: async () => ({ content: [{ type: "text" as const, text: "late mcp ran" }] }),
         }),
+        uncaptured_mcp: tool({
+          description: "test-only MCP tool outside the frozen parent membership",
+          inputSchema: z.object({}),
+          execute: async () => ({ content: [{ type: "text" as const, text: "uncaptured mcp ran" }] }),
+        }),
       }),
     prompts: () => Effect.succeed({}),
     resources: () => Effect.succeed({}),
@@ -398,7 +403,12 @@ describe("Tool whitelist (Task 14)", () => {
             for (const name of ["secret_custom", "secret_mcp"]) {
               try { await tools[name]({}) } catch (error) { errors.push(error.message) }
             }
-            return errors
+            const names = ALL_TOOLS.map((tool) => tool.name)
+            return {
+              errors,
+              catalogHasCustom: names.includes("secret_custom"),
+              catalogHasMcp: names.includes("secret_mcp"),
+            }
           `,
         })
         yield* llm.text("done")
@@ -425,6 +435,8 @@ describe("Tool whitelist (Task 14)", () => {
         if (!exec) return
         expect(exec.state.output).toContain("unknown tool: secret_custom")
         expect(exec.state.output).toContain("unknown tool: secret_mcp")
+        expect(exec.state.output).toContain('"catalogHasCustom": false')
+        expect(exec.state.output).toContain('"catalogHasMcp": false')
         expect(exec.state.metadata?.toolCalls).toBe(0)
         expect(exec.state.output).not.toContain("custom ran")
         expect(exec.state.output).not.toContain("mcp ran")
@@ -510,10 +522,19 @@ describe("Tool whitelist (Task 14)", () => {
 
         yield* llm.tool("exec", {
           code: `
+            const names = ALL_TOOLS.map((tool) => tool.name)
             const captured = await tools.secret_mcp({})
-            let late
-            try { await tools.late_mcp({}) } catch (error) { late = error.message }
-            return { captured: captured.output, late }
+            const late = await tools.late_mcp({})
+            let uncaptured
+            try { await tools.uncaptured_mcp({}) } catch (error) { uncaptured = error.message }
+            return {
+              catalogHasCaptured: names.includes("secret_mcp"),
+              catalogHasLate: names.includes("late_mcp"),
+              catalogHasUncaptured: names.includes("uncaptured_mcp"),
+              captured: captured.output,
+              late: late.output,
+              uncaptured,
+            }
           `,
         })
         yield* llm.text("done")
@@ -541,9 +562,13 @@ describe("Tool whitelist (Task 14)", () => {
         expect(exec.state.status).toBe("completed")
         if (exec.state.status !== "completed") return
         expect(exec.state.output).toContain("mcp ran")
-        expect(exec.state.output).toContain("unknown tool: late_mcp")
-        expect(exec.state.output).not.toContain("late mcp ran")
-        expect(exec.state.metadata?.toolCalls).toBe(1)
+        expect(exec.state.output).toContain("late mcp ran")
+        expect(exec.state.output).toContain("unknown tool: uncaptured_mcp")
+        expect(exec.state.output).not.toContain("uncaptured mcp ran")
+        expect(exec.state.output).toContain('"catalogHasCaptured": true')
+        expect(exec.state.output).toContain('"catalogHasLate": true')
+        expect(exec.state.output).toContain('"catalogHasUncaptured": false')
+        expect(exec.state.metadata?.toolCalls).toBe(2)
       }),
       { git: true, config: providerCfg },
     ),

@@ -74,6 +74,8 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   // Resolve tools using parent agent's permission and toolAllowlist
   const toolDefs = yield* toolRegistry.tools({
     modelID: input.model.id,
+    modelAPIID: input.model.api.id,
+    modelFamily: input.model.family,
     providerID: input.model.providerID,
     agent: input.agent,
     permission: input.permission,

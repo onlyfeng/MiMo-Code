@@ -161,6 +161,18 @@ const capture = (requests: Array<Omit<Permission.Request, "id" | "sessionID" | "
     }),
 })
 
+const stopOnDelete = (
+  requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">>,
+  stop: Error,
+) => ({
+  ...ctx,
+  ask: (request: Omit<Permission.Request, "id" | "sessionID" | "tool">) =>
+    Effect.sync(() => {
+      requests.push(request)
+      if (request.permission === "bash_delete") throw stop
+    }),
+})
+
 const mustTruncate = (result: {
   metadata: { truncated?: boolean; exit?: number | null } & Record<string, unknown>
   output: string
@@ -492,6 +504,122 @@ describe("tool.bash permissions", () => {
   // The temp-scoped delete exemption. The interesting assertions are the
   // fail-closed ones: an exemption that mis-fires silently authorizes an
   // irreversible action, so every case it CANNOT prove must still ask.
+  if (process.platform !== "win32") {
+    test("still asks for bash_delete when a PowerShell delete target depends on the child environment", async () => {
+      await using tmp = await tmpdir()
+      const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "mimocode-bash-env-delete-"))
+      const shellDir = await fs.mkdtemp(path.join(os.tmpdir(), "mimocode-bash-fake-pwsh-"))
+      const shell = path.join(shellDir, "pwsh")
+      const previousTemp = process.env.TEMP
+      await fs.symlink(Bun.which("true")!, shell)
+      process.env.TEMP = scratch
+
+      try {
+        await withShell({ label: "pwsh", shell }, async () => {
+          await Instance.provide({
+            directory: tmp.path,
+            fn: async () => {
+              const bash = await initBash()
+              const stop = new Error("stop after permission")
+              const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+              const failure = await Effect.runPromise(
+                bash.execute(
+                  {
+                    command: 'Remove-Item "$env:TEMP/victim.txt"',
+                    description: "Remove environment-derived path",
+                  },
+                  stopOnDelete(requests, stop),
+                ),
+              ).catch((error) => error)
+
+              expect(failure).toBe(stop)
+              expect(requests.some((request) => request.permission === "bash_delete")).toBe(true)
+            },
+          })
+        })()
+      } finally {
+        if (previousTemp === undefined) delete process.env.TEMP
+        else process.env.TEMP = previousTemp
+        await fs.rm(scratch, { recursive: true, force: true })
+        await fs.rm(shellDir, { recursive: true, force: true })
+      }
+    })
+
+    test("still asks for bash_delete when a POSIX delete target uses home expansion", async () => {
+      await using tmp = await tmpdir()
+      const shellDir = await fs.mkdtemp(path.join(os.tmpdir(), "mimocode-bash-fake-sh-"))
+      const shell = path.join(shellDir, "sh")
+      const descriptor = Object.getOwnPropertyDescriptor(os, "tmpdir")!
+      await fs.symlink(Bun.which("true")!, shell)
+
+      try {
+        // Model a valid host whose home directory itself lives under its temp
+        // root. The child environment may later replace HOME, so `~` cannot
+        // safely earn the temp-only delete exemption.
+        Object.defineProperty(os, "tmpdir", { configurable: true, value: () => os.homedir() })
+        await withShell({ label: "sh", shell }, async () => {
+          await Instance.provide({
+            directory: tmp.path,
+            fn: async () => {
+              const bash = await initBash()
+              const stop = new Error("stop after permission")
+              const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+              const failure = await Effect.runPromise(
+                bash.execute(
+                  { command: "rm -rf ~/victim", description: "Remove home-relative path" },
+                  stopOnDelete(requests, stop),
+                ),
+              ).catch((error) => error)
+
+              expect(failure).toBe(stop)
+              expect(requests.some((request) => request.permission === "bash_delete")).toBe(true)
+            },
+          })
+        })()
+      } finally {
+        Object.defineProperty(os, "tmpdir", descriptor)
+        await fs.rm(shellDir, { recursive: true, force: true })
+      }
+    })
+
+    test("still asks for bash_delete when a cmd delete target uses environment expansion", async () => {
+      await using tmp = await tmpdir()
+      const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "mimocode-bash-cmd-delete-"))
+      const shellDir = await fs.mkdtemp(path.join(os.tmpdir(), "mimocode-bash-fake-cmd-"))
+      const shell = path.join(shellDir, "cmd")
+      await fs.symlink(Bun.which("true")!, shell)
+
+      try {
+        await withShell({ label: "cmd", shell }, async () => {
+          await Instance.provide({
+            directory: tmp.path,
+            fn: async () => {
+              const bash = await initBash()
+              const stop = new Error("stop after permission")
+              const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+              const failure = await Effect.runPromise(
+                bash.execute(
+                  {
+                    command: 'del "%TEMP%\\victim"',
+                    workdir: scratch,
+                    description: "Remove environment-derived cmd path",
+                  },
+                  stopOnDelete(requests, stop),
+                ),
+              ).catch((error) => error)
+
+              expect(failure).toBe(stop)
+              expect(requests.some((request) => request.permission === "bash_delete")).toBe(true)
+            },
+          })
+        })()
+      } finally {
+        await fs.rm(scratch, { recursive: true, force: true })
+        await fs.rm(shellDir, { recursive: true, force: true })
+      }
+    })
+  }
+
   each("skips bash_delete for a delete confined to the OS temp dir", async () => {
     await using tmp = await tmpdir()
     const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "mimocode-bash-tmpdel-"))
