@@ -86,6 +86,7 @@ import type {
   PartUpdateErrors,
   PartUpdateResponses,
   PathGetResponses,
+  PermissionAskTimeoutResponses,
   PermissionAutoApproveDeleteResponses,
   PermissionListResponses,
   PermissionReplyErrors,
@@ -93,6 +94,8 @@ import type {
   PermissionRespondErrors,
   PermissionRespondResponses,
   PermissionRuleset,
+  PermissionSetAskTimeoutErrors,
+  PermissionSetAskTimeoutResponses,
   PermissionSetAutoApproveDeleteErrors,
   PermissionSetAutoApproveDeleteResponses,
   PermissionSetSkipAllErrors,
@@ -3065,7 +3068,7 @@ export class Permission extends HeyApiClient {
   /**
    * Set skip-all state
    *
-   * Enable or disable runtime auto-allow for permission asks. Applies instance-wide, so subagents inherit it. Explicit deny rules and forced-ask permissions (e.g. bash_delete) still apply.
+   * Enable or disable runtime auto-allow for permission asks in this directory instance. Same-directory subagents share the state; isolated worktrees and other directories do not. Explicit deny rules and forced-ask permissions (e.g. bash_delete) still apply.
    */
   public setSkipAll<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -3136,7 +3139,7 @@ export class Permission extends HeyApiClient {
   /**
    * Set auto-approve-delete state
    *
-   * Trust the model with irreversible deletes, skipping the extra bash_delete confirmation. Distinct from skip-all, which deliberately does NOT cover forced-ask permissions. Applies instance-wide (this directory only, so other directories served by the same process are unaffected) and subagents inherit it. Explicit `bash: deny` rules still block. Already-pending delete asks are left for a human — the command they guard is irreversible.
+   * Trust the model with irreversible deletes, skipping the extra bash_delete confirmation. Distinct from skip-all, which deliberately does NOT cover forced-ask permissions. Applies to this directory instance: same-directory subagents share it, while isolated worktrees and other directories do not. Explicit `bash: deny` rules still block. Already-pending delete asks are left for a human — the command they guard is irreversible.
    */
   public setAutoApproveDelete<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -3164,6 +3167,77 @@ export class Permission extends HeyApiClient {
       ThrowOnError
     >({
       url: "/permission/auto-approve-delete",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get permission ask timeout
+   *
+   * Timeout in milliseconds for permission asks that require human confirmation. null means no timeout (wait indefinitely). Applies to all asks — normal and forced-ask. Orthogonal to skip-all.
+   */
+  public askTimeout<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<PermissionAskTimeoutResponses, unknown, ThrowOnError>({
+      url: "/permission/ask-timeout",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Set permission ask timeout
+   *
+   * Set the timeout in milliseconds for permission asks that require human confirmation. null disables the timeout (wait indefinitely). Applies to this directory instance; same-directory subagents share it, while isolated worktrees and other directories do not. Orthogonal to skip-all — both can be enabled independently.
+   */
+  public setAskTimeout<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      ms?: number | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "ms" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      PermissionSetAskTimeoutResponses,
+      PermissionSetAskTimeoutErrors,
+      ThrowOnError
+    >({
+      url: "/permission/ask-timeout",
       ...options,
       ...params,
       headers: {

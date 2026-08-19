@@ -413,12 +413,17 @@ describe("exec", () => {
   }, 15_000)
 
   test("excluded tools are not dispatchable", async () => {
-    const defs = [fakeDef("task", async () => "should never run")]
+    const defs = [
+      fakeDef("task", async () => "should never run"),
+      fakeDef("mcp_tool_search", async () => "should never run"),
+    ]
     const result = await runToolScript(
-      `try { await tools.task({}) } catch (e) { return e.message }`,
+      `const listed = ALL_TOOLS.some((tool) => tool.name === "mcp_tool_search");
+       try { await tools.mcp_tool_search({ query: "docs" }) } catch (e) { return { listed, error: e.message } }`,
       defs,
     )
-    expect(result.output).toContain("unknown tool: task")
+    expect(result.output).toContain('"listed": false')
+    expect(result.output).toContain("unknown tool: mcp_tool_search")
   })
 
   test("skill_search is not dispatchable through the sandbox", async () => {
@@ -677,25 +682,55 @@ describe("exec", () => {
     expect(result.output).toContain('"tail": "after"')
     await fs.rm(nulFile, { force: true })
   })
+
+  test("discovers an MCP tool through ALL_TOOLS and dispatches its exact name", async () => {
+    const result = await runToolScript(
+      `const match = ALL_TOOLS.find((tool) => tool.name.includes("browser") && tool.name.includes("navigate"));
+       if (!match) return "not found";
+       const navigation = await tools[match.name]({ url: "https://example.com" });
+       return navigation.output`,
+      [],
+      undefined,
+      {
+        mcp: {
+          mcp__chrome_devtools__browser_navigate: {
+            description: "Navigate a browser page to a URL",
+            inputSchema: z.object({ url: z.string() }),
+            execute: async (args: { url: string }) => ({
+              output: `navigated: ${args.url}`,
+              metadata: { mcp: { isError: false } },
+              attachments: [],
+            }),
+          },
+        },
+      },
+    )
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output).toContain("navigated: https://example.com")
+  })
 })
 
 describe("renderToolScriptDeclarations", () => {
   test("renders TS signatures and skips excluded tools", () => {
     const defs = [
       fakeDef("read", async () => "x"),
+      fakeDef("mcp_tool_search", async () => "x"),
       fakeDef("task", async () => "x"),
       fakeDef("question", async () => "x"),
       fakeDef("skill_search", async () => "x"),
     ]
     const text = renderToolScriptDeclarations(defs)
     expect(text).toContain("read(input:")
+    expect(text).not.toContain("mcp_tool_search(input:")
+    expect(text).toContain("mcp__<server>__<tool>")
+    expect(text).toContain("declare const ALL_TOOLS")
     expect(text).not.toContain("task(input:")
     expect(text).not.toContain("question(input:")
     expect(text).not.toContain("skill_search(input:")
     expect(text).toContain("declare const tools")
   })
 
-  test("exclusion list covers agent control-flow tools and bash", () => {
+  test("exclusion list covers agent control-flow tools, MCP search, and bash", () => {
     for (const id of [
       "task",
       "question",
