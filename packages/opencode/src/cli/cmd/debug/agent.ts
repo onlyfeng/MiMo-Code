@@ -78,9 +78,13 @@ async function getAvailableTools(agent: Agent.Info) {
     Effect.gen(function* () {
       const provider = yield* Provider.Service
       const registry = yield* ToolRegistry.Service
-      const model = agent.model ?? (yield* provider.defaultModel())
+      const ref = agent.model ?? (yield* provider.defaultModel())
+      const model = yield* provider.getModel(ref.providerID, ref.modelID)
       return yield* registry.tools({
-        ...model,
+        providerID: model.providerID,
+        modelID: model.id,
+        modelAPIID: model.api.id,
+        modelFamily: model.family,
         agent,
       })
     }),

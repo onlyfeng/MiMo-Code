@@ -1457,6 +1457,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       for (const item of yield* registry.tools({
         modelID: input.model.id,
+        modelAPIID: input.model.api.id,
+        modelFamily: input.model.family,
         providerID: input.model.providerID,
         // A full-context fork inherits the parent's frozen wire membership.
         // Keep the child allowlist as an execution-time gate above instead of

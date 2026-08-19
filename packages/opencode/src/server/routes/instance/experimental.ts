@@ -16,6 +16,7 @@ import { errors } from "../../error"
 import { lazy } from "@/util/lazy"
 import { Effect, Option } from "effect"
 import { Agent } from "@/agent/agent"
+import { Provider } from "@/provider"
 import { jsonRequest, runRequest } from "./trace"
 
 const ConsoleOrgOption = z.object({
@@ -201,10 +202,14 @@ export const ExperimentalRoutes = lazy(() =>
           c,
           Effect.gen(function* () {
             const agents = yield* Agent.Service
+            const providers = yield* Provider.Service
             const registry = yield* ToolRegistry.Service
+            const resolved = yield* providers.getModel(ProviderID.make(provider), ModelID.make(model))
             return yield* registry.tools({
-              providerID: ProviderID.make(provider),
-              modelID: ModelID.make(model),
+              providerID: resolved.providerID,
+              modelID: resolved.id,
+              modelAPIID: resolved.api.id,
+              modelFamily: resolved.family,
               agent: yield* agents.get(yield* agents.defaultAgent()),
             })
           }),

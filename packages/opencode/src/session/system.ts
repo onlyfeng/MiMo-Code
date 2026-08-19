@@ -25,7 +25,7 @@ import { Skill } from "@/skill"
 import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
 import { isSkillSearchDisabled, type SkillSearchModel } from "@/skill/search"
 import { Flag } from "@/flag/flag"
-import { isMimoModel } from "@/tool/gpt"
+import { isMimoV25Model, usesMimoCodexMode } from "@/tool/gpt"
 
 function renderGitResult(result: Git.Result, fallback = "(none)") {
   if (result.exitCode !== 0) return fallback
@@ -36,8 +36,10 @@ const anthropicEnvironment = new Map<string, string>()
 
 export function provider(model: Provider.Model) {
   if (Flag.MIMOCODE_CODEX_MODE) return [PROMPT_GPT]
+  const ids = [model.id, model.api.id, model.family]
+  if (isMimoV25Model(...ids)) return [PROMPT_DEFAULT]
+  if (usesMimoCodexMode(...ids)) return [PROMPT_GPT]
   const prompt = (id: string) => {
-    if (isMimoModel(id)) return PROMPT_GPT
     if (id.includes("gpt-4") || id.includes("o1") || id.includes("o3")) return PROMPT_BEAST
     if (id.includes("gpt")) return PROMPT_GPT
     if (id.includes("gemini-")) return PROMPT_GEMINI

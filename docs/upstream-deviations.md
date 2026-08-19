@@ -15,8 +15,8 @@ upstream synchronization re-evaluates an entry.
 - Scope: fork `main` and propagation from `main` to `dev/compat`
 - Last reviewed: 2026-08-19
 - Upstream review range: `59f25b6ee95c3463bbe5b886366822d2fb8e3c4b`..
-  `fd1fd4966013288fff8a505675fb7b17f71a3922`
-- Fork behavior head reviewed: `f8bad7b6a9ef3151909790b50735f305daa2c6dc`
+  `b15b0971846861a4b25576d340ce1a4207f87712`
+- Fork behavior head reviewed: `a93222545d4ebff98a10aca1707192b507f4540c`
 
 ## FD-001 — `--yolo` must not temporarily mutate delete approval state
 
@@ -102,7 +102,12 @@ upstream synchronization re-evaluates an entry.
 - 2026-08-19 review: #2157's `MIMOCODE_CODEX_MODE` and MiMo/GPT prompt
   selection were adopted while retaining unconditional runtime environment and
   instruction additions plus the fork's skill permission/tool visibility
-  filtering.
+  filtering. #2161's narrower model selection was also adopted: MiMo v2.5 and
+  v2.5-pro use the normal prompt/toolset, while other recognized MiMo IDs retain
+  the Codex-mode path. The v2.5 decision takes priority when any catalog ID,
+  API ID, or family alias identifies that version, so prompt, MCP search, and
+  toolset selection cannot split; the instruction-delivery invariant remains
+  unchanged.
 - Reconsider only if: one immutable per-request decision gates both the UI
   signal and model payload, and tests prove that both surfaces contain the same
   instruction set.
@@ -162,3 +167,46 @@ upstream synchronization re-evaluates an entry.
   completes before directory bootstrap and all side effects, request/body/
   concurrency/cost bounds are defined, and shutdown first closes intake, then
   drains or cancels active work, and only then retires the instance.
+
+## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
+
+- Status: active
+- Upstream anchor: `866a5b8a2eff3970a0becb0d27f8f055e4624e19`, merged by
+  `b15b0971846861a4b25576d340ce1a4207f87712`
+- Fork contract: classify MiMo behavior from the complete resolved identity
+  `(model.id, model.api.id, model.family)` exactly once per surface. Explicit
+  `MIMOCODE_CODEX_MODE` overrides every model classification. Without that
+  override, an exact MiMo v2.5 or v2.5-pro match in any identity component wins
+  over every MiMo alias: it uses the normal prompt and toolset and does not
+  enable MCP Tool Search unless that feature is explicitly enabled. Other
+  recognized MiMo identities use the GPT prompt, Codex toolset, and MCP Tool
+  Search. Existing non-MiMo GPT toolset detection remains bound to the catalog
+  `model.id`; API and family aliases must not turn GPT-4 models into Codex-tool
+  models.
+- Rationale: the upstream implementation classifies catalog and API IDs in
+  separate fallbacks and recognizes the v2.5 exception at fewer prefix
+  boundaries than its general MiMo matcher. A model with `id=mimo-v2.5` and
+  `api.id=mimo` can therefore receive a GPT prompt while its tools and MCP
+  discovery use a different mode. Propagating every alias into the existing GPT
+  positive test is also unsafe: a real `gpt-4o-mini` with family `gpt-mini`
+  would incorrectly lose `read`/`edit`/`write` and gain
+  `exec`/`apply_patch`/`view_image`.
+- Required sync check: inspect
+  `packages/opencode/src/tool/gpt.ts`,
+  `packages/opencode/src/session/system.ts`,
+  `packages/opencode/src/session/prompt.ts`,
+  `packages/opencode/src/session/llm-request-prefix.ts`,
+  `packages/opencode/src/tool/registry.ts`,
+  `packages/opencode/src/tool/tool-script-ref.ts`,
+  `packages/opencode/src/tool/tool-script.ts`,
+  `packages/opencode/src/agent/agent.ts`,
+  `packages/opencode/src/cli/cmd/debug/agent.ts`,
+  `packages/opencode/src/server/routes/instance/experimental.ts`, and the
+  corresponding system, GPT helper, registry invocation, frozen-prefix, and
+  exec tests. Verify that live requests, frozen fork schemas, exec
+  `ALL_TOOLS`, agent generation, debug output, and the experimental tool-list
+  route all receive the same resolved identity.
+- Reconsider only if: the provider layer exposes one immutable model-mode value
+  that is consumed unchanged by prompt selection, MCP discovery, every tool
+  registry call, frozen prefix capture, and exec dispatch, with regressions for
+  alias conflicts, explicit overrides, and GPT-4 families.

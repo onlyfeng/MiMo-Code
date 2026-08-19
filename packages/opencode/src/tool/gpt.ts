@@ -7,17 +7,27 @@ export function isGPTModel(...values: Array<string | undefined>) {
 }
 
 export function isMcpToolSearchEnabled(enabled: boolean, ...modelIDs: Array<string | undefined>) {
-  return Flag.MIMOCODE_CODEX_MODE || enabled || isGPTModel(...modelIDs) || isMimoModel(...modelIDs)
+  if (Flag.MIMOCODE_CODEX_MODE || enabled) return true
+  if (isMimoV25Model(...modelIDs)) return false
+  return isGPTModel(...modelIDs) || usesMimoCodexMode(...modelIDs)
 }
 
-export function isMimoModel(...values: Array<string | undefined>) {
-  return values.some((value) => value && /(?:^|[/_-])mimo(?:$|[/_.-])/i.test(value))
+export function isMimoV25Model(...values: Array<string | undefined>) {
+  return values.some((value) => value && /(?:^|[/_-])mimo-v2\.5(?:-pro)?$/.test(value.toLowerCase()))
 }
 
-export function usesGPTToolset(modelID: string) {
+export function usesMimoCodexMode(...values: Array<string | undefined>) {
+  const ids = values.flatMap((value) => (value ? [value.toLowerCase()] : []))
+  if (isMimoV25Model(...ids)) return false
+  return ids.some((id) => /(?:^|[/_-])mimo(?:$|[/_.-])/.test(id))
+}
+
+export function usesGPTToolset(modelID: string, ...aliases: Array<string | undefined>) {
+  const modelIDs = [modelID, ...aliases]
+  if (Flag.MIMOCODE_CODEX_MODE) return true
+  if (isMimoV25Model(...modelIDs)) return false
   return (
-    Flag.MIMOCODE_CODEX_MODE ||
     (modelID.includes("gpt-") && !modelID.includes("oss") && !modelID.includes("gpt-4")) ||
-    isMimoModel(modelID)
+    usesMimoCodexMode(...modelIDs)
   )
 }

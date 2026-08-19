@@ -373,7 +373,9 @@ export const ToolScriptTool = Tool.define(
           const getDefs = toolScriptRegistry.current
           if (!getDefs) throw new Error("exec tool registry unavailable")
           const agentInfo = yield* agents.get(ctx.agent)
-          const model = ctx.extra?.model as { id: ModelID; providerID: ProviderID } | undefined
+          const model = ctx.extra?.model as
+            | { id: ModelID; providerID: ProviderID; api?: { id: string }; family?: string }
+            | undefined
           const toolWhitelist =
             ctx.extra?.toolWhitelist instanceof Set
               ? ctx.extra.toolWhitelist
@@ -384,7 +386,13 @@ export const ToolScriptTool = Tool.define(
           const defs = (
             yield* getDefs(
               model
-                ? { providerID: model.providerID, modelID: model.id, agent: agentInfo }
+                ? {
+                    providerID: model.providerID,
+                    modelID: model.id,
+                    modelAPIID: model.api?.id,
+                    modelFamily: model.family,
+                    agent: agentInfo,
+                  }
                 : undefined,
             )
           ).filter(

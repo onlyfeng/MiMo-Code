@@ -13,6 +13,7 @@ import { Instance } from "../../src/project/instance"
 import { Plugin } from "../../src/plugin"
 import { Bus } from "../../src/bus"
 import { Metrics } from "../../src/metrics"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 
 describe("sandbox non-deterministic mode", () => {
   test("deterministic:false keeps Date and Math.random", async () => {
@@ -139,10 +140,20 @@ async function runToolScript(
     timeoutSeconds?: number
     toolWhitelist?: Set<string> | string[]
     mcp?: Record<string, unknown>
+    model?: {
+      id: ModelID
+      providerID: ProviderID
+      api: { id: string }
+      family?: string
+    }
+    onRegistryInput?: (input: Parameters<NonNullable<typeof toolScriptRegistry.current>>[0]) => void
   },
 ) {
   const prev = toolScriptRegistry.current
-  toolScriptRegistry.current = () => Effect.succeed(defs)
+  toolScriptRegistry.current = (input) => {
+    opts?.onRegistryInput?.(input)
+    return Effect.succeed(defs)
+  }
   try {
     return await Instance.provide({
       directory: tmp,
@@ -163,6 +174,7 @@ async function runToolScript(
               abort: abort ?? new AbortController().signal,
               callID: "call_test",
               extra: {
+                ...(opts?.model ? { model: opts.model } : {}),
                 ...(opts?.toolWhitelist ? { toolWhitelist: opts.toolWhitelist } : {}),
                 ...(opts?.mcp ? { execMcp: { current: opts.mcp } } : {}),
               },
@@ -180,6 +192,29 @@ async function runToolScript(
 }
 
 describe("exec", () => {
+  test("passes the complete model identity to its late-bound registry", async () => {
+    let received: Parameters<NonNullable<typeof toolScriptRegistry.current>>[0] | undefined
+    const result = await runToolScript(`return ALL_TOOLS.length`, [], undefined, {
+      model: {
+        id: ModelID.make("mimo"),
+        providerID: ProviderID.make("xiaomi"),
+        api: { id: "mimo-v2.5-pro" },
+        family: "mimo-v2.6",
+      },
+      onRegistryInput: (input) => {
+        received = input
+      },
+    })
+
+    expect(result.metadata.status).toBe("completed")
+    expect(received).toMatchObject({
+      providerID: "xiaomi",
+      modelID: "mimo",
+      modelAPIID: "mimo-v2.5-pro",
+      modelFamily: "mimo-v2.6",
+    })
+  })
+
   test("cannot call tools outside the actor runtime whitelist", async () => {
     const result = await runToolScript(
       `return await tools.echo({ value: "blocked" })`,

@@ -36,7 +36,13 @@ export function bindToolScriptRef<T>(ref: LateBoundRef<T>, value: T) {
 
 export const toolScriptRegistry: {
   current:
-    | ((input?: { providerID: ProviderID; modelID: ModelID; agent: Agent.Info }) => Effect.Effect<Tool.Def[]>)
+    | ((input?: {
+        providerID: ProviderID
+        modelID: ModelID
+        modelAPIID?: string
+        modelFamily?: string
+        agent: Agent.Info
+      }) => Effect.Effect<Tool.Def[]>)
     | undefined
 } = { current: undefined }
 

@@ -123,6 +123,8 @@ export interface Interface {
   readonly tools: (model: {
     providerID: ProviderID
     modelID: ModelID
+    modelAPIID?: string
+    modelFamily?: string
     agent: Agent.Info
     permission?: Permission.Ruleset
     preserveMembership?: boolean
@@ -359,11 +361,13 @@ export const layer = Layer.effect(
     const available = Effect.fn("ToolRegistry.available")(function* (input: {
       providerID: ProviderID
       modelID: ModelID
+      modelAPIID?: string
+      modelFamily?: string
       agent: Agent.Info
       permission?: Permission.Ruleset
       preserveMembership?: boolean
     }) {
-      const useGPTTools = usesGPTToolset(input.modelID)
+      const useGPTTools = usesGPTToolset(input.modelID, input.modelAPIID, input.modelFamily)
       let filtered = (yield* all()).filter((tool) => {
         if (tool.id === ToolScriptTool.id) return useGPTTools || Flag.MIMOCODE_ENABLE_EXEC_TOOL
         if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {

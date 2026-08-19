@@ -48,7 +48,33 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
         expect(exec?.description).not.toContain("write(input:")
         expect(exec?.description).not.toContain("edit(input:")
         expect(yield* ids("anthropic/claude-sonnet-4-6")).not.toContain("exec")
-        expect(yield* ids("mimo-v2")).not.toContain("exec")
+        expect(yield* ids("mimo-v2")).toContain("exec")
+      }),
+    ),
+    30000,
+  )
+
+  it.live("keeps MiMo v2.5 aliases on the normal toolset", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const reg = yield* ToolRegistry.Service
+        const agents = yield* Agent.Service
+        const general = yield* agents.get("general")
+        if (!general) throw new Error("no general agent")
+        const tools = yield* reg.tools({
+          providerID: ProviderID.opencode,
+          modelID: ModelID.make("mimo"),
+          modelAPIID: "mimo-v2.5",
+          modelFamily: "mimo-v2.6",
+          agent: general,
+        })
+        const ids = tools.map((tool) => tool.id)
+
+        expect(ids).not.toContain("exec")
+        expect(ids).not.toContain("apply_patch")
+        expect(ids).toContain("edit")
+        expect(ids).toContain("write")
+        expect(ids).toContain("read")
       }),
     ),
     30000,
