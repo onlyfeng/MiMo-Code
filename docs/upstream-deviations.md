@@ -15,8 +15,8 @@ upstream synchronization re-evaluates an entry.
 - Scope: fork `main` and propagation from `main` to `dev/compat`
 - Last reviewed: 2026-08-19
 - Upstream review range: `59f25b6ee95c3463bbe5b886366822d2fb8e3c4b`..
-  `b15b0971846861a4b25576d340ce1a4207f87712`
-- Fork behavior head reviewed: `a93222545d4ebff98a10aca1707192b507f4540c`
+  `d0739e650db6837dc0dfce5ecc3ced992afbf6bc`
+- Fork behavior head reviewed: `3594dd8f9c04dc6910ef940704603f8e24e22724`
 
 ## FD-001 — `--yolo` must not temporarily mutate delete approval state
 
@@ -160,9 +160,17 @@ upstream synchronization re-evaluates an entry.
   `packages/opencode/src/llm-server/`,
   `packages/opencode/src/server/middleware.ts`,
   `packages/opencode/src/server/routes/instance/`, and all capability/token
-  tests and bundled documentation. Confirm that no capability route, implicit
-  listener, generated whole-server password, or address/token persistence has
-  re-entered through an automatic merge.
+  tests and bundled documentation, plus `packages/sdk/openapi.json`,
+  `packages/sdk/js/src/v2/gen/`, and `script/generate.ts`. Confirm that no
+  capability route, implicit listener, generated whole-server password,
+  address/token persistence, or generated `llmServer`/voice schema has
+  re-entered through an automatic merge, and that generated artifacts still
+  come from the fork source tree and pass the repository formatter.
+- 2026-08-19 review: #2162's upstream OpenAPI/SDK snapshot was not copied
+  because it included the rejected `llmServer` and voice capability schemas.
+  OpenAPI and the JavaScript SDK were regenerated from the fork source instead,
+  and the generator continues to run `script/format.ts` rather than relying on
+  manual diff editing.
 - Reconsider only if: the feature is explicitly enabled, token validation
   completes before directory bootstrap and all side effects, request/body/
   concurrency/cost bounds are defined, and shutdown first closes intake, then
