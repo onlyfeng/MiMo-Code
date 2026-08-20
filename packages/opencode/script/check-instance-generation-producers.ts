@@ -1589,9 +1589,14 @@ function scanCandidates(input: ParsedSource): Candidate[] {
     return normalize(resolved)
   }
   const includesStringType = (node: ts.Expression) => {
+    const seen = new Set<ts.Type>()
     const visit = (type: ts.Type): boolean => {
-      if (type.isUnionOrIntersection()) return type.types.some(visit)
-      return (type.flags & ts.TypeFlags.StringLike) !== 0 || input.checker.typeToString(type) === "string"
+      if (seen.has(type)) return false
+      seen.add(type)
+      if (type.isUnionOrIntersection() && type.types.some(visit)) return true
+      if ((type.flags & ts.TypeFlags.StringLike) !== 0 || input.checker.typeToString(type) === "string") return true
+      const constraint = input.checker.getBaseConstraintOfType(type)
+      return !!constraint && constraint !== type && visit(constraint)
     }
     return visit(input.checker.getTypeAtLocation(node))
   }
@@ -2529,12 +2534,16 @@ function authorityErrors(files: ParsedSource[]) {
   const errors: string[] = []
   for (const file of files) {
     const calls: ts.CallExpression[] = []
+    const assignments: ts.BinaryExpression[] = []
+    const bindingElements: ts.BindingElement[] = []
     const leaseDeclarations: ts.VariableDeclaration[] = []
     const valueDeclarations: ts.VariableDeclaration[] = []
     const rawHelperCalls = new Map<string, ts.CallExpression[]>()
-    const privateJoinCalls = new Map<string, ts.CallExpression[]>()
+    const privateJoinCalls = new Map<string, string[]>()
     const collect = (node: ts.Node) => {
       if (ts.isCallExpression(node)) calls.push(node)
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) assignments.push(node)
+      if (ts.isBindingElement(node) && ts.isIdentifier(node.name)) bindingElements.push(node)
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) valueDeclarations.push(node)
       if (
         ts.isVariableDeclaration(node) &&
@@ -2550,7 +2559,7 @@ function authorityErrors(files: ParsedSource[]) {
       node.forEachChild(collect)
     }
     collect(file.source)
-    const resolveValue = (identifier: ts.Identifier) =>
+    const resolveValueDeclaration = (identifier: ts.Identifier) =>
       valueDeclarations
         .filter(
           (declaration) =>
@@ -2559,7 +2568,8 @@ function authorityErrors(files: ParsedSource[]) {
             declaration.getStart(file.source) < identifier.getStart(file.source) &&
             (!nearestFunction(declaration) || nodeInside(nearestFunction(declaration)!, identifier)),
         )
-        .sort((left, right) => right.getStart(file.source) - left.getStart(file.source))[0]?.initializer
+        .sort((left, right) => right.getStart(file.source) - left.getStart(file.source))[0]
+    const resolveValue = (identifier: ts.Identifier) => resolveValueDeclaration(identifier)?.initializer
     const resolveLease = (expression: ts.Expression | undefined, at: ts.Node) => {
       if (!expression || !ts.isIdentifier(expression)) return undefined
       return leaseDeclarations
@@ -2611,10 +2621,33 @@ function authorityErrors(files: ParsedSource[]) {
       if (ts.isElementAccessExpression(expression) && ts.isStringLiteralLike(expression.argumentExpression)) {
         return expression.argumentExpression.text
       }
+      if (ts.isCallExpression(expression) && callProperty(expression)?.name === "bind") {
+        if (ts.isPropertyAccessExpression(expression.expression)) {
+          return resolvedMethodName(expression.expression.expression, seen)
+        }
+        if (ts.isElementAccessExpression(expression.expression)) {
+          return resolvedMethodName(expression.expression.expression, seen)
+        }
+      }
       if (!ts.isIdentifier(expression)) return undefined
+      const binding = bindingElements
+        .filter(
+          (element) =>
+            ts.isIdentifier(element.name) &&
+            element.name.text === expression.text &&
+            ts.isObjectBindingPattern(element.parent) &&
+            element.getStart(file.source) < expression.getStart(file.source) &&
+            (!nearestFunction(element) || nodeInside(nearestFunction(element)!, expression)),
+        )
+        .sort((left, right) => right.getStart(file.source) - left.getStart(file.source))[0]
+      if (binding) return nameText(binding.propertyName ?? binding.name)
       return resolvedMethodName(resolveValue(expression), seen)
     }
-    const capturedValue = (value: ts.Expression | undefined, seen = new Set<ts.Node>()): boolean => {
+    const sameContainer = (
+      value: ts.Expression | undefined,
+      declaration: ts.VariableDeclaration,
+      seen = new Set<ts.Node>(),
+    ): boolean => {
       if (!value || seen.has(value)) return false
       seen.add(value)
       if (
@@ -2623,31 +2656,103 @@ function authorityErrors(files: ParsedSource[]) {
         ts.isTypeAssertionExpression(value) ||
         ts.isSatisfiesExpression(value)
       ) {
-        return capturedValue(value.expression, seen)
+        return sameContainer(value.expression, declaration, seen)
       }
-      if (ts.isIdentifier(value)) return capturedValue(resolveValue(value), seen)
+      if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) {
+        return sameContainer(value.expression, declaration, seen)
+      }
+      if (!ts.isIdentifier(value)) return false
+      const resolved = resolveValueDeclaration(value)
+      if (resolved === declaration) return true
+      return !!resolved?.initializer && sameContainer(resolved.initializer, declaration, seen)
+    }
+    const capturedValue = (
+      value: ts.Expression | undefined,
+      seen = new Set<ts.Node>(),
+      at: ts.Node | undefined = value,
+    ): boolean => {
+      if (!value || seen.has(value)) return false
+      seen.add(value)
+      if (
+        ts.isParenthesizedExpression(value) ||
+        ts.isAsExpression(value) ||
+        ts.isTypeAssertionExpression(value) ||
+        ts.isSatisfiesExpression(value)
+      ) {
+        return capturedValue(value.expression, seen, at)
+      }
+      if (ts.isIdentifier(value)) {
+        const declaration = resolveValueDeclaration(value)
+        if (!declaration) return false
+        if (capturedValue(declaration.initializer, seen, at)) return true
+        const beforeUse = (mutation: ts.Node) =>
+          mutation.getStart(file.source) > declaration.getStart(file.source) &&
+          mutation.getStart(file.source) < (at?.getStart(file.source) ?? file.source.end) &&
+          nearestFunction(mutation) === nearestFunction(declaration)
+        const assigned = assignments.some((assignment) => {
+          if (!beforeUse(assignment)) return false
+          const receiver = ts.isPropertyAccessExpression(assignment.left) || ts.isElementAccessExpression(assignment.left)
+            ? assignment.left.expression
+            : undefined
+          return sameContainer(receiver, declaration) && capturedValue(assignment.right, new Set(seen), assignment)
+        })
+        if (assigned) return true
+        return calls.some((call) => {
+          if (!beforeUse(call) || !new Set(["push", "unshift", "splice", "add", "set"]).has(callProperty(call)?.name ?? "")) {
+            return false
+          }
+          const receiver = ts.isPropertyAccessExpression(call.expression) || ts.isElementAccessExpression(call.expression)
+            ? call.expression.expression
+            : undefined
+          return sameContainer(receiver, declaration) &&
+            call.arguments.some((argument) => capturedValue(argument, new Set(seen), call))
+        })
+      }
       if (ts.isObjectLiteralExpression(value)) {
         return value.properties.some((property) => {
-          if (ts.isPropertyAssignment(property)) return capturedValue(property.initializer, seen)
-          if (ts.isShorthandPropertyAssignment(property)) return capturedValue(property.name, seen)
-          if (ts.isSpreadAssignment(property)) return capturedValue(property.expression, seen)
+          if (ts.isPropertyAssignment(property)) return capturedValue(property.initializer, seen, at)
+          if (ts.isShorthandPropertyAssignment(property)) return capturedValue(property.name, seen, at)
+          if (ts.isSpreadAssignment(property)) return capturedValue(property.expression, seen, at)
           return false
         })
       }
       if (ts.isArrayLiteralExpression(value)) {
         return value.elements.some((element) => {
           if (ts.isOmittedExpression(element)) return false
-          if (ts.isSpreadElement(element)) return capturedValue(element.expression, seen)
-          return capturedValue(element, seen)
+          if (ts.isSpreadElement(element)) return capturedValue(element.expression, seen, at)
+          return capturedValue(element, seen, at)
         })
       }
       if (ts.isConditionalExpression(value)) {
-        return capturedValue(value.whenTrue, seen) || capturedValue(value.whenFalse, seen)
+        return capturedValue(value.whenTrue, seen, at) || capturedValue(value.whenFalse, seen, at)
       }
       return ts.isCallExpression(value) &&
         new Set(["captureInstanceExecution", "captureInstanceExecutionEffect"]).has(
           resolvedHelperName(value.expression) ?? "",
         )
+    }
+    const privateJoinTarget = (node: ts.CallExpression) => {
+      if (!new Set(["call", "apply"]).has(callProperty(node)?.name ?? "")) return undefined
+      if (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression)) {
+        return node.expression.expression
+      }
+      return undefined
+    }
+    const privateJoinCallSignature = (helper: string, node: ts.CallExpression) => {
+      if (ts.isIdentifier(node.expression) && node.expression.text === helper) return normalize(node)
+      const target = privateJoinTarget(node)
+      if (!target || !ts.isIdentifier(target) || target.text !== helper) return undefined
+      const invocation = callProperty(node)?.name
+      const args = invocation === "call"
+        ? [...node.arguments].slice(1)
+        : invocation === "apply" && node.arguments.length === 2 && ts.isArrayLiteralExpression(node.arguments[1]!) &&
+            node.arguments[1]!.elements.every(
+              (element) => !ts.isOmittedExpression(element) && !ts.isSpreadElement(element),
+            )
+          ? [...node.arguments[1]!.elements]
+          : undefined
+      if (!args) return undefined
+      return `${helper}(${args.map((argument) => normalize(argument)).join(",")})`
     }
     const lifecycleReceiver = (expression: ts.Expression | undefined) => {
       if (!expression) return false
@@ -2884,7 +2989,11 @@ function authorityErrors(files: ParsedSource[]) {
         ) {
           errors.push(`InstanceAdmissionRef cannot be provided outside its module: ${file.relative}`)
         }
-        const helper = resolvedHelperName(node.expression)
+        const equivalentPrivateJoin = privateJoinTarget(node)
+        const equivalentPrivateJoinHelper = resolvedHelperName(equivalentPrivateJoin)
+        const helper = equivalentPrivateJoinHelper && Object.hasOwn(privateJoinAllowlist, equivalentPrivateJoinHelper)
+          ? equivalentPrivateJoinHelper
+          : resolvedHelperName(node.expression)
         const allowed = helper ? helperAllowlist(helper) : undefined
         if (helper && Object.hasOwn(rawHelperSymbolAllowlist, helper)) {
           const symbol = enclosingDeclarationSymbol(node)
@@ -2898,8 +3007,9 @@ function authorityErrors(files: ParsedSource[]) {
           }
         } else if (helper && Object.hasOwn(privateJoinAllowlist, helper)) {
           const key = `${helper}:${file.relative}:${enclosingSymbol(node)}`
-          privateJoinCalls.set(key, [...(privateJoinCalls.get(key) ?? []), node])
-          if (!privateJoinCallContracts.get(key)?.includes(normalize(node))) {
+          const signature = privateJoinCallSignature(helper, node)
+          privateJoinCalls.set(key, [...(privateJoinCalls.get(key) ?? []), signature ?? normalize(node)])
+          if (!signature || !privateJoinCallContracts.get(key)?.includes(signature)) {
             errors.push(`private lifecycle join call is not exact-allowlisted: ${file.relative}:${enclosingSymbol(node)}:${helper}`)
           }
         } else if (helper && allowed && !allowed.has(file.relative)) {
@@ -2993,8 +3103,7 @@ function authorityErrors(files: ParsedSource[]) {
         (result, signature) => result.set(signature, (result.get(signature) ?? 0) + 1),
         new Map<string, number>(),
       )
-      const actual = matches.reduce((result, call) => {
-        const signature = normalize(call)
+      const actual = matches.reduce((result, signature) => {
         return result.set(signature, (result.get(signature) ?? 0) + 1)
       }, new Map<string, number>())
       if (

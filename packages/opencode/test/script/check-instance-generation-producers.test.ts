@@ -1378,6 +1378,29 @@ test("allowlisted wrappers may consume capture internally but cannot export the 
   )
 })
 
+test("capture containers cannot escape after later writes", async () => {
+  for (const [name, write] of [
+    ["assigned object", "const box: Record<string, unknown> = {}; box.execution = execution"],
+    ["pushed array", "const box: unknown[] = []; box.push(execution)"],
+  ] as const) {
+    const input = await fixture({
+      source: {
+        "effect/bootstrap-runtime.ts": [
+          "export function bootstrap() {",
+          "  const execution = captureInstanceExecution()",
+          `  ${write}`,
+          "  return box",
+          "}",
+        ].join("\n"),
+      },
+    })
+    await using _ = input.tmp
+    expect((await run(["--check"], input.env)).stderr, name).toContain(
+      "captured InstanceExecution cannot be re-exported",
+    )
+  }
+})
+
 test("private lifecycle capability fields remain implementation details", async () => {
   const input = await fixture({
     source: {
@@ -1720,6 +1743,23 @@ test("runSync method aliases cannot accept PromiseLike callbacks", async () => {
   expect((await run(["--check"], input.env)).stderr).toContain("runSync cannot accept async or PromiseLike callbacks")
 })
 
+test("destructured and bound runSync aliases cannot accept PromiseLike callbacks", async () => {
+  for (const [name, alias] of [
+    ["destructured", "const { runSync: run } = lease"],
+    ["bound", "const run = lease.runSync.bind(lease)"],
+  ] as const) {
+    const input = await fixture({
+      source: {
+        "effect/callback.ts": ["declare const lease: GenerationLease", alias, "run(() => fetch(url))"].join("\n"),
+      },
+    })
+    await using _ = input.tmp
+    expect((await run(["--check"], input.env)).stderr, name).toContain(
+      "runSync cannot accept async or PromiseLike callbacks",
+    )
+  }
+})
+
 test("raw helpers and private joins accept only their frozen symbol structure", async () => {
   const valid = await fixture({
     source: {
@@ -1781,6 +1821,51 @@ test("raw helpers and private joins accept only their frozen symbol structure", 
   })
   await using _duplicateJoin = duplicateJoin.tmp
   expect((await run(["--check"], duplicateJoin.env)).stderr).toContain(
+    "private lifecycle join call is not exact-allowlisted",
+  )
+
+})
+
+test("equivalent private joins obey exact fingerprints and cardinality", async () => {
+  for (const [name, exactCall, forgedCall] of [
+    [
+      "call",
+      "disposeDirectorySettled.call(undefined, info.directory)",
+      "disposeDirectorySettled.call(undefined, forged.directory)",
+    ],
+    [
+      "apply",
+      "disposeDirectorySettled.apply(undefined, [info.directory])",
+      "disposeDirectorySettled.apply(undefined, [forged.directory])",
+    ],
+  ] as const) {
+    const equivalent = await fixture({
+      source: { "workflow/runtime.ts": `export function spawnIsolated() { return ${exactCall} }\n` },
+    })
+    await using _equivalent = equivalent.tmp
+    expect(await run(["--check"], equivalent.env), name).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+
+    const forgedEquivalent = await fixture({
+      source: { "workflow/runtime.ts": `export function spawnIsolated() { return ${forgedCall} }\n` },
+    })
+    await using _forgedEquivalent = forgedEquivalent.tmp
+    expect((await run(["--check"], forgedEquivalent.env)).stderr, name).toContain(
+      "private lifecycle join call is not exact-allowlisted",
+    )
+  }
+
+  const duplicate = await fixture({
+    source: {
+      "workflow/runtime.ts": [
+        "export function spawnIsolated() {",
+        "  disposeDirectorySettled(info.directory)",
+        "  return disposeDirectorySettled.call(undefined, info.directory)",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _duplicate = duplicate.tmp
+  expect((await run(["--check"], duplicate.env)).stderr).toContain(
     "private lifecycle join call is not exact-allowlisted",
   )
 })
@@ -1899,6 +1984,27 @@ test("every StringLike disposer expression is rejected by its resolved type", as
     ["index-target.ts", "indexTarget"],
     ["alias-target.ts", "aliasTarget"],
     ["union-target.ts", "unionTarget"],
+  ]) {
+    expect(result.stderr).toContain(`unauthorized disposeInstance target: src/project/${file}:${symbol}`)
+  }
+})
+
+test("StringLike base constraints cannot bypass disposer target gates", async () => {
+  const input = await fixture({
+    source: {
+      "project/generic-target.ts":
+        "export function genericTarget<T extends string>(target: T) { disposeInstance(target) }\n",
+      "project/base-constraint-target.ts": [
+        "type PathTarget = string",
+        "export function baseConstraintTarget<T extends PathTarget>(target: T) { disposeInstance(target) }",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const result = await run(["--check-disposer-targets", "--allow-task1-adapter"], input.env)
+  for (const [file, symbol] of [
+    ["generic-target.ts", "genericTarget"],
+    ["base-constraint-target.ts", "baseConstraintTarget"],
   ]) {
     expect(result.stderr).toContain(`unauthorized disposeInstance target: src/project/${file}:${symbol}`)
   }
