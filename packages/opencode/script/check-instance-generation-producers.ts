@@ -64,7 +64,17 @@ type ParsedSource = {
   checker: ts.TypeChecker
 }
 
+type ParsedSourceRoots = Record<"src" | "test", string>
+type ParsedSourceContext = {
+  roots: ParsedSourceRoots
+  cache: Map<string, ParsedSource[]>
+}
+
 const parsedSourceCache = new Map<string, ParsedSource[]>()
+const defaultParsedSourceContext = {
+  roots: { src: defaultSourceRoot, test: defaultTestRoot },
+  cache: parsedSourceCache,
+}
 const defaultAnalysisBuildCounts = {
   production: 0,
   inventory: 0,
@@ -1257,9 +1267,16 @@ function hasStringDisposeInstanceDeclaration(root: string) {
   })
 }
 
-function parseSources(root: string, prefix: "src" | "test"): ParsedSource[] {
-  const cacheKey = root === defaultSourceRoot || root === defaultTestRoot ? `${prefix}:${root}` : undefined
-  const cached = cacheKey ? parsedSourceCache.get(cacheKey) : undefined
+function parseSources(
+  root: string,
+  prefix: "src" | "test",
+  context: ParsedSourceContext = defaultParsedSourceContext,
+): ParsedSource[] {
+  const cacheKey =
+    (prefix === "src" && root === context.roots.src) || (prefix === "test" && root === context.roots.test)
+      ? `${prefix}:${root}`
+      : undefined
+  const cached = cacheKey ? context.cache.get(cacheKey) : undefined
   if (cached) return cached
   const files = listFiles(root).sort()
   const resolveProjectImports = root === defaultSourceRoot
@@ -1296,8 +1313,13 @@ function parseSources(root: string, prefix: "src" | "test"): ParsedSource[] {
       checker,
     }
   })
-  if (cacheKey) parsedSourceCache.set(cacheKey, parsed)
+  if (cacheKey) context.cache.set(cacheKey, parsed)
   return parsed
+}
+
+export function createParsedSourceReaderForTest(roots: ParsedSourceRoots) {
+  const context = { roots, cache: new Map<string, ParsedSource[]>() }
+  return (root: string, prefix: "src" | "test") => parseSources(root, prefix, context).map((source) => source.text)
 }
 
 function nameText(name: ts.PropertyName | ts.BindingName | undefined): string | undefined {

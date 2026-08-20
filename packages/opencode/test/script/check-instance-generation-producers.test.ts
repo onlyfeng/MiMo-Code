@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import {
   check,
+  createParsedSourceReaderForTest,
   inspectCandidateSummaries,
   inspectDefaultAnalysisBuildCountsForTest,
   logicalOwnerGroupMembershipErrors,
@@ -45,6 +46,23 @@ test("default production analysis is built once per process", () => {
   expect(check(["--check-disposer-targets", "--allow-task1-adapter"])).toEqual([])
   expect(inspectCandidateSummaries().length).toBeGreaterThan(0)
   expect(inspectDefaultAnalysisBuildCountsForTest()).toEqual({ production: 1, inventory: 0 })
+})
+
+test("candidate summary snapshots cannot mutate the cached analysis", () => {
+  const snapshot = inspectCandidateSummaries()
+  const expected = {
+    length: snapshot.length,
+    anchor: snapshot[0]!.anchor,
+    signature: snapshot[0]!.candidates[0]!.signature,
+  }
+  snapshot[0]!.anchor = "polluted-summary"
+  snapshot[0]!.candidates[0]!.signature = "polluted-candidate"
+  snapshot.length = 0
+
+  const next = inspectCandidateSummaries()
+  expect(next).toHaveLength(expected.length)
+  expect(next[0]!.anchor).toBe(expected.anchor)
+  expect(next[0]!.candidates[0]!.signature).toBe(expected.signature)
 })
 
 test("default inventory analysis is built once without caching inventory errors", async () => {
@@ -100,7 +118,7 @@ test("the planned Task 0 inventory mode accepts the frozen starting universe", a
 })
 
 test("the planned Task 0 disposer mode accepts only the Task 1 adapter", async () => {
-  const result = await run(["--check-disposer-targets", "--allow-task1-adapter"])
+  const result = await runCLI(["--check-disposer-targets", "--allow-task1-adapter"])
   expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" })
 })
 
@@ -207,6 +225,32 @@ test("custom roots are reanalyzed after every source change", async () => {
   await Bun.write(file, "export const stable = true\n")
   expect(await run(args, input.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
   expect(inspectDefaultAnalysisBuildCountsForTest()).toEqual(before)
+})
+
+test("cross-role default roots are reanalyzed after source changes", async () => {
+  const input = await fixture({
+    source: { "probe.ts": 'export const version = "source-v1"\n' },
+    tests: { "probe.ts": 'export const version = "test-v1"\n' },
+  })
+  await using _ = input.tmp
+  const read = createParsedSourceReaderForTest({
+    src: input.env.MIMOCODE_INSTANCE_GENERATION_SOURCE_ROOT,
+    test: input.env.MIMOCODE_INSTANCE_GENERATION_TEST_ROOT,
+  })
+
+  expect(read(input.env.MIMOCODE_INSTANCE_GENERATION_TEST_ROOT, "src").join("\n")).toContain("test-v1")
+  await Bun.write(
+    path.join(input.env.MIMOCODE_INSTANCE_GENERATION_TEST_ROOT, "probe.ts"),
+    'export const version = "test-v2"\n',
+  )
+  expect(read(input.env.MIMOCODE_INSTANCE_GENERATION_TEST_ROOT, "src").join("\n")).toContain("test-v2")
+
+  expect(read(input.env.MIMOCODE_INSTANCE_GENERATION_SOURCE_ROOT, "test").join("\n")).toContain("source-v1")
+  await Bun.write(
+    path.join(input.env.MIMOCODE_INSTANCE_GENERATION_SOURCE_ROOT, "probe.ts"),
+    'export const version = "source-v2"\n',
+  )
+  expect(read(input.env.MIMOCODE_INSTANCE_GENERATION_SOURCE_ROOT, "test").join("\n")).toContain("source-v2")
 })
 
 test("inventory rows reject placeholders, empty cells, and stale anchors", async () => {
