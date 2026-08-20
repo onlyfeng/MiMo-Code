@@ -4,6 +4,7 @@ import path from "node:path"
 import {
   check,
   inspectCandidateSummaries,
+  inspectDefaultAnalysisBuildCountsForTest,
   logicalOwnerGroupMembershipErrors,
   plannedHandoffClosureErrors,
   plannedOwnerParentClosureErrors,
@@ -29,17 +30,65 @@ async function runCLI(args: string[], env: Record<string, string> = {}) {
   return { exitCode, stdout, stderr }
 }
 
-async function run(args: string[], env: Record<string, string> = {}) {
-  if (Object.keys(env).some((key) => key.startsWith("MIMOCODE_INSTANCE_GENERATION_"))) {
-    const errors = check(args, { ...process.env, ...env })
-    return {
-      exitCode: errors.length > 0 ? 1 : 0,
-      stdout: "",
-      stderr: errors.map((error) => `instance generation producer check failed: ${error}`).join("\n"),
-    }
+function run(args: string[], env: Record<string, string> = {}) {
+  const errors = check(args, { ...process.env, ...env })
+  return {
+    exitCode: errors.length > 0 ? 1 : 0,
+    stdout: "",
+    stderr: errors.map((error) => `instance generation producer check failed: ${error}`).join("\n"),
   }
-  return runCLI(args, env)
 }
+
+test("default production analysis is built once per process", () => {
+  expect(inspectDefaultAnalysisBuildCountsForTest()).toEqual({ production: 0, inventory: 0 })
+  expect(check(["--check-disposer-targets", "--allow-task1-adapter"])).toEqual([])
+  expect(check(["--check-disposer-targets", "--allow-task1-adapter"])).toEqual([])
+  expect(inspectCandidateSummaries().length).toBeGreaterThan(0)
+  expect(inspectDefaultAnalysisBuildCountsForTest()).toEqual({ production: 1, inventory: 0 })
+})
+
+test("default inventory analysis is built once without caching inventory errors", async () => {
+  const args = [
+    "--check",
+    "--allow-legacy-instance-settled-facades",
+    "--allow-task2-legacy-instance-ref-providers",
+  ]
+  const before = inspectDefaultAnalysisBuildCountsForTest()
+  expect(check(args)).toEqual([])
+  const built = inspectDefaultAnalysisBuildCountsForTest()
+  expect(built).toEqual({
+    production: before.production + (before.production === 0 ? 1 : 0),
+    inventory: before.inventory + (before.inventory === 0 ? 1 : 0),
+  })
+  const tmp = await tmpdir()
+  await using _ = tmp
+  const original = await Bun.file(
+    path.resolve(packageRoot, "../../docs/compose/spec/instance-generation-producer-inventory.md"),
+  ).text()
+  const invalidRemote = path.join(tmp.path, "invalid-remote.md")
+  const invalidBody = path.join(tmp.path, "invalid-body.md")
+  await Promise.all([
+    Bun.write(
+      invalidRemote,
+      original.replace("{workspaceID,sourceSlot,serverIncarnation}", "{workspaceID,generation}"),
+    ),
+    Bun.write(
+      invalidBody,
+      original.replace(
+        "replacement=registerGenerationBody | body | transferred",
+        "replacement=forgedBody | body | transferred",
+      ),
+    ),
+  ])
+  const remoteErrors = check(args, { ...process.env, MIMOCODE_INSTANCE_GENERATION_INVENTORY: invalidRemote })
+  expect(remoteErrors).toContain("planned RemoteRelayOwner contract is missing or changed")
+  expect(remoteErrors.join("\n")).not.toContain("transferred owner replacement wrapper does not match")
+  const bodyErrors = check(args, { ...process.env, MIMOCODE_INSTANCE_GENERATION_INVENTORY: invalidBody })
+  expect(bodyErrors.join("\n")).toContain("transferred owner replacement wrapper does not match")
+  expect(bodyErrors.join("\n")).not.toContain("planned RemoteRelayOwner contract is missing or changed")
+  expect(check(args)).toEqual([])
+  expect(inspectDefaultAnalysisBuildCountsForTest()).toEqual(built)
+})
 
 test("the planned Task 0 inventory mode accepts the frozen starting universe", async () => {
   const result = await run([
@@ -56,7 +105,7 @@ test("the planned Task 0 disposer mode accepts only the Task 1 adapter", async (
 })
 
 test("unknown flags fail closed", async () => {
-  const result = await run(["--check", "--future-flag"])
+  const result = await runCLI(["--check", "--future-flag"])
   expect(result.exitCode).toBe(1)
   expect(result.stderr).toContain("unknown flag: --future-flag")
 })
@@ -139,6 +188,26 @@ async function fixture(input: { source?: Record<string, string>; tests?: Record<
     },
   }
 }
+
+test("custom roots are reanalyzed after every source change", async () => {
+  const input = await fixture({ source: { "project/instance.ts": "export const stable = true\n" } })
+  await using _ = input.tmp
+  const file = path.join(input.env.MIMOCODE_INSTANCE_GENERATION_SOURCE_ROOT, "project/instance.ts")
+  const args = ["--check-disposer-targets"]
+  const before = inspectDefaultAnalysisBuildCountsForTest()
+
+  expect(await run(args, input.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  await Bun.write(file, 'export function invalidA() { disposeInstance("/tmp/a") }\n')
+  expect((await run(args, input.env)).stderr).toContain("legacy disposeInstance target requires --allow-task1-adapter")
+  await Bun.write(
+    file,
+    "declare const options: { path: string }\nexport function invalidB() { disposeInstance(options.path) }\n",
+  )
+  expect((await run(args, input.env)).stderr).toContain("legacy disposeInstance target requires --allow-task1-adapter")
+  await Bun.write(file, "export const stable = true\n")
+  expect(await run(args, input.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+  expect(inspectDefaultAnalysisBuildCountsForTest()).toEqual(before)
+})
 
 test("inventory rows reject placeholders, empty cells, and stale anchors", async () => {
   const placeholder = await fixture({

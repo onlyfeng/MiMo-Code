@@ -65,6 +65,14 @@ type ParsedSource = {
 }
 
 const parsedSourceCache = new Map<string, ParsedSource[]>()
+const defaultAnalysisBuildCounts = {
+  production: 0,
+  inventory: 0,
+}
+
+export function inspectDefaultAnalysisBuildCountsForTest() {
+  return { ...defaultAnalysisBuildCounts }
+}
 
 type Candidate = {
   file: string
@@ -90,6 +98,21 @@ type Summary = {
   fingerprint: string
   candidates: Candidate[]
 }
+
+type ProductionAnalysis = {
+  sources: ParsedSource[]
+  rawSummaries: Summary[]
+  summaries: Summary[]
+}
+
+type InventoryAnalysis = {
+  tests: ParsedSource[]
+  testFacades: Candidate[]
+  authorityErrorMessages: string[]
+}
+
+const defaultProductionAnalysisCache: { value?: ProductionAnalysis } = {}
+const defaultInventoryAnalysisCache: { value?: InventoryAnalysis } = {}
 
 type InventoryRow = {
   anchor: string
@@ -1947,14 +1970,30 @@ function summarizeCandidates(candidates: Candidate[]): Summary[] {
   })
 }
 
-function inspectRawCandidateSummaries(sourceRoot = defaultSourceRoot): Summary[] {
-  return summarizeCandidates(parseSources(sourceRoot, "src").flatMap(scanCandidates))
+function productionAnalysis(sourceRoot = defaultSourceRoot): ProductionAnalysis {
+  const build = () => {
+    const sources = parseSources(sourceRoot, "src")
+    const rawSummaries = summarizeCandidates(sources.flatMap(scanCandidates))
+    return Object.freeze({
+      sources,
+      rawSummaries,
+      summaries: rawSummaries.filter(
+        (summary) => rendererOnlyExclusions.get(summary.anchor) !== summary.fingerprint,
+      ),
+    })
+  }
+  if (sourceRoot !== defaultSourceRoot) return build()
+  if (defaultProductionAnalysisCache.value) return defaultProductionAnalysisCache.value
+  defaultProductionAnalysisCache.value = build()
+  defaultAnalysisBuildCounts.production++
+  return defaultProductionAnalysisCache.value
 }
 
 export function inspectCandidateSummaries(sourceRoot = defaultSourceRoot): Summary[] {
-  return inspectRawCandidateSummaries(sourceRoot).filter(
-    (summary) => rendererOnlyExclusions.get(summary.anchor) !== summary.fingerprint,
-  )
+  return productionAnalysis(sourceRoot).summaries.map((summary) => ({
+    ...summary,
+    candidates: summary.candidates.map((candidate) => ({ ...candidate })),
+  }))
 }
 
 export function rendererOnlyExclusionErrors(
@@ -3465,6 +3504,26 @@ function authorityErrors(files: ParsedSource[]) {
   return [...new Set(errors)]
 }
 
+function inventoryAnalysis(
+  production: ProductionAnalysis,
+  sourceRoot: string,
+  testRoot: string,
+): InventoryAnalysis {
+  const build = () => {
+    const tests = parseSources(testRoot, "test")
+    return Object.freeze({
+      tests,
+      testFacades: tests.flatMap(scanCandidates).filter((candidate) => candidate.kind === "legacy-settled-facade"),
+      authorityErrorMessages: authorityErrors([...production.sources, ...tests]),
+    })
+  }
+  if (sourceRoot !== defaultSourceRoot || testRoot !== defaultTestRoot) return build()
+  if (defaultInventoryAnalysisCache.value) return defaultInventoryAnalysisCache.value
+  defaultInventoryAnalysisCache.value = build()
+  defaultAnalysisBuildCounts.inventory++
+  return defaultInventoryAnalysisCache.value
+}
+
 function parseArgs(args: string[]): { mode?: Mode; enabled: Set<Flag>; errors: string[] } {
   const errors: string[] = []
   const known = new Set<string>([...modes, ...flags])
@@ -3498,12 +3557,10 @@ export function check(args: string[], env: NodeJS.ProcessEnv = process.env) {
   ) {
     return ["legacy disposeInstance target requires --allow-task1-adapter"]
   }
-  const sources = parseSources(sourceRoot, "src")
-  const candidates = sources.flatMap(scanCandidates)
-  const rawSummaries = summarizeCandidates(candidates)
-  const summaries = rawSummaries.filter(
-    (summary) => rendererOnlyExclusions.get(summary.anchor) !== summary.fingerprint,
-  )
+  const production = productionAnalysis(sourceRoot)
+  const sources = production.sources
+  const rawSummaries = production.rawSummaries
+  const summaries = production.summaries
 
   if (parsed.mode === "--check-disposer-targets") {
     const disposeTargets = summaries.filter((summary) =>
@@ -3516,15 +3573,16 @@ export function check(args: string[], env: NodeJS.ProcessEnv = process.env) {
     return checkAllowedShapes(summaries, "dispose-target", task1DisposerTargets, "unauthorized disposeInstance target")
   }
 
-  const tests = parseSources(testRoot, "test")
-  const errors = authorityErrors([...sources, ...tests])
+  const inventoryState = inventoryAnalysis(production, sourceRoot, testRoot)
+  const tests = inventoryState.tests
+  const errors = [...inventoryState.authorityErrorMessages]
   const enforceFrozenContracts = sourceRoot === defaultSourceRoot
   errors.push(...rendererOnlyExclusionErrors(sourceRoot, rawSummaries, enforceFrozenContracts))
   errors.push(...rendererOnlyExclusionDocumentErrors(inventory, sourceRoot, enforceFrozenContracts))
   const productionFacades = summaries.filter((summary) =>
     summary.candidates.some((candidate) => candidate.kind === "legacy-settled-facade"),
   )
-  const testFacades = tests.flatMap(scanCandidates).filter((candidate) => candidate.kind === "legacy-settled-facade")
+  const testFacades = inventoryState.testFacades
   if (!parsed.enabled.has("--allow-legacy-instance-settled-facades")) {
     if (productionFacades.length > 0 || testFacades.length > 0) {
       errors.push("legacy settled facade requires --allow-legacy-instance-settled-facades")
