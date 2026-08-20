@@ -45,6 +45,8 @@ import * as CheckpointContext from "./checkpoint-context"
 import { buildProgressDiff } from "./checkpoint-progress-reconcile"
 
 const log = Log.create({ service: "session.checkpoint" })
+const CHECKPOINT_WRITER_TOOLS = ["read", "write", "edit", "apply_patch", "glob", "grep", "task"] as const
+const checkpointWriterToolContract = `The ${CHECKPOINT_WRITER_TOOLS.join(", ")} tools are available; do not invoke others.`
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 60) + "\n... (truncated, full body at file)"
@@ -329,7 +331,8 @@ function composeWriterPrompt(input: {
 }): string {
   return [
     "<system-reminder>",
-    "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above. The read, write, edit, glob, grep, and task tools are available; do not invoke others.",
+    "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above.",
+    checkpointWriterToolContract,
     "",
     "========================================================================",
     "ABSOLUTE PATHS — USE THESE VERBATIM. NEVER COMPUTE, INFER, OR MODIFY.",
@@ -949,7 +952,7 @@ export const layer: Layer.Layer<
         description: `checkpoint writer for session ${input.sessionID} covering ${rangeDesc}`,
         task: promptText,
         context: "full",
-        tools: ["read", "write", "edit", "apply_patch", "glob", "grep", "task"],
+        tools: [...CHECKPOINT_WRITER_TOOLS],
         model: {
           providerID: input.model.providerID as ProviderID,
           modelID: input.model.modelID as ModelID,
