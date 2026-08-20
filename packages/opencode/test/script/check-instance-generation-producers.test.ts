@@ -1816,13 +1816,14 @@ test("transfer release paths dominate exits and child handles cannot escape befo
       "failure release must dominate every exceptional exit and rethrow the original error",
     ],
   ] as const
-  await Promise.all(
-    cases.map(async ([name, source, message]) => {
-      const input = await fixture({ source: { [`project/${name}.ts`]: source } })
-      await using _ = input.tmp
-      expect((await run(["--check"], input.env)).stderr).toContain(message)
-    }),
-  )
+  const input = await fixture({
+    source: Object.fromEntries(cases.map(([name, source]) => [`project/${name}.ts`, source])),
+  })
+  await using _ = input.tmp
+  const stderr = (await run(["--check"], input.env)).stderr
+  for (const [name, , message] of cases) {
+    expect(stderr, name).toContain(`${message}: src/project/${name}.ts:handoff`)
+  }
 })
 
 test("lifecycle authority checks structural callsites, escapes, types, and PromiseLike results", async () => {
@@ -1921,7 +1922,7 @@ test("runSync method aliases cannot accept PromiseLike callbacks", async () => {
 })
 
 test("authority aliases resolve only through enclosing lexical scopes", async () => {
-  for (const [name, source, message] of [
+  const cases = [
     [
       "value alias",
       [
@@ -2162,12 +2163,34 @@ test("authority aliases resolve only through enclosing lexical scopes", async ()
       ].join("\n"),
       "raw lifecycle helper call is not exact-allowlisted",
     ],
-  ] as const) {
-    const input = await fixture({
-      source: { [name.includes("raw helper") ? "effect/bootstrap-runtime.ts" : "effect/callback.ts"]: source },
-    })
-    await using _ = input.tmp
-    expect((await run(["--check"], input.env)).stderr, name).toContain(message)
+  ] as const
+  const methodCases = cases.filter(([name]) => !name.includes("raw helper"))
+  const rawCases = cases.filter(([name]) => name.includes("raw helper"))
+  const methodFile = (name: (typeof cases)[number][0]) => `effect/lexical-${name.replaceAll(" ", "-")}.ts`
+  const rawSymbol = (index: number) => (index === 0 ? "bootstrap" : `bootstrap${index}`)
+  const input = await fixture({
+    source: {
+      ...Object.fromEntries(methodCases.map(([name, source]) => [methodFile(name), `${source}\nexport {}`])),
+      "effect/bootstrap-runtime.ts": rawCases
+        .map(([, source], index) => {
+          if (index === 0) return source
+          return source
+            .replace(/\bbootstrap\b/g, rawSymbol(index))
+            .replace(/\bcapture\b/g, `capture${index}`)
+            .replace(/\bbenign\b/g, `benign${index}`)
+            .replace(/\bpick\b/g, `pick${index}`)
+        })
+        .join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const stderr = (await run(["--check"], input.env)).stderr
+  for (const [name, , message] of methodCases) {
+    expect(stderr, name).toContain(`${message}: src/${methodFile(name)}:`)
+  }
+  for (const [[name, , message], index] of rawCases.map((entry, index) => [entry, index] as const)) {
+    const expected = index === 0 ? message : "raw lifecycle helper is not allowlisted"
+    expect(stderr, name).toContain(`${expected}: src/effect/bootstrap-runtime.ts:${rawSymbol(index)}:`)
   }
 })
 
