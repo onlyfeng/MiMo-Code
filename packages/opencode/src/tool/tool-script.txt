@@ -35,7 +35,7 @@ The script environment provides JavaScript built-ins plus `tools`, `files`, and 
 
 - Call built-in tools, and other tool IDs that are valid JavaScript identifiers, with `await tools.name(input)`.
 - Call request-authorized MCP tools by their exact catalog name (`await tools.mcp__server__tool(input)` or `await tools[name](input)`); the same permission checks as direct calls apply.
-- `await tools.exec_command(...)` invokes the shell through the `bash` alias; only `await tools.mcp__server__tool(...)` invokes an MCP tool.
+- `exec_command` is reserved as the `bash` alias and is therefore unavailable inside `exec`; it cannot fall through to an MCP tool with that name.
 - MCP results carry parsed `structuredContent` in the `structured` field when the server provides it.
 - Use `Promise.all` or `Promise.allSettled` only for independent calls; at most 8 run concurrently.
 - Return a small JSON-serializable aggregate. Circular values, BigInt, and throwing getters fail execution.
