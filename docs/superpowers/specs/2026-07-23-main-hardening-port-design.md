@@ -54,7 +54,7 @@ unchanged after rebase.
 | Tool-history replay cap | Absent; persisted tool input/output/error can be replayed without a local size bound | Prototype exists in `session/message-v2.ts`, with incomplete edge-case coverage | Promote and strengthen in PR 2 while preserving current attachment routing |
 | Other model-visible caps | Absent on instruction, inbox, skill-list, synthetic data/resource/skill/command, and actor-state paths | Prototype exists, but inbox/skill wrappers can exceed 50 KiB and oversized skill XML loses its closing tag | Promote corrected wrapper-inclusive semantics in PR 3 against current `main` |
 | MaxMode judge caps | MaxMode is already executable through `experimental.maxMode` and the built-in `max` agent; candidate reasoning/text/tool input enter a second model call without bounds | Character-cap prototype exists, but its generic safety behavior is not compatibility-only | Put non-throwing serialization and an absolute judge-request byte cap on shared `main` in PR 3; keep only per-agent selection/retry/status extensions downstream |
-| Request preflight overflow | Provider-side overflow handling exists, but no aggregate request preflight | Prototype exists after the #35, #36, and #39 corrections | Promote generic behavior in PR 4 after PR 3, without moving MaxMode ownership |
+| Request preflight overflow | Provider-side overflow handling exists, but no aggregate request preflight | Prototype exists after the #35, #36, and #39 corrections, but its `messages: []` recovery estimate incorrectly discards the active turn and frozen-fork prefix | Promote a corrected recovery-floor classifier in PR 4 after PR 3, without moving MaxMode ownership |
 | MCP discovery and attachment routing | Request authorization, outer-schema loading, exec catalog membership, and native/synthetic attachment routing are separate contracts | Same contracts plus the cap prototype | Text caps must not become an authorization/discovery gate or alter attachment routing |
 | Model-aware skill guidance | Permission- and tool-visibility-aware guidance is selected after the resolved `(model.id, model.api.id, model.family)` decision | Same selection plus the cap prototype | PR 3 caps only the structured listing and must preserve FD-002/FD-005 behavior |
 
@@ -463,13 +463,20 @@ serializer.
   including CJK, emoji, and tiny budgets. The fixed `<session-state>` scaffold
   and following caller prompt are excluded; `context="none"` and
   `context="full"` remain unchanged.
+- One coupled integration fixture captures the exact
+  `TuiEvent.InstructionsLoaded.files` list and the provider-facing system
+  messages for both a normal step and a MaxMode candidate. Every non-empty
+  reported file contributes the same capped instruction block to both request
+  paths. The MaxMode assertion observes the candidate's actual provider request,
+  not only `additions`, `processArgs`, or `MaxStepInput`; the judge's independent
+  `JUDGE_SYSTEM` request is outside this file-delivery invariant.
 
 ### Focused Verification
 
 From `packages/opencode`:
 
 ```bash
-bun test test/session/instruction.test.ts test/inbox/render.test.ts test/session/system.test.ts test/session/prompt-effect.test.ts test/tool/actor.test.ts test/tool/tool-script.test.ts test/util/child-process-env.test.ts --timeout 60000
+bun test test/session/instruction.test.ts test/session/instructions-loaded-delivery.test.ts test/inbox/render.test.ts test/session/system.test.ts test/session/prompt-effect.test.ts test/tool/actor.test.ts test/tool/tool-script.test.ts test/util/child-process-env.test.ts --timeout 60000
 bun typecheck
 ```
 
@@ -484,8 +491,11 @@ PRs modify request construction and compatibility propagation.
 ### Problem
 
 Provider-side context-overflow errors arrive only after request construction and
-network dispatch. They also cannot distinguish a recoverable history overflow
-from a fixed system/tool prefix that compaction can never shrink.
+network dispatch. They also cannot distinguish discardable history from the
+fixed request prefix and active model-visible turn that the selected recovery
+cannot shrink. Treating the current user text, attachments, or frozen-fork
+prefix as removable would route an unrecoverable request into repeated rebuild
+or compaction instead of returning one terminal error.
 
 The guard must conservatively approximate the request using the tools that
 survive permission and per-message filtering. Counting every registered tool
@@ -506,7 +516,24 @@ In `session/overflow.ts`, add pure request estimation and classification:
 - compare against `usable()` with a guard of the smaller of 5,000 tokens or 10%
   of the usable window; and
 - classify as `ok`, recoverable `overflow`, or unrecoverable
-  `overflow-static` after re-estimating with conversation messages removed.
+  `overflow-static` against both the full request and a caller-supplied recovery
+  floor. The floor retains every message the selected recovery cannot remove:
+  the model-visible current turn on normal paths, all frozen inherited messages
+  plus the current own turn on frozen-fork paths, and request-local synthetic
+  messages appended for dispatch. Only history proven discardable before that
+  boundary may be omitted; never classify by re-estimating with `messages: []`.
+
+The current-turn boundary is the exact `lastUser.id` used to assemble the
+request, not the last `role: "user"` after conversion: synthetic attachment and
+tool envelopes may also use that role. Add a source-ID-aware conversion helper
+that returns the complete provider message list and an exact suffix drawn from
+that same converted list. If the source boundary is missing or conversion cannot
+prove prefix alignment, fail closed by treating the complete message list as the
+floor. The normal prefix builder returns the verified suffix with
+`inheritedMessages`; the frozen-fork path derives the same suffix from its own
+post-watermark messages and prepends the immutable `forkCtx.inheritedMessages`
+to the recovery floor. Final-step `MAX_STEPS` and other request-local synthetic
+messages are appended to both the full request and its floor.
 
 First extract/export `LLM.filterActiveTools` from the current inline active-tool
 filter and make `LLM.stream` use it without changing emitted tool membership.
@@ -550,9 +577,11 @@ For recoverable overflow:
 - enter the existing actor-compaction or main checkpoint-rebuild/compaction
   path without calling the provider.
 
-For static-prefix overflow:
+For recovery-floor overflow (`overflow-static`):
 
-- finalize the assistant as `error` with a clear `ModelError`;
+- finalize the assistant as `error` with a clear `ModelError` explaining that
+  the fixed request prefix and active turn still exceed the usable context after
+  discardable history is removed;
 - publish the existing session error event;
 - stop instead of entering an unrecoverable compaction loop; and
 - do not call the provider.
@@ -576,19 +605,25 @@ are handled before the classifier, so `session/classify.ts` does not change.
 ### Acceptance
 
 - Pure tests cover ASCII and multibyte estimation, small windows, disabled
-  compaction, filtered tools, bigint/function/symbol/circular data,
-  recoverable message overflow, static-prefix overflow, and the heuristic
-  80 KiB schema contribution cap.
+  compaction, filtered tools, bigint/function/symbol/circular data, recoverable
+  old-history overflow, recovery-floor overflow from current user text and
+  attachments, current-turn assistant/tool envelopes, frozen inherited
+  messages, request-local synthetic messages, and the heuristic 80 KiB schema
+  contribution cap.
 - A real AI SDK `tool(jsonSchema(hugeSchema))` test proves descriptor
   materialization observes the provider-visible schema rather than serializing
   a getter/function marker, and excludes `execute`.
 - A live recoverable-overflow test proves the placeholder is finalized, the
   first oversized step reaches no provider call, and an observable
   compaction/rebuild boundary owns the next transition.
-- A live static-prefix test proves one clear terminal error and zero provider
-  calls, with no compaction loop.
+- Live current-text and attachment floor tests prove one clear terminal error,
+  zero provider calls, zero recovery boundaries, and no compaction loop. A
+  history-only live overflow proves recovery occurs once and the next dispatch
+  still contains the original current user text and attachment.
 - A bounded hidden-agent test proves preflight is skipped.
-- Normal-main and frozen-fork request paths are both covered.
+- Normal-main and frozen-fork request paths are both covered. Frozen inherited
+  messages and the fork's active own turn always remain in the floor; only the
+  fork's older own history may be classified as discardable.
 - One MCP test proves unloaded request-authorized schemas are not counted while
   request-scoped `exec` can still dispatch them; after search-load, the active
   schema is counted.
@@ -605,7 +640,7 @@ are handled before the classifier, so `session/classify.ts` does not change.
 From `packages/opencode`:
 
 ```bash
-bun test test/session/overflow.test.ts test/session/prompt-effect.test.ts --timeout 30000
+bun test test/session/overflow.test.ts test/session/message-v2.test.ts test/session/llm-request-prefix.test.ts test/session/prompt-effect.test.ts test/session/fork-prefix-invariant.test.ts test/session/llm.test.ts test/cli/tui/context-usage.test.ts --timeout 60000
 bun typecheck
 ```
 

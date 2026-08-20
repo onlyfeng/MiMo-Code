@@ -342,9 +342,23 @@ merge rather than carrying a second implementation:
 
 For every generated block, assert `Buffer.byteLength(block, "utf8") <= MODEL_VISIBLE_TEXT_CAP_BYTES`. Include local/global/remote instructions, plain inbox, completed/failed actor notifications, one huge skill, many skills, CJK, emoji, and tiny remaining budgets.
 
-- [ ] **Step 2: Add the FD-002 coupled instruction regression**
+- [ ] **Step 2: Add the FD-002 coupled normal/MaxMode instruction regression**
 
-In one scenario, capture the `TuiEvent.InstructionsLoaded` file list and the downstream `streamText` system payload in `instructions-loaded-delivery.test.ts`. Assert every non-empty reported file contributes capped content to the same request.
+In one controlled fixture, create non-empty `AGENTS.md` and `CLAUDE.md` files
+with unique markers, enable MaxMode with one candidate, and run one primary
+`build` session and one primary `max` session. Subscribe to
+`TuiEvent.InstructionsLoaded` before each loop and capture the actual
+TestLLMServer request bodies.
+
+Assert that both runs publish the same expected non-empty file set. For every
+reported file, assert its exact capped
+`Instructions from: <absolute path>\n<content>` block appears in both the normal
+provider-facing system messages and the MaxMode candidate's provider-facing
+system messages. Do not satisfy this regression by inspecting `additions`,
+`processArgs`, or `MaxStepInput` before `LLM.stream`. Configure
+`experimental.maxMode.candidates: 1` and assert the MaxMode run makes exactly one
+provider call; `judge` short-circuits for one survivor, so that call is the real
+candidate request rather than the independent judge request.
 
 - [ ] **Step 3: Implement reserved-wrapper caps**
 
@@ -413,7 +427,8 @@ Run and preserve assertions that a request-authorized MCP tool can be dispatched
 cd packages/opencode
 env -u MIMOCODE_EXPERIMENTAL -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH -u MIMOCODE_CODEX_MODE \
   bun test --timeout 60000 \
-  test/session/instruction.test.ts test/inbox/render.test.ts test/session/system.test.ts \
+  test/session/instruction.test.ts test/session/instructions-loaded-delivery.test.ts \
+  test/inbox/render.test.ts test/session/system.test.ts \
   test/session/prompt-effect.test.ts test/session/max-mode.test.ts \
   test/tool/actor.test.ts test/tool/tool-script.test.ts \
   test/tool/whitelist.test.ts test/util/child-process-env.test.ts
@@ -439,7 +454,7 @@ After exact-head CI and approval, merge to `main`, then propagate `main -> dev/c
 
 **Interfaces:**
 - Consumes: `contextWindow`, `usable`, Task 2's byte helper and `safeStringify`, and current `LLM.resolveTools` output.
-- Produces: `LLM.filterActiveTools(tools, activeTools)`, a trusted-boundary `LLM.materializeWireToolDescriptors(...)`, `estimateRequestTokens`, and `classifyRequestOverflow` returning `ok | overflow | overflow-static` with token measurements.
+- Produces: `LLM.filterActiveTools(tools, activeTools)`, a trusted-boundary `LLM.materializeWireToolDescriptors(...)`, `estimateRequestTokens`, and `classifyRequestOverflow` returning `ok | overflow | overflow-static` with `requestTokens` and `recoveryFloorTokens` measurements.
 
 - [ ] **Step 1: Extract the exact wire-tool filter with parity tests**
 
@@ -458,11 +473,19 @@ Replace the inline filter in `LLM.stream` and prove the emitted tool keys are un
 
 - [ ] **Step 2: Add RED pure-estimator tests**
 
-Cover ASCII/multibyte requests, circular/bigint/function/symbol data, the 80 KiB schema contribution cap, filtered tools, recoverable history overflow, static-prefix overflow, `compaction.max_context`, disabled auto compaction, unknown context, and a provider model already clamped to 372K. Build at least one real AI SDK `tool({ inputSchema: jsonSchema(hugeSchema) })`. Capture the selected descriptor immediately before the real provider/`streamText` request and compare its name, description, and JSON schema to the estimator's materialized descriptor byte-for-byte; assert the large schema is counted and `execute` is absent.
+Cover ASCII/multibyte requests, circular/bigint/function/symbol data, the 80 KiB schema contribution cap, filtered tools, recoverable old-history overflow, recovery-floor overflow from current user text and file content, current-turn assistant/tool envelopes, immutable frozen messages, request-local synthetic messages, `compaction.max_context`, disabled auto compaction, unknown context, and a provider model already clamped to 372K. Build at least one real AI SDK `tool({ inputSchema: jsonSchema(hugeSchema) })`. Capture the selected descriptor immediately before the real provider/`streamText` request and compare its name, description, and JSON schema to the estimator's materialized descriptor byte-for-byte; assert the large schema is counted and `execute` is absent.
 
 - [ ] **Step 3: Implement the estimator and classifier**
 
-Use the larger of the existing character estimate and UTF-8 bytes divided by three. Compare against `usable({ cfg, model })` with a guard of `Math.min(5_000, usableTokens * 0.1)`. Re-estimate with `messages: []` to distinguish `overflow-static`; do not independently classify the model. The estimator consumes only the materialized pure descriptors; descriptor materialization is the explicit trusted getter boundary and must happen once for the same selected tool set used by dispatch.
+Use the larger of the existing character estimate and UTF-8 bytes divided by
+three. Compare against `usable({ cfg, model })` with a guard of
+`Math.min(5_000, usableTokens * 0.1)`. Make
+`recoveryFloorMessages: ModelMessage[]` a required classifier input and
+re-estimate with that caller-supplied floor to distinguish `overflow-static`;
+never substitute `messages: []` and never independently classify the model. The
+estimator consumes only the materialized pure descriptors; descriptor
+materialization is the explicit trusted getter boundary and must happen once
+for the same selected tool set used by dispatch.
 
 - [ ] **Step 4: Verify and commit the pure layer**
 
@@ -479,18 +502,30 @@ git commit -m "feat(session): classify request overflow before dispatch"
 ### Task 7: PR 4 — Integrate preflight into normal and frozen-fork requests
 
 **Files:**
+- Modify: `packages/opencode/src/session/message-v2.ts`
+- Modify: `packages/opencode/src/session/llm-request-prefix.ts`
 - Modify: `packages/opencode/src/session/prompt.ts`
+- Modify: `packages/opencode/test/session/message-v2.test.ts`
+- Modify: `packages/opencode/test/session/llm-request-prefix.test.ts`
 - Modify: `packages/opencode/test/session/prompt-effect.test.ts`
 - Modify: `packages/opencode/test/session/fork-prefix-invariant.test.ts`
 - Modify: `packages/opencode/test/cli/tui/context-usage.test.ts`
 
 **Interfaces:**
 - Consumes: Task 6's classifier and `LLM.filterActiveTools`; `processArgs.tools` plus `processArgs.activeTools` define the outer wire schemas.
+- Produces: `MessageV2.toModelMessagesWithCurrentTurnEffect(...)`, returning the complete converted messages and a `currentTurnMessages` suffix anchored to the exact source `lastUser.id`; `buildLLMRequestPrefix` forwards that suffix for the normal path.
 - Produces: provider-free recovery for `overflow`, terminal error for `overflow-static`, and unchanged provider-signalled overflow fallback.
 
 - [ ] **Step 1: Add RED live preflight tests**
 
-Assert a recoverable oversized request finalizes its placeholder as cancelled, makes zero provider calls on that step, and enters observable recovery. Assert a static-only overflow finalizes one `ModelError`, emits the existing session error event, makes zero provider calls, and stops without compaction looping.
+Assert old oversized history plus a small current turn finalizes its placeholder
+as cancelled, makes zero provider calls on that step, enters observable recovery
+once, and sends the unchanged current text/file content on the next dispatch.
+Assert oversized current user text and file content each finalize one `ModelError`,
+emit the existing session error event, make zero provider calls, create zero
+recovery boundaries, and stop without looping. The error states that the fixed
+prefix and active request still do not fit after discardable history is removed;
+it must not claim that only system/tool schemas overflowed.
 
 - [ ] **Step 2: Add MCP wire-membership regressions**
 
@@ -498,10 +533,49 @@ Prove an unloaded but request-authorized MCP schema is not counted in the outer 
 
 - [ ] **Step 3: Add identity/fork/MaxMode guard regressions**
 
-Cover a MiMo v2.5 alias conflict, another MiMo model, normal main, frozen fork, final-step `toolChoice: "none"`, structured output, and a native hidden bounded computation. Assert preflight consumes the already-selected prompt/tools and does not run for the hidden bounded computation.
+Cover a MiMo v2.5 alias conflict, another MiMo model, normal main, frozen fork,
+final-step `toolChoice: "none"`, structured output, and a native hidden bounded
+computation. Assert preflight consumes the already-selected prompt/tools and
+does not run for the hidden bounded computation. In the frozen-fork case, prove
+that immutable `forkCtx.inheritedMessages` plus the active own turn remain in the
+floor while only older own history is discardable; an oversized frozen prefix
+must terminate rather than repeatedly compact the actor slice. Assert the
+final-step `MAX_STEPS` message is present in both the full request and its floor.
 
 - [ ] **Step 4: Integrate one preflight function at the process boundary**
 
+Add `MessageV2.toModelMessagesWithCurrentTurnEffect(...)` as a source-ID-aware
+conversion helper with this contract:
+
+```ts
+toModelMessagesWithCurrentTurnEffect(
+  input: WithParts[],
+  model: Provider.Model,
+  currentUserID: MessageID,
+  options?: { stripMedia?: boolean },
+): Effect.Effect<{
+  messages: ModelMessage[]
+  currentTurnMessages: ModelMessage[]
+}>
+```
+
+During the existing source-to-UI-message pass, record the UI boundary before the
+message whose exact source ID is `currentUserID`. Convert the complete normalized
+UI list and its pre-boundary prefix with the same tool-output mapping. When the
+converted prefix is deep-equal to the corresponding prefix of the complete
+conversion using Node's `isDeepStrictEqual`, return `currentTurnMessages` as the
+remaining slice of the complete array. If the source ID is absent or prefix
+alignment cannot be proven, fail
+closed by returning the complete `messages` array as `currentTurnMessages`. Do
+not reconvert the current suffix independently and do not guess the boundary
+from the last converted `role: "user"`, because tool-result attachments can
+produce synthetic envelopes with that role. Add parity tests proving the
+helper's complete `messages` equals the existing conversion, the missing-ID
+fallback returns the full list, and text, direct file parts, later
+assistant/tool envelopes, and a tool-result attachment's synthetic
+`role: "user"` envelope all stay in the suffix.
+
+Use that helper in `buildLLMRequestPrefix` and the frozen-fork own-message path.
 After each `processArgs` object is complete and before `handle.process`, derive the
 selected tools and materialize their provider-facing descriptors through the
 shared LLM helper. Conceptually:
@@ -509,14 +583,22 @@ shared LLM helper. Conceptually:
 ```ts
 const wireTools = LLM.filterActiveTools(LLM.resolveTools(processArgs), processArgs.activeTools)
 const wireToolDescriptors = await LLM.materializeWireToolDescriptors(wireTools, processArgs.model)
+const dispatchSyntheticMessages: ModelMessage[] = isLastStep
+  ? [{ role: "user", content: MAX_STEPS }]
+  : []
+const recoveryFloorMessages = forkCtx
+  ? [...forkCtx.inheritedMessages, ...ownCurrentTurnMessages, ...dispatchSyntheticMessages]
+  : [...currentTurnMessages, ...dispatchSyntheticMessages]
 ```
 
 Classify the exact `prebuiltSystem`, messages, `wireToolDescriptors`, and
-`toolChoice`. The provider call must consume the same selected tool set and
-provider transform; do not materialize a second independently selected set.
-Handle only results created by this preflight; leave provider-signalled
-overflow, classifier behavior, MaxMode selection, and status ownership
-unchanged.
+`toolChoice`, passing `recoveryFloorMessages` as the required floor. Build
+`dispatchSyntheticMessages` once and append the same objects to the full request
+and floor; this includes final-step `MAX_STEPS`. The provider call must consume
+the same selected tool set and provider transform; do not materialize a second
+independently selected set. Handle only results created by this preflight; leave
+provider-signalled overflow, classifier behavior, MaxMode selection, and status
+ownership unchanged.
 
 - [ ] **Step 5: Verify, commit, and propagate PR 4**
 
@@ -524,14 +606,15 @@ unchanged.
 cd packages/opencode
 env -u MIMOCODE_EXPERIMENTAL -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH -u MIMOCODE_CODEX_MODE \
   bun test --timeout 60000 \
-  test/session/overflow.test.ts test/session/prompt-effect.test.ts \
+  test/session/overflow.test.ts test/session/message-v2.test.ts \
+  test/session/llm-request-prefix.test.ts test/session/prompt-effect.test.ts \
   test/session/fork-prefix-invariant.test.ts test/session/llm.test.ts \
   test/cli/tui/context-usage.test.ts
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
 bun run lint
 git diff --check
-git add packages/opencode/src/session/prompt.ts packages/opencode/test/session/prompt-effect.test.ts packages/opencode/test/session/fork-prefix-invariant.test.ts packages/opencode/test/cli/tui/context-usage.test.ts
+git add packages/opencode/src/session/message-v2.ts packages/opencode/src/session/llm-request-prefix.ts packages/opencode/src/session/prompt.ts packages/opencode/test/session/message-v2.test.ts packages/opencode/test/session/llm-request-prefix.test.ts packages/opencode/test/session/prompt-effect.test.ts packages/opencode/test/session/fork-prefix-invariant.test.ts packages/opencode/test/cli/tui/context-usage.test.ts
 git commit -m "fix(session): preflight oversized provider requests"
 ```
 
@@ -582,7 +665,7 @@ bun test --timeout 60000 \
   test/session/checkpoint-child-session.test.ts test/tool/whitelist.test.ts \
   test/agent/agent.test.ts test/tool/apply_patch.test.ts \
   test/util/text-truncate.test.ts test/util/safe-stringify.test.ts \
-  test/session/message-v2.test.ts test/tool/truncation.test.ts \
+  test/session/message-v2.test.ts test/session/llm-request-prefix.test.ts test/tool/truncation.test.ts \
   test/session/instruction.test.ts test/session/instructions-loaded-delivery.test.ts \
   test/inbox/render.test.ts test/session/system.test.ts test/session/prompt-effect.test.ts \
   test/session/max-mode.test.ts test/tool/actor.test.ts test/tool/tool-script.test.ts test/util/child-process-env.test.ts \
