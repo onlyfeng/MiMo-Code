@@ -235,7 +235,7 @@ test("a transferred row names a frozen independent same-target handoff lease", a
     input.env.MIMOCODE_INSTANCE_GENERATION_INVENTORY,
     [
       inventoryHeader,
-      `| \`${summary.anchor}\` | ${summary.signals} | ${summary.fingerprint} | instance:background producer | cancel=GenerationOwnedHandle.close | settle=GenerationOwnedHandle receipt | target=Instance.current; lease=current; handoff=planned:src/file/watcher.ts:FileWatcher.state.channel-handoff; handoffTarget=Instance.current | producer | transferred | Task 5 | planned=test/project/instance-producer-retirement.test.ts:producer retirement |`,
+      `| \`${summary.anchor}\` | ${summary.signals} | ${summary.fingerprint} | instance:background producer | cancel=GenerationOwnedHandle.close | settle=GenerationOwnedHandle receipt | target=Instance.current; lease=current; handoff=planned:src/file/watcher.ts:FileWatcher.state.channel-handoff; handoffTarget=Instance.current; replacement=registerTransferredGenerationProducer | producer | transferred | Task 5 | planned=test/project/instance-producer-retirement.test.ts:producer retirement |`,
       "",
     ].join("\n"),
   )
@@ -1339,6 +1339,20 @@ test("allowlisted wrappers may consume capture internally but cannot export the 
   const result = await run(["--check"], escaped.env)
   expect(result.exitCode).toBe(1)
   expect(result.stderr).toContain("captured InstanceExecution cannot be re-exported")
+
+  const nested = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "export const bootstrap = (expose: boolean) => {",
+        "  const execution = captureInstanceExecution()",
+        "  if (expose) return execution",
+        "  return makeOpaqueBootstrapHandle(execution)",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _nested = nested.tmp
+  expect((await run(["--check"], nested.env)).stderr).toContain("captured InstanceExecution cannot be re-exported")
 })
 
 test("private lifecycle capability fields remain implementation details", async () => {
@@ -1355,3 +1369,496 @@ test("private lifecycle capability fields remain implementation details", async 
   await using _ = input.tmp
   expect(await run(["--check"], input.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
 })
+
+test("MCP and LSP lifecycle callbacks are part of the actual-source universe", () => {
+  const summaries = inspectCandidateSummaries()
+  const byFile = new Map<string, typeof summaries>()
+  for (const summary of summaries) byFile.set(summary.file, [...(byFile.get(summary.file) ?? []), summary])
+
+  expect(
+    [...byFile.keys()].filter((file) => file.startsWith("src/mcp/") || file.startsWith("src/lsp/")).sort(),
+  ).toEqual(["src/lsp/client.ts", "src/lsp/lsp.ts", "src/mcp/index.ts", "src/mcp/sampling.ts"])
+  expect(byFile.get("src/mcp/index.ts")?.some((summary) => summary.symbol.startsWith("startTurnLifecycleNotification"))).toBe(true)
+  expect(byFile.get("src/mcp/index.ts")?.some((summary) => summary.symbol.startsWith("watch"))).toBe(true)
+  expect(byFile.get("src/mcp/sampling.ts")?.some((summary) => summary.symbol.startsWith("serve"))).toBe(true)
+  expect(byFile.get("src/lsp/client.ts")?.some((summary) => summary.symbol.startsWith("create"))).toBe(true)
+  expect(byFile.get("src/lsp/lsp.ts")?.some((summary) => summary.symbol.includes("getClients"))).toBe(true)
+})
+
+test("transfer release paths dominate exits and child handles cannot escape before arming", async () => {
+  const cases = [
+    [
+      "conditional-success",
+      [
+        "export function setup(condition: boolean) {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "    if (condition) handoff.release({ ok: true })",
+        "    return child",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+      "success release must dominate every normal exit",
+    ],
+    [
+      "failure-before-release",
+      [
+        "export function setup(condition: boolean) {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "    handoff.release({ ok: true })",
+        "    return child",
+        "  } catch (error) {",
+        "    if (condition) throw new Error('wrapped')",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+      "failure release must dominate every exceptional exit and rethrow the original error",
+    ],
+    [
+      "failure-wraps-error",
+      [
+        "export function setup() {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "    handoff.release({ ok: true })",
+        "    return child",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw new Error('wrapped')",
+        "  }",
+        "}",
+      ].join("\n"),
+      "failure release must dominate every exceptional exit and rethrow the original error",
+    ],
+    [
+      "published-child",
+      [
+        "let published",
+        "export function setup() {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "    published = child",
+        "    handoff.release({ ok: true })",
+        "    return child",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+      "transferred child handle must not escape before successful release",
+    ],
+    [
+      "passed-child",
+      [
+        "export function setup() {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "    publish(child)",
+        "    handoff.release({ ok: true })",
+        "    return child",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+      "transferred child handle must not escape before successful release",
+    ],
+    [
+      "returned-child",
+      [
+        "export function setup() {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "    return child",
+        "    handoff.release({ ok: true })",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+      "transferred child handle must not escape before successful release",
+    ],
+    [
+      "captured-child",
+      [
+        "export function setup() {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "    const expose = () => child",
+        "    handoff.release({ ok: true })",
+        "    return { child, expose }",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+      "transferred child handle must not escape before successful release",
+    ],
+    [
+      "property-child",
+      [
+        "export function setup() {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "    published.child = child",
+        "    handoff.release({ ok: true })",
+        "    return child",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+      "transferred child handle must not escape before successful release",
+    ],
+    [
+      "callback-child",
+      [
+        "export function setup() {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => {",
+        "      const producer = registerTransferredGenerationProducer({ handoffFrom: handoff, label, run })",
+        "      publish(producer)",
+        "      return producer",
+        "    })",
+        "    handoff.release({ ok: true })",
+        "    return child",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+      "transferred child handle must not escape before successful release",
+    ],
+    [
+      "direct-runSync-result",
+      [
+        "export function setup() {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    publish(handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run })))",
+        "    handoff.release({ ok: true })",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+      "transferred child handle must not escape before successful release",
+    ],
+    [
+      "continue-before-release",
+      [
+        "export function setup(items: unknown[], skip: boolean) {",
+        "  for (const item of items) {",
+        "    const handoff = acquireGenerationLease()",
+        "    try {",
+        "      const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "      if (skip) continue",
+        "      handoff.release({ ok: true })",
+        "      return child",
+        "    } catch (error) {",
+        "      handoff.release({ ok: false, error })",
+        "      throw error",
+        "    }",
+        "  }",
+        "}",
+      ].join("\n"),
+      "success release must dominate every normal exit",
+    ],
+    [
+      "finally-replaces-error",
+      [
+        "export function setup(condition: boolean) {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "    handoff.release({ ok: true })",
+        "    return child",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  } finally {",
+        "    if (condition) return undefined",
+        "  }",
+        "}",
+      ].join("\n"),
+      "failure release must dominate every exceptional exit and rethrow the original error",
+    ],
+  ] as const
+  await Promise.all(
+    cases.map(async ([name, source, message]) => {
+      const input = await fixture({ source: { [`project/${name}.ts`]: source } })
+      await using _ = input.tmp
+      expect((await run(["--check"], input.env)).stderr).toContain(message)
+    }),
+  )
+})
+
+test("lifecycle authority checks structural callsites, escapes, types, and PromiseLike results", async () => {
+  const input = await fixture({
+    source: {
+      "workflow/runtime.ts": "export function spawnIsolated() { return disposeDirectorySettled('/tmp/forged') }\n",
+      "effect/run-service.ts": [
+        "export function attachWith() {",
+        "  const execution = captureInstanceExecution()",
+        "  const alias = execution",
+        "  return alias",
+        "}",
+      ].join("\n"),
+      "namespace-export.ts": 'export * as lifecycle from "./effect/instance-ref"\n',
+      "assertion.ts": "const execution = <InstanceExecution>{}\n",
+      "as-assertion.ts": "const execution = {} as InstanceExecution\n",
+      "typed-lease.ts": "declare const x: GenerationLease; x.release()\n",
+      "fetch-sync.ts": "declare const lease: GenerationLease; lease.runSync(() => fetch(url))\n",
+      "thenable-sync.ts": [
+        "declare const lease: GenerationLease",
+        "declare function later(): PromiseLike<void>",
+        "lease.runSync(() => later())",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const result = await run(["--check"], input.env)
+  for (const message of [
+    "private lifecycle join call is not exact-allowlisted",
+    "captured InstanceExecution cannot be re-exported",
+    "lifecycle authority module cannot be namespace re-exported",
+    "InstanceExecution cannot be cast or reconstructed",
+    "release requires a discriminated result",
+    "runSync cannot accept async or PromiseLike callbacks",
+  ]) {
+    expect(result.stderr).toContain(message)
+  }
+})
+
+test("typed PromiseLike callback references cannot enter runSync", async () => {
+  const input = await fixture({
+    source: {
+      "effect/callback.ts": [
+        "declare const lease: GenerationLease",
+        "declare const callback: () => PromiseLike<number>",
+        "lease.runSync(callback)",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  expect((await run(["--check"], input.env)).stderr).toContain("runSync cannot accept async or PromiseLike callbacks")
+})
+
+test("raw helpers and private joins accept only their frozen symbol structure", async () => {
+  const valid = await fixture({
+    source: {
+      "workflow/runtime.ts": "export function spawnIsolated() { return disposeDirectorySettled(info.directory) }\n",
+      "effect/bootstrap-runtime.ts": [
+        "export function bootstrap() {",
+        "  const execution = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(execution)",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _valid = valid.tmp
+  expect(await run(["--check"], valid.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+
+  const extra = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "export function bootstrap() {",
+        "  const first = captureInstanceExecution()",
+        "  const second = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(first, second)",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _extra = extra.tmp
+  expect((await run(["--check"], extra.env)).stderr).toContain("raw lifecycle helper call is not exact-allowlisted")
+
+  const aliases = await fixture({
+    source: {
+      "workflow/runtime.ts": [
+        "const join = disposeDirectorySettled",
+        "export function spawnIsolated() { return join(info.directory) }",
+      ].join("\n"),
+      "effect/bootstrap-runtime.ts": [
+        "const capture = captureInstanceExecution",
+        "export function bootstrap() {",
+        "  const execution = capture()",
+        "  return makeOpaqueBootstrapHandle(execution)",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _aliases = aliases.tmp
+  const aliasResult = await run(["--check"], aliases.env)
+  expect(aliasResult.stderr).toContain("raw lifecycle helper call is not exact-allowlisted")
+  expect(aliasResult.stderr).toContain("private lifecycle join call is not exact-allowlisted")
+})
+
+test("resolved aliases and typed string disposer arguments cannot bypass frozen gates", async () => {
+  const provider = await fixture({
+    source: {
+      "actor/spawn.ts": [
+        "const Ref = InstanceRef",
+        "export function unexpected() { return Effect.provideService(Ref, context) }",
+      ].join("\n"),
+    },
+  })
+  await using _provider = provider.tmp
+  expect((await run(["--check", "--allow-task2-legacy-instance-ref-providers"], provider.env)).stderr).toContain(
+    "unauthorized raw InstanceRef provider: src/actor/spawn.ts:unexpected",
+  )
+
+  const facade = await fixture({
+    source: {
+      "config/config.ts": [
+        "const dispose = Instance.disposeAll",
+        "export function unexpected() { return dispose() }",
+      ].join("\n"),
+    },
+  })
+  await using _facade = facade.tmp
+  expect((await run(["--check", "--allow-legacy-instance-settled-facades"], facade.env)).stderr).toContain(
+    "unauthorized legacy settled facade caller: src/config/config.ts:unexpected",
+  )
+
+  const disposer = await fixture({
+    source: {
+      "project/instance.ts": [
+        "function directoryFor(): string { return '/tmp/forged' }",
+        "export function unexpected() { disposeInstance(directoryFor()) }",
+      ].join("\n"),
+    },
+  })
+  await using _disposer = disposer.tmp
+  expect((await run(["--check-disposer-targets", "--allow-task1-adapter"], disposer.env)).stderr).toContain(
+    "unauthorized disposeInstance target: src/project/instance.ts:unexpected",
+  )
+
+  const importedProvider = await fixture({
+    source: {
+      "effect/instance-ref.ts": "export const InstanceRef = {}\n",
+      "actor/spawn.ts": [
+        'import { InstanceRef as Ref } from "../effect/instance-ref"',
+        "export function unexpected() { return Effect.provideService(Ref, context) }",
+      ].join("\n"),
+    },
+  })
+  await using _importedProvider = importedProvider.tmp
+  expect((await run(["--check", "--allow-task2-legacy-instance-ref-providers"], importedProvider.env)).stderr).toContain(
+    "unauthorized raw InstanceRef provider: src/actor/spawn.ts:unexpected",
+  )
+
+  const importedFacade = await fixture({
+    source: {
+      "project/instance.ts": "export const Instance = { disposeAll() {} }\n",
+      "config/config.ts": [
+        'import { Instance as RuntimeInstance } from "../project/instance"',
+        "const dispose = RuntimeInstance.disposeAll",
+        "export function unexpected() { return dispose() }",
+      ].join("\n"),
+    },
+  })
+  await using _importedFacade = importedFacade.tmp
+  expect((await run(["--check", "--allow-legacy-instance-settled-facades"], importedFacade.env)).stderr).toContain(
+    "unauthorized legacy settled facade caller: src/config/config.ts:unexpected",
+  )
+
+  const importedDisposer = await fixture({
+    source: {
+      "effect/instance-registry.ts": "export function disposeInstance(_target: unknown) {}\n",
+      "project/instance.ts": [
+        'import { disposeInstance as dispose } from "../effect/instance-registry"',
+        "function directoryFor(): string { return '/tmp/forged' }",
+        "export function unexpected() { dispose(directoryFor()) }",
+      ].join("\n"),
+    },
+  })
+  await using _importedDisposer = importedDisposer.tmp
+  expect((await run(["--check-disposer-targets", "--allow-task1-adapter"], importedDisposer.env)).stderr).toContain(
+    "unauthorized disposeInstance target: src/project/instance.ts:unexpected",
+  )
+})
+
+test("frozen producer consumers reject swapped handoff and parent relations", async () => {
+  const tmp = await tmpdir()
+  await using _ = tmp
+  const original = await Bun.file(path.resolve(packageRoot, "../../docs/compose/spec/instance-generation-producer-inventory.md")).text()
+  const handoffs = original
+    .replaceAll("planned:src/bus/index.ts:on.subscription-channel-handoff", "planned:swap:bus")
+    .replaceAll("planned:src/file/watcher.ts:FileWatcher.state.channel-handoff", "planned:src/bus/index.ts:on.subscription-channel-handoff")
+    .replaceAll("planned:swap:bus", "planned:src/file/watcher.ts:FileWatcher.state.channel-handoff")
+  const handoffInventory = path.join(tmp.path, "handoff.md")
+  await Bun.write(handoffInventory, handoffs)
+  const parents = original
+    .replaceAll(
+      "ownerID=actor.parent-notify; parent=planned:src/actor/spawn.ts:notify.parent-target-lease",
+      "ownerID=swap.actor.parent; parent=planned:swap.actor.parent",
+    )
+    .replaceAll(
+      "ownerID=actor.parent-terminal-notify; parent=planned:src/actor/spawn.ts:notifyTerminal.parent-target-lease",
+      "ownerID=actor.parent-notify; parent=planned:src/actor/spawn.ts:notify.parent-target-lease",
+    )
+    .replaceAll(
+      "ownerID=swap.actor.parent; parent=planned:swap.actor.parent",
+      "ownerID=actor.parent-terminal-notify; parent=planned:src/actor/spawn.ts:notifyTerminal.parent-target-lease",
+    )
+  const parentInventory = path.join(tmp.path, "parent.md")
+  await Bun.write(parentInventory, parents)
+  const results = await Promise.all(
+    [handoffInventory, parentInventory].map((inventory) =>
+      run(["--check", "--allow-legacy-instance-settled-facades", "--allow-task2-legacy-instance-ref-providers"], {
+        MIMOCODE_INSTANCE_GENERATION_INVENTORY: inventory,
+      }),
+    ),
+  )
+  for (const result of results) expect(result.stderr).toContain("frozen producer consumer relation changed")
+}, 30_000)
+
+test("body wrappers and workflow cleanup stay bound to their implementing APIs and tasks", async () => {
+  const tmp = await tmpdir()
+  await using _ = tmp
+  const original = await Bun.file(path.resolve(packageRoot, "../../docs/compose/spec/instance-generation-producer-inventory.md")).text()
+  const body = original.replaceAll(
+    "replacement=registerGenerationBody | body | transferred",
+    "replacement=registerTransferredGenerationBody | body | transferred",
+  )
+  const workflow = original.replace(
+    "| Task 7 | planned=test/workflow/runtime-worktree.test.ts:target-local workflow |",
+    "| Task 9 | planned=test/workflow/runtime.test.ts:workflow shutdown |",
+  )
+  const bodyInventory = path.join(tmp.path, "body.md")
+  const workflowInventory = path.join(tmp.path, "workflow.md")
+  await Promise.all([Bun.write(bodyInventory, body), Bun.write(workflowInventory, workflow)])
+  const [bodyResult, workflowResult] = await Promise.all([
+    run(["--check", "--allow-legacy-instance-settled-facades", "--allow-task2-legacy-instance-ref-providers"], {
+      MIMOCODE_INSTANCE_GENERATION_INVENTORY: bodyInventory,
+    }),
+    run(["--check", "--allow-legacy-instance-settled-facades", "--allow-task2-legacy-instance-ref-providers"], {
+      MIMOCODE_INSTANCE_GENERATION_INVENTORY: workflowInventory,
+    }),
+  ])
+  expect(bodyResult.stderr).toContain("transferred owner replacement wrapper does not match")
+  expect(workflowResult.stderr).toContain("planned deterministic test path is not frozen")
+}, 30_000)

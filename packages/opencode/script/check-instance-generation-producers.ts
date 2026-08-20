@@ -51,6 +51,7 @@ type ParsedSource = {
   relative: string
   text: string
   source: ts.SourceFile
+  checker: ts.TypeChecker
 }
 
 type Candidate = {
@@ -102,6 +103,11 @@ const ownerKinds = new Set([
   "process_exempt",
 ])
 const ownershipModes = new Set(["nested", "transferred", "directory-root"])
+const transferredAuthorityWrappers = new Map([
+  ["body", new Set(["registerGenerationBody"])],
+  ["channel", new Set(["registerTransferredGenerationChannel"])],
+  ["producer", new Set(["registerTransferredGenerationProducer", "registerRemoteRelayProducer"])],
+])
 const placeholders = /\b(?:TBD|TODO|audit later|INCOMPLETE)\b/i
 
 const generationProducerSurfaces = [
@@ -114,6 +120,10 @@ const generationProducerSurfaces = [
   "src/history/",
   "src/inbox/",
   "src/memory/",
+  "src/lsp/client.ts",
+  "src/lsp/lsp.ts",
+  "src/mcp/index.ts",
+  "src/mcp/sampling.ts",
   "src/plugin/",
   "src/project/",
   "src/provider/provider.ts",
@@ -173,6 +183,174 @@ const task2InstanceRefProviders = new Map([
   ["src/tool/session.ts:SessionTool.execute.wtDir#instance-ref-provider-wtDir-8368a1cdb2", "5f78f2a4f3d400f8"],
   ["src/tool/session.ts:SessionTool.execute.remExit#instance-ref-provider-remExit-eb0cfe5ff3", "66e346374a79d734"],
   ["src/workflow/runtime.ts:spawnIsolated.wtBridge#instance-ref-provider-wtBridge-5d6e008362", "091cd59b0daf7283"],
+])
+
+const frozenProducerConsumerRelations = new Map([
+  ["src/actor/registry.ts:layer#effect-fork-expressionstatement-015bebb1f3", "eca455d563d0acb7"],
+  ["src/actor/spawn.ts:notify#instance-ref-provider-expressionstatement-0c1396d50f", "d2b1de4fe80dc2e9"],
+  ["src/actor/spawn.ts:forkWork.boundWork#instance-ref-provider-boundWork-91987c3ae1", "b29a3b5c5cf9eb76"],
+  ["src/actor/spawn.ts:forkWork.fiber#effect-fork-fiber-72362dbd72", "205a0b5926c2e518"],
+  ["src/actor/spawn.ts:notifyTerminal#instance-ref-provider-expressionstatement-77472bca03", "1b9165cf8f9f44b5"],
+  ["src/actor/spawn.ts:layer#instance-ref-provider-expressionstatement-0dd4508a1c", "226787555b359b35"],
+  ["src/actor/spawn.ts:layer#effect-fork-expressionstatement-e9131ea116", "8dadb65f955fad76"],
+  ["src/bus/index.ts:on.subscription#native-callback-subscription-9adb6135c1", "6410163a898de9b3"],
+  ["src/bus/index.ts:on#effect-fork-expressionstatement-249ad7320b", "5cbf2a38870086e1"],
+  ["src/bus/index.ts:on#effect-fork-fork-1898f6edbf", "5cbf2a38870086e1"],
+  ["src/bus/index.ts:subscribe#native-callback-return-c66f66fa00", "5cbf2a38870086e1"],
+  ["src/config/config.ts:Config.loadInstanceState.dep#effect-fork-dep-7c7406f0b7", "685c4952b08d1911"],
+  ["src/config/config.ts:Config.invalidate.task#legacy-settled-facade-task-8a291143d4", "0aa5e6e3bfe97cf8"],
+  ["src/config/config.ts:Config.invalidate.task#global-event-publisher-task-5d53733bdc", "0aa5e6e3bfe97cf8"],
+  ["src/config/config.ts:Config.invalidate#naked-void-expressionstatement-9de8ef398e", "03251ecb55a06334"],
+  ["src/control-plane/sse.ts:parseSSE.reader#stream-continuation-reader-712d7f2d65", "50dcf5e3a4be9820"],
+  ["src/control-plane/sse.ts:abort#naked-void-catch-f99b8d0fb4", "50dcf5e3a4be9820"],
+  ["src/control-plane/sse.ts:parseSSE#native-callback-addEventListener-c40848e419", "50dcf5e3a4be9820"],
+  ["src/control-plane/util.ts:waitEvent.timeout#timer-timeout-timeout-7339f9de0b", "8b936764f006f8be"],
+  ["src/control-plane/util.ts:waitEvent#native-callback-on-a19a305026", "8b936764f006f8be"],
+  ["src/control-plane/util.ts:waitEvent#native-callback-addEventListener-17047fab75", "8b936764f006f8be"],
+  ["src/control-plane/workspace.ts:sessionRestore#global-event-publisher-emit-f570feb277", "50dcf5e3a4be9820"],
+  ["src/control-plane/workspace.ts:sessionRestore#global-event-publisher-emit-825ffab3ee", "50dcf5e3a4be9820"],
+  ["src/control-plane/workspace.ts:setStatus#global-event-publisher-emit-5e022324a1", "50dcf5e3a4be9820"],
+  ["src/control-plane/workspace.ts:syncWorkspaceLoop#global-event-publisher-emit-6aa087d931", "50dcf5e3a4be9820"],
+  ["src/control-plane/workspace.ts:startSync#naked-void-then-19828efd14", "50dcf5e3a4be9820"],
+  ["src/control-plane/workspace.ts:startSync#naked-void-catch-319d15c208", "50dcf5e3a4be9820"],
+  ["src/control-plane/workspace.ts:startWorkspaceSyncing#naked-void-startSync-ef678fa9a4", "d25f8f981cba71b5"],
+  ["src/cron/scheduler.ts:runTick#detached-promise-catch-a301fcd8ec", "0f186c2fa243f4c6"],
+  ["src/cron/scheduler.ts:start#timer-interval-expressionstatement-7a683d4167", "0f186c2fa243f4c6"],
+  ["src/effect/cross-spawn-spawner.ts:onError#native-callback-expressionstatement-8dcf6f655f", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:make.setupFds#effect-fork-expressionstatement-321b04e5a8", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:make.setupFds#native-callback-on-af909c1872", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:onError#native-callback-expressionstatement-7db88db1a6", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:onError#native-callback-expressionstatement-9d0bab237b", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:setupStdin#effect-fork-return-18be294933", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:onError#native-callback-stdout-fa90d9ed0c", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:onError#native-callback-stderr-1cf76f42d3", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:spawn#native-callback-on-72dc98f1c6", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:spawn#native-callback-on-c9f301f971", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:spawn#native-callback-on-1a2ef9ae04", "47f8c620a29989b4"],
+  ["src/effect/cross-spawn-spawner.ts:spawn#native-callback-on-0993bcbc2e", "47f8c620a29989b4"],
+  ["src/effect/hard-timeout.ts:awaitWithHardTimeout.fiber#effect-fork-fiber-3d0e3a6112", "f99073b69380e1f6"],
+  ["src/file/index.ts:File.init#effect-fork-expressionstatement-84545f1cb3", "f94fb7d1d7a2ac50"],
+  ["src/file/ripgrep.ts:files#effect-fork-expressionstatement-3aa3277eae", "62f75fbd7c118cfe"],
+  ["src/file/ripgrep.ts:files.stderr#effect-fork-stderr-fb47f21849", "62f75fbd7c118cfe"],
+  ["src/file/ripgrep.ts:files.stdout#effect-fork-stdout-0b721f882b", "62f75fbd7c118cfe"],
+  ["src/file/watcher.ts:FileWatcher.state.cb#instance-bind-cb-29693a8651", "354349824b968c32"],
+  ["src/file/watcher.ts:subscribe.pending#native-callback-pending-8f439884c1", "7e6a0b6be1937d5a"],
+  ["src/file/watcher.ts:subscribe#detached-promise-catch-462dc4d3d3", "7e6a0b6be1937d5a"],
+  ["src/history/backfill.ts:History.Backfill.init#effect-fork-expressionstatement-a46b619cda", "3a9bf1c69acfa3f3"],
+  ["src/history/writer.ts:History.Writer.state#effect-fork-expressionstatement-a3e27f2360", "6ea029da067c94e1"],
+  ["src/inbox/inbox.ts:Inbox.send.bridge#instance-ref-provider-bridge-07829a1a13", "66dd5d66326046fd"],
+  ["src/inbox/inbox.ts:Inbox.send#effect-fork-expressionstatement-241ecb89fb", "a0540f5ad225e0da"],
+  ["src/inbox/inbox.ts:Inbox.send#effect-fork-expressionstatement-866cd9a18d", "a0540f5ad225e0da"],
+  ["src/lsp/client.ts:create#native-callback-onNotification-39adcaeef4", "34664d0542a1e34b"],
+  ["src/lsp/client.ts:create#native-callback-onRequest-aee6898cb0", "81b951628b01371a"],
+  ["src/lsp/client.ts:create#native-callback-onRequest-b7157e539a", "81b951628b01371a"],
+  ["src/lsp/client.ts:create#native-callback-onRequest-6fb95ebfed", "81b951628b01371a"],
+  ["src/lsp/client.ts:create#native-callback-onRequest-602616340a", "81b951628b01371a"],
+  ["src/lsp/client.ts:create#native-callback-onRequest-76984b6045", "81b951628b01371a"],
+  ["src/lsp/client.ts:waitForDiagnostics#timer-timeout-expressionstatement-38e7fa7908", "531b98ee4cedee28"],
+  ["src/lsp/lsp.ts:layer.getClients#detached-promise-finally-84a8b203f0", "cceeeb34000ed329"],
+  ["src/mcp/index.ts:startTurnLifecycleNotification#naked-void-then-ec9254654b", "ac3f8e38f76712de"],
+  ["src/mcp/index.ts:try#native-callback-addEventListener-7e8ecd9ae4", "b6bc1da403a58c6e"],
+  ["src/mcp/index.ts:MCP.connectLocal#native-callback-on-ef3490cebc", "262d54c0f5a8fdf3"],
+  ["src/mcp/index.ts:watch#native-callback-setNotificationHandler-d09f7bc44c", "1c636534fe9fdf37"],
+  ["src/mcp/index.ts:MCP.authenticate.timer#timer-timeout-timer-f32a6263b8", "3fa57ea07b889432"],
+  ["src/mcp/index.ts:MCP.authenticate#native-callback-on-884ee2b240", "3fa57ea07b889432"],
+  ["src/mcp/index.ts:MCP.authenticate#native-callback-on-81b4a8093f", "3fa57ea07b889432"],
+  ["src/mcp/sampling.ts:onError#native-callback-stream-3b77d2b99f", "ec119204a21edd2c"],
+  ["src/mcp/sampling.ts:try#async-iterator-forofstatement-dd2b65698a", "ec119204a21edd2c"],
+  ["src/mcp/sampling.ts:serve#native-callback-setRequestHandler-a203d903a9", "66ac29ac1bb40a22"],
+  ["src/plugin/codex.ts:startOAuthServer#detached-promise-catch-8d1e6b295a", "20e75ebded6603ba"],
+  ["src/plugin/codex.ts:startOAuthServer#native-callback-on-a5896fc140", "5a3f194df480c241"],
+  ["src/plugin/codex.ts:waitForOAuthCallback.timeout#timer-timeout-timeout-936a6407b2", "20e75ebded6603ba"],
+  ["src/plugin/index.ts:publishPluginError#effect-fork-fork-f8a9806590", "9a519e3da060dd94"],
+  ["src/plugin/index.ts:Plugin.state#effect-fork-expressionstatement-de31462f92", "6bb5768f4395f94d"],
+  ["src/plugin/index.ts:Plugin.state#naked-void-event-782f4b84e7", "9a519e3da060dd94"],
+  ["src/plugin/index.ts:try#detached-promise-catch-3764a1f3af", "d120da90ceda499b"],
+  ["src/plugin/index.ts:Plugin.fileHooks#effect-fork-expressionstatement-88d2945d2c", "286b0544fa8a3cc0"],
+  ["src/plugin/index.ts:Plugin.fileHooks#naked-void-catch-ca8beacfa5", "d120da90ceda499b"],
+  ["src/plugin/index.ts:try#timer-timeout-race-1119c3c96c", "441dc9859ff38d4a"],
+  ["src/plugin/mimo.ts:authorize#native-callback-on-3bcf3b5d5c", "bdf86c60dbe17380"],
+  ["src/plugin/mimo.ts:MimoAuthPlugin.timeout#timer-timeout-timeout-ee1fcb318a", "204355f053f4dc5f"],
+  ["src/plugin/mimo.ts:MimoAuthPlugin.serverCallbackPromise#native-callback-on-9731869816", "204355f053f4dc5f"],
+  ["src/plugin/mimo.ts:authorize#detached-promise-catch-b4aed84031", "204355f053f4dc5f"],
+  ["src/plugin/mimo.ts:fetch.reader#stream-continuation-reader-28880f9783", "204355f053f4dc5f"],
+  ["src/plugin/mimo.ts:fetch.body#readable-body-body-b58bde8ce2", "204355f053f4dc5f"],
+  ["src/plugin/xai.ts:defaultSleep#timer-timeout-expressionstatement-6f39b10892", "453750398082f5e6"],
+  ["src/plugin/xai.ts:startOAuthServer.server#detached-promise-catch-d36690348f", "453750398082f5e6"],
+  ["src/plugin/xai.ts:startOAuthServer#native-callback-once-2bbfb8b2ac", "3960cdc162c3a373"],
+  ["src/plugin/xai.ts:waitForOAuthCallback.timeout#timer-timeout-timeout-936a6407b2", "453750398082f5e6"],
+  ["src/project/instance.ts:disposeCached#global-event-publisher-emit-14f079bf3d", "1907b00d6d58973d"],
+  ["src/project/instance.ts:reload#global-event-publisher-emit-ba3c72d878", "f17b8c989aba874a"],
+  ["src/project/instance.ts:dispose#global-event-publisher-emit-c36b5ee5c8", "d67d1baba18c69fa"],
+  ["src/project/project.ts:emitUpdated#global-event-publisher-emitUpdated-de9b7db25a", "cf345447b4bfc4a1"],
+  ["src/project/project.ts:Project.fromDirectory#effect-fork-expressionstatement-d0d7f5f540", "a3e133caa394d1fb"],
+  ["src/project/vcs.ts:Vcs.state#effect-fork-expressionstatement-da21d24ce4", "d57d3993840ea92b"],
+  ["src/project/vcs.ts:Vcs.init#effect-fork-expressionstatement-f024daa36a", "3ad978737f8246ef"],
+  ["src/provider/provider.ts:wrapSSE.reader#stream-continuation-reader-83f0924347", "7239b5b20e0bb1b7"],
+  ["src/provider/provider.ts:wrapSSE.body#readable-body-body-31192cce4e", "7239b5b20e0bb1b7"],
+  ["src/provider/provider.ts:timeoutController.id#timer-timeout-id-4372e83eae", "47e1b421bf6a4624"],
+  ["src/provider/provider.ts:trackAbortSource.listeners#native-callback-addEventListener-f80c722c7d", "e9688bcd8549530a"],
+  ["src/provider/provider.ts:wrapRequestTimeout.reader#stream-continuation-reader-98675be4aa", "8a9521dc4eee3a41"],
+  ["src/provider/provider.ts:wrapRequestTimeout#readable-body-return-6a686053e4", "8a9521dc4eee3a41"],
+  ["src/pty/index.ts:Pty.create#instance-bind-onData-44c2daf13c", "40334b921d5321dd"],
+  ["src/pty/index.ts:Pty.create#instance-bind-onExit-c40a9b9901", "4387df1a9a1e47d1"],
+  ["src/pty/index.ts:onMessage#native-callback-return-dacddfeb51", "4387df1a9a1e47d1"],
+  ["src/pty/index.ts:onClose#native-callback-return-8ebdfdbceb", "4387df1a9a1e47d1"],
+  ["src/pty/pty.bun.ts:onData#native-callback-methoddeclaration-610616a83a", "4387df1a9a1e47d1"],
+  ["src/pty/pty.bun.ts:onExit#native-callback-methoddeclaration-a53eaa8b50", "4387df1a9a1e47d1"],
+  ["src/pty/pty.node.ts:onData#native-callback-methoddeclaration-52df5d7a98", "4387df1a9a1e47d1"],
+  ["src/pty/pty.node.ts:onExit#native-callback-methoddeclaration-754b5fc4d8", "4387df1a9a1e47d1"],
+  ["src/server/adapter.node.ts:start#native-callback-once-6a359a2f1d", "6f20b0d3b70ab171"],
+  ["src/server/adapter.node.ts:start#native-callback-once-7466106a21", "6f20b0d3b70ab171"],
+  ["src/server/adapter.node.ts:stop#native-callback-close-c8647d89aa", "baaa20a6911284fb"],
+  ["src/server/proxy.ts:app#websocket-upgrade-app-dabac3c046", "9ccf3dc5ef724785"],
+  ["src/server/proxy.ts:http#readable-body-return-c333849276", "fac2b4cbf8153633"],
+  ["src/server/routes/global.ts:streamEvents#sse-body-return-2c770ca200", "784a135c348bb243"],
+  ["src/server/routes/global.ts:GlobalRoutes.get_event#native-callback-on-feb36597e3", "736901e5a43af31f"],
+  ["src/server/routes/global.ts:GlobalRoutes.post_upgrade#global-event-publisher-emit-fa9ce18537", "bd20f67a8d6eb20f"],
+  ["src/server/routes/instance/event.ts:EventRoutes.get_event#sse-body-return-d742c01420", "ae36d39aeb7f71d7"],
+  ["src/server/routes/instance/pty.ts:PtyRoutes#websocket-upgrade-return-79830239ad", "d60665efba8e2a5c"],
+  ["src/server/routes/instance/session.ts:SessionRoutes.post_sessionID_message#readable-body-return-653bd9237c", "f00596312f5316cc"],
+  ["src/server/routes/instance/session.ts:SessionRoutes.post_sessionID_prompt_async#naked-void-catch-8ebb72d644", "30b4f48a412c0595"],
+  ["src/session/checkpoint.ts:SessionCheckpoint.tryStartCheckpointWriter#effect-fork-expressionstatement-484a6f57a6", "7cee05e24af265c4"],
+  ["src/session/cron-bridge.ts:start.unsubscribe#detached-promise-catch-8f0ff25a97", "0f186c2fa243f4c6"],
+  ["src/session/cron-bridge.ts:onFire#detached-promise-catch-c980203175", "0f186c2fa243f4c6"],
+  ["src/session/processor.ts:SessionProcessor.create.handleEvent#effect-fork-expressionstatement-b159b6757b", "a6febc06099a5826"],
+  ["src/session/prompt.ts:cancel#effect-fork-return-510c4f1c57", "0aa9baa509afe937"],
+  ["src/session/prompt.ts:SessionPrompt.shellImpl.exit#naked-void-fork-4ab185c336", "319ec9f92546e8f2"],
+  ["src/session/prompt.ts:SessionPrompt.run#effect-fork-expressionstatement-a7a948c1a6", "ee4c522405a3adf1"],
+  ["src/session/prompt.ts:SessionPrompt.run#detached-promise-catch-9edfca8886", "3b8f2b833f07323f"],
+  ["src/session/prompt.ts:SessionPrompt.run#detached-promise-catch-0b682b0736", "965b27a8698f64a8"],
+  ["src/session/prompt.ts:SessionPrompt.run#detached-promise-catch-c06fed76ea", "74986da2ef7d61a3"],
+  ["src/session/prompt.ts:SessionPrompt.run.outcome#effect-fork-expressionstatement-ce5565d12e", "b0a32883900d4d5e"],
+  ["src/session/prompt.ts:SessionPrompt.run#effect-fork-expressionstatement-72394b905d", "4501dd1b19523471"],
+  ["src/session/prune.ts:SessionPrune.fireCheckpoints#effect-fork-expressionstatement-a9a9d900ba", "ba66656f07200796"],
+  ["src/share/session.ts:SessionShare.create#effect-fork-expressionstatement-3496ffe539", "362448179eb201a6"],
+  ["src/share/share-next.ts:sync#effect-fork-expressionstatement-8a266d47f0", "5ce2816385044a32"],
+  ["src/share/share-next.ts:watch#effect-fork-watch-d5c35f98f8", "fdde9184ac328d71"],
+  ["src/share/share-next.ts:ShareNext.create#effect-fork-expressionstatement-746247d3cf", "5ce2816385044a32"],
+  ["src/skill/index.ts:layer.fiber#effect-fork-fiber-319745fe04", "7846dd4ff72a8ff4"],
+  ["src/snapshot/index.ts:Snapshot.state#effect-fork-expressionstatement-b4b075f05d", "a2d647bdf9810389"],
+  ["src/sync/index.ts:process#naked-void-then-cf03261542", "6b925e3aec6017a7"],
+  ["src/sync/index.ts:process#naked-void-publish-552d6bb3bb", "6b925e3aec6017a7"],
+  ["src/sync/index.ts:process#global-event-publisher-emit-2c9d8254d0", "6b925e3aec6017a7"],
+  ["src/tool/read.ts:ReadTool.warm#effect-fork-expressionstatement-80d2a47de2", "25a958c00170d3bb"],
+  ["src/tool/session.ts:SessionTool.execute.wtDir#instance-ref-provider-wtDir-8368a1cdb2", "e197e98dff9f2c38"],
+  ["src/tool/session.ts:SessionTool.execute.remExit#instance-ref-provider-remExit-eb0cfe5ff3", "2fd9793b20fc74c0"],
+  ["src/workflow/runtime.ts:attempt#detached-promise-then-14214eb77b", "d1d41f2b8f46d336"],
+  ["src/workflow/runtime.ts:scheduleFlush#timer-timeout-set-b0b4859fdf", "d1d41f2b8f46d336"],
+  ["src/workflow/runtime.ts:publishAgentFailed#effect-run-fork-runFork-0e51d0e461", "d1d41f2b8f46d336"],
+  ["src/workflow/runtime.ts:spawnIsolated.wtBridge#instance-ref-provider-wtBridge-5d6e008362", "c0218cbf0f2cc1c4"],
+  ["src/workflow/runtime.ts:agentImpl.result#timer-timeout-expressionstatement-137de411be", "d1d41f2b8f46d336"],
+  ["src/workflow/runtime.ts:agentImpl#timer-timeout-expressionstatement-684a926831", "d1d41f2b8f46d336"],
+  ["src/workflow/runtime.ts:phase#effect-run-fork-runFork-9ca2810870", "d1d41f2b8f46d336"],
+  ["src/workflow/runtime.ts:phase#effect-run-fork-runFork-423d2058e6", "d1d41f2b8f46d336"],
+  ["src/workflow/runtime.ts:phase#effect-run-fork-runFork-32f39a0904", "d1d41f2b8f46d336"],
+  ["src/workflow/runtime.ts:logHook#effect-run-fork-runFork-c7dccdc06e", "d1d41f2b8f46d336"],
+  ["src/workflow/runtime.ts:logHook#effect-run-fork-runFork-1a3e7fb27f", "d1d41f2b8f46d336"],
+  ["src/workflow/runtime.ts:WorkflowRuntime.launch#effect-fork-expressionstatement-ef2290a98d", "f6c62e992648d233"],
+  ["src/worktree/index.ts:layer.booted#global-event-publisher-emit-33b264a3e2", "bd604f85146744a1"],
+  ["src/worktree/index.ts:layer.boot#global-event-publisher-emit-e2bcde59e7", "bd604f85146744a1"],
 ])
 
 const processExemptions = new Map<string, string>()
@@ -244,6 +422,26 @@ const plannedHandoffAnchors = new Map([
   [
     "planned:src/inbox/inbox.ts:Inbox.send.target-local-handoff",
     { task: "Task 2", lease: "child", target: "Inbox target context" },
+  ],
+  [
+    "planned:src/lsp/client.ts:create.client-channel-handoff",
+    { task: "Task 5", lease: "current", target: "LSP.getClients ctx" },
+  ],
+  [
+    "planned:src/lsp/lsp.ts:getClients.spawn-handoff",
+    { task: "Task 5", lease: "current", target: "ctx" },
+  ],
+  [
+    "planned:src/mcp/index.ts:connectLocal.client-channel-handoff",
+    { task: "Task 5", lease: "current", target: "Instance.current" },
+  ],
+  [
+    "planned:src/mcp/index.ts:startTurnLifecycleNotification.handoff",
+    { task: "Task 5", lease: "current", target: "Instance.current" },
+  ],
+  [
+    "planned:src/mcp/index.ts:watch.client-channel-handoff",
+    { task: "Task 5", lease: "current", target: "EffectBridge.capturedTarget" },
   ],
   [
     "planned:src/plugin/codex.ts:oauth-attempt-channel-handoff",
@@ -369,6 +567,14 @@ const plannedOwnerParentAnchors = new Map<string, PlannedOwnerParent>([
     { ownerID: "ripgrep.caller-stream", task: "Task 5", target: "CallerEffectScope.current" },
   ],
   [
+    "planned:src/lsp/client.ts:waitForDiagnostics.caller-lease",
+    { ownerID: "lsp.wait-diagnostics", task: "Task 5", target: "Instance.current" },
+  ],
+  [
+    "planned:src/mcp/index.ts:MCP.authenticate.browser-open-lease",
+    { ownerID: "mcp.authenticate-browser-open", task: "Task 5", target: "Instance.current" },
+  ],
+  [
     "planned:src/plugin/index.ts:trigger.caller-lease",
     { ownerID: "plugin.trigger.finite", task: "Task 5", target: "Instance.current" },
   ],
@@ -435,6 +641,40 @@ const plannedOwnerParentAnchors = new Map<string, PlannedOwnerParent>([
 ])
 
 const frozenLogicalOwnerGroups = new Map<string, readonly string[]>([
+  [
+    "lsp.client-channel",
+    [
+      "src/lsp/client.ts:create#native-callback-onNotification-39adcaeef4",
+      "src/lsp/client.ts:create#native-callback-onRequest-aee6898cb0",
+      "src/lsp/client.ts:create#native-callback-onRequest-b7157e539a",
+      "src/lsp/client.ts:create#native-callback-onRequest-6fb95ebfed",
+      "src/lsp/client.ts:create#native-callback-onRequest-602616340a",
+      "src/lsp/client.ts:create#native-callback-onRequest-76984b6045",
+    ],
+  ],
+  [
+    "mcp.authenticate-browser-open",
+    [
+      "src/mcp/index.ts:MCP.authenticate.timer#timer-timeout-timer-f32a6263b8",
+      "src/mcp/index.ts:MCP.authenticate#native-callback-on-884ee2b240",
+      "src/mcp/index.ts:MCP.authenticate#native-callback-on-81b4a8093f",
+    ],
+  ],
+  [
+    "mcp.sampling-request-channel",
+    [
+      "src/mcp/sampling.ts:onError#native-callback-stream-3b77d2b99f",
+      "src/mcp/sampling.ts:try#async-iterator-forofstatement-dd2b65698a",
+      "src/mcp/sampling.ts:serve#native-callback-setRequestHandler-a203d903a9",
+    ],
+  ],
+  [
+    "mcp.turn-notification",
+    [
+      "src/mcp/index.ts:startTurnLifecycleNotification#naked-void-then-ec9254654b",
+      "src/mcp/index.ts:try#native-callback-addEventListener-7e8ecd9ae4",
+    ],
+  ],
   [
     "actor.fork-work",
     [
@@ -805,6 +1045,9 @@ const plannedDeterministicTests = new Map<string, { tasks: ReadonlySet<string>; 
   ["test/inbox/wake-matrix.test.ts", { tasks: new Set(["Task 5"]), scenario: "inbox wake" }],
   ["test/plugin/oauth-retirement.test.ts", { tasks: new Set(["Task 5"]), scenario: "OAuth retirement" }],
   ["test/plugin/generation-retirement.test.ts", { tasks: new Set(["Task 5"]), scenario: "plugin channel" }],
+  ["test/mcp/lifecycle.test.ts", { tasks: new Set(["Task 5"]), scenario: "instance generation retirement" }],
+  ["test/mcp/sampling-e2e.test.ts", { tasks: new Set(["Task 5"]), scenario: "sampling generation retirement" }],
+  ["test/lsp/lifecycle.test.ts", { tasks: new Set(["Task 5"]), scenario: "instance generation retirement" }],
   ["test/tool/read-lifecycle.test.ts", { tasks: new Set(["Task 5"]), scenario: "LSP late work" }],
   ["test/server/global-event-generation.test.ts", { tasks: new Set(["Task 6"]), scenario: "generation event" }],
   ["test/server/instance-openapi-lifecycle.test.ts", { tasks: new Set(["Task 6"]), scenario: "lifecycle schema" }],
@@ -819,7 +1062,6 @@ const plannedDeterministicTests = new Map<string, { tasks: ReadonlySet<string>; 
   ["test/cli/bootstrap-retirement.test.ts", { tasks: new Set(["Task 7"]), scenario: "headless shutdown" }],
   ["test/cli/tui/bootstrap-race.test.tsx", { tasks: new Set(["Task 6"]), scenario: "TUI shutdown" }],
   ["test/session/run-state-dispose.test.ts", { tasks: new Set(["Task 4"]), scenario: "run state shutdown" }],
-  ["test/workflow/runtime.test.ts", { tasks: new Set(["Task 9"]), scenario: "workflow shutdown" }],
 ])
 
 const rawHelperAllowlist: Record<string, ReadonlySet<string>> = {
@@ -868,6 +1110,78 @@ const privateJoinAllowlist: Record<string, ReadonlySet<string>> = {
   ]),
 }
 
+const rawHelperSymbolAllowlist: Record<string, ReadonlySet<string>> = {
+  registerLifecycleOwner: new Set([
+    "src/project/instance.ts:runNestedGenerationProducer",
+    "src/project/instance.ts:registerNestedGenerationChannel",
+    "src/project/instance.ts:acquireGenerationLease",
+    "src/project/instance.ts:acquireChildGenerationLease",
+  ]),
+  transferLifecycleOwner: new Set([
+    "src/project/instance.ts:registerTransferredGenerationProducer",
+    "src/project/instance.ts:registerTransferredGenerationChannel",
+    "src/project/instance.ts:registerGenerationBody",
+  ]),
+  captureInstanceExecution: new Set([
+    "src/effect/bootstrap-runtime.ts:bootstrap",
+    "src/effect/bootstrap-runtime.ts:BootstrapRuntime",
+    "src/effect/run-service.ts:attachWith",
+    "src/project/instance.ts:bind",
+  ]),
+  captureInstanceExecutionEffect: new Set([
+    "src/effect/bridge.ts:make",
+  ]),
+  restoreInstanceExecutionSync: new Set([
+    "src/effect/bootstrap-runtime.ts:bootstrap",
+    "src/effect/bootstrap-runtime.ts:BootstrapRuntime",
+    "src/effect/run-service.ts:attachWith",
+    "src/project/instance.ts:bind",
+  ]),
+  enterInstanceExecutionEffect: new Set([
+    "src/effect/bootstrap-runtime.ts:bootstrap",
+    "src/effect/bootstrap-runtime.ts:BootstrapRuntime",
+    "src/effect/bridge.ts:make",
+    "src/effect/run-service.ts:attachWith",
+  ]),
+  registerDirectoryRootLifecycleOwner: new Set([
+    "src/effect/instance-state.ts:make",
+    "src/project/instance.ts:provide",
+    "src/project/instance.ts:disposeCached",
+    "src/project/instance.ts:reload",
+    "src/project/instance.ts:dispose",
+  ]),
+}
+
+const rawHelperCallContracts = new Map<string, ReadonlySet<string>>(
+  Object.entries(rawHelperSymbolAllowlist).flatMap(([helper, anchors]) =>
+    [...anchors].map((anchor) => {
+      const fingerprints = helper === "registerLifecycleOwner" || helper === "registerDirectoryRootLifecycleOwner"
+        ? new Set([`${helper}({kind,target})`, `${helper}({abort,kind,target})`])
+        : helper === "transferLifecycleOwner"
+          ? new Set([
+              `${helper}({handoffFrom,kind})`,
+              `${helper}({abort,handoffFrom,kind})`,
+              `${helper}({handoffFrom,kind,onArmed})`,
+              `${helper}({abort,handoffFrom,kind,onArmed})`,
+            ])
+          : helper === "captureInstanceExecution" || helper === "captureInstanceExecutionEffect"
+            ? new Set([`${helper}()`])
+            : new Set([`${helper}(value,value)`])
+      return [`${helper}:${anchor}`, fingerprints] as const
+    }),
+  ),
+)
+
+const privateJoinCallContracts = new Map<string, ReadonlySet<string>>([
+  ["disposeDirectorySettled:src/project/instance.ts:disposeDirectory", new Set(["disposeDirectorySettled(input)", "disposeDirectorySettled(directory)"])],
+  ["disposeDirectorySettled:src/cli/bootstrap.ts:bootstrap", new Set(["disposeDirectorySettled(directory)"])],
+  ["disposeDirectorySettled:src/workflow/runtime.ts:spawnIsolated", new Set(["disposeDirectorySettled(info.directory)"])],
+  ["disposeDirectorySettled:test/fixture/instance-lifecycle.ts:disposeDirectory", new Set(["disposeDirectorySettled(directory)"])],
+  ["disposeAllSettled:src/project/instance.ts:disposeAll", new Set(["disposeAllSettled()"])],
+  ["disposeAllSettled:src/server/shutdown.ts:shutdown", new Set(["disposeAllSettled()"])],
+  ["disposeAllSettled:test/fixture/instance-lifecycle.ts:disposeAll", new Set(["disposeAllSettled()"])],
+])
+
 function listFiles(root: string): string[] {
   if (!existsSync(root)) return []
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -879,21 +1193,37 @@ function listFiles(root: string): string[] {
 }
 
 function parseSources(root: string, prefix: "src" | "test"): ParsedSource[] {
-  return listFiles(root)
-    .sort()
+  const files = listFiles(root).sort()
+  const program = ts.createProgram({
+    rootNames: files,
+    options: {
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      jsx: ts.JsxEmit.Preserve,
+      noResolve: true,
+      skipLibCheck: true,
+    },
+  })
+  const checker = program.getTypeChecker()
+  return files
     .map((file) => {
-      const text = readFileSync(file, "utf8")
+      const source = program.getSourceFile(file)
+      const text = source?.text ?? readFileSync(file, "utf8")
       return {
         file,
         relative: `${prefix}/${path.relative(root, file).split(path.sep).join("/")}`,
         text,
-        source: ts.createSourceFile(
-          file,
-          text,
-          ts.ScriptTarget.Latest,
-          true,
-          file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-        ),
+        source:
+          source ??
+          ts.createSourceFile(
+            file,
+            text,
+            ts.ScriptTarget.Latest,
+            true,
+            file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+          ),
+        checker,
       }
     })
 }
@@ -979,6 +1309,38 @@ function enclosingSymbol(node: ts.Node): string {
     current = current.parent
   }
   return role ?? "module"
+}
+
+function enclosingDeclarationSymbol(node: ts.Node): string {
+  let current: ts.Node | undefined = node
+  while (current) {
+    const label = effectFnLabel(current)
+    if (label) return label
+    if (ts.isFunctionDeclaration(current) && current.name) return current.name.text
+    if (ts.isMethodDeclaration(current) || ts.isMethodSignature(current)) {
+      const name = nameText(current.name)
+      if (name) return name
+    }
+    if (
+      (ts.isPropertyAssignment(current) || ts.isPropertyDeclaration(current)) &&
+      current.initializer &&
+      (ts.isArrowFunction(current.initializer) || ts.isFunctionExpression(current.initializer))
+    ) {
+      const name = nameText(current.name)
+      if (name) return name
+    }
+    if (
+      ts.isVariableDeclaration(current) &&
+      current.initializer &&
+      (ts.isArrowFunction(current.initializer) || ts.isFunctionExpression(current.initializer))
+    ) {
+      const name = nameText(current.name)
+      if (name) return name
+    }
+    if (ts.isClassDeclaration(current) && current.name) return current.name.text
+    current = current.parent
+  }
+  return "*"
 }
 
 function callProperty(node: ts.CallExpression) {
@@ -1096,9 +1458,11 @@ function scanCandidates(input: ParsedSource): Candidate[] {
   const found: Candidate[] = []
   const scanLowConfidence = isGenerationProducerSurface(input.relative)
   const declarations: Array<ts.ParameterDeclaration | ts.VariableDeclaration> = []
+  const functions: ts.FunctionDeclaration[] = []
   const asyncQueueBindings = new Set<string>()
   const websocketUpgradeBindings = new Set(["upgradeWebSocket"])
   const collectDeclarations = (node: ts.Node) => {
+    if (ts.isFunctionDeclaration(node) && node.name) functions.push(node)
     if ((ts.isParameter(node) || ts.isVariableDeclaration(node)) && ts.isIdentifier(node.name)) {
       declarations.push(node)
       if (
@@ -1149,6 +1513,39 @@ function scanCandidates(input: ParsedSource): Candidate[] {
           containsNode(lexicalScope(declaration), node),
       )
       .sort((left, right) => right.getStart(input.source) - left.getStart(input.source))[0]
+  const resolveAlias = (node: ts.Expression | undefined, seen = new Set<ts.Node>()): ts.Expression | undefined => {
+    if (!node || seen.has(node)) return node
+    seen.add(node)
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
+      return resolveAlias(node.expression, seen)
+    }
+    if (!ts.isIdentifier(node)) return node
+    const declaration = declarationFor(node)
+    return declaration?.initializer ? resolveAlias(declaration.initializer, seen) : node
+  }
+  const resolvedText = (node: ts.Expression | undefined): string | undefined => {
+    const resolved = resolveAlias(node)
+    if (!resolved) return undefined
+    if (ts.isPropertyAccessExpression(resolved)) {
+      return `${resolvedText(resolved.expression) ?? normalize(resolved.expression)}.${resolved.name.text}`
+    }
+    if (ts.isElementAccessExpression(resolved) && ts.isStringLiteralLike(resolved.argumentExpression)) {
+      return `${resolvedText(resolved.expression) ?? normalize(resolved.expression)}.${resolved.argumentExpression.text}`
+    }
+    if (ts.isIdentifier(resolved)) {
+      const symbol = input.checker.getSymbolAtLocation(resolved)
+      const target = symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? input.checker.getAliasedSymbol(symbol) : symbol
+      if (target && target.name !== "unknown") return target.name
+    }
+    return normalize(resolved)
+  }
+  const includesStringType = (node: ts.Expression) => {
+    const visit = (type: ts.Type): boolean => {
+      if (type.isUnionOrIntersection()) return type.types.some(visit)
+      return (type.flags & ts.TypeFlags.StringLike) !== 0 || input.checker.typeToString(type) === "string"
+    }
+    return visit(input.checker.getTypeAtLocation(node))
+  }
   const legacyStringArgument = (node: ts.Expression | undefined, seen = new Set<ts.Node>()): boolean => {
     if (!node) return true
     if (seen.has(node)) return false
@@ -1171,8 +1568,15 @@ function scanCandidates(input: ParsedSource): Candidate[] {
       return legacyStringArgument(node.whenTrue, seen) || legacyStringArgument(node.whenFalse, seen)
     }
     if (ts.isCallExpression(node)) {
-      return /(?:^|\.)(?:resolve|join|dirname|normalize)$/.test(node.expression.getText(input.source)) ||
-        node.expression.getText(input.source) === "String"
+      const callee = resolvedText(node.expression) ?? node.expression.getText(input.source)
+      const identifier = ts.isIdentifier(node.expression) ? node.expression : undefined
+      const declaration = identifier
+        ? functions.find((item) => item.name?.text === identifier.text && item.getStart(input.source) <= node.getStart(input.source))
+        : undefined
+      return includesStringType(node) ||
+        /(?:^|\.)(?:resolve|join|dirname|normalize)$/.test(callee) ||
+        callee === "String" ||
+        !!declaration?.type && /\bstring\b/.test(declaration.type.getText(input.source))
     }
     return false
   }
@@ -1285,6 +1689,13 @@ function scanCandidates(input: ParsedSource): Candidate[] {
     if (ts.isCallExpression(node)) {
       const property = callProperty(node)
       const callee = node.expression.getText(input.source)
+      const resolvedCallee = resolveAlias(node.expression)
+      const resolvedProperty = resolvedCallee && ts.isPropertyAccessExpression(resolvedCallee)
+        ? { receiver: resolvedText(resolvedCallee.expression) ?? normalize(resolvedCallee.expression), name: resolvedCallee.name.text }
+        : resolvedCallee && ts.isElementAccessExpression(resolvedCallee) && ts.isStringLiteralLike(resolvedCallee.argumentExpression)
+          ? { receiver: resolvedText(resolvedCallee.expression) ?? normalize(resolvedCallee.expression), name: resolvedCallee.argumentExpression.text }
+          : undefined
+      const effectiveProperty = resolvedProperty ?? property
       if (
         property &&
         new Set(["then", "catch", "finally"]).has(property.name) &&
@@ -1306,11 +1717,11 @@ function scanCandidates(input: ParsedSource): Candidate[] {
       if (callee === "setInterval") addLowConfidence("timer-interval", node)
       if (callee === "setImmediate") addLowConfidence("timer-immediate", node)
       if (callee === "queueMicrotask") addLowConfidence("microtask", node)
-      if (property?.receiver === "Instance" && property.name === "bind") add("instance-bind", node)
-      if (property?.name === "provideService" && node.arguments[0]?.getText(input.source) === "InstanceRef") {
+      if (effectiveProperty?.receiver === "Instance" && effectiveProperty.name === "bind") add("instance-bind", node)
+      if (effectiveProperty?.name === "provideService" && resolvedText(node.arguments[0]) === "InstanceRef") {
         add("instance-ref-provider", node)
       }
-      if (property?.name === "provideService" && node.arguments[0]?.getText(input.source) === "InstanceAdmissionRef") {
+      if (effectiveProperty?.name === "provideService" && resolvedText(node.arguments[0]) === "InstanceAdmissionRef") {
         add("admission-ref-provider", node)
       }
       if (
@@ -1335,7 +1746,16 @@ function scanCandidates(input: ParsedSource): Candidate[] {
         return !!argument && (ts.isIdentifier(argument) || ts.isArrowFunction(argument) || ts.isFunctionExpression(argument))
       }
       const callbackMethod = property?.name
-      const callbackPosition = callbackMethod && new Set(["on", "addEventListener", "addListener", "once"]).has(callbackMethod)
+      const callbackPosition = callbackMethod && new Set([
+        "on",
+        "addEventListener",
+        "addListener",
+        "once",
+        "onNotification",
+        "onRequest",
+        "setNotificationHandler",
+        "setRequestHandler",
+      ]).has(callbackMethod)
         ? 1
         : callbackMethod &&
             new Set(["onAbort", "onData", "onExit", "subscribe", "subscribeAll", "subscribeCallback"]).has(callbackMethod)
@@ -1351,10 +1771,11 @@ function scanCandidates(input: ParsedSource): Candidate[] {
       ) {
         addLowConfidence("native-callback", node)
       }
-      if (property?.receiver === "Instance" && (property.name === "disposeDirectory" || property.name === "disposeAll")) {
+      if (effectiveProperty?.receiver === "Instance" && new Set(["disposeDirectory", "disposeAll"]).has(effectiveProperty.name)) {
         add("legacy-settled-facade", node)
       }
-      if (callee === "disposeInstance" && legacyStringArgument(node.arguments[0])) add("dispose-target", node)
+      const resolvedCallName = resolvedText(node.expression)
+      if (resolvedCallName === "disposeInstance" && legacyStringArgument(node.arguments[0])) add("dispose-target", node)
     }
     node.forEachChild(visit)
   }
@@ -1389,8 +1810,7 @@ function fingerprint(candidates: Candidate[]) {
     .slice(0, 16)
 }
 
-function inspectRawCandidateSummaries(sourceRoot = defaultSourceRoot): Summary[] {
-  const candidates = parseSources(sourceRoot, "src").flatMap(scanCandidates)
+function summarizeCandidates(candidates: Candidate[]): Summary[] {
   const leaderKinds = new Set<CandidateKind>([
     "admission-ref-provider",
     "async-iterator",
@@ -1475,6 +1895,10 @@ function inspectRawCandidateSummaries(sourceRoot = defaultSourceRoot): Summary[]
   })
 }
 
+function inspectRawCandidateSummaries(sourceRoot = defaultSourceRoot): Summary[] {
+  return summarizeCandidates(parseSources(sourceRoot, "src").flatMap(scanCandidates))
+}
+
 export function inspectCandidateSummaries(sourceRoot = defaultSourceRoot): Summary[] {
   return inspectRawCandidateSummaries(sourceRoot).filter(
     (summary) => rendererOnlyExclusions.get(summary.anchor) !== summary.fingerprint,
@@ -1516,6 +1940,36 @@ function structuredFields(value: string) {
         return separator > 0 ? [[item.slice(0, separator), item.slice(separator + 1)] as const] : []
       }),
   )
+}
+
+function producerConsumerRelation(row: InventoryRow) {
+  const fields = structuredFields(row.cells[6])
+  const handoff = fields.get("handoff") ?? ""
+  const parent = fields.get("parent") ?? ""
+  const ownerID = fields.get("ownerID") ?? ""
+  if (!handoff && !parent && !ownerID) return undefined
+  return `handoff=${handoff};parent=${parent};ownerID=${ownerID}`
+}
+
+function producerConsumerRelationErrors(
+  rows: InventoryRow[],
+  frozen: ReadonlyMap<string, string> = frozenProducerConsumerRelations,
+) {
+  const actual = rows.reduce((result, row) => {
+    const relation = producerConsumerRelation(row)
+    if (!relation) return result
+    result.set(row.anchor, createHash("sha256").update(relation).digest("hex").slice(0, 16))
+    return result
+  }, new Map<string, string>())
+  const errors = [...actual]
+    .filter(([anchor, relation]) => frozen.get(anchor) !== relation)
+    .map(([anchor]) => `frozen producer consumer relation changed: ${anchor}`)
+  errors.push(
+    ...[...frozen.keys()]
+      .filter((anchor) => !actual.has(anchor))
+      .map((anchor) => `frozen producer consumer relation changed: ${anchor}`),
+  )
+  return errors
 }
 
 function logicalOwnerGroupErrors(rows: InventoryRow[]) {
@@ -1730,6 +2184,10 @@ function validateInventory(
       const lease = fields.get("lease")
       const handoff = fields.get("handoff")
       const handoffTarget = fields.get("handoffTarget")
+      const wrappers = transferredAuthorityWrappers.get(row.cells[7])
+      if (!wrappers?.has(fields.get("replacement") ?? "")) {
+        errors.push(`transferred owner replacement wrapper does not match at line ${row.line}: ${row.anchor}`)
+      }
       if (!handoff || handoff === row.anchor) {
         errors.push(`transferred row requires an exact independent handoff lease anchor at line ${row.line}: ${row.anchor}`)
       }
@@ -1832,6 +2290,7 @@ function validateInventory(
     if (!summaryByAnchor.has(row.anchor)) errors.push(`inventory row has no matching producer candidate: ${row.anchor}`)
   }
   if (enforceFrozenContracts) {
+    errors.push(...producerConsumerRelationErrors(parsed.rows))
     errors.push(...plannedHandoffClosureErrors(referencedPlannedHandoffs))
     errors.push(...plannedOwnerParentClosureErrors(referencedPlannedParents))
     const logicalGroups = new Map<string, Set<string>>()
@@ -1888,6 +2347,18 @@ function rawHelperName(node: ts.CallExpression) {
   return undefined
 }
 
+function rawHelperCallFingerprint(name: string, node: ts.CallExpression) {
+  if (!ts.isIdentifier(node.expression) || node.expression.text !== name) return undefined
+  return `${name}(${node.arguments
+    .map((argument) => {
+      if (!ts.isObjectLiteralExpression(argument)) return "value"
+      const names = argument.properties.map((property) => nameText(property.name))
+      if (names.some((item) => !item)) return "invalid-object"
+      return `{${names.filter((item): item is string => !!item).sort().join(",")}}`
+    })
+    .join(",")})`
+}
+
 function containsAwait(node: ts.Node) {
   let found = false
   const visit = (current: ts.Node) => {
@@ -1919,8 +2390,26 @@ function releaseShape(node: ts.CallExpression) {
   return "invalid" as const
 }
 
-function returnsPromiseLike(callback: ts.Expression | undefined, resolve?: (node: ts.Identifier) => ts.Expression | undefined) {
-  if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) return false
+function returnsPromiseLike(
+  callback: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+  resolve?: (node: ts.Identifier) => ts.Expression | undefined,
+) {
+  if (!callback) return false
+  const typed = checker
+    .getTypeAtLocation(callback)
+    .getCallSignatures()
+    .some((signature) => {
+      const result = checker.getReturnTypeOfSignature(signature)
+      const hasThen = (type: ts.Type): boolean => {
+        if (type.isUnionOrIntersection()) return type.types.some(hasThen)
+        if ((type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Never)) !== 0) return false
+        return !!checker.getPropertyOfType(checker.getApparentType(type), "then")
+      }
+      return hasThen(result)
+    })
+  if (typed) return true
+  if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return false
   if (callback.modifiers?.some((item) => item.kind === ts.SyntaxKind.AsyncKeyword)) return true
   const seen = new Set<ts.Node>()
   const promiseExpression = (node: ts.Expression): boolean => {
@@ -1975,6 +2464,7 @@ function authorityErrors(files: ParsedSource[]) {
     const calls: ts.CallExpression[] = []
     const leaseDeclarations: ts.VariableDeclaration[] = []
     const valueDeclarations: ts.VariableDeclaration[] = []
+    const rawHelperCalls = new Map<string, ts.CallExpression[]>()
     const collect = (node: ts.Node) => {
       if (ts.isCallExpression(node)) calls.push(node)
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) valueDeclarations.push(node)
@@ -2012,6 +2502,73 @@ function authorityErrors(files: ParsedSource[]) {
           return !scope || nodeInside(scope, at)
         })
         .sort((left, right) => right.getStart(file.source) - left.getStart(file.source))[0]
+    }
+    const resolvedHelperName = (expression: ts.Expression | undefined, seen = new Set<ts.Node>()): string | undefined => {
+      if (!expression || seen.has(expression)) return undefined
+      seen.add(expression)
+      if (
+        ts.isParenthesizedExpression(expression) ||
+        ts.isAsExpression(expression) ||
+        ts.isTypeAssertionExpression(expression) ||
+        ts.isSatisfiesExpression(expression)
+      ) {
+        return resolvedHelperName(expression.expression, seen)
+      }
+      if (ts.isPropertyAccessExpression(expression)) return expression.name.text
+      if (ts.isElementAccessExpression(expression) && ts.isStringLiteralLike(expression.argumentExpression)) {
+        return expression.argumentExpression.text
+      }
+      if (!ts.isIdentifier(expression)) return undefined
+      const value = resolveValue(expression)
+      if (value) return resolvedHelperName(value, seen)
+      const symbol = file.checker.getSymbolAtLocation(expression)
+      const target = symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? file.checker.getAliasedSymbol(symbol) : symbol
+      return target?.name ?? expression.text
+    }
+    const capturedValue = (value: ts.Expression | undefined, seen = new Set<ts.Node>()): boolean => {
+      if (!value || seen.has(value)) return false
+      seen.add(value)
+      if (
+        ts.isParenthesizedExpression(value) ||
+        ts.isAsExpression(value) ||
+        ts.isTypeAssertionExpression(value) ||
+        ts.isSatisfiesExpression(value)
+      ) {
+        return capturedValue(value.expression, seen)
+      }
+      if (ts.isIdentifier(value)) return capturedValue(resolveValue(value), seen)
+      return ts.isCallExpression(value) &&
+        new Set(["captureInstanceExecution", "captureInstanceExecutionEffect"]).has(
+          resolvedHelperName(value.expression) ?? "",
+        )
+    }
+    const lifecycleReceiver = (expression: ts.Expression | undefined) => {
+      if (!expression) return false
+      const type = file.checker.typeToString(
+        file.checker.getTypeAtLocation(expression),
+        undefined,
+        ts.TypeFormatFlags.NoTruncation,
+      )
+      return /\b(?:GenerationLease|LifecycleOwnerHandle|TransferredLifecycleOwnerHandle|GenerationOwnedHandle|TransferredGenerationHandle)\b/.test(
+        type,
+      )
+    }
+    const exportedFunction = (node: ReturnType<typeof nearestFunction>) => {
+      if (!node) return false
+      if (ts.isFunctionDeclaration(node)) return exported(node)
+      if (ts.isMethodDeclaration(node)) {
+        let current: ts.Node | undefined = node.parent
+        while (current && !ts.isSourceFile(current)) {
+          if (ts.isClassDeclaration(current)) return exported(current)
+          current = current.parent
+        }
+        return false
+      }
+      if (ts.isVariableDeclaration(node.parent)) {
+        const statement = node.parent.parent.parent
+        return ts.isVariableStatement(statement) && exported(statement)
+      }
+      return false
     }
     const transfers = new Map<ts.VariableDeclaration, ts.CallExpression[]>()
     const transferRunSyncs = new Map<ts.VariableDeclaration, Set<ts.CallExpression>>()
@@ -2082,6 +2639,16 @@ function authorityErrors(files: ParsedSource[]) {
       }
       if (
         ts.isExportDeclaration(node) &&
+        node.exportClause &&
+        ts.isNamespaceExport(node.exportClause) &&
+        !!node.moduleSpecifier &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        /(?:^|\/)instance-ref(?:\.[cm]?[jt]s)?$/.test(node.moduleSpecifier.text)
+      ) {
+        errors.push(`lifecycle authority module cannot be namespace re-exported: ${file.relative}`)
+      }
+      if (
+        ts.isExportDeclaration(node) &&
         !node.exportClause &&
         !!node.moduleSpecifier &&
         ts.isStringLiteral(node.moduleSpecifier) &&
@@ -2090,27 +2657,31 @@ function authorityErrors(files: ParsedSource[]) {
         errors.push(`lifecycle authority module cannot be star re-exported: ${file.relative}`)
       }
       if (file.relative !== "src/effect/instance-ref.ts" && exported(node)) {
-        const directCapture = (value: ts.Node | undefined) =>
-          !!value &&
-          ts.isCallExpression(value) &&
-          new Set(["captureInstanceExecution", "captureInstanceExecutionEffect"]).has(rawHelperName(value) ?? "")
         if (
           (ts.isVariableStatement(node) &&
-            node.declarationList.declarations.some((declaration) => directCapture(declaration.initializer))) ||
-          ((ts.isPropertyDeclaration(node) || ts.isPropertyAssignment(node)) && directCapture(node.initializer))
+            node.declarationList.declarations.some((declaration) => capturedValue(declaration.initializer))) ||
+          ((ts.isPropertyDeclaration(node) || ts.isPropertyAssignment(node)) && capturedValue(node.initializer))
         ) {
           errors.push(`captured InstanceExecution cannot be re-exported: ${file.relative}`)
         }
         if (ts.isFunctionDeclaration(node) && node.body) {
           const returned = node.body.statements.some(
-            (statement) => ts.isReturnStatement(statement) && directCapture(statement.expression),
+            (statement) => ts.isReturnStatement(statement) && capturedValue(statement.expression),
           )
           if (returned) errors.push(`captured InstanceExecution cannot be re-exported: ${file.relative}`)
         }
       }
       if (
         file.relative !== "src/effect/instance-ref.ts" &&
-        ((ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) &&
+        ts.isReturnStatement(node) &&
+        capturedValue(node.expression) &&
+        exportedFunction(nearestFunction(node))
+      ) {
+        errors.push(`captured InstanceExecution cannot be re-exported: ${file.relative}`)
+      }
+      if (
+        file.relative !== "src/effect/instance-ref.ts" &&
+        ((ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)) &&
           /\b(?:InstanceExecution|LifecycleOwnerToken|LifecycleOwnerStack)\b/.test(node.type.getText(file.source)))
       ) {
         errors.push(`InstanceExecution cannot be cast or reconstructed: ${file.relative}`)
@@ -2206,22 +2777,40 @@ function authorityErrors(files: ParsedSource[]) {
         ) {
           errors.push(`InstanceAdmissionRef cannot be provided outside its module: ${file.relative}`)
         }
-        const helper = rawHelperName(node)
+        const helper = resolvedHelperName(node.expression)
         const allowed = helper ? helperAllowlist(helper) : undefined
-        if (helper && allowed && !allowed.has(file.relative)) {
+        if (helper && Object.hasOwn(rawHelperSymbolAllowlist, helper)) {
+          const symbol = enclosingDeclarationSymbol(node)
+          const key = `${helper}:${file.relative}:${symbol}`
+          rawHelperCalls.set(key, [...(rawHelperCalls.get(key) ?? []), node])
+          const contract = rawHelperCallContracts.get(key)
+          if (!contract) {
+            errors.push(`raw lifecycle helper is not allowlisted: ${file.relative}:${symbol}:${helper}`)
+          } else if (!contract.has(rawHelperCallFingerprint(helper, node) ?? "")) {
+            errors.push(`raw lifecycle helper call is not exact-allowlisted: ${file.relative}:${symbol}:${helper}`)
+          }
+        } else if (helper && Object.hasOwn(privateJoinAllowlist, helper)) {
+          const key = `${helper}:${file.relative}:${enclosingSymbol(node)}`
+          if (!privateJoinCallContracts.get(key)?.has(normalize(node))) {
+            errors.push(`private lifecycle join call is not exact-allowlisted: ${file.relative}:${enclosingSymbol(node)}:${helper}`)
+          }
+        } else if (helper && allowed && !allowed.has(file.relative)) {
           errors.push(`raw lifecycle helper is not allowlisted: ${file.relative}:${enclosingSymbol(node)}:${helper}`)
         }
         const property = callProperty(node)
         const releaseReceiver = ts.isPropertyAccessExpression(node.expression) ? node.expression.expression : undefined
         const acquiredRelease = property?.name === "release" ? resolveLease(releaseReceiver, node) : undefined
-        if (property?.name === "release" && (acquiredRelease || /(?:lease|owner|handle|handoff|child)/i.test(property.receiver))) {
+        if (
+          property?.name === "release" &&
+          (acquiredRelease || lifecycleReceiver(releaseReceiver) || /(?:lease|owner|handle|handoff|child)/i.test(property.receiver))
+        ) {
           if (node.arguments.length === 0) {
             errors.push(`release requires a discriminated result: ${file.relative}:${enclosingSymbol(node)}`)
           } else if (releaseShape(node) === "invalid") {
             errors.push(`release result must be exactly one discriminated shape: ${file.relative}:${enclosingSymbol(node)}`)
           }
         }
-        if (property?.name === "runSync" && returnsPromiseLike(node.arguments[0], resolveValue)) {
+        if (property?.name === "runSync" && returnsPromiseLike(node.arguments[0], file.checker, resolveValue)) {
             errors.push(`runSync cannot accept async or PromiseLike callbacks: ${file.relative}:${enclosingSymbol(node)}`)
         }
         if (
@@ -2282,6 +2871,10 @@ function authorityErrors(files: ParsedSource[]) {
       node.forEachChild(visit)
     }
     visit(file.source)
+    for (const [key, matches] of rawHelperCalls) {
+      if (matches.length <= 1) continue
+      errors.push(`raw lifecycle helper call is not exact-allowlisted: ${key}`)
+    }
 
     const shortSetupLeases = new Set([
       ...transfers.keys(),
@@ -2306,6 +2899,7 @@ function authorityErrors(files: ParsedSource[]) {
       })
       const success = releases.filter((call) => releaseShape(call) === "success")
       const failure = releases.filter((call) => releaseShape(call) === "failure")
+      let setupTry: ts.TryStatement | undefined
       if (registrations.length === 0) {
         errors.push(`generation handoff lease must register at least one transferred owner: ${file.relative}:${name}`)
       }
@@ -2326,8 +2920,59 @@ function authorityErrors(files: ParsedSource[]) {
           }
           return undefined
         }
-        if (tryFor(success[0]!, "try") !== tryFor(failure[0]!, "catch") || !tryFor(success[0]!, "try")) {
+        setupTry = tryFor(success[0]!, "try")
+        if (setupTry !== tryFor(failure[0]!, "catch") || !setupTry) {
           errors.push(`transferred producer success and failure release paths must be structurally exclusive: ${file.relative}:${name}`)
+        }
+      }
+      if (setupTry && success[0] && failure[0]) {
+        const successStatement = setupTry.tryBlock.statements.find((statement) => nodeInside(statement, success[0]!))
+        if (!successStatement || successStatement !== success[0].parent || !ts.isExpressionStatement(successStatement)) {
+          errors.push(`success release must dominate every normal exit: ${file.relative}:${name}`)
+        }
+
+        const catchClause = setupTry.catchClause
+        const catchBinding = catchClause?.variableDeclaration?.name
+        const failureStatement = catchClause?.block.statements.find((statement) => nodeInside(statement, failure[0]!))
+        const failureIndex = failureStatement && catchClause ? catchClause.block.statements.indexOf(failureStatement) : -1
+        const rethrow = catchClause?.block.statements[failureIndex + 1]
+        if (
+          !catchClause ||
+          !catchBinding ||
+          !ts.isIdentifier(catchBinding) ||
+          failureIndex !== 0 ||
+          failureStatement !== failure[0].parent ||
+          !ts.isExpressionStatement(failureStatement) ||
+          catchClause.block.statements.length !== 2 ||
+          !rethrow ||
+          !ts.isThrowStatement(rethrow) ||
+          !rethrow.expression ||
+          !ts.isIdentifier(rethrow.expression) ||
+          rethrow.expression.text !== catchBinding.text
+        ) {
+          errors.push(
+            `failure release must dominate every exceptional exit and rethrow the original error: ${file.relative}:${name}`,
+          )
+        }
+        let finallyOverrides = false
+        const scanFinally = (node: ts.Node) => {
+          if (node !== setupTry!.finallyBlock && nearestFunction(node) !== nearestFunction(setupTry!)) return
+          if (
+            ts.isReturnStatement(node) ||
+            ts.isThrowStatement(node) ||
+            ts.isBreakStatement(node) ||
+            ts.isContinueStatement(node) ||
+            ts.isAwaitExpression(node)
+          ) {
+            finallyOverrides = true
+          }
+          node.forEachChild(scanFinally)
+        }
+        if (setupTry.finallyBlock) scanFinally(setupTry.finallyBlock)
+        if (finallyOverrides) {
+          errors.push(
+            `failure release must dominate every exceptional exit and rethrow the original error: ${file.relative}:${name}`,
+          )
         }
       }
       const firstRelease = releases.map((call) => call.getStart(file.source)).sort((left, right) => left - right)[0] ?? scope.end
@@ -2350,6 +2995,29 @@ function authorityErrors(files: ParsedSource[]) {
           if (ts.isThrowStatement(node)) {
             errors.push(`transferred producer setup must not throw before release: ${file.relative}:${name}`)
           }
+          if (setupTry && (ts.isBreakStatement(node) || ts.isContinueStatement(node))) {
+            const bypassesSuccessRelease = (() => {
+              if (node.label) return true
+              let current: ts.Node | undefined = node.parent
+              while (current && current !== scope) {
+                if (
+                  ts.isForStatement(current) ||
+                  ts.isForInStatement(current) ||
+                  ts.isForOfStatement(current) ||
+                  ts.isWhileStatement(current) ||
+                  ts.isDoStatement(current) ||
+                  ts.isSwitchStatement(current)
+                ) {
+                  return nodeInside(current, setupTry)
+                }
+                current = current.parent
+              }
+              return true
+            })()
+            if (bypassesSuccessRelease) {
+              errors.push(`success release must dominate every normal exit: ${file.relative}:${name}`)
+            }
+          }
           if (
             ts.isBinaryExpression(node) &&
             node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
@@ -2368,6 +3036,136 @@ function authorityErrors(files: ParsedSource[]) {
         node.forEachChild(scanRegion)
       }
       scanRegion(scope)
+
+      const successPosition = success[0]?.getStart(file.source) ?? firstRelease
+      const runSyncs = transferRunSyncs.get(lease) ?? new Set<ts.CallExpression>()
+      const runSyncCallbacks = new Map(
+        [...runSyncs].flatMap((runSync) => {
+          const callback = runSync.arguments[0]
+          return callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
+            ? [[runSync, callback] as const]
+            : []
+        }),
+      )
+      const childDeclarations = new Set<ts.VariableDeclaration>()
+      const declarationBefore = (node: ts.Node, boundary: ts.Node) => {
+        let current: ts.Node | undefined = node.parent
+        while (current && current !== boundary) {
+          if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name)) return current
+          if (
+            ts.isFunctionDeclaration(current) ||
+            ts.isFunctionExpression(current) ||
+            ts.isArrowFunction(current) ||
+            ts.isMethodDeclaration(current)
+          ) {
+            return undefined
+          }
+          current = current.parent
+        }
+        return undefined
+      }
+      for (const registration of registrations) {
+        const runSync = [...runSyncs].find((candidate) => nodeInside(candidate, registration))
+        const callback = runSync ? runSyncCallbacks.get(runSync) : undefined
+        const declaration = callback ? declarationBefore(registration, callback) : undefined
+        if (declaration) childDeclarations.add(declaration)
+        if (!callback || declaration) continue
+
+        let current: ts.Node = registration
+        let allowedReturn = false
+        while (current.parent && current.parent !== callback) {
+          if (ts.isCallExpression(current.parent) && current.parent !== runSync) break
+          if (ts.isReturnStatement(current.parent)) {
+            allowedReturn = nearestFunction(current.parent) === callback
+            break
+          }
+          current = current.parent
+        }
+        if (ts.isArrowFunction(callback) && callback.body === current) allowedReturn = true
+        if (!allowedReturn) {
+          errors.push(`transferred child handle must not escape before successful release: ${file.relative}:${name}`)
+        }
+      }
+      for (const runSync of runSyncs) {
+        const declaration = declarationBefore(runSync, scope)
+        if (declaration && ts.isIdentifier(declaration.name)) {
+          childDeclarations.add(declaration)
+          continue
+        }
+        if (declaration) {
+          errors.push(`transferred child handle must not escape before successful release: ${file.relative}:${name}`)
+          continue
+        }
+        let current: ts.Node = runSync
+        let discarded = false
+        while (current.parent && current.parent !== scope) {
+          const parent = current.parent
+          if (ts.isExpressionStatement(parent)) {
+            discarded = true
+            break
+          }
+          if (
+            ts.isParenthesizedExpression(parent) ||
+            ts.isAsExpression(parent) ||
+            ts.isTypeAssertionExpression(parent) ||
+            ts.isSatisfiesExpression(parent) ||
+            ts.isNonNullExpression(parent) ||
+            ts.isVoidExpression(parent)
+          ) {
+            current = parent
+            continue
+          }
+          break
+        }
+        if (!discarded) {
+          errors.push(`transferred child handle must not escape before successful release: ${file.relative}:${name}`)
+        }
+      }
+
+      const allowedRunSyncReturn = (identifier: ts.Identifier, declaration: ts.VariableDeclaration) => {
+        const callback = [...runSyncCallbacks.values()].find(
+          (candidate) => nodeInside(candidate, declaration) && nodeInside(candidate, identifier),
+        )
+        if (!callback || nearestFunction(identifier) !== callback) return false
+        let current: ts.Node = identifier
+        while (current.parent && current.parent !== callback) {
+          if (
+            ts.isCallExpression(current.parent) ||
+            ts.isFunctionExpression(current.parent) ||
+            ts.isArrowFunction(current.parent)
+          ) {
+            return false
+          }
+          if (ts.isReturnStatement(current.parent)) return nearestFunction(current.parent) === callback
+          current = current.parent
+        }
+        return ts.isArrowFunction(callback) && callback.body === current
+      }
+      const scanChildEscapes = (node: ts.Node) => {
+        if (
+          ts.isIdentifier(node) &&
+          node.getStart(file.source) < successPosition &&
+          !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) &&
+          !(ts.isPropertyAssignment(node.parent) && node.parent.name === node)
+        ) {
+          const declaration = [...childDeclarations].find(
+            (candidate) =>
+              ts.isIdentifier(candidate.name) &&
+              candidate.name.text === node.text &&
+              candidate.getStart(file.source) <= node.getStart(file.source) &&
+              nodeInside(nearestFunction(candidate) ?? scope, node),
+          )
+          if (
+            declaration &&
+            declaration.name !== node &&
+            !allowedRunSyncReturn(node, declaration)
+          ) {
+            errors.push(`transferred child handle must not escape before successful release: ${file.relative}:${name}`)
+          }
+        }
+        node.forEachChild(scanChildEscapes)
+      }
+      scanChildEscapes(scope)
     }
   }
   const central = files.find((file) => file.relative === "src/effect/instance-ref.ts")
@@ -2442,7 +3240,7 @@ export function check(args: string[], env: NodeJS.ProcessEnv = process.env) {
   const sources = parseSources(sourceRoot, "src")
   const tests = parseSources(testRoot, "test")
   const candidates = sources.flatMap(scanCandidates)
-  const rawSummaries = inspectRawCandidateSummaries(sourceRoot)
+  const rawSummaries = summarizeCandidates(candidates)
   const summaries = rawSummaries.filter(
     (summary) => rendererOnlyExclusions.get(summary.anchor) !== summary.fingerprint,
   )
