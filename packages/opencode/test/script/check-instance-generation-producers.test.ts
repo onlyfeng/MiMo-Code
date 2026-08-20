@@ -106,7 +106,7 @@ test("default inventory analysis is built once without caching inventory errors"
   expect(bodyErrors.join("\n")).not.toContain("planned RemoteRelayOwner contract is missing or changed")
   expect(check(args)).toEqual([])
   expect(inspectDefaultAnalysisBuildCountsForTest()).toEqual(built)
-})
+}, 45_000)
 
 test("the planned Task 0 inventory mode accepts the frozen starting universe", async () => {
   const result = await run([
@@ -1453,6 +1453,15 @@ test("allowlisted wrappers may consume capture internally but cannot export the 
   await using _valid = valid.tmp
   expect(await run(["--check"], valid.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
 
+  const validArrow = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts":
+        "export const bootstrap = () => makeOpaqueBootstrapHandle(captureInstanceExecution())\n",
+    },
+  })
+  await using _validArrow = validArrow.tmp
+  expect(await run(["--check"], validArrow.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+
   const escaped = await fixture({
     source: {
       "effect/bootstrap-runtime.ts": "export function bootstrap() { return captureInstanceExecution() }\n",
@@ -1462,6 +1471,21 @@ test("allowlisted wrappers may consume capture internally but cannot export the 
   const result = await run(["--check"], escaped.env)
   expect(result.exitCode).toBe(1)
   expect(result.stderr).toContain("captured InstanceExecution cannot be re-exported")
+
+  for (const [name, body] of [
+    ["direct", "captureInstanceExecution()"],
+    ["nested", "() => captureInstanceExecution()"],
+  ] as const) {
+    const expressionBody = await fixture({
+      source: {
+        "effect/bootstrap-runtime.ts": `export const bootstrap = () => ${body}\n`,
+      },
+    })
+    await using _ = expressionBody.tmp
+    expect((await run(["--check"], expressionBody.env)).stderr, name).toContain(
+      "captured InstanceExecution cannot be re-exported",
+    )
+  }
 
   const nested = await fixture({
     source: {
@@ -1894,6 +1918,752 @@ test("runSync method aliases cannot accept PromiseLike callbacks", async () => {
   })
   await using _ = input.tmp
   expect((await run(["--check"], input.env)).stderr).toContain("runSync cannot accept async or PromiseLike callbacks")
+})
+
+test("authority aliases resolve only through enclosing lexical scopes", async () => {
+  for (const [name, source, message] of [
+    [
+      "value alias",
+      [
+        "declare const lease: GenerationLease",
+        "declare function benign(callback?: unknown): unknown",
+        "declare function work(): unknown",
+        "const run = lease.runSync",
+        "{ const run = benign }",
+        "run(async () => work())",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "function-scoped var",
+      [
+        "export function start(lease: GenerationLease) {",
+        "  { var run = lease.runSync }",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "repeated var declarations",
+      [
+        "export function start(lease: GenerationLease, benign: (callback?: unknown) => unknown) {",
+        "  var run = benign",
+        "  var run = lease.runSync",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "repeated var without overwrite",
+      [
+        "export function start(lease: GenerationLease) {",
+        "  var run = lease.runSync",
+        "  var run",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "conditional var overwrite",
+      [
+        "export function start(lease: GenerationLease, benign: (callback?: unknown) => unknown, pick: boolean) {",
+        "  var run = lease.runSync",
+        "  if (pick) { var run = benign }",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "conditional assignment",
+      [
+        "export function start(lease: GenerationLease, benign: (callback?: unknown) => unknown, pick: boolean) {",
+        "  let run = benign",
+        "  if (pick) run = lease.runSync",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "short-circuit assignment",
+      [
+        "export function start(lease: GenerationLease, benign: (callback?: unknown) => unknown, pick: boolean) {",
+        "  let run = lease.runSync",
+        "  pick && (run = benign)",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "conditional expression assignment",
+      [
+        "export function start(lease: GenerationLease, benign: (callback?: unknown) => unknown, pick: boolean) {",
+        "  let run = lease.runSync",
+        "  pick ? (run = benign) : undefined",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "conditional initializer",
+      [
+        "export function start(lease: GenerationLease, benign: (callback?: unknown) => unknown, pick: boolean) {",
+        "  const run = pick ? lease.runSync : benign",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "loop increment assignment",
+      [
+        "export function start(lease: GenerationLease, benign: (callback?: unknown) => unknown, pick: boolean) {",
+        "  let run = lease.runSync",
+        "  for (; pick; run = benign) break",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "catch parameter",
+      [
+        "export function start(lease: GenerationLease, benign: (callback?: unknown) => unknown) {",
+        "  const run = lease.runSync",
+        "  try {} catch (run) {}",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "for initializer",
+      [
+        "export function start(lease: GenerationLease, benign: (callback?: unknown) => unknown) {",
+        "  const run = lease.runSync",
+        "  for (const run = benign; false;) {}",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "switch case",
+      [
+        "export function start(lease: GenerationLease, benign: (callback?: unknown) => unknown) {",
+        "  const run = lease.runSync",
+        "  switch (0) { case 0: const run = benign; break }",
+        "  run(async () => undefined)",
+        "}",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "destructured alias",
+      [
+        "declare const lease: GenerationLease",
+        "declare const safe: { benign(callback?: unknown): unknown }",
+        "declare function work(): unknown",
+        "const { runSync: run } = lease",
+        "{ const { benign: run } = safe }",
+        "run(async () => work())",
+      ].join("\n"),
+      "runSync cannot accept async or PromiseLike callbacks",
+    ],
+    [
+      "raw helper alias",
+      [
+        "declare function benign(): unknown",
+        "export function bootstrap() {",
+        "  const capture = captureInstanceExecution",
+        "  { const capture = benign }",
+        "  return makeOpaqueBootstrapHandle(capture())",
+        "}",
+      ].join("\n"),
+      "raw lifecycle helper call is not exact-allowlisted",
+    ],
+    [
+      "repeated raw helper alias",
+      [
+        "declare function benign(): unknown",
+        "var capture = benign",
+        "var capture = captureInstanceExecution",
+        "export function bootstrap() {",
+        "  return makeOpaqueBootstrapHandle(capture())",
+        "}",
+      ].join("\n"),
+      "raw lifecycle helper call is not exact-allowlisted",
+    ],
+    [
+      "repeated raw helper alias without overwrite",
+      [
+        "var capture = captureInstanceExecution",
+        "var capture",
+        "export function bootstrap() {",
+        "  return makeOpaqueBootstrapHandle(capture())",
+        "}",
+      ].join("\n"),
+      "raw lifecycle helper call is not exact-allowlisted",
+    ],
+    [
+      "conditional raw helper alias overwrite",
+      [
+        "declare const pick: boolean",
+        "declare function benign(): unknown",
+        "var capture = captureInstanceExecution",
+        "if (pick) { var capture = benign }",
+        "export function bootstrap() {",
+        "  return makeOpaqueBootstrapHandle(capture())",
+        "}",
+      ].join("\n"),
+      "raw lifecycle helper call is not exact-allowlisted",
+    ],
+    [
+      "conditional raw helper alias assignment",
+      [
+        "declare const pick: boolean",
+        "declare function benign(): unknown",
+        "let capture = benign",
+        "if (pick) capture = captureInstanceExecution",
+        "export function bootstrap() {",
+        "  return makeOpaqueBootstrapHandle(capture())",
+        "}",
+      ].join("\n"),
+      "raw lifecycle helper call is not exact-allowlisted",
+    ],
+    [
+      "conditional raw helper initializer",
+      [
+        "declare const pick: boolean",
+        "declare function benign(): unknown",
+        "const capture = pick ? captureInstanceExecution : benign",
+        "export function bootstrap() {",
+        "  return makeOpaqueBootstrapHandle(capture())",
+        "}",
+      ].join("\n"),
+      "raw lifecycle helper call is not exact-allowlisted",
+    ],
+    [
+      "short-circuit raw helper assignment",
+      [
+        "declare const pick: boolean",
+        "declare function benign(): unknown",
+        "let capture = captureInstanceExecution",
+        "pick && (capture = benign)",
+        "export function bootstrap() {",
+        "  return makeOpaqueBootstrapHandle(capture())",
+        "}",
+      ].join("\n"),
+      "raw lifecycle helper call is not exact-allowlisted",
+    ],
+  ] as const) {
+    const input = await fixture({
+      source: { [name.includes("raw helper") ? "effect/bootstrap-runtime.ts" : "effect/callback.ts"]: source },
+    })
+    await using _ = input.tmp
+    expect((await run(["--check"], input.env)).stderr, name).toContain(message)
+  }
+})
+
+test("authority aliases resolve through custom-root imports", async () => {
+  const input = await fixture({
+    source: {
+      "effect/provider.ts": [
+        "declare const lease: GenerationLease",
+        "export const run = lease.runSync",
+        "export const capture = captureInstanceExecution",
+      ].join("\n"),
+      "effect/callback.ts": [
+        'import { run } from "./provider"',
+        "run(async () => undefined)",
+      ].join("\n"),
+      "effect/bootstrap-runtime.ts": [
+        'import { capture } from "./provider"',
+        "export function bootstrap() {",
+        "  return makeOpaqueBootstrapHandle(capture())",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const result = await run(["--check"], input.env)
+  expect(result.stderr).toContain("runSync cannot accept async or PromiseLike callbacks")
+  expect(result.stderr).toContain("raw lifecycle helper call is not exact-allowlisted")
+})
+
+test("default imports preserve lifecycle authority provenance", async () => {
+  const method = await fixture({
+    source: {
+      "effect/provider.ts": [
+        "declare const lease: GenerationLease",
+        "export default lease.runSync",
+      ].join("\n"),
+      "effect/callback.ts": [
+        'import run from "./provider"',
+        "run(async () => undefined)",
+      ].join("\n"),
+      "effect/js-callback.ts": [
+        'import run from "./provider.js"',
+        "run(async () => undefined)",
+      ].join("\n"),
+      "effect/named-default-callback.ts": [
+        'import { default as run } from "./provider"',
+        "run(async () => undefined)",
+      ].join("\n"),
+      "effect/local-barrel.ts": [
+        'import run from "./provider"',
+        "declare function benign(callback?: unknown): unknown",
+        "let forwarded = benign",
+        "forwarded = run",
+        "export { forwarded as default }",
+      ].join("\n"),
+      "effect/local-barrel-callback.ts": [
+        'import run from "./local-barrel"',
+        "run(async () => undefined)",
+      ].join("\n"),
+      "effect/clean-local-barrel.ts": [
+        'import run from "./provider"',
+        "declare function benign(callback?: unknown): unknown",
+        "let forwarded = run",
+        "forwarded = benign",
+        "export { forwarded as default }",
+      ].join("\n"),
+      "effect/clean-local-barrel-callback.ts": [
+        'import run from "./clean-local-barrel"',
+        "run(async () => undefined)",
+      ].join("\n"),
+      "effect/conditional-local-barrel.ts": [
+        'import run from "./provider"',
+        "declare const pick: boolean",
+        "declare function benign(callback?: unknown): unknown",
+        "let forwarded = benign",
+        "if (pick) forwarded = run",
+        "export { forwarded as default }",
+      ].join("\n"),
+      "effect/conditional-local-barrel-callback.ts": [
+        'import run from "./conditional-local-barrel"',
+        "run(async () => undefined)",
+      ].join("\n"),
+      "effect/named-local-barrel.ts": [
+        'import run from "./provider"',
+        "declare function benign(callback?: unknown): unknown",
+        "let forwarded = benign",
+        "forwarded = run",
+        "export { forwarded }",
+      ].join("\n"),
+      "effect/named-local-barrel-callback.ts": [
+        'import { forwarded as run } from "./named-local-barrel"',
+        "run(async () => undefined)",
+      ].join("\n"),
+      "effect/nested-local-barrel.ts": [
+        'import run from "./provider"',
+        "declare function benign(callback?: unknown): unknown",
+        "let inner = benign",
+        "inner = run",
+        "export const forwarded = inner",
+      ].join("\n"),
+      "effect/nested-local-barrel-callback.ts": [
+        'import { forwarded as invoke } from "@/effect/nested-local-barrel"',
+        "invoke(async () => undefined)",
+      ].join("\n"),
+      "effect/clean-nested-local-barrel.ts": [
+        'import run from "./provider"',
+        "declare function benign(callback?: unknown): unknown",
+        "let inner = run",
+        "inner = benign",
+        "export const forwarded = inner",
+      ].join("\n"),
+      "effect/clean-nested-local-barrel-callback.ts": [
+        'import { forwarded as invoke } from "./clean-nested-local-barrel"',
+        "invoke(async () => undefined)",
+      ].join("\n"),
+      "effect/conditional-nested-local-barrel.ts": [
+        'import run from "./provider"',
+        "declare const pick: boolean",
+        "declare function benign(callback?: unknown): unknown",
+        "let inner = benign",
+        "if (pick) inner = run",
+        "export const forwarded = inner",
+      ].join("\n"),
+      "effect/conditional-nested-local-barrel-callback.ts": [
+        'import { forwarded as invoke } from "./conditional-nested-local-barrel"',
+        "invoke(async () => undefined)",
+      ].join("\n"),
+    },
+  })
+  await using _method = method.tmp
+  const methodErrors = (await run(["--check"], method.env)).stderr
+  expect(methodErrors).not.toContain("src/effect/clean-local-barrel-callback.ts")
+  expect(methodErrors).not.toContain("src/effect/clean-nested-local-barrel-callback.ts")
+  expect(methodErrors.match(/runSync cannot accept async or PromiseLike callbacks/g)).toHaveLength(8)
+
+  const helper = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "export default function captureInstanceExecution() { return handle }",
+      ].join("\n"),
+      "effect/bootstrap-runtime.ts": [
+        'import capture from "./instance-ref"',
+        "export function bootstrap() { return capture() }",
+      ].join("\n"),
+      "effect/barrel.ts": 'export { default } from "./instance-ref"\n',
+      "effect/barrel-consumer.ts": [
+        'import capture from "./barrel"',
+        "export function bootstrapFromBarrel() { return capture() }",
+      ].join("\n"),
+      "effect/alias-consumer.ts": [
+        'import capture from "@/effect/barrel"',
+        "export function bootstrapFromAlias() { return capture() }",
+      ].join("\n"),
+      "effect/named-default-consumer.ts": [
+        'import { default as capture } from "./instance-ref"',
+        "export function bootstrapFromNamedDefault() { return capture() }",
+      ].join("\n"),
+      "effect/named-barrel.ts": 'export { default as capture } from "./instance-ref"\n',
+      "effect/named-barrel-consumer.ts": [
+        'import { capture } from "./named-barrel"',
+        "export function bootstrapFromNamedBarrel() { return capture() }",
+      ].join("\n"),
+      "effect/namespace-consumer.ts": [
+        'import * as lifecycle from "./named-barrel"',
+        "export function bootstrapFromNamespace() { return lifecycle.capture() }",
+      ].join("\n"),
+      "effect/unused-barrel.ts": 'export { default } from "./instance-ref"\n',
+      "effect/local-import-barrel.ts": [
+        'import capture from "./instance-ref"',
+        "export { capture as default }",
+      ].join("\n"),
+      "effect/local-import-consumer.ts": [
+        'import capture from "./local-import-barrel"',
+        "export function bootstrapFromLocalImport() { return capture() }",
+      ].join("\n"),
+      "effect/unused-local-import.ts": [
+        'import capture from "./instance-ref"',
+        "export default capture",
+      ].join("\n"),
+    },
+  })
+  await using _helper = helper.tmp
+  const helperErrors = (await run(["--check"], helper.env)).stderr
+  expect(helperErrors).toContain("raw lifecycle helper call is not exact-allowlisted: src/effect/bootstrap-runtime.ts")
+  for (const file of [
+    "barrel-consumer.ts",
+    "alias-consumer.ts",
+    "named-default-consumer.ts",
+    "named-barrel-consumer.ts",
+    "namespace-consumer.ts",
+    "local-import-consumer.ts",
+  ]) {
+    expect(helperErrors).toContain(`raw lifecycle helper is not allowlisted: src/effect/${file}`)
+  }
+  expect(helperErrors).toContain("raw lifecycle helper cannot be re-exported: src/effect/unused-barrel.ts")
+  expect(helperErrors).toContain("raw lifecycle helper cannot be re-exported: src/effect/unused-local-import.ts")
+  expect(helperErrors.match(/captured InstanceExecution cannot be re-exported/g)).toHaveLength(7)
+
+  const ordinary = await fixture({
+    source: {
+      "ordinary/helper.ts": [
+        "function captureInstanceExecution() { return undefined }",
+        "export default captureInstanceExecution",
+      ].join("\n"),
+      "effect/callback.ts": [
+        'import { default as capture } from "../ordinary/helper"',
+        "export function ordinary() { return capture() }",
+      ].join("\n"),
+      "ordinary/barrel.ts": 'export { default as capture } from "./helper"\n',
+      "ordinary/local-barrel.ts": [
+        'import capture from "./helper"',
+        "export { capture as default }",
+      ].join("\n"),
+      "effect/barrel-callback.ts": [
+        'import { capture } from "../ordinary/barrel"',
+        "export function ordinaryBarrel() { return capture() }",
+      ].join("\n"),
+      "effect/namespace-callback.ts": [
+        'import * as ordinary from "../ordinary/barrel"',
+        "export function ordinaryNamespace() { return ordinary.capture() }",
+      ].join("\n"),
+      "effect/local-barrel-callback.ts": [
+        'import capture from "../ordinary/local-barrel"',
+        "export function ordinaryLocalBarrel() { return capture() }",
+      ].join("\n"),
+    },
+  })
+  await using _ordinary = ordinary.tmp
+  const ordinaryErrors = (await run(["--check"], ordinary.env)).stderr
+  expect(ordinaryErrors).not.toContain("raw lifecycle helper")
+  expect(ordinaryErrors).not.toContain("captured InstanceExecution cannot be re-exported")
+})
+
+test("authority alias reaching definitions preserve unconditional overwrites", async () => {
+  const input = await fixture({
+    source: {
+      "effect/callback.ts": [
+        "declare const lease: GenerationLease",
+        "declare function benign(callback?: unknown): unknown",
+        "var run = lease.runSync",
+        "var run = benign",
+        "run(async () => undefined)",
+        "let assignedRun = lease.runSync",
+        "assignedRun = benign",
+        "assignedRun(async () => undefined)",
+        "let blockRun = lease.runSync",
+        "{ blockRun = benign }",
+        "blockRun(async () => undefined)",
+        "const captureInstanceExecution = () => undefined",
+        "export function ordinary() { return captureInstanceExecution() }",
+      ].join("\n"),
+      "effect/function-shadow.ts": [
+        "function captureInstanceExecution() { return undefined }",
+        "export function ordinaryFunctionShadow() { return captureInstanceExecution() }",
+      ].join("\n"),
+      "ordinary/helper.ts": "export function captureInstanceExecution() { return undefined }\n",
+      "effect/import-shadow.ts": [
+        'import { captureInstanceExecution } from "../ordinary/helper"',
+        "export function ordinaryImportShadow() { return captureInstanceExecution() }",
+      ].join("\n"),
+      "effect/reexport-shadow.ts": 'export { captureInstanceExecution } from "../ordinary/helper"\n',
+      "effect/bootstrap-runtime.ts": [
+        "declare function benign(): unknown",
+        "var capture = captureInstanceExecution",
+        "var capture = benign",
+        "export function bootstrap() {",
+        "  let assignedCapture = captureInstanceExecution",
+        "  assignedCapture = benign",
+        "  assignedCapture()",
+        "  var value = captureInstanceExecution()",
+        "  var value = makeOpaqueBootstrapHandle(value)",
+        "  return value",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const stderr = (await run(["--check"], input.env)).stderr
+  expect(stderr).not.toContain("runSync cannot accept async or PromiseLike callbacks")
+  expect(stderr).not.toContain("raw lifecycle helper")
+  expect(stderr).not.toContain("captured InstanceExecution cannot be re-exported")
+})
+
+test("runSync resolves all possible callback definitions", async () => {
+  const input = await fixture({
+    source: {
+      "local-promise.d.ts": localPromiseDeclarations,
+      "effect/callback.ts": [
+        "declare const lease: GenerationLease",
+        "declare const pick: boolean",
+        "let callback: () => unknown = () => Promise.resolve()",
+        "if (pick) callback = () => 0",
+        "lease.runSync(callback)",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  expect((await run(["--check"], input.env)).stderr).toContain(
+    "runSync cannot accept async or PromiseLike callbacks",
+  )
+})
+
+test("runSync PromiseLike aliases preserve conditional reaching definitions", async () => {
+  const input = await fixture({
+    source: {
+      "local-promise.d.ts": localPromiseDeclarations,
+      "effect/callback.ts": [
+        "declare const lease: GenerationLease",
+        "declare const pick: boolean",
+        "let pending: unknown = Promise.resolve()",
+        "if (pick) pending = 0",
+        "lease.runSync(() => pending)",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  expect((await run(["--check"], input.env)).stderr).toContain(
+    "runSync cannot accept async or PromiseLike callbacks",
+  )
+})
+
+test("authority aliases follow shorthand property values", async () => {
+  const input = await fixture({
+    source: {
+      "effect/callback.ts": [
+        "declare const lease: GenerationLease",
+        "const run = lease.runSync",
+        "const api = { run }",
+        "api.run(async () => undefined)",
+      ].join("\n"),
+      "effect/bootstrap-runtime.ts": [
+        "const capture = captureInstanceExecution",
+        "const api = { capture }",
+        "export const bootstrap = () => api.capture()",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const stderr = (await run(["--check"], input.env)).stderr
+  expect(stderr).toContain("runSync cannot accept async or PromiseLike callbacks")
+  expect(stderr).toContain("captured InstanceExecution cannot be re-exported")
+})
+
+test("non-null wrappers preserve lifecycle authority provenance", async () => {
+  const input = await fixture({
+    source: {
+      "local-promise.d.ts": localPromiseDeclarations,
+      "effect/callback.ts": [
+        "declare const lease: GenerationLease",
+        "lease.runSync!(() => Promise.resolve())",
+      ].join("\n"),
+      "effect/bootstrap-runtime.ts": "export const bootstrap = () => captureInstanceExecution!()\n",
+    },
+  })
+  await using _ = input.tmp
+  const stderr = (await run(["--check"], input.env)).stderr
+  expect(stderr).toContain("runSync cannot accept async or PromiseLike callbacks")
+  expect(stderr).toContain("captured InstanceExecution cannot be re-exported")
+})
+
+test("indexed helper access uses canonical symbol provenance", async () => {
+  const canonical = await fixture({
+    source: {
+      "effect/instance-ref.ts": "export function captureInstanceExecution() { return handle }\n",
+      "effect/callback.ts": [
+        'import * as lifecycle from "./instance-ref"',
+        "export function indexed() { return lifecycle['captureInstanceExecution']() }",
+      ].join("\n"),
+    },
+  })
+  await using _canonical = canonical.tmp
+  expect((await run(["--check"], canonical.env)).stderr).toContain(
+    "raw lifecycle helper is not allowlisted: src/effect/callback.ts",
+  )
+
+  const ordinary = await fixture({
+    source: {
+      "ordinary/helper.ts": "export function captureInstanceExecution() { return undefined }\n",
+      "effect/callback.ts": [
+        'import * as ordinary from "../ordinary/helper"',
+        "export function indexed() { return ordinary['captureInstanceExecution']() }",
+      ].join("\n"),
+    },
+  })
+  await using _ordinary = ordinary.tmp
+  const stderr = (await run(["--check"], ordinary.env)).stderr
+  expect(stderr).not.toContain("raw lifecycle helper")
+  expect(stderr).not.toContain("captured InstanceExecution cannot be re-exported")
+})
+
+test("exported raw helper bindings use canonical symbol provenance", async () => {
+  const canonical = await fixture({
+    source: {
+      "effect/instance-ref.ts": "export function captureInstanceExecution() { return handle }\n",
+      "effect/bootstrap-runtime.ts": [
+        'import { captureInstanceExecution } from "./instance-ref"',
+        "export const leaked = captureInstanceExecution",
+        "export const leakedObject = { captureInstanceExecution }",
+        "export const leakedArrow = () => captureInstanceExecution",
+        "export function leakedFunction() { return captureInstanceExecution }",
+      ].join("\n"),
+    },
+  })
+  await using _canonical = canonical.tmp
+  expect((await run(["--check"], canonical.env)).stderr).toContain(
+    "raw lifecycle helper cannot be re-exported: src/effect/bootstrap-runtime.ts:captureInstanceExecution",
+  )
+
+  const ordinary = await fixture({
+    source: {
+      "ordinary/helper.ts": "export function captureInstanceExecution() { return undefined }\n",
+      "effect/bootstrap-runtime.ts": [
+        'import { captureInstanceExecution } from "../ordinary/helper"',
+        "export const leaked = captureInstanceExecution",
+        "export const leakedObject = { captureInstanceExecution }",
+        "export const leakedArrow = () => captureInstanceExecution",
+        "export function leakedFunction() { return captureInstanceExecution }",
+      ].join("\n"),
+    },
+  })
+  await using _ordinary = ordinary.tmp
+  expect((await run(["--check"], ordinary.env)).stderr).not.toContain("raw lifecycle helper")
+})
+
+test("for-of aliases preserve lifecycle authority provenance", async () => {
+  const callback = await fixture({
+    source: {
+      "effect/callback.ts": [
+        "declare const lease: GenerationLease",
+        "for (const run of [lease.runSync]) run(async () => undefined)",
+      ].join("\n"),
+    },
+  })
+  await using _callback = callback.tmp
+  expect((await run(["--check"], callback.env)).stderr).toContain(
+    "runSync cannot accept async or PromiseLike callbacks",
+  )
+
+  const handoff = await fixture({
+    source: {
+      "project/forged.ts": [
+        "export function setup(forged: GenerationLease) {",
+        "  let handoff = acquireChildGenerationLease(context)",
+        "  for (handoff of [forged]) {}",
+        "  try {",
+        "    const child = handoff.runSync(() =>",
+        "      registerTransferredGenerationProducer({ handoffFrom: handoff, label, run })",
+        "    )",
+        "    handoff.release({ ok: true })",
+        "    return child",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _handoff = handoff.tmp
+  expect((await run(["--check"], handoff.env)).stderr).toContain(
+    "transferred producer requires an acquired generation handoff lease",
+  )
+})
+
+test("transferred handoff aliases require one possible acquired definition", async () => {
+  for (const [name, overwrite] of [
+    ["declaration", "var handoff = forged"],
+    ["assignment", "handoff = forged"],
+  ] as const) {
+    const input = await fixture({
+      source: {
+        "project/forged.ts": [
+          "export function setup(forged: GenerationLease) {",
+          "  var handoff = acquireChildGenerationLease(context)",
+          `  ${overwrite}`,
+          "  try {",
+          "    const child = handoff.runSync(() => {",
+          "      const producer = registerTransferredGenerationProducer({ handoffFrom: handoff, label, run })",
+          "      const channel = registerTransferredGenerationChannel({ handoffFrom: handoff, label, closeTransport })",
+          "      return { producer, channel }",
+          "    })",
+          "    handoff.release({ ok: true })",
+          "    return child",
+          "  } catch (error) {",
+          "    handoff.release({ ok: false, error })",
+          "    throw error",
+          "  }",
+          "}",
+        ].join("\n"),
+      },
+    })
+    await using _ = input.tmp
+    expect((await run(["--check"], input.env)).stderr, name).toContain(
+      "transferred producer requires an acquired generation handoff lease",
+    )
+  }
 })
 
 test("destructured and bound runSync aliases cannot accept PromiseLike callbacks", async () => {

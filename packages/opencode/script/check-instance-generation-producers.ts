@@ -2508,9 +2508,11 @@ function releaseShape(node: ts.CallExpression) {
 function returnsPromiseLike(
   callback: ts.Expression | undefined,
   checker: ts.TypeChecker,
-  resolve?: (node: ts.Identifier) => ts.Expression | undefined,
-) {
-  if (!callback) return false
+  resolve?: (node: ts.Identifier) => readonly ts.Expression[],
+  callbacks = new Set<ts.Node>(),
+): boolean {
+  if (!callback || callbacks.has(callback)) return false
+  callbacks.add(callback)
   const typed = checker
     .getTypeAtLocation(callback)
     .getCallSignatures()
@@ -2524,16 +2526,46 @@ function returnsPromiseLike(
       return hasThen(result)
     })
   if (typed) return true
+  if (ts.isIdentifier(callback)) {
+    return (resolve?.(callback) ?? []).some((value) =>
+      returnsPromiseLike(value, checker, resolve, new Set(callbacks)),
+    )
+  }
+  if (ts.isConditionalExpression(callback)) {
+    return returnsPromiseLike(callback.whenTrue, checker, resolve, new Set(callbacks)) ||
+      returnsPromiseLike(callback.whenFalse, checker, resolve, new Set(callbacks))
+  }
   if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return false
   if (callback.modifiers?.some((item) => item.kind === ts.SyntaxKind.AsyncKeyword)) return true
   const seen = new Set<ts.Node>()
   const promiseExpression = (node: ts.Expression): boolean => {
     if (seen.has(node)) return false
     seen.add(node)
-    if (ts.isParenthesizedExpression(node)) return promiseExpression(node.expression)
+    if (
+      ts.isParenthesizedExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isTypeAssertionExpression(node) ||
+      ts.isSatisfiesExpression(node) ||
+      ts.isNonNullExpression(node)
+    ) {
+      return promiseExpression(node.expression)
+    }
     if (ts.isIdentifier(node)) {
-      const value = resolve?.(node)
-      return !!value && promiseExpression(value)
+      return (resolve?.(node) ?? []).some((value) => promiseExpression(value))
+    }
+    if (ts.isConditionalExpression(node)) {
+      return promiseExpression(node.whenTrue) || promiseExpression(node.whenFalse)
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      new Set([ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]).has(
+        node.operatorToken.kind,
+      )
+    ) {
+      return promiseExpression(node.left) || promiseExpression(node.right)
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+      return node.elements.some((element) => !ts.isOmittedExpression(element) && promiseExpression(element))
     }
     if (ts.isNewExpression(node)) return node.expression.getText(node.getSourceFile()) === "Promise"
     if (ts.isCallExpression(node)) {
@@ -2595,19 +2627,49 @@ function nonThrowingDirectReturn(expression: ts.Expression | undefined): boolean
 
 function authorityErrors(files: ParsedSource[]) {
   const errors: string[] = []
+  const relativeBySource = new Map(files.map((file) => [file.source, file.relative]))
+  const sourceByRelative = new Map(files.map((file) => [file.relative, file]))
+  const localBindingDefinitionCache = new Map<string, Array<{ node: ts.Node; value: ts.Expression }>>()
+  const moduleExportDefinitionCache = new Map<string, Array<{ node: ts.Node; value: ts.Expression }>>()
+  const moduleSourceCache = new Map<string, ParsedSource | undefined>()
+  const propertyValueCache = new WeakMap<ts.Node, ts.Expression[]>()
+  const symbolAtLocationCache = new WeakMap<ts.Node, ts.Symbol | null>()
+  const aliasedSymbolCache = new WeakMap<ts.Symbol, ts.Symbol>()
+  const symbolAt = (node: ts.Node, checker: ts.TypeChecker) => {
+    if (symbolAtLocationCache.has(node)) return symbolAtLocationCache.get(node) ?? undefined
+    const symbol = checker.getSymbolAtLocation(node)
+    symbolAtLocationCache.set(node, symbol ?? null)
+    return symbol
+  }
+  const aliasedSymbol = (symbol: ts.Symbol, checker: ts.TypeChecker) => {
+    if ((symbol.flags & ts.SymbolFlags.Alias) === 0) return symbol
+    const cached = aliasedSymbolCache.get(symbol)
+    if (cached) return cached
+    const target = checker.getAliasedSymbol(symbol)
+    aliasedSymbolCache.set(symbol, target)
+    return target
+  }
   for (const file of files) {
     const calls: ts.CallExpression[] = []
     const assignments: ts.BinaryExpression[] = []
-    const bindingElements: ts.BindingElement[] = []
+    const forOfBindings: Array<{ binding: ts.Identifier; node: ts.ForOfStatement; value: ts.Expression }> = []
     const leaseDeclarations: ts.VariableDeclaration[] = []
-    const valueDeclarations: ts.VariableDeclaration[] = []
     const rawHelperCalls = new Map<string, ts.CallExpression[]>()
     const privateJoinCalls = new Map<string, string[]>()
     const collect = (node: ts.Node) => {
       if (ts.isCallExpression(node)) calls.push(node)
       if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) assignments.push(node)
-      if (ts.isBindingElement(node) && ts.isIdentifier(node.name)) bindingElements.push(node)
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) valueDeclarations.push(node)
+      if (ts.isForOfStatement(node)) {
+        if (ts.isVariableDeclarationList(node.initializer)) {
+          for (const declaration of node.initializer.declarations) {
+            if (ts.isIdentifier(declaration.name)) {
+              forOfBindings.push({ binding: declaration.name, node, value: node.expression })
+            }
+          }
+        } else if (ts.isIdentifier(node.initializer)) {
+          forOfBindings.push({ binding: node.initializer, node, value: node.expression })
+        }
+      }
       if (
         ts.isVariableDeclaration(node) &&
         ts.isIdentifier(node.name) &&
@@ -2622,89 +2684,597 @@ function authorityErrors(files: ParsedSource[]) {
       node.forEachChild(collect)
     }
     collect(file.source)
-    const resolveValueDeclaration = (identifier: ts.Identifier) =>
-      valueDeclarations
+    const ownerOf = (node: ts.Node) => sourceByRelative.get(relativeBySource.get(node.getSourceFile()) ?? "")
+    const checkerFor = (node: ts.Node) => ownerOf(node)?.checker ?? file.checker
+    const resolveSymbol = (identifier: ts.Identifier) => {
+      const checker = checkerFor(identifier)
+      const symbol = ts.isShorthandPropertyAssignment(identifier.parent)
+        ? checker.getShorthandAssignmentValueSymbol(identifier.parent)
+        : symbolAt(identifier, checker)
+      return symbol ? aliasedSymbol(symbol, checker) : undefined
+    }
+    const resolveSymbolDeclarations = (identifier: ts.Identifier) => {
+      return [...(resolveSymbol(identifier)?.declarations ?? [])]
         .filter(
           (declaration) =>
-            ts.isIdentifier(declaration.name) &&
-            declaration.name.text === identifier.text &&
-            declaration.getStart(file.source) < identifier.getStart(file.source) &&
-            (!nearestFunction(declaration) || nodeInside(nearestFunction(declaration)!, identifier)),
+            (declaration.getSourceFile() !== identifier.getSourceFile() ||
+              declaration.getStart(declaration.getSourceFile()) < identifier.getStart(identifier.getSourceFile())) &&
+            (!ts.isVariableDeclaration(declaration) ||
+              !declaration.initializer ||
+              declaration.getSourceFile() !== identifier.getSourceFile() ||
+              !nodeInside(declaration.initializer, identifier)),
         )
-        .sort((left, right) => right.getStart(file.source) - left.getStart(file.source))[0]
-    const resolveValue = (identifier: ts.Identifier) => resolveValueDeclaration(identifier)?.initializer
-    const resolveLease = (expression: ts.Expression | undefined, at: ts.Node) => {
-      if (!expression || !ts.isIdentifier(expression)) return undefined
-      return leaseDeclarations
-        .filter((declaration) => {
-          if (!ts.isIdentifier(declaration.name) || declaration.name.text !== expression.text) return false
-          if (declaration.getStart(file.source) > at.getStart(file.source)) return false
-          const scope = nearestFunction(declaration)
-          return !scope || nodeInside(scope, at)
-        })
-        .sort((left, right) => right.getStart(file.source) - left.getStart(file.source))[0]
+        .sort(
+          (left, right) =>
+            right.getStart(right.getSourceFile()) - left.getStart(left.getSourceFile()),
+        )
     }
-    const resolvedHelperName = (expression: ts.Expression | undefined, seen = new Set<ts.Node>()): string | undefined => {
-      if (!expression || seen.has(expression)) return undefined
+    const statementListParent = (node: ts.Node) => {
+      const parent = node.parent
+      return ts.isSourceFile(parent) ||
+        ts.isBlock(parent) ||
+        ts.isModuleBlock(parent) ||
+        ts.isCaseClause(parent) ||
+        ts.isDefaultClause(parent)
+        ? parent
+        : undefined
+    }
+    const directDefinitionStatement = (definition: ts.Node) => {
+      if (
+        ts.isVariableDeclaration(definition) &&
+        ts.isVariableDeclarationList(definition.parent) &&
+        ts.isVariableStatement(definition.parent.parent) &&
+        statementListParent(definition.parent.parent)
+      ) {
+        return definition.parent.parent
+      }
+      if (!ts.isBinaryExpression(definition) || definition.operatorToken.kind !== ts.SyntaxKind.EqualsToken) {
+        return undefined
+      }
+      let current: ts.Node = definition
+      while (
+        ts.isParenthesizedExpression(current.parent) ||
+        ts.isAsExpression(current.parent) ||
+        ts.isTypeAssertionExpression(current.parent) ||
+        ts.isSatisfiesExpression(current.parent) ||
+        ts.isNonNullExpression(current.parent)
+      ) {
+        current = current.parent
+      }
+      return ts.isExpressionStatement(current.parent) && statementListParent(current.parent)
+        ? current.parent
+        : undefined
+    }
+    const directReferenceStatement = (reference: ts.Identifier) => {
+      let current: ts.Node = reference
+      while (current.parent) {
+        if (statementListParent(current)) return current
+        if (
+          ts.isFunctionDeclaration(current) ||
+          ts.isFunctionExpression(current) ||
+          ts.isArrowFunction(current) ||
+          ts.isMethodDeclaration(current) ||
+          ts.isGetAccessorDeclaration(current) ||
+          ts.isSetAccessorDeclaration(current) ||
+          ts.isConstructorDeclaration(current)
+        ) {
+          return undefined
+        }
+        current = current.parent
+      }
+      return undefined
+    }
+    const directStatementContext = (statement: ts.Node) => {
+      let entry = statement
+      let list = statementListParent(entry)
+      if (!list) return undefined
+      while (ts.isBlock(list)) {
+        const parent = statementListParent(list)
+        if (!parent) break
+        entry = list
+        list = parent
+      }
+      return list ? { entry, list } : undefined
+    }
+    const dominatesReference = (definition: ts.Node, reference: ts.Identifier) => {
+      const statement = directDefinitionStatement(definition)
+      const use = directReferenceStatement(reference)
+      const definitionContext = statement && directStatementContext(statement)
+      const useContext = use && directStatementContext(use)
+      return !!statement &&
+        !!use &&
+        !!definitionContext &&
+        !!useContext &&
+        statement.getSourceFile() === use.getSourceFile() &&
+        definitionContext.list === useContext.list &&
+        definition.getStart(definition.getSourceFile()) < reference.getStart(reference.getSourceFile())
+    }
+    const resolveVariableDeclarations = (identifier: ts.Identifier) =>
+      resolveSymbolDeclarations(identifier).filter(
+        (declaration): declaration is ts.VariableDeclaration => ts.isVariableDeclaration(declaration),
+      )
+    const resolveModuleSource = (importer: string, specifier: string) => {
+      const cacheKey = `${importer}:${specifier}`
+      if (moduleSourceCache.has(cacheKey)) return moduleSourceCache.get(cacheKey)
+      const base = specifier.startsWith("@/")
+        ? `src/${specifier.slice(2)}`
+        : specifier.startsWith(".")
+          ? path.posix.normalize(path.posix.join(path.posix.dirname(importer), specifier))
+          : undefined
+      if (!base) return undefined
+      const stem = /\.(?:[cm]?js|jsx)$/.test(base) ? base.replace(/\.(?:[cm]?js|jsx)$/, "") : base
+      const resolved = [...new Set([
+        base,
+        stem,
+        `${stem}.ts`,
+        `${stem}.tsx`,
+        `${stem}.mts`,
+        `${stem}.cts`,
+        `${stem}.d.ts`,
+        `${stem}/index.ts`,
+        `${stem}/index.tsx`,
+        `${stem}/index.mts`,
+        `${stem}/index.cts`,
+      ])].map((candidate) => sourceByRelative.get(candidate)).find((candidate) => !!candidate)
+      moduleSourceCache.set(cacheKey, resolved)
+      return resolved
+    }
+    function localBindingDefinitions(
+      source: ParsedSource,
+      name: string,
+      seen = new Set<string>(),
+      limit: ts.Node = source.source,
+    ) {
+      const limitPosition = ts.isSourceFile(limit) ? limit.end : limit.getStart(limit.getSourceFile())
+      const cacheKey = `${source.relative}:${name}:${limitPosition}`
+      const cacheable = seen.size === 0
+      if (cacheable && localBindingDefinitionCache.has(cacheKey)) {
+        return localBindingDefinitionCache.get(cacheKey)!
+      }
+      const key = `binding:${source.relative}:${name}`
+      if (seen.has(key)) return []
+      seen.add(key)
+      const bindings = source.source.statements.flatMap((statement) => {
+        if (ts.isFunctionDeclaration(statement) && statement.name?.text === name) return [statement.name]
+        if (ts.isVariableStatement(statement)) {
+          return statement.declarationList.declarations.flatMap((declaration) =>
+            ts.isIdentifier(declaration.name) && declaration.name.text === name ? [declaration.name] : [],
+          )
+        }
+        if (!ts.isImportDeclaration(statement)) return []
+        if (statement.importClause?.name?.text === name) return [statement.importClause.name]
+        if (statement.importClause?.namedBindings && ts.isNamedImports(statement.importClause.namedBindings)) {
+          return statement.importClause.namedBindings.elements.flatMap((element) =>
+            element.name.text === name ? [element.name] : [],
+          )
+        }
+        return []
+      })
+      const symbol = bindings.map((binding) => symbolAt(binding, source.checker)).find((binding) => !!binding)
+      const sameBinding = (identifier: ts.Identifier) => {
+        const candidate = symbolAt(identifier, source.checker)
+        if (!symbol || !candidate) return identifier.text === name
+        return candidate === symbol
+      }
+      const definitions: Array<{ node: ts.Node; value: ts.Expression }> = []
+      const visit = (node: ts.Node) => {
+        if (node.getStart(node.getSourceFile()) >= limitPosition && node !== source.source) return
+        if (ts.isFunctionDeclaration(node)) {
+          if (node.name && sameBinding(node.name)) definitions.push({ node, value: node.name })
+          return
+        }
+        if (
+          ts.isFunctionExpression(node) ||
+          ts.isArrowFunction(node) ||
+          ts.isMethodDeclaration(node) ||
+          ts.isGetAccessorDeclaration(node) ||
+          ts.isSetAccessorDeclaration(node) ||
+          ts.isConstructorDeclaration(node) ||
+          ts.isClassDeclaration(node) ||
+          ts.isClassExpression(node)
+        ) {
+          return
+        }
+        if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && sameBinding(node.name) && node.initializer) {
+          definitions.push({ node, value: node.initializer })
+        }
+        if (
+          ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isIdentifier(node.left) &&
+          sameBinding(node.left)
+        ) {
+          definitions.push({ node, value: node.right })
+        }
+        if (ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier)) {
+          const imported = node.importClause?.name && sameBinding(node.importClause.name)
+            ? "default"
+            : node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)
+              ? node.importClause.namedBindings.elements.find((element) => sameBinding(element.name))?.propertyName?.text ??
+                node.importClause.namedBindings.elements.find((element) => sameBinding(element.name))?.name.text
+              : undefined
+          const target = imported ? resolveModuleSource(source.relative, node.moduleSpecifier.text) : undefined
+          if (target && imported) {
+            definitions.push(...moduleExportDefinitions(target, imported, new Set(seen)).map((item) => ({
+              node,
+              value: item.value,
+            })))
+          }
+          return
+        }
+        node.forEachChild(visit)
+      }
+      visit(source.source)
+      definitions.sort(
+        (left, right) => right.node.getStart(right.node.getSourceFile()) - left.node.getStart(left.node.getSourceFile()),
+      )
+      const dominant = definitions.find((definition) => {
+        if (
+          (ts.isImportDeclaration(definition.node) || ts.isFunctionDeclaration(definition.node)) &&
+          definition.node.parent === source.source
+        ) {
+          return true
+        }
+        const statement = directDefinitionStatement(definition.node)
+        return !!statement && directStatementContext(statement)?.list === source.source
+      })
+      const result = dominant
+        ? definitions.filter(
+            (definition) =>
+              definition.node.getStart(definition.node.getSourceFile()) >=
+              dominant.node.getStart(dominant.node.getSourceFile()),
+          )
+        : definitions
+      if (cacheable) localBindingDefinitionCache.set(cacheKey, result)
+      return result
+    }
+    function moduleExportDefinitions(
+      source: ParsedSource,
+      name: string,
+      seen = new Set<string>(),
+    ): Array<{ node: ts.Node; value: ts.Expression }> {
+      const cacheKey = `${source.relative}:${name}`
+      const cacheable = seen.size === 0
+      if (cacheable && moduleExportDefinitionCache.has(cacheKey)) {
+        return moduleExportDefinitionCache.get(cacheKey)!
+      }
+      const key = `${source.relative}:${name}`
+      if (seen.has(key)) return []
+      seen.add(key)
+      const definitions = source.source.statements.flatMap<{ node: ts.Node; value: ts.Expression }>((statement) => {
+        if (name === "default" && ts.isExportAssignment(statement) && !statement.isExportEquals) {
+          return ts.isIdentifier(statement.expression)
+            ? localBindingDefinitions(source, statement.expression.text, new Set(seen), statement)
+            : [{ node: statement, value: statement.expression }]
+        }
+        if (
+          ts.isFunctionDeclaration(statement) &&
+          statement.name &&
+          ((name === "default" && statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)) ||
+            (statement.name.text === name && exported(statement)))
+        ) {
+          return [{ node: statement, value: statement.name }]
+        }
+        if (ts.isVariableStatement(statement) && exported(statement) && name !== "default") {
+          return statement.declarationList.declarations.flatMap((declaration) =>
+            ts.isIdentifier(declaration.name) && declaration.name.text === name && declaration.initializer
+              ? localBindingDefinitions(source, name, new Set(seen))
+              : [],
+          )
+        }
+        if (!ts.isExportDeclaration(statement) || !statement.exportClause || !ts.isNamedExports(statement.exportClause)) {
+          return []
+        }
+        return statement.exportClause.elements.flatMap((element) => {
+          if (element.name.text !== name) return []
+          const imported = element.propertyName?.text ?? element.name.text
+          if (!statement.moduleSpecifier || !ts.isStringLiteralLike(statement.moduleSpecifier)) {
+            return localBindingDefinitions(source, imported, new Set(seen))
+          }
+          const target = resolveModuleSource(source.relative, statement.moduleSpecifier.text)
+          return target ? moduleExportDefinitions(target, imported, new Set(seen)) : []
+        })
+      })
+      if (cacheable) moduleExportDefinitionCache.set(cacheKey, definitions)
+      return definitions
+    }
+    const importedBindingDefinitions = (identifier: ts.Identifier) => {
+      const symbol = symbolAt(identifier, checkerFor(identifier))
+      if (!symbol || (symbol.flags & ts.SymbolFlags.Alias) === 0) return []
+      return [...(symbol.declarations ?? [])].flatMap<{ node: ts.Node; value: ts.Expression }>((declaration) => {
+        let current: ts.Node | undefined = declaration
+        while (current && !ts.isImportDeclaration(current) && !ts.isSourceFile(current)) current = current.parent
+        if (!current || !ts.isImportDeclaration(current)) return []
+        const imported = current.importClause?.name?.text === identifier.text
+          ? "default"
+          : current.importClause?.namedBindings && ts.isNamedImports(current.importClause.namedBindings)
+            ? current.importClause.namedBindings.elements.find((element) => element.name.text === identifier.text)
+                ?.propertyName?.text ??
+              current.importClause.namedBindings.elements.find((element) => element.name.text === identifier.text)?.name.text
+            : undefined
+        if (!imported) return []
+        if (!ts.isStringLiteralLike(current.moduleSpecifier)) return []
+        const importer = relativeBySource.get(identifier.getSourceFile()) ?? file.relative
+        const target = resolveModuleSource(importer, current.moduleSpecifier.text)
+        return target ? moduleExportDefinitions(target, imported) : []
+      })
+    }
+    const resolveValueDefinitions = (identifier: ts.Identifier) => {
+      const owner = sourceByRelative.get(relativeBySource.get(identifier.getSourceFile()) ?? "")
+      if (owner && owner.source !== file.source) {
+        return localBindingDefinitions(owner, identifier.text, new Set(), identifier).filter(
+          (definition) => definition.value !== identifier,
+        )
+      }
+      const symbol = resolveSymbol(identifier)
+      const imported = importedBindingDefinitions(identifier)
+      const definitions: Array<{ node: ts.Node; value: ts.Expression }> = [
+        ...(imported.length > 0
+          ? []
+          : resolveSymbolDeclarations(identifier).flatMap<{ node: ts.Node; value: ts.Expression }>((declaration) => {
+              if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
+                return [{ node: declaration, value: declaration.initializer }]
+              }
+              if (ts.isExportAssignment(declaration)) return [{ node: declaration, value: declaration.expression }]
+              return []
+            })),
+        ...imported,
+        ...assignments.flatMap((assignment) =>
+          ts.isIdentifier(assignment.left) &&
+          assignment.getSourceFile() === identifier.getSourceFile() &&
+          resolveSymbol(assignment.left) === symbol &&
+          assignment.getStart(file.source) < identifier.getStart(identifier.getSourceFile()) &&
+          !nodeInside(assignment.right, identifier)
+            ? [{ node: assignment, value: assignment.right }]
+            : [],
+        ),
+        ...forOfBindings.flatMap((binding) =>
+          binding.node.getSourceFile() === identifier.getSourceFile() &&
+          resolveSymbol(binding.binding) === symbol &&
+          binding.node.getStart(binding.node.getSourceFile()) < identifier.getStart(identifier.getSourceFile())
+            ? [{ node: binding.node, value: binding.value }]
+            : [],
+        ),
+      ].sort(
+        (left, right) =>
+          (right.node.getSourceFile() === identifier.getSourceFile()
+            ? right.node.getStart(right.node.getSourceFile())
+            : -1) -
+          (left.node.getSourceFile() === identifier.getSourceFile()
+            ? left.node.getStart(left.node.getSourceFile())
+            : -1),
+      )
+      const dominant = definitions.findIndex((definition) => dominatesReference(definition.node, identifier))
+      return dominant === -1 ? definitions : definitions.slice(0, dominant + 1)
+    }
+    const resolveValues = (identifier: ts.Identifier) =>
+      resolveValueDefinitions(identifier).map((definition) => definition.value)
+    const resolveLease = (expression: ts.Expression | undefined) => {
+      if (!expression || !ts.isIdentifier(expression)) return undefined
+      const definitions = resolveValueDefinitions(expression)
+      const declaration = definitions[0]?.node
+      return definitions.length === 1 && declaration && ts.isVariableDeclaration(declaration) && leaseDeclarations.includes(declaration)
+        ? declaration
+        : undefined
+    }
+    const propertySymbol = (expression: ts.PropertyAccessExpression | ts.ElementAccessExpression) => {
+      const checker = checkerFor(expression)
+      if (ts.isPropertyAccessExpression(expression)) return symbolAt(expression.name, checker)
+      if (!ts.isStringLiteralLike(expression.argumentExpression)) return undefined
+      return checker.getPropertyOfType(
+        checker.getApparentType(checker.getTypeAtLocation(expression.expression)),
+        expression.argumentExpression.text,
+      )
+    }
+    const namespacePropertyDefinitions = (
+      expression: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    ) => {
+      const member = ts.isPropertyAccessExpression(expression)
+        ? expression.name.text
+        : ts.isStringLiteralLike(expression.argumentExpression)
+          ? expression.argumentExpression.text
+          : undefined
+      if (!member || !ts.isIdentifier(expression.expression)) return []
+      const receiver = expression.expression
+      const owner = ownerOf(expression)
+      const symbol = symbolAt(receiver, checkerFor(expression))
+      if (!symbol || (symbol.flags & ts.SymbolFlags.Alias) === 0) return []
+      return [...(symbol.declarations ?? [])].flatMap<{ node: ts.Node; value: ts.Expression }>((declaration) => {
+        let current: ts.Node | undefined = declaration
+        while (current && !ts.isImportDeclaration(current) && !ts.isSourceFile(current)) current = current.parent
+        if (
+          !current ||
+          !ts.isImportDeclaration(current) ||
+          !current.importClause?.namedBindings ||
+          !ts.isNamespaceImport(current.importClause.namedBindings) ||
+          current.importClause.namedBindings.name.text !== receiver.text ||
+          !ts.isStringLiteralLike(current.moduleSpecifier)
+        ) {
+          return []
+        }
+        const target = resolveModuleSource(owner?.relative ?? file.relative, current.moduleSpecifier.text)
+        return target ? moduleExportDefinitions(target, member) : []
+      })
+    }
+    const propertyValues = (expression: ts.PropertyAccessExpression | ts.ElementAccessExpression) => {
+      if (propertyValueCache.has(expression)) return propertyValueCache.get(expression)!
+      const symbol = propertySymbol(expression)
+      const values = [
+        ...[...(symbol?.declarations ?? [])].flatMap((declaration) => {
+        if (ts.isShorthandPropertyAssignment(declaration)) return resolveValues(declaration.name)
+        if (
+          (ts.isPropertyAssignment(declaration) || ts.isPropertyDeclaration(declaration)) &&
+          declaration.initializer
+        ) {
+          return [declaration.initializer]
+        }
+        if (ts.isExportAssignment(declaration)) return [declaration.expression]
+        return []
+        }),
+        ...namespacePropertyDefinitions(expression).map((definition) => definition.value),
+      ]
+      propertyValueCache.set(expression, values)
+      return values
+    }
+    const helperNameFromSymbol = (
+      symbol: ts.Symbol | undefined,
+      fallback: string,
+      checker = file.checker,
+    ) => {
+      if (!symbol) return fallback
+      const target = aliasedSymbol(symbol, checker)
+      const canonical = Object.hasOwn(privateJoinAllowlist, fallback)
+        ? "src/project/instance.ts"
+        : Object.hasOwn(rawHelperAllowlist, fallback)
+          ? "src/effect/instance-ref.ts"
+          : transferredHelpers.has(fallback)
+            ? "src/project/instance.ts"
+            : undefined
+      if (!canonical) return undefined
+      return target.declarations?.some((declaration) => relativeBySource.get(declaration.getSourceFile()) === canonical)
+        ? fallback
+        : undefined
+    }
+    const helperNameFromIdentifier = (expression: ts.Identifier, fallback: string) =>
+      helperNameFromSymbol(symbolAt(expression, checkerFor(expression)), fallback, checkerFor(expression))
+    const resolvedHelperNames = (expression: ts.Expression | undefined, seen = new Set<ts.Node>()): string[] => {
+      if (!expression || seen.has(expression)) return []
       seen.add(expression)
       if (
         ts.isParenthesizedExpression(expression) ||
         ts.isAsExpression(expression) ||
         ts.isTypeAssertionExpression(expression) ||
-        ts.isSatisfiesExpression(expression)
+        ts.isSatisfiesExpression(expression) ||
+        ts.isNonNullExpression(expression)
       ) {
-        return resolvedHelperName(expression.expression, seen)
+        return resolvedHelperNames(expression.expression, seen)
       }
-      if (ts.isPropertyAccessExpression(expression)) return expression.name.text
+      if (ts.isConditionalExpression(expression)) {
+        return [...new Set([
+          ...resolvedHelperNames(expression.whenTrue, new Set(seen)),
+          ...resolvedHelperNames(expression.whenFalse, new Set(seen)),
+        ])]
+      }
+      if (
+        ts.isBinaryExpression(expression) &&
+        new Set([ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]).has(
+          expression.operatorToken.kind,
+        )
+      ) {
+        return [...new Set([
+          ...resolvedHelperNames(expression.left, new Set(seen)),
+          ...resolvedHelperNames(expression.right, new Set(seen)),
+        ])]
+      }
+      if (ts.isArrayLiteralExpression(expression)) {
+        return [...new Set(expression.elements.flatMap((element) =>
+          ts.isOmittedExpression(element) ? [] : resolvedHelperNames(element, new Set(seen)),
+        ))]
+      }
+      if (ts.isPropertyAccessExpression(expression)) {
+        const values = propertyValues(expression)
+        const names = values.flatMap((value) => resolvedHelperNames(value, new Set(seen)))
+        if (values.length > 0) return [...new Set(names)]
+        if (!ts.isIdentifier(expression.name)) return []
+        const name = helperNameFromIdentifier(expression.name, expression.name.text)
+        return name ? [name] : []
+      }
       if (ts.isElementAccessExpression(expression) && ts.isStringLiteralLike(expression.argumentExpression)) {
-        return expression.argumentExpression.text
+        const values = propertyValues(expression)
+        const names = values.flatMap((value) => resolvedHelperNames(value, new Set(seen)))
+        if (values.length > 0) return [...new Set(names)]
+        const name = helperNameFromSymbol(
+          propertySymbol(expression),
+          expression.argumentExpression.text,
+          checkerFor(expression),
+        )
+        return name ? [name] : []
       }
-      if (!ts.isIdentifier(expression)) return undefined
-      const value = resolveValue(expression)
-      if (value) return resolvedHelperName(value, seen)
-      const symbol = file.checker.getSymbolAtLocation(expression)
-      const target = symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? file.checker.getAliasedSymbol(symbol) : symbol
-      return target?.name ?? expression.text
+      if (!ts.isIdentifier(expression)) return []
+      const resolvedValues = resolveValues(expression)
+      const values = resolvedValues.flatMap((value) => resolvedHelperNames(value, new Set(seen)))
+      if (resolvedValues.length > 0) return [...new Set(values)]
+      const name = helperNameFromIdentifier(expression, expression.text)
+      return name ? [name] : []
     }
-    const resolvedMethodName = (
+    const transferredHelpers = new Set([
+      "registerTransferredGenerationProducer",
+      "registerTransferredGenerationChannel",
+      "registerGenerationBody",
+    ])
+    const resolvedHelperName = (expression: ts.Expression | undefined) => {
+      const names = resolvedHelperNames(expression)
+      return names.find((name) => !!helperAllowlist(name) || transferredHelpers.has(name)) ?? names[0]
+    }
+    const resolvedMethodNames = (
       expression: ts.Expression | undefined,
       seen = new Set<ts.Node>(),
-    ): string | undefined => {
-      if (!expression || seen.has(expression)) return undefined
+    ): string[] => {
+      if (!expression || seen.has(expression)) return []
       seen.add(expression)
       if (
         ts.isParenthesizedExpression(expression) ||
         ts.isAsExpression(expression) ||
         ts.isTypeAssertionExpression(expression) ||
-        ts.isSatisfiesExpression(expression)
+        ts.isSatisfiesExpression(expression) ||
+        ts.isNonNullExpression(expression)
       ) {
-        return resolvedMethodName(expression.expression, seen)
+        return resolvedMethodNames(expression.expression, seen)
       }
-      if (ts.isPropertyAccessExpression(expression)) return expression.name.text
+      if (ts.isConditionalExpression(expression)) {
+        return [...new Set([
+          ...resolvedMethodNames(expression.whenTrue, new Set(seen)),
+          ...resolvedMethodNames(expression.whenFalse, new Set(seen)),
+        ])]
+      }
+      if (
+        ts.isBinaryExpression(expression) &&
+        new Set([ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]).has(
+          expression.operatorToken.kind,
+        )
+      ) {
+        return [...new Set([
+          ...resolvedMethodNames(expression.left, new Set(seen)),
+          ...resolvedMethodNames(expression.right, new Set(seen)),
+        ])]
+      }
+      if (ts.isArrayLiteralExpression(expression)) {
+        return [...new Set(expression.elements.flatMap((element) =>
+          ts.isOmittedExpression(element) ? [] : resolvedMethodNames(element, new Set(seen)),
+        ))]
+      }
+      if (ts.isPropertyAccessExpression(expression)) {
+        if (expression.name.text === "runSync") return [expression.name.text]
+        return [...new Set(propertyValues(expression).flatMap((value) =>
+          resolvedMethodNames(value, new Set(seen)),
+        ))]
+      }
       if (ts.isElementAccessExpression(expression) && ts.isStringLiteralLike(expression.argumentExpression)) {
-        return expression.argumentExpression.text
+        if (expression.argumentExpression.text === "runSync") return [expression.argumentExpression.text]
+        return [...new Set(propertyValues(expression).flatMap((value) =>
+          resolvedMethodNames(value, new Set(seen)),
+        ))]
       }
       if (ts.isCallExpression(expression) && callProperty(expression)?.name === "bind") {
         if (ts.isPropertyAccessExpression(expression.expression)) {
-          return resolvedMethodName(expression.expression.expression, seen)
+          return resolvedMethodNames(expression.expression.expression, seen)
         }
         if (ts.isElementAccessExpression(expression.expression)) {
-          return resolvedMethodName(expression.expression.expression, seen)
+          return resolvedMethodNames(expression.expression.expression, seen)
         }
       }
-      if (!ts.isIdentifier(expression)) return undefined
-      const binding = bindingElements
-        .filter(
-          (element) =>
-            ts.isIdentifier(element.name) &&
-            element.name.text === expression.text &&
-            ts.isObjectBindingPattern(element.parent) &&
-            element.getStart(file.source) < expression.getStart(file.source) &&
-            (!nearestFunction(element) || nodeInside(nearestFunction(element)!, expression)),
-        )
-        .sort((left, right) => right.getStart(file.source) - left.getStart(file.source))[0]
-      if (binding) return nameText(binding.propertyName ?? binding.name)
-      return resolvedMethodName(resolveValue(expression), seen)
+      if (!ts.isIdentifier(expression)) return []
+      const bindings = resolveSymbolDeclarations(expression).flatMap((binding) =>
+        ts.isBindingElement(binding) && ts.isObjectBindingPattern(binding.parent)
+          ? [nameText(binding.propertyName ?? binding.name)]
+          : [],
+      ).filter((name): name is string => !!name)
+      const values = resolveValues(expression).flatMap((value) => resolvedMethodNames(value, new Set(seen)))
+      return [...new Set([...bindings, ...values])]
+    }
+    const resolvedMethodName = (expression: ts.Expression | undefined) => {
+      const names = resolvedMethodNames(expression)
+      return names.includes("runSync") ? "runSync" : names[0]
     }
     const sameContainer = (
       value: ts.Expression | undefined,
@@ -2717,7 +3287,8 @@ function authorityErrors(files: ParsedSource[]) {
         ts.isParenthesizedExpression(value) ||
         ts.isAsExpression(value) ||
         ts.isTypeAssertionExpression(value) ||
-        ts.isSatisfiesExpression(value)
+        ts.isSatisfiesExpression(value) ||
+        ts.isNonNullExpression(value)
       ) {
         return sameContainer(value.expression, declaration, seen)
       }
@@ -2725,9 +3296,11 @@ function authorityErrors(files: ParsedSource[]) {
         return sameContainer(value.expression, declaration, seen)
       }
       if (!ts.isIdentifier(value)) return false
-      const resolved = resolveValueDeclaration(value)
-      if (resolved === declaration) return true
-      return !!resolved?.initializer && sameContainer(resolved.initializer, declaration, seen)
+      const resolved = resolveVariableDeclarations(value)
+      if (resolved.includes(declaration)) return true
+      return resolved.some(
+        (candidate) => !!candidate.initializer && sameContainer(candidate.initializer, declaration, new Set(seen)),
+      )
     }
     const capturedValue = (
       value: ts.Expression | undefined,
@@ -2740,35 +3313,39 @@ function authorityErrors(files: ParsedSource[]) {
         ts.isParenthesizedExpression(value) ||
         ts.isAsExpression(value) ||
         ts.isTypeAssertionExpression(value) ||
-        ts.isSatisfiesExpression(value)
+        ts.isSatisfiesExpression(value) ||
+        ts.isNonNullExpression(value)
       ) {
         return capturedValue(value.expression, seen, at)
       }
+      if (ts.isArrowFunction(value) && !ts.isBlock(value.body)) return capturedValue(value.body, seen, at)
       if (ts.isIdentifier(value)) {
-        const declaration = resolveValueDeclaration(value)
-        if (!declaration) return false
-        if (capturedValue(declaration.initializer, seen, at)) return true
-        const beforeUse = (mutation: ts.Node) =>
-          mutation.getStart(file.source) > declaration.getStart(file.source) &&
-          mutation.getStart(file.source) < (at?.getStart(file.source) ?? file.source.end) &&
-          nearestFunction(mutation) === nearestFunction(declaration)
-        const assigned = assignments.some((assignment) => {
-          if (!beforeUse(assignment)) return false
-          const receiver = ts.isPropertyAccessExpression(assignment.left) || ts.isElementAccessExpression(assignment.left)
-            ? assignment.left.expression
-            : undefined
-          return sameContainer(receiver, declaration) && capturedValue(assignment.right, new Set(seen), assignment)
-        })
-        if (assigned) return true
-        return calls.some((call) => {
-          if (!beforeUse(call) || !new Set(["push", "unshift", "splice", "add", "set"]).has(callProperty(call)?.name ?? "")) {
-            return false
-          }
-          const receiver = ts.isPropertyAccessExpression(call.expression) || ts.isElementAccessExpression(call.expression)
-            ? call.expression.expression
-            : undefined
-          return sameContainer(receiver, declaration) &&
-            call.arguments.some((argument) => capturedValue(argument, new Set(seen), call))
+        if (resolveValues(value).some((resolved) => capturedValue(resolved, new Set(seen), at))) return true
+        const declarations = resolveVariableDeclarations(value)
+        return declarations.some((declaration) => {
+          const beforeUse = (mutation: ts.Node) =>
+            declaration.getSourceFile() === file.source &&
+            mutation.getStart(file.source) > declaration.getStart(file.source) &&
+            mutation.getStart(file.source) < (at?.getStart(file.source) ?? file.source.end) &&
+            nearestFunction(mutation) === nearestFunction(declaration)
+          const assigned = assignments.some((assignment) => {
+            if (!beforeUse(assignment)) return false
+            const receiver = ts.isPropertyAccessExpression(assignment.left) || ts.isElementAccessExpression(assignment.left)
+              ? assignment.left.expression
+              : undefined
+            return sameContainer(receiver, declaration) && capturedValue(assignment.right, new Set(seen), assignment)
+          })
+          if (assigned) return true
+          return calls.some((call) => {
+            if (!beforeUse(call) || !new Set(["push", "unshift", "splice", "add", "set"]).has(callProperty(call)?.name ?? "")) {
+              return false
+            }
+            const receiver = ts.isPropertyAccessExpression(call.expression) || ts.isElementAccessExpression(call.expression)
+              ? call.expression.expression
+              : undefined
+            return sameContainer(receiver, declaration) &&
+              call.arguments.some((argument) => capturedValue(argument, new Set(seen), call))
+          })
         })
       }
       if (ts.isObjectLiteralExpression(value)) {
@@ -2793,6 +3370,108 @@ function authorityErrors(files: ParsedSource[]) {
         new Set(["captureInstanceExecution", "captureInstanceExecutionEffect"]).has(
           resolvedHelperName(value.expression) ?? "",
         )
+    }
+    const returnedRawHelperNames = (body: ts.Block, seen: Set<ts.Node>) => {
+      const names: string[] = []
+      const visit = (node: ts.Node) => {
+        if (
+          node !== body &&
+          (ts.isFunctionDeclaration(node) ||
+            ts.isFunctionExpression(node) ||
+            ts.isArrowFunction(node) ||
+            ts.isMethodDeclaration(node) ||
+            ts.isGetAccessorDeclaration(node) ||
+            ts.isSetAccessorDeclaration(node) ||
+            ts.isConstructorDeclaration(node) ||
+            ts.isClassDeclaration(node) ||
+            ts.isClassExpression(node))
+        ) {
+          return
+        }
+        if (ts.isReturnStatement(node)) {
+          names.push(...rawHelperValueNames(node.expression, new Set(seen)))
+          return
+        }
+        node.forEachChild(visit)
+      }
+      visit(body)
+      return [...new Set(names)]
+    }
+    function rawHelperValueNames(
+      value: ts.Expression | undefined,
+      seen = new Set<ts.Node>(),
+    ): string[] {
+      if (!value || seen.has(value)) return []
+      seen.add(value)
+      if (
+        ts.isParenthesizedExpression(value) ||
+        ts.isAsExpression(value) ||
+        ts.isTypeAssertionExpression(value) ||
+        ts.isSatisfiesExpression(value) ||
+        ts.isNonNullExpression(value)
+      ) {
+        return rawHelperValueNames(value.expression, seen)
+      }
+      if (ts.isIdentifier(value) || ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) {
+        return resolvedHelperNames(value).filter((name) => !!helperAllowlist(name))
+      }
+      if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) {
+        return ts.isBlock(value.body)
+          ? returnedRawHelperNames(value.body, seen)
+          : rawHelperValueNames(value.body, seen)
+      }
+      if (ts.isObjectLiteralExpression(value)) {
+        return [...new Set(value.properties.flatMap((property) => {
+          if (ts.isPropertyAssignment(property)) return rawHelperValueNames(property.initializer, new Set(seen))
+          if (ts.isShorthandPropertyAssignment(property)) return rawHelperValueNames(property.name, new Set(seen))
+          if (ts.isSpreadAssignment(property)) return rawHelperValueNames(property.expression, new Set(seen))
+          if (
+            (ts.isMethodDeclaration(property) ||
+              ts.isGetAccessorDeclaration(property) ||
+              ts.isSetAccessorDeclaration(property)) &&
+            property.body
+          ) {
+            return returnedRawHelperNames(property.body, new Set(seen))
+          }
+          return []
+        }))]
+      }
+      if (ts.isArrayLiteralExpression(value)) {
+        return [...new Set(value.elements.flatMap((element) =>
+          ts.isOmittedExpression(element)
+            ? []
+            : rawHelperValueNames(ts.isSpreadElement(element) ? element.expression : element, new Set(seen)),
+        ))]
+      }
+      if (ts.isConditionalExpression(value)) {
+        return [...new Set([
+          ...rawHelperValueNames(value.whenTrue, new Set(seen)),
+          ...rawHelperValueNames(value.whenFalse, new Set(seen)),
+        ])]
+      }
+      if (ts.isBinaryExpression(value)) {
+        if (value.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+          return rawHelperValueNames(value.right, new Set(seen))
+        }
+        if (
+          new Set([
+            ts.SyntaxKind.AmpersandAmpersandToken,
+            ts.SyntaxKind.BarBarToken,
+            ts.SyntaxKind.QuestionQuestionToken,
+          ]).has(value.operatorToken.kind)
+        ) {
+          return [...new Set([
+            ...rawHelperValueNames(value.left, new Set(seen)),
+            ...rawHelperValueNames(value.right, new Set(seen)),
+          ])]
+        }
+      }
+      if (ts.isCallExpression(value) && callProperty(value)?.name === "bind") {
+        if (ts.isPropertyAccessExpression(value.expression) || ts.isElementAccessExpression(value.expression)) {
+          return rawHelperValueNames(value.expression.expression, new Set(seen))
+        }
+      }
+      return []
     }
     const privateJoinTarget = (node: ts.CallExpression) => {
       if (!new Set(["call", "apply"]).has(callProperty(node)?.name ?? "")) return undefined
@@ -2904,12 +3583,28 @@ function authorityErrors(files: ParsedSource[]) {
         errors.push(`InstanceAdmissionRef must remain module-private: ${file.relative}`)
       }
       if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
+        const lifecycleModule = !!node.moduleSpecifier &&
+          ts.isStringLiteralLike(node.moduleSpecifier) &&
+          /(?:^|\/)instance-ref(?:\.[cm]?[jt]s)?$/.test(node.moduleSpecifier.text)
         for (const element of node.exportClause.elements) {
           const name = element.propertyName?.text ?? element.name.text
           if (name === "InstanceAdmissionRef") {
             errors.push(`InstanceAdmissionRef must remain module-private: ${file.relative}`)
           }
-          if (helperAllowlist(name)) errors.push(`raw lifecycle helper cannot be re-exported: ${file.relative}:${name}`)
+          const target = node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)
+            ? resolveModuleSource(file.relative, node.moduleSpecifier.text)
+            : undefined
+          const imported = element.propertyName?.text ?? element.name.text
+          const helper = (target || !node.moduleSpecifier
+            ? (target ? moduleExportDefinitions(target, imported) : localBindingDefinitions(file, imported))
+                .flatMap((definition) => resolvedHelperNames(definition.value))
+                .find((candidate) => !!helperAllowlist(candidate))
+            : undefined) ??
+            (ts.isIdentifier(element.name) ? helperNameFromIdentifier(element.name, name) : undefined) ??
+            (lifecycleModule && helperAllowlist(name) ? name : undefined)
+          if (helper && helperAllowlist(helper)) {
+            errors.push(`raw lifecycle helper cannot be re-exported: ${file.relative}:${helper}`)
+          }
         }
       }
       if (
@@ -2930,6 +3625,20 @@ function authorityErrors(files: ParsedSource[]) {
         /(?:^|\/)instance-ref(?:\.[cm]?[jt]s)?$/.test(node.moduleSpecifier.text)
       ) {
         errors.push(`lifecycle authority module cannot be star re-exported: ${file.relative}`)
+      }
+      if (ts.isExportAssignment(node)) {
+        const helper = rawHelperValueNames(node.expression)[0]
+        if (helper) errors.push(`raw lifecycle helper cannot be re-exported: ${file.relative}:${helper}`)
+      }
+      if (exported(node)) {
+        const helper = ts.isVariableStatement(node)
+          ? node.declarationList.declarations.flatMap((declaration) =>
+              rawHelperValueNames(declaration.initializer),
+            )[0]
+          : ts.isFunctionDeclaration(node) && node.body
+            ? returnedRawHelperNames(node.body, new Set())[0]
+            : undefined
+        if (helper) errors.push(`raw lifecycle helper cannot be re-exported: ${file.relative}:${helper}`)
       }
       if (file.relative !== "src/effect/instance-ref.ts" && exported(node)) {
         if (
@@ -2982,15 +3691,27 @@ function authorityErrors(files: ParsedSource[]) {
       ) {
         errors.push(`InstanceExecution cannot be cast or reconstructed: ${file.relative}`)
       }
+      if (ts.isImportDeclaration(node) && node.importClause?.name) {
+        const helper = resolvedHelperNames(node.importClause.name).find((candidate) => !!helperAllowlist(candidate))
+        const allowed = helper ? helperAllowlist(helper) : undefined
+        if (helper && allowed && (!allowed.has(file.relative) || node.importClause.name.text !== helper)) {
+          errors.push(`raw lifecycle helper is not allowlisted: ${file.relative}:${helper}`)
+        }
+      }
       if (ts.isImportDeclaration(node) && node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)) {
+        const lifecycleModule = ts.isStringLiteralLike(node.moduleSpecifier) &&
+          /(?:^|\/)instance-ref(?:\.[cm]?[jt]s)?$/.test(node.moduleSpecifier.text)
         for (const element of node.importClause.namedBindings.elements) {
           const name = element.propertyName?.text ?? element.name.text
           if (name === "InstanceAdmissionRef") {
             errors.push(`InstanceAdmissionRef must remain module-private: ${file.relative}`)
           }
-          const allowed = helperAllowlist(name)
+          const resolved = resolvedHelperNames(element.name).find((candidate) => !!helperAllowlist(candidate)) ??
+            helperNameFromIdentifier(element.name, name) ??
+            (lifecycleModule && helperAllowlist(name) ? name : undefined)
+          const allowed = resolved ? helperAllowlist(resolved) : undefined
           if (allowed && (!allowed.has(file.relative) || !!element.propertyName)) {
-            errors.push(`raw lifecycle helper is not allowlisted: ${file.relative}:${name}`)
+            errors.push(`raw lifecycle helper is not allowlisted: ${file.relative}:${resolved}`)
           }
         }
       }
@@ -3080,7 +3801,7 @@ function authorityErrors(files: ParsedSource[]) {
         }
         const property = callProperty(node)
         const releaseReceiver = ts.isPropertyAccessExpression(node.expression) ? node.expression.expression : undefined
-        const acquiredRelease = property?.name === "release" ? resolveLease(releaseReceiver, node) : undefined
+        const acquiredRelease = property?.name === "release" ? resolveLease(releaseReceiver) : undefined
         if (
           property?.name === "release" &&
           (acquiredRelease || lifecycleReceiver(releaseReceiver) || /(?:lease|owner|handle|handoff|child)/i.test(property.receiver))
@@ -3093,7 +3814,7 @@ function authorityErrors(files: ParsedSource[]) {
         }
         if (
           (property?.name === "runSync" || resolvedMethodName(node.expression) === "runSync") &&
-          returnsPromiseLike(node.arguments[0], file.checker, resolveValue)
+          returnsPromiseLike(node.arguments[0], file.checker, resolveValues)
         ) {
           errors.push(`runSync cannot accept async or PromiseLike callbacks: ${file.relative}:${enclosingSymbol(node)}`)
         }
@@ -3117,7 +3838,7 @@ function authorityErrors(files: ParsedSource[]) {
               errors.push(`transferred producer target must derive from handoffFrom: ${file.relative}:${enclosingSymbol(node)}`)
             }
             const handoffExpression = propertyExpression(handoff)
-            const lease = resolveLease(handoffExpression, node)
+            const lease = resolveLease(handoffExpression)
             if (!lease) {
               errors.push(`transferred producer requires an acquired generation handoff lease: ${file.relative}:${enclosingSymbol(node)}`)
             } else {
