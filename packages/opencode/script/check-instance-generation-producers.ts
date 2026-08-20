@@ -1279,10 +1279,11 @@ function parseSources(
   const cached = cacheKey ? context.cache.get(cacheKey) : undefined
   if (cached) return cached
   const files = listFiles(root).sort()
-  const resolveProjectImports = root === defaultSourceRoot
+  const defaultSource = prefix === "src" && root === defaultSourceRoot
+  const defaultTest = prefix === "test" && root === defaultTestRoot
   const program = ts.createProgram({
     rootNames: files,
-    options: resolveProjectImports
+    options: defaultSource
       ? { ...projectCompilerOptions, noResolve: false }
       : {
           target: ts.ScriptTarget.ESNext,
@@ -1291,6 +1292,7 @@ function parseSources(
           jsx: ts.JsxEmit.Preserve,
           noResolve: true,
           skipLibCheck: true,
+          ...(!defaultTest && { noLib: true, types: [] }),
         },
   })
   const checker = program.getTypeChecker()

@@ -117,9 +117,13 @@ test("the planned Task 0 inventory mode accepts the frozen starting universe", a
   expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" })
 })
 
-test("the planned Task 0 disposer mode accepts only the Task 1 adapter", async () => {
-  const result = await runCLI(["--check-disposer-targets", "--allow-task1-adapter"])
-  expect(result).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+test("the CLI forwards both modes without shifting argv", async () => {
+  const result = await runCLI(["--check", "--check-disposer-targets"])
+  expect(result).toEqual({
+    exitCode: 1,
+    stdout: "",
+    stderr: "instance generation producer check failed: exactly one checker mode is required\n",
+  })
 })
 
 test("unknown flags fail closed", async () => {
@@ -177,6 +181,12 @@ const inventoryHeader = [
   "",
   "| Anchor | Signals | Fingerprint | Mutation surface | Cancellation input | Settlement receipt | Canonical target source | Owner kind | Ownership mode | Task | Deterministic test |",
   "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+].join("\n")
+
+const localPromiseDeclarations = [
+  "interface PromiseLike<T> { then(resolve: (value: T) => void): void }",
+  "declare function fetch(value: unknown): PromiseLike<unknown>",
+  "declare const url: unknown",
 ].join("\n")
 
 async function fixture(input: { source?: Record<string, string>; tests?: Record<string, string>; inventory?: string }) {
@@ -1794,6 +1804,7 @@ test("transfer release paths dominate exits and child handles cannot escape befo
 test("lifecycle authority checks structural callsites, escapes, types, and PromiseLike results", async () => {
   const input = await fixture({
     source: {
+      "local-promise.d.ts": localPromiseDeclarations,
       "workflow/runtime.ts": "export function spawnIsolated() { return disposeDirectorySettled('/tmp/forged') }\n",
       "effect/run-service.ts": [
         "export function attachWith() {",
@@ -1828,9 +1839,37 @@ test("lifecycle authority checks structural callsites, escapes, types, and Promi
   }
 })
 
+test("custom fixtures classify only locally declared thenables", async () => {
+  const ambient = await fixture({
+    source: {
+      "effect/ambient-callback.ts": "declare const lease: GenerationLease; lease.runSync(() => fetch(url))\n",
+    },
+  })
+  await using _ambient = ambient.tmp
+  expect((await run(["--check"], ambient.env)).stderr).not.toContain(
+    "runSync cannot accept async or PromiseLike callbacks",
+  )
+
+  const local = await fixture({
+    source: {
+      "effect/local-callback.ts": [
+        "interface LocalThenable { then(resolve: () => void): void }",
+        "declare function localFetch(value: unknown): LocalThenable",
+        "declare const lease: GenerationLease",
+        "lease.runSync(() => localFetch(value))",
+      ].join("\n"),
+    },
+  })
+  await using _local = local.tmp
+  expect((await run(["--check"], local.env)).stderr).toContain(
+    "runSync cannot accept async or PromiseLike callbacks",
+  )
+})
+
 test("typed PromiseLike callback references cannot enter runSync", async () => {
   const input = await fixture({
     source: {
+      "local-promise.d.ts": localPromiseDeclarations,
       "effect/callback.ts": [
         "declare const lease: GenerationLease",
         "declare const callback: () => PromiseLike<number>",
@@ -1845,6 +1884,7 @@ test("typed PromiseLike callback references cannot enter runSync", async () => {
 test("runSync method aliases cannot accept PromiseLike callbacks", async () => {
   const input = await fixture({
     source: {
+      "local-promise.d.ts": localPromiseDeclarations,
       "effect/callback.ts": [
         "declare const lease: GenerationLease",
         "const run = lease.runSync",
@@ -1863,6 +1903,7 @@ test("destructured and bound runSync aliases cannot accept PromiseLike callbacks
   ] as const) {
     const input = await fixture({
       source: {
+        "local-promise.d.ts": localPromiseDeclarations,
         "effect/callback.ts": ["declare const lease: GenerationLease", alias, "run(() => fetch(url))"].join("\n"),
       },
     })
