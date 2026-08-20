@@ -9,6 +9,16 @@ const packageRoot = path.resolve(import.meta.dir, "..")
 const defaultSourceRoot = path.join(packageRoot, "src")
 const defaultTestRoot = path.join(packageRoot, "test")
 const defaultInventory = path.resolve(packageRoot, "../../docs/compose/spec/instance-generation-producer-inventory.md")
+const projectCompilerOptions = (() => {
+  const configPath = path.join(packageRoot, "tsconfig.json")
+  const config = ts.readConfigFile(configPath, ts.sys.readFile)
+  if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, "\n"))
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, packageRoot, undefined, configPath)
+  if (parsed.errors.length > 0) {
+    throw new Error(parsed.errors.map((error) => ts.flattenDiagnosticMessageText(error.messageText, "\n")).join("\n"))
+  }
+  return parsed.options
+})()
 
 const modes = ["--check", "--check-disposer-targets"] as const
 const flags = [
@@ -53,6 +63,8 @@ type ParsedSource = {
   source: ts.SourceFile
   checker: ts.TypeChecker
 }
+
+const parsedSourceCache = new Map<string, ParsedSource[]>()
 
 type Candidate = {
   file: string
@@ -1172,14 +1184,17 @@ const rawHelperCallContracts = new Map<string, ReadonlySet<string>>(
   ),
 )
 
-const privateJoinCallContracts = new Map<string, ReadonlySet<string>>([
-  ["disposeDirectorySettled:src/project/instance.ts:disposeDirectory", new Set(["disposeDirectorySettled(input)", "disposeDirectorySettled(directory)"])],
-  ["disposeDirectorySettled:src/cli/bootstrap.ts:bootstrap", new Set(["disposeDirectorySettled(directory)"])],
-  ["disposeDirectorySettled:src/workflow/runtime.ts:spawnIsolated", new Set(["disposeDirectorySettled(info.directory)"])],
-  ["disposeDirectorySettled:test/fixture/instance-lifecycle.ts:disposeDirectory", new Set(["disposeDirectorySettled(directory)"])],
-  ["disposeAllSettled:src/project/instance.ts:disposeAll", new Set(["disposeAllSettled()"])],
-  ["disposeAllSettled:src/server/shutdown.ts:shutdown", new Set(["disposeAllSettled()"])],
-  ["disposeAllSettled:test/fixture/instance-lifecycle.ts:disposeAll", new Set(["disposeAllSettled()"])],
+const privateJoinCallContracts = new Map<string, readonly string[]>([
+  [
+    "disposeDirectorySettled:src/project/instance.ts:disposeDirectory",
+    ["disposeDirectorySettled(input)", "disposeDirectorySettled(directory)"],
+  ],
+  ["disposeDirectorySettled:src/cli/bootstrap.ts:bootstrap", ["disposeDirectorySettled(directory)"]],
+  ["disposeDirectorySettled:src/workflow/runtime.ts:spawnIsolated", ["disposeDirectorySettled(info.directory)"]],
+  ["disposeDirectorySettled:test/fixture/instance-lifecycle.ts:disposeDirectory", ["disposeDirectorySettled(directory)"]],
+  ["disposeAllSettled:src/project/instance.ts:disposeAll", ["disposeAllSettled()"]],
+  ["disposeAllSettled:src/server/shutdown.ts:shutdown", ["disposeAllSettled()"]],
+  ["disposeAllSettled:test/fixture/instance-lifecycle.ts:disposeAll", ["disposeAllSettled()"]],
 ])
 
 function listFiles(root: string): string[] {
@@ -1192,40 +1207,74 @@ function listFiles(root: string): string[] {
   })
 }
 
+function hasStringDisposeInstanceDeclaration(root: string) {
+  return listFiles(root).some((file) => {
+    const text = readFileSync(file, "utf8")
+    if (!text.includes("disposeInstance")) return false
+    const source = ts.createSourceFile(
+      file,
+      text,
+      ts.ScriptTarget.Latest,
+      true,
+      file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    )
+    let found = false
+    const containsStringKeyword = (node: ts.Node) => {
+      if (node.kind === ts.SyntaxKind.StringKeyword) found = true
+      if (!found) node.forEachChild(containsStringKeyword)
+    }
+    const visit = (node: ts.Node) => {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === "disposeInstance" && node.parameters[0]?.type) {
+        containsStringKeyword(node.parameters[0].type)
+      }
+      if (!found) node.forEachChild(visit)
+    }
+    visit(source)
+    return found
+  })
+}
+
 function parseSources(root: string, prefix: "src" | "test"): ParsedSource[] {
+  const cacheKey = root === defaultSourceRoot || root === defaultTestRoot ? `${prefix}:${root}` : undefined
+  const cached = cacheKey ? parsedSourceCache.get(cacheKey) : undefined
+  if (cached) return cached
   const files = listFiles(root).sort()
+  const resolveProjectImports = root === defaultSourceRoot
   const program = ts.createProgram({
     rootNames: files,
-    options: {
-      target: ts.ScriptTarget.ESNext,
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      jsx: ts.JsxEmit.Preserve,
-      noResolve: true,
-      skipLibCheck: true,
-    },
+    options: resolveProjectImports
+      ? { ...projectCompilerOptions, noResolve: false }
+      : {
+          target: ts.ScriptTarget.ESNext,
+          module: ts.ModuleKind.ESNext,
+          moduleResolution: ts.ModuleResolutionKind.Bundler,
+          jsx: ts.JsxEmit.Preserve,
+          noResolve: true,
+          skipLibCheck: true,
+        },
   })
   const checker = program.getTypeChecker()
-  return files
-    .map((file) => {
-      const source = program.getSourceFile(file)
-      const text = source?.text ?? readFileSync(file, "utf8")
-      return {
-        file,
-        relative: `${prefix}/${path.relative(root, file).split(path.sep).join("/")}`,
-        text,
-        source:
-          source ??
-          ts.createSourceFile(
-            file,
-            text,
-            ts.ScriptTarget.Latest,
-            true,
-            file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-          ),
-        checker,
-      }
-    })
+  const parsed = files.map((file) => {
+    const source = program.getSourceFile(file)
+    const text = source?.text ?? readFileSync(file, "utf8")
+    return {
+      file,
+      relative: `${prefix}/${path.relative(root, file).split(path.sep).join("/")}`,
+      text,
+      source:
+        source ??
+        ts.createSourceFile(
+          file,
+          text,
+          ts.ScriptTarget.Latest,
+          true,
+          file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+        ),
+      checker,
+    }
+  })
+  if (cacheKey) parsedSourceCache.set(cacheKey, parsed)
+  return parsed
 }
 
 function nameText(name: ts.PropertyName | ts.BindingName | undefined): string | undefined {
@@ -1550,16 +1599,15 @@ function scanCandidates(input: ParsedSource): Candidate[] {
     if (!node) return true
     if (seen.has(node)) return false
     seen.add(node)
+    if (includesStringType(node)) return true
     if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) return true
     if (ts.isIdentifier(node)) {
       const declaration = declarationFor(node)
       if (!declaration) return false
-      if (declaration.type && /\bstring\b/.test(declaration.type.getText(input.source))) return true
       return !!declaration.initializer && legacyStringArgument(declaration.initializer, seen)
     }
-    if (ts.isPropertyAccessExpression(node)) return node.name.text === "directory"
     if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
-      return /\bstring\b/.test(node.type.getText(input.source)) || legacyStringArgument(node.expression)
+      return legacyStringArgument(node.expression)
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
       return legacyStringArgument(node.left, seen) || legacyStringArgument(node.right, seen)
@@ -1573,8 +1621,7 @@ function scanCandidates(input: ParsedSource): Candidate[] {
       const declaration = identifier
         ? functions.find((item) => item.name?.text === identifier.text && item.getStart(input.source) <= node.getStart(input.source))
         : undefined
-      return includesStringType(node) ||
-        /(?:^|\.)(?:resolve|join|dirname|normalize)$/.test(callee) ||
+      return /(?:^|\.)(?:resolve|join|dirname|normalize)$/.test(callee) ||
         callee === "String" ||
         !!declaration?.type && /\bstring\b/.test(declaration.type.getText(input.source))
     }
@@ -2458,6 +2505,26 @@ function nodeInside(ancestor: ts.Node, node: ts.Node) {
   return ancestor.getStart(ancestor.getSourceFile()) <= node.getStart(node.getSourceFile()) && ancestor.end >= node.end
 }
 
+function nonThrowingDirectReturn(expression: ts.Expression | undefined): boolean {
+  if (!expression) return true
+  if (
+    ts.isParenthesizedExpression(expression) ||
+    ts.isAsExpression(expression) ||
+    ts.isTypeAssertionExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
+    ts.isNonNullExpression(expression)
+  ) {
+    return nonThrowingDirectReturn(expression.expression)
+  }
+  return ts.isIdentifier(expression) ||
+    ts.isStringLiteralLike(expression) ||
+    ts.isNumericLiteral(expression) ||
+    ts.isBigIntLiteral(expression) ||
+    expression.kind === ts.SyntaxKind.TrueKeyword ||
+    expression.kind === ts.SyntaxKind.FalseKeyword ||
+    expression.kind === ts.SyntaxKind.NullKeyword
+}
+
 function authorityErrors(files: ParsedSource[]) {
   const errors: string[] = []
   for (const file of files) {
@@ -2465,6 +2532,7 @@ function authorityErrors(files: ParsedSource[]) {
     const leaseDeclarations: ts.VariableDeclaration[] = []
     const valueDeclarations: ts.VariableDeclaration[] = []
     const rawHelperCalls = new Map<string, ts.CallExpression[]>()
+    const privateJoinCalls = new Map<string, ts.CallExpression[]>()
     const collect = (node: ts.Node) => {
       if (ts.isCallExpression(node)) calls.push(node)
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) valueDeclarations.push(node)
@@ -2525,6 +2593,27 @@ function authorityErrors(files: ParsedSource[]) {
       const target = symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? file.checker.getAliasedSymbol(symbol) : symbol
       return target?.name ?? expression.text
     }
+    const resolvedMethodName = (
+      expression: ts.Expression | undefined,
+      seen = new Set<ts.Node>(),
+    ): string | undefined => {
+      if (!expression || seen.has(expression)) return undefined
+      seen.add(expression)
+      if (
+        ts.isParenthesizedExpression(expression) ||
+        ts.isAsExpression(expression) ||
+        ts.isTypeAssertionExpression(expression) ||
+        ts.isSatisfiesExpression(expression)
+      ) {
+        return resolvedMethodName(expression.expression, seen)
+      }
+      if (ts.isPropertyAccessExpression(expression)) return expression.name.text
+      if (ts.isElementAccessExpression(expression) && ts.isStringLiteralLike(expression.argumentExpression)) {
+        return expression.argumentExpression.text
+      }
+      if (!ts.isIdentifier(expression)) return undefined
+      return resolvedMethodName(resolveValue(expression), seen)
+    }
     const capturedValue = (value: ts.Expression | undefined, seen = new Set<ts.Node>()): boolean => {
       if (!value || seen.has(value)) return false
       seen.add(value)
@@ -2537,6 +2626,24 @@ function authorityErrors(files: ParsedSource[]) {
         return capturedValue(value.expression, seen)
       }
       if (ts.isIdentifier(value)) return capturedValue(resolveValue(value), seen)
+      if (ts.isObjectLiteralExpression(value)) {
+        return value.properties.some((property) => {
+          if (ts.isPropertyAssignment(property)) return capturedValue(property.initializer, seen)
+          if (ts.isShorthandPropertyAssignment(property)) return capturedValue(property.name, seen)
+          if (ts.isSpreadAssignment(property)) return capturedValue(property.expression, seen)
+          return false
+        })
+      }
+      if (ts.isArrayLiteralExpression(value)) {
+        return value.elements.some((element) => {
+          if (ts.isOmittedExpression(element)) return false
+          if (ts.isSpreadElement(element)) return capturedValue(element.expression, seen)
+          return capturedValue(element, seen)
+        })
+      }
+      if (ts.isConditionalExpression(value)) {
+        return capturedValue(value.whenTrue, seen) || capturedValue(value.whenFalse, seen)
+      }
       return ts.isCallExpression(value) &&
         new Set(["captureInstanceExecution", "captureInstanceExecutionEffect"]).has(
           resolvedHelperName(value.expression) ?? "",
@@ -2791,7 +2898,8 @@ function authorityErrors(files: ParsedSource[]) {
           }
         } else if (helper && Object.hasOwn(privateJoinAllowlist, helper)) {
           const key = `${helper}:${file.relative}:${enclosingSymbol(node)}`
-          if (!privateJoinCallContracts.get(key)?.has(normalize(node))) {
+          privateJoinCalls.set(key, [...(privateJoinCalls.get(key) ?? []), node])
+          if (!privateJoinCallContracts.get(key)?.includes(normalize(node))) {
             errors.push(`private lifecycle join call is not exact-allowlisted: ${file.relative}:${enclosingSymbol(node)}:${helper}`)
           }
         } else if (helper && allowed && !allowed.has(file.relative)) {
@@ -2810,8 +2918,11 @@ function authorityErrors(files: ParsedSource[]) {
             errors.push(`release result must be exactly one discriminated shape: ${file.relative}:${enclosingSymbol(node)}`)
           }
         }
-        if (property?.name === "runSync" && returnsPromiseLike(node.arguments[0], file.checker, resolveValue)) {
-            errors.push(`runSync cannot accept async or PromiseLike callbacks: ${file.relative}:${enclosingSymbol(node)}`)
+        if (
+          (property?.name === "runSync" || resolvedMethodName(node.expression) === "runSync") &&
+          returnsPromiseLike(node.arguments[0], file.checker, resolveValue)
+        ) {
+          errors.push(`runSync cannot accept async or PromiseLike callbacks: ${file.relative}:${enclosingSymbol(node)}`)
         }
         if (
           helper &&
@@ -2875,6 +2986,24 @@ function authorityErrors(files: ParsedSource[]) {
       if (matches.length <= 1) continue
       errors.push(`raw lifecycle helper call is not exact-allowlisted: ${key}`)
     }
+    for (const [key, matches] of privateJoinCalls) {
+      const contract = privateJoinCallContracts.get(key)
+      if (!contract) continue
+      const expected = contract.reduce(
+        (result, signature) => result.set(signature, (result.get(signature) ?? 0) + 1),
+        new Map<string, number>(),
+      )
+      const actual = matches.reduce((result, call) => {
+        const signature = normalize(call)
+        return result.set(signature, (result.get(signature) ?? 0) + 1)
+      }, new Map<string, number>())
+      if (
+        matches.length !== contract.length ||
+        [...expected].some(([signature, count]) => actual.get(signature) !== count)
+      ) {
+        errors.push(`private lifecycle join call is not exact-allowlisted: ${key}`)
+      }
+    }
 
     const shortSetupLeases = new Set([
       ...transfers.keys(),
@@ -2929,6 +3058,21 @@ function authorityErrors(files: ParsedSource[]) {
         const successStatement = setupTry.tryBlock.statements.find((statement) => nodeInside(statement, success[0]!))
         if (!successStatement || successStatement !== success[0].parent || !ts.isExpressionStatement(successStatement)) {
           errors.push(`success release must dominate every normal exit: ${file.relative}:${name}`)
+        }
+        const statementsAfterSuccess = successStatement
+          ? setupTry.tryBlock.statements
+              .slice(setupTry.tryBlock.statements.indexOf(successStatement) + 1)
+              .filter((statement) => !ts.isEmptyStatement(statement))
+          : []
+        if (
+          statementsAfterSuccess.length > 1 ||
+          (statementsAfterSuccess[0] &&
+            (!ts.isReturnStatement(statementsAfterSuccess[0]) ||
+              !nonThrowingDirectReturn(statementsAfterSuccess[0].expression)))
+        ) {
+          errors.push(
+            `successful release must be the last potentially throwing action protected by catch: ${file.relative}:${name}`,
+          )
         }
 
         const catchClause = setupTry.catchClause
@@ -3237,8 +3381,15 @@ export function check(args: string[], env: NodeJS.ProcessEnv = process.env) {
   const sourceRoot = env.MIMOCODE_INSTANCE_GENERATION_SOURCE_ROOT ?? defaultSourceRoot
   const testRoot = env.MIMOCODE_INSTANCE_GENERATION_TEST_ROOT ?? defaultTestRoot
   const inventory = env.MIMOCODE_INSTANCE_GENERATION_INVENTORY ?? defaultInventory
+  if (
+    parsed.mode === "--check-disposer-targets" &&
+    !parsed.enabled.has("--allow-task1-adapter") &&
+    sourceRoot === defaultSourceRoot &&
+    hasStringDisposeInstanceDeclaration(sourceRoot)
+  ) {
+    return ["legacy disposeInstance target requires --allow-task1-adapter"]
+  }
   const sources = parseSources(sourceRoot, "src")
-  const tests = parseSources(testRoot, "test")
   const candidates = sources.flatMap(scanCandidates)
   const rawSummaries = summarizeCandidates(candidates)
   const summaries = rawSummaries.filter(
@@ -3256,6 +3407,7 @@ export function check(args: string[], env: NodeJS.ProcessEnv = process.env) {
     return checkAllowedShapes(summaries, "dispose-target", task1DisposerTargets, "unauthorized disposeInstance target")
   }
 
+  const tests = parseSources(testRoot, "test")
   const errors = authorityErrors([...sources, ...tests])
   const enforceFrozenContracts = sourceRoot === defaultSourceRoot
   errors.push(...rendererOnlyExclusionErrors(sourceRoot, rawSummaries, enforceFrozenContracts))

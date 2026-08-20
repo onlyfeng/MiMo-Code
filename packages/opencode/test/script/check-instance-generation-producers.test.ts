@@ -1353,6 +1353,29 @@ test("allowlisted wrappers may consume capture internally but cannot export the 
   })
   await using _nested = nested.tmp
   expect((await run(["--check"], nested.env)).stderr).toContain("captured InstanceExecution cannot be re-exported")
+
+  const containerCases = [
+    ["object", "return { execution }"],
+    ["array", "const container = [execution]; return container"],
+  ] as const
+  await Promise.all(
+    containerCases.map(async ([name, escapedReturn]) => {
+      const input = await fixture({
+        source: {
+          "effect/bootstrap-runtime.ts": [
+            "export function bootstrap() {",
+            "  const execution = captureInstanceExecution()",
+            `  ${escapedReturn}`,
+            "}",
+          ].join("\n"),
+        },
+      })
+      await using _ = input.tmp
+      expect((await run(["--check"], input.env)).stderr, name).toContain(
+        "captured InstanceExecution cannot be re-exported",
+      )
+    }),
+  )
 })
 
 test("private lifecycle capability fields remain implementation details", async () => {
@@ -1438,6 +1461,23 @@ test("transfer release paths dominate exits and child handles cannot escape befo
         "}",
       ].join("\n"),
       "failure release must dominate every exceptional exit and rethrow the original error",
+    ],
+    [
+      "throwing-after-success-release",
+      [
+        "export function setup() {",
+        "  const handoff = acquireGenerationLease()",
+        "  try {",
+        "    const child = handoff.runSync(() => registerTransferredGenerationProducer({ handoffFrom: handoff, label, run }))",
+        "    handoff.release({ ok: true })",
+        "    return publish(child)",
+        "  } catch (error) {",
+        "    handoff.release({ ok: false, error })",
+        "    throw error",
+        "  }",
+        "}",
+      ].join("\n"),
+      "successful release must be the last potentially throwing action protected by catch",
     ],
     [
       "published-child",
@@ -1666,6 +1706,20 @@ test("typed PromiseLike callback references cannot enter runSync", async () => {
   expect((await run(["--check"], input.env)).stderr).toContain("runSync cannot accept async or PromiseLike callbacks")
 })
 
+test("runSync method aliases cannot accept PromiseLike callbacks", async () => {
+  const input = await fixture({
+    source: {
+      "effect/callback.ts": [
+        "declare const lease: GenerationLease",
+        "const run = lease.runSync",
+        "run(() => fetch(url))",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  expect((await run(["--check"], input.env)).stderr).toContain("runSync cannot accept async or PromiseLike callbacks")
+})
+
 test("raw helpers and private joins accept only their frozen symbol structure", async () => {
   const valid = await fixture({
     source: {
@@ -1714,6 +1768,21 @@ test("raw helpers and private joins accept only their frozen symbol structure", 
   const aliasResult = await run(["--check"], aliases.env)
   expect(aliasResult.stderr).toContain("raw lifecycle helper call is not exact-allowlisted")
   expect(aliasResult.stderr).toContain("private lifecycle join call is not exact-allowlisted")
+
+  const duplicateJoin = await fixture({
+    source: {
+      "workflow/runtime.ts": [
+        "export function spawnIsolated() {",
+        "  disposeDirectorySettled(info.directory)",
+        "  return disposeDirectorySettled(info.directory)",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _duplicateJoin = duplicateJoin.tmp
+  expect((await run(["--check"], duplicateJoin.env)).stderr).toContain(
+    "private lifecycle join call is not exact-allowlisted",
+  )
 })
 
 test("resolved aliases and typed string disposer arguments cannot bypass frozen gates", async () => {
@@ -1799,6 +1868,40 @@ test("resolved aliases and typed string disposer arguments cannot bypass frozen 
   expect((await run(["--check-disposer-targets", "--allow-task1-adapter"], importedDisposer.env)).stderr).toContain(
     "unauthorized disposeInstance target: src/project/instance.ts:unexpected",
   )
+})
+
+test("every StringLike disposer expression is rejected by its resolved type", async () => {
+  const input = await fixture({
+    source: {
+      "project/property-target.ts": [
+        "declare const options: { path: string }",
+        "export function propertyTarget() { disposeInstance(options.path) }",
+      ].join("\n"),
+      "project/index-target.ts": [
+        "declare const options: { [key: string]: string }",
+        'export function indexTarget() { disposeInstance(options["path"]) }',
+      ].join("\n"),
+      "project/alias-target.ts": [
+        "declare const options: { path: string }",
+        "export function aliasTarget() { const target = options.path; disposeInstance(target) }",
+      ].join("\n"),
+      "project/union-target.ts": [
+        "interface GenerationHandle { close(): void }",
+        "declare const target: GenerationHandle | string",
+        "export function unionTarget() { disposeInstance(target) }",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const result = await run(["--check-disposer-targets", "--allow-task1-adapter"], input.env)
+  for (const [file, symbol] of [
+    ["property-target.ts", "propertyTarget"],
+    ["index-target.ts", "indexTarget"],
+    ["alias-target.ts", "aliasTarget"],
+    ["union-target.ts", "unionTarget"],
+  ]) {
+    expect(result.stderr).toContain(`unauthorized disposeInstance target: src/project/${file}:${symbol}`)
+  }
 })
 
 test("frozen producer consumers reject swapped handoff and parent relations", async () => {
