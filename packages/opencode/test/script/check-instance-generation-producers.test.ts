@@ -553,6 +553,196 @@ test("a timer lifecycle leader owns the callback work in one cluster", async () 
   expect(summaries[0]!.anchor).toContain("#timer-timeout-")
 })
 
+test("qualified and aliased global timers cannot bypass discovery", async () => {
+  const input = await fixture({
+    source: {
+      "server/timer-direct.ts": "setTimeout(work, 0)\nexport {}",
+      "server/timer-qualified.ts": "globalThis.setTimeout(work, 0)\nexport {}",
+      "server/timer-alias.ts": "const repeat = setInterval\nrepeat(work, 1000)\nexport {}",
+      "server/timer-qualified-alias.ts": "const delay = globalThis.setTimeout\ndelay(work, 0)\nexport {}",
+      "server/timer-indexed.ts": "globalThis['setImmediate'](work)\nexport {}",
+      "server/timer-destructured.ts": "const { setTimeout: delay } = globalThis\ndelay(work, 0)\nexport {}",
+      "server/timer-assigned.ts": [
+        "declare const pick: boolean",
+        "let delay = ordinary",
+        "if (pick) delay = globalThis.setTimeout",
+        "delay(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-overwritten-positive.ts": [
+        "let delay = ordinary",
+        "delay = globalThis.setTimeout",
+        "delay(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-comma-positive.ts": "(ordinary, globalThis.setTimeout)(work, 0)\nexport {}",
+      "server/timer-and-positive.ts": "(ordinary && globalThis.setTimeout)(work, 0)\nexport {}",
+      "server/timer-destructured-assignment.ts": [
+        "let delay = ordinary",
+        ";({ setTimeout: delay } = globalThis)",
+        "delay(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-destructured-conditional.ts": [
+        "declare const pick: boolean",
+        "let delay = ordinary",
+        "if (pick) ({ setTimeout: delay } = globalThis)",
+        "delay(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-destructured-shorthand.ts": [
+        "let setTimeout = ordinary",
+        ";({ setTimeout } = globalThis)",
+        "setTimeout(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-destructured-computed.ts": [
+        "let delay = ordinary",
+        ';({ ["setTimeout"]: delay } = globalThis)',
+        "delay(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-root-assigned.ts": [
+        "const local = { setTimeout() {} }",
+        "let clock = local",
+        "clock = globalThis",
+        "clock.setTimeout(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-root-conditional.ts": [
+        "declare const pick: boolean",
+        "const local = { setTimeout() {} }",
+        "const clock = pick ? globalThis : local",
+        "clock.setTimeout(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-redeclared.ts": [
+        "var delay: typeof globalThis.setTimeout = globalThis.setTimeout",
+        "var delay: typeof globalThis.setTimeout",
+        "delay(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-root-redeclared.ts": [
+        "var clock: typeof globalThis = globalThis",
+        "var clock: typeof globalThis",
+        "clock.setTimeout(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-bound.ts": "const delay = globalThis.setTimeout.bind(globalThis)\ndelay(work, 0)\nexport {}",
+      "server/timer-call.ts": "globalThis.setTimeout.call(globalThis, work, 0)\nexport {}",
+      "server/timer-conditional.ts": "const delay = pick ? globalThis.setTimeout : ordinary\ndelay(work, 0)\nexport {}",
+      "server/timer-import.ts": 'import { setTimeout as delay } from "node:timers"\ndelay(work, 0)',
+      "server/timer-namespace.ts": 'import * as timers from "node:timers"\ntimers.setInterval(work, 1000)',
+      "server/local-function.ts": "function setTimeout() {}\nsetTimeout()\nexport {}",
+      "server/local-parameter.ts": [
+        "export function ordinary(setTimeout: (callback: unknown, delay: number) => void) {",
+        "  setTimeout(work, 0)",
+        "}",
+      ].join("\n"),
+      "server/local-object.ts": "const clock = { setTimeout() {} }\nclock.setTimeout()\nexport {}",
+      "server/shadowed-global.ts": "const globalThis = { setTimeout() {} }\nglobalThis.setTimeout()\nexport {}",
+      "server/ordinary-destructured.ts": [
+        "const clock = { setTimeout() {} }",
+        "const { setTimeout: delay } = clock",
+        "delay()",
+        "export {}",
+      ].join("\n"),
+      "server/ordinary.ts": "export function setTimeout() {}",
+      "server/ordinary-import.ts": 'import { setTimeout } from "./ordinary"\nsetTimeout()',
+      "server/promise-timer.ts": 'import { setTimeout as sleep } from "node:timers/promises"\nsleep(0)',
+      "server/timer-overwritten-negative.ts": [
+        "let delay = globalThis.setTimeout",
+        "delay = ordinary",
+        "delay(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-comma-negative.ts": "(globalThis.setTimeout, ordinary)(work, 0)\nexport {}",
+      "server/timer-and-negative.ts": "(globalThis.setTimeout && ordinary)(work, 0)\nexport {}",
+      "server/timer-future-declaration.ts": "delay(work, 0)\nvar delay = globalThis.setTimeout\nexport {}",
+      "server/timer-destructured-overwrite.ts": [
+        "const clock = { setTimeout() {} }",
+        "let delay = globalThis.setTimeout",
+        ";({ setTimeout: delay } = clock)",
+        "delay(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-destructured-shorthand-clean.ts": [
+        "const clock = { setTimeout() {} }",
+        "let setTimeout = globalThis.setTimeout",
+        ";({ setTimeout } = clock)",
+        "setTimeout(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-destructured-computed-clean.ts": [
+        "const clock = { setTimeout() {} }",
+        "let delay = globalThis.setTimeout",
+        ';({ ["setTimeout"]: delay } = clock)',
+        "delay(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-root-overwrite.ts": [
+        "const local = { setTimeout() {} }",
+        "let clock = globalThis",
+        "clock = local",
+        "clock.setTimeout(work, 0)",
+        "export {}",
+      ].join("\n"),
+      "server/timer-root-future.ts": "clock.setTimeout(work, 0)\nvar clock = globalThis\nexport {}",
+    },
+  })
+  await using _ = input.tmp
+  const candidates = inspectCandidateSummaries(input.env.MIMOCODE_INSTANCE_GENERATION_SOURCE_ROOT).flatMap(
+    (summary) => summary.candidates,
+  )
+  for (const [file, kind] of [
+    ["src/server/timer-direct.ts", "timer-timeout"],
+    ["src/server/timer-qualified.ts", "timer-timeout"],
+    ["src/server/timer-alias.ts", "timer-interval"],
+    ["src/server/timer-qualified-alias.ts", "timer-timeout"],
+    ["src/server/timer-indexed.ts", "timer-immediate"],
+    ["src/server/timer-destructured.ts", "timer-timeout"],
+    ["src/server/timer-assigned.ts", "timer-timeout"],
+    ["src/server/timer-overwritten-positive.ts", "timer-timeout"],
+    ["src/server/timer-comma-positive.ts", "timer-timeout"],
+    ["src/server/timer-and-positive.ts", "timer-timeout"],
+    ["src/server/timer-destructured-assignment.ts", "timer-timeout"],
+    ["src/server/timer-destructured-conditional.ts", "timer-timeout"],
+    ["src/server/timer-destructured-shorthand.ts", "timer-timeout"],
+    ["src/server/timer-destructured-computed.ts", "timer-timeout"],
+    ["src/server/timer-root-assigned.ts", "timer-timeout"],
+    ["src/server/timer-root-conditional.ts", "timer-timeout"],
+    ["src/server/timer-redeclared.ts", "timer-timeout"],
+    ["src/server/timer-root-redeclared.ts", "timer-timeout"],
+    ["src/server/timer-bound.ts", "timer-timeout"],
+    ["src/server/timer-call.ts", "timer-timeout"],
+    ["src/server/timer-conditional.ts", "timer-timeout"],
+    ["src/server/timer-import.ts", "timer-timeout"],
+    ["src/server/timer-namespace.ts", "timer-interval"],
+  ] as const) {
+    expect(candidates.filter((candidate) => candidate.file === file && candidate.kind === kind), file).toHaveLength(1)
+  }
+  for (const file of [
+    "src/server/local-function.ts",
+    "src/server/local-parameter.ts",
+    "src/server/local-object.ts",
+    "src/server/shadowed-global.ts",
+    "src/server/ordinary-destructured.ts",
+    "src/server/ordinary-import.ts",
+    "src/server/promise-timer.ts",
+    "src/server/timer-overwritten-negative.ts",
+    "src/server/timer-comma-negative.ts",
+    "src/server/timer-and-negative.ts",
+    "src/server/timer-future-declaration.ts",
+    "src/server/timer-destructured-overwrite.ts",
+    "src/server/timer-destructured-shorthand-clean.ts",
+    "src/server/timer-destructured-computed-clean.ts",
+    "src/server/timer-root-overwrite.ts",
+    "src/server/timer-root-future.ts",
+  ]) {
+    expect(candidates.some((candidate) => candidate.file === file), file).toBe(false)
+  }
+})
+
 test("all AsyncQueue waiters in the TUI control surface are frozen", async () => {
   const input = await fixture({
     source: {
@@ -929,10 +1119,10 @@ test("Bus callback subscription rows share one exact generation channel owner", 
     expect(row(anchor)).toContain(`ownerID=bus.subscription-channel; parent=${leader}`)
     expect(row(anchor)).toContain("| channel | nested | Task 5 |")
   }
-  expect(row("src/bus/index.ts:subscribe#native-callback-return-c66f66fa00")).toContain(
+  expect(row("src/bus/index.ts:subscribe#native-callback-return-0fd4a0a017")).toContain(
     `ownerID=bus.subscription-channel; parent=${leader}`,
   )
-  expect(row("src/bus/index.ts:subscribe#native-callback-return-c66f66fa00")).toContain(
+  expect(row("src/bus/index.ts:subscribe#native-callback-return-0fd4a0a017")).toContain(
     "| lease | nested | Task 5 |",
   )
 })
@@ -1027,6 +1217,69 @@ test("the same call inside and outside a lifecycle boundary has different anchor
   expect(new Set(summaries.map((item) => item.anchor)).size).toBe(2)
   expect(summaries.some((item) => item.candidates[0]!.boundary.includes("handoff.runSync"))).toBe(true)
   expect(summaries.some((item) => item.candidates[0]!.boundary.startsWith("direct@"))).toBe(true)
+})
+
+test("lifecycle boundaries stop at deferred closures but retain synchronous consumers", async () => {
+  const input = await fixture({
+    source: {
+      "server/lifecycle-boundary.ts": [
+        "export const directArrow = handoff.runSync(() => Effect.runFork(directArrowWork))",
+        "export const directFunction = handoff.runSync(function () { Effect.runFork(directFunctionWork) })",
+        "export const directMethod = handoff.runSync(({ callback() { Effect.runFork(directMethodWork) } }).callback)",
+        "export const directPropertyArrow = handoff.runSync(({ callback: () => Effect.runFork(directPropertyArrowWork) }).callback)",
+        "export const directPropertyFunction = handoff.runSync(({ callback: function () { Effect.runFork(directPropertyFunctionWork) } }).callback)",
+        "export const callWrapped = handoff.runSync.call(handoff, () => Effect.runFork(callWrappedWork))",
+        "export const applyWrapped = handoff.runSync.apply(handoff, [() => Effect.runFork(applyWrappedWork)])",
+        "const boundRunSync = handoff.runSync.bind(handoff)",
+        "export const boundRun = boundRunSync(() => Effect.runFork(boundRunWork))",
+        "const boundCallback = handoff.runSync.bind(handoff, () => Effect.runFork(boundCallbackWork))",
+        "export const invokedBoundCallback = boundCallback()",
+        "let assignedRun = ordinary",
+        "assignedRun = handoff.runSync",
+        "export const assignedRunResult = assignedRun(() => Effect.runFork(assignedRunWork))",
+        "let overwrittenRun = handoff.runSync",
+        "overwrittenRun = ordinary",
+        "export const overwrittenRunResult = overwrittenRun(() => Effect.runFork(overwrittenRunWork))",
+        "const { runSync: destructuredRun } = handoff",
+        "export const destructuredRunResult = destructuredRun(() => Effect.runFork(destructuredRunWork))",
+        "export const returnedArrow = handoff.runSync(() => () => Effect.runFork(returnedArrowWork))",
+        "export const returnedFunction = handoff.runSync(function () { return function () { Effect.runFork(returnedFunctionWork) } })",
+        "export const returnedMethod = handoff.runSync(() => ({ callback() { Effect.runFork(returnedMethodWork) } }))",
+        "export const storedClosure = handoff.runSync(() => { const later = () => Effect.runFork(storedClosureWork); sink(later) })",
+        "export const arrowIife = handoff.runSync(() => { (() => Effect.runFork(arrowIifeWork))() })",
+        "export const functionIife = handoff.runSync(() => { (function () { Effect.runFork(functionIifeWork) })() })",
+        "export const methodIife = handoff.runSync(() => ({ callback() { Effect.runFork(methodIifeWork) } }).callback())",
+        "export const generatorIife = handoff.runSync(() => { (function* () { Effect.runFork(generatorIifeWork) })() })",
+        "export const nested = outer.runSync(() => inner.runSync(() => Effect.runFork(nestedWork)))",
+        "export const returnedBranch = handoff.runSync(() => () => { if (pick) Effect.runFork(returnedBranchWork) })",
+        "export const commaRight = handoff.runSync((() => Effect.runFork(commaLeftWork), ordinary))",
+        "export const andRight = handoff.runSync((() => Effect.runFork(andLeftWork)) && ordinary)",
+        "export const selectedNestedMethod = handoff.runSync(({ callback() { Effect.runFork(unselectedMethodWork) }, nested: { callback: ordinary } }).nested.callback)",
+        "export const promiseExecutor = Instance.bind(() => new Promise((resolve) => { Effect.runFork(promiseExecutorWork); resolve(undefined) }))",
+        "export function shadowedPromise(Promise: new (executor: unknown) => unknown) { return Instance.bind(() => new Promise(() => Effect.runFork(shadowPromiseWork))) }",
+        "export const ordinaryBind = ordinary.bind(() => Effect.runFork(ordinaryBindWork))",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const candidates = inspectCandidateSummaries(input.env.MIMOCODE_INSTANCE_GENERATION_SOURCE_ROOT).flatMap(
+    (summary) => summary.candidates,
+  )
+  const boundary = (label: string) =>
+    candidates.find((candidate) => candidate.kind === "effect-run-fork" && candidate.signature.includes(label))!.boundary
+  for (const label of ["directArrowWork", "directFunctionWork", "directMethodWork", "directPropertyArrowWork", "directPropertyFunctionWork", "callWrappedWork", "applyWrappedWork", "boundRunWork", "boundCallbackWork", "assignedRunWork", "destructuredRunWork", "arrowIifeWork", "functionIifeWork", "methodIifeWork"]) {
+    expect(boundary(label), label).toContain("handoff.runSync")
+  }
+  for (const label of ["returnedArrowWork", "returnedFunctionWork", "returnedMethodWork", "storedClosureWork", "generatorIifeWork", "returnedBranchWork"]) {
+    expect(boundary(label), label).not.toContain("handoff.runSync")
+  }
+  expect(boundary("nestedWork")).toContain("outer.runSync>inner.runSync")
+  expect(boundary("returnedBranchWork")).toStartWith("if:")
+  for (const label of ["commaLeftWork", "andLeftWork", "unselectedMethodWork", "shadowPromiseWork", "ordinaryBindWork", "overwrittenRunWork"]) {
+    expect(boundary(label), label).not.toContain("runSync")
+    expect(boundary(label), label).not.toContain("Instance.bind")
+  }
+  expect(boundary("promiseExecutorWork")).toContain("Instance.bind")
 })
 
 test("block-bodied lifecycle callbacks retain their outer boundary", async () => {
@@ -1277,6 +1530,16 @@ test("authority checker rejects raw lifecycle capability escape forms", async ()
       "InstanceAdmissionRef must remain module-private",
     ],
     [
+      "type-only reexported admission ref",
+      'export type { InstanceAdmissionRef } from "./effect/instance-ref"',
+      "InstanceAdmissionRef must remain module-private",
+    ],
+    [
+      "inline type-only reexported admission ref",
+      'export { type InstanceAdmissionRef } from "./effect/instance-ref"',
+      "InstanceAdmissionRef must remain module-private",
+    ],
+    [
       "star reexported lifecycle module",
       'export * from "./effect/instance-ref"',
       "lifecycle authority module cannot be star re-exported",
@@ -1445,6 +1708,7 @@ test("allowlisted wrappers may consume capture internally but cannot export the 
       "effect/bootstrap-runtime.ts": [
         "export function bootstrap() {",
         "  const execution = captureInstanceExecution()",
+        "  function internalOnly() { return execution }",
         "  return makeOpaqueBootstrapHandle(execution)",
         "}",
       ].join("\n"),
@@ -1455,8 +1719,12 @@ test("allowlisted wrappers may consume capture internally but cannot export the 
 
   const validArrow = await fixture({
     source: {
-      "effect/bootstrap-runtime.ts":
-        "export const bootstrap = () => makeOpaqueBootstrapHandle(captureInstanceExecution())\n",
+      "effect/bootstrap-runtime.ts": [
+        "export const bootstrap = () => {",
+        "  const execution = captureInstanceExecution()",
+        "  return () => { return makeOpaqueBootstrapHandle(execution) }",
+        "}",
+      ].join("\n"),
     },
   })
   await using _validArrow = validArrow.tmp
@@ -1522,6 +1790,523 @@ test("allowlisted wrappers may consume capture internally but cannot export the 
         "captured InstanceExecution cannot be re-exported",
       )
     }),
+  )
+})
+
+test("block-bodied closures cannot export captured execution", async () => {
+  const input = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "export function bootstrap() {",
+        "  const execution = captureInstanceExecution()",
+        "  return () => { return execution }",
+        "}",
+      ].join("\n"),
+      "effect/run-service.ts": [
+        "export function attachWith() {",
+        "  const execution = captureInstanceExecution()",
+        "  const alias = execution",
+        "  return function (condition: boolean) { if (condition) return alias; return undefined }",
+        "}",
+      ].join("\n"),
+      "project/instance.ts": [
+        "export function bind() {",
+        "  const execution = captureInstanceExecution()",
+        "  return { leak() { return execution } }",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const stderr = (await run(["--check"], input.env)).stderr
+  for (const file of ["src/effect/bootstrap-runtime.ts", "src/effect/run-service.ts", "src/project/instance.ts"]) {
+    expect(stderr).toContain(`captured InstanceExecution cannot be re-exported: ${file}`)
+  }
+
+  const localFunction = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "export function BootstrapRuntime() {",
+        "  const execution = captureInstanceExecution()",
+        "  function expose() { return execution }",
+        "  return expose",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _localFunction = localFunction.tmp
+  expect((await run(["--check"], localFunction.env)).stderr).toContain(
+    "captured InstanceExecution cannot be re-exported: src/effect/bootstrap-runtime.ts",
+  )
+})
+
+test("named and default exports cannot relay captured execution", async () => {
+  const input = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "function bootstrap() {",
+        "  const execution = captureInstanceExecution()",
+        "  return () => { return execution }",
+        "}",
+        "export { bootstrap }",
+      ].join("\n"),
+      "effect/run-service.ts": [
+        "const attachWith = () => {",
+        "  const execution = captureInstanceExecution()",
+        "  return () => { return execution }",
+        "}",
+        "export { attachWith }",
+      ].join("\n"),
+      "project/instance.ts": [
+        "function bind() {",
+        "  const execution = captureInstanceExecution()",
+        "  return () => { return execution }",
+        "}",
+        "export default bind",
+      ].join("\n"),
+      "effect/bridge.ts": [
+        "export default (() => {",
+        "  const execution = captureInstanceExecutionEffect()",
+        "  return () => { return execution }",
+        "})",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const stderr = (await run(["--check"], input.env)).stderr
+  for (const file of [
+    "src/effect/bootstrap-runtime.ts",
+    "src/effect/run-service.ts",
+    "src/project/instance.ts",
+    "src/effect/bridge.ts",
+  ]) {
+    expect(stderr).toContain(`captured InstanceExecution cannot be re-exported: ${file}`)
+  }
+
+  const opaque = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "function bootstrap() {",
+        "  const execution = captureInstanceExecution()",
+        "  return () => { return makeOpaqueBootstrapHandle(execution) }",
+        "}",
+        "export { bootstrap }",
+      ].join("\n"),
+      "project/instance.ts": [
+        "function bind() {",
+        "  const execution = captureInstanceExecution()",
+        "  return () => { return makeOpaqueBootstrapHandle(execution) }",
+        "}",
+        "export default bind",
+      ].join("\n"),
+    },
+  })
+  await using _opaque = opaque.tmp
+  expect((await run(["--check"], opaque.env)).stderr).not.toContain(
+    "captured InstanceExecution cannot be re-exported",
+  )
+
+  const typeOnly = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "function bootstrap() {",
+        "  const execution = captureInstanceExecution()",
+        "  return () => { return execution }",
+        "}",
+        "export type { bootstrap }",
+      ].join("\n"),
+      "effect/run-service.ts": [
+        "function attachWith() {",
+        "  const execution = captureInstanceExecution()",
+        "  return () => { return execution }",
+        "}",
+        "export { type attachWith }",
+      ].join("\n"),
+    },
+  })
+  await using _typeOnly = typeOnly.tmp
+  const typeOnlyStderr = (await run(["--check"], typeOnly.env)).stderr
+  expect(typeOnlyStderr).not.toContain("captured InstanceExecution cannot be re-exported")
+  expect(typeOnlyStderr).not.toContain("raw lifecycle helper cannot be re-exported")
+})
+
+test("captured execution cannot escape through value-selection expressions", async () => {
+  const input = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "export async function bootstrap() {",
+        "  const execution = captureInstanceExecution()",
+        "  return await execution",
+        "}",
+      ].join("\n"),
+      "effect/run-service.ts": [
+        "const execution = captureInstanceExecution()",
+        "const box = { execution }",
+        "export const attachWith = box.execution",
+      ].join("\n"),
+      "project/instance.ts": [
+        "const execution = captureInstanceExecution()",
+        "const box = { execution }",
+        'export const bind = box["execution"]',
+      ].join("\n"),
+      "effect/bridge.ts": [
+        "const execution = captureInstanceExecutionEffect()",
+        "export const make = (ordinary, execution)",
+      ].join("\n"),
+      "effect/iife.ts": "export const leak = (() => captureInstanceExecution())()",
+      "effect/iife-block.ts": "export const leak = (function () { return captureInstanceExecution() })()",
+      "effect/post-write.ts": [
+        "const execution = captureInstanceExecution()",
+        "const box: { execution?: unknown } = {}",
+        "box.execution = execution",
+        "export const leak = box.execution",
+      ].join("\n"),
+      "effect/post-write-indexed.ts": [
+        "const execution = captureInstanceExecution()",
+        "const box: { execution?: unknown } = {}",
+        'box["execution"] = execution',
+        'export default box["execution"]',
+      ].join("\n"),
+      "effect/getter.ts": [
+        "const execution = captureInstanceExecution()",
+        "const box = { get execution() { return execution } }",
+        "export const leak = box.execution",
+      ].join("\n"),
+      "effect/iife-alias.ts": [
+        "const bootstrap = () => captureInstanceExecution()",
+        "const alias = bootstrap",
+        "export const leak = alias()",
+      ].join("\n"),
+      "effect/iife-function-alias.ts": [
+        "function bootstrap() { return captureInstanceExecution() }",
+        "const alias = bootstrap",
+        "export const leak = alias()",
+      ].join("\n"),
+      "effect/iife-property.ts": [
+        "const fn = () => captureInstanceExecution()",
+        "const box = { fn }",
+        "export const leak = box.fn()",
+      ].join("\n"),
+      "effect/iife-method.ts": [
+        "const box = { leak() { return captureInstanceExecution() } }",
+        "export const leak = box.leak()",
+      ].join("\n"),
+      "effect/iife-call.ts": "export const leak = (() => captureInstanceExecution()).call(null)",
+      "effect/iife-comma.ts": [
+        "const leak = () => captureInstanceExecution()",
+        "export const escaped = (ordinary, leak)()",
+      ].join("\n"),
+      "effect/iife-conditional.ts": [
+        "declare const pick: boolean",
+        "const leak = () => captureInstanceExecution()",
+        "export const escaped = (pick ? leak : ordinary)()",
+      ].join("\n"),
+      "effect/iife-identity.ts":
+        "export const escaped = ((value) => value)(captureInstanceExecution())",
+      "effect/iife-default.ts":
+        "export const escaped = ((value = captureInstanceExecution()) => value)(undefined)",
+      "effect/iife-rest.ts":
+        "export const escaped = ((...values) => values[0])(captureInstanceExecution())",
+      "effect/iife-destructured-parameter.ts":
+        "export const escaped = (({ value }) => value)({ value: captureInstanceExecution() })",
+      "effect/iife-destructured-alias.ts": [
+        "const payload = { value: captureInstanceExecution() }",
+        "export const escaped = (({ value }) => value)(payload)",
+      ].join("\n"),
+      "effect/iife-destructured-getter.ts": [
+        "const payload = { get value() { return captureInstanceExecution() } }",
+        "export const escaped = (({ value }) => value)(payload)",
+      ].join("\n"),
+      "effect/iife-spread-alias.ts": [
+        "const args = [captureInstanceExecution()]",
+        "export const escaped = ((value) => value)(...args)",
+      ].join("\n"),
+      "effect/iife-nested-spread-alias.ts": [
+        "const base = [captureInstanceExecution()]",
+        "const args = [...base]",
+        "export const escaped = ((value) => value)(...args)",
+      ].join("\n"),
+      "effect/iife-object-spread-alias.ts": [
+        "const base = { value: captureInstanceExecution() }",
+        "const payload = { ...base }",
+        "export const escaped = (({ value }) => value)(payload)",
+      ].join("\n"),
+      "effect/iife-default-alias.ts": [
+        "const absent = undefined",
+        "export const escaped = ((value = captureInstanceExecution()) => value)(absent)",
+      ].join("\n"),
+      "effect/iife-apply-alias.ts": [
+        "const identity = (value) => value",
+        "const args = [captureInstanceExecution()]",
+        "export const escaped = identity.apply(null, args)",
+      ].join("\n"),
+      "effect/iife-apply-parameter.ts":
+        "export const escaped = ((args) => ((value) => value).apply(null, args))([captureInstanceExecution()])",
+      "effect/iife-array-projection-spread.ts": [
+        "const base = [captureInstanceExecution()]",
+        "const values = [...base]",
+        "export const escaped = ((array) => array[0])(values)",
+      ].join("\n"),
+      "effect/iife-hole-second.ts": [
+        "const args = [, captureInstanceExecution()]",
+        "export const escaped = ((first, second) => second)(...args)",
+      ].join("\n"),
+      "effect/iife-array-rest.ts":
+        "export const escaped = (([first, ...rest]) => rest[0])([ordinary, captureInstanceExecution()])",
+      "effect/iife-tuple-branch.ts": [
+        "declare const pick: boolean",
+        "const args = pick ? [ordinary] : [ordinary, captureInstanceExecution()]",
+        "export const escaped = ((first, second) => second)(...args)",
+      ].join("\n"),
+      "effect/iife-apply-tuple-branch.ts": [
+        "declare const pick: boolean",
+        "const args = pick ? [ordinary] : [ordinary, captureInstanceExecution()]",
+        "export const escaped = ((first, second) => second).apply(null, args)",
+      ].join("\n"),
+      "effect/iife-bound-parameter.ts": [
+        "const identity = (value) => value",
+        "export const escaped = identity.bind(null, captureInstanceExecution())()",
+      ].join("\n"),
+      "effect/iife-conditional-parameter-overwrite.ts": [
+        "declare const pick: boolean",
+        "export const escaped = ((value) => {",
+        "  if (pick) value = ordinary",
+        "  return value",
+        "})(captureInstanceExecution())",
+      ].join("\n"),
+      "effect/post-write-alias.ts": [
+        "export function bootstrap() {",
+        "  const execution = captureInstanceExecution()",
+        "  const box: { execution?: unknown } = {}",
+        "  const alias = box",
+        "  box.execution = execution",
+        "  return alias.execution",
+        "}",
+      ].join("\n"),
+      "effect/post-write-module.ts": [
+        "const box = { execution: ordinary }",
+        "export function bootstrap() {",
+        "  const execution = captureInstanceExecution()",
+        "  box.execution = execution",
+        "  return box.execution",
+        "}",
+      ].join("\n"),
+      "effect/post-write-module-alias.ts": [
+        "const box = { execution: ordinary }",
+        "export function bootstrap() {",
+        "  const execution = captureInstanceExecution()",
+        "  const alias = box",
+        "  box.execution = execution",
+        "  return alias.execution",
+        "}",
+      ].join("\n"),
+      "effect/post-write-outer-closure.ts": [
+        "export function bootstrap() {",
+        "  const box = { execution: ordinary }",
+        "  box.execution = captureInstanceExecution()",
+        "  return () => box.execution",
+        "}",
+      ].join("\n"),
+      "effect/post-write-nested.ts": [
+        "const root = { box: { execution: ordinary } }",
+        "root.box.execution = captureInstanceExecution()",
+        "export const escaped = root.box.execution",
+      ].join("\n"),
+      "effect/post-write-nested-read-alias.ts": [
+        "const root = { box: { execution: ordinary } }",
+        "root.box.execution = captureInstanceExecution()",
+        "const box = root.box",
+        "export const escaped = box.execution",
+      ].join("\n"),
+      "effect/post-write-nested-write-alias.ts": [
+        "const root = { box: { execution: ordinary } }",
+        "const box = root.box",
+        "box.execution = captureInstanceExecution()",
+        "export const escaped = root.box.execution",
+      ].join("\n"),
+      "effect/post-write-nested-parent.ts": [
+        "const root = { box: { execution: ordinary } }",
+        "root.box = { execution: captureInstanceExecution() }",
+        "export const escaped = root.box.execution",
+      ].join("\n"),
+      "effect/post-write-nested-parent-alias.ts": [
+        "const replacement = { execution: captureInstanceExecution() }",
+        "const root = { box: { execution: ordinary } }",
+        "root.box = replacement",
+        "export const escaped = root.box.execution",
+      ].join("\n"),
+      "effect/post-write-nested-parent-conditional.ts": [
+        "declare const pick: boolean",
+        "const root = { box: { execution: ordinary } }",
+        "if (pick) root.box = { execution: captureInstanceExecution() }",
+        "export const escaped = root.box.execution",
+      ].join("\n"),
+      "effect/post-write-nested-parent-conditional-alias.ts": [
+        "declare const pick: boolean",
+        "const root = { box: { execution: ordinary } }",
+        "if (pick) root.box = { execution: captureInstanceExecution() }",
+        "const box = root.box",
+        "export const escaped = box.execution",
+      ].join("\n"),
+      "effect/post-write-assigned-alias.ts": [
+        "const root = { box: { execution: ordinary } }",
+        "root.box = { execution: captureInstanceExecution() }",
+        "let alias",
+        "alias = root.box",
+        "root.box = { execution: ordinary }",
+        "export const escaped = alias.execution",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const stderr = (await run(["--check"], input.env)).stderr
+  for (const file of [
+    "src/effect/bootstrap-runtime.ts",
+    "src/effect/run-service.ts",
+    "src/project/instance.ts",
+    "src/effect/bridge.ts",
+    "src/effect/iife.ts",
+    "src/effect/iife-block.ts",
+    "src/effect/post-write.ts",
+    "src/effect/post-write-indexed.ts",
+    "src/effect/getter.ts",
+    "src/effect/iife-alias.ts",
+    "src/effect/iife-function-alias.ts",
+    "src/effect/iife-property.ts",
+    "src/effect/iife-method.ts",
+    "src/effect/iife-call.ts",
+    "src/effect/iife-comma.ts",
+    "src/effect/iife-conditional.ts",
+    "src/effect/iife-identity.ts",
+    "src/effect/iife-default.ts",
+    "src/effect/iife-rest.ts",
+    "src/effect/iife-destructured-parameter.ts",
+    "src/effect/iife-destructured-alias.ts",
+    "src/effect/iife-destructured-getter.ts",
+    "src/effect/iife-spread-alias.ts",
+    "src/effect/iife-nested-spread-alias.ts",
+    "src/effect/iife-object-spread-alias.ts",
+    "src/effect/iife-default-alias.ts",
+    "src/effect/iife-apply-alias.ts",
+    "src/effect/iife-apply-parameter.ts",
+    "src/effect/iife-array-projection-spread.ts",
+    "src/effect/iife-hole-second.ts",
+    "src/effect/iife-array-rest.ts",
+    "src/effect/iife-tuple-branch.ts",
+    "src/effect/iife-apply-tuple-branch.ts",
+    "src/effect/iife-bound-parameter.ts",
+    "src/effect/iife-conditional-parameter-overwrite.ts",
+    "src/effect/post-write-alias.ts",
+    "src/effect/post-write-module.ts",
+    "src/effect/post-write-module-alias.ts",
+    "src/effect/post-write-outer-closure.ts",
+    "src/effect/post-write-nested.ts",
+    "src/effect/post-write-nested-read-alias.ts",
+    "src/effect/post-write-nested-write-alias.ts",
+    "src/effect/post-write-nested-parent.ts",
+    "src/effect/post-write-nested-parent-alias.ts",
+    "src/effect/post-write-nested-parent-conditional.ts",
+    "src/effect/post-write-nested-parent-conditional-alias.ts",
+    "src/effect/post-write-assigned-alias.ts",
+  ]) {
+    expect(stderr).toContain(`captured InstanceExecution cannot be re-exported: ${file}`)
+  }
+
+  const ordinary = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "const box = { execution: ordinary }",
+        "export const bootstrap = box.execution",
+        "export const indexed = box['execution']",
+        "export const selected = (captureInstanceExecution, ordinary)",
+        "export const iife = (() => makeOpaqueBootstrapHandle(captureInstanceExecution()))()",
+        "const box2: { secret?: unknown; ordinary?: unknown } = {}",
+        "box2.secret = captureInstanceExecution()",
+        "box2.ordinary = ordinary",
+        "export const sibling = box2.ordinary",
+        "const box3 = { get execution() { return makeOpaqueBootstrapHandle(captureInstanceExecution()) } }",
+        "export const getter = box3.execution",
+        "function unsafeBeforeOverwrite() { return captureInstanceExecution() }",
+        "unsafeBeforeOverwrite = ordinary",
+        "export const overwritten = unsafeBeforeOverwrite()",
+        "const safeBootstrap = () => makeOpaqueBootstrapHandle(captureInstanceExecution())",
+        "const safeAlias = safeBootstrap",
+        "export const safeAliasResult = safeAlias()",
+        "const unsafeLeft = () => captureInstanceExecution()",
+        "export const commaRight = (unsafeLeft, ordinary)()",
+        "export const opaqueIdentity = ((value) => makeOpaqueBootstrapHandle(value))(captureInstanceExecution())",
+        "export const overwrittenParameter = ((value) => { value = ordinary; return value })(captureInstanceExecution())",
+        "export const opaqueDefault = ((value = captureInstanceExecution()) => makeOpaqueBootstrapHandle(value))(undefined)",
+        "export const opaqueRest = ((...values) => makeOpaqueBootstrapHandle(values[0]))(captureInstanceExecution())",
+        "export const opaqueDestructured = (({ value }) => makeOpaqueBootstrapHandle(value))({ value: captureInstanceExecution() })",
+        "const opaquePayload = { value: makeOpaqueBootstrapHandle(captureInstanceExecution()) }",
+        "export const opaqueDestructuredAlias = (({ value }) => value)(opaquePayload)",
+        "const opaqueArgs = [makeOpaqueBootstrapHandle(captureInstanceExecution())]",
+        "export const opaqueSpreadAlias = ((value) => value)(...opaqueArgs)",
+        "export const opaqueApplyParameter = ((args) => ((value) => value).apply(null, args))([makeOpaqueBootstrapHandle(captureInstanceExecution())])",
+        "const opaqueBase = [makeOpaqueBootstrapHandle(captureInstanceExecution())]",
+        "const opaqueNestedArgs = [...opaqueBase]",
+        "export const opaqueNestedSpreadAlias = ((value) => value)(...opaqueNestedArgs)",
+        "export const opaqueArrayProjection = ((array) => array[0])(opaqueNestedArgs)",
+        "export const ignoredSparseTail = ((first) => first)(...[, captureInstanceExecution()])",
+        "const safeTupleArgs = pick ? [ordinary] : [captureInstanceExecution()]",
+        "export const ignoredTupleTail = ((first, second) => second)(...safeTupleArgs)",
+        "const opaqueBound = (value) => makeOpaqueBootstrapHandle(value)",
+        "export const opaqueBoundResult = opaqueBound.bind(null, captureInstanceExecution())()",
+        "const original: { execution?: unknown } = {}",
+        "const other: { execution?: unknown } = {}",
+        "original.execution = captureInstanceExecution()",
+        "let receiver = original",
+        "receiver = other",
+        "export const reassignedReceiver = receiver.execution",
+        "const shared = { execution: ordinary }",
+        "function unrelatedWrite() { shared.execution = captureInstanceExecution() }",
+        "export function unrelatedRead() { return shared.execution }",
+        "export function overwrittenProperty() {",
+        "  const holder = { execution: ordinary }",
+        "  holder.execution = captureInstanceExecution()",
+        "  holder.execution = makeOpaqueBootstrapHandle(captureInstanceExecution())",
+        "  return holder.execution",
+        "}",
+        "const nestedSibling = { box: { execution: ordinary }, other: { execution: ordinary } }",
+        "nestedSibling.other.execution = captureInstanceExecution()",
+        "export const safeNestedSibling = nestedSibling.box.execution",
+        "const nestedOverwrite = { box: { execution: ordinary } }",
+        "nestedOverwrite.box.execution = captureInstanceExecution()",
+        "nestedOverwrite.box.execution = makeOpaqueBootstrapHandle(captureInstanceExecution())",
+        "export const safeNestedOverwrite = nestedOverwrite.box.execution",
+        "const nestedParentOverwrite = { box: { execution: ordinary } }",
+        "nestedParentOverwrite.box.execution = captureInstanceExecution()",
+        "nestedParentOverwrite.box = { execution: ordinary }",
+        "export const safeNestedParentOverwrite = nestedParentOverwrite.box.execution",
+        "const replacedRoot = { box: { execution: ordinary } }",
+        "const oldBox = replacedRoot.box",
+        "replacedRoot.box = { execution: captureInstanceExecution() }",
+        "export const safeOldBox = oldBox.execution",
+        "const detachedRoot = { box: { execution: ordinary } }",
+        "const detachedBox = detachedRoot.box",
+        "detachedRoot.box = { execution: ordinary }",
+        "detachedBox.execution = captureInstanceExecution()",
+        "export const safeCurrentBox = detachedRoot.box.execution",
+        "const copiedRoot = { box: { execution: ordinary } }",
+        "const copiedOld = copiedRoot.box",
+        "copiedRoot.box = { execution: captureInstanceExecution() }",
+        "const copiedOldAgain = copiedOld",
+        "export const safeCopiedOld = copiedOldAgain.execution",
+        "const conditionalRoot = { box: { execution: ordinary } }",
+        "const conditionalOld = conditionalRoot.box",
+        "if (pick) conditionalRoot.box = { execution: captureInstanceExecution() }",
+        "export const safeConditionalOld = conditionalOld.execution",
+        "const conditionalOpaqueRoot = { box: { execution: ordinary } }",
+        "if (pick) conditionalOpaqueRoot.box = { execution: makeOpaqueBootstrapHandle(captureInstanceExecution()) }",
+        "const conditionalOpaqueBox = conditionalOpaqueRoot.box",
+        "export const safeConditionalOpaque = conditionalOpaqueBox.execution",
+      ].join("\n"),
+    },
+  })
+  await using _ordinary = ordinary.tmp
+  expect((await run(["--check"], ordinary.env)).stderr).not.toContain(
+    "captured InstanceExecution cannot be re-exported",
   )
 })
 

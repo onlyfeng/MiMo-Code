@@ -241,7 +241,7 @@ const frozenProducerConsumerRelations = new Map([
   ["src/bus/index.ts:on.subscription#native-callback-subscription-9adb6135c1", "6410163a898de9b3"],
   ["src/bus/index.ts:on#effect-fork-expressionstatement-249ad7320b", "5cbf2a38870086e1"],
   ["src/bus/index.ts:on#effect-fork-fork-1898f6edbf", "5cbf2a38870086e1"],
-  ["src/bus/index.ts:subscribe#native-callback-return-c66f66fa00", "5cbf2a38870086e1"],
+  ["src/bus/index.ts:subscribe#native-callback-return-0fd4a0a017", "5cbf2a38870086e1"],
   ["src/config/config.ts:Config.loadInstanceState.dep#effect-fork-dep-7c7406f0b7", "685c4952b08d1911"],
   ["src/config/config.ts:Config.invalidate.task#legacy-settled-facade-task-8a291143d4", "0aa5e6e3bfe97cf8"],
   ["src/config/config.ts:Config.invalidate.task#global-event-publisher-task-5d53733bdc", "0aa5e6e3bfe97cf8"],
@@ -733,7 +733,7 @@ const frozenLogicalOwnerGroups = new Map<string, readonly string[]>([
       "src/bus/index.ts:on.subscription#native-callback-subscription-9adb6135c1",
       "src/bus/index.ts:on#effect-fork-expressionstatement-249ad7320b",
       "src/bus/index.ts:on#effect-fork-fork-1898f6edbf",
-      "src/bus/index.ts:subscribe#native-callback-return-c66f66fa00",
+      "src/bus/index.ts:subscribe#native-callback-return-0fd4a0a017",
     ],
   ],
   [
@@ -1458,8 +1458,14 @@ function callProperty(node: ts.CallExpression) {
   return undefined
 }
 
+const normalizedNodeCache = new WeakMap<ts.Node, string>()
+
 function normalize(node: ts.Node) {
-  return canonicalPrinter.printNode(ts.EmitHint.Unspecified, node, node.getSourceFile()).replace(/\s+/g, " ").trim()
+  const cached = normalizedNodeCache.get(node)
+  if (cached) return cached
+  const value = canonicalPrinter.printNode(ts.EmitHint.Unspecified, node, node.getSourceFile()).replace(/\s+/g, " ").trim()
+  normalizedNodeCache.set(node, value)
+  return value
 }
 
 function owningNode(node: ts.Node) {
@@ -1504,14 +1510,256 @@ function owningRole(node: ts.Node) {
   return ts.SyntaxKind[node.kind].replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase()
 }
 
-function ownershipBoundary(node: ts.Node, owner: ts.Node) {
+type OwnershipFunction =
+  | ts.ArrowFunction
+  | ts.FunctionExpression
+  | ts.FunctionDeclaration
+  | ts.MethodDeclaration
+  | ts.GetAccessorDeclaration
+  | ts.SetAccessorDeclaration
+  | ts.ConstructorDeclaration
+
+function ownershipFunction(node: ts.Node): node is OwnershipFunction {
+  return ts.isArrowFunction(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isFunctionDeclaration(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node) ||
+    ts.isConstructorDeclaration(node)
+}
+
+function ownershipExpression(node: ts.Expression): ts.Expression {
+  if (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isNonNullExpression(node)
+  ) {
+    return ownershipExpression(node.expression)
+  }
+  return node
+}
+
+function expressionYieldsOwnershipFunction(expression: ts.Expression, fn: OwnershipFunction): boolean {
+  const value = ownershipExpression(expression)
+  if (value === fn) return true
+  if (ts.isConditionalExpression(value)) {
+    return expressionYieldsOwnershipFunction(value.whenTrue, fn) || expressionYieldsOwnershipFunction(value.whenFalse, fn)
+  }
+  if (
+    ts.isBinaryExpression(value) &&
+    new Set([ts.SyntaxKind.CommaToken, ts.SyntaxKind.AmpersandAmpersandToken]).has(value.operatorToken.kind)
+  ) {
+    return expressionYieldsOwnershipFunction(value.right, fn)
+  }
+  if (
+    ts.isBinaryExpression(value) &&
+    new Set([ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]).has(value.operatorToken.kind)
+  ) {
+    return expressionYieldsOwnershipFunction(value.left, fn) || expressionYieldsOwnershipFunction(value.right, fn)
+  }
+  if (ts.isCallExpression(value) && callProperty(value)?.name === "bind") {
+    if (ts.isPropertyAccessExpression(value.expression) || ts.isElementAccessExpression(value.expression)) {
+      return expressionYieldsOwnershipFunction(value.expression.expression, fn)
+    }
+  }
+  if (!ts.isPropertyAccessExpression(value) && !ts.isElementAccessExpression(value)) return false
+  const property = ts.isPropertyAccessExpression(value)
+    ? value.name.text
+    : ts.isStringLiteralLike(value.argumentExpression)
+      ? value.argumentExpression.text
+      : undefined
+  const receiver = ownershipExpression(value.expression)
+  if (!property || !ts.isObjectLiteralExpression(receiver)) return false
+  const selected = receiver.properties.find(
+    (item) =>
+      (ts.isMethodDeclaration(item) || ts.isPropertyAssignment(item)) &&
+      nameText(item.name) === property,
+  )
+  if (selected === fn) return ts.isMethodDeclaration(fn) && !fn.asteriskToken
+  return !!selected &&
+    ts.isPropertyAssignment(selected) &&
+    expressionYieldsOwnershipFunction(selected.initializer, fn)
+}
+
+type LifecycleOwnershipTarget = {
+  receiver: string
+  name: "runSync" | "enter" | "bind"
+  boundArgs: readonly ts.Expression[]
+}
+
+function lifecycleOwnershipTarget(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  seen = new Set<ts.Node>(),
+): LifecycleOwnershipTarget | undefined {
+  const value = ownershipExpression(expression)
+  if (seen.has(value)) return undefined
+  seen.add(value)
+  if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) {
+    const name = ts.isPropertyAccessExpression(value)
+      ? value.name.text
+      : ts.isStringLiteralLike(value.argumentExpression)
+        ? value.argumentExpression.text
+        : undefined
+    const receiver = normalize(value.expression)
+    if (name === "runSync" || name === "enter" || (name === "bind" && receiver === "Instance")) {
+      return { receiver, name, boundArgs: [] }
+    }
+  }
+  if (
+    ts.isCallExpression(value) &&
+    callProperty(value)?.name === "bind" &&
+    (ts.isPropertyAccessExpression(value.expression) || ts.isElementAccessExpression(value.expression))
+  ) {
+    const target = lifecycleOwnershipTarget(value.expression.expression, checker, seen)
+    return target ? { ...target, boundArgs: [...target.boundArgs, ...value.arguments.slice(1)] } : undefined
+  }
+  if (!ts.isIdentifier(value)) return undefined
+  const symbol = checker.getSymbolAtLocation(value)
+  const target = symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol
+  const directStatement = (node: ts.Node) => {
+    let current = node
+    while (current.parent) {
+      if (ts.isSourceFile(current.parent) || ts.isBlock(current.parent)) return current
+      if (ownershipFunction(current)) return undefined
+      current = current.parent
+    }
+    return undefined
+  }
+  type LifecycleOwnershipDefinition = {
+    node: ts.Node
+    expression?: ts.Expression
+    resolved?: LifecycleOwnershipTarget
+  }
+  const definitions: LifecycleOwnershipDefinition[] = [
+    ...(target?.declarations ?? []).flatMap<LifecycleOwnershipDefinition>((declaration) => {
+      if (declaration.getStart(declaration.getSourceFile()) >= value.getStart(value.getSourceFile())) return []
+      if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
+        return [{ node: declaration as ts.Node, expression: declaration.initializer }]
+      }
+      if (!ts.isBindingElement(declaration) || !ts.isObjectBindingPattern(declaration.parent)) return []
+      const binding = declaration.parent.parent
+      const name = nameText(declaration.propertyName ?? declaration.name)
+      if (
+        !ts.isVariableDeclaration(binding) ||
+        !binding.initializer ||
+        (name !== "runSync" && name !== "enter" && !(name === "bind" && normalize(binding.initializer) === "Instance"))
+      ) {
+        return []
+      }
+      return [{
+        node: declaration as ts.Node,
+        resolved: { receiver: normalize(binding.initializer), name, boundArgs: [] as ts.Expression[] },
+      }]
+    }),
+    ...(() => {
+      const items: Array<{ node: ts.Node; expression: ts.Expression }> = []
+      const visit = (node: ts.Node) => {
+        if (
+          ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isIdentifier(node.left) &&
+          checker.getSymbolAtLocation(node.left) === symbol &&
+          node.getStart(node.getSourceFile()) < value.getStart(value.getSourceFile())
+        ) {
+          items.push({ node, expression: node.right })
+        }
+        node.forEachChild(visit)
+      }
+      visit(value.getSourceFile())
+      return items
+    })(),
+  ].sort((left, right) => right.node.getStart(right.node.getSourceFile()) - left.node.getStart(left.node.getSourceFile()))
+  const referenceStatement = directStatement(value)
+  const dominant = definitions.findIndex((definition) => {
+    const statement = directStatement(definition.node)
+    return !!statement && !!referenceStatement && statement.parent === referenceStatement.parent &&
+      (ts.isVariableStatement(statement) ||
+        (ts.isExpressionStatement(statement) && statement.expression === definition.node))
+  })
+  return (dominant === -1 ? definitions : definitions.slice(0, dominant + 1))
+    .map((definition) => definition.resolved ??
+      (definition.expression
+        ? lifecycleOwnershipTarget(definition.expression, checker, new Set(seen))
+        : undefined))
+    .find((resolved) => !!resolved)
+}
+
+function lifecycleOwnershipCall(call: ts.CallExpression, checker: ts.TypeChecker) {
+  const property = callProperty(call)
+  if (
+    property?.name === "bind" &&
+    (ts.isPropertyAccessExpression(call.expression) || ts.isElementAccessExpression(call.expression))
+  ) {
+    const target = lifecycleOwnershipTarget(call.expression.expression, checker)
+    if (target) return { target, callback: call.arguments[1] }
+  }
+  if (
+    property &&
+    new Set(["call", "apply"]).has(property.name) &&
+    (ts.isPropertyAccessExpression(call.expression) || ts.isElementAccessExpression(call.expression))
+  ) {
+    const target = lifecycleOwnershipTarget(call.expression.expression, checker)
+    if (!target) return undefined
+    const applied = call.arguments[1]
+    const callback = property.name === "call"
+      ? call.arguments[1]
+      : applied && ts.isArrayLiteralExpression(applied) && applied.elements[0] &&
+          !ts.isOmittedExpression(applied.elements[0]) && !ts.isSpreadElement(applied.elements[0])
+        ? applied.elements[0]
+        : undefined
+    return { target, callback: target.boundArgs[0] ?? callback }
+  }
+  const target = lifecycleOwnershipTarget(call.expression, checker)
+  return target ? { target, callback: target.boundArgs[0] ?? call.arguments[0] } : undefined
+}
+
+function ownershipConsumer(call: ts.CallExpression | ts.NewExpression, fn: OwnershipFunction, checker: ts.TypeChecker) {
+  if ((ts.isFunctionExpression(fn) || ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn)) && fn.asteriskToken) {
+    return false
+  }
+  if (ts.isNewExpression(call)) {
+    const expression = ownershipExpression(call.expression)
+    if (!ts.isIdentifier(expression) || expression.text !== "Promise" || !call.arguments?.[0]) return false
+    const declarations = checker.getSymbolAtLocation(expression)?.declarations ?? []
+    if (declarations.some((declaration) => declaration.getSourceFile() === expression.getSourceFile())) return false
+    return expressionYieldsOwnershipFunction(call.arguments[0], fn)
+  }
+  if (expressionYieldsOwnershipFunction(call.expression, fn)) return true
+  const property = callProperty(call)
+  if (
+    property &&
+    new Set(["call", "apply"]).has(property.name) &&
+    (ts.isPropertyAccessExpression(call.expression) || ts.isElementAccessExpression(call.expression)) &&
+    expressionYieldsOwnershipFunction(call.expression.expression, fn)
+  ) {
+    return true
+  }
+  const lifecycle = lifecycleOwnershipCall(call, checker)
+  return !!lifecycle?.callback && expressionYieldsOwnershipFunction(lifecycle.callback, fn)
+}
+
+function ownershipBoundary(node: ts.Node, owner: ts.Node, checker: ts.TypeChecker) {
   const boundaries: string[] = []
+  const pending: OwnershipFunction[] = []
   let current: ts.Node | undefined = node.parent
   while (current && !ts.isSourceFile(current)) {
+    if (ownershipFunction(current)) pending.push(current)
     if (ts.isCallExpression(current)) {
-      const property = callProperty(current)
-      if (property && new Set(["runSync", "enter", "bind"]).has(property.name)) {
-        boundaries.push(`${property.receiver}.${property.name}`)
+      for (let index = pending.length - 1; index >= 0; index--) {
+        if (ownershipConsumer(current, pending[index]!, checker)) pending.splice(index, 1)
+      }
+      const lifecycle = lifecycleOwnershipCall(current, checker)
+      if (pending.length === 0 && lifecycle) {
+        boundaries.push(`${lifecycle.target.receiver}.${lifecycle.target.name}`)
+      }
+    }
+    if (ts.isNewExpression(current)) {
+      for (let index = pending.length - 1; index >= 0; index--) {
+        if (ownershipConsumer(current, pending[index]!, checker)) pending.splice(index, 1)
       }
     }
     if (ts.isIfStatement(current)) {
@@ -1555,10 +1803,54 @@ function scanCandidates(input: ParsedSource): Candidate[] {
   const scanLowConfidence = isGenerationProducerSurface(input.relative)
   const declarations: Array<ts.ParameterDeclaration | ts.VariableDeclaration> = []
   const functions: ts.FunctionDeclaration[] = []
+  const timerAssignments: Array<{
+    node: ts.BinaryExpression
+    binding: ts.Identifier
+    source: ts.Expression
+    member?: string
+    symbol?: ts.Symbol
+  }> = []
   const asyncQueueBindings = new Set<string>()
   const websocketUpgradeBindings = new Set(["upgradeWebSocket"])
+  const timerMemberName = (name: ts.PropertyName) =>
+    ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)
+      ? name.expression.text
+      : nameText(name)
   const collectDeclarations = (node: ts.Node) => {
     if (ts.isFunctionDeclaration(node) && node.name) functions.push(node)
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      if (ts.isIdentifier(node.left)) {
+        timerAssignments.push({ node, binding: node.left, source: node.right })
+      }
+      if (ts.isObjectLiteralExpression(node.left)) {
+        for (const property of node.left.properties) {
+          const binding = ts.isShorthandPropertyAssignment(property)
+            ? property.name
+            : ts.isPropertyAssignment(property) && ts.isIdentifier(property.initializer)
+              ? property.initializer
+              : ts.isPropertyAssignment(property) &&
+                  ts.isBinaryExpression(property.initializer) &&
+                  property.initializer.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+                  ts.isIdentifier(property.initializer.left)
+                ? property.initializer.left
+                : undefined
+          const member = ts.isShorthandPropertyAssignment(property) || ts.isPropertyAssignment(property)
+            ? timerMemberName(property.name)
+            : undefined
+          if (binding && member) {
+            timerAssignments.push({
+              node,
+              binding,
+              source: node.right,
+              member,
+              symbol: ts.isShorthandPropertyAssignment(property)
+                ? input.checker.getShorthandAssignmentValueSymbol(property)
+                : undefined,
+            })
+          }
+        }
+      }
+    }
     if ((ts.isParameter(node) || ts.isVariableDeclaration(node)) && ts.isIdentifier(node.name)) {
       declarations.push(node)
       if (
@@ -1635,6 +1927,264 @@ function scanCandidates(input: ParsedSource): Candidate[] {
     }
     return normalize(resolved)
   }
+  const timerKinds = {
+    setTimeout: "timer-timeout",
+    setInterval: "timer-interval",
+    setImmediate: "timer-immediate",
+  } as const satisfies Record<string, CandidateKind>
+  const importBinding = (identifier: ts.Identifier) => {
+    const symbol = input.checker.getSymbolAtLocation(identifier)
+    for (const declaration of symbol?.declarations ?? []) {
+      let current: ts.Node | undefined = declaration
+      while (current && !ts.isImportDeclaration(current) && !ts.isSourceFile(current)) current = current.parent
+      if (!current || !ts.isImportDeclaration(current) || !ts.isStringLiteralLike(current.moduleSpecifier)) continue
+      if (ts.isImportSpecifier(declaration)) {
+        return {
+          module: current.moduleSpecifier.text,
+          name: declaration.propertyName?.text ?? declaration.name.text,
+          namespace: false,
+        }
+      }
+      if (ts.isNamespaceImport(declaration)) {
+        return { module: current.moduleSpecifier.text, name: "*", namespace: true }
+      }
+    }
+    return undefined
+  }
+  const sourceDeclaration = (identifier: ts.Identifier) =>
+    input.checker.getSymbolAtLocation(identifier)?.declarations?.some(
+      (declaration) => declaration.getSourceFile() === input.source,
+    ) ?? false
+  const timerModules = new Set(["node:timers", "timers"])
+  const globalTimerRoots = new Set(["globalThis", "window", "global", "self"])
+  const timerStatementListParent = (node: ts.Node) => {
+    const parent = node.parent
+    return ts.isSourceFile(parent) ||
+      ts.isBlock(parent) ||
+      ts.isModuleBlock(parent) ||
+      ts.isCaseClause(parent) ||
+      ts.isDefaultClause(parent)
+      ? parent
+      : undefined
+  }
+  const timerDirectDefinitionStatement = (definition: ts.Node) => {
+    const variable = ts.isVariableDeclaration(definition)
+      ? definition
+      : ts.isBindingElement(definition) &&
+          ts.isObjectBindingPattern(definition.parent) &&
+          ts.isVariableDeclaration(definition.parent.parent)
+        ? definition.parent.parent
+        : undefined
+    if (
+      variable &&
+      ts.isVariableDeclarationList(variable.parent) &&
+      ts.isVariableStatement(variable.parent.parent) &&
+      timerStatementListParent(variable.parent.parent)
+    ) {
+      return variable.parent.parent
+    }
+    if (!ts.isBinaryExpression(definition) || definition.operatorToken.kind !== ts.SyntaxKind.EqualsToken) {
+      return undefined
+    }
+    let current: ts.Node = definition
+    while (
+      ts.isParenthesizedExpression(current.parent) ||
+      ts.isAsExpression(current.parent) ||
+      ts.isTypeAssertionExpression(current.parent) ||
+      ts.isSatisfiesExpression(current.parent) ||
+      ts.isNonNullExpression(current.parent)
+    ) {
+      current = current.parent
+    }
+    return ts.isExpressionStatement(current.parent) && timerStatementListParent(current.parent)
+      ? current.parent
+      : undefined
+  }
+  const timerDirectReferenceStatement = (reference: ts.Identifier) => {
+    let current: ts.Node = reference
+    while (current.parent) {
+      if (timerStatementListParent(current)) return current
+      if (ownershipFunction(current)) return undefined
+      current = current.parent
+    }
+    return undefined
+  }
+  const timerDirectStatementContext = (statement: ts.Node) => {
+    let entry = statement
+    let list = timerStatementListParent(entry)
+    if (!list) return undefined
+    while (ts.isBlock(list)) {
+      const parent = timerStatementListParent(list)
+      if (!parent) break
+      entry = list
+      list = parent
+    }
+    return list ? { entry, list } : undefined
+  }
+  const timerDominatesReference = (definition: ts.Node, reference: ts.Identifier) => {
+    const statement = timerDirectDefinitionStatement(definition)
+    const use = timerDirectReferenceStatement(reference)
+    const definitionContext = statement && timerDirectStatementContext(statement)
+    const useContext = use && timerDirectStatementContext(use)
+    return !!statement &&
+      !!use &&
+      !!definitionContext &&
+      !!useContext &&
+      statement.getSourceFile() === use.getSourceFile() &&
+      definitionContext.list === useContext.list &&
+      definition.getStart(definition.getSourceFile()) < reference.getStart(reference.getSourceFile())
+  }
+  const unwrapTimerExpression = (expression: ts.Expression): ts.Expression => {
+    if (
+      ts.isParenthesizedExpression(expression) ||
+      ts.isAsExpression(expression) ||
+      ts.isTypeAssertionExpression(expression) ||
+      ts.isSatisfiesExpression(expression) ||
+      ts.isNonNullExpression(expression)
+    ) {
+      return unwrapTimerExpression(expression.expression)
+    }
+    return expression
+  }
+  type TimerDefinition = { node: ts.Node; source?: ts.Expression; member?: string }
+  const timerReachingDefinitions = (value: ts.Identifier) => {
+    const symbol = input.checker.getSymbolAtLocation(value)
+    const definitions: TimerDefinition[] = [
+      ...(symbol?.declarations ?? []).flatMap<TimerDefinition>((declaration) => {
+        if (declaration.getSourceFile() !== input.source) return []
+        if (declaration.getStart(input.source) >= value.getStart(input.source)) return []
+        if (ts.isVariableDeclaration(declaration)) {
+          return declaration.initializer ? [{ node: declaration, source: declaration.initializer }] : []
+        }
+        if (!ts.isBindingElement(declaration) || !ts.isObjectBindingPattern(declaration.parent)) return []
+        const binding = declaration.parent.parent
+        const member = declaration.propertyName
+          ? timerMemberName(declaration.propertyName)
+          : ts.isIdentifier(declaration.name)
+            ? declaration.name.text
+            : undefined
+        return ts.isVariableDeclaration(binding)
+          ? [{ node: declaration, source: binding.initializer, member }]
+          : []
+      }),
+      ...timerAssignments.filter(
+        (assignment) =>
+          assignment.node.getStart(input.source) < value.getStart(input.source) &&
+          (assignment.symbol ?? input.checker.getSymbolAtLocation(assignment.binding)) === symbol,
+      ),
+    ]
+    const dominant = definitions
+      .filter((definition) => timerDominatesReference(definition.node, value))
+      .sort((left, right) => right.node.getStart(input.source) - left.node.getStart(input.source))[0]
+    return {
+      symbol,
+      definitions: dominant
+        ? definitions.filter(
+            (definition) => definition.node.getStart(input.source) >= dominant.node.getStart(input.source),
+          )
+        : definitions,
+    }
+  }
+  const timerRoot = (expression: ts.Expression, seen = new Set<ts.Node>()): boolean => {
+    const value = unwrapTimerExpression(expression)
+    if (seen.has(value)) return false
+    seen.add(value)
+    if (ts.isConditionalExpression(value)) {
+      return timerRoot(value.whenTrue, new Set(seen)) || timerRoot(value.whenFalse, new Set(seen))
+    }
+    if (
+      ts.isBinaryExpression(value) &&
+      new Set([ts.SyntaxKind.CommaToken, ts.SyntaxKind.AmpersandAmpersandToken]).has(value.operatorToken.kind)
+    ) {
+      return timerRoot(value.right, new Set(seen))
+    }
+    if (
+      ts.isBinaryExpression(value) &&
+      new Set([ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]).has(value.operatorToken.kind)
+    ) {
+      return timerRoot(value.left, new Set(seen)) || timerRoot(value.right, new Set(seen))
+    }
+    if (!ts.isIdentifier(value)) return false
+    const imported = importBinding(value)
+    if (imported?.namespace && timerModules.has(imported.module)) return true
+    const resolved = timerReachingDefinitions(value)
+    if (resolved.definitions.length > 0) {
+      return resolved.definitions.some(
+        (definition) => !definition.member && !!definition.source && timerRoot(definition.source, new Set(seen)),
+      )
+    }
+    const declarations = resolved.symbol?.declarations ?? []
+    if (declarations.length === 0 || declarations.every((declaration) => declaration.getSourceFile() !== input.source)) {
+      return globalTimerRoots.has(value.text)
+    }
+    return false
+  }
+  const timerKind = (expression: ts.Expression, seen = new Set<ts.Node>()): ReadonlySet<CandidateKind> => {
+    const value = unwrapTimerExpression(expression)
+    if (seen.has(value)) return new Set()
+    seen.add(value)
+    if (ts.isConditionalExpression(value)) {
+      return new Set([
+        ...timerKind(value.whenTrue, new Set(seen)),
+        ...timerKind(value.whenFalse, new Set(seen)),
+      ])
+    }
+    if (ts.isBinaryExpression(value) && value.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      return timerKind(value.right, new Set(seen))
+    }
+    if (ts.isBinaryExpression(value) && value.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+      return timerKind(value.right, new Set(seen))
+    }
+    if (
+      ts.isBinaryExpression(value) &&
+      new Set([
+        ts.SyntaxKind.BarBarToken,
+        ts.SyntaxKind.QuestionQuestionToken,
+      ]).has(value.operatorToken.kind)
+    ) {
+      return new Set([
+        ...timerKind(value.left, new Set(seen)),
+        ...timerKind(value.right, new Set(seen)),
+      ])
+    }
+    if (ts.isCallExpression(value) && callProperty(value)?.name === "bind") {
+      if (ts.isPropertyAccessExpression(value.expression) || ts.isElementAccessExpression(value.expression)) {
+        return timerKind(value.expression.expression, new Set(seen))
+      }
+    }
+    if (ts.isIdentifier(value)) {
+      const imported = importBinding(value)
+      if (imported && timerModules.has(imported.module)) {
+        const kind = timerKinds[imported.name as keyof typeof timerKinds]
+        return new Set(kind ? [kind] : [])
+      }
+      const resolved = timerReachingDefinitions(value)
+      const kinds = resolved.definitions.flatMap<CandidateKind>((definition) => {
+        if (definition.member && definition.source) {
+          if (!(definition.member in timerKinds) || !timerRoot(definition.source, new Set(seen))) return []
+          return [timerKinds[definition.member as keyof typeof timerKinds]]
+        }
+        return definition.source ? [...timerKind(definition.source, new Set(seen))] : []
+      })
+      if (kinds.length > 0) return new Set(kinds)
+      if (sourceDeclaration(value)) return new Set()
+      const kind = timerKinds[value.text as keyof typeof timerKinds]
+      return new Set(kind ? [kind] : [])
+    }
+    if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) {
+      const property = ts.isPropertyAccessExpression(value)
+        ? value.name.text
+        : ts.isStringLiteralLike(value.argumentExpression)
+          ? value.argumentExpression.text
+          : undefined
+      if (property && new Set(["call", "apply"]).has(property)) {
+        return timerKind(value.expression, new Set(seen))
+      }
+      if (!property || !(property in timerKinds) || !timerRoot(value.expression, new Set(seen))) return new Set()
+      return new Set([timerKinds[property as keyof typeof timerKinds]])
+    }
+    return new Set()
+  }
   const includesStringType = (node: ts.Expression) => {
     const seen = new Set<ts.Type>()
     const visit = (type: ts.Type): boolean => {
@@ -1697,7 +2247,7 @@ function scanCandidates(input: ParsedSource): Candidate[] {
       ownerKey: `${input.relative}:${owner.getStart(input.source)}:${owner.end}`,
       ownerRole: owningRole(owner),
       ownerSignature: normalize(owner),
-      boundary: ownershipBoundary(node, owner),
+      boundary: ownershipBoundary(node, owner, input.checker),
       candidateRole: candidateRole(node, input.source),
     })
   }
@@ -1812,9 +2362,7 @@ function scanCandidates(input: ParsedSource): Candidate[] {
       ) {
         addLowConfidence("effect-fork", node)
       }
-      if (callee === "setTimeout") addLowConfidence("timer-timeout", node)
-      if (callee === "setInterval") addLowConfidence("timer-interval", node)
-      if (callee === "setImmediate") addLowConfidence("timer-immediate", node)
+      for (const timer of timerKind(node.expression)) addLowConfidence(timer, node)
       if (callee === "queueMicrotask") addLowConfidence("microtask", node)
       if (effectiveProperty?.receiver === "Instance" && effectiveProperty.name === "bind") add("instance-bind", node)
       if (effectiveProperty?.name === "provideService" && resolvedText(node.arguments[0]) === "InstanceRef") {
@@ -2745,7 +3293,7 @@ function authorityErrors(files: ParsedSource[]) {
         ? current.parent
         : undefined
     }
-    const directReferenceStatement = (reference: ts.Identifier) => {
+    const directReferenceStatement = (reference: ts.Node) => {
       let current: ts.Node = reference
       while (current.parent) {
         if (statementListParent(current)) return current
@@ -2776,7 +3324,7 @@ function authorityErrors(files: ParsedSource[]) {
       }
       return list ? { entry, list } : undefined
     }
-    const dominatesReference = (definition: ts.Node, reference: ts.Identifier) => {
+    const dominatesReference = (definition: ts.Node, reference: ts.Node) => {
       const statement = directDefinitionStatement(definition)
       const use = directReferenceStatement(reference)
       const definitionContext = statement && directStatementContext(statement)
@@ -2999,12 +3547,17 @@ function authorityErrors(files: ParsedSource[]) {
         return target ? moduleExportDefinitions(target, imported) : []
       })
     }
+    const valueDefinitionCache = new WeakMap<ts.Identifier, Array<{ node: ts.Node; value: ts.Expression }>>()
     const resolveValueDefinitions = (identifier: ts.Identifier) => {
+      const cached = valueDefinitionCache.get(identifier)
+      if (cached) return cached
       const owner = sourceByRelative.get(relativeBySource.get(identifier.getSourceFile()) ?? "")
       if (owner && owner.source !== file.source) {
-        return localBindingDefinitions(owner, identifier.text, new Set(), identifier).filter(
+        const definitions = localBindingDefinitions(owner, identifier.text, new Set(), identifier).filter(
           (definition) => definition.value !== identifier,
         )
+        valueDefinitionCache.set(identifier, definitions)
+        return definitions
       }
       const symbol = resolveSymbol(identifier)
       const imported = importedBindingDefinitions(identifier)
@@ -3045,7 +3598,9 @@ function authorityErrors(files: ParsedSource[]) {
             : -1),
       )
       const dominant = definitions.findIndex((definition) => dominatesReference(definition.node, identifier))
-      return dominant === -1 ? definitions : definitions.slice(0, dominant + 1)
+      const resolved = dominant === -1 ? definitions : definitions.slice(0, dominant + 1)
+      valueDefinitionCache.set(identifier, resolved)
+      return resolved
     }
     const resolveValues = (identifier: ts.Identifier) =>
       resolveValueDefinitions(identifier).map((definition) => definition.value)
@@ -3096,6 +3651,32 @@ function authorityErrors(files: ParsedSource[]) {
         return target ? moduleExportDefinitions(target, member) : []
       })
     }
+    const returnedExpressions = (body: ts.Block) => {
+      const values: ts.Expression[] = []
+      const visit = (node: ts.Node) => {
+        if (
+          node !== body &&
+          (ts.isFunctionDeclaration(node) ||
+            ts.isFunctionExpression(node) ||
+            ts.isArrowFunction(node) ||
+            ts.isMethodDeclaration(node) ||
+            ts.isGetAccessorDeclaration(node) ||
+            ts.isSetAccessorDeclaration(node) ||
+            ts.isConstructorDeclaration(node) ||
+            ts.isClassDeclaration(node) ||
+            ts.isClassExpression(node))
+        ) {
+          return
+        }
+        if (ts.isReturnStatement(node) && node.expression) {
+          values.push(node.expression)
+          return
+        }
+        node.forEachChild(visit)
+      }
+      visit(body)
+      return values
+    }
     const propertyValues = (expression: ts.PropertyAccessExpression | ts.ElementAccessExpression) => {
       if (propertyValueCache.has(expression)) return propertyValueCache.get(expression)!
       const symbol = propertySymbol(expression)
@@ -3107,6 +3688,9 @@ function authorityErrors(files: ParsedSource[]) {
           declaration.initializer
         ) {
           return [declaration.initializer]
+        }
+        if (ts.isGetAccessorDeclaration(declaration) && declaration.body) {
+          return returnedExpressions(declaration.body)
         }
         if (ts.isExportAssignment(declaration)) return [declaration.expression]
         return []
@@ -3302,12 +3886,16 @@ function authorityErrors(files: ParsedSource[]) {
         (candidate) => !!candidate.initializer && sameContainer(candidate.initializer, declaration, new Set(seen)),
       )
     }
-    const capturedValue = (
-      value: ts.Expression | undefined,
+    type ContainerIdentity = {
+      root: ts.VariableDeclaration
+      path: readonly string[]
+      capturedAt?: ts.Node
+    }
+    const canonicalContainerIdentities = (
+      value: ts.Expression,
       seen = new Set<ts.Node>(),
-      at: ts.Node | undefined = value,
-    ): boolean => {
-      if (!value || seen.has(value)) return false
+    ): ContainerIdentity[] => {
+      if (seen.has(value)) return []
       seen.add(value)
       if (
         ts.isParenthesizedExpression(value) ||
@@ -3316,11 +3904,399 @@ function authorityErrors(files: ParsedSource[]) {
         ts.isSatisfiesExpression(value) ||
         ts.isNonNullExpression(value)
       ) {
-        return capturedValue(value.expression, seen, at)
+        return canonicalContainerIdentities(value.expression, seen)
       }
-      if (ts.isArrowFunction(value) && !ts.isBlock(value.body)) return capturedValue(value.body, seen, at)
+      if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) {
+        const member = ts.isPropertyAccessExpression(value)
+          ? value.name.text
+          : ts.isStringLiteralLike(value.argumentExpression) || ts.isNumericLiteral(value.argumentExpression)
+            ? value.argumentExpression.text
+            : undefined
+        return member
+          ? canonicalContainerIdentities(value.expression, seen).map((identity) => ({
+              root: identity.root,
+              path: [...identity.path, member],
+              capturedAt: identity.capturedAt,
+            }))
+          : []
+      }
+      if (!ts.isIdentifier(value)) return []
+      const definitions = resolveValueDefinitions(value)
+      const resolved = definitions.flatMap((definition) =>
+        canonicalContainerIdentities(definition.value, new Set(seen)).map((identity) => ({
+          ...identity,
+          capturedAt: identity.capturedAt ?? definition.node,
+        }))
+      )
+      const identities: ContainerIdentity[] = resolved.length > 0
+        ? resolved
+        : resolveVariableDeclarations(value).map((root) => ({ root, path: [], capturedAt: undefined }))
+      return identities.filter(
+        (identity, index) =>
+          identities.findIndex((candidate) =>
+            candidate.root === identity.root &&
+            candidate.path.join("\0") === identity.path.join("\0") &&
+            candidate.capturedAt === identity.capturedAt
+          ) === index,
+      )
+    }
+    const propertyName = (expression: ts.PropertyAccessExpression | ts.ElementAccessExpression) =>
+      ts.isPropertyAccessExpression(expression)
+        ? expression.name.text
+        : ts.isStringLiteralLike(expression.argumentExpression) || ts.isNumericLiteral(expression.argumentExpression)
+          ? expression.argumentExpression.text
+          : undefined
+    type ContainerAssignment = {
+      assignment: ts.BinaryExpression
+      identity: ContainerIdentity
+      path: readonly string[]
+    }
+    let indexedContainerAssignments: readonly ContainerAssignment[] | undefined
+    const containerAssignments = () => {
+      if (indexedContainerAssignments) return indexedContainerAssignments
+      indexedContainerAssignments = assignments.flatMap((assignment) => {
+        if (!ts.isPropertyAccessExpression(assignment.left) && !ts.isElementAccessExpression(assignment.left)) {
+          return []
+        }
+        const name = propertyName(assignment.left)
+        if (!name) return []
+        return canonicalContainerIdentities(assignment.left.expression).map((identity) => ({
+          assignment,
+          identity,
+          path: [...identity.path, name],
+        }))
+      })
+      return indexedContainerAssignments
+    }
+    const containerVersionCache = new Map<string, ReadonlySet<ts.BinaryExpression | undefined>>()
+    const containerVersions = (identity: ContainerIdentity, at: ts.Node) => {
+      const reference = identity.capturedAt ?? at
+      const key = `${identity.root.getStart(file.source)}\0${identity.path.join("\0")}\0${reference.getStart(file.source)}`
+      const cached = containerVersionCache.get(key)
+      if (cached) return cached
+      const matching = [...new Set(containerAssignments()
+        .filter((item) =>
+          item.assignment.getStart(file.source) < reference.getStart(file.source) &&
+          item.identity.root === identity.root &&
+          item.path.length <= identity.path.length &&
+          item.path.every((part, index) => identity.path[index] === part)
+        )
+        .map((item) => item.assignment))]
+        .sort((left, right) => right.getStart(file.source) - left.getStart(file.source))
+      const dominant = matching.findIndex((assignment) => dominatesReference(assignment, reference))
+      const versions = new Set<ts.BinaryExpression | undefined>([
+        ...(dominant === -1 ? matching : matching.slice(0, dominant + 1)),
+        ...(dominant === -1 ? [undefined] : []),
+      ])
+      containerVersionCache.set(key, versions)
+      return versions
+    }
+    const sharesContainerVersion = (
+      left: ContainerIdentity,
+      leftAt: ts.Node,
+      right: ContainerIdentity,
+      rightAt: ts.Node,
+    ) => {
+      const versions = containerVersions(left, leftAt)
+      return [...containerVersions(right, rightAt)].some((version) => versions.has(version))
+    }
+    function staticValueCandidates(value: ts.Expression, seen = new Set<ts.Node>()): ts.Expression[] {
+      const expression = ownershipExpression(value)
+      if (seen.has(expression)) return []
+      seen.add(expression)
+      if (ts.isIdentifier(expression)) {
+        const definitions = resolveValueDefinitions(expression)
+        return definitions.length > 0
+          ? definitions.flatMap((definition) => staticValueCandidates(definition.value, new Set(seen)))
+          : [expression]
+      }
+      if (ts.isConditionalExpression(expression)) {
+        return [
+          ...staticValueCandidates(expression.whenTrue, new Set(seen)),
+          ...staticValueCandidates(expression.whenFalse, new Set(seen)),
+        ]
+      }
+      if (
+        ts.isBinaryExpression(expression) &&
+        new Set([ts.SyntaxKind.CommaToken, ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.EqualsToken]).has(
+          expression.operatorToken.kind,
+        )
+      ) {
+        return staticValueCandidates(expression.right, new Set(seen))
+      }
+      if (
+        ts.isBinaryExpression(expression) &&
+        new Set([ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]).has(expression.operatorToken.kind)
+      ) {
+        return [
+          ...staticValueCandidates(expression.left, new Set(seen)),
+          ...staticValueCandidates(expression.right, new Set(seen)),
+        ]
+      }
+      return [expression]
+    }
+    function staticArrayTuples(value: ts.Expression, seen = new Set<ts.Node>()): ts.Expression[][] {
+      return staticValueCandidates(value, seen).flatMap((candidate) => {
+        const source = ownershipExpression(candidate)
+        if (!ts.isArrayLiteralExpression(source)) return []
+        return source.elements.reduce<ts.Expression[][]>((tuples, element) => {
+          const options = ts.isOmittedExpression(element)
+            ? [[ts.factory.createVoidZero()]]
+            : ts.isSpreadElement(element)
+              ? staticArrayTuples(element.expression, new Set(seen))
+              : [[element]]
+          return tuples.flatMap((tuple) => options.map((option) => [...tuple, ...option]))
+        }, [[]])
+      })
+    }
+    function staticPropertyValues(value: ts.Expression, name: string, seen = new Set<ts.Node>()): ts.Expression[] {
+      return staticValueCandidates(value, seen).flatMap((candidate) => {
+        const source = ownershipExpression(candidate)
+        if (ts.isArrayLiteralExpression(source) && /^\d+$/.test(name)) {
+          return staticArrayTuples(source).flatMap((tuple) =>
+            tuple[Number(name)] ? [tuple[Number(name)]!] : []
+          )
+        }
+        if (!ts.isObjectLiteralExpression(source)) return []
+        for (const property of [...source.properties].reverse()) {
+          if (ts.isSpreadAssignment(property)) {
+            const spread = staticPropertyValues(property.expression, name, new Set(seen))
+            if (spread.length > 0) return spread
+            continue
+          }
+          if (nameText(property.name) !== name) continue
+          const selected = propertyExpression(property)
+          if (selected) return [selected]
+          if (ts.isGetAccessorDeclaration(property) && property.body) return returnedExpressions(property.body)
+          return []
+        }
+        return []
+      })
+    }
+    const staticPropertyPathValues = (value: ts.Expression, path: readonly string[]) =>
+      path.reduce<ts.Expression[]>((values, name) =>
+        values.flatMap((candidate) => staticPropertyValues(candidate, name)), staticValueCandidates(value))
+    const assignedPropertyValues = (expression: ts.PropertyAccessExpression | ts.ElementAccessExpression) => {
+      const name = propertyName(expression)
+      const identities = canonicalContainerIdentities(expression.expression)
+      if (!name || identities.length === 0) return { values: [] as ts.Expression[], replacesStatic: false }
+      const matching = containerAssignments().flatMap((item) => {
+        const assignment = item.assignment
+        if (assignment.getStart(file.source) >= expression.getStart(file.source)) return []
+        const mutationScope = nearestFunction(assignment)
+        const readScope = nearestFunction(expression)
+        const match = identities.flatMap((identity) => {
+          const declarationScope = nearestFunction(identity.root)
+          if (!(
+            mutationScope === declarationScope ||
+            mutationScope === readScope ||
+            (!!mutationScope && nodeInside(mutationScope, expression))
+          )) return []
+          const targetPath = [...identity.path, name]
+          const candidate = item.identity
+          const assignedPath = item.path
+          if (
+            candidate.root !== identity.root ||
+            assignedPath.some((part, index) => targetPath[index] !== part)
+          ) {
+            return []
+          }
+          if (
+            assignedPath.length < targetPath.length
+              ? !containerVersions(identity, expression).has(assignment)
+              : !sharesContainerVersion(candidate, assignment, identity, expression)
+          ) {
+            return []
+          }
+          return [{ assignment, values: staticPropertyPathValues(assignment.right, targetPath.slice(assignedPath.length)) }]
+        })
+        return match.slice(0, 1)
+      })
+        .filter((item, index, items) => items.findIndex((candidate) => candidate.assignment === item.assignment) === index)
+        .sort((left, right) => right.assignment.getStart(file.source) - left.assignment.getStart(file.source))
+      const dominant = matching.findIndex((item) => dominatesReference(item.assignment, expression))
+      return {
+        values: (dominant === -1 ? matching : matching.slice(0, dominant + 1)).flatMap((item) => item.values),
+        replacesStatic: dominant !== -1,
+      }
+    }
+    type CapturedBindings = ReadonlyMap<ts.Symbol, readonly ts.Expression[]>
+    const capturedArgumentIsUndefined = (value: ts.Expression | undefined) => {
+      if (!value) return true
+      const argument = ownershipExpression(value)
+      if (ts.isVoidExpression(argument)) return true
+      if (!ts.isIdentifier(argument) || argument.text !== "undefined") return false
+      return resolveSymbolDeclarations(argument).every(
+        (declaration) => declaration.getSourceFile() !== file.source,
+      )
+    }
+    const capturedReachingValues = (identifier: ts.Identifier, bindings: CapturedBindings) => {
+      const definitions = resolveValueDefinitions(identifier)
+      const initial = bindings.get(resolveSymbol(identifier)!) ?? []
+      return [
+        ...(initial.length > 0 && !definitions.some((definition) => dominatesReference(definition.node, identifier))
+          ? initial
+          : []),
+        ...definitions.map((definition) => definition.value),
+      ]
+    }
+    const capturedArgumentValues = (
+      value: ts.Expression,
+      bindings: CapturedBindings,
+      seen = new Set<ts.Node>(),
+    ): ts.Expression[] => {
+      const argument = ownershipExpression(value)
+      if (seen.has(argument)) return []
+      seen.add(argument)
+      if (ts.isIdentifier(argument)) {
+        const resolved = capturedReachingValues(argument, bindings)
+        return (resolved.length > 0 ? resolved : [argument]).flatMap((candidate) =>
+          staticValueCandidates(candidate, new Set(seen))
+        )
+      }
+      if (ts.isConditionalExpression(argument)) {
+        return [
+          ...capturedArgumentValues(argument.whenTrue, bindings, new Set(seen)),
+          ...capturedArgumentValues(argument.whenFalse, bindings, new Set(seen)),
+        ]
+      }
+      if (
+        ts.isBinaryExpression(argument) &&
+        new Set([ts.SyntaxKind.CommaToken, ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.EqualsToken]).has(
+          argument.operatorToken.kind,
+        )
+      ) {
+        return capturedArgumentValues(argument.right, bindings, new Set(seen))
+      }
+      if (
+        ts.isBinaryExpression(argument) &&
+        new Set([ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]).has(argument.operatorToken.kind)
+      ) {
+        return [
+          ...capturedArgumentValues(argument.left, bindings, new Set(seen)),
+          ...capturedArgumentValues(argument.right, bindings, new Set(seen)),
+        ]
+      }
+      return [argument]
+    }
+    const capturedCallBindings = (
+      callable: { parameters: ts.NodeArray<ts.ParameterDeclaration> },
+      args: readonly ts.Expression[],
+      bindings: CapturedBindings,
+    ) => {
+      const result = new Map(bindings)
+      const bind = (name: ts.BindingName, value: ts.Expression | undefined) => {
+        if (!value) return
+        if (ts.isIdentifier(name)) {
+          const symbol = resolveSymbol(name)
+          if (symbol) result.set(symbol, [...(result.get(symbol) ?? []), value])
+          return
+        }
+        const candidates = capturedArgumentValues(value, bindings)
+        if (ts.isObjectBindingPattern(name)) {
+          for (const element of name.elements) {
+            if (element.dotDotDotToken) continue
+            const member = nameText(element.propertyName ?? element.name)
+            const values = member
+              ? candidates.flatMap((candidate) => staticPropertyValues(candidate, member))
+              : []
+            for (const item of values.length > 0 ? values : [element.initializer]) {
+              bind(element.name, capturedArgumentIsUndefined(item) ? element.initializer ?? item : item)
+            }
+          }
+          return
+        }
+        if (!ts.isArrayBindingPattern(name)) return
+        const tuples = candidates.flatMap((candidate) => staticArrayTuples(candidate))
+        name.elements.forEach((element, index) => {
+          if (!ts.isBindingElement(element)) return
+          if (element.dotDotDotToken) {
+            for (const tuple of tuples) {
+              bind(element.name, ts.factory.createArrayLiteralExpression(tuple.slice(index)))
+            }
+            return
+          }
+          for (const tuple of tuples) {
+            const selected = tuple[index]
+            bind(element.name, selected && !capturedArgumentIsUndefined(selected) ? selected : element.initializer)
+          }
+        })
+      }
+      const expanded = args.reduce<ts.Expression[][]>((tuples, argument) => {
+        const options = ts.isSpreadElement(argument)
+          ? capturedArgumentValues(argument.expression, bindings).flatMap((value) => staticArrayTuples(value))
+          : [[argument]]
+        return tuples.flatMap((tuple) => options.map((option) => [...tuple, ...option]))
+      }, [[]])
+      callable.parameters.forEach((parameter, index) => {
+        if (parameter.dotDotDotToken) {
+          for (const tuple of expanded) {
+            bind(parameter.name, ts.factory.createArrayLiteralExpression(tuple.slice(index)))
+          }
+          return
+        }
+        for (const tuple of expanded) {
+          const argument = tuple[index]
+          const values = !argument || capturedArgumentIsUndefined(argument)
+            ? [parameter.initializer ?? argument]
+            : capturedArgumentValues(argument, bindings)
+          for (const value of values) {
+            bind(parameter.name, capturedArgumentIsUndefined(value) ? parameter.initializer ?? value : value)
+          }
+        }
+      })
+      return result
+    }
+    const capturedProjectedValues = (
+      expression: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+      bindings: CapturedBindings,
+    ) => {
+      const name = propertyName(expression)
+      const receiver = ownershipExpression(expression.expression)
+      if (!name || !ts.isIdentifier(receiver) || !bindings.has(resolveSymbol(receiver)!)) return []
+      return capturedReachingValues(receiver, bindings).flatMap((value) => staticPropertyValues(value, name))
+    }
+    const capturedValue = (
+      value: ts.Expression | undefined,
+      seen = new Set<ts.Node>(),
+      at: ts.Node | undefined = value,
+      bindings: CapturedBindings = new Map(),
+    ): boolean => {
+      if (!value || seen.has(value)) return false
+      seen.add(value)
+      if (
+        ts.isParenthesizedExpression(value) ||
+        ts.isAsExpression(value) ||
+        ts.isTypeAssertionExpression(value) ||
+        ts.isSatisfiesExpression(value) ||
+        ts.isNonNullExpression(value) ||
+        ts.isAwaitExpression(value)
+      ) {
+        return capturedValue(value.expression, seen, at, bindings)
+      }
+      if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) {
+        return ts.isBlock(value.body)
+          ? returnedCapturedValue(value.body, seen, bindings)
+          : capturedValue(value.body, seen, at, bindings)
+      }
       if (ts.isIdentifier(value)) {
-        if (resolveValues(value).some((resolved) => capturedValue(resolved, new Set(seen), at))) return true
+        if (
+          capturedReachingValues(value, bindings).some((resolved) =>
+            capturedValue(resolved, new Set(seen), at, bindings)
+          )
+        ) {
+          return true
+        }
+        if (
+          resolveSymbolDeclarations(value).some(
+            (declaration) =>
+              ts.isFunctionDeclaration(declaration) &&
+              !!declaration.body &&
+              returnedCapturedValue(declaration.body, new Set(seen), bindings),
+          )
+        ) {
+          return true
+        }
         const declarations = resolveVariableDeclarations(value)
         return declarations.some((declaration) => {
           const beforeUse = (mutation: ts.Node) =>
@@ -3333,7 +4309,8 @@ function authorityErrors(files: ParsedSource[]) {
             const receiver = ts.isPropertyAccessExpression(assignment.left) || ts.isElementAccessExpression(assignment.left)
               ? assignment.left.expression
               : undefined
-            return sameContainer(receiver, declaration) && capturedValue(assignment.right, new Set(seen), assignment)
+            return sameContainer(receiver, declaration) &&
+              capturedValue(assignment.right, new Set(seen), assignment, bindings)
           })
           if (assigned) return true
           return calls.some((call) => {
@@ -3344,32 +4321,203 @@ function authorityErrors(files: ParsedSource[]) {
               ? call.expression.expression
               : undefined
             return sameContainer(receiver, declaration) &&
-              call.arguments.some((argument) => capturedValue(argument, new Set(seen), call))
+              call.arguments.some((argument) => capturedValue(argument, new Set(seen), call, bindings))
           })
         })
       }
+      if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) {
+        const assigned = assignedPropertyValues(value)
+        return [
+          ...capturedProjectedValues(value, bindings),
+          ...(assigned.replacesStatic ? [] : propertyValues(value)),
+          ...assigned.values,
+        ].some((resolved) => capturedValue(resolved, new Set(seen), at, bindings))
+      }
       if (ts.isObjectLiteralExpression(value)) {
         return value.properties.some((property) => {
-          if (ts.isPropertyAssignment(property)) return capturedValue(property.initializer, seen, at)
-          if (ts.isShorthandPropertyAssignment(property)) return capturedValue(property.name, seen, at)
-          if (ts.isSpreadAssignment(property)) return capturedValue(property.expression, seen, at)
+          if (ts.isPropertyAssignment(property)) return capturedValue(property.initializer, seen, at, bindings)
+          if (ts.isShorthandPropertyAssignment(property)) return capturedValue(property.name, seen, at, bindings)
+          if (ts.isSpreadAssignment(property)) return capturedValue(property.expression, seen, at, bindings)
+          if (
+            (ts.isMethodDeclaration(property) || ts.isGetAccessorDeclaration(property)) &&
+            property.body
+          ) {
+            return returnedCapturedValue(property.body, new Set(seen), bindings)
+          }
           return false
         })
       }
       if (ts.isArrayLiteralExpression(value)) {
         return value.elements.some((element) => {
           if (ts.isOmittedExpression(element)) return false
-          if (ts.isSpreadElement(element)) return capturedValue(element.expression, seen, at)
-          return capturedValue(element, seen, at)
+          if (ts.isSpreadElement(element)) return capturedValue(element.expression, seen, at, bindings)
+          return capturedValue(element, seen, at, bindings)
         })
       }
       if (ts.isConditionalExpression(value)) {
-        return capturedValue(value.whenTrue, seen, at) || capturedValue(value.whenFalse, seen, at)
+        return capturedValue(value.whenTrue, seen, at, bindings) ||
+          capturedValue(value.whenFalse, seen, at, bindings)
       }
-      return ts.isCallExpression(value) &&
-        new Set(["captureInstanceExecution", "captureInstanceExecutionEffect"]).has(
-          resolvedHelperName(value.expression) ?? "",
+      if (
+        ts.isBinaryExpression(value) &&
+        new Set([ts.SyntaxKind.CommaToken, ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.EqualsToken]).has(
+          value.operatorToken.kind,
         )
+      ) {
+        return capturedValue(value.right, seen, at, bindings)
+      }
+      if (
+        ts.isBinaryExpression(value) &&
+        new Set([ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]).has(value.operatorToken.kind)
+      ) {
+        return capturedValue(value.left, new Set(seen), at, bindings) ||
+          capturedValue(value.right, new Set(seen), at, bindings)
+      }
+      if (!ts.isCallExpression(value)) return false
+      if (invokedCapturedValue(value, new Set(seen), bindings)) return true
+      return new Set(["captureInstanceExecution", "captureInstanceExecutionEffect"]).has(
+        resolvedHelperName(value.expression) ?? "",
+      )
+    }
+    function callableCapturedValue(
+      value: ts.Expression,
+      seen: Set<ts.Node>,
+      args: readonly ts.Expression[] = [],
+      bindings: CapturedBindings = new Map(),
+    ): boolean {
+      const callable = ownershipExpression(value)
+      if (seen.has(callable)) return false
+      seen.add(callable)
+      if (ts.isConditionalExpression(callable)) {
+        return callableCapturedValue(callable.whenTrue, new Set(seen), args, bindings) ||
+          callableCapturedValue(callable.whenFalse, new Set(seen), args, bindings)
+      }
+      if (
+        ts.isBinaryExpression(callable) &&
+        new Set([ts.SyntaxKind.CommaToken, ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.EqualsToken]).has(
+          callable.operatorToken.kind,
+        )
+      ) {
+        return callableCapturedValue(callable.right, new Set(seen), args, bindings)
+      }
+      if (
+        ts.isBinaryExpression(callable) &&
+        new Set([ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]).has(callable.operatorToken.kind)
+      ) {
+        return callableCapturedValue(callable.left, new Set(seen), args, bindings) ||
+          callableCapturedValue(callable.right, new Set(seen), args, bindings)
+      }
+      if (ts.isArrowFunction(callable) || ts.isFunctionExpression(callable)) {
+        if (ts.isFunctionExpression(callable) && callable.asteriskToken) return false
+        const callBindings = capturedCallBindings(callable, args, bindings)
+        return ts.isBlock(callable.body)
+          ? returnedCapturedValue(callable.body, new Set(seen), callBindings)
+          : capturedValue(callable.body, new Set(seen), callable, callBindings)
+      }
+      if (ts.isCallExpression(callable) && callProperty(callable)?.name === "bind") {
+        if (ts.isPropertyAccessExpression(callable.expression) || ts.isElementAccessExpression(callable.expression)) {
+          return callableCapturedValue(
+            callable.expression.expression,
+            new Set(seen),
+            [...callable.arguments.slice(1), ...args],
+            bindings,
+          )
+        }
+      }
+      if (ts.isIdentifier(callable)) {
+        if (
+          resolveValueDefinitions(callable).some((definition) =>
+            callableCapturedValue(definition.value, new Set(seen), args, bindings),
+          )
+        ) {
+          return true
+        }
+        const symbol = resolveSymbol(callable)
+        const dominantAssignment = assignments.some(
+          (assignment) =>
+            ts.isIdentifier(assignment.left) &&
+            resolveSymbol(assignment.left) === symbol &&
+            assignment.getStart(assignment.getSourceFile()) < callable.getStart(callable.getSourceFile()) &&
+            dominatesReference(assignment, callable),
+        )
+        if (dominantAssignment) return false
+        return resolveSymbolDeclarations(callable).some(
+          (declaration) =>
+            ts.isFunctionDeclaration(declaration) &&
+            !declaration.asteriskToken &&
+            !!declaration.body &&
+            returnedCapturedValue(
+              declaration.body,
+              new Set(seen),
+              capturedCallBindings(declaration, args, bindings),
+            ),
+        )
+      }
+      if (ts.isPropertyAccessExpression(callable) || ts.isElementAccessExpression(callable)) {
+        const assigned = assignedPropertyValues(callable)
+        const values = [
+          ...(assigned.replacesStatic ? [] : propertyValues(callable)),
+          ...assigned.values,
+        ]
+        if (values.some((resolved) => callableCapturedValue(resolved, new Set(seen), args, bindings))) return true
+        if (assigned.replacesStatic) return false
+        return [...(propertySymbol(callable)?.declarations ?? [])].some(
+          (declaration) =>
+            ts.isMethodDeclaration(declaration) &&
+            !declaration.asteriskToken &&
+            !!declaration.body &&
+            returnedCapturedValue(
+              declaration.body,
+              new Set(seen),
+              capturedCallBindings(declaration, args, bindings),
+            ),
+        )
+      }
+      return false
+    }
+    function invokedCapturedValue(call: ts.CallExpression, seen: Set<ts.Node>, bindings: CapturedBindings) {
+      const property = callProperty(call)
+      if (
+        property &&
+        new Set(["call", "apply"]).has(property.name) &&
+        (ts.isPropertyAccessExpression(call.expression) || ts.isElementAccessExpression(call.expression))
+      ) {
+        const target = call.expression.expression
+        if (property.name === "call") {
+          return callableCapturedValue(target, seen, call.arguments.slice(1), bindings)
+        }
+        return !!call.arguments[1] && capturedArgumentValues(call.arguments[1], bindings)
+          .flatMap((value) => staticArrayTuples(value))
+          .some((args) => callableCapturedValue(target, new Set(seen), args, bindings))
+      }
+      return callableCapturedValue(call.expression, seen, call.arguments, bindings)
+    }
+    function returnedCapturedValue(body: ts.Block, seen: Set<ts.Node>, bindings: CapturedBindings = new Map()) {
+      let captured = false
+      const visit = (node: ts.Node) => {
+        if (captured) return
+        if (
+          node !== body &&
+          (ts.isFunctionDeclaration(node) ||
+            ts.isFunctionExpression(node) ||
+            ts.isArrowFunction(node) ||
+            ts.isMethodDeclaration(node) ||
+            ts.isGetAccessorDeclaration(node) ||
+            ts.isSetAccessorDeclaration(node) ||
+            ts.isConstructorDeclaration(node) ||
+            ts.isClassDeclaration(node) ||
+            ts.isClassExpression(node))
+        ) {
+          return
+        }
+        if (ts.isReturnStatement(node)) {
+          captured = capturedValue(node.expression, new Set(seen), node, bindings)
+          return
+        }
+        node.forEachChild(visit)
+      }
+      visit(body)
+      return captured
     }
     const returnedRawHelperNames = (body: ts.Block, seen: Set<ts.Node>) => {
       const names: string[] = []
@@ -3591,19 +4739,27 @@ function authorityErrors(files: ParsedSource[]) {
           if (name === "InstanceAdmissionRef") {
             errors.push(`InstanceAdmissionRef must remain module-private: ${file.relative}`)
           }
+          if (node.isTypeOnly || element.isTypeOnly) continue
           const target = node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)
             ? resolveModuleSource(file.relative, node.moduleSpecifier.text)
             : undefined
           const imported = element.propertyName?.text ?? element.name.text
-          const helper = (target || !node.moduleSpecifier
+          const definitions = target || !node.moduleSpecifier
             ? (target ? moduleExportDefinitions(target, imported) : localBindingDefinitions(file, imported))
-                .flatMap((definition) => resolvedHelperNames(definition.value))
-                .find((candidate) => !!helperAllowlist(candidate))
-            : undefined) ??
+            : []
+          const helper = definitions
+            .flatMap((definition) => resolvedHelperNames(definition.value))
+            .find((candidate) => !!helperAllowlist(candidate)) ??
             (ts.isIdentifier(element.name) ? helperNameFromIdentifier(element.name, name) : undefined) ??
             (lifecycleModule && helperAllowlist(name) ? name : undefined)
           if (helper && helperAllowlist(helper)) {
             errors.push(`raw lifecycle helper cannot be re-exported: ${file.relative}:${helper}`)
+          }
+          if (
+            file.relative !== "src/effect/instance-ref.ts" &&
+            definitions.some((definition) => capturedValue(definition.value))
+          ) {
+            errors.push(`captured InstanceExecution cannot be re-exported: ${file.relative}`)
           }
         }
       }
@@ -3629,6 +4785,9 @@ function authorityErrors(files: ParsedSource[]) {
       if (ts.isExportAssignment(node)) {
         const helper = rawHelperValueNames(node.expression)[0]
         if (helper) errors.push(`raw lifecycle helper cannot be re-exported: ${file.relative}:${helper}`)
+        if (file.relative !== "src/effect/instance-ref.ts" && capturedValue(node.expression)) {
+          errors.push(`captured InstanceExecution cannot be re-exported: ${file.relative}`)
+        }
       }
       if (exported(node)) {
         const helper = ts.isVariableStatement(node)
