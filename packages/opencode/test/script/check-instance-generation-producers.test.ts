@@ -743,6 +743,58 @@ test("qualified and aliased global timers cannot bypass discovery", async () => 
   }
 })
 
+test("qualified and aliased global microtasks cannot bypass discovery", async () => {
+  const input = await fixture({
+    source: {
+      "server/microtask-direct.ts": "queueMicrotask(work)\nexport {}",
+      "server/microtask-qualified.ts": "globalThis.queueMicrotask(work)\nexport {}",
+      "server/microtask-indexed.ts": "globalThis['queueMicrotask'](work)\nexport {}",
+      "server/microtask-alias.ts": "const schedule = queueMicrotask\nschedule(work)\nexport {}",
+      "server/microtask-qualified-alias.ts": "const schedule = globalThis.queueMicrotask\nschedule(work)\nexport {}",
+      "server/microtask-destructured.ts": "const { queueMicrotask: schedule } = globalThis\nschedule(work)\nexport {}",
+      "server/microtask-local-function.ts": "function queueMicrotask() {}\nqueueMicrotask()\nexport {}",
+      "server/microtask-local-variable.ts": "const queueMicrotask = ordinary\nqueueMicrotask(work)\nexport {}",
+      "server/microtask-local-parameter.ts": [
+        "export function ordinary(queueMicrotask: (callback: unknown) => void) {",
+        "  queueMicrotask(work)",
+        "}",
+      ].join("\n"),
+      "server/microtask-local-object.ts": "const scheduler = { queueMicrotask() {} }\nscheduler.queueMicrotask(work)\nexport {}",
+      "server/microtask-shadowed-global.ts": "const globalThis = { queueMicrotask() {} }\nglobalThis.queueMicrotask(work)\nexport {}",
+      "server/microtask-ordinary.ts": "export function queueMicrotask() {}",
+      "server/microtask-ordinary-import.ts": 'import { queueMicrotask } from "./microtask-ordinary"\nqueueMicrotask(work)',
+      "server/microtask-ordinary-import-alias.ts": 'import { queueMicrotask as schedule } from "./microtask-ordinary"\nschedule(work)',
+      "server/microtask-timers-namespace.ts": 'import * as timers from "node:timers"\ntimers.queueMicrotask(work)',
+    },
+  })
+  await using _ = input.tmp
+  const candidates = inspectCandidateSummaries(input.env.MIMOCODE_INSTANCE_GENERATION_SOURCE_ROOT).flatMap(
+    (summary) => summary.candidates,
+  )
+  for (const file of [
+    "src/server/microtask-direct.ts",
+    "src/server/microtask-qualified.ts",
+    "src/server/microtask-indexed.ts",
+    "src/server/microtask-alias.ts",
+    "src/server/microtask-qualified-alias.ts",
+    "src/server/microtask-destructured.ts",
+  ]) {
+    expect(candidates.filter((candidate) => candidate.file === file && candidate.kind === "microtask"), file).toHaveLength(1)
+  }
+  for (const file of [
+    "src/server/microtask-local-function.ts",
+    "src/server/microtask-local-variable.ts",
+    "src/server/microtask-local-parameter.ts",
+    "src/server/microtask-local-object.ts",
+    "src/server/microtask-shadowed-global.ts",
+    "src/server/microtask-ordinary-import.ts",
+    "src/server/microtask-ordinary-import-alias.ts",
+    "src/server/microtask-timers-namespace.ts",
+  ]) {
+    expect(candidates.some((candidate) => candidate.file === file), file).toBe(false)
+  }
+})
+
 test("all AsyncQueue waiters in the TUI control surface are frozen", async () => {
   const input = await fixture({
     source: {
@@ -1968,6 +2020,612 @@ test("allowlisted wrappers may consume capture internally but cannot export the 
     }),
   )
 })
+
+test("allowlisted wrappers cannot publish captured execution through external state", async () => {
+  const input = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "export const published: { execution?: unknown } = {}",
+        "export function bootstrap() {",
+        "  published.execution = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(published.execution)",
+        "}",
+      ].join("\n"),
+      "effect/run-service.ts": [
+        "export function attachWith(target: { execution?: unknown }) {",
+        "  target.execution = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(target.execution)",
+        "}",
+      ].join("\n"),
+      "project/instance.ts": [
+        "declare const globalThis: { published: { execution?: unknown } }",
+        "export function bind() {",
+        "  globalThis.published.execution = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(globalThis.published.execution)",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const stderr = (await run(["--check"], input.env)).stderr
+  for (const file of [
+    "src/effect/bootstrap-runtime.ts",
+    "src/effect/run-service.ts",
+    "src/project/instance.ts",
+  ]) {
+    expect(stderr).toContain(`captured InstanceExecution cannot be published through external state: ${file}`)
+  }
+
+  const escapedCases = [
+    [
+      "module alias",
+      [
+        "const published: unknown[] = []",
+        "export function bootstrap() {",
+        "  const alias = published",
+        "  alias.push(captureInstanceExecution())",
+        "  return makeOpaqueBootstrapHandle(alias)",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "logical assignment",
+      [
+        "const published: { execution?: unknown } = {}",
+        "export function bootstrap() {",
+        "  published.execution ||= captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(published.execution)",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "Object.assign",
+      [
+        "const published: { execution?: unknown } = {}",
+        "export function bootstrap() {",
+        "  Object.assign(published, { execution: captureInstanceExecution() })",
+        "  return makeOpaqueBootstrapHandle(published.execution)",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "local helper invocation",
+      [
+        "const published: { execution?: unknown } = {}",
+        "function publish() { published.execution = captureInstanceExecution() }",
+        "export function bootstrap() {",
+        "  publish()",
+        "  return makeOpaqueBootstrapHandle(published.execution)",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "exported object shorthand",
+      [
+        "const published: { execution?: unknown } = {}",
+        "const bootstrap = () => { published.execution = captureInstanceExecution() }",
+        "export const api = { bootstrap }",
+      ].join("\n"),
+    ],
+    [
+      "object destructuring assignment",
+      [
+        "let published: unknown",
+        "export function bootstrap() {",
+        "  ;({ execution: published } = { execution: captureInstanceExecution() })",
+        "  return makeOpaqueBootstrapHandle(published)",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "array destructuring parameter",
+      [
+        "export function bootstrap(target: unknown[]) {",
+        "  ;[target[0]] = [captureInstanceExecution()]",
+        "  return makeOpaqueBootstrapHandle(target[0])",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "concise mutation",
+      [
+        "const published: unknown[] = []",
+        "export const bootstrap = () => published.push(captureInstanceExecution())",
+      ].join("\n"),
+    ],
+    [
+      "concise Object.assign",
+      [
+        "const published: { execution?: unknown } = {}",
+        "export const bootstrap = () => Object.assign(published, { execution: captureInstanceExecution() })",
+      ].join("\n"),
+    ],
+    [
+      "exported callable array",
+      [
+        "const published: { execution?: unknown } = {}",
+        "const bootstrap = () => { published.execution = captureInstanceExecution() }",
+        "export const api = [bootstrap]",
+      ].join("\n"),
+    ],
+    [
+      "default IIFE object",
+      [
+        "const published: { execution?: unknown } = {}",
+        "export default (() => ({",
+        "  bootstrap() { published.execution = captureInstanceExecution() },",
+        "}))()",
+      ].join("\n"),
+    ],
+    [
+      "exported class method",
+      [
+        "const published: { execution?: unknown } = {}",
+        "export class API {",
+        "  bootstrap() { published.execution = captureInstanceExecution() }",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "IIFE module target",
+      [
+        "const published: unknown[] = []",
+        "export const bootstrap = () =>",
+        "  ((target: unknown[]) => target.push(captureInstanceExecution()))(published)",
+      ].join("\n"),
+    ],
+    [
+      "conditional IIFE module target",
+      [
+        "declare const pick: boolean",
+        "const published: unknown[] = []",
+        "export const bootstrap = () =>",
+        "  ((target: unknown[]) => target.push(captureInstanceExecution()))(pick ? [] : published)",
+      ].join("\n"),
+    ],
+    [
+      "IIFE property target",
+      [
+        "const published: unknown[] = []",
+        "export const api = ((options: { target: unknown[] }) => ({",
+        "  bootstrap() {",
+        "    options.target.push(captureInstanceExecution())",
+        "    return makeOpaqueBootstrapHandle(options.target)",
+        "  },",
+        "}))({ target: published })",
+      ].join("\n"),
+    ],
+    [
+      "apply module tuple target",
+      [
+        "const args: [unknown[]] = [[]]",
+        "export const bootstrap = () =>",
+        "  ((target: unknown[]) => target.push(captureInstanceExecution())).apply(null, args)",
+      ].join("\n"),
+    ],
+    [
+      "spread module tuple target",
+      [
+        "const args: [unknown[]] = [[]]",
+        "export const bootstrap = () =>",
+        "  ((target: unknown[]) => target.push(captureInstanceExecution()))(...args)",
+      ].join("\n"),
+    ],
+    [
+      "call module this target",
+      [
+        "const published: unknown[] = []",
+        "function bootstrap(this: unknown[]) {",
+        "  this.push(captureInstanceExecution())",
+        "  return makeOpaqueBootstrapHandle(this)",
+        "}",
+        "export const api = bootstrap.call(published)",
+      ].join("\n"),
+    ],
+    [
+      "object default module target",
+      [
+        "const published: unknown[] = []",
+        "export const bootstrap = () =>",
+        "  (({ target = published }: { target?: unknown[] }) =>",
+        "    target.push(captureInstanceExecution()))({ target: undefined })",
+      ].join("\n"),
+    ],
+    [
+      "call target after this parameter",
+      [
+        "const published: unknown[] = []",
+        "function bootstrap(this: unknown[], target: unknown[]) {",
+        "  return target.push(captureInstanceExecution())",
+        "}",
+        "export const api = bootstrap.call([], published)",
+      ].join("\n"),
+    ],
+    [
+      "arrow lexical this target",
+      [
+        "export function bootstrap(this: unknown[]) {",
+        "  return (() => this.push(captureInstanceExecution())).call([])",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "arrow lexical this apply target",
+      [
+        "export function bootstrap(this: unknown[]) {",
+        "  return (() => this.push(captureInstanceExecution())).apply([], [])",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "arrow lexical this bound target",
+      [
+        "export function bootstrap(this: unknown[]) {",
+        "  return (() => this.push(captureInstanceExecution())).bind([])()",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "object rest module target",
+      [
+        "const published: unknown[] = []",
+        "export const bootstrap = () =>",
+        "  (({ ...rest }: { target: unknown[] }) =>",
+        "    rest.target.push(captureInstanceExecution()))({ target: published })",
+      ].join("\n"),
+    ],
+    [
+      "rest element module target",
+      [
+        "const published: unknown[] = []",
+        "export const bootstrap = () =>",
+        "  ((...targets: unknown[][]) => targets[0]?.push(captureInstanceExecution()))(published)",
+      ].join("\n"),
+    ],
+    [
+      "module lvalue replacement",
+      [
+        "let published: unknown[] = []",
+        "export function bootstrap() {",
+        "  published = []",
+        "  published.push(captureInstanceExecution())",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "module assignment argument",
+      [
+        "let published: unknown[] = []",
+        "export const bootstrap = () =>",
+        "  ((target: unknown[]) => target.push(captureInstanceExecution()))(published = [])",
+      ].join("\n"),
+    ],
+    [
+      "module property assignment argument",
+      [
+        "const state: { target?: unknown[] } = {}",
+        "export const bootstrap = () =>",
+        "  ((target: unknown[]) => target.push(captureInstanceExecution()))(state.target = [])",
+      ].join("\n"),
+    ],
+    [
+      "rest binding module element",
+      [
+        "const published: unknown[] = []",
+        "export const bootstrap = () =>",
+        "  ((...[target]: [unknown[]]) => target.push(captureInstanceExecution()))(published)",
+      ].join("\n"),
+    ],
+    [
+      "property external overwrite",
+      [
+        "const published: unknown[] = []",
+        "export const bootstrap = () => ((options: { target: unknown[] }) => {",
+        "  options.target = published",
+        "  options.target.push(captureInstanceExecution())",
+        "})({ target: [] })",
+      ].join("\n"),
+    ],
+    [
+      "nested this property target",
+      [
+        "const published: { execution?: unknown } = {}",
+        "function bootstrap(this: { target: { execution?: unknown } }) {",
+        "  this.target.execution = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(this.target)",
+        "}",
+        "export const api = bootstrap.call({ target: published })",
+      ].join("\n"),
+    ],
+    [
+      "capture call invocation",
+      [
+        "const published: { execution?: unknown } = {}",
+        "export function bootstrap() {",
+        "  published.execution = captureInstanceExecution.call(undefined)",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "capture apply invocation",
+      [
+        "const published: { execution?: unknown } = {}",
+        "export function bootstrap() {",
+        "  published.execution = captureInstanceExecution.apply(undefined, [])",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "capture bind invocation",
+      [
+        "const published: { execution?: unknown } = {}",
+        "export function bootstrap() {",
+        "  published.execution = captureInstanceExecution.bind(undefined)()",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "capture comma invocation",
+      [
+        "const published: { execution?: unknown } = {}",
+        "export function bootstrap() {",
+        "  published.execution = (ordinary, captureInstanceExecution)()",
+        "}",
+      ].join("\n"),
+    ],
+  ] as const
+  const escaped = await fixture({
+    source: Object.fromEntries(
+      escapedCases.map(([, source], index) => [`effect/publication-escaped-${index}.ts`, source]),
+    ),
+  })
+  await using _escaped = escaped.tmp
+  const escapedStderr = (await run(["--check"], escaped.env)).stderr
+  for (const [index, [name]] of escapedCases.entries()) {
+    expect(escapedStderr, name).toContain(
+      `captured InstanceExecution cannot be published through external state: src/effect/publication-escaped-${index}.ts`,
+    )
+  }
+
+  const local = await fixture({
+    source: {
+      "effect/bootstrap-runtime.ts": [
+        "export const bootstrap = ((target: unknown[]) => ({",
+        "  start() {",
+        "    target.push(captureInstanceExecution())",
+        "    return makeOpaqueBootstrapHandle(target)",
+        "  },",
+        "}))([])",
+      ].join("\n"),
+      "effect/run-service.ts": [
+        "export function attachWith(target: { execution?: unknown }) {",
+        "  target = {}",
+        "  target.execution = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(target.execution)",
+        "}",
+      ].join("\n"),
+      "project/instance.ts": [
+        "export function bind() {",
+        "  let internal: { execution?: unknown }",
+        "  internal = {}",
+        "  const alias = internal",
+        "  alias.execution = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(alias.execution)",
+        "}",
+      ].join("\n"),
+      "effect/bridge.ts": [
+        "export function make() {",
+        "  let internal: unknown",
+        "  ;({ execution: internal } = { execution: captureInstanceExecutionEffect() })",
+        "  return makeOpaqueBootstrapHandle(internal)",
+        "}",
+        "export const local = () =>",
+        "  ((target: unknown[]) => target.push(captureInstanceExecutionEffect()))([])",
+      ].join("\n"),
+    },
+  })
+  await using _local = local.tmp
+  expect((await run(["--check"], local.env)).stderr).not.toContain(
+    "captured InstanceExecution cannot be published through external state",
+  )
+
+  const safeCases = [
+    [
+      "conditional local IIFE",
+      [
+        "declare const pick: boolean",
+        "export const bootstrap = () =>",
+        "  ((target: unknown[]) => target.push(captureInstanceExecution()))(pick ? [] : [])",
+      ].join("\n"),
+    ],
+    [
+      "local IIFE property",
+      [
+        "export const bootstrap = ((options: { target: unknown[] }) => ({",
+        "  start() {",
+        "    options.target.push(captureInstanceExecution())",
+        "    return makeOpaqueBootstrapHandle(options.target)",
+        "  },",
+        "}))({ target: [] })",
+      ].join("\n"),
+    ],
+    [
+      "inline apply tuple",
+      [
+        "export const bootstrap = () =>",
+        "  ((target: unknown[]) => target.push(captureInstanceExecution())).apply(null, [[]])",
+      ].join("\n"),
+    ],
+    [
+      "inline spread tuple",
+      [
+        "export const bootstrap = () =>",
+        "  ((target: unknown[]) => target.push(captureInstanceExecution()))(...[[]] as [unknown[]])",
+      ].join("\n"),
+    ],
+    [
+      "local call this",
+      [
+        "function bootstrap(this: unknown[]) {",
+        "  this.push(captureInstanceExecution())",
+        "  return makeOpaqueBootstrapHandle(this)",
+        "}",
+        "export const api = bootstrap.call([])",
+      ].join("\n"),
+    ],
+    [
+      "local apply this",
+      [
+        "function bootstrap(this: unknown[]) {",
+        "  this.push(captureInstanceExecution())",
+        "  return makeOpaqueBootstrapHandle(this)",
+        "}",
+        "export const api = bootstrap.apply([], [])",
+      ].join("\n"),
+    ],
+    [
+      "local bound this",
+      [
+        "function bootstrap(this: unknown[]) {",
+        "  this.push(captureInstanceExecution())",
+        "  return makeOpaqueBootstrapHandle(this)",
+        "}",
+        "export const api = bootstrap.bind([])",
+      ].join("\n"),
+    ],
+    [
+      "object default local target",
+      [
+        "export const bootstrap = () =>",
+        "  (({ target = [] }: { target?: unknown[] }) =>",
+        "    target.push(captureInstanceExecution()))({ target: undefined })",
+      ].join("\n"),
+    ],
+    [
+      "local target after this parameter",
+      [
+        "function bootstrap(this: unknown[], target: unknown[]) {",
+        "  return target.push(captureInstanceExecution())",
+        "}",
+        "export const api = bootstrap.call([], [])",
+      ].join("\n"),
+    ],
+    [
+      "fresh rest container",
+      [
+        "const published: unknown[] = []",
+        "export const bootstrap = () =>",
+        "  ((...targets: unknown[]) => targets.push(captureInstanceExecution()))(published)",
+      ].join("\n"),
+    ],
+    [
+      "fresh rest element",
+      [
+        "export const bootstrap = () =>",
+        "  ((...targets: unknown[][]) => targets[0]?.push(captureInstanceExecution()))([])",
+      ].join("\n"),
+    ],
+    [
+      "object rest local target",
+      [
+        "export const bootstrap = () =>",
+        "  (({ ...rest }: { target: unknown[] }) =>",
+        "    rest.target.push(captureInstanceExecution()))({ target: [] })",
+      ].join("\n"),
+    ],
+    [
+      "exported rest container",
+      [
+        "export function bootstrap(...targets: unknown[]) {",
+        "  return targets.push(captureInstanceExecution())",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "local binding assignment",
+      [
+        "const published: unknown = {}",
+        "export function bootstrap() {",
+        "  let local = published",
+        "  local = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(local)",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "parameter assignment",
+      [
+        "export function bootstrap(target: unknown) {",
+        "  target = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(target)",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "fresh object property assignment",
+      [
+        "const published: unknown = {}",
+        "export const bootstrap = () => ((options: { target: unknown }) => {",
+        "  options.target = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(options.target)",
+        "})({ target: published })",
+      ].join("\n"),
+    ],
+    [
+      "fresh rest slots",
+      [
+        "const published: unknown = {}",
+        "export const bootstrap = () => ((...targets: unknown[]) => {",
+        "  targets[0] = captureInstanceExecution()",
+        "  ;(targets as unknown as { extra?: unknown }).extra = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(targets)",
+        "})(published)",
+      ].join("\n"),
+    ],
+    [
+      "fresh object rest property assignment",
+      [
+        "const published: unknown = {}",
+        "export const bootstrap = () => (({ ...rest }: { target: unknown }) => {",
+        "  rest.target = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(rest)",
+        "})({ target: published })",
+      ].join("\n"),
+    ],
+    [
+      "local property overwrite",
+      [
+        "const published: unknown[] = []",
+        "export const bootstrap = () => ((options: { target: unknown[] }) => {",
+        "  options.target = []",
+        "  options.target.push(captureInstanceExecution())",
+        "})({ target: published })",
+      ].join("\n"),
+    ],
+    [
+      "nested this local target",
+      [
+        "function bootstrap(this: { target: { execution?: unknown } }) {",
+        "  this.target.execution = captureInstanceExecution()",
+        "  return makeOpaqueBootstrapHandle(this.target)",
+        "}",
+        "export const api = bootstrap.call({ target: {} })",
+      ].join("\n"),
+    ],
+  ] as const
+  const safe = await fixture({
+    source: Object.fromEntries(
+      safeCases.map(([, source], index) => [`effect/publication-safe-${index}.ts`, source]),
+    ),
+  })
+  await using _safe = safe.tmp
+  const safeStderr = (await run(["--check"], safe.env)).stderr
+  for (const [index, [name]] of safeCases.entries()) {
+    expect(safeStderr, name).not.toContain(
+      `captured InstanceExecution cannot be published through external state: src/effect/publication-safe-${index}.ts`,
+    )
+  }
+}, 15_000)
 
 test("block-bodied closures cannot export captured execution", async () => {
   const input = await fixture({
@@ -3633,6 +4291,87 @@ test("indexed helper access uses canonical symbol provenance", async () => {
   expect(stderr).not.toContain("captured InstanceExecution cannot be re-exported")
 })
 
+test("namespace imports cannot relay canonical raw lifecycle helpers", async () => {
+  const canonical = await fixture({
+    source: {
+      "effect/instance-ref.ts": "export function captureInstanceExecution() { return handle }\n",
+      "effect/instance-barrel.ts": 'export * from "./instance-ref"\n',
+      "effect/namespace-export.ts": [
+        'import * as lifecycle from "./instance-ref"',
+        "export { lifecycle }",
+      ].join("\n"),
+      "effect/namespace-alias.ts": [
+        'import * as lifecycle from "./instance-ref"',
+        "export { lifecycle as exposed }",
+      ].join("\n"),
+      "effect/namespace-const.ts": [
+        'import * as lifecycle from "./instance-ref"',
+        "export const exposed = lifecycle",
+      ].join("\n"),
+      "effect/namespace-barrel.ts": [
+        'import * as lifecycle from "./instance-barrel"',
+        "export default lifecycle",
+      ].join("\n"),
+    },
+  })
+  await using _canonical = canonical.tmp
+  const canonicalStderr = (await run(["--check"], canonical.env)).stderr
+  for (const file of [
+    "src/effect/namespace-export.ts",
+    "src/effect/namespace-alias.ts",
+    "src/effect/namespace-const.ts",
+    "src/effect/namespace-barrel.ts",
+  ]) {
+    expect(canonicalStderr).toContain(`raw lifecycle helper cannot be re-exported: ${file}`)
+  }
+
+  const canonicalDefault = await fixture({
+    source: {
+      "effect/instance-ref.ts": "export default function captureInstanceExecution() { return handle }\n",
+      "effect/default-barrel.ts": 'export { default as exposed } from "./instance-ref"\n',
+      "effect/namespace-default.ts": [
+        'import * as lifecycle from "./instance-ref"',
+        "export const exposed = lifecycle",
+      ].join("\n"),
+      "effect/namespace-default-barrel.ts": [
+        'import * as lifecycle from "./default-barrel"',
+        "export default lifecycle",
+      ].join("\n"),
+    },
+  })
+  await using _canonicalDefault = canonicalDefault.tmp
+  const defaultStderr = (await run(["--check"], canonicalDefault.env)).stderr
+  for (const file of ["src/effect/namespace-default.ts", "src/effect/namespace-default-barrel.ts"]) {
+    expect(defaultStderr).toContain(`raw lifecycle helper cannot be re-exported: ${file}`)
+  }
+
+  const ordinary = await fixture({
+    source: {
+      "ordinary/helper.ts": "export function captureInstanceExecution() { return undefined }\n",
+      "ordinary/default-helper.ts": "export default function captureInstanceExecution() { return undefined }\n",
+      "effect/ordinary-namespace.ts": [
+        'import * as lifecycle from "../ordinary/helper"',
+        "export { lifecycle }",
+        "export const exposed = lifecycle",
+      ].join("\n"),
+      "effect/unused-namespace.ts": 'import * as lifecycle from "./instance-ref"\nexport const stable = true',
+      "effect/ordinary-default-namespace.ts": [
+        'import * as lifecycle from "../ordinary/default-helper"',
+        "export const exposed = lifecycle",
+      ].join("\n"),
+      "effect/type-namespace.ts": [
+        'import type * as lifecycle from "./instance-ref"',
+        "export type { lifecycle }",
+      ].join("\n"),
+      "effect/instance-ref.ts": "export function captureInstanceExecution() { return handle }\n",
+    },
+  })
+  await using _ordinary = ordinary.tmp
+  expect((await run(["--check"], ordinary.env)).stderr).not.toContain(
+    "raw lifecycle helper cannot be re-exported",
+  )
+})
+
 test("exported raw helper bindings use canonical symbol provenance", async () => {
   const canonical = await fixture({
     source: {
@@ -3823,6 +4562,55 @@ test("raw helpers and private joins accept only their frozen symbol structure", 
     "private lifecycle join call is not exact-allowlisted",
   )
 
+})
+
+test("raw helper call and apply forms cannot bypass exact contracts", async () => {
+  for (const [name, invocation] of [
+    ["call", "captureInstanceExecution.call(undefined)"],
+    ["apply", "captureInstanceExecution.apply(undefined, [])"],
+    ["alias call", "capture.call(undefined)"],
+  ] as const) {
+    const input = await fixture({
+      source: {
+        "effect/bootstrap-runtime.ts": [
+          ...(name === "alias call" ? ["const capture = captureInstanceExecution"] : []),
+          "export function bootstrap() {",
+          `  const execution = ${invocation}`,
+          "  return makeOpaqueBootstrapHandle(execution)",
+          "}",
+        ].join("\n"),
+      },
+    })
+    await using _ = input.tmp
+    expect((await run(["--check"], input.env)).stderr, name).toContain(
+      "raw lifecycle helper call is not exact-allowlisted",
+    )
+  }
+
+  const unauthorized = await fixture({
+    source: {
+      "effect/callback.ts": [
+        "export function direct() { return captureInstanceExecution.call(undefined) }",
+        "export function applied() { return captureInstanceExecution.apply(undefined, []) }",
+      ].join("\n"),
+    },
+  })
+  await using _unauthorized = unauthorized.tmp
+  expect((await run(["--check"], unauthorized.env)).stderr).toContain(
+    "raw lifecycle helper is not allowlisted: src/effect/callback.ts",
+  )
+
+  const ordinary = await fixture({
+    source: {
+      "effect/callback.ts": [
+        "function captureInstanceExecution() { return ordinary }",
+        "export const called = captureInstanceExecution.call(undefined)",
+        "export const applied = captureInstanceExecution.apply(undefined, [])",
+      ].join("\n"),
+    },
+  })
+  await using _ordinary = ordinary.tmp
+  expect((await run(["--check"], ordinary.env)).stderr).not.toContain("raw lifecycle helper")
 })
 
 test("equivalent private joins obey exact fingerprints and cardinality", async () => {
