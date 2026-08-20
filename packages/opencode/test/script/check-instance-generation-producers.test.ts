@@ -1700,6 +1700,182 @@ test("capture provenance binds capture and restore to the same private WeakMap",
   })
   await using _valid = valid.tmp
   expect(await run(["--check"], valid.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+
+  const invalidConst = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const captured = new WeakMap()",
+        "const restored = new WeakMap()",
+        "export const captureInstanceExecution = () => { captured.set(handle, execution); return handle }",
+        "export const restoreInstanceExecutionSync = () => restored.get(handle)",
+      ].join("\n"),
+    },
+  })
+  await using _invalidConst = invalidConst.tmp
+  expect((await run(["--check"], invalidConst.env)).stderr).toContain(
+    "InstanceExecution capture requires module-private WeakMap provenance",
+  )
+
+  const validConst = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const provenance = new WeakMap()",
+        "export const captureInstanceExecution = () => { provenance.set(handle, execution); return handle }",
+        "export const restoreInstanceExecutionSync = () => provenance.get(handle)",
+      ].join("\n"),
+    },
+  })
+  await using _validConst = validConst.tmp
+  expect(await run(["--check"], validConst.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+
+  const mixed = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const captured = new WeakMap()",
+        "const restored = new WeakMap()",
+        "export const captureInstanceExecution = () => { captured.set(handle, execution); return handle }",
+        "export function restoreInstanceExecutionSync() { return restored.get(handle) }",
+      ].join("\n"),
+    },
+  })
+  await using _mixed = mixed.tmp
+  expect((await run(["--check"], mixed.env)).stderr).toContain(
+    "InstanceExecution capture requires module-private WeakMap provenance",
+  )
+
+  const exportAlias = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const captured = new WeakMap()",
+        "const restored = new WeakMap()",
+        "const capture = () => { captured.set(handle, execution); return handle }",
+        "export { capture as captureInstanceExecution }",
+        "export const restoreInstanceExecutionSync = () => restored.get(handle)",
+      ].join("\n"),
+    },
+  })
+  await using _exportAlias = exportAlias.tmp
+  expect((await run(["--check"], exportAlias.env)).stderr).toContain(
+    "InstanceExecution capture requires module-private WeakMap provenance",
+  )
+
+  const restoreAlias = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const provenance = new WeakMap()",
+        "export const captureInstanceExecution = () => { provenance.set(handle, execution); return handle }",
+        "const restore = () => provenance.get(handle)",
+        "export { restore as restoreInstanceExecutionSync }",
+      ].join("\n"),
+    },
+  })
+  await using _restoreAlias = restoreAlias.tmp
+  expect(await run(["--check"], restoreAlias.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+
+  const nestedDecoy = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const captured = new WeakMap()",
+        "const restored = new WeakMap()",
+        "export const captureInstanceExecution = () => { captured.set(handle, execution); return handle }",
+        "export const restoreInstanceExecutionSync = () => restored.get(handle)",
+        "function decoy() {",
+        "  function restoreInstanceExecutionSync() { return captured.get(handle) }",
+        "  return restoreInstanceExecutionSync",
+        "}",
+      ].join("\n"),
+    },
+  })
+  await using _nestedDecoy = nestedDecoy.tmp
+  expect((await run(["--check"], nestedDecoy.env)).stderr).toContain(
+    "InstanceExecution capture requires module-private WeakMap provenance",
+  )
+
+  const privateRestore = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const provenance = new WeakMap()",
+        "export const captureInstanceExecution = () => { provenance.set(handle, execution); return handle }",
+        "const restoreInstanceExecutionSync = () => provenance.get(handle)",
+      ].join("\n"),
+    },
+  })
+  await using _privateRestore = privateRestore.tmp
+  expect((await run(["--check"], privateRestore.env)).stderr).toContain(
+    "InstanceExecution capture requires module-private WeakMap provenance",
+  )
+
+  const nonCallableCapture = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const provenance = new WeakMap()",
+        "export const captureInstanceExecution = handle",
+        "export const captureInstanceExecutionEffect = () => { provenance.set(handle, execution); return handle }",
+        "export const restoreInstanceExecutionSync = () => provenance.get(handle)",
+      ].join("\n"),
+    },
+  })
+  await using _nonCallableCapture = nonCallableCapture.tmp
+  expect((await run(["--check"], nonCallableCapture.env)).stderr).toContain(
+    "InstanceExecution capture requires module-private WeakMap provenance",
+  )
+
+  const splitCapture = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const first = new WeakMap()",
+        "const second = new WeakMap()",
+        "export const captureInstanceExecution = () => { first.set(handle, execution); return handle }",
+        "export const captureInstanceExecutionEffect = () => { second.set(handle, execution); return handle }",
+        "export const restoreInstanceExecutionSync = () => first.get(handle)",
+      ].join("\n"),
+    },
+  })
+  await using _splitCapture = splitCapture.tmp
+  expect((await run(["--check"], splitCapture.env)).stderr).toContain(
+    "InstanceExecution capture requires module-private WeakMap provenance",
+  )
+
+  const nonCallableRestore = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const provenance = new WeakMap()",
+        "export const captureInstanceExecution = () => { provenance.set(handle, execution); return handle }",
+        "export const restoreInstanceExecutionSync = handle",
+        "export const enterInstanceExecutionEffect = () => provenance.get(handle)",
+      ].join("\n"),
+    },
+  })
+  await using _nonCallableRestore = nonCallableRestore.tmp
+  expect((await run(["--check"], nonCallableRestore.env)).stderr).toContain(
+    "InstanceExecution capture requires module-private WeakMap provenance",
+  )
+
+  const allCanonical = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const provenance = new WeakMap()",
+        "export const captureInstanceExecution = () => { provenance.set(handle, execution); return handle }",
+        "export const captureInstanceExecutionEffect = () => { provenance.set(effectHandle, execution); return effectHandle }",
+        "export const restoreInstanceExecutionSync = () => provenance.get(handle)",
+        "export const enterInstanceExecutionEffect = () => provenance.get(effectHandle)",
+      ].join("\n"),
+    },
+  })
+  await using _allCanonical = allCanonical.tmp
+  expect(await run(["--check"], allCanonical.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
+
+  const localOnly = await fixture({
+    source: {
+      "effect/instance-ref.ts": [
+        "const provenance = new WeakMap()",
+        "const captureInstanceExecution = () => { provenance.set(handle, execution); return handle }",
+        "export const restoreInstanceExecutionSync = () => provenance.get(handle)",
+      ].join("\n"),
+    },
+  })
+  await using _localOnly = localOnly.tmp
+  expect(await run(["--check"], localOnly.env)).toEqual({ exitCode: 0, stdout: "", stderr: "" })
 })
 
 test("allowlisted wrappers may consume capture internally but cannot export the captured value", async () => {
@@ -2689,6 +2865,97 @@ test("typed PromiseLike callback references cannot enter runSync", async () => {
   })
   await using _ = input.tmp
   expect((await run(["--check"], input.env)).stderr).toContain("runSync cannot accept async or PromiseLike callbacks")
+})
+
+test("PromiseLike fallback ignores returns inside nested callables", async () => {
+  const input = await fixture({
+    source: {
+      "local-promise.d.ts": localPromiseDeclarations,
+      "effect/safe-function.ts": [
+        "declare const lease: GenerationLease",
+        "lease.runSync(() => {",
+        "  function later() { return Promise.resolve() }",
+        "  return later",
+        "})",
+      ].join("\n"),
+      "effect/safe-function-expression.ts": [
+        "declare const lease: GenerationLease",
+        "lease.runSync(() => {",
+        "  return function () { return Promise.resolve() }",
+        "})",
+      ].join("\n"),
+      "effect/safe-arrow.ts": [
+        "declare const lease: GenerationLease",
+        "lease.runSync(() => {",
+        "  const later = () => { return Promise.resolve() }",
+        "  return later",
+        "})",
+      ].join("\n"),
+      "effect/safe-method.ts": [
+        "declare const lease: GenerationLease",
+        "lease.runSync(() => {",
+        "  const holder = { later() { return Promise.resolve() } }",
+        "  return holder.later",
+        "})",
+      ].join("\n"),
+      "effect/safe-getter.ts": [
+        "declare const lease: GenerationLease",
+        "lease.runSync(() => {",
+        "  return { get later() { return Promise.resolve() } }",
+        "})",
+      ].join("\n"),
+      "effect/safe-array.ts": [
+        "declare const lease: GenerationLease",
+        "lease.runSync(() => {",
+        "  return [() => Promise.resolve()]",
+        "})",
+      ].join("\n"),
+      "effect/safe-class.ts": [
+        "declare const lease: GenerationLease",
+        "lease.runSync(() => {",
+        "  class Later { run() { return Promise.resolve() } }",
+        "  return Later",
+        "})",
+      ].join("\n"),
+      "effect/unsafe-outer.ts": [
+        "declare const lease: GenerationLease",
+        "lease.runSync(() => {",
+        "  function later() { return ordinary }",
+        "  return Promise.resolve()",
+        "})",
+      ].join("\n"),
+      "effect/unsafe-branch.ts": [
+        "declare const lease: GenerationLease",
+        "declare const pick: boolean",
+        "lease.runSync(() => {",
+        "  if (pick) return Promise.resolve()",
+        "  return ordinary",
+        "})",
+      ].join("\n"),
+      "effect/unsafe-thenable.ts": [
+        "declare const lease: GenerationLease",
+        "lease.runSync(() => {",
+        "  return { then(resolve) { resolve() } }",
+        "})",
+      ].join("\n"),
+    },
+  })
+  await using _ = input.tmp
+  const stderr = (await run(["--check"], input.env)).stderr
+  for (const file of [
+    "safe-function",
+    "safe-function-expression",
+    "safe-arrow",
+    "safe-method",
+    "safe-getter",
+    "safe-array",
+    "safe-class",
+  ]) {
+    expect(stderr).not.toContain(`runSync cannot accept async or PromiseLike callbacks: src/effect/${file}.ts`)
+  }
+  for (const file of ["unsafe-outer", "unsafe-branch", "unsafe-thenable"]) {
+    expect(stderr).toContain(`runSync cannot accept async or PromiseLike callbacks: src/effect/${file}.ts`)
+  }
 })
 
 test("runSync method aliases cannot accept PromiseLike callbacks", async () => {

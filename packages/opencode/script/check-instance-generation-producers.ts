@@ -3126,6 +3126,19 @@ function returnsPromiseLike(
   if (!ts.isBlock(callback.body)) return promiseExpression(callback.body)
   let found = false
   const visit = (node: ts.Node) => {
+    if (
+      ts.isFunctionDeclaration(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isGetAccessorDeclaration(node) ||
+      ts.isSetAccessorDeclaration(node) ||
+      ts.isConstructorDeclaration(node) ||
+      ts.isClassDeclaration(node) ||
+      ts.isClassExpression(node)
+    ) {
+      return
+    }
     if (ts.isReturnStatement(node) && node.expression && promiseExpression(node.expression)) found = true
     if (!found) node.forEachChild(visit)
   }
@@ -5365,10 +5378,28 @@ function authorityErrors(files: ParsedSource[]) {
     }
   }
   const central = files.find((file) => file.relative === "src/effect/instance-ref.ts")
-  if (central && /export function captureInstanceExecution/.test(central.text)) {
+  if (central) {
     const maps: string[] = []
-    const captures: ts.FunctionDeclaration[] = []
-    const restores: ts.FunctionDeclaration[] = []
+    const callableBody = (declaration: ts.Declaration) => {
+      if (ts.isFunctionDeclaration(declaration)) return declaration.body
+      if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) return undefined
+      const value = ownershipExpression(declaration.initializer)
+      return ts.isArrowFunction(value) || ts.isFunctionExpression(value) ? value.body : undefined
+    }
+    const moduleSymbol = central.checker.getSymbolAtLocation(central.source)
+    const moduleExports = moduleSymbol ? central.checker.getExportsOfModule(moduleSymbol) : []
+    const exportedCallableBodies = (matches: (name: string) => boolean) => {
+      return moduleExports.filter((symbol) => matches(symbol.getName())).map((binding) => ({
+        binding,
+        bodies: [...(aliasedSymbol(binding, central.checker).declarations ?? [])]
+          .map(callableBody)
+          .filter((body): body is ts.ConciseBody => !!body),
+      }))
+    }
+    const captures = exportedCallableBodies((name) => name.startsWith("captureInstanceExecution"))
+    const restores = exportedCallableBodies((name) =>
+      /^(?:restoreInstanceExecution|enterInstanceExecution)/.test(name)
+    )
     const collect = (node: ts.Node) => {
       if (
         ts.isVariableStatement(node) &&
@@ -5386,22 +5417,19 @@ function authorityErrors(files: ParsedSource[]) {
           }
         }
       }
-      if (ts.isFunctionDeclaration(node) && node.name?.text.startsWith("captureInstanceExecution")) captures.push(node)
-      if (
-        ts.isFunctionDeclaration(node) &&
-        /^(?:restoreInstanceExecution|enterInstanceExecution)/.test(node.name?.text ?? "")
-      ) {
-        restores.push(node)
-      }
       node.forEachChild(collect)
     }
     collect(central.source)
-    const valid = maps.some(
+    const valid = captures.length > 0 && restores.length > 0 && maps.some(
       (name) =>
-        captures.some((fn) => fn.body && new RegExp(`\\b${name}\\.set\\s*\\(`).test(fn.body.getText(central.source))) &&
-        restores.some((fn) => fn.body && new RegExp(`\\b${name}\\.get\\s*\\(`).test(fn.body.getText(central.source))),
+        captures.every((entry) =>
+          entry.bodies.some((body) => new RegExp(`\\b${name}\\.set\\s*\\(`).test(body.getText(central.source)))
+        ) &&
+        restores.every((entry) =>
+          entry.bodies.some((body) => new RegExp(`\\b${name}\\.get\\s*\\(`).test(body.getText(central.source)))
+        ),
     )
-    if (!valid) {
+    if (captures.length > 0 && !valid) {
       errors.push("InstanceExecution capture requires module-private WeakMap provenance: src/effect/instance-ref.ts")
     }
   }
