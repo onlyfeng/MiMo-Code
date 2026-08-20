@@ -37,7 +37,10 @@ const ref = {
 // Closure-shared state so tests can inspect spawn behavior. Mirrors
 // hangingActor in checkpoint-drain.test.ts but adds counter access plus
 // "settle the next outcome" knobs (success for T3, failure for T9/T10).
-const spawnLog: { count: number; lastInput?: { sessionID: string; parentSessionID?: string; mode: string } } = { count: 0 }
+const spawnLog: {
+  count: number
+  lastInput?: { sessionID: string; parentSessionID?: string; mode: string; task: string; tools: string[] }
+} = { count: 0 }
 const settleNextSuccess: { value: boolean } = { value: false }
 // T10 uses explicit (test-driven) settlement to avoid the documented race
 // in prune.ts:321-329 (settle watcher in checkpoint.ts deletes writers Map
@@ -66,6 +69,8 @@ const recordingActor = Layer.effect(
             sessionID: input.sessionID,
             parentSessionID: input.parentSessionID,
             mode: input.mode,
+            task: input.task,
+            tools: input.tools === "INHERIT" ? [] : [...input.tools],
           }
           const outcome = yield* Deferred.make<AgentOutcome>()
           if (settleNextSuccess.value) {
@@ -184,6 +189,24 @@ describe("checkpoint writer child-session isolation", () => {
         // false topic-missing → MAX_PRE_REACT loop.
         expect(spawnLog.lastInput?.sessionID).toBe(children[0].id)
         expect(spawnLog.lastInput?.parentSessionID).toBe(info.id)
+        if (!spawnLog.lastInput) throw new Error("checkpoint writer did not spawn")
+        expect(spawnLog.lastInput?.tools).toEqual([
+          "read",
+          "write",
+          "edit",
+          "apply_patch",
+          "glob",
+          "grep",
+          "task",
+        ])
+        const contracts = [
+          ...(spawnLog.lastInput?.task.matchAll(
+            /The ([^.]+) tools are available; do not invoke others\./g,
+          ) ?? []),
+        ]
+        expect(contracts).toHaveLength(1)
+        expect(contracts[0]?.[1]?.split(", ")).toEqual(spawnLog.lastInput?.tools)
+        expect(spawnLog.lastInput?.task).not.toContain("Available tools (runtime-enforced whitelist)")
       }),
     ),
   )
