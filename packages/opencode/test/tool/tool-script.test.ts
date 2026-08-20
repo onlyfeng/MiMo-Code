@@ -592,7 +592,7 @@ describe("exec", () => {
       [],
     )
     expect(result.metadata.status).toBe("completed")
-    expect(result.output).toContain("tools.write/tools.edit")
+    expect(result.output).toContain("tools.apply_patch")
   })
 
   test("files.readText reads worktree files raw (no line numbers)", async () => {

@@ -101,7 +101,7 @@ export function renderToolScriptDeclarations(defs: Tool.Def[]): string {
     "declare const files: {",
     "  /** Raw file contents — no line numbers, no truncation. null if missing. Paths: worktree or OS tmp. */",
     "  readText(path: string): Promise<string | null>",
-    "  /** Write raw text; parent dirs auto-created. OS tmp dir ONLY — project writes go through tools.write/edit. */",
+    "  /** Write raw text; parent dirs auto-created. OS tmp dir ONLY — project writes go through tools.apply_patch. */",
     "  writeText(path: string, content: string): Promise<void>",
     "}",
     "```",
@@ -247,7 +247,7 @@ const files = {
 `
 
 /** Jail for the `files` raw-IO primitives. Read: worktree + OS tmp. Write: OS
- * tmp ONLY — project writes must go through tools.write/edit so Permission.ask
+ * tmp ONLY — project writes must go through tools.apply_patch so Permission.ask
  * applies (enforced here, not just advised in the prompt). Containment is
  * checked on REALPATHS: macOS /tmp and /var are symlinks into /private, so a
  * lexical check rejects the literal "/tmp/x" even though it lives inside the
@@ -274,7 +274,7 @@ function resolveJailed(roots: string[], p: string, kind: "read" | "write"): stri
   if (canonRoots.some((root) => abs === root || Filesystem.contains(root, abs))) return abs
   throw new Error(
     kind === "write"
-      ? `files.writeText is limited to the OS temp dir — write project files via tools.write/tools.edit: ${JSON.stringify(p)}`
+      ? `files.writeText is limited to the OS temp dir — write project files via tools.apply_patch: ${JSON.stringify(p)}`
       : `path outside allowed roots (worktree, tmp): ${JSON.stringify(p)}`,
   )
 }
@@ -649,7 +649,7 @@ export const ToolScriptTool = Tool.define(
           // Raw file IO (`files.*`): machine-to-machine data channel, bypassing the
           // agent-facing read/write formatting (line numbers, truncation). Reads are
           // jailed to worktree + OS tmp; writes to OS tmp ONLY (project writes must
-          // carry permissions → tools.write/edit). Read side also caps size so a
+          // carry permissions → tools.apply_patch). Read side also caps size so a
           // giant file can't blow the guest memory limit.
           const readText: HostFn = async (p: unknown) => {
             const abs = resolveJailed(jailRoots, String(p), "read")

@@ -13,10 +13,10 @@ upstream synchronization re-evaluates an entry.
 
 - Status: active
 - Scope: fork `main` and propagation from `main` to `dev/compat`
-- Last reviewed: 2026-08-19
+- Last reviewed: 2026-08-20
 - Upstream review range: `59f25b6ee95c3463bbe5b886366822d2fb8e3c4b`..
-  `d0739e650db6837dc0dfce5ecc3ced992afbf6bc`
-- Fork behavior head reviewed: `3594dd8f9c04dc6910ef940704603f8e24e22724`
+  `6ee774bad24c4f830536167d8db5e0d81ec50ba5`
+- Fork behavior head reviewed: `0f07797eda6f6e3f8b8ad68509f95121067192cc`
 
 ## FD-001 — `--yolo` must not temporarily mutate delete approval state
 
@@ -218,3 +218,49 @@ upstream synchronization re-evaluates an entry.
   that is consumed unchanged by prompt selection, MCP discovery, every tool
   registry call, frozen prefix capture, and exec dispatch, with regressions for
   alias conflicts, explicit overrides, and GPT-4 families.
+
+## FD-006 — `exec` remains an optional composition tool, not an authority gateway
+
+- Status: active
+- Upstream anchors: `7f6ddefee6fb7f89a27fccbdb05eac1103e4f005`, merged by
+  `6ee774bad24c4f830536167d8db5e0d81ec50ba5`
+- Fork contract: GPT/Codex models retain their direct, permission-visible tool
+  surface. `exec` may batch ordinary data and file operations, but it is not the
+  sole outer gateway and may not hide shell execution, agent/task orchestration,
+  user questions, skills, session/workflow control, cron, memory, or history
+  behind one opaque call. Shell, agent/task orchestration, user questions,
+  skills, session/workflow control, cron, and directory changes remain excluded
+  from the nested `tools.*` catalog; the existing nested data-oriented tools do
+  not justify hiding their direct outer surface. The public exec compute budget
+  remains `timeout_seconds`, measured in seconds; do not silently rename it to
+  `timeout` measured in milliseconds.
+- Rationale: collapsing independently reviewed capabilities into one outer
+  `exec` call makes the model-visible schema smaller by hiding rather than
+  removing authority. It weakens per-tool auditability, expands a high-budget
+  script into shell and conversation control, and obscures which nested
+  operation crossed a permission or lifecycle boundary. Changing the timeout
+  field and unit at the same time also turns previously valid callers into
+  errors or changes their deadline by three orders of magnitude.
+- Required sync check: inspect
+  `packages/opencode/src/agent/prompt/generate-gpt.txt`,
+  `packages/opencode/src/session/prompt.ts`,
+  `packages/opencode/src/session/prompt/gpt.txt`,
+  `packages/opencode/src/tool/registry.ts`,
+  `packages/opencode/src/tool/tool-script-ref.ts`,
+  `packages/opencode/src/tool/tool-script.ts`,
+  `packages/opencode/src/tool/tool-script.txt`, the TUI tool-visibility helper,
+  and the actor, agent, registry invocation, skill, skill-search, exec,
+  whitelist, and TUI visibility tests. Verify the actor/agent/frozen whitelist
+  intersection, disabled-tools filter, full FD-005 model identity, WeakMap
+  registry lifetime, nested exclusion set, direct GPT tool surface, and
+  seconds-based timeout contract together.
+- 2026-08-20 review: the wording that directs project writes through
+  `tools.apply_patch`, the Bash timeout unit clarification, and the TUI rule
+  that keeps a completed outer `exec` visible were adopted. The single-exec
+  GPT surface, nested shell/control expansion, and breaking timeout rename were
+  rejected.
+- Reconsider only if: nested execution has an immutable request-scoped
+  capability set, every nested operation remains separately visible and
+  attributable to permission and lifecycle enforcement, shell/control tools
+  cannot bypass their direct boundaries, and a compatibility window preserves
+  the existing timeout field and unit.
