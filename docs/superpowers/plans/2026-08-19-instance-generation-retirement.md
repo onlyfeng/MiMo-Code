@@ -225,6 +225,8 @@ git commit -m "refactor(instance): make disposer phases generation aware"
 
 - Modify: `packages/opencode/src/project/instance.ts`
 - Modify: `packages/opencode/src/project/bootstrap.ts`
+- Modify: `packages/opencode/src/project/project.ts`
+- Modify: `packages/opencode/src/project/vcs.ts`
 - Modify: `packages/opencode/src/config/config.ts`
 - Modify: `packages/opencode/src/bus/index.ts`
 - Modify: `packages/opencode/src/bus/global.ts`
@@ -236,12 +238,24 @@ git commit -m "refactor(instance): make disposer phases generation aware"
 - Modify: `packages/opencode/src/effect/run-service.ts`
 - Modify: `packages/opencode/src/effect/bridge.ts`
 - Modify: `packages/opencode/src/server/routes/instance/httpapi/server.ts`
+- Modify: `packages/opencode/src/server/routes/instance/experimental.ts`
+- Modify: `packages/opencode/src/server/routes/instance/session.ts`
 - Modify: every raw Task 0 `InstanceRef` provider, including
   `packages/opencode/src/actor/spawn.ts`, `packages/opencode/src/inbox/inbox.ts`,
   `packages/opencode/src/workflow/runtime.ts`, and
   `packages/opencode/src/tool/session.ts`.
-- Modify/create: owner, boot, runtime, Bus, HTTP API, actor, inbox, workflow,
-  and tool-session admission tests.
+- Create: `packages/opencode/test/project/instance-bootstrap-retirement.test.ts`
+- Modify: `packages/opencode/test/actor/spawn-notification.test.ts` and
+  `packages/opencode/test/actor/cancel-notification.test.ts`.
+- Modify: `packages/opencode/test/actor/spawn.test.ts`,
+  `packages/opencode/test/effect/run-service.test.ts`,
+  `packages/opencode/test/inbox/fork-agent-compat.test.ts`,
+  `packages/opencode/test/project/instance-dispose.test.ts`,
+  `packages/opencode/test/server/httpapi-instance-admission.test.ts`,
+  `packages/opencode/test/tool/session-tool.test.ts`, and
+  `packages/opencode/test/workflow/runtime-worktree.test.ts`.
+- Modify/create: the remaining owner, runtime, Bus, HTTP API, actor, inbox,
+  workflow, and tool-session admission tests listed in the commands below.
 - Update: producer inventory.
 
 **Required package-internal types**
@@ -417,6 +431,13 @@ Add deterministic tests for:
 
 - deferred boot publication: owner CAS and provider lease precede boot start;
 - close during held boot; disposer registered before boot settlement is seen;
+- hold icon discovery and VCS initialization after admission, then retire their
+  exact directory; the boot receipt waits for cancellation/settlement, and no
+  icon write, project update, branch publication, or later discovery starts
+  after terminal settlement. Cover both the ordinary boot call and
+  `Project.initGit`: both operations are awaited in their calling Effect, so
+  boot is owned by `BootReceipt` and `initGit` by its current
+  request/instance owner, never by the long-lived Project or VCS service scope;
 - synchronous and asynchronous boot failure automatically become one
   `Closing(boot_failure)` without replacing reload/shutdown/maintenance intent;
 - no replacement opens while cleanup is held; exactly one queued successor
@@ -537,7 +558,7 @@ same ledger primitives rather than inventing a second ledger.
 
 ```bash
 cd packages/opencode
-bun test test/effect/app-runtime-logger.test.ts test/effect/run-service.test.ts test/effect/instance-state.test.ts test/project/instance-dispose.test.ts test/server/httpapi-instance-admission.test.ts test/actor/spawn.test.ts test/inbox/fork-agent-compat.test.ts test/workflow/runtime-worktree.test.ts test/tool/session-tool.test.ts --timeout 60000
+bun test test/effect/app-runtime-logger.test.ts test/effect/run-service.test.ts test/effect/instance-state.test.ts test/project/instance-dispose.test.ts test/server/httpapi-instance-admission.test.ts test/actor/spawn.test.ts test/actor/spawn-notification.test.ts test/actor/cancel-notification.test.ts test/inbox/fork-agent-compat.test.ts test/workflow/runtime-worktree.test.ts test/tool/session-tool.test.ts --timeout 60000
 ```
 
 Expected RED: source/import review identifies every frozen raw provider and the
@@ -703,9 +724,15 @@ fail if a new declaration or caller appears.
 
 - [ ] **Step 5: Make boot work receipt-owned and terminal events single-owner**
 
-Move bootstrap initialization and memory reconcile into `BootReceipt.settled`;
-partial resource registration is complete before that receipt settles on
-failure. Remove the duplicate local Bus disposed publication. Terminal CAS
+Move bootstrap initialization, Project icon discovery reached from boot, VCS
+initialization, and memory reconcile into `BootReceipt.settled`; partial
+resource registration is complete before that receipt settles on failure.
+`Project.fromDirectory` awaits icon discovery instead of forking it into the
+Project layer scope, and `Vcs.init` awaits InstanceState initialization
+instead of forking it into the VCS layer scope. The boot caller therefore
+remains in the boot receipt, while `Project.initGit` remains in its current
+request/instance owner.
+Remove the duplicate local Bus disposed publication. Terminal CAS
 installs a non-admitting `Terminal(g)` reservation holding either Absent or
 successor outcome. Safe GlobalBus emission catches sync throws and immediately
 attaches rejection handlers to returned promises without awaiting them. It
@@ -722,10 +749,10 @@ shutdown; successor init then remains zero.
 
 ```bash
 cd packages/opencode
-bun test test/project/instance-dispose.test.ts test/project/instance-bootstrap-retirement.test.ts test/bus/bus.test.ts test/effect/instance-registry.test.ts test/effect/app-runtime-logger.test.ts test/effect/run-service.test.ts test/effect/instance-state.test.ts test/server/httpapi-instance-admission.test.ts test/actor/spawn.test.ts test/inbox/fork-agent-compat.test.ts test/workflow/runtime-worktree.test.ts test/tool/session-tool.test.ts --timeout 60000
+bun test test/project/instance-dispose.test.ts test/project/instance-bootstrap-retirement.test.ts test/bus/bus.test.ts test/effect/instance-registry.test.ts test/effect/app-runtime-logger.test.ts test/effect/run-service.test.ts test/effect/instance-state.test.ts test/server/httpapi-instance-admission.test.ts test/actor/spawn.test.ts test/actor/spawn-notification.test.ts test/actor/cancel-notification.test.ts test/inbox/fork-agent-compat.test.ts test/workflow/runtime-worktree.test.ts test/tool/session-tool.test.ts --timeout 60000
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- packages/opencode/src/project/instance.ts packages/opencode/src/project/bootstrap.ts packages/opencode/src/config/config.ts packages/opencode/src/bus/index.ts packages/opencode/src/bus/global.ts packages/opencode/src/effect/instance-ref.ts packages/opencode/src/effect/instance-registry.ts packages/opencode/src/effect/instance-state.ts packages/opencode/src/effect/bootstrap-runtime.ts packages/opencode/src/effect/run-service.ts packages/opencode/src/effect/bridge.ts packages/opencode/src/server/routes/instance/httpapi/server.ts packages/opencode/src/actor/spawn.ts packages/opencode/src/inbox/inbox.ts packages/opencode/src/workflow/runtime.ts packages/opencode/src/tool/session.ts packages/opencode/test/project/instance-dispose.test.ts packages/opencode/test/project/instance-bootstrap-retirement.test.ts packages/opencode/test/bus/bus.test.ts packages/opencode/test/effect/instance-registry.test.ts packages/opencode/test/effect/app-runtime-logger.test.ts packages/opencode/test/effect/run-service.test.ts packages/opencode/test/effect/instance-state.test.ts packages/opencode/test/server/httpapi-instance-admission.test.ts packages/opencode/test/actor/spawn.test.ts packages/opencode/test/inbox/fork-agent-compat.test.ts packages/opencode/test/workflow/runtime-worktree.test.ts packages/opencode/test/tool/session-tool.test.ts docs/compose/spec/instance-generation-producer-inventory.md
+git add -- packages/opencode/src/project/instance.ts packages/opencode/src/project/bootstrap.ts packages/opencode/src/project/project.ts packages/opencode/src/project/vcs.ts packages/opencode/src/config/config.ts packages/opencode/src/bus/index.ts packages/opencode/src/bus/global.ts packages/opencode/src/effect/instance-ref.ts packages/opencode/src/effect/instance-registry.ts packages/opencode/src/effect/instance-state.ts packages/opencode/src/effect/bootstrap-runtime.ts packages/opencode/src/effect/run-service.ts packages/opencode/src/effect/bridge.ts packages/opencode/src/server/routes/instance/httpapi/server.ts packages/opencode/src/server/routes/instance/experimental.ts packages/opencode/src/server/routes/instance/session.ts packages/opencode/src/actor/spawn.ts packages/opencode/src/inbox/inbox.ts packages/opencode/src/workflow/runtime.ts packages/opencode/src/tool/session.ts packages/opencode/test/project/instance-dispose.test.ts packages/opencode/test/project/instance-bootstrap-retirement.test.ts packages/opencode/test/bus/bus.test.ts packages/opencode/test/effect/instance-registry.test.ts packages/opencode/test/effect/app-runtime-logger.test.ts packages/opencode/test/effect/run-service.test.ts packages/opencode/test/effect/instance-state.test.ts packages/opencode/test/server/httpapi-instance-admission.test.ts packages/opencode/test/actor/spawn.test.ts packages/opencode/test/actor/spawn-notification.test.ts packages/opencode/test/actor/cancel-notification.test.ts packages/opencode/test/inbox/fork-agent-compat.test.ts packages/opencode/test/workflow/runtime-worktree.test.ts packages/opencode/test/tool/session-tool.test.ts docs/compose/spec/instance-generation-producer-inventory.md
 git diff --cached --check
 git commit -m "feat(instance): add generation owner and paired authority"
 ```
@@ -954,22 +981,88 @@ git commit -m "fix(session): settle exact runners before instance dependencies"
 
 **Files**
 
-- Modify: config, history, prune, checkpoint, actor, inbox, tool-session, and
-  workflow runtime sources named by the inventory.
-- Modify: `packages/opencode/src/pty/index.ts`
-- Modify: `packages/opencode/src/file/watcher.ts`
-- Modify: `packages/opencode/src/cli/cmd/run.ts`
-- Modify: `packages/opencode/src/cli/cmd/run-completion.ts`
-- Modify: `packages/opencode/src/mcp/index.ts`
-- Modify: `packages/opencode/src/mcp/oauth-callback.ts`
-- Modify: instance middleware plus event, PTY, session, and TUI control routes.
-- Modify: `packages/opencode/src/server/proxy.ts` and
-  `packages/opencode/src/server/workspace.ts` for proxied/relayed body transfer.
-- Create/modify: producer, stream, checkpoint, actor/inbox/tool/workflow,
-  watcher, PTY, and TUI-control tests.
-- Modify: `packages/opencode/test/cli/run-completion.test.ts`
-- Create: `packages/opencode/test/cli/run.test.ts`
-- Modify: `packages/opencode/test/mcp/oauth-callback.test.ts`
+- Modify every exact Task 5 inventory source:
+  - `packages/opencode/src/actor/group.ts`,
+    `packages/opencode/src/actor/waiter.ts`,
+    `packages/opencode/src/bus/index.ts`,
+    `packages/opencode/src/cli/cmd/run.ts`, and
+    `packages/opencode/src/cli/cmd/run-completion.ts`;
+  - `packages/opencode/src/config/agent.ts`,
+    `packages/opencode/src/config/command.ts`,
+    `packages/opencode/src/config/config.ts`,
+    `packages/opencode/src/cron/scheduler.ts`,
+    `packages/opencode/src/effect/cross-spawn-spawner.ts`, and
+    `packages/opencode/src/effect/hard-timeout.ts`;
+  - `packages/opencode/src/file/ripgrep.ts`,
+    `packages/opencode/src/file/watcher.ts`,
+    `packages/opencode/src/history/backfill.ts`,
+    `packages/opencode/src/lsp/client.ts`,
+    `packages/opencode/src/lsp/lsp.ts`,
+    `packages/opencode/src/mcp/index.ts`,
+    `packages/opencode/src/mcp/oauth-callback.ts`,
+    `packages/opencode/src/mcp/sampling.ts`, and
+    `packages/opencode/src/permission/index.ts`;
+  - `packages/opencode/src/plugin/codex.ts`,
+    `packages/opencode/src/plugin/index.ts`,
+    `packages/opencode/src/plugin/mimo.ts`,
+    `packages/opencode/src/plugin/xai.ts`,
+    `packages/opencode/src/provider/provider.ts`,
+    `packages/opencode/src/pty/index.ts`,
+    `packages/opencode/src/pty/pty.bun.ts`, and
+    `packages/opencode/src/pty/pty.node.ts`;
+  - `packages/opencode/src/server/proxy.ts`,
+    `packages/opencode/src/server/routes/instance/event.ts`,
+    `packages/opencode/src/server/routes/instance/pty.ts`,
+    `packages/opencode/src/server/routes/instance/session.ts`, and
+    `packages/opencode/src/server/routes/instance/tui.ts`;
+  - `packages/opencode/src/session/checkpoint.ts`,
+    `packages/opencode/src/session/cron-bridge.ts`,
+    `packages/opencode/src/session/goal.ts`,
+    `packages/opencode/src/session/llm.ts`,
+    `packages/opencode/src/session/message-v2.ts`,
+    `packages/opencode/src/session/processor.ts`,
+    `packages/opencode/src/session/prompt.ts`,
+    `packages/opencode/src/session/prune.ts`, and
+    `packages/opencode/src/share/session.ts`;
+  - `packages/opencode/src/tool/actor.ts`,
+    `packages/opencode/src/tool/bash.ts`,
+    `packages/opencode/src/tool/read.ts`,
+    `packages/opencode/src/tool/truncate.ts`,
+    `packages/opencode/src/tool/workflow.ts`,
+    `packages/opencode/src/workflow/runtime.ts`, and
+    `packages/opencode/src/workflow/sandbox.ts`.
+- Modify the shared lifecycle/support sites used by those rows:
+  `packages/opencode/src/project/instance.ts`,
+  `packages/opencode/src/actor/spawn.ts`,
+  `packages/opencode/src/inbox/inbox.ts`,
+  `packages/opencode/src/tool/session.ts`,
+  `packages/opencode/src/server/workspace.ts`, and
+  `packages/opencode/src/server/routes/instance/middleware.ts`.
+- Create/modify every exact Task 5 inventory test:
+  `test/actor/spawn.test.ts`, `test/bus/subscription-retirement.test.ts`,
+  `test/cli/run-completion.test.ts`, `test/cli/run.test.ts`,
+  `test/config/dependency-retirement.test.ts`,
+  `test/effect/cross-spawn-spawner-retirement.test.ts`,
+  `test/file/watcher-retirement.test.ts`,
+  `test/history/backfill-retirement.test.ts`, `test/lsp/lifecycle.test.ts`,
+  `test/mcp/lifecycle.test.ts`, `test/mcp/oauth-callback.test.ts`,
+  `test/mcp/sampling-e2e.test.ts`,
+  `test/plugin/generation-retirement.test.ts`,
+  `test/plugin/oauth-retirement.test.ts`,
+  `test/project/instance-producer-retirement.test.ts`,
+  `test/pty/retirement.test.ts`,
+  `test/server/instance-stream-retirement.test.ts`,
+  `test/server/tui-control-retirement.test.ts`,
+  `test/session/auto-memory-retirement.test.ts`,
+  `test/session/checkpoint-drain.test.ts`,
+  `test/session/cron-bridge-retirement.test.ts`,
+  `test/session/processor-summary-retirement.test.ts`,
+  `test/session/prompt-background-retirement.test.ts`,
+  `test/session/prompt-cancel-retirement.test.ts`,
+  `test/session/prompt-shell-retirement.test.ts`,
+  `test/tool/read-lifecycle.test.ts`, and
+  `test/workflow/runtime-retirement.test.ts`.
+- Modify the supplemental cross-owner tests named by the commands below.
 - Update: producer inventory; every row must now name a concrete API and test.
 
 **Interfaces**
@@ -1102,9 +1195,36 @@ auth channel clears the five-minute timer and both indexes, rejects exactly its
 own waiter, and races a callback with first-wins settlement; it neither closes
 the process-wide listener nor affects another pending auth.
 
+For the mounted cron bridge, use Deferred gates to hold an admitted scheduler
+tick, busy-to-idle keepalive, and `onFire` prompt injection. Retiring the
+mount's exact generation seals later admission, clears the interval, removes
+both Bus subscriptions, releases the scheduler lock, and waits for
+`CronBridge.stop()` plus all admitted callbacks. A successor generation may
+mount again after settlement; the test must not dispose the process-wide
+`AppRuntime` or disturb unrelated shared services.
+
 ```bash
 cd packages/opencode
-bun test test/project/instance-producer-retirement.test.ts test/server/instance-stream-retirement.test.ts test/server/tui-control-retirement.test.ts test/session/checkpoint-drain.test.ts test/actor/spawn-notification.test.ts test/actor/stall-watchdog.test.ts test/inbox/wake-matrix.test.ts test/tool/session-tool.test.ts test/workflow/runtime-worktree.test.ts test/workflow/runtime-retirement.test.ts test/file/watcher-retirement.test.ts test/pty/retirement.test.ts test/cli/run-completion.test.ts test/cli/run.test.ts test/mcp/oauth-callback.test.ts --timeout 60000
+bun test --timeout 60000 \
+  test/actor/spawn.test.ts test/actor/spawn-notification.test.ts \
+  test/actor/stall-watchdog.test.ts test/bus/subscription-retirement.test.ts \
+  test/cli/run-completion.test.ts test/cli/run.test.ts \
+  test/config/dependency-retirement.test.ts \
+  test/effect/cross-spawn-spawner-retirement.test.ts \
+  test/file/watcher-retirement.test.ts test/history/backfill-retirement.test.ts \
+  test/inbox/wake-matrix.test.ts test/lsp/lifecycle.test.ts \
+  test/mcp/lifecycle.test.ts test/mcp/oauth-callback.test.ts test/mcp/sampling-e2e.test.ts \
+  test/plugin/generation-retirement.test.ts test/plugin/oauth-retirement.test.ts \
+  test/project/instance-producer-retirement.test.ts test/pty/retirement.test.ts \
+  test/server/instance-stream-retirement.test.ts test/server/tui-control-retirement.test.ts \
+  test/session/auto-memory-retirement.test.ts test/session/checkpoint-drain.test.ts \
+  test/session/cron-bridge-retirement.test.ts \
+  test/session/processor-summary-retirement.test.ts \
+  test/session/prompt-background-retirement.test.ts \
+  test/session/prompt-cancel-retirement.test.ts \
+  test/session/prompt-shell-retirement.test.ts \
+  test/tool/read-lifecycle.test.ts test/tool/session-tool.test.ts \
+  test/workflow/runtime-worktree.test.ts test/workflow/runtime-retirement.test.ts
 ```
 
 - [ ] **Step 2: Migrate every inventoried producer**
@@ -1131,6 +1251,15 @@ completion channel; both its timer/polls and the later detached event loop enter
 that parent. The attached-client path remains command-owned. Each MCP OAuth
 pending waiter is a separate nested auth channel. The shared loopback listener
 remains process-owned and moves to SharedShutdown in Task 8.
+Before `SessionPrompt.run` starts its detached cron mount, acquire a short
+same-target handoff in the current generation and register one transferred cron
+channel inside the synchronous handoff region. The scheduler tick/interval,
+both `CronBridge` Bus subscriptions, busy-to-idle keepalive, and `onFire`
+prompt injection all enter that channel. Closing it seals admission, clears the
+interval, unsubscribes both handlers, releases the scheduler lock, calls the
+existing `CronBridge.stop()`, and joins callbacks admitted before the seal.
+Do not add a second lifecycle framework or rely on global
+`AppRuntime.dispose()` for directory retirement.
 
 The retirement order after Task 4 is fixed:
 
@@ -1147,12 +1276,81 @@ boot settled
 
 ```bash
 cd packages/opencode
-bun test test/project/instance-producer-retirement.test.ts test/server/instance-stream-retirement.test.ts test/server/tui-control-retirement.test.ts test/session/checkpoint-drain.test.ts test/actor/spawn-notification.test.ts test/actor/stall-watchdog.test.ts test/inbox/wake-matrix.test.ts test/tool/session-tool.test.ts test/workflow/runtime-worktree.test.ts test/workflow/runtime-retirement.test.ts test/file/watcher-retirement.test.ts test/pty/retirement.test.ts test/cli/run-completion.test.ts test/cli/run.test.ts test/mcp/oauth-callback.test.ts --timeout 60000
+bun test --timeout 60000 \
+  test/actor/spawn.test.ts test/actor/spawn-notification.test.ts \
+  test/actor/stall-watchdog.test.ts test/bus/subscription-retirement.test.ts \
+  test/cli/run-completion.test.ts test/cli/run.test.ts \
+  test/config/dependency-retirement.test.ts \
+  test/effect/cross-spawn-spawner-retirement.test.ts \
+  test/file/watcher-retirement.test.ts test/history/backfill-retirement.test.ts \
+  test/inbox/wake-matrix.test.ts test/lsp/lifecycle.test.ts \
+  test/mcp/lifecycle.test.ts test/mcp/oauth-callback.test.ts test/mcp/sampling-e2e.test.ts \
+  test/plugin/generation-retirement.test.ts test/plugin/oauth-retirement.test.ts \
+  test/project/instance-producer-retirement.test.ts test/pty/retirement.test.ts \
+  test/server/instance-stream-retirement.test.ts test/server/tui-control-retirement.test.ts \
+  test/session/auto-memory-retirement.test.ts test/session/checkpoint-drain.test.ts \
+  test/session/cron-bridge-retirement.test.ts \
+  test/session/processor-summary-retirement.test.ts \
+  test/session/prompt-background-retirement.test.ts \
+  test/session/prompt-cancel-retirement.test.ts \
+  test/session/prompt-shell-retirement.test.ts \
+  test/tool/read-lifecycle.test.ts test/tool/session-tool.test.ts \
+  test/workflow/runtime-worktree.test.ts test/workflow/runtime-retirement.test.ts
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- packages/opencode/src/project/instance.ts packages/opencode/src/config/config.ts packages/opencode/src/history/backfill.ts packages/opencode/src/session/prune.ts packages/opencode/src/session/checkpoint.ts packages/opencode/src/actor/spawn.ts packages/opencode/src/inbox/inbox.ts packages/opencode/src/tool/session.ts packages/opencode/src/workflow/runtime.ts packages/opencode/src/pty/index.ts packages/opencode/src/file/watcher.ts packages/opencode/src/cli/cmd/run.ts packages/opencode/src/cli/cmd/run-completion.ts packages/opencode/src/mcp/index.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/server/proxy.ts packages/opencode/src/server/workspace.ts packages/opencode/src/server/routes/instance/middleware.ts packages/opencode/src/server/routes/instance/event.ts packages/opencode/src/server/routes/instance/pty.ts packages/opencode/src/server/routes/instance/session.ts packages/opencode/src/server/routes/instance/tui.ts packages/opencode/test/project/instance-producer-retirement.test.ts packages/opencode/test/server/instance-stream-retirement.test.ts packages/opencode/test/server/tui-control-retirement.test.ts packages/opencode/test/session/checkpoint-drain.test.ts packages/opencode/test/actor/spawn-notification.test.ts packages/opencode/test/actor/stall-watchdog.test.ts packages/opencode/test/inbox/wake-matrix.test.ts packages/opencode/test/tool/session-tool.test.ts packages/opencode/test/workflow/runtime-worktree.test.ts packages/opencode/test/workflow/runtime-retirement.test.ts packages/opencode/test/file/watcher-retirement.test.ts packages/opencode/test/pty/retirement.test.ts packages/opencode/test/cli/run-completion.test.ts packages/opencode/test/cli/run.test.ts packages/opencode/test/mcp/oauth-callback.test.ts docs/compose/spec/instance-generation-producer-inventory.md
+git add -- \
+  packages/opencode/src/project/instance.ts \
+  packages/opencode/src/actor/group.ts packages/opencode/src/actor/waiter.ts packages/opencode/src/actor/spawn.ts \
+  packages/opencode/src/bus/index.ts \
+  packages/opencode/src/cli/cmd/run.ts packages/opencode/src/cli/cmd/run-completion.ts \
+  packages/opencode/src/config/agent.ts packages/opencode/src/config/command.ts packages/opencode/src/config/config.ts \
+  packages/opencode/src/cron/scheduler.ts \
+  packages/opencode/src/effect/cross-spawn-spawner.ts packages/opencode/src/effect/hard-timeout.ts \
+  packages/opencode/src/file/ripgrep.ts packages/opencode/src/file/watcher.ts \
+  packages/opencode/src/history/backfill.ts packages/opencode/src/inbox/inbox.ts \
+  packages/opencode/src/lsp/client.ts packages/opencode/src/lsp/lsp.ts \
+  packages/opencode/src/mcp/index.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/mcp/sampling.ts \
+  packages/opencode/src/permission/index.ts \
+  packages/opencode/src/plugin/codex.ts packages/opencode/src/plugin/index.ts \
+  packages/opencode/src/plugin/mimo.ts packages/opencode/src/plugin/xai.ts \
+  packages/opencode/src/provider/provider.ts \
+  packages/opencode/src/pty/index.ts packages/opencode/src/pty/pty.bun.ts packages/opencode/src/pty/pty.node.ts \
+  packages/opencode/src/server/proxy.ts packages/opencode/src/server/workspace.ts \
+  packages/opencode/src/server/routes/instance/middleware.ts \
+  packages/opencode/src/server/routes/instance/event.ts packages/opencode/src/server/routes/instance/pty.ts \
+  packages/opencode/src/server/routes/instance/session.ts packages/opencode/src/server/routes/instance/tui.ts \
+  packages/opencode/src/session/checkpoint.ts packages/opencode/src/session/cron-bridge.ts \
+  packages/opencode/src/session/goal.ts packages/opencode/src/session/llm.ts \
+  packages/opencode/src/session/message-v2.ts packages/opencode/src/session/processor.ts \
+  packages/opencode/src/session/prompt.ts packages/opencode/src/session/prune.ts \
+  packages/opencode/src/share/session.ts \
+  packages/opencode/src/tool/actor.ts packages/opencode/src/tool/bash.ts \
+  packages/opencode/src/tool/read.ts packages/opencode/src/tool/truncate.ts \
+  packages/opencode/src/tool/workflow.ts packages/opencode/src/tool/session.ts \
+  packages/opencode/src/workflow/runtime.ts packages/opencode/src/workflow/sandbox.ts \
+  packages/opencode/test/actor/spawn.test.ts packages/opencode/test/actor/spawn-notification.test.ts \
+  packages/opencode/test/actor/stall-watchdog.test.ts packages/opencode/test/bus/subscription-retirement.test.ts \
+  packages/opencode/test/cli/run-completion.test.ts packages/opencode/test/cli/run.test.ts \
+  packages/opencode/test/config/dependency-retirement.test.ts \
+  packages/opencode/test/effect/cross-spawn-spawner-retirement.test.ts \
+  packages/opencode/test/file/watcher-retirement.test.ts packages/opencode/test/history/backfill-retirement.test.ts \
+  packages/opencode/test/inbox/wake-matrix.test.ts packages/opencode/test/lsp/lifecycle.test.ts \
+  packages/opencode/test/mcp/lifecycle.test.ts packages/opencode/test/mcp/oauth-callback.test.ts \
+  packages/opencode/test/mcp/sampling-e2e.test.ts \
+  packages/opencode/test/plugin/generation-retirement.test.ts packages/opencode/test/plugin/oauth-retirement.test.ts \
+  packages/opencode/test/project/instance-producer-retirement.test.ts packages/opencode/test/pty/retirement.test.ts \
+  packages/opencode/test/server/instance-stream-retirement.test.ts packages/opencode/test/server/tui-control-retirement.test.ts \
+  packages/opencode/test/session/auto-memory-retirement.test.ts packages/opencode/test/session/checkpoint-drain.test.ts \
+  packages/opencode/test/session/cron-bridge-retirement.test.ts \
+  packages/opencode/test/session/processor-summary-retirement.test.ts \
+  packages/opencode/test/session/prompt-background-retirement.test.ts \
+  packages/opencode/test/session/prompt-cancel-retirement.test.ts \
+  packages/opencode/test/session/prompt-shell-retirement.test.ts \
+  packages/opencode/test/tool/read-lifecycle.test.ts packages/opencode/test/tool/session-tool.test.ts \
+  packages/opencode/test/workflow/runtime-worktree.test.ts packages/opencode/test/workflow/runtime-retirement.test.ts \
+  docs/compose/spec/instance-generation-producer-inventory.md
 git diff --cached --check
-# If the frozen inventory names another path, add that exact path explicitly;
+# Confirm the cached paths match the literal Task 5 source/test lists above;
 # never stage an entire src/test directory. Inspect `git diff --cached --name-status`.
 git commit -m "fix(instance): join generation channels and producers"
 ```
@@ -1476,7 +1674,9 @@ git commit -m "fix(instance): fence worktree maintenance through deletion"
 - Modify: `packages/opencode/src/server/adapter.ts`
 - Modify: `packages/opencode/src/server/adapter.bun.ts`
 - Modify: `packages/opencode/src/server/adapter.node.ts`
+- Modify: `packages/opencode/src/server/mdns.ts`
 - Modify: `packages/opencode/src/server/routes/global.ts`
+- Modify: `packages/opencode/src/cli/cmd/tui/context/exit.tsx`
 - Modify: `packages/opencode/src/cli/cmd/tui/worker.ts`
 - Modify: `packages/opencode/src/cli/cmd/tui/thread.ts`
 - Modify: `packages/opencode/src/cli/cmd/serve.ts`
@@ -1488,7 +1688,9 @@ git commit -m "fix(instance): fence worktree maintenance through deletion"
 - Modify: `packages/opencode/src/mcp/oauth-callback.ts`
 - Modify: compiled `packages/opencode/src/cli/cmd/web.ts` listener lifecycle
   without expanding Web product behavior.
-- Create/modify: real stream, TUI thread, and CLI entrypoint shutdown tests.
+- Create/modify: real stream, TUI thread, and CLI entrypoint shutdown tests,
+  including `packages/opencode/test/server/shutdown-streams.test.ts` and
+  `packages/opencode/test/cli/server-shutdown-entrypoints.test.ts`.
 - Modify: `packages/opencode/test/actor/registry.test.ts`
 - Modify: `packages/opencode/test/actor/stall-watchdog.test.ts`
 - Modify: `packages/opencode/test/skill/skill.test.ts`
@@ -1528,6 +1730,14 @@ Use real listeners, not only call-order mocks:
 - include instance Event SSE, PTY, TUI long-poll, and queued reload;
 - send SIGTERM to serve and compiled web, EOF to ACP, and TUI RPC shutdown; each
   reaches the same settled coordinator and force-closes once;
+- enable real mDNS publication, admit both `up` and `error` callbacks, and
+  begin shutdown; the shared discovery channel seals later callbacks, removes
+  listeners, awaits the `unpublishAll` callback and then the `destroy`
+  callback exactly once each, and leaves no published service or port state
+  after its receipt settles;
+- race repeated TUI exit requests while `onExit` is held; every caller shares
+  one shutdown receipt, the exit task is not recreated, and `onExit` is
+  awaited exactly once before terminal completion;
 - call TUI `rpc.server` a second time while the first listener has an active
   connection; it rejects before side effects, leaves the original listener
   intact, and never invokes raw `stop(true)`;
@@ -1632,8 +1842,13 @@ clears their interval, and settles admitted fetch/cache work. It also closes the
 process-wide MCP OAuth loopback listener, rejects residual waiters, and joins
 admitted handlers. It seals automatic heap-snapshot admission, clears the minute
 interval, and joins each admitted run through the return of the synchronous
-native snapshot write. Web coverage is lifecycle-only and does not add a new
-product feature.
+native snapshot write. The same receipt owns the mDNS discovery channel: close
+seals `up`/`error` admission, removes their listeners, runs
+`unpublishAll` to callback completion and then `destroy` to callback
+completion exactly once, clears module state, and joins the terminal cleanup
+receipt. TUI exit coalesces repeated calls into that shared receipt and awaits
+its one `onExit` callback. Web coverage is lifecycle-only and does not add a
+new product feature.
 TUI `rpc.server` is single-shot per worker lifetime. A second call rejects
 before stop/rebind/mutation; non-terminal replacement never uses raw
 `stop(true)` and terminal shutdown never reopens its intake gate.
@@ -1695,7 +1910,7 @@ bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/c
 bun script/check-fd004-boundary.ts --check
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/acp/agent.ts packages/opencode/src/cli/heap.ts packages/opencode/src/index.ts packages/opencode/src/provider/models.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/actor/registry.test.ts packages/opencode/test/actor/stall-watchdog.test.ts packages/opencode/test/skill/skill.test.ts packages/opencode/test/acp/event-subscription.test.ts packages/opencode/test/cli/heap-shutdown.test.ts packages/opencode/test/mcp/oauth-callback.test.ts packages/opencode/test/provider/models-refresh-shutdown.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
+git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/mdns.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/context/exit.tsx packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/acp/agent.ts packages/opencode/src/cli/heap.ts packages/opencode/src/index.ts packages/opencode/src/provider/models.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/actor/registry.test.ts packages/opencode/test/actor/stall-watchdog.test.ts packages/opencode/test/skill/skill.test.ts packages/opencode/test/acp/event-subscription.test.ts packages/opencode/test/cli/heap-shutdown.test.ts packages/opencode/test/mcp/oauth-callback.test.ts packages/opencode/test/provider/models-refresh-shutdown.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
 # Inspect the remaining test-only diff and require every path to be one of the
 # frozen Task 0 legacy cleanup callers before staging exactly that path list.
 git diff --name-status -- packages/opencode/test
@@ -1762,11 +1977,22 @@ bun test --timeout 60000 \
   test/session/run-state-tuple-key.test.ts test/session/checkpoint-drain.test.ts \
   test/project/instance-producer-retirement.test.ts test/server/instance-stream-retirement.test.ts \
   test/server/tui-control-retirement.test.ts test/file/watcher-retirement.test.ts \
-  test/pty/retirement.test.ts test/actor/spawn-notification.test.ts \
+  test/pty/retirement.test.ts test/actor/spawn.test.ts \
+  test/actor/spawn-notification.test.ts test/actor/cancel-notification.test.ts \
   test/actor/registry.test.ts test/actor/stall-watchdog.test.ts test/skill/skill.test.ts \
-  test/inbox/wake-matrix.test.ts \
+  test/inbox/fork-agent-compat.test.ts test/inbox/wake-matrix.test.ts \
   test/tool/session-tool.test.ts test/workflow/runtime-worktree.test.ts \
   test/workflow/runtime-retirement.test.ts test/workflow/runtime.test.ts \
+  test/bus/subscription-retirement.test.ts test/config/dependency-retirement.test.ts \
+  test/effect/cross-spawn-spawner-retirement.test.ts \
+  test/history/backfill-retirement.test.ts test/lsp/lifecycle.test.ts \
+  test/mcp/lifecycle.test.ts test/mcp/sampling-e2e.test.ts \
+  test/plugin/generation-retirement.test.ts test/plugin/oauth-retirement.test.ts \
+  test/session/auto-memory-retirement.test.ts test/session/cron-bridge-retirement.test.ts \
+  test/session/processor-summary-retirement.test.ts \
+  test/session/prompt-background-retirement.test.ts \
+  test/session/prompt-cancel-retirement.test.ts \
+  test/session/prompt-shell-retirement.test.ts test/tool/read-lifecycle.test.ts \
   test/server/httpapi-instance-admission.test.ts \
   test/server/instance-closing.test.ts test/server/project-init-git.test.ts \
   test/server/workspace-instance-generation.test.ts test/server/instance-openapi-lifecycle.test.ts \
