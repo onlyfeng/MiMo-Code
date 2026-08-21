@@ -1080,6 +1080,19 @@ bootstrap, root resolution, local orchestrator ID, and navigation. An external
 switch invalidates whichever phase is current. The source receipt never waits on
 its successor, so the operation's own switch cannot create an epoch self-wait.
 
+The App's `bash.interactive.asked` event, spawned child process, retry timer, and
+reply form one nested child channel of the initiating selection epoch. The
+channel captures the source client and directory before its first await; it
+never constructs a late raw reply from the current selection. Selection
+replacement aborts and joins the child, clears a pending retry delay, prevents
+an unadmitted retry or reply through a later selection, settles or cancels
+captured-source transport, rejects stale toast admission, and restores a
+still-live renderer exactly once. Host exit closes and joins the same
+selection coordinator before renderer destruction and `tui()` resolution;
+`thread.ts` requests worker RPC shutdown only afterward. Host exit suppresses
+late renderer work and transitively joins this receipt; SharedShutdown does not
+register a second owner or make the worker own a host-process child.
+
 Within each selection/epoch, the client assigns a source slot to the outer SDK
 transport and to each workspace relay identity, then keys clocks by
 `(sourceSlot, serverIncarnation, canonicalDirectory)` and maintains
@@ -1467,6 +1480,10 @@ terminal shutdown coordinator to reopen intake after its permanent gate.
   an old source phase to replace a newer selection, and after its own switch its
   target phase cannot write the root ID or navigate after another switch. Direct
   entry from the orchestrator selection creates no successor or self-wait.
+- A held interactive Bash child is aborted and joined on selection replacement;
+  its retry/reply stays bound to the captured source and cannot reach the new
+  selection. TUI host exit waits the same receipt before renderer destruction
+  and worker shutdown handoff, and admits no late renderer or toast work.
 - A pending `/tui/control/next` is actively closed by retire/shutdown and cannot
   hold the active-lease barrier; another directory or generation cannot consume
   its queue item. A blocked SSE write is actively aborted and joined.

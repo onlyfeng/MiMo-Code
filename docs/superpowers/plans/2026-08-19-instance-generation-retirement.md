@@ -1419,8 +1419,9 @@ git commit -m "fix(instance): join generation channels and producers"
   process-global publisher explicitly.
 - Create: `packages/opencode/src/cli/cmd/tui/context/instance-generation.tsx`
 - Modify: TUI SDK, project, sync, and event contexts.
-- Modify: TUI App session-fork response handlers and orchestrator directory
-  transition, reusing the same selection coordinator.
+- Modify: TUI App session-fork response handlers, orchestrator directory
+  transition, and interactive Bash event-to-process-to-reply channel, reusing
+  the same selection coordinator.
 - Modify: workspace-create dialog and session-list callers that rely on
   `project.workspace.sync()` mutating internally.
 - Create/modify: HTTP, workspace, OpenAPI, event, and TUI tests, including
@@ -1608,6 +1609,20 @@ records the orchestrator ID, and preserves its route without disposal, a
 successor epoch, or self-wait. Exercise the real App call sites rather than
 duplicating their transition sequence in the test.
 
+Register each `bash.interactive.asked` continuation as one nested child of the
+initiating selection epoch; do not split its process, retry timer, and reply into
+separate owners. Capture the source selection client and directory before the
+first await and use that captured client for the reply instead of a raw fetch
+that can lose target provenance. Hold the child process, replace the selection,
+then prove the epoch aborts and joins it, clears a pending 500 ms retry delay,
+prevents an unadmitted retry, never posts the old request ID through the new
+client, observes every rejection, and shows no stale toast. A live TUI restores
+its renderer exactly once; host exit suppresses renderer work and is covered
+again in Task 8. Also cover normal completion and one reply retry through the
+captured source client. Reuse
+the selection coordinator and existing App test fixtures; add no Bash-specific
+lifecycle abstraction or test file.
+
 Each clock also stores `committedGeneration`. Ordinary instance events may
 mutate only at that generation. A higher ordinary event records observation and
 coalesces bootstrap but cannot touch the old store. Handle disposed before the
@@ -1783,6 +1798,9 @@ git commit -m "fix(instance): fence worktree maintenance through deletion"
 - Modify: `packages/opencode/src/server/adapter.node.ts`
 - Modify: `packages/opencode/src/server/mdns.ts`
 - Modify: `packages/opencode/src/server/routes/global.ts`
+- Modify/verify: `packages/opencode/src/cli/cmd/tui/app.tsx`; host exit exposes
+  Task 6's current selection receipt to `ExitProvider` for close/join rather
+  than registering the interactive Bash child with a second owner.
 - Modify: `packages/opencode/src/cli/cmd/tui/context/exit.tsx`
 - Modify: `packages/opencode/src/cli/cmd/tui/worker.ts`
 - Modify: `packages/opencode/src/cli/cmd/tui/thread.ts`
@@ -1845,6 +1863,12 @@ Use real listeners, not only call-order mocks:
 - race repeated TUI exit requests while `onExit` is held; every caller shares
   one shutdown receipt, the exit task is not recreated, and `onExit` is
   awaited exactly once before terminal completion;
+- emit `bash.interactive.asked`, hold its real child process and separately its
+  reply/retry, then request host exit; the host exit receipt first closes the
+  current selection coordinator and joins the same Task 6 child receipt, clears
+  the timer, and issues no late renderer/toast work. Only then may it destroy the
+  renderer and resolve `tui()`; `thread.ts` subsequently requests and joins the
+  worker RPC shutdown;
 - call TUI `rpc.server` a second time while the first listener has an active
   connection; it rejects before side effects, leaves the original listener
   intact, and never invokes raw `stop(true)`;
@@ -1956,6 +1980,12 @@ completion exactly once, clears module state, and joins the terminal cleanup
 receipt. TUI exit coalesces repeated calls into that shared receipt and awaits
 its one `onExit` callback. Web coverage is lifecycle-only and does not add a
 new product feature.
+The host exit receipt first closes and awaits the current
+`TuiGenerationCoordinator`, transitively joining the interactive Bash child
+registered in Task 6. It then destroys the renderer and resolves `tui()`;
+`thread.ts` may only afterward request and join worker RPC shutdown. Do not
+double-register the Bash child with SharedShutdown or make the worker own a
+host-process child.
 TUI `rpc.server` is single-shot per worker lifetime. A second call rejects
 before stop/rebind/mutation; non-terminal replacement never uses raw
 `stop(true)` and terminal shutdown never reopens its intake gate.
@@ -2030,7 +2060,7 @@ if rg -n -U '\bawait\s*(\(\s*)*([A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*)*requestDispose
   echo "opaque requestDisposeAll result is awaited" >&2
   exit 1
 fi
-git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/mdns.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/context/exit.tsx packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/acp/agent.ts packages/opencode/src/cli/heap.ts packages/opencode/src/index.ts packages/opencode/src/provider/models.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/actor/registry.test.ts packages/opencode/test/actor/stall-watchdog.test.ts packages/opencode/test/skill/skill.test.ts packages/opencode/test/acp/event-subscription.test.ts packages/opencode/test/cli/heap-shutdown.test.ts packages/opencode/test/mcp/oauth-callback.test.ts packages/opencode/test/provider/models-refresh-shutdown.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
+git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/mdns.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/app.tsx packages/opencode/src/cli/cmd/tui/context/exit.tsx packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/acp/agent.ts packages/opencode/src/cli/heap.ts packages/opencode/src/index.ts packages/opencode/src/provider/models.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/actor/registry.test.ts packages/opencode/test/actor/stall-watchdog.test.ts packages/opencode/test/skill/skill.test.ts packages/opencode/test/acp/event-subscription.test.ts packages/opencode/test/cli/heap-shutdown.test.ts packages/opencode/test/mcp/oauth-callback.test.ts packages/opencode/test/provider/models-refresh-shutdown.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
 # Inspect the remaining test-only diff and require every path to be one of the
 # frozen Task 0 legacy cleanup callers before staging exactly that path list.
 git diff --name-status -- packages/opencode/test
@@ -2227,8 +2257,8 @@ The reviewer must inspect:
   workflow timers;
 - Absent/Open maintenance and worktree two-phase deletion;
 - workspace canonical headers, committed/cohort/high-water response and event
-  filtering, generation-bound session-sync cache, and app-level fork/directory
-  transition epoch handoff;
+  filtering, generation-bound session-sync cache, app-level fork/directory
+  transition epoch handoff, and the selection-owned interactive Bash child;
 - OpenAPI operation injection and tracked SDK idempotency;
 - TUI/serve/ACP/web real shutdown; and
 - reviewed removal of the two legacy settled facades plus focused private-join
