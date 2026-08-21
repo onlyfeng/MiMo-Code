@@ -213,9 +213,10 @@ ALS side likewise stores instance context and the full owner stack in separate
 local contexts. `Instance.bind`, the runtime attachment helper, and
 `EffectBridge` capture and restore both values together behind opaque
 `InstanceExecution`. The internal `restoreInstanceExecutionSync` helper
-validates every captured token before invoking user code; its type/checker
-rejects PromiseLike callbacks, and a runtime thenable is adopted into the drain
-before misuse is reported. The internal Effect entry helper registers its
+validates every captured token before invoking user code; its type signature
+rejects statically visible PromiseLike callbacks, focused tests cover untyped
+thenables, and a runtime thenable is adopted into the drain before misuse is
+reported. The internal Effect entry helper registers its
 complete lifetime in the owner drain. Any released or mismatched token rejects
 before user code runs. No caller can read or reconstruct the context/owner
 stack.
@@ -234,8 +235,8 @@ because retirement still needs its result.
 
 The low-level API is frozen in
 `packages/opencode/src/effect/instance-ref.ts`. These are package-internal
-exports with checker-enforced import sites, not public/barrel APIs; the brand
-constructors remain module-private:
+exports with a reviewed set of package-internal import sites, not public/barrel
+APIs; the brand constructors remain module-private:
 
 ```ts
 /** Module-private; never imported or provided outside this module. */
@@ -342,7 +343,8 @@ created only by the two exact-allowlisted capture functions and backed by a
 module-private `WeakMap` containing the paired context/owner stack; every
 consumer rejects an object without that provenance. Supplying a truncated
 stack, casting a fabricated execution, exporting/providing the ref, or
-re-exporting a capture/root factory is a checker error.
+re-exporting a capture/root factory violates the contract and is covered by
+focused negative tests plus import-site review.
 `restoreInstanceExecutionSync` is the sync ALS/callback boundary and has the
 same PromiseLike rejection/adoption rule as `runSync`.
 `enterInstanceExecutionEffect` is the Effect boundary: it validates the same
@@ -431,9 +433,10 @@ exposes no Promise or resolver to the request owner. Arbitrary application code
 cannot enqueue work for post-handoff execution.
 
 `runSync` uses the conditional rest guard `RejectPromiseLike<R>`, so a
-PromiseLike result requires an impossible `never` argument. The checker also
-rejects async/thenable call sites. The implementation still checks the returned
-value. If an untyped callback nevertheless returns a thenable, the owner adopts
+PromiseLike result requires an impossible `never` argument. Focused call-site
+review covers untyped or deliberately obscured callbacks. The implementation
+still checks the returned value. If an untyped callback nevertheless returns a
+thenable, the owner adopts
 it into the private callback drain, closes with
 `AsyncLifecycleCallbackError`, and throws synchronously; retirement may not
 treat the callback as departed while its continuation can still mutate.
@@ -816,10 +819,12 @@ must outlive its caller registers a transferred handle whose private run
 continuation is admitted and scheduled by release of an explicit short lease in
 the producer's own target ledger; registration returns no result/readiness
 Promise to that handoff owner. Treating one API as the other, or inferring the
-handoff from an ambient long-lived ancestor, is a checker error.
+handoff from an ambient long-lived ancestor, violates the contract and is
+covered by focused owner/handoff tests.
 
-The implementation begins with a checked-in producer inventory, not an end-of-
-PR search. At minimum it classifies `project/bootstrap.ts` service init and
+The implementation begins with a checked-in, manually refreshed producer
+inventory, not an end-of-PR search. At minimum it classifies
+`project/bootstrap.ts` service init and
 memory reconcile, `config/config.ts` dependency install,
 `history/backfill.ts`, `session/prune.ts` detached settlement,
 `prompt_async`, instance/global event streams, checkpoint writers, actor and
@@ -855,21 +860,24 @@ continuation registered at request creation. Private receipt joins have an
 exact structural allowlist: the directory owner state machine, the shared
 shutdown coordinator, the headless-bootstrap and workflow process-owned
 cleanup sites, and one test-only lifecycle fixture. Worktree deletion uses
-`maintainDirectory` instead of importing a join. The producer checker rejects
-every other import/call site. This prevents settlement Promises from being
-fetched in clean context and later smuggled into an admitted callback.
+`maintainDirectory` instead of importing a join. Manual inventory and import-
+site review must identify every other import/call site, while focused tests
+cover the runtime self-wait rejection. This prevents settlement Promises from
+being fetched in clean context and later smuggled into an admitted callback.
 
 The implementation branch temporarily retains the existing Promise-returning
 `Instance.disposeDirectory` and `Instance.disposeAll` facades only so each TDD
-commit remains runnable while their frozen callers are migrated. A checker
-flag allows exactly those two declarations and the pre-migration call anchors;
-it does not permit a third facade or a new caller. Config invalidation moves to
+commit remains runnable while their frozen callers are migrated. Each task
+records the two remaining declarations and pre-migration call anchors in the
+inventory and source-search evidence; a third facade or new caller blocks
+review. Config invalidation moves to
 non-waiting request/event semantics with the directory owner, the global route
 becomes accepted/event-based with the HTTP surface, worktree and workflow move
 with maintenance, the TUI worker moves to shared shutdown, and tests move to
 the single test-only fixture. The final shutdown task deletes both legacy
-facades and runs the strict checker without the flag. No commit that still
-needs the flag is eligible to merge independently.
+facades; final manual inventory and source review confirm their absence, while
+focused tests exercise the frozen legacy call shapes. No commit that still
+retains either facade is eligible to merge independently.
 
 - `Instance.dispose()` runs inside the current instance request. It atomically
   marks the current generation closing, starts retirement, and returns quickly.
@@ -934,7 +942,8 @@ needs the flag is eligible to merge independently.
   filesystem, or DB side effects.
 - `requestDisposeAll()` is the public non-waiting request. The module-private
   `disposeAllSettled()` join is reusable only by shared shutdown and test
-  cleanup and is structurally allowlisted by the checker. While it is running, a process-local drain gate rejects every new
+  cleanup; those exact import/call sites are recorded during inventory review.
+  While it is running, a process-local drain gate rejects every new
   `provide`/`reload`; it atomically converts queued successors to
   `shutdown`, changes any Terminal successor outcome to `shutdown`, closes every
   open entry, and waits for all retirement
@@ -1360,10 +1369,11 @@ terminal shutdown coordinator to reopen intake after its permanent gate.
   general restore capability. Only the exact capture functions can create a
   WeakMap-provenanced execution, only the directory owner/state registrar can
   create a root, and current/cross-target leases append the complete ambient
-  stack. The checker rejects AdmissionRef export/provision, execution
+  stack. Module-private provenance, reviewed import searches, and focused
+  negative tests cover AdmissionRef export/provision, execution
   reconstruction/casts, and raw capture/restore/root imports outside the exact
-  infrastructure allowlist; the internal sync and Effect entries cannot create
-  an untracked async continuation.
+  infrastructure sites; the internal sync and Effect entries cannot create an
+  untracked async continuation.
 - The explicit same-target handoff release seals transfer registration and
   atomically arms or closes the complete ledger-owned child set. A transfer
   racing that seal or the target producer seal is either in the set or rejected
@@ -1384,7 +1394,8 @@ terminal shutdown coordinator to reopen intake after its permanent gate.
 - Every settled lifecycle API rejects before side effects when invoked from any
   owner in its transitive wait set, including boot, body, runner, producer,
   channel, state scope, disposer, or maintenance—not only an active request.
-- The final strict inventory check finds no legacy Promise-returning
+- The final manual inventory refresh and source review find no legacy
+  Promise-returning
   `Instance.disposeAll`/`disposeDirectory` facade or caller. Only the exact
   test-only lifecycle fixture may import test cleanup joins.
 

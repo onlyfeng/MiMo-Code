@@ -66,13 +66,11 @@ inventory
 
 ---
 
-### Task 0: Freeze a mechanically checkable producer inventory
+### Task 0: Freeze and manually refresh the producer inventory
 
 **Files**
 
 - Create: `docs/compose/spec/instance-generation-producer-inventory.md`
-- Create: `packages/opencode/script/check-instance-generation-producers.ts`
-- Create: `packages/opencode/test/script/check-instance-generation-producers.test.ts`
 - Inspect: all `packages/opencode/src` instance, prompt, processor, actor,
   workflow, plugin, Bus, PTY, watcher, server, config, history, memory, and
   bootstrap paths.
@@ -87,90 +85,29 @@ same-target handoff-lease anchor and proves that cross-target work first creates
 a short lease in the child target. Owner kind is one of `boot`,
 `lease`, `body`, `runner`, `producer`, `channel`, `state_scope`, `retirement`,
 `disposer`, `maintenance`, or a proved process-owned mutation-free exemption.
-`TBD`, `audit later`, and empty owner/test cells are errors.
+`TBD`, `audit later`, and empty owner/test cells block inventory review.
 
-- [ ] **Step 1: Write the checker and observe RED**
+- [ ] **Step 1: Collect search evidence and observe RED**
 
-The checker searches at least `Effect.fork*`, `Effect.runFork`, naked `void`
-promises, `setTimeout`/`setInterval`, `Instance.bind`, direct
-`provideService(InstanceRef`, direct `provideService(InstanceAdmissionRef`,
-raw execution/token/owner-stack access or casts, stream/body continuations, SSE/WebSocket/TUI
-long-poll callbacks, native event callbacks, and every `GlobalBus.emit("event"`
-publisher. It verifies every candidate is
-represented by a non-placeholder inventory row and every row still resolves.
-Task 0 also freezes two strict CLI modes in the same script:
+Run the seed searches in the inventory document for `Effect.fork*`,
+`Effect.runFork`, naked `void` promises, timers, `Instance.bind`, raw instance
+providers, lifecycle helpers, disposer calls, and global event publishers.
+Independently enumerate and inspect the complete diff of every source file
+changed from the PR base, then compare existing rows on native-callback,
+stream, long-poll, and detached-promise surfaces. Classify every affected row
+and record the reviewed source range. A zero-result seed query is not evidence
+that a changed surface has no producer.
 
-- `--check` validates the complete producer/owner inventory;
-- `--check-disposer-targets` rejects any string overload or string argument to
-  `disposeInstance`; only `--allow-task1-adapter` permits the exact deprecated
-  overload plus the `disposeCached`, `Instance.reload`, and `Instance.dispose`
-  symbol anchors for Task 1.
+The inventory is review evidence, not a complete static proof of arbitrary
+TypeScript semantics. API types and module boundaries prevent ordinary
+authority or settlement leakage; runtime validation and focused deterministic
+tests exercise forged and frozen legacy shapes. Source/import review checks
+that no public exposure or unreviewed call site remains. Aliasing, control
+flow, module scheduling, and container mutation are inspected in the changed
+source rather than inferred by an inventory tool.
 
-The inventory mode also rejects exported owner/channel readiness or settlement
-thenables and production imports of private lifecycle receipt joins outside the
-exact directory-owner, shared-shutdown, headless-bootstrap,
-workflow-cleanup, and test-fixture allowlist. A callback-tracked `enter`
-Promise is not a readiness/settlement Promise: nested entry registers
-immediately, while transferred entry must synchronously reject pending/settled
-state. The checker requires both implementations to be non-async and contain
-no readiness await. It rejects every other public owner/channel
-PromiseLike result and every `runSync` signature/call that accepts a
-PromiseLike. It also rejects exposed `.token`, `.execution`, owner-stack
-fields, object reconstruction of `InstanceExecution`, exporting/providing the
-module-private `InstanceAdmissionRef`, and raw imports/calls of
-`registerLifecycleOwner`, `transferLifecycleOwner`,
-`captureInstanceExecution`, `captureInstanceExecutionEffect`,
-`restoreInstanceExecutionSync`, `enterInstanceExecutionEffect`, or
-`registerDirectoryRootLifecycleOwner` outside their exact infrastructure
-allowlists. Capture values must have module-private WeakMap
-provenance and cannot be re-exported. Higher-level producer/channel wrappers
-may use only opaque handle methods; application, route, provider, workflow,
-and native callback code cannot capture or restore execution directly.
-It rejects owner/lease `release` calls without the mandatory discriminated
-`{ ok: true } | { ok: false, error }` result; runtime validation rejects a
-forged/ambiguous shape, and an unsettled callback makes release fail before
-mutation.
-It also rejects the former context-only/ambient-parent transferred producer
-shape, a missing or forged `handoffFrom`, a transfer target that differs from
-the handoff lease target, and registration outside that exact lease's
-`runSync`. The acquire/register/discriminated-release setup is a synchronous
-region: `await`, early return, naked throw, or handle escape before exactly one
-success/failure release is an error. Application sites cannot call the
-low-level transfer primitive, and direct cross-ledger transfer is forbidden.
-
-`--allow-legacy-instance-settled-facades` is a second, independent temporary
-flag. It permits only the two pre-existing Promise-returning declarations
-`Instance.disposeDirectory` and `Instance.disposeAll`, plus the frozen
-pre-migration production call anchors in `Config.invalidate`, the global
-dispose route, TUI worker shutdown, `Worktree.remove`, and workflow isolated
-cleanup. Test calls are classified separately but may use only those same two
-symbols. The flag rejects a new declaration or call anchor. Tasks 0-7 use it
-while migrating those callers; Task 8 deletes the facades, migrates test
-cleanup to one structurally allowlisted fixture, and runs strict mode.
-
-`--allow-task2-legacy-instance-ref-providers` is a third temporary flag used
-only in Tasks 0-1. It permits exactly the raw `InstanceRef` provider anchors
-frozen as Task 2 migration rows in the inventory; every row must already name
-its replacement wrapper and deterministic test. It does not allow
-`InstanceAdmissionRef`, token/stack/execution construction, or a new provider.
-Task 2 atomically migrates the complete set—including run-service, bridge,
-HTTPAPI, actor, inbox, workflow, and tool-session sites—then deletes this flag
-and runs the authority checker without it.
-
-Unknown flags fail nonzero. Checker tests inject each illegal form, prove the
-disposer-target allowlist accepts only its four exact anchors, prove the legacy
-facade flag accepts only its frozen declarations/callers, and prove strict mode
-rejects both classes. They also prove the Task 2 provider flag accepts only its
-frozen inventory anchors. Later tasks only invoke already-committed modes.
-
-```bash
-cd packages/opencode
-bun script/check-instance-generation-producers.ts --check --allow-legacy-instance-settled-facades --allow-task2-legacy-instance-ref-providers
-bun script/check-instance-generation-producers.ts --check-disposer-targets --allow-task1-adapter
-bun test test/script/check-instance-generation-producers.test.ts --timeout 30000
-```
-
-Expected RED: checker/inventory is absent or reports unowned candidates.
+Expected RED: the inventory review exposes an unclassified candidate, an empty
+ownership decision, or missing deterministic test evidence.
 
 - [ ] **Step 2: Classify the complete starting universe**
 
@@ -191,12 +128,10 @@ No later task may defer discovering ownership that is already visible here.
 
 ```bash
 cd packages/opencode
-bun script/check-instance-generation-producers.ts --check --allow-legacy-instance-settled-facades --allow-task2-legacy-instance-ref-providers
-bun script/check-instance-generation-producers.ts --check-disposer-targets --allow-task1-adapter
-bun test test/script/check-instance-generation-producers.test.ts --timeout 30000
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- docs/compose/spec/instance-generation-producer-inventory.md packages/opencode/script/check-instance-generation-producers.ts packages/opencode/test/script/check-instance-generation-producers.test.ts
+git diff -- docs/compose/spec/instance-generation-producer-inventory.md
+git add -- docs/compose/spec/instance-generation-producer-inventory.md
 git diff --cached --check
 git commit -m "docs(instance): freeze generation producer ownership"
 ```
@@ -261,7 +196,8 @@ adapter that maps to generation zero so the existing owner compiles. Task 2
 removes it. Every callback that receives the changed signature must migrate in
 this task: `InstanceState`, read-state, session-cwd, registry tests, and project
 dispose tests. Migrate every string call in those files too; before GREEN, run a
-residual checker for `disposeInstance(`. The temporary allowlist is frozen to
+residual source search for `disposeInstance(` and review every result. The
+temporary compatibility set is limited to
 the deprecated overload plus all three current `project/instance.ts` symbol
 anchors: `disposeCached`, `Instance.reload`, and `Instance.dispose`; line
 numbers alone are not stable allowlist keys. Every
@@ -275,8 +211,6 @@ directory-owned maps use `target.directory`.
 cd packages/opencode
 bun test test/effect/instance-registry.test.ts test/tool/read-state.test.ts test/tool/session-cwd.test.ts test/project/instance-dispose.test.ts --timeout 30000
 bun typecheck
-bun script/check-instance-generation-producers.ts --check --allow-legacy-instance-settled-facades --allow-task2-legacy-instance-ref-providers
-bun script/check-instance-generation-producers.ts --check-disposer-targets --allow-task1-adapter
 cd "$(git rev-parse --show-toplevel)"
 git add -- packages/opencode/src/effect/instance-registry.ts packages/opencode/src/effect/instance-state.ts packages/opencode/src/tool/read-state.ts packages/opencode/src/tool/session-cwd.ts packages/opencode/test/effect/instance-registry.test.ts packages/opencode/test/tool/read-state.test.ts packages/opencode/test/tool/session-cwd.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/instance-generation-producer-inventory.md
 git diff --cached --check
@@ -306,16 +240,15 @@ git commit -m "refactor(instance): make disposer phases generation aware"
   `packages/opencode/src/actor/spawn.ts`, `packages/opencode/src/inbox/inbox.ts`,
   `packages/opencode/src/workflow/runtime.ts`, and
   `packages/opencode/src/tool/session.ts`.
-- Modify: producer checker and its test to delete the Task 2 raw-provider flag
-  after the complete migration.
 - Modify/create: owner, boot, runtime, Bus, HTTP API, actor, inbox, workflow,
   and tool-session admission tests.
 - Update: producer inventory.
 
 **Required package-internal types**
 
-These are deep internal exports with checker-enforced import sites, not public
-barrel APIs. Unique-symbol constructors remain module-private.
+These are deep internal exports, not public barrel APIs. Their reviewed
+package-internal import sites are recorded in PR evidence. Unique-symbol
+constructors remain module-private; focused tests cover the approved callers.
 
 ```ts
 export type BootInput = {
@@ -546,9 +479,11 @@ private callback drain, closes with `AsyncLifecycleCallbackError`, throws
 synchronously, and blocks retirement until that continuation settles.
 Assert that public handles expose no token/execution/owner-stack field and no
 generic restore method. Attempt the former raw bypass with every exported
-surface and prove the checker/type system rejects it; internal sync restore has
-the same PromiseLike containment, while internal Effect entry remains in the
-owner drain until settlement.
+surface: API types must prevent ordinary construction, focused tests exercise
+the frozen bypass shapes, and private provenance plus runtime validation must
+reject forged opaque values. Internal sync restore has the same PromiseLike
+containment, while internal Effect entry remains in the owner drain until
+settlement.
 Create roots only through the exact-allowlisted directory-root factory, and
 capture ALS/Effect execution only through the two allowlisted capture
 functions. Prove each captured value has private WeakMap provenance, a forged
@@ -564,8 +499,9 @@ For both current and child GenerationLeases, register transferred children and
 exercise sync throw, async rejection, and an attempted successful release while
 `enter` is still held. The first two pass `{ ok: false, error }`, close the
 complete child set, and never run `onArmed`; the early release throws before
-mutation. Only a settled success may pass `{ ok: true }` and arm the set. The
-checker rejects a missing or structurally ambiguous release result.
+mutation. Only a settled success may pass `{ ok: true }` and arm the set.
+API/runtime validation and focused tests reject a missing or structurally
+ambiguous release result.
 Register two transfers under one target-local handoff, then race a gated third
 registration against successful and failed handoff release. A registration that
 linearizes
@@ -601,14 +537,12 @@ same ledger primitives rather than inventing a second ledger.
 
 ```bash
 cd packages/opencode
-bun test test/effect/app-runtime-logger.test.ts test/effect/run-service.test.ts test/effect/instance-state.test.ts test/project/instance-dispose.test.ts test/server/httpapi-instance-admission.test.ts test/actor/spawn.test.ts test/inbox/fork-agent-compat.test.ts test/workflow/runtime-worktree.test.ts test/tool/session-tool.test.ts test/script/check-instance-generation-producers.test.ts --timeout 60000
-bun script/check-instance-generation-producers.ts --check --allow-legacy-instance-settled-facades
-bun script/check-instance-generation-producers.ts --check-disposer-targets
+bun test test/effect/app-runtime-logger.test.ts test/effect/run-service.test.ts test/effect/instance-state.test.ts test/project/instance-dispose.test.ts test/server/httpapi-instance-admission.test.ts test/actor/spawn.test.ts test/inbox/fork-agent-compat.test.ts test/workflow/runtime-worktree.test.ts test/tool/session-tool.test.ts --timeout 60000
 ```
 
-Expected RED: the first strict command reports every frozen raw provider, and
-the second reports the Task 1 adapter. Both failures disappear in this task;
-neither temporary flag survives GREEN.
+Expected RED: source/import review identifies every frozen raw provider and the
+Task 1 adapter. Both classes disappear in this task, and focused negative tests
+cover their former call shapes before GREEN.
 
 - [ ] **Step 3: Implement central execution transport and ambient validation**
 
@@ -634,7 +568,7 @@ capture/restore import/call allowlist and use opaque `InstanceExecution`; no
 handle exposes token/execution/stack fields. `Instance.bind` is synchronous-only;
 async work uses the tracked Effect/producer/channel wrapper. An explicitly
 present but stale token is never treated as token absence.
-The checker freezes symbol-level ownership: `project/instance.ts` uses sync
+The inventory records symbol-level ownership: `project/instance.ts` uses sync
 capture/restore; `effect/bridge.ts` uses Effect capture/entry;
 `effect/run-service.ts` and `effect/bootstrap-runtime.ts` use sync capture plus
 Effect entry; only `project/instance.ts` and `effect/instance-state.ts` call
@@ -706,14 +640,13 @@ the outer long-lived owner remains lineage only and is never the handoff for a
 different target. The synchronous acquire/register/release region contains no
 `await`, early return, naked throw, or pre-release handle escape. Its wrapper is
 implemented here on the low-level transfer primitive and is reused—not
-reinvented—by Task 5. Delete both `--allow-task1-adapter` and
-`--allow-task2-legacy-instance-ref-providers` before GREEN; checker tests prove
-both old flags now fail as unknown. The checker must
-find zero raw provider, AdmissionRef provider, token/stack/execution
-construction, or unallowlisted restore call.
-Remove the Task 1 generation-zero overload and migrate all three
-`project/instance.ts` string arguments. The disposer-target checker runs without
-an allow flag and fails on either a string overload or string call expression.
+reinvented—by Task 5. Refresh the inventory and review every listed raw
+provider and authority call site before GREEN; source/import review must find
+no remaining listed legacy site. Focused tests exercise the frozen raw-provider,
+AdmissionRef, token/stack/execution, and restore bypass shapes, while runtime
+provenance rejects forged values. Remove the Task 1 generation-zero overload
+and migrate all three `project/instance.ts` string arguments; focused tests
+cover both the deprecated overload and string-call migration.
 
 - [ ] **Step 4: Implement owner state and all-owner self-wait**
 
@@ -748,8 +681,8 @@ continuation registered at request creation, never a Promise that can be moved
 into an admitted callback. Private joins are structurally limited to the
 directory owner, shared shutdown coordinator, headless-bootstrap and workflow
 process-owned cleanup, and one test-only fixture; worktree deletion must use
-`maintainDirectory`. The inventory checker rejects every other import/call
-site.
+`maintainDirectory`. The inventory review accounts for every other import/call
+site, and focused tests cover the approved boundaries.
 
 The module-private `disposeAllSettled()` synchronously installs its global intake gate before its first
 await, converts Closing reload intents and Terminal successor outcomes to
@@ -790,12 +723,9 @@ shutdown; successor init then remains zero.
 ```bash
 cd packages/opencode
 bun test test/project/instance-dispose.test.ts test/project/instance-bootstrap-retirement.test.ts test/bus/bus.test.ts test/effect/instance-registry.test.ts test/effect/app-runtime-logger.test.ts test/effect/run-service.test.ts test/effect/instance-state.test.ts test/server/httpapi-instance-admission.test.ts test/actor/spawn.test.ts test/inbox/fork-agent-compat.test.ts test/workflow/runtime-worktree.test.ts test/tool/session-tool.test.ts --timeout 60000
-bun test test/script/check-instance-generation-producers.test.ts --timeout 30000
-bun script/check-instance-generation-producers.ts --check --allow-legacy-instance-settled-facades
-bun script/check-instance-generation-producers.ts --check-disposer-targets
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- packages/opencode/src/project/instance.ts packages/opencode/src/project/bootstrap.ts packages/opencode/src/config/config.ts packages/opencode/src/bus/index.ts packages/opencode/src/bus/global.ts packages/opencode/src/effect/instance-ref.ts packages/opencode/src/effect/instance-registry.ts packages/opencode/src/effect/instance-state.ts packages/opencode/src/effect/bootstrap-runtime.ts packages/opencode/src/effect/run-service.ts packages/opencode/src/effect/bridge.ts packages/opencode/src/server/routes/instance/httpapi/server.ts packages/opencode/src/actor/spawn.ts packages/opencode/src/inbox/inbox.ts packages/opencode/src/workflow/runtime.ts packages/opencode/src/tool/session.ts packages/opencode/test/project/instance-dispose.test.ts packages/opencode/test/project/instance-bootstrap-retirement.test.ts packages/opencode/test/bus/bus.test.ts packages/opencode/test/effect/instance-registry.test.ts packages/opencode/test/effect/app-runtime-logger.test.ts packages/opencode/test/effect/run-service.test.ts packages/opencode/test/effect/instance-state.test.ts packages/opencode/test/server/httpapi-instance-admission.test.ts packages/opencode/test/actor/spawn.test.ts packages/opencode/test/inbox/fork-agent-compat.test.ts packages/opencode/test/workflow/runtime-worktree.test.ts packages/opencode/test/tool/session-tool.test.ts packages/opencode/script/check-instance-generation-producers.ts packages/opencode/test/script/check-instance-generation-producers.test.ts docs/compose/spec/instance-generation-producer-inventory.md
+git add -- packages/opencode/src/project/instance.ts packages/opencode/src/project/bootstrap.ts packages/opencode/src/config/config.ts packages/opencode/src/bus/index.ts packages/opencode/src/bus/global.ts packages/opencode/src/effect/instance-ref.ts packages/opencode/src/effect/instance-registry.ts packages/opencode/src/effect/instance-state.ts packages/opencode/src/effect/bootstrap-runtime.ts packages/opencode/src/effect/run-service.ts packages/opencode/src/effect/bridge.ts packages/opencode/src/server/routes/instance/httpapi/server.ts packages/opencode/src/actor/spawn.ts packages/opencode/src/inbox/inbox.ts packages/opencode/src/workflow/runtime.ts packages/opencode/src/tool/session.ts packages/opencode/test/project/instance-dispose.test.ts packages/opencode/test/project/instance-bootstrap-retirement.test.ts packages/opencode/test/bus/bus.test.ts packages/opencode/test/effect/instance-registry.test.ts packages/opencode/test/effect/app-runtime-logger.test.ts packages/opencode/test/effect/run-service.test.ts packages/opencode/test/effect/instance-state.test.ts packages/opencode/test/server/httpapi-instance-admission.test.ts packages/opencode/test/actor/spawn.test.ts packages/opencode/test/inbox/fork-agent-compat.test.ts packages/opencode/test/workflow/runtime-worktree.test.ts packages/opencode/test/tool/session-tool.test.ts docs/compose/spec/instance-generation-producer-inventory.md
 git diff --cached --check
 git commit -m "feat(instance): add generation owner and paired authority"
 ```
@@ -915,7 +845,6 @@ so every task remains independently GREEN.
 ```bash
 cd packages/opencode
 bun test test/effect/instance-state-registry.test.ts test/effect/instance-state.test.ts test/bus/bus.test.ts test/project/instance-dispose.test.ts --timeout 30000
-bun script/check-instance-generation-producers.ts --check --allow-legacy-instance-settled-facades
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
 git add -- packages/opencode/src/effect/instance-state-registry.ts packages/opencode/src/effect/instance-state.ts packages/opencode/src/project/instance.ts packages/opencode/test/effect/instance-state-registry.test.ts packages/opencode/test/effect/instance-state.test.ts packages/opencode/test/bus/bus.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/instance-generation-producer-inventory.md
@@ -1012,7 +941,6 @@ main-only status rule.
 ```bash
 cd packages/opencode
 bun test test/effect/runner.test.ts test/session/run-state-dispose.test.ts test/session/run-state-tuple-key.test.ts test/effect/instance-state.test.ts --timeout 30000
-bun script/check-instance-generation-producers.ts --check --allow-legacy-instance-settled-facades
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
 git add -- packages/opencode/src/effect/runner.ts packages/opencode/src/session/run-state.ts packages/opencode/test/effect/runner.test.ts packages/opencode/test/session/run-state-dispose.test.ts packages/opencode/test/session/run-state-tuple-key.test.ts packages/opencode/test/effect/instance-state.test.ts docs/compose/spec/instance-generation-producer-inventory.md
@@ -1194,10 +1122,9 @@ boot settled
 ```bash
 cd packages/opencode
 bun test test/project/instance-producer-retirement.test.ts test/server/instance-stream-retirement.test.ts test/server/tui-control-retirement.test.ts test/session/checkpoint-drain.test.ts test/actor/spawn-notification.test.ts test/actor/stall-watchdog.test.ts test/inbox/wake-matrix.test.ts test/tool/session-tool.test.ts test/workflow/runtime-worktree.test.ts test/workflow/runtime-retirement.test.ts test/file/watcher-retirement.test.ts test/pty/retirement.test.ts --timeout 60000
-bun script/check-instance-generation-producers.ts --check --allow-legacy-instance-settled-facades
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- packages/opencode/src/project/instance.ts packages/opencode/src/config/config.ts packages/opencode/src/history/backfill.ts packages/opencode/src/session/prune.ts packages/opencode/src/session/checkpoint.ts packages/opencode/src/actor/spawn.ts packages/opencode/src/inbox/inbox.ts packages/opencode/src/tool/session.ts packages/opencode/src/workflow/runtime.ts packages/opencode/src/pty/index.ts packages/opencode/src/file/watcher.ts packages/opencode/src/server/proxy.ts packages/opencode/src/server/workspace.ts packages/opencode/src/server/routes/instance/middleware.ts packages/opencode/src/server/routes/instance/event.ts packages/opencode/src/server/routes/instance/pty.ts packages/opencode/src/server/routes/instance/session.ts packages/opencode/src/server/routes/instance/tui.ts packages/opencode/test/project/instance-producer-retirement.test.ts packages/opencode/test/server/instance-stream-retirement.test.ts packages/opencode/test/server/tui-control-retirement.test.ts packages/opencode/test/session/checkpoint-drain.test.ts packages/opencode/test/actor/spawn-notification.test.ts packages/opencode/test/actor/stall-watchdog.test.ts packages/opencode/test/inbox/wake-matrix.test.ts packages/opencode/test/tool/session-tool.test.ts packages/opencode/test/workflow/runtime-worktree.test.ts packages/opencode/test/workflow/runtime-retirement.test.ts packages/opencode/test/file/watcher-retirement.test.ts packages/opencode/test/pty/retirement.test.ts docs/compose/spec/instance-generation-producer-inventory.md packages/opencode/script/check-instance-generation-producers.ts
+git add -- packages/opencode/src/project/instance.ts packages/opencode/src/config/config.ts packages/opencode/src/history/backfill.ts packages/opencode/src/session/prune.ts packages/opencode/src/session/checkpoint.ts packages/opencode/src/actor/spawn.ts packages/opencode/src/inbox/inbox.ts packages/opencode/src/tool/session.ts packages/opencode/src/workflow/runtime.ts packages/opencode/src/pty/index.ts packages/opencode/src/file/watcher.ts packages/opencode/src/server/proxy.ts packages/opencode/src/server/workspace.ts packages/opencode/src/server/routes/instance/middleware.ts packages/opencode/src/server/routes/instance/event.ts packages/opencode/src/server/routes/instance/pty.ts packages/opencode/src/server/routes/instance/session.ts packages/opencode/src/server/routes/instance/tui.ts packages/opencode/test/project/instance-producer-retirement.test.ts packages/opencode/test/server/instance-stream-retirement.test.ts packages/opencode/test/server/tui-control-retirement.test.ts packages/opencode/test/session/checkpoint-drain.test.ts packages/opencode/test/actor/spawn-notification.test.ts packages/opencode/test/actor/stall-watchdog.test.ts packages/opencode/test/inbox/wake-matrix.test.ts packages/opencode/test/tool/session-tool.test.ts packages/opencode/test/workflow/runtime-worktree.test.ts packages/opencode/test/workflow/runtime-retirement.test.ts packages/opencode/test/file/watcher-retirement.test.ts packages/opencode/test/pty/retirement.test.ts docs/compose/spec/instance-generation-producer-inventory.md
 git diff --cached --check
 # If the frozen inventory names another path, add that exact path explicitly;
 # never stage an entire src/test directory. Inspect `git diff --cached --name-status`.
@@ -1386,7 +1313,6 @@ Run both RED matrices again, then:
 
 ```bash
 cd packages/opencode
-bun script/check-instance-generation-producers.ts --check --allow-legacy-instance-settled-facades
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
 git add -- packages/opencode/src/server/routes/instance/access.ts packages/opencode/src/server/routes/instance/middleware.ts packages/opencode/src/server/routes/instance/index.ts packages/opencode/src/server/routes/instance/openapi-lifecycle.ts packages/opencode/src/server/incarnation.ts packages/opencode/src/server/server.ts packages/opencode/src/server/workspace.ts packages/opencode/src/server/proxy.ts packages/opencode/src/server/middleware.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/server/routes/control/workspace.ts packages/opencode/src/control-plane/workspace.ts packages/opencode/src/project/instance.ts packages/opencode/src/project/project.ts packages/opencode/src/config/config.ts packages/opencode/src/sync/index.ts packages/opencode/src/worktree/index.ts packages/opencode/src/bus/global.ts packages/opencode/src/bus/index.ts packages/opencode/src/cli/cmd/tui/context/instance-generation.tsx packages/opencode/src/cli/cmd/tui/context/sdk.tsx packages/opencode/src/cli/cmd/tui/context/project.tsx packages/opencode/src/cli/cmd/tui/context/sync.tsx packages/opencode/src/cli/cmd/tui/context/event.ts packages/opencode/src/cli/cmd/tui/component/dialog-workspace-create.tsx packages/opencode/src/cli/cmd/tui/component/dialog-session-list.tsx packages/opencode/test/server/instance-closing.test.ts packages/opencode/test/server/project-init-git.test.ts packages/opencode/test/server/workspace-instance-generation.test.ts packages/opencode/test/server/instance-openapi-lifecycle.test.ts packages/opencode/test/server/global-event-generation.test.ts packages/opencode/test/bus/bus.test.ts packages/opencode/test/cli/tui/instance-closing.test.tsx packages/opencode/test/cli/tui/instance-generation-order.test.tsx packages/opencode/test/cli/tui/workspace-sync-generation.test.tsx packages/opencode/test/cli/tui/directory-switch.test.tsx packages/opencode/test/cli/tui/bootstrap-directory-denied.test.tsx packages/opencode/test/cli/tui/bootstrap-race.test.tsx packages/opencode/test/cli/tui/use-event.test.tsx packages/sdk/openapi.json packages/sdk/js/src/v2/gen docs/compose/spec/instance-generation-producer-inventory.md
@@ -1493,7 +1419,6 @@ all target owners. No destructive path imports that join.
 ```bash
 cd packages/opencode
 bun test test/project/worktree.test.ts test/project/instance-dispose.test.ts test/server/project-init-git.test.ts test/cli/bootstrap-retirement.test.ts test/control-plane/workspace-remove.test.ts test/plugin/workspace-adaptor-remove.test.ts test/tool/session-tool.test.ts test/workflow/runtime-worktree.test.ts --timeout 60000
-bun script/check-instance-generation-producers.ts --check --allow-legacy-instance-settled-facades
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
 git add -- packages/opencode/src/worktree/index.ts packages/opencode/src/cli/bootstrap.ts packages/opencode/src/server/routes/instance/project.ts packages/opencode/src/server/routes/instance/experimental.ts packages/opencode/src/control-plane/workspace.ts packages/opencode/src/control-plane/types.ts packages/opencode/src/control-plane/adaptors/worktree.ts packages/opencode/src/control-plane/dev/debug-workspace-plugin.ts packages/opencode/src/plugin/index.ts packages/opencode/src/tool/session.ts packages/opencode/src/workflow/runtime.ts packages/opencode/test/project/worktree.test.ts packages/opencode/test/project/instance-dispose.test.ts packages/opencode/test/server/project-init-git.test.ts packages/opencode/test/cli/bootstrap-retirement.test.ts packages/opencode/test/control-plane/workspace-remove.test.ts packages/opencode/test/plugin/workspace-adaptor-remove.test.ts packages/opencode/test/tool/session-tool.test.ts packages/opencode/test/workflow/runtime-worktree.test.ts docs/compose/spec/instance-generation-producer-inventory.md
@@ -1509,11 +1434,9 @@ git commit -m "fix(instance): fence worktree maintenance through deletion"
 
 - Modify: `packages/opencode/src/project/instance.ts` (delete the two legacy
   settled facades).
-- Modify: `packages/opencode/script/check-instance-generation-producers.ts` and
-  its test (remove the legacy allow path and require strict mode).
 - Create: `packages/opencode/test/fixture/instance-lifecycle.ts` as the sole
   test-only private-join adapter.
-- Modify: every test file reported by the checker as still calling
+- Modify: every test file found during the inventory refresh as still calling
   `Instance.disposeAll()` or `Instance.disposeDirectory()`; no awaited opaque
   request ID may remain.
 - Create: `packages/opencode/src/server/shutdown.ts`
@@ -1571,12 +1494,12 @@ Use real listeners, not only call-order mocks:
 - `disposeAll` remains reusable after shutdown tests.
 - the legacy `Instance.disposeAll`/`disposeDirectory` exports are absent;
   production callers cannot import a private join, every migrated test cleanup
-  awaits the single test fixture, and `await requestDisposeAll()` is rejected by
-  the checker rather than silently awaiting an opaque ID.
+  awaits the single test fixture, and focused call-site review confirms no code
+  silently awaits the opaque result of `requestDisposeAll()`.
 
 ```bash
 cd packages/opencode
-bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/project/instance-dispose.test.ts test/script/check-instance-generation-producers.test.ts --timeout 60000
+bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/project/instance-dispose.test.ts --timeout 60000
 ```
 
 - [ ] **Step 2: Implement shared ordering**
@@ -1605,11 +1528,11 @@ before stop/rebind/mutation; non-terminal replacement never uses raw
 Move TUI worker shutdown to the shared coordinator, then delete the deprecated
 `Instance.disposeAll()` and `Instance.disposeDirectory()` wrappers. Migrate all
 remaining tests to `test/fixture/instance-lifecycle.ts`, which is the only
-non-production importer of the private joins and is structurally allowlisted.
-The checker must report zero legacy declarations/callers before the first
-strict `--check`; do not rely on TypeScript, because `await` on an opaque ID is
-otherwise legal JavaScript. Remove the legacy flag implementation only after
-its injected checker fixtures prove strict mode fails the old forms.
+non-production importer of the private joins and is documented as such in the
+final review evidence. Before final review, inventory and source searches must
+find zero legacy declarations or callers. Focused negative tests exercise the
+frozen legacy forms; do not rely on TypeScript alone, because `await` on an
+opaque ID is otherwise legal JavaScript.
 
 - [ ] **Step 3: Run the full FD-004 sync check**
 
@@ -1655,12 +1578,11 @@ upstream merge from silently removing one part of the protocol.
 
 ```bash
 cd packages/opencode
-bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/project/instance-dispose.test.ts test/script/check-instance-generation-producers.test.ts --timeout 60000
-bun script/check-instance-generation-producers.ts --check
+bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/project/instance-dispose.test.ts --timeout 60000
 bun script/check-fd004-boundary.ts --check
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-instance-generation-producers.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-instance-generation-producers.test.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
+git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
 # Inspect the remaining test-only diff and require every path to be one of the
 # frozen Task 0 legacy cleanup callers before staging exactly that path list.
 git diff --name-status -- packages/opencode/test
@@ -1742,10 +1664,7 @@ bun test --timeout 60000 \
   test/cli/tui/use-event.test.tsx test/project/worktree.test.ts \
   test/cli/bootstrap-retirement.test.ts test/server/shutdown-streams.test.ts \
   test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts \
-  test/script/check-instance-generation-producers.test.ts \
   test/script/check-fd004-boundary.test.ts test/bus/bus.test.ts
-bun script/check-instance-generation-producers.ts --check
-bun script/check-instance-generation-producers.ts --check-disposer-targets
 bun script/check-fd004-boundary.ts --check
 bun typecheck
 ```
@@ -1795,8 +1714,6 @@ include its exact review table in the PR evidence.
 
 ```bash
 cd packages/opencode
-bun script/check-instance-generation-producers.ts --check
-bun script/check-instance-generation-producers.ts --check-disposer-targets
 cd ../..
 rg -n 'provideService\((InstanceRef|InstanceAdmissionRef)' packages/opencode/src
 rg -n 'registerLifecycleOwner|transferLifecycleOwner|captureInstanceExecution|captureInstanceExecutionEffect|restoreInstanceExecutionSync|enterInstanceExecutionEffect|registerDirectoryRootLifecycleOwner' packages/opencode/src
@@ -1807,8 +1724,8 @@ test ! -e packages/sdk/js/openapi.json
 ```
 
 The two searches may contain only the exact internal infrastructure allowlist
-and explicit negative fixtures; the checker separately rejects exposed token,
-stack, or execution fields/casts. Step 2 refuses a pre-existing `.artifacts` path and removes
+and explicit negative fixtures; focused negative tests and inventory review
+cover exposed token, stack, or execution fields/casts. Step 2 refuses a pre-existing `.artifacts` path and removes
 only its exact generated JUnit file plus now-empty parent directories; do not
 use a broad `git clean`. The feature worktree contains no user `.mimocode` files, so
 any other untracked result blocks publication. Re-run the Task 0 horizontal
@@ -1835,8 +1752,8 @@ The reviewer must inspect:
   filtering, and generation-bound session-sync cache;
 - OpenAPI operation injection and tracked SDK idempotency;
 - TUI/serve/ACP/web real shutdown; and
-- strict removal of the two legacy settled facades plus exact private-join
-  import/call-site enforcement; and
+- reviewed removal of the two legacy settled facades plus focused private-join
+  import/call-site evidence; and
 - full FD-004 and fork-specific actor/checkpoint/status invariants.
 
 Resolve every Critical/Important finding before publication.
