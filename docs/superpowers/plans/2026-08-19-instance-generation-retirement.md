@@ -1389,7 +1389,8 @@ git commit -m "fix(instance): join generation channels and producers"
   - `packages/opencode/src/control-plane/sse.ts`,
     `packages/opencode/src/control-plane/util.ts`, and
     `packages/opencode/src/control-plane/workspace.ts`;
-  - `packages/opencode/src/cli/cmd/tui/context/event.ts`,
+  - `packages/opencode/src/cli/cmd/tui/app.tsx`,
+    `packages/opencode/src/cli/cmd/tui/context/event.ts`,
     `packages/opencode/src/cli/cmd/tui/context/project.tsx`,
     `packages/opencode/src/cli/cmd/tui/context/sdk.tsx`,
     `packages/opencode/src/cli/cmd/tui/context/sync.tsx`, and
@@ -1418,6 +1419,8 @@ git commit -m "fix(instance): join generation channels and producers"
   process-global publisher explicitly.
 - Create: `packages/opencode/src/cli/cmd/tui/context/instance-generation.tsx`
 - Modify: TUI SDK, project, sync, and event contexts.
+- Modify: TUI App session-fork response handlers and orchestrator directory
+  transition, reusing the same selection coordinator.
 - Modify: workspace-create dialog and session-list callers that rely on
   `project.workspace.sync()` mutating internally.
 - Create/modify: HTTP, workspace, OpenAPI, event, and TUI tests, including
@@ -1426,7 +1429,9 @@ git commit -m "fix(instance): join generation channels and producers"
   `packages/opencode/test/server/global-event-generation.test.ts`,
   `packages/opencode/test/server/project-init-git.test.ts`,
   `packages/opencode/test/server/workspace-instance-generation.test.ts`, and
-  `packages/opencode/test/cli/tui/instance-generation-order.test.tsx`.
+  `packages/opencode/test/cli/tui/instance-generation-order.test.tsx`, plus the
+  app transition race in
+  `packages/opencode/test/cli/tui/directory-switch.test.tsx`.
 - Verify: `packages/opencode/src/cli/cmd/generate.ts` and
   `packages/sdk/js/script/build.ts` generation behavior.
 - Regenerate: `packages/sdk/openapi.json` and `packages/sdk/js/src/v2/gen/`.
@@ -1578,6 +1583,31 @@ after the epoch already closed, it invokes the returned unsubscribe immediately
 and admits no callback or late flush. Gate that race in
 `instance-generation-order.test.tsx`.
 
+Bind both App session-fork call sites to the initiating selection epoch and
+captured client. Table-drive held `--continue --fork` and `--session --fork`
+responses, replace the selection, then release them; neither success nor failure
+may navigate or show a stale toast, every rejection is observed, and no
+`unhandledRejection` occurs. A server-side fork accepted before cancellation is
+not rolled back.
+
+Orchestrator entry uses the same coordinator, not a new lifecycle abstraction.
+After `orchestratorDir()`, a same-target direct entry stays entirely on the source
+epoch: it does not dispose, switch directories, create a successor, or hand off;
+root/store/route work joins the source receipt. A cross-target entry uses two
+phases. Its source epoch owns old-directory `instance.dispose()` and is
+revalidated immediately before the synchronous `switchDirectory(target)`. That
+switch atomically advances selection and registers the remaining
+bootstrap/root/store/route continuation under the exact target epoch before
+releasing the source receipt; the source must not await the target and
+self-deadlock. Hold source disposal, switch externally from A to C, then release
+it and prove the old operation never switches to B or starts its bootstrap.
+Separately complete A to B, hold B root resolution, switch to C, then release it
+and prove no B root ID/store/navigation commits into C. Also prove an uncontended
+A to B transition completes, and direct entry already in B resolves its root,
+records the orchestrator ID, and preserves its route without disposal, a
+successor epoch, or self-wait. Exercise the real App call sites rather than
+duplicating their transition sequence in the test.
+
 Each clock also stores `committedGeneration`. Ordinary instance events may
 mutate only at that generation. A higher ordinary event records observation and
 coalesces bootstrap but cannot touch the old store. Handle disposed before the
@@ -1616,7 +1646,7 @@ Run both RED matrices again, then:
 cd packages/opencode
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- packages/opencode/src/server/routes/instance/access.ts packages/opencode/src/server/routes/instance/middleware.ts packages/opencode/src/server/routes/instance/index.ts packages/opencode/src/server/routes/instance/openapi-lifecycle.ts packages/opencode/src/server/incarnation.ts packages/opencode/src/server/server.ts packages/opencode/src/server/workspace.ts packages/opencode/src/server/proxy.ts packages/opencode/src/server/middleware.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/server/routes/control/workspace.ts packages/opencode/src/control-plane/sse.ts packages/opencode/src/control-plane/util.ts packages/opencode/src/control-plane/workspace.ts packages/opencode/src/project/instance.ts packages/opencode/src/project/project.ts packages/opencode/src/config/config.ts packages/opencode/src/sync/index.ts packages/opencode/src/task/registry.ts packages/opencode/src/worktree/index.ts packages/opencode/src/bus/global.ts packages/opencode/src/bus/index.ts packages/opencode/src/cli/cmd/tui/context/instance-generation.tsx packages/opencode/src/cli/cmd/tui/context/sdk.tsx packages/opencode/src/cli/cmd/tui/context/project.tsx packages/opencode/src/cli/cmd/tui/context/sync.tsx packages/opencode/src/cli/cmd/tui/context/event.ts packages/opencode/src/cli/cmd/tui/component/dialog-workspace-create.tsx packages/opencode/src/cli/cmd/tui/component/dialog-session-list.tsx packages/opencode/test/server/instance-closing.test.ts packages/opencode/test/server/project-init-git.test.ts packages/opencode/test/server/workspace-instance-generation.test.ts packages/opencode/test/server/instance-openapi-lifecycle.test.ts packages/opencode/test/server/global-event-generation.test.ts packages/opencode/test/bus/bus.test.ts packages/opencode/test/cli/tui/instance-closing.test.tsx packages/opencode/test/cli/tui/instance-generation-order.test.tsx packages/opencode/test/cli/tui/workspace-sync-generation.test.tsx packages/opencode/test/cli/tui/directory-switch.test.tsx packages/opencode/test/cli/tui/bootstrap-directory-denied.test.tsx packages/opencode/test/cli/tui/bootstrap-race.test.tsx packages/opencode/test/cli/tui/use-event.test.tsx packages/sdk/openapi.json packages/sdk/js/src/v2/gen docs/compose/spec/instance-generation-producer-inventory.md
+git add -- packages/opencode/src/server/routes/instance/access.ts packages/opencode/src/server/routes/instance/middleware.ts packages/opencode/src/server/routes/instance/index.ts packages/opencode/src/server/routes/instance/openapi-lifecycle.ts packages/opencode/src/server/incarnation.ts packages/opencode/src/server/server.ts packages/opencode/src/server/workspace.ts packages/opencode/src/server/proxy.ts packages/opencode/src/server/middleware.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/server/routes/control/workspace.ts packages/opencode/src/control-plane/sse.ts packages/opencode/src/control-plane/util.ts packages/opencode/src/control-plane/workspace.ts packages/opencode/src/project/instance.ts packages/opencode/src/project/project.ts packages/opencode/src/config/config.ts packages/opencode/src/sync/index.ts packages/opencode/src/task/registry.ts packages/opencode/src/worktree/index.ts packages/opencode/src/bus/global.ts packages/opencode/src/bus/index.ts packages/opencode/src/cli/cmd/tui/app.tsx packages/opencode/src/cli/cmd/tui/context/instance-generation.tsx packages/opencode/src/cli/cmd/tui/context/sdk.tsx packages/opencode/src/cli/cmd/tui/context/project.tsx packages/opencode/src/cli/cmd/tui/context/sync.tsx packages/opencode/src/cli/cmd/tui/context/event.ts packages/opencode/src/cli/cmd/tui/component/dialog-workspace-create.tsx packages/opencode/src/cli/cmd/tui/component/dialog-session-list.tsx packages/opencode/test/server/instance-closing.test.ts packages/opencode/test/server/project-init-git.test.ts packages/opencode/test/server/workspace-instance-generation.test.ts packages/opencode/test/server/instance-openapi-lifecycle.test.ts packages/opencode/test/server/global-event-generation.test.ts packages/opencode/test/bus/bus.test.ts packages/opencode/test/cli/tui/instance-closing.test.tsx packages/opencode/test/cli/tui/instance-generation-order.test.tsx packages/opencode/test/cli/tui/workspace-sync-generation.test.tsx packages/opencode/test/cli/tui/directory-switch.test.tsx packages/opencode/test/cli/tui/bootstrap-directory-denied.test.tsx packages/opencode/test/cli/tui/bootstrap-race.test.tsx packages/opencode/test/cli/tui/use-event.test.tsx packages/sdk/openapi.json packages/sdk/js/src/v2/gen docs/compose/spec/instance-generation-producer-inventory.md
 git diff --cached --check
 # Inspect staged paths and remove unrelated server/TUI tests before commit.
 git commit -m "feat(instance): expose generation retirement over HTTP"
@@ -2197,7 +2227,8 @@ The reviewer must inspect:
   workflow timers;
 - Absent/Open maintenance and worktree two-phase deletion;
 - workspace canonical headers, committed/cohort/high-water response and event
-  filtering, and generation-bound session-sync cache;
+  filtering, generation-bound session-sync cache, and app-level fork/directory
+  transition epoch handoff;
 - OpenAPI operation injection and tracked SDK idempotency;
 - TUI/serve/ACP/web real shutdown; and
 - reviewed removal of the two legacy settled facades plus focused private-join

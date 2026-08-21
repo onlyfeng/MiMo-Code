@@ -1066,6 +1066,20 @@ only the wrapper commits mutations. One coordinator per TUI selection
 `{sdkDirectory, workspaceID}` handles `instance_closing`; multiple bootstrap
 calls for that selection join it rather than creating per-directory retry loops.
 
+App-level session-fork continuations use the same checked-response selection
+epoch: a completed server fork is not rolled back, but an old response cannot
+navigate or show a stale error after selection replacement. Orchestrator entry
+uses a two-phase epoch handoff only when its resolved target differs from the
+source selection. The same-target direct-entry path performs no disposal,
+directory switch, successor creation, or handoff; root resolution, local ID, and
+navigation stay on the source receipt. For a cross-target entry, the source epoch
+owns target resolution and old-directory disposal and is revalidated immediately
+before the synchronous `switchDirectory`. That switch registers the exact target-
+selection phase before the source receipt releases; the target epoch then owns
+bootstrap, root resolution, local orchestrator ID, and navigation. An external
+switch invalidates whichever phase is current. The source receipt never waits on
+its successor, so the operation's own switch cannot create an epoch self-wait.
+
 Within each selection/epoch, the client assigns a source slot to the outer SDK
 transport and to each workspace relay identity, then keys clocks by
 `(sourceSlot, serverIncarnation, canonicalDirectory)` and maintains
@@ -1250,7 +1264,8 @@ terminal shutdown coordinator to reopen intake after its permanent gate.
   preserve three-state response provenance, ensure the innermost canonical
   workspace target owns the lifecycle triple, and inject common lifecycle
   OpenAPI responses only into instance operations.
-- `packages/opencode/src/cli/cmd/tui/context/sdk.tsx`,
+- `packages/opencode/src/cli/cmd/tui/app.tsx`,
+  `packages/opencode/src/cli/cmd/tui/context/sdk.tsx`,
   `packages/opencode/src/cli/cmd/tui/context/project.tsx`,
   `packages/opencode/src/cli/cmd/tui/context/sync.tsx`,
   `packages/opencode/src/cli/cmd/tui/context/event.ts`, and project/workspace
@@ -1447,6 +1462,11 @@ terminal shutdown coordinator to reopen intake after its permanent gate.
   cohort. `fullSyncedSessions` is keyed/invalidated by epoch and exact lifecycle
   target. All instance event envelopes carry incarnation/generation; delayed g
   or old-incarnation events/responses cannot overwrite accepted new data.
+- Delayed app-level `--continue --fork` and `--session --fork` responses cannot
+  navigate or toast after a selection switch. Orchestrator entry cannot resume
+  an old source phase to replace a newer selection, and after its own switch its
+  target phase cannot write the root ID or navigate after another switch. Direct
+  entry from the orchestrator selection creates no successor or self-wait.
 - A pending `/tui/control/next` is actively closed by retire/shutdown and cannot
   hold the active-lease barrier; another directory or generation cannot consume
   its queue item. A blocked SSE write is actively aborted and joined.
