@@ -74,6 +74,8 @@ inventory
 - Inspect: all `packages/opencode/src` instance, prompt, processor, actor,
   workflow, plugin, Bus, PTY, watcher, server, config, history, memory, and
   bootstrap paths.
+- Inspect: all `packages/opencode/test` legacy instance-cleanup callers and every
+  source or test use of the opaque global-disposal request API.
 
 **Inventory row contract**
 
@@ -97,6 +99,21 @@ changed from the PR base, then compare existing rows on native-callback,
 stream, long-poll, and detached-promise surfaces. Classify every affected row
 and record the reviewed source range. A zero-result seed query is not evidence
 that a changed surface has no producer.
+
+Freeze the complete legacy cleanup caller set across production and tests, and
+separately prove whether any opaque global-disposal request is directly awaited:
+
+```bash
+rg -n -U '\bInstance\s*\.\s*(disposeAll|disposeDirectory)\b' packages/opencode/src packages/opencode/test --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}' || true
+rg -n '\b(disposeAll|disposeDirectory)\b' packages/opencode/src/project/instance.ts || true
+rg -n '\brequestDisposeAll\b' packages/opencode/src packages/opencode/test --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}' || true
+rg -n -U '\bawait\s*(\(\s*)*([A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*)*requestDisposeAll\b' packages/opencode/src packages/opencode/test --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}' || true
+```
+
+Record every path from the first two commands for Task 8 migration. Manually
+classify every reference from the third command, including aliases and wrappers.
+Any result from the fourth command is an immediate blocker; awaiting the opaque
+request ID does not await disposal settlement.
 
 The inventory is review evidence, not a complete static proof of arbitrary
 TypeScript semantics. API types and module boundaries prevent ordinary
@@ -1970,6 +1987,19 @@ bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/c
 bun script/check-fd004-boundary.ts --check
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
+if rg -n -U '\bInstance\s*\.\s*(disposeAll|disposeDirectory)\b' packages/opencode/src packages/opencode/test --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'; then
+  echo "legacy instance-disposal caller remains" >&2
+  exit 1
+fi
+if rg -n '\b(disposeAll|disposeDirectory)\b' packages/opencode/src/project/instance.ts; then
+  echo "legacy instance-disposal facade remains" >&2
+  exit 1
+fi
+rg -n '\brequestDisposeAll\b' packages/opencode/src packages/opencode/test --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}' || true
+if rg -n -U '\bawait\s*(\(\s*)*([A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*)*requestDisposeAll\b' packages/opencode/src packages/opencode/test --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'; then
+  echo "opaque requestDisposeAll result is awaited" >&2
+  exit 1
+fi
 git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/mdns.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/context/exit.tsx packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/acp/agent.ts packages/opencode/src/cli/heap.ts packages/opencode/src/index.ts packages/opencode/src/provider/models.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/actor/registry.test.ts packages/opencode/test/actor/stall-watchdog.test.ts packages/opencode/test/skill/skill.test.ts packages/opencode/test/acp/event-subscription.test.ts packages/opencode/test/cli/heap-shutdown.test.ts packages/opencode/test/mcp/oauth-callback.test.ts packages/opencode/test/provider/models-refresh-shutdown.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
 # Inspect the remaining test-only diff and require every path to be one of the
 # frozen Task 0 legacy cleanup callers before staging exactly that path list.
@@ -2120,6 +2150,19 @@ cd packages/opencode
 cd ../..
 rg -n 'provideService\((InstanceRef|InstanceAdmissionRef)' packages/opencode/src
 rg -n 'registerLifecycleOwner|transferLifecycleOwner|captureInstanceExecution|captureInstanceExecutionEffect|restoreInstanceExecutionSync|enterInstanceExecutionEffect|registerDirectoryRootLifecycleOwner' packages/opencode/src
+if rg -n -U '\bInstance\s*\.\s*(disposeAll|disposeDirectory)\b' packages/opencode/src packages/opencode/test --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'; then
+  echo "legacy instance-disposal caller remains" >&2
+  exit 1
+fi
+if rg -n '\b(disposeAll|disposeDirectory)\b' packages/opencode/src/project/instance.ts; then
+  echo "legacy instance-disposal facade remains" >&2
+  exit 1
+fi
+rg -n '\brequestDisposeAll\b' packages/opencode/src packages/opencode/test --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}' || true
+if rg -n -U '\bawait\s*(\(\s*)*([A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*)*requestDisposeAll\b' packages/opencode/src packages/opencode/test --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'; then
+  echo "opaque requestDisposeAll result is awaited" >&2
+  exit 1
+fi
 git diff --check
 test -z "$(git ls-files -u)"
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
@@ -2133,7 +2176,9 @@ only its exact generated JUnit file plus now-empty parent directories; do not
 use a broad `git clean`. The feature worktree contains no user `.mimocode` files, so
 any other untracked result blocks publication. Re-run the Task 0 horizontal
 search and require every row to name its implemented owner and deterministic
-test.
+test. The disposal searches are intentionally bounded textual checks plus
+manual review of every `requestDisposeAll` reference across source and tests;
+do not replace them with a hand-written TypeScript/JavaScript parser.
 
 - [ ] **Step 5: Independent read-only review**
 

@@ -41,6 +41,15 @@ rg -n --glob '*.{ts,tsx,mts,cts}' \
 rg -n --glob '*.{ts,tsx,mts,cts}' \
   'captureInstanceExecution|captureInstanceExecutionEffect|restoreInstanceExecutionSync|enterInstanceExecutionEffect|registerLifecycleOwner|transferLifecycleOwner|registerDirectoryRootLifecycleOwner' src
 rg -n --glob '*.{ts,tsx,mts,cts}' '\bvoid\s+' src
+rg -n -U --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}' \
+  '\bInstance\s*\.\s*(disposeAll|disposeDirectory)\b' src test || true
+rg -n '\b(disposeAll|disposeDirectory)\b' src/project/instance.ts || true
+rg -n --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}' '\brequestDisposeAll\b' src test || true
+if rg -n -U --glob '*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}' \
+  '\bawait\s*(\(\s*)*([A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*)*requestDisposeAll\b' src test; then
+  echo "opaque requestDisposeAll result is awaited" >&2
+  exit 1
+fi
 git diff --name-only origin/main...HEAD -- src
 git diff --cached --name-only -- src
 git diff --name-only -- src
@@ -54,10 +63,13 @@ Reviewers then:
    listed by `git ls-files`; compare all four sets with the previous inventory
    baseline. The `rg` queries are seed searches, not a completeness gate; a
    zero-result query does not prove that a changed surface has no producer.
-2. Add, update, or remove every affected row; `TBD`, `audit later`, and empty
+2. Freeze every source and test path from the two legacy-disposal searches for
+   Task 8 migration. Manually classify every `requestDisposeAll` reference,
+   including aliases and wrappers; the direct-await query must remain empty.
+3. Add, update, or remove every affected row; `TBD`, `audit later`, and empty
    owner or test cells block review.
-3. Confirm each non-exempt row names a focused deterministic lifecycle test.
-4. Treat these searches as review aids, not complete TypeScript semantics.
+4. Confirm each non-exempt row names a focused deterministic lifecycle test.
+5. Treat these searches as review aids, not complete TypeScript semantics.
    Native callbacks, streams, long polls, detached promise chains, aliasing,
    control flow, data flow, module scheduling, and container mutation are
    examined directly in each changed-source diff. API/runtime invariants and
