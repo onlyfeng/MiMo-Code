@@ -42,12 +42,13 @@ rg -n --glob '*.{ts,tsx,mts,cts}' \
   'captureInstanceExecution|captureInstanceExecutionEffect|restoreInstanceExecutionSync|enterInstanceExecutionEffect|registerLifecycleOwner|transferLifecycleOwner|registerDirectoryRootLifecycleOwner' src
 rg -n --glob '*.{ts,tsx,mts,cts}' '\bvoid\s+' src
 git diff --name-only origin/main...HEAD -- src
+git diff --cached --name-only -- src
 git diff --name-only -- src
 ```
 
 Reviewers then:
 
-1. Inspect the complete diff of every source file listed by the two `git diff`
+1. Inspect the complete diff of every source file listed by the three `git diff`
    commands and compare it with the previous inventory baseline. The `rg`
    queries are seed searches, not a completeness gate; a zero-result query does
    not prove that a changed surface has no producer.
