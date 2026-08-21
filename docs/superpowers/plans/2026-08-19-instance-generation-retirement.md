@@ -1466,6 +1466,12 @@ git commit -m "fix(instance): fence worktree maintenance through deletion"
   `Instance.disposeAll()` or `Instance.disposeDirectory()`; no awaited opaque
   request ID may remain.
 - Create: `packages/opencode/src/server/shutdown.ts`
+- Use existing: `packages/opencode/src/effect/app-runtime.ts:AppRuntime.dispose`
+  as the sole process-wide Effect-layer close; do not add per-layer stop APIs.
+- Review: `packages/opencode/src/actor/registry.ts`,
+  `packages/opencode/src/actor/spawn.ts`, and
+  `packages/opencode/src/skill/index.ts`; preserve their existing scoped forks
+  under the runtime closed by `AppRuntime.dispose()`.
 - Modify: `packages/opencode/src/server/server.ts`
 - Modify: `packages/opencode/src/server/adapter.ts`
 - Modify: `packages/opencode/src/server/adapter.bun.ts`
@@ -1483,6 +1489,9 @@ git commit -m "fix(instance): fence worktree maintenance through deletion"
 - Modify: compiled `packages/opencode/src/cli/cmd/web.ts` listener lifecycle
   without expanding Web product behavior.
 - Create/modify: real stream, TUI thread, and CLI entrypoint shutdown tests.
+- Modify: `packages/opencode/test/actor/registry.test.ts`
+- Modify: `packages/opencode/test/actor/stall-watchdog.test.ts`
+- Modify: `packages/opencode/test/skill/skill.test.ts`
 - Modify: `packages/opencode/test/acp/event-subscription.test.ts`
 - Create: `packages/opencode/test/cli/heap-shutdown.test.ts`
 - Modify: `packages/opencode/test/mcp/oauth-callback.test.ts`
@@ -1554,6 +1563,21 @@ Use real listeners, not only call-order mocks:
   prove shutdown clears the minute interval, seals later ticks and queued
   pre-write runs, and waits for an admitted synchronous `writeHeapSnapshot` to
   return; the main CLI and TUI worker use the same process-root owner;
+- in the real ActorRegistry and Actor layers, admit one periodic scan into a
+  Deferred DB, Bus, or inbox operation, then advance shared shutdown through
+  the attempted instance/global drains; when mandatory runtime scope close
+  begins, it prevents another scan, interrupts and joins the admitted fiber,
+  runs its finalizer, and emits no later stuck or watchdog notification;
+- in the real Skill layer, block process-shared discovery, then begin shared
+  shutdown; after every instance/global drain has been attempted, mandatory
+  runtime scope close interrupts and joins discovery and its waiter, prevents
+  later discovery admission, and runs its finalizer before the shared receipt
+  settles;
+- in CLI entrypoint subprocesses, combine a rejecting instance disposer with
+  blocked Skill discovery and prove the coordinator still invokes and joins the
+  single `AppRuntime.dispose()` before force-close/log finalization; preceding
+  drain failure and runtime-disposal failure both join the unclean aggregate
+  without skipping runtime, transport, or log finalizers;
 - start the real MCP OAuth loopback listener and a pending callback, then prove
   shared shutdown stops callback admission, rejects residual waiters, and joins
   `server.close` plus any admitted handler before its receipt settles;
@@ -1568,7 +1592,7 @@ Use real listeners, not only call-order mocks:
 
 ```bash
 cd packages/opencode
-bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/acp/event-subscription.test.ts test/cli/heap-shutdown.test.ts test/mcp/oauth-callback.test.ts test/provider/models-refresh-shutdown.test.ts test/project/instance-dispose.test.ts --timeout 60000
+bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/actor/registry.test.ts test/actor/stall-watchdog.test.ts test/skill/skill.test.ts test/acp/event-subscription.test.ts test/cli/heap-shutdown.test.ts test/mcp/oauth-callback.test.ts test/provider/models-refresh-shutdown.test.ts test/project/instance-dispose.test.ts --timeout 60000
 ```
 
 - [ ] **Step 2: Implement shared ordering**
@@ -1576,16 +1600,25 @@ bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/c
 ```text
 synchronously install process intake gate
 -> actively close/join global long-lived streams and long-polls
--> collect private disposeAllSettled() and remaining global-request drain failures
+-> attempt every private disposeAllSettled() and remaining global-request drain without short-circuiting
+-> always dispose AppRuntime and join its process-wide Effect layer scopes, adding any failure to the aggregate
 -> finally raw forceClose once and close logs
 -> emit clean shutdown-complete or report the aggregated unclean failure
 ```
 
 Do not wait instance requests before retirement. TUI waits an explicit
 `shutdown-complete`; emergency second-signal termination is logged as unclean.
-Retirement/drain rejection never skips the transport/log `finally`; the failed
-generation remains fail-closed in memory, but the listener cannot remain
-half-shut. Report/rethrow only after finalization.
+Retirement/drain rejection never skips mandatory runtime close or the
+transport/log `finally`; the failed generation remains fail-closed in memory,
+but the listener cannot remain half-shut. Report/rethrow only after finalization.
+After every instance and global-request drain has been attempted, the
+coordinator calls the existing `AppRuntime.dispose()` exactly once even when a
+preceding drain failed, and awaits its terminal receipt. Starting that scope
+close seals later ActorRegistry scans, Actor watchdog scans, and shared Skill
+discovery, then interrupts and joins their admitted fibers before raw
+transport/log finalization. Do not create parallel per-layer shutdown APIs.
+Runtime disposal rejection joins the same unclean aggregate and cannot skip the
+final transport/log `finally`.
 Serve and compiled web install a reachable signal lifetime rather than an
 unreachable stop after `new Promise(() => {})`. ACP closes on protocol/stdin
 completion or error. Its connection channel owns the global-event request and
@@ -1658,11 +1691,11 @@ upstream merge from silently removing one part of the protocol.
 
 ```bash
 cd packages/opencode
-bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/acp/event-subscription.test.ts test/cli/heap-shutdown.test.ts test/mcp/oauth-callback.test.ts test/provider/models-refresh-shutdown.test.ts test/project/instance-dispose.test.ts --timeout 60000
+bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/actor/registry.test.ts test/actor/stall-watchdog.test.ts test/skill/skill.test.ts test/acp/event-subscription.test.ts test/cli/heap-shutdown.test.ts test/mcp/oauth-callback.test.ts test/provider/models-refresh-shutdown.test.ts test/project/instance-dispose.test.ts --timeout 60000
 bun script/check-fd004-boundary.ts --check
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/acp/agent.ts packages/opencode/src/cli/heap.ts packages/opencode/src/index.ts packages/opencode/src/provider/models.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/acp/event-subscription.test.ts packages/opencode/test/cli/heap-shutdown.test.ts packages/opencode/test/mcp/oauth-callback.test.ts packages/opencode/test/provider/models-refresh-shutdown.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
+git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/acp/agent.ts packages/opencode/src/cli/heap.ts packages/opencode/src/index.ts packages/opencode/src/provider/models.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/actor/registry.test.ts packages/opencode/test/actor/stall-watchdog.test.ts packages/opencode/test/skill/skill.test.ts packages/opencode/test/acp/event-subscription.test.ts packages/opencode/test/cli/heap-shutdown.test.ts packages/opencode/test/mcp/oauth-callback.test.ts packages/opencode/test/provider/models-refresh-shutdown.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
 # Inspect the remaining test-only diff and require every path to be one of the
 # frozen Task 0 legacy cleanup callers before staging exactly that path list.
 git diff --name-status -- packages/opencode/test
@@ -1730,7 +1763,8 @@ bun test --timeout 60000 \
   test/project/instance-producer-retirement.test.ts test/server/instance-stream-retirement.test.ts \
   test/server/tui-control-retirement.test.ts test/file/watcher-retirement.test.ts \
   test/pty/retirement.test.ts test/actor/spawn-notification.test.ts \
-  test/actor/stall-watchdog.test.ts test/inbox/wake-matrix.test.ts \
+  test/actor/registry.test.ts test/actor/stall-watchdog.test.ts test/skill/skill.test.ts \
+  test/inbox/wake-matrix.test.ts \
   test/tool/session-tool.test.ts test/workflow/runtime-worktree.test.ts \
   test/workflow/runtime-retirement.test.ts test/workflow/runtime.test.ts \
   test/server/httpapi-instance-admission.test.ts \
