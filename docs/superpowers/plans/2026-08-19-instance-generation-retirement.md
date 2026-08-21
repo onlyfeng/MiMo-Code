@@ -1448,9 +1448,13 @@ git commit -m "fix(instance): fence worktree maintenance through deletion"
 - Modify: TUI worker/thread.
 - Modify: `packages/opencode/src/cli/cmd/serve.ts`
 - Modify: `packages/opencode/src/cli/cmd/acp.ts`
+- Modify: `packages/opencode/src/acp/agent.ts`
+- Modify: `packages/opencode/src/provider/models.ts`
 - Modify: compiled `packages/opencode/src/cli/cmd/web.ts` listener lifecycle
   without expanding Web product behavior.
 - Create/modify: real stream, TUI thread, and CLI entrypoint shutdown tests.
+- Modify: `packages/opencode/test/acp/event-subscription.test.ts`
+- Create: `packages/opencode/test/provider/models-refresh-shutdown.test.ts`
 - Create: `docs/compose/spec/fd-004-rejected-surfaces.json`
 - Create: `packages/opencode/script/check-fd004-boundary.ts`
 - Create/modify: focused FD-004 checker tests.
@@ -1488,6 +1492,18 @@ Use real listeners, not only call-order mocks:
   intact, and never invokes raw `stop(true)`;
 - ACP calls non-waiting shutdown begin while inside bootstrap ownership, leaves
   that owner, then waits finish outside it;
+- in `test/acp/event-subscription.test.ts`, hold or reject a started deferred
+  `sessionUpdate`; the connection-channel-owned notification receipt keeps
+  shutdown finish pending until settle or rejection, records the rejection, and
+  emits no `unhandledRejection`;
+- in `test/cli/server-shutdown-entrypoints.test.ts`, complete ACP initialize and
+  `newSession`, then close stdin both before the deferred callback starts and
+  after its write starts; the real connection channel cancels or joins it;
+- hold the automatic configured-model fetch (default models.dev), then prove
+  shutdown clears the hourly interval, aborts that fetch, and rejects later
+  ticks;
+- independently hold the cache write after fetch resolves, then prove the shared
+  receipt does not settle until the admitted refresh and write settle;
 - inject a rejecting instance disposer through TUI, serve, ACP, and web; each
   reports unclean failure only after raw force-close and log finalization run
   exactly once;
@@ -1499,7 +1515,7 @@ Use real listeners, not only call-order mocks:
 
 ```bash
 cd packages/opencode
-bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/project/instance-dispose.test.ts --timeout 60000
+bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/acp/event-subscription.test.ts test/provider/models-refresh-shutdown.test.ts test/project/instance-dispose.test.ts --timeout 60000
 ```
 
 - [ ] **Step 2: Implement shared ordering**
@@ -1519,8 +1535,10 @@ generation remains fail-closed in memory, but the listener cannot remain
 half-shut. Report/rethrow only after finalization.
 Serve and compiled web install a reachable signal lifetime rather than an
 unreachable stop after `new Promise(() => {})`. ACP closes on protocol/stdin
-completion or error. Web coverage is lifecycle-only and does not add a new
-product feature.
+completion or error; its channel receipt also owns deferred agent notifications.
+The process-root receipt owns startup and hourly configured-model refreshes,
+clears their interval, and settles admitted fetch/cache work. Web coverage is
+lifecycle-only and does not add a new product feature.
 TUI `rpc.server` is single-shot per worker lifetime. A second call rejects
 before stop/rebind/mutation; non-terminal replacement never uses raw
 `stop(true)` and terminal shutdown never reopens its intake gate.
@@ -1578,11 +1596,11 @@ upstream merge from silently removing one part of the protocol.
 
 ```bash
 cd packages/opencode
-bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/project/instance-dispose.test.ts --timeout 60000
+bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/acp/event-subscription.test.ts test/provider/models-refresh-shutdown.test.ts test/project/instance-dispose.test.ts --timeout 60000
 bun script/check-fd004-boundary.ts --check
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
+git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/acp/agent.ts packages/opencode/src/provider/models.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/acp/event-subscription.test.ts packages/opencode/test/provider/models-refresh-shutdown.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
 # Inspect the remaining test-only diff and require every path to be one of the
 # frozen Task 0 legacy cleanup callers before staging exactly that path list.
 git diff --name-status -- packages/opencode/test
@@ -1664,6 +1682,7 @@ bun test --timeout 60000 \
   test/cli/tui/use-event.test.tsx test/project/worktree.test.ts \
   test/cli/bootstrap-retirement.test.ts test/server/shutdown-streams.test.ts \
   test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts \
+  test/acp/event-subscription.test.ts test/provider/models-refresh-shutdown.test.ts \
   test/script/check-fd004-boundary.test.ts test/bus/bus.test.ts
 bun script/check-fd004-boundary.ts --check
 bun typecheck
