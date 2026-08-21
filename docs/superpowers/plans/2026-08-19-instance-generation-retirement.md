@@ -1471,16 +1471,20 @@ git commit -m "fix(instance): fence worktree maintenance through deletion"
 - Modify: `packages/opencode/src/server/adapter.bun.ts`
 - Modify: `packages/opencode/src/server/adapter.node.ts`
 - Modify: `packages/opencode/src/server/routes/global.ts`
-- Modify: TUI worker/thread.
+- Modify: `packages/opencode/src/cli/cmd/tui/worker.ts`
+- Modify: `packages/opencode/src/cli/cmd/tui/thread.ts`
 - Modify: `packages/opencode/src/cli/cmd/serve.ts`
 - Modify: `packages/opencode/src/cli/cmd/acp.ts`
 - Modify: `packages/opencode/src/acp/agent.ts`
+- Modify: `packages/opencode/src/cli/heap.ts`
+- Modify: `packages/opencode/src/index.ts`
 - Modify: `packages/opencode/src/provider/models.ts`
 - Modify: `packages/opencode/src/mcp/oauth-callback.ts`
 - Modify: compiled `packages/opencode/src/cli/cmd/web.ts` listener lifecycle
   without expanding Web product behavior.
 - Create/modify: real stream, TUI thread, and CLI entrypoint shutdown tests.
 - Modify: `packages/opencode/test/acp/event-subscription.test.ts`
+- Create: `packages/opencode/test/cli/heap-shutdown.test.ts`
 - Modify: `packages/opencode/test/mcp/oauth-callback.test.ts`
 - Create: `packages/opencode/test/provider/models-refresh-shutdown.test.ts`
 - Create: `docs/compose/spec/fd-004-rejected-surfaces.json`
@@ -1524,6 +1528,20 @@ Use real listeners, not only call-order mocks:
   `sessionUpdate`; the connection-channel-owned notification receipt keeps
   shutdown finish pending until settle or rejection, records the rejection, and
   emits no `unhandledRejection`;
+- block the ACP global-event request or iterator, and separately dispatch one
+  event into a Deferred `handleEvent` operation, then close the connection; its
+  signal aborts the iterator, prevents resubscription and later dispatch, and
+  the connection receipt waits for the iterator and admitted handler's local
+  termination;
+- queue two same-session permissions behind a held `requestPermission`, then
+  close the connection; later FIFO work never starts, the local admitted wait
+  ends through `connection.signal`, any late SDK resolution or rejection is
+  observed without resuming work, and no post-close `permission.reply`,
+  `writeTextFile`, or `unhandledRejection` occurs;
+- hold or reject edit permission `writeTextFile`; an unstarted write is dropped,
+  an admitted local write is joined through return or connection cancellation,
+  late resolution or rejection is observed, and no reply or write starts after
+  close;
 - in `test/cli/server-shutdown-entrypoints.test.ts`, complete ACP initialize and
   `newSession`, then close stdin both before the deferred callback starts and
   after its write starts; the real connection channel cancels or joins it;
@@ -1532,6 +1550,10 @@ Use real listeners, not only call-order mocks:
   ticks;
 - independently hold the cache write after fetch resolves, then prove the shared
   receipt does not settle until the admitted refresh and write settle;
+- with automatic heap snapshots enabled and RSS controlled above the threshold,
+  prove shutdown clears the minute interval, seals later ticks and queued
+  pre-write runs, and waits for an admitted synchronous `writeHeapSnapshot` to
+  return; the main CLI and TUI worker use the same process-root owner;
 - start the real MCP OAuth loopback listener and a pending callback, then prove
   shared shutdown stops callback admission, rejects residual waiters, and joins
   `server.close` plus any admitted handler before its receipt settles;
@@ -1546,7 +1568,7 @@ Use real listeners, not only call-order mocks:
 
 ```bash
 cd packages/opencode
-bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/acp/event-subscription.test.ts test/mcp/oauth-callback.test.ts test/provider/models-refresh-shutdown.test.ts test/project/instance-dispose.test.ts --timeout 60000
+bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/acp/event-subscription.test.ts test/cli/heap-shutdown.test.ts test/mcp/oauth-callback.test.ts test/provider/models-refresh-shutdown.test.ts test/project/instance-dispose.test.ts --timeout 60000
 ```
 
 - [ ] **Step 2: Implement shared ordering**
@@ -1566,12 +1588,19 @@ generation remains fail-closed in memory, but the listener cannot remain
 half-shut. Report/rethrow only after finalization.
 Serve and compiled web install a reachable signal lifetime rather than an
 unreachable stop after `new Promise(() => {})`. ACP closes on protocol/stdin
-completion or error; its channel receipt also owns deferred agent notifications.
+completion or error. Its connection channel owns the global-event request and
+iterator, admitted event dispatch, per-session permission FIFOs, admitted client
+writes, and deferred agent notifications. Connection close seals local admission
+and uses `connection.signal` to end local waits; it observes late SDK settlement
+without claiming EOF cancels or rejects a request already sent inside
+`AgentSideConnection`.
 The process-root receipt owns startup and hourly configured-model refreshes,
 clears their interval, and settles admitted fetch/cache work. It also closes the
 process-wide MCP OAuth loopback listener, rejects residual waiters, and joins
-admitted handlers. Web coverage is lifecycle-only and does not add a new product
-feature.
+admitted handlers. It seals automatic heap-snapshot admission, clears the minute
+interval, and joins each admitted run through the return of the synchronous
+native snapshot write. Web coverage is lifecycle-only and does not add a new
+product feature.
 TUI `rpc.server` is single-shot per worker lifetime. A second call rejects
 before stop/rebind/mutation; non-terminal replacement never uses raw
 `stop(true)` and terminal shutdown never reopens its intake gate.
@@ -1629,11 +1658,11 @@ upstream merge from silently removing one part of the protocol.
 
 ```bash
 cd packages/opencode
-bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/acp/event-subscription.test.ts test/mcp/oauth-callback.test.ts test/provider/models-refresh-shutdown.test.ts test/project/instance-dispose.test.ts --timeout 60000
+bun test test/server/shutdown-streams.test.ts test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts test/acp/event-subscription.test.ts test/cli/heap-shutdown.test.ts test/mcp/oauth-callback.test.ts test/provider/models-refresh-shutdown.test.ts test/project/instance-dispose.test.ts --timeout 60000
 bun script/check-fd004-boundary.ts --check
 bun typecheck
 cd "$(git rev-parse --show-toplevel)"
-git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/acp/agent.ts packages/opencode/src/provider/models.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/acp/event-subscription.test.ts packages/opencode/test/mcp/oauth-callback.test.ts packages/opencode/test/provider/models-refresh-shutdown.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
+git add -- packages/opencode/src/project/instance.ts packages/opencode/src/server/shutdown.ts packages/opencode/src/server/server.ts packages/opencode/src/server/adapter.ts packages/opencode/src/server/adapter.bun.ts packages/opencode/src/server/adapter.node.ts packages/opencode/src/server/routes/global.ts packages/opencode/src/cli/cmd/tui/worker.ts packages/opencode/src/cli/cmd/tui/thread.ts packages/opencode/src/cli/cmd/serve.ts packages/opencode/src/cli/cmd/acp.ts packages/opencode/src/acp/agent.ts packages/opencode/src/cli/heap.ts packages/opencode/src/index.ts packages/opencode/src/provider/models.ts packages/opencode/src/mcp/oauth-callback.ts packages/opencode/src/cli/cmd/web.ts packages/opencode/script/check-fd004-boundary.ts packages/opencode/test/fixture/instance-lifecycle.ts packages/opencode/test/script/check-fd004-boundary.test.ts packages/opencode/test/server/shutdown-streams.test.ts packages/opencode/test/cli/tui/thread.test.ts packages/opencode/test/cli/server-shutdown-entrypoints.test.ts packages/opencode/test/acp/event-subscription.test.ts packages/opencode/test/cli/heap-shutdown.test.ts packages/opencode/test/mcp/oauth-callback.test.ts packages/opencode/test/provider/models-refresh-shutdown.test.ts packages/opencode/test/project/instance-dispose.test.ts docs/compose/spec/fd-004-rejected-surfaces.json docs/compose/spec/instance-generation-producer-inventory.md docs/upstream-deviations.md
 # Inspect the remaining test-only diff and require every path to be one of the
 # frozen Task 0 legacy cleanup callers before staging exactly that path list.
 git diff --name-status -- packages/opencode/test
@@ -1716,6 +1745,7 @@ bun test --timeout 60000 \
   test/cli/bootstrap-retirement.test.ts test/server/shutdown-streams.test.ts \
   test/cli/tui/thread.test.ts test/cli/server-shutdown-entrypoints.test.ts \
   test/cli/run-completion.test.ts test/cli/run.test.ts test/acp/event-subscription.test.ts \
+  test/cli/heap-shutdown.test.ts \
   test/mcp/oauth-callback.test.ts test/provider/models-refresh-shutdown.test.ts \
   test/script/check-fd004-boundary.test.ts test/bus/bus.test.ts
 bun script/check-fd004-boundary.ts --check
