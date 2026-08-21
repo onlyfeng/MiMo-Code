@@ -44,14 +44,16 @@ rg -n --glob '*.{ts,tsx,mts,cts}' '\bvoid\s+' src
 git diff --name-only origin/main...HEAD -- src
 git diff --cached --name-only -- src
 git diff --name-only -- src
+git ls-files --others --exclude-standard -- src
 ```
 
 Reviewers then:
 
-1. Inspect the complete diff of every source file listed by the three `git diff`
-   commands and compare it with the previous inventory baseline. The `rg`
-   queries are seed searches, not a completeness gate; a zero-result query does
-   not prove that a changed surface has no producer.
+1. Inspect the complete diff of every tracked source file listed by the three
+   `git diff` commands and the complete contents of every untracked source file
+   listed by `git ls-files`; compare all four sets with the previous inventory
+   baseline. The `rg` queries are seed searches, not a completeness gate; a
+   zero-result query does not prove that a changed surface has no producer.
 2. Add, update, or remove every affected row; `TBD`, `audit later`, and empty
    owner or test cells block review.
 3. Confirm each non-exempt row names a focused deterministic lifecycle test.
