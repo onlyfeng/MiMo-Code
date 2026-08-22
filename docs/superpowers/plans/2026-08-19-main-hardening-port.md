@@ -1,5 +1,11 @@
 # Main Hardening Port Implementation Plan
 
+> **Status (2026-08-22):** Task 1 merged through PR #57 at
+> `622463a816d7c56c79a13107819ecc50e1942121` and is included in the current
+> main baseline `b5c2181d6c4c98b91cdef8e3b789f7da37bdffad`. Tasks 2 through 8 remain
+> pending and must be re-audited from that baseline. Unchecked boxes below are
+> the remaining execution record, not evidence that Task 1 is unmerged.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver four branch-independent context-safety fixes to fork `main`, then propagate each merged result to `dev/compat` without importing compatibility-only behavior.
@@ -19,7 +25,7 @@
   before root-relative commands.
 - Run tests and `bun typecheck` from `packages/opencode`; never run tests from the repository root.
 - Install dependencies only with `bun ci`; never mutate `bun.lock` for these changes.
-- Preserve `docs/upstream-deviations.md` FD-001 through FD-005.
+- Preserve `docs/upstream-deviations.md` FD-001 through FD-006.
 - Preserve request authorization, MCP discovery/loading, `execMcp.current`, `ALL_TOOLS`, frozen fork membership, and attachment routing.
 - Preserve `dev/compat` MaxMode, checkpoint, overflow, actor/status, and fork-prefix extensions during propagation.
 - Do not change Web, App, or Desktop surfaces.

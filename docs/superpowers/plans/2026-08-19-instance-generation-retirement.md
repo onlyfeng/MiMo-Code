@@ -1,5 +1,11 @@
 # Instance Generation Retirement Implementation Plan
 
+> **Status (2026-08-22):** Task 0 completed through PR #59 at
+> `ffc89d3916197e5860e91050616476f423c09ad4`; the inventory was rechecked at
+> main `b5c2181d6c4c98b91cdef8e3b789f7da37bdffad`. Tasks 1 through 10 remain
+> pending. Their unchecked boxes are active work, while Task 0's unchecked
+> historical steps no longer mean that its baseline is unmerged.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: use
 > `superpowers:subagent-driven-development` or `superpowers:executing-plans`.
 > Implement one task at a time. Each task must demonstrate RED before changing

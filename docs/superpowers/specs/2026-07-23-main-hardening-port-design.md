@@ -1,5 +1,10 @@
 # Main Hardening Port Design
 
+> **Status (2026-08-22):** The verified baseline below is historical. PR 1
+> merged through fork PR #57 at `622463a816d7c56c79a13107819ecc50e1942121`.
+> PRs 2 through 4 remain unimplemented and require a fresh source/path audit
+> from main `b5c2181d6c4c98b91cdef8e3b789f7da37bdffad` before work resumes.
+
 ## Goal
 
 Promote four branch-independent correctness and context-safety fixes to the fork's

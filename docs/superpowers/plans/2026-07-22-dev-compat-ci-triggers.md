@@ -1,5 +1,9 @@
 # Dev/Compat CI Trigger Coverage Implementation Plan
 
+> **Status (2026-08-22):** Implemented and merged at
+> `43c541b566be4edc318d9347a2979d625077ed6e` (PR #42). The unchecked steps
+> below are a historical execution record, not active work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Automatically run the existing lint, typecheck, and sharded test workflows for pull requests into `dev/compat` and direct synchronization pushes to `dev/compat`.

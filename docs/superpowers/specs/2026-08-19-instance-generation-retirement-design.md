@@ -1,5 +1,11 @@
 # Instance Generation Retirement Design
 
+> **Status (2026-08-22):** The verified refs below are historical. The producer
+> inventory was merged through PR #59 at
+> `ffc89d3916197e5860e91050616476f423c09ad4` and rechecked at main
+> `b5c2181d6c4c98b91cdef8e3b789f7da37bdffad`; production implementation remains
+> pending.
+
 ## Goal
 
 Make per-directory instance disposal terminate without finalizer deadlock while

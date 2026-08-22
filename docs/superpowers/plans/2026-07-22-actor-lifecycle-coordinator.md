@@ -1,5 +1,9 @@
 # Actor Lifecycle Coordinator Implementation Plan
 
+> **Status (2026-08-22):** Implemented and merged at
+> `c893078f3b42d4cf4ca16c4407b981dc376aa299` (PR #44). The unchecked steps
+> below are a historical execution record, not active work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
 
 **Goal:** Move the in-memory actor lifecycle state machine out of spawn.ts without changing actor behavior or public interfaces.

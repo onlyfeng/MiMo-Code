@@ -6,26 +6,25 @@ decisions and must never be inferred from a nearby row.
 
 ## Baseline and evidence
 
-- Fork source baseline: `onlyfeng/MiMo-Code@622463a816d7c56c79a13107819ecc50e1942121`.
+- Fork source baseline: `onlyfeng/MiMo-Code@b5c2181d6c4c98b91cdef8e3b789f7da37bdffad`.
 - Classification source: the inventory review from closed PR #58 at
   `1cf78c6274aca3018086bbdf8fe62df27092ca60`, manually compared with the fork
   baseline above.
-- Upstream context reviewed: `XiaomiMiMo/MiMo-Code@bed9b0b2e8a8cb45c2576ada164ec412a31dbc31`.
-  That upstream head is not merged into the fork and is not part of this
-  inventory baseline; its changes must be reconsidered during the next
-  upstream synchronization under `docs/upstream-deviations.md`.
-- The 18 upstream-only commits add no rows to this fork-source inventory. A
-  future upstream sync must recheck their FD-002, FD-003, FD-005, and FD-006
-  surfaces before merging them.
+- Upstream context reviewed and merged:
+  `XiaomiMiMo/MiMo-Code@bed9b0b2e8a8cb45c2576ada164ec412a31dbc31`,
+  incorporated by fork merge `b5c2181d6c4c98b91cdef8e3b789f7da37bdffad`.
+- The 18 formerly upstream-only commits add no producer rows to this inventory.
+  Their FD-002 through FD-006 surfaces were rechecked during the merge.
 - `Signals` and `Fingerprint` are non-normative discovery notes retained from
   the closed PR. They are not regenerated or enforced by a repository checker.
   When a row's source changes, reviewers reclassify the row and may replace its
   fingerprint with `manual` rather than claiming an unverified hash.
 
-The fork change after the closed PR's original base is #57. It changes the
-checkpoint writer's tool contract, but not the `Effect.forkIn(scope)` producer,
-its cancellation path, or its settlement responsibility, so the checkpoint
-row remains unchanged.
+Fork changes after the closed PR's original base include #57 and #59. #57
+changes the checkpoint writer's tool contract, but not its
+`Effect.forkIn(scope)` producer, cancellation path, or settlement
+responsibility. #59 records this inventory baseline without changing a
+producer. The checkpoint row therefore remains unchanged.
 
 ## Manual refresh procedure
 
