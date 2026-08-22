@@ -1,5 +1,9 @@
 # Actor Lifecycle Coordinator Design
 
+> **Status (2026-08-22):** Delivered through PR #44 at
+> `c893078f3b42d4cf4ca16c4407b981dc376aa299`. The future-tense branch and
+> implementation text below records the pre-implementation design baseline.
+
 ## Goal
 
 Extract the actor generation, terminal-claim, cancellation-episode, persistent-ownership, and fork-context state machine from `packages/opencode/src/actor/spawn.ts` into one internal coordinator without changing actor behavior, public APIs, storage, notifications, or scheduling.

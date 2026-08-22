@@ -1,5 +1,10 @@
 # Dev/Compat CI Trigger Coverage Design
 
+> **Status (2026-08-22):** Delivered through PR #42 at
+> `43c541b566be4edc318d9347a2979d625077ed6e`. The current workflow contract is
+> `branches: [main, dev, dev/compat]`; the older state below is the preserved
+> pre-implementation baseline.
+
 ## Goal
 
 Ensure every pull request into `dev/compat` and every direct synchronization push to `dev/compat` automatically runs the same lint, typecheck, and sharded test workflows that already protect `main`, while preserving the upstream `dev` branch filters.

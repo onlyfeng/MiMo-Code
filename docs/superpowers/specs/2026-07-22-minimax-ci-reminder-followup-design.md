@@ -1,5 +1,9 @@
 # MiniMax CI Reminder Follow-up Design
 
+> **Status (2026-08-22):** Delivered through PR #43 at
+> `9a363e486e9fd96f83da25376869c732b0e76f53`. The future-tense delivery text
+> below records the pre-implementation design baseline.
+
 ## Goal
 
 Resolve the actionable Codex review feedback that arrived after PR #42 was already merged. MiniMax-backed sessions must receive the same current CI branch guidance as `AGENTS.md` and the three GitHub Actions workflows, without retaining a duplicate reminder.

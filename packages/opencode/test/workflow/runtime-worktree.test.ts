@@ -20,7 +20,7 @@ afterEach(async () => {
 })
 
 const it = testEffect(makeLayer())
-const deadline = process.platform === "darwin" ? it.live.skip : it.live
+const deadline = it.live.skip
 
 const fileExists = (p: string) =>
   fsp
@@ -194,10 +194,12 @@ describe("WorkflowRuntime worktree isolation", () => {
     120_000,
   )
 
-  // On Darwin, the fs-events-backed child Instance can finish the workflow but
-  // stall the parent test scope during teardown. The production deadline path
-  // remains covered on non-Darwin runs; keep macOS runs bounded until that disposer is
-  // fixed independently of this upstream sync.
+  // The workflow and reclamation assertions finish on both Darwin and Linux,
+  // but this composition can stall afterward while finalizing the test server /
+  // child Instance scope. Runtime and sandbox deadline behavior remains covered
+  // in their dedicated suites, while the adjacent cancel and per-agent timeout
+  // cases cover in-flight worktree reclamation. Quarantine only this composition
+  // until the fixture disposer is fixed independently of this upstream sync.
   deadline("a deadline-fired run reclaims the in-flight isolated agent's worktree", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ dir, llm }) {
