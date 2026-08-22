@@ -31,6 +31,11 @@ type MockEvent =
   | { type: "tool-result"; toolCallId: string; output: unknown }
   | { type: "finish-step"; finishReason: string; usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number }; providerMetadata?: unknown }
 
+type MockReply = {
+  events: MockEvent[]
+  error?: unknown
+}
+
 export function textReply(text: string): MockEvent[] {
   return [
     { type: "start-step" },
@@ -83,13 +88,18 @@ export interface TrajectoryStep {
 }
 
 export class MockLLM {
-  #queue: MockEvent[][] = []
+  #queue: MockReply[] = []
   #calls = 0
   #trajectory: TrajectoryStep[] = []
 
   /** Enqueue a reply (array of events) for the next stream() call */
   enqueue(...replies: MockEvent[][]) {
-    this.#queue.push(...replies)
+    this.#queue.push(...replies.map((events) => ({ events })))
+  }
+
+  /** Enqueue events followed by a stream failure for the next stream() call */
+  enqueueFailure(events: MockEvent[], error: unknown) {
+    this.#queue.push({ events, error })
   }
 
   /** How many times stream() was called */
@@ -122,7 +132,8 @@ export class MockLLM {
       LLM.Service.of({
         stream: (input) => {
           self.#calls++
-          const events = self.#queue.shift() ?? textReply("ok")
+          const reply = self.#queue.shift()
+          const events = reply?.events ?? textReply("ok")
 
           // Extract summary from events for trajectory
           const textParts = events.filter((e) => e.type === "text-delta").map((e) => (e as any).text)
@@ -150,7 +161,8 @@ export class MockLLM {
             },
           })
 
-          return Stream.fromIterable(events) as any
+          const stream = Stream.fromIterable(events)
+          return (reply?.error ? Stream.concat(stream, Stream.fail(reply.error)) : stream) as any
         },
         buildSystemArray: (_input) => Effect.succeed([]),
       }),

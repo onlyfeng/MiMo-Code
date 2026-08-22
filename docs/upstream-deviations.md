@@ -21,16 +21,20 @@ upstream synchronization re-evaluates an entry.
   extend a shared entry with a `dev/compat` note rather than reworking its
   wording here, so the copies stay diffable.
 - Last reviewed: 2026-08-22
-- Upstream review range: `bed9b0b2e8a8cb45c2576ada164ec412a31dbc31`..
-  `5f2c3fb03780f0b0392a8fd7f4c90c96dc4e8969`
-- Fork behavior head reviewed: `e3f1ae6b22003693e3d50008469b31b626334ba7`
-- Validation note: the workflow deadline/worktree composition test is
-  quarantined on all platforms pending a separate fixture-disposer fix. Two
-  exact-SHA Linux CI runs completed both deadline and worktree-reclamation
-  assertions, then stalled in fixture finalization for 120 seconds with both
-  the frozen upstream hang and a controlled hang. Dedicated runtime/sandbox
-  deadline tests and adjacent worktree cancel/per-agent-timeout tests remain
-  enabled; no workflow production code changed in this sync.
+- Upstream review range: `5f2c3fb03780f0b0392a8fd7f4c90c96dc4e8969`..
+  `f57520c08d4d10e64ac035e90ba561e889119c98`
+- Fork behavior head reviewed: `bec5e80eab71d2285b97c19114c59405d745c02f`
+- Validation note: the incoming workflow excluded all of
+  `runtime-worktree.test.ts` from normal shards and attempted to run only its
+  quarantined `deadline-fired` case separately. That case remains skipped
+  pending the fixture-disposer fix, while the replacement `find '*.test.ts'`
+  discovery would also omit every `.test.tsx` file. The workflow hunk was
+  rejected; the original sharding continues to run the five enabled worktree
+  cases and all eight `.test.tsx` files while quarantining only the known case.
+- Adaptation note: upstream text-part deferral was completed for hook-cleared,
+  hook-created, and retry cleanup paths. The PDF CJK guidance now uses
+  project-controlled fonts with explicit TTC face indexes and language-matched
+  runtime-supported CID fallbacks.
 - Exit condition: after the fixture disposer is fixed, re-enable this test in
   its corresponding Linux unit-test shard and prove in exact-SHA CI that the
   process exits before a bounded outer timeout rather than being killed by it.
@@ -76,6 +80,8 @@ upstream synchronization re-evaluates an entry.
 - 2026-08-22 live-sync review: the incoming Bash output-budget work did not
   change delete authorization, temporary-directory validation, or the explicit
   instance control.
+- 2026-08-22 PDF/text live-sync review: the four-commit range did not touch any
+  delete-approval or Bash authorization surface.
 - Reconsider only if: delete authorization becomes request- or session-scoped,
   ownership and restoration are linearizable, caller loss cannot leave a
   capability enabled, and the Bash decision is bound to the same immutable
@@ -136,6 +142,10 @@ upstream synchronization re-evaluates an entry.
   adopted through normal requests, command requests, compaction replay, and
   frozen-prefix capture while runtime environment and instruction additions
   remain unconditional.
+- 2026-08-22 PDF/text live-sync review: processor text-part persistence was
+  adapted without changing request construction. Coupled prompt regressions
+  still prove that reported instruction content reaches normal and MaxMode
+  requests.
 - Reconsider only if: one immutable per-request decision gates both the UI
   signal and model payload, and tests prove that both surfaces contain the same
   instruction set.
@@ -180,6 +190,8 @@ upstream synchronization re-evaluates an entry.
 - 2026-08-22 live-sync review: generated JavaScript SDK artifacts were rebuilt
   from the merged fork source. No implicit listener, `llmServer`, whole-server
   password, or rejected capability route re-entered the generated surface.
+- 2026-08-22 PDF/text live-sync review: no route, listener, OpenAPI, generator,
+  or generated SDK input changed, so SDK regeneration was not required.
 - Reconsider only if: the feature is explicitly enabled, token validation
   completes before directory bootstrap and all side effects, request/body/
   concurrency/cost bounds are defined, and shutdown first closes intake, then
@@ -232,6 +244,8 @@ upstream synchronization re-evaluates an entry.
   discovery, frozen prefixes, agent generation, and nested exec dispatch. The
   Xiaomi provider transport also uses the complete resolved model identity but
   deliberately remains independent of the per-session harness.
+- 2026-08-22 PDF/text live-sync review: no identity, prompt-selection,
+  discovery, registry, or toolset surface changed.
 - Reconsider only if: the provider layer exposes one immutable model-mode value
   that is consumed unchanged by prompt selection, MCP discovery, every tool
   registry call, frozen prefix capture, and exec dispatch, with regressions for
@@ -286,6 +300,8 @@ upstream synchronization re-evaluates an entry.
   permission-visible Codex surface, nested `bash`/`exec_command` exclusions,
   request-scoped whitelist filters, and seconds-based `timeout_seconds` budget
   remain intact.
+- 2026-08-22 PDF/text live-sync review: no direct or nested tool surface,
+  permission boundary, whitelist, or timeout contract changed.
 - Reconsider only if: nested execution has an immutable request-scoped
   capability set, every nested operation remains separately visible and
   attributable to permission and lifecycle enforcement, shell/control tools

@@ -181,6 +181,7 @@ interface ProcessorContext extends Input {
   stepPartIds: PartID[]
   textNgramMonitor: TextNgramMonitor | undefined
   textNgramRepeat: boolean
+  textPartPersisted: boolean
 }
 
 type StreamEvent = Event
@@ -237,6 +238,7 @@ export const layer: Layer.Layer<
         stepPartIds: [],
         textNgramMonitor: undefined,
         textNgramRepeat: false,
+        textPartPersisted: false,
       }
       let aborted = false
       // Only the main agent owns session-level status. Subagents (explore,
@@ -649,16 +651,21 @@ export const layer: Layer.Layer<
               time: { start: Date.now() },
               metadata: value.providerMetadata,
             }
-            yield* session.updatePart(ctx.currentText)
-            ctx.stepPartIds.push(ctx.currentText.id)
+            ctx.textPartPersisted = false
             return
 
           case "text-delta":
-            if (!ctx.firstTokenAt) ctx.firstTokenAt = Date.now()
             if (!ctx.currentText) return
+            if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
+            if (!value.text) return
+            if (!ctx.firstTokenAt) ctx.firstTokenAt = Date.now()
+            if (!ctx.textPartPersisted) {
+              const part = yield* session.updatePart(ctx.currentText)
+              ctx.textPartPersisted = true
+              ctx.stepPartIds.push(part.id)
+            }
             ctx.currentText.text += value.text
             checkTextNgram(value.text)
-            if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
             yield* session.updatePartDelta({
               sessionID: ctx.currentText.sessionID,
               messageID: ctx.currentText.messageID,
@@ -686,7 +693,24 @@ export const layer: Layer.Layer<
               ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
             }
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
-            yield* session.updatePart(ctx.currentText)
+            if (!ctx.currentText.text) {
+              if (ctx.textPartPersisted) {
+                const partID = yield* session.removePart({
+                  sessionID: ctx.currentText.sessionID,
+                  messageID: ctx.currentText.messageID,
+                  partID: ctx.currentText.id,
+                })
+                ctx.stepPartIds = ctx.stepPartIds.filter((id) => id !== partID)
+                ctx.textPartPersisted = false
+              }
+              ctx.currentText = undefined
+              return
+            }
+            const persistedText = yield* session.updatePart(ctx.currentText)
+            if (!ctx.textPartPersisted) {
+              ctx.textPartPersisted = true
+              ctx.stepPartIds.push(persistedText.id)
+            }
             ctx.currentText = undefined
             return
 
@@ -716,9 +740,11 @@ export const layer: Layer.Layer<
         }
 
         if (ctx.currentText) {
-          const end = Date.now()
-          ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
-          yield* session.updatePart(ctx.currentText)
+          if (ctx.currentText.text) {
+            const end = Date.now()
+            ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
+            yield* session.updatePart(ctx.currentText)
+          }
           ctx.currentText = undefined
         }
 
