@@ -8,7 +8,6 @@ import { Instance } from "../../src/project/instance"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { SystemPrompt } from "../../src/session/system"
 import PROMPT_MINIMAX from "../../src/session/prompt/minimax.txt"
-import { MODEL_VISIBLE_TEXT_CAP_BYTES } from "../../src/util/text-truncate"
 import { provideInstance, tmpdir } from "../fixture/fixture"
 import { ProviderTest } from "../fake/provider"
 
@@ -165,13 +164,17 @@ describe("session.system", () => {
   test("GPT prompt aligns exec and parallel-call guidance", () => {
     const prompt = SystemPrompt.provider(ProviderTest.model())[0]
 
+    expect(prompt).toContain("You are Codex, an agent based on GPT-5")
     expect(prompt).toContain("Parallelize only tool calls that are independent")
     expect(prompt).toContain("keep dependencies sequential")
     expect(prompt).toContain("only one small call is needed")
     expect(prompt).toContain("escaping text for `bash` calls")
     expect(prompt).toContain("the `command` argument")
+    expect(prompt).toContain('exact string "We need" or "Need"')
+    expect(prompt).toContain("Conversation-control and orchestration tools are intentionally unavailable inside `exec`")
     expect(prompt).not.toContain("exec_command")
     expect(prompt).not.toContain("the `cmd` argument")
+    expect(prompt).not.toContain("tools.skill")
     expect(prompt).not.toContain("When possible, prefer parallelization over sequential tool calls")
   })
 
@@ -303,7 +306,7 @@ describe("session.system", () => {
     })
   })
 
-  test("prompts the model to search skills from the first user query", async () => {
+  test("skill catalog does not include invocation reminders", async () => {
     await using tmp = await tmpdir({ git: true })
     const home = process.env.HOME
     const userProfile = process.env.USERPROFILE
@@ -321,13 +324,10 @@ describe("session.system", () => {
             }).pipe(Effect.provide(SystemPrompt.defaultLayer)),
           )
 
-          expect(prompt).toContain("first user query")
-          expect(prompt).toContain("might benefit from a specialized workflow")
-          expect(prompt).toContain("skill_search")
-          expect(prompt).toContain("action")
-          expect(prompt).toContain("input")
-          expect(prompt).toContain("output")
-          expect(prompt).toContain("audience")
+          expect(prompt).toContain("Skills available in this session:")
+          expect(prompt).not.toContain("first user query")
+          expect(prompt).not.toContain("skill_search")
+          expect(prompt).not.toContain("Use the skill tool")
         },
       })
     } finally {
@@ -336,7 +336,7 @@ describe("session.system", () => {
     }
   })
 
-  test("omits skill search guidance when the tool is unavailable", async () => {
+  test("omits the skill catalog when neither skill tool is available", async () => {
     await using tmp = await tmpdir({ git: true })
 
     await Instance.provide({
@@ -352,10 +352,8 @@ describe("session.system", () => {
 
         expect(await run({ ...build!, toolAllowlist: ["read"] })).toBeUndefined()
         expect(await run(build!, build!.permission, { skill: false, skill_search: false })).toBeUndefined()
-        expect(await run({ ...build!, toolAllowlist: ["skill"] })).not.toContain("skill_search")
-        expect(await run({ ...build!, toolAllowlist: ["skill"] })).toContain("Use the skill tool")
-        expect(await run({ ...build!, toolAllowlist: ["skill_search"] })).toContain("skill_search")
-        expect(await run({ ...build!, toolAllowlist: ["skill_search"] })).not.toContain("Use the skill tool")
+        expect(await run({ ...build!, toolAllowlist: ["skill"] })).toContain("Skills available in this session:")
+        expect(await run({ ...build!, toolAllowlist: ["skill_search"] })).toContain("Skills available in this session:")
         expect(await run(build!, [{ permission: "skill", pattern: "*", action: "deny" }])).toBeUndefined()
         expect(await run(build!, [{ permission: "skill", pattern: "mimocode-docs", action: "deny" }])).not.toContain(
           "<name>mimocode-docs</name>",
@@ -423,89 +421,4 @@ description: ${description}
     }
   })
 
-  test("does not prompt blacklisted models to use skill_search", async () => {
-    await using tmp = await tmpdir({ git: true })
-
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const build = await load(tmp.path, (svc) => svc.get("build"))
-        const prompts = await Effect.runPromise(
-          Effect.gen(function* () {
-            const system = yield* SystemPrompt.Service
-            return yield* Effect.all([
-              system.skills(build!, { model: { id: "gpt-5.4" } }),
-              system.skills(build!, { model: { id: "claude-sonnet-4-6" } }),
-              system.skills(build!, { model: { id: "kimi-k2.5" } }),
-              system.skills(build!, { model: { id: "k2p5", family: "kimi-thinking" } }),
-              system.skills(build!, { model: { id: "mimo-v2" } }),
-              system.skills(build!, { model: { id: "deepseek-v3.2" } }),
-            ])
-          }).pipe(Effect.provide(SystemPrompt.defaultLayer)),
-        )
-
-        expect(prompts[0]).not.toContain("skill_search")
-        expect(prompts[1]).not.toContain("skill_search")
-        expect(prompts[2]).not.toContain("skill_search")
-        expect(prompts[3]).not.toContain("skill_search")
-        expect(prompts[4]).not.toContain("skill_search")
-        expect(prompts[5]).toContain("skill_search")
-      },
-    })
-  })
-
-  test("keeps model-aware skill guidance when a multibyte skill listing is capped", async () => {
-    await using tmp = await tmpdir({
-      git: true,
-      init: async (dir) => {
-        await Bun.write(
-          path.join(dir, ".mimocode", "skill", "oversized-multibyte", "SKILL.md"),
-          `---
-name: oversized-multibyte
-description: ${"跨模型技能说明".repeat(10_000)}
----
-
-# Oversized multibyte skill
-`,
-        )
-      },
-    })
-    const home = process.env.HOME
-    const userProfile = process.env.USERPROFILE
-    process.env.HOME = tmp.path
-    process.env.USERPROFILE = tmp.path
-
-    try {
-      await Instance.provide({
-        directory: tmp.path,
-        fn: async () => {
-          const build = await load(tmp.path, (svc) => svc.get("build"))
-          const prompts = await Effect.runPromise(
-            Effect.gen(function* () {
-              const system = yield* SystemPrompt.Service
-              return yield* Effect.all([
-                system.skills(build, { model: { id: "gpt-5.4" } }),
-                system.skills(build, { model: { id: "deepseek-v3.2" } }),
-              ])
-            }).pipe(Effect.provide(SystemPrompt.defaultLayer)),
-          )
-
-          expect(prompts[0]).not.toContain("call skill_search")
-          expect(prompts[0]).toContain("Use the skill tool")
-          expect(prompts[1]).toContain("call skill_search")
-          prompts.forEach((prompt) => {
-            if (!prompt) throw new Error("Expected skill guidance")
-            const listing = prompt.slice(prompt.indexOf("<available_skills>"))
-            expect(listing).toContain("<available_skills>")
-            expect(Buffer.byteLength(listing, "utf8")).toBeLessThanOrEqual(MODEL_VISIBLE_TEXT_CAP_BYTES)
-            expect(listing).toContain("bytes of available skills truncated before model injection")
-            expect(listing).not.toContain("\uFFFD")
-          })
-        },
-      })
-    } finally {
-      process.env.HOME = home
-      process.env.USERPROFILE = userProfile
-    }
-  })
 })

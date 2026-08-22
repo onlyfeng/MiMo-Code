@@ -7,7 +7,7 @@ import type { ModelMessage } from "ai"
 import { capUtf8TextByBytes } from "../util/text-truncate"
 import { safeStringifySimple } from "../util/safe-stringify"
 
-const COMPACTION_BUFFER = 20_000
+const COMPACTION_BUFFER = 33_000
 
 // Cap the output reservation so models with large output windows (e.g. 32K, 64K)
 // don't strangle the usable input window. 20K covers >99.99% of compaction

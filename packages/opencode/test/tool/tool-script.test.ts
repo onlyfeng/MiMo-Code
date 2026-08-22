@@ -728,7 +728,7 @@ describe("exec", () => {
       undefined,
       {
         mcp: {
-          mcp__chrome_devtools__browser_navigate: {
+          "chrome-devtools_browser-navigate": {
             description: "Navigate a browser page to a URL",
             inputSchema: z.object({ url: z.string() }),
             execute: async (args: { url: string }) => ({
@@ -757,7 +757,7 @@ describe("renderToolScriptDeclarations", () => {
     const text = renderToolScriptDeclarations(defs)
     expect(text).toContain("read(input:")
     expect(text).not.toContain("mcp_tool_search(input:")
-    expect(text).toContain("mcp__<server>__<tool>")
+    expect(text).toContain("name: string; description: string")
     expect(text).toContain("declare const ALL_TOOLS")
     expect(text).not.toContain("task(input:")
     expect(text).not.toContain("question(input:")

@@ -47,8 +47,36 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
         expect(exec?.description).not.toContain("read(input:")
         expect(exec?.description).not.toContain("write(input:")
         expect(exec?.description).not.toContain("edit(input:")
+        expect(gpt.map((tool) => tool.id)).toEqual(
+          expect.arrayContaining(["bash", "apply_patch", "skill_search", "skill", "task", "exec"]),
+        )
         expect(yield* ids("anthropic/claude-sonnet-4-6")).not.toContain("exec")
         expect(yield* ids("mimo-v2")).toContain("exec")
+      }),
+    ),
+    30000,
+  )
+
+  it.live("keeps exec beside safe GPT allowlist members without nesting shell", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const reg = yield* ToolRegistry.Service
+        const agents = yield* Agent.Service
+        const general = yield* agents.get("general")
+        if (!general) throw new Error("no general agent")
+        const ids = (toolAllowlist: string[]) =>
+          reg
+            .tools({
+              providerID: ProviderID.opencode,
+              modelID: ModelID.make("openai/gpt-5.4"),
+              agent: { ...general, toolAllowlist },
+            })
+            .pipe(Effect.map((tools) => tools.map((tool) => tool.id)))
+
+        expect(yield* ids(["apply_patch"])).toEqual(expect.arrayContaining(["apply_patch", "exec"]))
+        expect(yield* ids(["bash"])).toContain("bash")
+        expect(yield* ids(["bash"])).not.toContain("exec")
+        expect(yield* ids(["missing_tool"])).not.toContain("exec")
       }),
     ),
     30000,
@@ -141,6 +169,7 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
         const bash = tools.find((tool) => tool.id === "bash")
         expect(bash?.description).toContain("DO NOT use it for file operations")
         expect(bash?.description).not.toContain("the dedicated `read`, `write`, and `edit` tools are unavailable")
+        expect(tools.find((tool) => tool.id === "skill_search")?.description).not.toContain("first query")
         expect(tools.some((tool) => tool.id === "notebook_edit")).toBeTrue()
         expect(tools.some((tool) => tool.id === "grep")).toBeTrue()
         expect(tools.some((tool) => tool.id === "glob")).toBeTrue()

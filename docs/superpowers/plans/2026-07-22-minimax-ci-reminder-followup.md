@@ -1,5 +1,9 @@
 # MiniMax CI Reminder Follow-up Implementation Plan
 
+> **Status (2026-08-22):** Implemented and merged at
+> `9a363e486e9fd96f83da25376869c732b0e76f53` (PR #43). The unchecked steps
+> below are a historical execution record, not active work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the MiniMax system prompt state the current `main`, `dev`, and `dev/compat` CI branch contract exactly once, with a regression test that prevents renewed drift.

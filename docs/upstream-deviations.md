@@ -13,10 +13,14 @@ upstream synchronization re-evaluates an entry.
 
 - Status: active
 - Scope: fork `main` and propagation from `main` to `dev/compat`
-- Last reviewed: 2026-08-20
-- Upstream review range: `59f25b6ee95c3463bbe5b886366822d2fb8e3c4b`..
-  `6ee774bad24c4f830536167d8db5e0d81ec50ba5`
-- Fork behavior head reviewed: `0f07797eda6f6e3f8b8ad68509f95121067192cc`
+- Last reviewed: 2026-08-22
+- Upstream review range: `6ee774bad24c4f830536167d8db5e0d81ec50ba5`..
+  `bed9b0b2e8a8cb45c2576ada164ec412a31dbc31`
+- Fork behavior head reviewed: `b5c2181d6c4c98b91cdef8e3b789f7da37bdffad`
+- Validation note: the pre-existing Darwin workflow deadline test can finish
+  its runtime path but stall while disposing an fs-events-backed test Instance.
+  It remains enabled on non-Darwin runs and is quarantined on Darwin pending a
+  separate disposer fix; no workflow production code changed in this sync.
 
 ## FD-001 — `--yolo` must not temporarily mutate delete approval state
 
@@ -54,6 +58,8 @@ upstream synchronization re-evaluates an entry.
   derived from shell environment expansion (`~`, PowerShell `$`, or cmd `%`)
   cannot earn the temporary-directory exemption, because authorization and the
   final child environment may otherwise differ.
+- 2026-08-22 review: the frozen 18-commit range did not reintroduce yolo-driven
+  delete approval mutation or change the explicit instance control.
 - Reconsider only if: delete authorization becomes request- or session-scoped,
   ownership and restoration are linearizable, caller loss cannot leave a
   capability enabled, and the Bash decision is bound to the same immutable
@@ -94,11 +100,9 @@ upstream synchronization re-evaluates an entry.
   `packages/opencode/test/session/system.test.ts`. Verify both the published
   instruction paths and the actual model-request additions on normal and
   MaxMode paths.
-- Follow-up verification gap: no current regression binds the user-visible
-  `InstructionsLoaded` file list to the downstream `streamText` system request
-  in one scenario. Before adopting an upstream change to these surfaces, add
-  that coupled regression and prove the MaxMode candidate forwards the same
-  system content.
+- Coupled verification: `prompt-effect.test.ts` now binds the user-visible
+  `InstructionsLoaded` file list to the downstream normal request and both
+  MaxMode candidate requests in the same scenarios.
 - 2026-08-19 review: #2157's `MIMOCODE_CODEX_MODE` and MiMo/GPT prompt
   selection were adopted while retaining unconditional runtime environment and
   instruction additions plus the fork's skill permission/tool visibility
@@ -108,6 +112,10 @@ upstream synchronization re-evaluates an entry.
   API ID, or family alias identifies that version, so prompt, MCP search, and
   toolset selection cannot split; the instruction-delivery invariant remains
   unchanged.
+- 2026-08-22 review: the upstream skill-search reminder removal and prompt
+  cleanup were adopted while unconditional instruction delivery was retained.
+  The new coupled regressions fail against the upstream-only behavior and pass
+  at the reviewed fork head.
 - Reconsider only if: one immutable per-request decision gates both the UI
   signal and model payload, and tests prove that both surfaces contain the same
   instruction set.
@@ -133,6 +141,12 @@ upstream synchronization re-evaluates an entry.
   Verify that 1M-class GPT models clamp to 372K, smaller/non-GPT models are not
   raised, zero remains zero, and documentation distinguishes capacity from the
   272K billing tier.
+- 2026-08-22 review: 128K output defaults and the 33K compaction reserve were
+  adopted without changing the Codex OAuth 372K context clamp or its tests.
+  On `dev/compat`, the fake GPT fixture now uses a 200K/128K context/output pair,
+  content-cap tests pin `test/test-model`, and the catalog-pressure test pins its
+  own 100K budget. This keeps those tests focused without changing production
+  overflow behavior.
 - Reconsider only if: current Codex backend/catalog evidence proves a different
   hard serving limit and the implementation, overflow tests, and user-facing
   budget documentation are updated together.
@@ -171,6 +185,9 @@ upstream synchronization re-evaluates an entry.
   OpenAPI and the JavaScript SDK were regenerated from the fork source instead,
   and the generator continues to run `script/format.ts` rather than relying on
   manual diff editing.
+- 2026-08-22 review: the frozen range did not reintroduce the rejected listener,
+  capability routes, `llmServer` schema, or deleted listener tests. Existing
+  opt-in TUI voice functionality is outside this listener contract.
 - Reconsider only if: the feature is explicitly enabled, token validation
   completes before directory bootstrap and all side effects, request/body/
   concurrency/cost bounds are defined, and shutdown first closes intake, then
@@ -214,6 +231,8 @@ upstream synchronization re-evaluates an entry.
   exec tests. Verify that live requests, frozen fork schemas, exec
   `ALL_TOOLS`, agent generation, debug output, and the experimental tool-list
   route all receive the same resolved identity.
+- 2026-08-22 review: prompt selection, MCP Tool Search, registry filtering, and
+  exec dispatch retain the complete identity tuple and MiMo v2.5 precedence.
 - Reconsider only if: the provider layer exposes one immutable model-mode value
   that is consumed unchanged by prompt selection, MCP discovery, every tool
   registry call, frozen prefix capture, and exec dispatch, with regressions for
@@ -259,6 +278,10 @@ upstream synchronization re-evaluates an entry.
   that keeps a completed outer `exec` visible were adopted. The single-exec
   GPT surface, nested shell/control expansion, and breaking timeout rename were
   rejected.
+- 2026-08-22 review: the upstream compact single-exec surface and nested
+  shell/`exec_command` conversion were rejected. Opaque MCP catalog wording and
+  allowlist-aware `exec` availability were adopted while direct tools, nested
+  exclusions, and the seconds-based `timeout_seconds` contract were preserved.
 - Reconsider only if: nested execution has an immutable request-scoped
   capability set, every nested operation remains separately visible and
   attributable to permission and lifecycle enforcement, shell/control tools

@@ -1,5 +1,9 @@
 # Actor Cancel Regression Test Synchronization Implementation Plan
 
+> **Status (2026-08-22):** Implemented and merged through PR #40 at
+> `bf244ca8832a08a2d34116680e7ce3c663777916`. The unchecked steps below are a
+> historical execution record, not active work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the final-turn forced-cancel regression test enter its pre-delivery race window deterministically while preserving the fork's existing production cancellation behavior.
