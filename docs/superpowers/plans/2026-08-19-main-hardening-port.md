@@ -25,7 +25,7 @@
   before root-relative commands.
 - Run tests and `bun typecheck` from `packages/opencode`; never run tests from the repository root.
 - Install dependencies only with `bun ci`; never mutate `bun.lock` for these changes.
-- Preserve `docs/upstream-deviations.md` FD-001 through FD-006.
+- Preserve every active entry in `docs/upstream-deviations.md`.
 - Preserve request authorization, MCP discovery/loading, `execMcp.current`, `ALL_TOOLS`, frozen fork membership, and attachment routing.
 - Preserve `dev/compat` MaxMode, checkpoint, overflow, actor/status, and fork-prefix extensions during propagation.
 - Do not change Web, App, or Desktop surfaces.
@@ -479,7 +479,7 @@ Replace the inline filter in `LLM.stream` and prove the emitted tool keys are un
 
 - [ ] **Step 2: Add RED pure-estimator tests**
 
-Cover ASCII/multibyte requests, circular/bigint/function/symbol data, the 80 KiB schema contribution cap, filtered tools, recoverable old-history overflow, recovery-floor overflow from current user text and file content, current-turn assistant/tool envelopes, immutable frozen messages, request-local synthetic messages, `compaction.max_context`, disabled auto compaction, unknown context, and a provider model already clamped to 372K. Build at least one real AI SDK `tool({ inputSchema: jsonSchema(hugeSchema) })`. Capture the selected descriptor immediately before the real provider/`streamText` request and compare its name, description, and JSON schema to the estimator's materialized descriptor byte-for-byte; assert the large schema is counted and `execute` is absent.
+Cover ASCII/multibyte requests, circular/bigint/function/symbol data, the 80 KiB schema contribution cap, filtered tools, recoverable old-history overflow, recovery-floor overflow from current user text and file content, current-turn assistant/tool envelopes, immutable frozen messages, request-local synthetic messages, `compaction.max_context`, disabled auto compaction, unknown context, and a provider model whose published input cap is lower than its total context window. Build at least one real AI SDK `tool({ inputSchema: jsonSchema(hugeSchema) })`. Capture the selected descriptor immediately before the real provider/`streamText` request and compare its name, description, and JSON schema to the estimator's materialized descriptor byte-for-byte; assert the large schema is counted and `execute` is absent.
 
 - [ ] **Step 3: Implement the estimator and classifier**
 

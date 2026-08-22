@@ -140,39 +140,6 @@ upstream synchronization re-evaluates an entry.
   signal and model payload, and tests prove that both surfaces contain the same
   instruction set.
 
-## FD-003 — Codex OAuth models retain the served 372K capacity clamp
-
-- Status: active
-- Upstream anchor: `39353dd2a39ab48f0e92c34a6f67d73ac40f136a`, merged by
-  `9d54ad3c`
-- Fork contract: for Codex OAuth, clamp positive `gpt-*` context limits to
-  372,000 tokens without raising smaller windows. Clamp an existing
-  `limit.input` as well, but do not create one; preserve `limit.context === 0`
-  as the sentinel that disables overflow handling. The documented 272K value
-  remains an optional cost-control budget, not a hard provider capacity.
-- Rationale: removing the clamp trusts a generic catalog value that may exceed
-  the ChatGPT Codex serving boundary. That can defer compaction until a request
-  the backend rejects. Conversely, treating 272K as capacity confuses a pricing
-  boundary with a serving limit and needlessly reduces usable context.
-- Required sync check: inspect
-  `packages/opencode/src/plugin/codex.ts`,
-  `packages/opencode/test/plugin/codex.test.ts`,
-  `packages/web/src/content/docs/config.mdx`, and the context-budget design.
-  Verify that 1M-class GPT models clamp to 372K, smaller/non-GPT models are not
-  raised, zero remains zero, and documentation distinguishes capacity from the
-  272K billing tier.
-- 2026-08-22 review: 128K output defaults and the 33K compaction reserve were
-  adopted without changing the Codex OAuth 372K context clamp or its tests.
-  On `dev/compat`, the fake GPT fixture now uses a 200K/128K context/output pair,
-  content-cap tests pin `test/test-model`, and the catalog-pressure test pins its
-  own 100K budget. This keeps those tests focused without changing production
-  overflow behavior.
-- 2026-08-22 live-sync review: the incoming range did not touch the Codex OAuth
-  capacity clamp or its documented capacity-versus-budget distinction.
-- Reconsider only if: current Codex backend/catalog evidence proves a different
-  hard serving limit and the implementation, overflow tests, and user-facing
-  budget documentation are updated together.
-
 ## FD-004 — no implicit OpenAI-compatible listener on ordinary instances
 
 - Status: active

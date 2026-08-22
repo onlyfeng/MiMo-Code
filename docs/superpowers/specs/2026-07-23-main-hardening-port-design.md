@@ -36,8 +36,8 @@ pinned to these exact refs:
 
 The upstream SHA is an ancestor of fork `main`, and fork `main` is an ancestor of
 `dev/compat`. Exact-SHA lint, typecheck, and four test shards are green on both
-fork branches. The active contracts in `docs/upstream-deviations.md` (FD-001
-through FD-005) are hard constraints for every implementation PR in this design.
+fork branches. Every active contract in `docs/upstream-deviations.md` is a hard
+constraint for every implementation PR in this design.
 
 Before implementing any PR, fetch both remotes again and repeat the affected-file
 audit. If `upstream/main` or fork `main` moved, the implementation must rebase its
@@ -570,7 +570,7 @@ MaxMode behavior.
 
 Use the current `contextWindow()`/`usable()` flow as the only request threshold
 owner. Preserve config `compaction.max_context`, output/reserved headroom,
-FD-003's Codex 372K clamp, `limit.context === 0`, and
+provider-published model limits, `limit.context === 0`, and
 `compaction.auto === false` semantics.
 
 For recoverable overflow:
@@ -634,8 +634,8 @@ are handled before the classifier, so `session/classify.ts` does not change.
   schema is counted.
 - MiMo v2.5 alias-conflict and other-MiMo cases prove preflight consumes the same
   prompt/MCP/tool decision instead of independently reclassifying the model.
-- `compaction.max_context` and the Codex 372K clamp both drive the same
-  `usable()` threshold used by preflight.
+- `compaction.max_context` and provider-published `limit.input || limit.context`
+  both drive the same `usable()` threshold used by preflight.
 - Existing provider-overflow, fork, structured-output, checkpoint rebuild, and
   subagent compaction tests remain green; provider-overflow message persistence
   is explicitly unchanged.
