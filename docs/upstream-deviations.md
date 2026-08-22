@@ -24,6 +24,9 @@ upstream synchronization re-evaluates an entry.
   the frozen upstream hang and a controlled hang. Dedicated runtime/sandbox
   deadline tests and adjacent worktree cancel/per-agent-timeout tests remain
   enabled; no workflow production code changed in this sync.
+- Exit condition: after the fixture disposer is fixed, re-enable this test in
+  its corresponding Linux unit-test shard and prove in exact-SHA CI that the
+  process exits before a bounded outer timeout rather than being killed by it.
 
 ## FD-001 — `--yolo` must not temporarily mutate delete approval state
 
