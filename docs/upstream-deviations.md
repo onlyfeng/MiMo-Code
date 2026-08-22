@@ -317,3 +317,50 @@ upstream synchronization re-evaluates an entry.
   attributable to permission and lifecycle enforcement, shell/control tools
   cannot bypass their direct boundaries, and a compatibility window preserves
   the existing timeout field and unit.
+
+## FD-007 — model metadata states the request-level provider and variant
+
+- Status: active
+- Upstream anchors: `5fc3df6e18f8f682615a8d08ddb4a45dd1eb7271` (upstream #1279)
+- Fork contract: the prompt metadata row and the subagent footer both render
+  `alias · providerID/modelID · variant: <value>`. The `providerID/modelID`
+  segment is unconditional — it is not suppressed for any provider/model pair,
+  including `mimo/mimo-auto`, on the grounds that the alias already carries the
+  brand. The variant segment is likewise unconditional and reads `none` when
+  neither the user nor the agent selected one; it is never rendered as
+  `default`, `medium`, or another provider-specific reasoning level. The value
+  shown is the variant the next request will actually carry: an explicit
+  selection, otherwise the agent's configured variant when the request targets
+  the agent's own model and that model defines the variant, matching
+  `SessionPrompt.createUserMessage`. An agent model reference the TUI cannot
+  resolve from `model_groups` stays "unknown" and must not be guessed by
+  mirroring `Provider.defaultModel()` client-side.
+- Rationale: upstream shortens the row by hiding the provider label when the
+  model name already contains the brand and by showing the variant only when it
+  was manually selected. Both make the row untrue about the request it
+  describes. An operator cannot tell which provider actually serves an aliased
+  model, and an agent-configured variant reads as absent while the server sends
+  and persists it. The refusal to elect a default model client-side is part of
+  the same contract: that election reads the recent list, the configured
+  provider set, and a server-side priority table, so a TUI copy would become a
+  third implementation — alongside the server's and the fallback in
+  `context/local.tsx` — and the two that exist already disagree on whether
+  `cfg.model` outranks the recent list. A drifting copy would assert a variant
+  the request never carries, which is worse than reporting none.
+- Required sync check: inspect
+  `packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx`,
+  `packages/opencode/src/cli/cmd/tui/component/model-metadata.tsx`,
+  `packages/opencode/src/cli/cmd/tui/routes/session/subagent-footer.tsx`,
+  `packages/opencode/src/cli/cmd/tui/util/model.ts`,
+  `packages/opencode/src/cli/cmd/tui/context/local.tsx`,
+  `packages/opencode/src/session/prompt.ts`,
+  `packages/opencode/src/provider/provider.ts`, and the TUI model and
+  model-metadata tests. An upstream change to the footer row can merge cleanly
+  and still restore the hidden provider label or the conditional variant, so
+  verify the rendered contract, not just the absence of conflicts. Re-verify the
+  agent-variant fallback against `createUserMessage` whenever upstream changes
+  variant resolution or `resolveModelRef`.
+- Reconsider only if: upstream exposes the resolved request-level model and
+  variant through another surface the operator can read, or the server resolves
+  the effective model/variant for a pending request so the TUI can ask for it
+  instead of predicting it.

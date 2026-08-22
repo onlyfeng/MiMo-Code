@@ -3,6 +3,7 @@ import { useRouteData, useCurrentAgentID } from "@tui/context/route"
 import { useSync } from "@tui/context/sync"
 import { useTheme } from "@tui/context/theme"
 import { SplitBorder } from "@tui/component/border"
+import { ModelMetadata } from "@tui/component/model-metadata"
 import type { AssistantMessage } from "@mimo-ai/sdk/v2"
 import { useCommandDialog } from "@tui/component/dialog-command"
 import { useKeybind } from "../../context/keybind"
@@ -37,6 +38,11 @@ export function SubagentFooter() {
   const messages = createMemo(
     () => sync.data.message[route.sessionID]?.[currentAgentID()] ?? [],
   )
+
+  const modelMetadata = createMemo(() => {
+    const selection = Model.latestMessageSelection(messages())
+    return selection ? Model.displayMetadata(sync.data.provider, selection) : undefined
+  })
 
   const usage = createMemo(() => {
     const msg = messages()
@@ -88,25 +94,30 @@ export function SubagentFooter() {
         backgroundColor={theme.backgroundPanel}
       >
         <box flexDirection="row" justifyContent="space-between" gap={1}>
-          <box flexDirection="row" gap={1}>
-            <text fg={theme.text}>
+          <box flexDirection="row" gap={1} flexShrink={1}>
+            <text fg={theme.text} flexShrink={0}>
               <b>{subagentInfo().label}</b>
             </text>
             <Show when={subagentInfo().total > 0}>
-              <text style={{ fg: theme.textMuted }}>
+              <text style={{ fg: theme.textMuted }} flexShrink={0}>
                 ({subagentInfo().index} of {subagentInfo().total})
                 <Show when={subagentInfo().status}>{` · ${subagentInfo().status}`}</Show>
               </text>
             </Show>
+            <Show when={modelMetadata()}>
+              {(item) => (
+                <ModelMetadata metadata={item()} aliasColor={theme.text} detailColor={theme.textMuted} />
+              )}
+            </Show>
             <Show when={usage()}>
               {(item) => (
-                <text fg={theme.textMuted} wrapMode="none">
+                <text fg={theme.textMuted} wrapMode="none" flexShrink={0}>
                   {[item().context, item().cost].filter(Boolean).join(" · ")}
                 </text>
               )}
             </Show>
           </box>
-          <box flexDirection="row" gap={2}>
+          <box flexDirection="row" gap={2} flexShrink={0}>
             <box
               onMouseOver={() => setHover("parent")}
               onMouseOut={() => setHover(null)}

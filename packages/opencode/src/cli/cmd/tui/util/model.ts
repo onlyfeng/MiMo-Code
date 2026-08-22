@@ -29,6 +29,90 @@ export function name(
   return get(list, providerID, modelID)?.name ?? modelID
 }
 
+/**
+ * The `provider/model` the agent itself targets, resolved the way
+ * `Provider.resolveModelRef` resolves it when called with no context provider:
+ * a literal ref parses directly, a group ref takes the group default.
+ *
+ * A ref with no `model_groups` entry yields undefined, which callers must read
+ * as "unknown", never as "match". That deliberately stops short of the server's
+ * last branch, where an unconfigured built-in tier (`ultra`/`standard`/`lite`)
+ * falls through to `Provider.defaultModel()`. Electing that default is not a
+ * pure function of anything the TUI holds — it walks the recent list, the
+ * configured provider set and a server-side priority table — so mirroring it
+ * here would add a THIRD copy of default-model election (the server's, the
+ * fallback in context/local.tsx, and this one) whose branches already disagree
+ * on precedence. A stale copy would assert a variant the request never carries,
+ * which is worse than the understatement it replaces.
+ *
+ * The residual gap: an agent on an unconfigured built-in tier reads
+ * `variant: none` while the server applies the agent's variant. It closes when
+ * prompt/index.tsx seeds the variant store from the last user message's
+ * server-resolved value — but that seeding is keyed on a CHANGED session id,
+ * not on each turn, so it covers opening or re-entering a session and NOT an
+ * agent switch inside a live one (context/local.tsx only re-selects the model
+ * for a literal agent `model`, never for a tier `modelRef`). Closing the rest
+ * means electing the default here; the first three branches of `defaultModel()`
+ * are exact reads of state the TUI already holds, so a partial mirror is
+ * possible — it is declined as a design call, not because it cannot be written.
+ */
+function agentSelection(groups: Config["model_groups"], agent: { model?: Selection; modelRef?: string }) {
+  if (!agent.modelRef) return agent.model
+  if (agent.modelRef.includes("/")) return parse(agent.modelRef)
+  const group = groups?.[agent.modelRef]
+  if (!group) return undefined
+  return parse(typeof group === "string" ? group : group.default)
+}
+
+/**
+ * The variant the NEXT request will actually carry, mirroring the server's
+ * fallback in session/prompt.ts `createUserMessage`. An explicit selection always
+ * wins; otherwise the agent's configured variant applies, but only when the
+ * request targets the agent's own model and that model really defines the
+ * variant. Without this the prompt row reads `variant: none` while the server
+ * sends and persists the agent's variant.
+ */
+export function effectiveVariant(
+  list: Provider[] | ReadonlyMap<string, Provider> | undefined,
+  input: {
+    agent: { variant?: string; model?: Selection; modelRef?: string } | undefined
+    groups: Config["model_groups"]
+    selection: Selection
+    selected?: string
+  },
+) {
+  if (input.selected) return input.selected
+  if (!input.agent?.variant) return undefined
+  const agent = agentSelection(input.groups, input.agent)
+  if (!agent) return undefined
+  if (agent.providerID !== input.selection.providerID || agent.modelID !== input.selection.modelID) return undefined
+  return get(list, input.selection.providerID, input.selection.modelID)?.variants?.[input.agent.variant]
+    ? input.agent.variant
+    : undefined
+}
+
+export function displayMetadata(
+  list: Provider[] | ReadonlyMap<string, Provider> | undefined,
+  input: Selection & { variant?: string },
+  alias?: string,
+) {
+  return {
+    alias: alias ?? name(list, input.providerID, input.modelID),
+    detail: `${input.providerID}/${input.modelID} · variant: ${input.variant ?? "none"}`,
+  }
+}
+
+export function latestMessageSelection(messages: Message[]) {
+  const message = messages.at(-1)
+  if (!message) return undefined
+  if (message.role === "user") return message.model
+  return {
+    providerID: message.providerID,
+    modelID: message.modelID,
+    variant: message.variant,
+  }
+}
+
 export function parse(value: string) {
   const [providerID, ...modelID] = value.split("/")
   return { providerID, modelID: modelID.join("/") }

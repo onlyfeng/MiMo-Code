@@ -7,6 +7,7 @@ import { Filesystem } from "@/util"
 import { useLocal } from "@tui/context/local"
 import { tint, useTheme } from "@tui/context/theme"
 import { EmptyBorder, SplitBorder } from "@tui/component/border"
+import { ModelMetadata } from "@tui/component/model-metadata"
 import { useSDK } from "@tui/context/sdk"
 import { useRoute } from "@tui/context/route"
 import { useProject } from "@tui/context/project"
@@ -141,7 +142,24 @@ export function Prompt(props: PromptProps) {
   const voiceEnabled = createMemo(() => kv.get("voice_enabled", false))
   const voiceSendEnabled = createMemo(() => kv.get("voice_send_command", false))
   const voiceControlEnabled = createMemo(() => kv.get("voice_control_enabled", false))
-  const currentProviderLabel = createMemo(() => local.model.parsed().provider)
+  const currentModelMetadata = createMemo(() => {
+    const current = local.model.current()
+    return current
+      ? Model.displayMetadata(
+          sync.data.provider,
+          {
+            ...current,
+            variant: Model.effectiveVariant(sync.data.provider, {
+              agent: local.agent.current(),
+              groups: sync.data.config.model_groups,
+              selection: current,
+              selected: local.model.variant.current(),
+            }),
+          },
+          local.model.parsed().model,
+        )
+      : undefined
+  })
   const [voiceState, setVoiceState] = createSignal<"idle" | "listening" | "speaking" | "processing" | "finishing">(
     activeVoice ? (activeVoice.pending > 0 ? "processing" : "listening") : "idle",
   )
@@ -1535,19 +1553,8 @@ export function Prompt(props: PromptProps) {
     return local.agent.color(agent.name)
   })
 
-  const showVariant = createMemo(() => {
-    const variants = local.model.variant.list()
-    if (variants.length === 0) return false
-    const current = local.model.variant.current()
-    return !!current
-  })
-
   const agentMetaAlpha = createFadeIn(() => !!local.agent.current(), animationsEnabled)
   const modelMetaAlpha = createFadeIn(() => !!local.agent.current() && store.mode === "normal", animationsEnabled)
-  const variantMetaAlpha = createFadeIn(
-    () => !!local.agent.current() && store.mode === "normal" && showVariant(),
-    animationsEnabled,
-  )
   const borderHighlight = createMemo(() => tint(theme.border, highlight(), agentMetaAlpha()))
 
   const placeholderText = createMemo(() => {
@@ -1784,11 +1791,11 @@ export function Prompt(props: PromptProps) {
               syntaxStyle={syntax()}
             />
             <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
-              <box flexDirection="row" gap={1}>
+              <box flexDirection="row" gap={1} flexShrink={1}>
                 <Show when={local.agent.current()} fallback={<box height={1} />}>
                   {(agent) => (
                     <>
-                      <text fg={fadeColor(highlight(), agentMetaAlpha())}>
+                      <text fg={fadeColor(highlight(), agentMetaAlpha())} flexShrink={0}>
                         {store.mode === "shell"
                           ? "Shell"
                           : agent().name === "compose"
@@ -1796,27 +1803,18 @@ export function Prompt(props: PromptProps) {
                             : Locale.titlecase(agent().name)}
                       </text>
                       <Show when={store.mode === "normal"}>
-                        <box flexDirection="row" gap={1}>
-                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                          <text
-                            flexShrink={0}
-                            fg={fadeColor(keybind.leader ? theme.textMuted : theme.text, modelMetaAlpha())}
-                          >
-                            {local.model.parsed().model}
-                          </text>
-                          {/* Hide provider label for mimo-auto since model name already contains "MiMo" */}
-                          <Show when={!(local.model.current()?.providerID === "mimo" && local.model.current()?.modelID === "mimo-auto")}>
-                            <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
-                              {currentProviderLabel()}
-                            </text>
-                          </Show>
-                          <Show when={showVariant()}>
-                            <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
-                            <text>
-                              <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
-                                {local.model.variant.current()}
-                              </span>
-                            </text>
+                        <box flexDirection="row" gap={1} flexShrink={1}>
+                          <Show when={currentModelMetadata()}>
+                            {(item) => (
+                              <ModelMetadata
+                                metadata={item()}
+                                aliasColor={fadeColor(
+                                  keybind.leader ? theme.textMuted : theme.text,
+                                  modelMetaAlpha(),
+                                )}
+                                detailColor={fadeColor(theme.textMuted, modelMetaAlpha())}
+                              />
+                            )}
                           </Show>
                         </box>
                       </Show>
@@ -1824,12 +1822,12 @@ export function Prompt(props: PromptProps) {
                   )}
                 </Show>
                 <Show when={local.neverAsk.current()}>
-                  <text>
+                  <text flexShrink={0}>
                     <span style={{ fg: theme.error, bold: true }}>«never-ask»</span>
                   </text>
                 </Show>
               </box>
-              <box flexDirection="row" gap={1} alignItems="center">
+              <box flexDirection="row" gap={1} alignItems="center" flexShrink={0}>
                 <Show when={hasRightContent()}>
                   {props.right}
                 </Show>
