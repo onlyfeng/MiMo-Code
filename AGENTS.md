@@ -8,6 +8,10 @@
 - The default branch in this repo is `main`.
 - CI triggers on `main`, `dev`, and `dev/compat` branches.
 - Before every upstream sync, review active entries in [docs/upstream-deviations.md](docs/upstream-deviations.md) for incoming changes to their listed surfaces, including changes that merge cleanly.
+- Treat `upstream` as read-only. Push and open PRs only against `onlyfeng/MiMo-Code`, and propagate accepted upstream changes through `upstream/main` → fork `main` → fork `dev/compat`.
+- Use freshly fetched upstream and fork refs for a normal sync. If the user explicitly freezes the upstream baseline, do not fetch or advance that baseline; report alignment only to its named SHA, never to current upstream.
+- Before declaring a sync complete, verify the fork's remote branch-tip SHAs, successful CI runs for those exact SHAs, and ancestry from the selected upstream SHA through fork `main` to fork `dev/compat`.
+- Clean up only temporary branches and worktrees created by the current operation and verified not to contain user work; preserve unrelated or dirty worktrees.
 - Prefer automation: execute requested actions without confirmation unless blocked by missing info or safety/irreversibility.
 - Install deps with `bun ci` (= `bun install --frozen-lockfile`) — install per `bun.lock`, don't mutate the lockfile. ⛔ Do NOT use `bun install`/`npm install`.
 
