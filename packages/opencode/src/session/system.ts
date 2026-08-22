@@ -23,8 +23,7 @@ import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
 import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
-import { Flag } from "@/flag/flag"
-import { isMimoV25Model, usesMimoCodexMode } from "@/tool/gpt"
+import { type HarnessMode, resolveHarnessMode } from "@/tool/gpt"
 
 function renderGitResult(result: Git.Result, fallback = "(none)") {
   if (result.exitCode !== 0) return fallback
@@ -33,11 +32,15 @@ function renderGitResult(result: Git.Result, fallback = "(none)") {
 
 const anthropicEnvironment = new Map<string, string>()
 
-export function provider(model: Provider.Model) {
-  if (Flag.MIMOCODE_CODEX_MODE) return [PROMPT_GPT]
-  const ids = [model.id, model.api.id, model.family]
-  if (isMimoV25Model(...ids)) return [PROMPT_DEFAULT]
-  if (usesMimoCodexMode(...ids)) return [PROMPT_GPT]
+export function provider(model: Provider.Model, harness?: HarnessMode) {
+  if (
+    resolveHarnessMode({
+      modelID: model.id,
+      modelAPIID: model.api.id,
+      modelFamily: model.family,
+      harness,
+    }) === "codex"
+  ) return [PROMPT_GPT]
   const prompt = (id: string) => {
     if (id.includes("gpt-4") || id.includes("o1") || id.includes("o3")) return PROMPT_BEAST
     if (id.includes("gpt")) return PROMPT_GPT
@@ -52,12 +55,12 @@ export function provider(model: Provider.Model) {
   return [prompt(model.id) ?? prompt(model.api.id) ?? PROMPT_DEFAULT]
 }
 
-export function agent(agent: Agent.Info, model: Provider.Model) {
-  return agent.prompt ? [agent.prompt] : provider(model)
+export function agent(agent: Agent.Info, model: Provider.Model, harness?: HarnessMode) {
+  return agent.prompt ? [agent.prompt] : provider(model, harness)
 }
 
 export interface Interface {
-  readonly environment: (model: Provider.Model, now: number) => Effect.Effect<string[]>
+  readonly environment: (model: Provider.Model, now: number, harness?: HarnessMode) => Effect.Effect<string[]>
   readonly skills: (
     agent: Agent.Info,
     input?: {
@@ -79,10 +82,14 @@ export const layer = Layer.effect(
     const git = yield* Git.Service
 
     return Service.of({
-      environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model, now: number) {
+      environment: Effect.fn("SystemPrompt.environment")(function* (
+        model: Provider.Model,
+        now: number,
+        harness?: HarnessMode,
+      ) {
         const instance = yield* InstanceState.context
         const project = instance.project
-        if (provider(model)[0] === PROMPT_ANTHROPIC) {
+        if (provider(model, harness)[0] === PROMPT_ANTHROPIC) {
           const key = `${instance.directory}\0${now}\0${model.providerID}\0${model.api.id}`
           const cached = anthropicEnvironment.get(key)
           if (cached)

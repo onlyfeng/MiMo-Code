@@ -27,6 +27,7 @@ import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { isRecord } from "@/util/record"
 import { withStatics } from "@/util/schema"
 import { isFreeApiModel, isFreeApiSunset } from "@/util/free-api-sunset"
+import { usesMimoCodexMode } from "../tool/gpt"
 
 import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
@@ -259,7 +260,12 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
   "venice-ai-sdk-provider": () => import("venice-ai-sdk-provider").then((m) => m.createVenice),
 }
 
-type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>) => Promise<any>
+type CustomModelLoader = (
+  sdk: any,
+  modelID: string,
+  options?: Record<string, any>,
+  model?: Model,
+) => Promise<any>
 type CustomVarsLoader = (options: Record<string, any>) => Record<string, string>
 type CustomDiscoverModels = () => Promise<Record<string, Model>>
 type CustomLoader = (provider: Info) => Effect.Effect<{
@@ -323,6 +329,16 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           return sdk.responses(modelID)
         },
         options: { headerTimeout: DEFAULT_OPENAI_HEADER_TIMEOUT },
+      }),
+    xiaomi: () =>
+      Effect.succeed({
+        autoload: false,
+        async getModel(sdk: any, modelID: string, _options?: Record<string, any>, model?: Model) {
+          return usesMimoCodexMode(model?.id, model?.api.id ?? modelID, model?.family)
+            ? sdk.responses(modelID)
+            : sdk.languageModel(modelID)
+        },
+        options: {},
       }),
     xai: () =>
       Effect.succeed({
@@ -1696,7 +1712,14 @@ const layer: Layer.Layer<
           return wrapSSE(bounded, chunkTimeout, chunkAbortCtl)
         }
 
-        const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]
+        const bundledLoader =
+          model.providerID === "xiaomi" && model.api.npm === "@ai-sdk/openai-compatible"
+            ? () =>
+                import("./sdk/copilot").then(
+                  (module) => (options: any) =>
+                    module.createOpenaiCompatible({ ...options, customToolNames: ["exec"] }),
+                )
+            : BUNDLED_PROVIDERS[model.api.npm]
         if (bundledLoader) {
           log.info("using bundled provider", {
             providerID: model.providerID,
@@ -1775,10 +1798,10 @@ const layer: Layer.Layer<
 
         try {
           const language = s.modelLoaders[model.providerID]
-            ? await s.modelLoaders[model.providerID](sdk, model.api.id, {
-                ...provider.options,
-                ...model.options,
-              })
+              ? await s.modelLoaders[model.providerID](sdk, model.api.id, {
+                  ...provider.options,
+                  ...model.options,
+                }, model)
             : sdk.languageModel(model.api.id)
           s.models.set(key, language)
           return language
