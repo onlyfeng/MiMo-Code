@@ -14,9 +14,9 @@ upstream synchronization re-evaluates an entry.
 - Status: active
 - Scope: fork `main` and propagation from `main` to `dev/compat`
 - Last reviewed: 2026-08-22
-- Upstream review range: `6ee774bad24c4f830536167d8db5e0d81ec50ba5`..
-  `bed9b0b2e8a8cb45c2576ada164ec412a31dbc31`
-- Fork behavior head reviewed: `b5c2181d6c4c98b91cdef8e3b789f7da37bdffad`
+- Upstream review range: `bed9b0b2e8a8cb45c2576ada164ec412a31dbc31`..
+  `5f2c3fb03780f0b0392a8fd7f4c90c96dc4e8969`
+- Fork behavior head reviewed: `e3f1ae6b22003693e3d50008469b31b626334ba7`
 - Validation note: the workflow deadline/worktree composition test is
   quarantined on all platforms pending a separate fixture-disposer fix. Two
   exact-SHA Linux CI runs completed both deadline and worktree-reclamation
@@ -24,6 +24,9 @@ upstream synchronization re-evaluates an entry.
   the frozen upstream hang and a controlled hang. Dedicated runtime/sandbox
   deadline tests and adjacent worktree cancel/per-agent-timeout tests remain
   enabled; no workflow production code changed in this sync.
+- Exit condition: after the fixture disposer is fixed, re-enable this test in
+  its corresponding Linux unit-test shard and prove in exact-SHA CI that the
+  process exits before a bounded outer timeout rather than being killed by it.
 
 ## FD-001 — `--yolo` must not temporarily mutate delete approval state
 
@@ -63,6 +66,9 @@ upstream synchronization re-evaluates an entry.
   final child environment may otherwise differ.
 - 2026-08-22 review: the frozen 18-commit range did not reintroduce yolo-driven
   delete approval mutation or change the explicit instance control.
+- 2026-08-22 live-sync review: the incoming Bash output-budget work did not
+  change delete authorization, temporary-directory validation, or the explicit
+  instance control.
 - Reconsider only if: delete authorization becomes request- or session-scoped,
   ownership and restoration are linearizable, caller loss cannot leave a
   capability enabled, and the Bash decision is bound to the same immutable
@@ -119,6 +125,10 @@ upstream synchronization re-evaluates an entry.
   cleanup were adopted while unconditional instruction delivery was retained.
   The new coupled regressions fail against the upstream-only behavior and pass
   at the reviewed fork head.
+- 2026-08-22 live-sync review: session-pinned system and harness settings were
+  adopted through normal requests, command requests, compaction replay, and
+  frozen-prefix capture while runtime environment and instruction additions
+  remain unconditional.
 - Reconsider only if: one immutable per-request decision gates both the UI
   signal and model payload, and tests prove that both surfaces contain the same
   instruction set.
@@ -150,6 +160,8 @@ upstream synchronization re-evaluates an entry.
   content-cap tests pin `test/test-model`, and the catalog-pressure test pins its
   own 100K budget. This keeps those tests focused without changing production
   overflow behavior.
+- 2026-08-22 live-sync review: the incoming range did not touch the Codex OAuth
+  capacity clamp or its documented capacity-versus-budget distinction.
 - Reconsider only if: current Codex backend/catalog evidence proves a different
   hard serving limit and the implementation, overflow tests, and user-facing
   budget documentation are updated together.
@@ -191,6 +203,9 @@ upstream synchronization re-evaluates an entry.
 - 2026-08-22 review: the frozen range did not reintroduce the rejected listener,
   capability routes, `llmServer` schema, or deleted listener tests. Existing
   opt-in TUI voice functionality is outside this listener contract.
+- 2026-08-22 live-sync review: generated JavaScript SDK artifacts were rebuilt
+  from the merged fork source. No implicit listener, `llmServer`, whole-server
+  password, or rejected capability route re-entered the generated surface.
 - Reconsider only if: the feature is explicitly enabled, token validation
   completes before directory bootstrap and all side effects, request/body/
   concurrency/cost bounds are defined, and shutdown first closes intake, then
@@ -202,15 +217,17 @@ upstream synchronization re-evaluates an entry.
 - Upstream anchor: `866a5b8a2eff3970a0becb0d27f8f055e4624e19`, merged by
   `b15b0971846861a4b25576d340ce1a4207f87712`
 - Fork contract: classify MiMo behavior from the complete resolved identity
-  `(model.id, model.api.id, model.family)` exactly once per surface. Explicit
-  `MIMOCODE_CODEX_MODE` overrides every model classification. Without that
-  override, an exact MiMo v2.5 or v2.5-pro match in any identity component wins
-  over every MiMo alias: it uses the normal prompt and toolset and does not
-  enable MCP Tool Search unless that feature is explicitly enabled. Other
-  recognized MiMo identities use the GPT prompt, Codex toolset, and MCP Tool
-  Search. Existing non-MiMo GPT toolset detection remains bound to the catalog
-  `model.id`; API and family aliases must not turn GPT-4 models into Codex-tool
-  models.
+  `(model.id, model.api.id, model.family)` through one shared resolver per
+  surface. A session-pinned explicit `codex` or `default` harness overrides
+  process inference; catalog GPT-5 models remain Codex even under `default`,
+  while GPT-4 and GPT-OSS are not automatically classified as Codex.
+  With an `auto` or omitted harness, `MIMOCODE_CODEX_MODE` overrides model
+  inference. Otherwise, an exact MiMo v2.5 or v2.5-pro match in any identity
+  component wins over every generic MiMo alias and uses the normal prompt,
+  toolset, and discovery mode. Other recognized MiMo identities use the GPT
+  prompt, Codex toolset, and MCP Tool Search. Existing non-MiMo GPT toolset
+  detection remains bound to the catalog `model.id`; API and family aliases
+  must not turn GPT-4 models into Codex-tool models.
 - Rationale: the upstream implementation classifies catalog and API IDs in
   separate fallbacks and recognizes the v2.5 exception at fewer prefix
   boundaries than its general MiMo matcher. A model with `id=mimo-v2.5` and
@@ -236,6 +253,11 @@ upstream synchronization re-evaluates an entry.
   route all receive the same resolved identity.
 - 2026-08-22 review: prompt selection, MCP Tool Search, registry filtering, and
   exec dispatch retain the complete identity tuple and MiMo v2.5 precedence.
+- 2026-08-22 live-sync review: the new persisted session harness is resolved
+  consistently by system prompt selection, direct registry filtering, MCP
+  discovery, frozen prefixes, agent generation, and nested exec dispatch. The
+  Xiaomi provider transport also uses the complete resolved model identity but
+  deliberately remains independent of the per-session harness.
 - Reconsider only if: the provider layer exposes one immutable model-mode value
   that is consumed unchanged by prompt selection, MCP discovery, every tool
   registry call, frozen prefix capture, and exec dispatch, with regressions for
@@ -285,6 +307,11 @@ upstream synchronization re-evaluates an entry.
   shell/`exec_command` conversion were rejected. Opaque MCP catalog wording and
   allowlist-aware `exec` availability were adopted while direct tools, nested
   exclusions, and the seconds-based `timeout_seconds` contract were preserved.
+- 2026-08-22 live-sync review: direct Bash `max_output_tokens`, MCP aliases, and
+  the Responses free-form custom `exec` transport were adopted. The direct
+  permission-visible Codex surface, nested `bash`/`exec_command` exclusions,
+  request-scoped whitelist filters, and seconds-based `timeout_seconds` budget
+  remain intact.
 - Reconsider only if: nested execution has an immutable request-scoped
   capability set, every nested operation remains separately visible and
   attributable to permission and lifecycle enforcement, shell/control tools

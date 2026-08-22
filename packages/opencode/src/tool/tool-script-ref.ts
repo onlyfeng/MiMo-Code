@@ -9,6 +9,7 @@ import type { Effect } from "effect"
 import type { Agent } from "../agent/agent"
 import type { ModelID, ProviderID } from "../provider/schema"
 import type * as Tool from "./tool"
+import type { HarnessMode } from "./gpt"
 
 type LateBoundRef<T> = { current: T | undefined }
 type Binding = { value: unknown }
@@ -42,6 +43,7 @@ export const toolScriptRegistry: {
         modelAPIID?: string
         modelFamily?: string
         agent: Agent.Info
+        harness?: HarnessMode
       }) => Effect.Effect<Tool.Def[]>)
     | undefined
 } = { current: undefined }

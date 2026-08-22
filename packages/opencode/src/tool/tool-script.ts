@@ -6,7 +6,7 @@ import ts from "typescript"
 import { Effect } from "effect"
 import type { Tool as AiTool } from "ai"
 import { EffectBridge, InstanceState } from "@/effect"
-import { Log, Filesystem } from "@/util"
+import { Log, Filesystem, ToolCompat } from "@/util"
 import { Agent } from "@/agent/agent"
 import { Bus } from "@/bus"
 import { Metrics } from "@/metrics"
@@ -14,6 +14,7 @@ import { Plugin } from "@/plugin"
 import type { ModelID, ProviderID } from "../provider/schema"
 import { evalScript, type HostFn } from "../workflow/sandbox"
 import { toolScriptRegistry, TOOL_SCRIPT_ALIASES, TOOL_SCRIPT_EXCLUDED } from "./tool-script-ref"
+import type { HarnessMode } from "./gpt"
 import DESCRIPTION from "./tool-script.txt"
 import * as Tool from "./tool"
 
@@ -313,7 +314,7 @@ export const ToolScriptTool = Tool.define(
         code: z
           .string()
           .describe(
-            "Raw JavaScript or TypeScript source for the body of an async function, not JSON or a Markdown code block. Call tools via the global `tools` object; inspect `ALL_TOOLS` when needed; `return` the final aggregated value.",
+            "The `code` field value is raw JavaScript or TypeScript source for the body of an async function, not JSON or a Markdown code block. The outer exec tool arguments must still be a JSON object containing this field. Call tools via the global `tools` object; inspect `ALL_TOOLS` when needed; `return` the final aggregated value.",
           ),
         max_tool_calls: z
           .number()
@@ -376,6 +377,7 @@ export const ToolScriptTool = Tool.define(
           const model = ctx.extra?.model as
             | { id: ModelID; providerID: ProviderID; api?: { id: string }; family?: string }
             | undefined
+          const harness = ctx.extra?.harness as HarnessMode | undefined
           const toolWhitelist =
             ctx.extra?.toolWhitelist instanceof Set
               ? ctx.extra.toolWhitelist
@@ -392,6 +394,7 @@ export const ToolScriptTool = Tool.define(
                     modelAPIID: model.api?.id,
                     modelFamily: model.family,
                     agent: agentInfo,
+                    harness,
                   }
                 : undefined,
             )
@@ -507,7 +510,8 @@ export const ToolScriptTool = Tool.define(
             const id = String(name)
             const alias = TOOL_SCRIPT_ALIASES[id as keyof typeof TOOL_SCRIPT_ALIASES]
             const def = byId.get(alias ?? id)
-            const mcpDef = def ? undefined : mcpById.get(id)
+            const mcpID = def ? undefined : ToolCompat.resolveName(id, [...mcpById.keys()])
+            const mcpDef = mcpID ? mcpById.get(mcpID) : undefined
             if (!def && !mcpDef) return Promise.reject(new Error(`unknown tool: ${id}`))
             calls++
             if (calls > maxToolCalls)

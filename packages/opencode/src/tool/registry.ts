@@ -75,7 +75,7 @@ import { resolveInvocationStyle } from "./invocation-style"
 import { BuiltinWorkflow } from "@/workflow/builtin"
 import { ToolScriptTool, renderToolScriptDeclarations } from "./tool-script"
 import { bindToolScriptRef, TOOL_SCRIPT_EXCLUDED, toolScriptRegistry } from "./tool-script-ref"
-import { usesGPTToolset } from "./gpt"
+import { type HarnessMode, resolveHarnessMode } from "./gpt"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -128,6 +128,7 @@ export interface Interface {
     agent: Agent.Info
     permission?: Permission.Ruleset
     preserveMembership?: boolean
+    harness?: HarnessMode
   }) => Effect.Effect<Tool.Def[]>
   readonly reload: () => Effect.Effect<void>
 }
@@ -366,8 +367,14 @@ export const layer = Layer.effect(
       agent: Agent.Info
       permission?: Permission.Ruleset
       preserveMembership?: boolean
+      harness?: HarnessMode
     }) {
-      const useGPTTools = usesGPTToolset(input.modelID, input.modelAPIID, input.modelFamily)
+      const useGPTTools = resolveHarnessMode({
+        modelID: input.modelID,
+        modelAPIID: input.modelAPIID,
+        modelFamily: input.modelFamily,
+        harness: input.harness,
+      }) === "codex"
       let filtered = (yield* all()).filter((tool) => {
         if (tool.id === ToolScriptTool.id) return useGPTTools || Flag.MIMOCODE_ENABLE_EXEC_TOOL
         if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {

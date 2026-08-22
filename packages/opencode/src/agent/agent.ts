@@ -6,7 +6,7 @@ import { ModelID, ProviderID } from "../provider/schema"
 import { generateObject, streamObject, type ModelMessage } from "ai"
 import { Instance } from "../project/instance"
 import { Truncate } from "../tool"
-import { usesGPTToolset } from "../tool/gpt"
+import { resolveHarnessMode } from "../tool/gpt"
 import { Auth } from "../auth"
 import { ProviderTransform } from "../provider"
 
@@ -570,7 +570,13 @@ export const layer = Layer.effect(
 
         const system = [
           PROMPT_GENERATE,
-          ...(usesGPTToolset(resolved.id, resolved.api.id, resolved.family) ? [PROMPT_GENERATE_GPT] : []),
+          ...(resolveHarnessMode({
+            modelID: resolved.id,
+            modelAPIID: resolved.api.id,
+            modelFamily: resolved.family,
+          }) === "codex"
+            ? [PROMPT_GENERATE_GPT]
+            : []),
         ]
         yield* plugin.trigger("experimental.chat.system.transform", { model: resolved }, { system })
         const existing = yield* InstanceState.useEffect(state, (s) => s.list())
