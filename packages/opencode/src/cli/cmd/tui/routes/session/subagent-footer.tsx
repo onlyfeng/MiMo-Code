@@ -38,6 +38,11 @@ export function SubagentFooter() {
     () => sync.data.message[route.sessionID]?.[currentAgentID()] ?? [],
   )
 
+  const modelMetadata = createMemo(() => {
+    const selection = Model.messageSelection(messages().at(-1))
+    return selection ? Model.displayMetadata(sync.data.provider, selection) : undefined
+  })
+
   const usage = createMemo(() => {
     const msg = messages()
     const last = msg.findLast(
@@ -97,6 +102,19 @@ export function SubagentFooter() {
                 ({subagentInfo().index} of {subagentInfo().total})
                 <Show when={subagentInfo().status}>{` · ${subagentInfo().status}`}</Show>
               </text>
+            </Show>
+            <Show when={modelMetadata()}>
+              {(item) => (
+                <>
+                  <text fg={theme.textMuted}>·</text>
+                  <text fg={theme.text} wrapMode="none">
+                    {item().alias}
+                  </text>
+                  <text fg={theme.textMuted} wrapMode="none">
+                    · {item().detail}
+                  </text>
+                </>
+              )}
             </Show>
             <Show when={usage()}>
               {(item) => (

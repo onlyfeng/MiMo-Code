@@ -29,6 +29,27 @@ export function name(
   return get(list, providerID, modelID)?.name ?? modelID
 }
 
+export function displayMetadata(
+  list: Provider[] | ReadonlyMap<string, Provider> | undefined,
+  input: Selection & { variant?: string },
+  alias?: string,
+) {
+  return {
+    alias: alias ?? name(list, input.providerID, input.modelID),
+    detail: `${input.providerID}/${input.modelID} · variant: ${input.variant ?? "none"}`,
+  }
+}
+
+export function messageSelection(message: Message | undefined) {
+  if (!message) return undefined
+  if (message.role === "user") return message.model
+  return {
+    providerID: message.providerID,
+    modelID: message.modelID,
+    variant: message.variant,
+  }
+}
+
 export function parse(value: string) {
   const [providerID, ...modelID] = value.split("/")
   return { providerID, modelID: modelID.join("/") }

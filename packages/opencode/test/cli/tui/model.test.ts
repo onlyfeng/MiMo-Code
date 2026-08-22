@@ -1,18 +1,20 @@
 import { describe, expect, test } from "bun:test"
-import type { Provider } from "@mimo-ai/sdk/v2"
-import { initial } from "../../../src/cli/cmd/tui/util/model"
+import type { AssistantMessage, Provider, UserMessage } from "@mimo-ai/sdk/v2"
+import { displayMetadata, initial, messageSelection } from "../../../src/cli/cmd/tui/util/model"
 
 const providers = [
   {
     id: "openai",
+    name: "OpenAI",
     models: {
-      "gpt-5.6-sol": {},
+      "gpt-5.6-sol": { name: "GPT-5.6" },
     },
   },
   {
     id: "ppio",
+    name: "PPIO",
     models: {
-      "deepseek-v3": {},
+      "deepseek-v3": { name: "DeepSeek V3" },
     },
   },
 ] as unknown as Provider[]
@@ -57,5 +59,66 @@ describe("initial model", () => {
         configured: "ppio/deepseek-v3",
       }),
     ).toBeUndefined()
+  })
+})
+
+describe("model display metadata", () => {
+  test("shows the raw provider/model and the persisted named variant", () => {
+    expect(
+      displayMetadata(providers, { providerID: "openai", modelID: "gpt-5.6-sol", variant: "high" }, "GPT-5.6 alias"),
+    ).toEqual({
+      alias: "GPT-5.6 alias",
+      detail: "openai/gpt-5.6-sol · variant: high",
+    })
+  })
+
+  test("shows none when no named variant was persisted instead of inferring a default", () => {
+    expect(displayMetadata(providers, { providerID: "ppio", modelID: "deepseek-v3" })).toEqual({
+      alias: "DeepSeek V3",
+      detail: "ppio/deepseek-v3 · variant: none",
+    })
+  })
+})
+
+describe("message model selection", () => {
+  test("reads provider, model, and variant from a user message", () => {
+    const message = {
+      id: "message-user",
+      sessionID: "session",
+      role: "user",
+      time: { created: 1 },
+      agent: "explore",
+      model: { providerID: "openai", modelID: "gpt-5.6-sol", variant: "high" },
+    } satisfies UserMessage
+
+    expect(messageSelection(message)).toEqual({
+      providerID: "openai",
+      modelID: "gpt-5.6-sol",
+      variant: "high",
+    })
+  })
+
+  test("reads provider, model, and variant from an assistant message", () => {
+    const message = {
+      id: "message-assistant",
+      sessionID: "session",
+      role: "assistant",
+      time: { created: 2 },
+      parentID: "message-user",
+      providerID: "ppio",
+      modelID: "deepseek-v3",
+      mode: "explore",
+      agent: "explore",
+      path: { cwd: "/repo", root: "/repo" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      variant: "thinking",
+    } satisfies AssistantMessage
+
+    expect(messageSelection(message)).toEqual({
+      providerID: "ppio",
+      modelID: "deepseek-v3",
+      variant: "thinking",
+    })
   })
 })

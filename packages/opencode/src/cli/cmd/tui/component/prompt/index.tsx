@@ -141,7 +141,16 @@ export function Prompt(props: PromptProps) {
   const voiceEnabled = createMemo(() => kv.get("voice_enabled", false))
   const voiceSendEnabled = createMemo(() => kv.get("voice_send_command", false))
   const voiceControlEnabled = createMemo(() => kv.get("voice_control_enabled", false))
-  const currentProviderLabel = createMemo(() => local.model.parsed().provider)
+  const currentModelMetadata = createMemo(() => {
+    const current = local.model.current()
+    return current
+      ? Model.displayMetadata(
+          sync.data.provider,
+          { ...current, variant: local.model.variant.current() },
+          local.model.parsed().model,
+        )
+      : undefined
+  })
   const [voiceState, setVoiceState] = createSignal<"idle" | "listening" | "speaking" | "processing" | "finishing">(
     activeVoice ? (activeVoice.pending > 0 ? "processing" : "listening") : "idle",
   )
@@ -1535,19 +1544,8 @@ export function Prompt(props: PromptProps) {
     return local.agent.color(agent.name)
   })
 
-  const showVariant = createMemo(() => {
-    const variants = local.model.variant.list()
-    if (variants.length === 0) return false
-    const current = local.model.variant.current()
-    return !!current
-  })
-
   const agentMetaAlpha = createFadeIn(() => !!local.agent.current(), animationsEnabled)
   const modelMetaAlpha = createFadeIn(() => !!local.agent.current() && store.mode === "normal", animationsEnabled)
-  const variantMetaAlpha = createFadeIn(
-    () => !!local.agent.current() && store.mode === "normal" && showVariant(),
-    animationsEnabled,
-  )
   const borderHighlight = createMemo(() => tint(theme.border, highlight(), agentMetaAlpha()))
 
   const placeholderText = createMemo(() => {
@@ -1797,26 +1795,22 @@ export function Prompt(props: PromptProps) {
                       </text>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1}>
-                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                          <text
-                            flexShrink={0}
-                            fg={fadeColor(keybind.leader ? theme.textMuted : theme.text, modelMetaAlpha())}
-                          >
-                            {local.model.parsed().model}
-                          </text>
-                          {/* Hide provider label for mimo-auto since model name already contains "MiMo" */}
-                          <Show when={!(local.model.current()?.providerID === "mimo" && local.model.current()?.modelID === "mimo-auto")}>
-                            <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
-                              {currentProviderLabel()}
-                            </text>
-                          </Show>
-                          <Show when={showVariant()}>
-                            <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
-                            <text>
-                              <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
-                                {local.model.variant.current()}
-                              </span>
-                            </text>
+                          <Show when={currentModelMetadata()}>
+                            {(item) => (
+                              <>
+                                <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
+                                <text
+                                  flexShrink={0}
+                                  fg={fadeColor(keybind.leader ? theme.textMuted : theme.text, modelMetaAlpha())}
+                                >
+                                  {item().alias}
+                                </text>
+                                <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
+                                <text fg={fadeColor(theme.textMuted, modelMetaAlpha())} wrapMode="none">
+                                  {item().detail}
+                                </text>
+                              </>
+                            )}
                           </Show>
                         </box>
                       </Show>
