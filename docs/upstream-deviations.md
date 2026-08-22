@@ -17,13 +17,13 @@ upstream synchronization re-evaluates an entry.
 - Upstream review range: `6ee774bad24c4f830536167d8db5e0d81ec50ba5`..
   `bed9b0b2e8a8cb45c2576ada164ec412a31dbc31`
 - Fork behavior head reviewed: `b5c2181d6c4c98b91cdef8e3b789f7da37bdffad`
-- Validation note: the pre-existing Darwin workflow deadline test can finish
-  its runtime path but stall while disposing an fs-events-backed test Instance.
-  It remains enabled on non-Darwin runs and is quarantined on Darwin pending a
-  separate disposer fix. An attempted controlled-hang substitution was reverted
-  after exact-SHA Linux CI completed both assertions but stalled in fixture
-  finalization; non-Darwin runs retain the frozen upstream fixture behavior and
-  no workflow production code changed in this sync.
+- Validation note: the workflow deadline/worktree composition test is
+  quarantined on all platforms pending a separate fixture-disposer fix. Two
+  exact-SHA Linux CI runs completed both deadline and worktree-reclamation
+  assertions, then stalled in fixture finalization for 120 seconds with both
+  the frozen upstream hang and a controlled hang. Dedicated runtime/sandbox
+  deadline tests and adjacent worktree cancel/per-agent-timeout tests remain
+  enabled; no workflow production code changed in this sync.
 
 ## FD-001 — `--yolo` must not temporarily mutate delete approval state
 

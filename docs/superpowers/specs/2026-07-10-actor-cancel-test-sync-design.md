@@ -1,5 +1,9 @@
 # Actor Cancel Regression Test Synchronization Design
 
+> **Status (2026-08-22):** Delivered through PR #40 at
+> `bf244ca8832a08a2d34116680e7ce3c663777916`. The future-tense delivery text
+> below records the pre-implementation design baseline.
+
 ## Goal
 
 Make the existing `cancel(forced) after the final turn but before delivery settles cancelled` regression test enter the intended pre-delivery cancellation window deterministically, without changing the fork's production cancellation behavior.
