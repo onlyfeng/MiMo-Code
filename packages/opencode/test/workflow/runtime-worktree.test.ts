@@ -207,10 +207,7 @@ describe("WorkflowRuntime worktree isolation", () => {
           title: "wf reclaim on deadline",
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
-        // A controllable hang preserves the deadline behavior without leaving
-        // Stream.never/TCP teardown alive after the outcome is observed.
-        const release = yield* Deferred.make<void>()
-        yield* llm.hangUntil(release)
+        yield* llm.hang // the isolated agent hangs → run will hit the deadline
         yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
         const root = path.join(Global.Path.data, "worktree", Instance.project.id)
         const script = [
@@ -224,9 +221,7 @@ describe("WorkflowRuntime worktree isolation", () => {
           model: ref,
           scriptDeadlineMs: 2000,
         })
-        const outcome = yield* runtime
-          .wait({ runID })
-          .pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
+        const outcome = yield* runtime.wait({ runID })
         expect(["failed", "cancelled"]).toContain(outcome.status)
         yield* Effect.gen(function* () {
           while ((yield* Effect.promise(() => fsp.readdir(root).catch(() => [] as string[]))).length) {

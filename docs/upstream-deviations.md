@@ -20,7 +20,10 @@ upstream synchronization re-evaluates an entry.
 - Validation note: the pre-existing Darwin workflow deadline test can finish
   its runtime path but stall while disposing an fs-events-backed test Instance.
   It remains enabled on non-Darwin runs and is quarantined on Darwin pending a
-  separate disposer fix; no workflow production code changed in this sync.
+  separate disposer fix. An attempted controlled-hang substitution was reverted
+  after exact-SHA Linux CI completed both assertions but stalled in fixture
+  finalization; non-Darwin runs retain the frozen upstream fixture behavior and
+  no workflow production code changed in this sync.
 
 ## FD-001 — `--yolo` must not temporarily mutate delete approval state
 
