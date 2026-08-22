@@ -1,6 +1,8 @@
 import { NodeFileSystem } from "@effect/platform-node"
+import { APICallError } from "@ai-sdk/provider"
 import { beforeEach, expect } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
+import fs from "node:fs/promises"
 import path from "path"
 import type { Agent } from "../../src/agent/agent"
 import { Agent as AgentSvc } from "../../src/agent/agent"
@@ -23,12 +25,16 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { raw, reply, TestLLMServer } from "../lib/llm-server"
+import { MockLLM, textReply } from "../lib/mock-llm"
 import { resetAllMonitors } from "../../src/session/try-best-detector"
 
 void Log.init({ print: false })
 
+const processorLLM = new MockLLM()
+
 beforeEach(() => {
   resetAllMonitors()
+  processorLLM.reset()
 })
 
 const summary = Layer.succeed(
@@ -160,23 +166,27 @@ const assistant = Effect.fn("TestSession.assistant")(function* (
 
 const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
-const deps = Layer.mergeAll(
-  Session.defaultLayer,
-  Snapshot.defaultLayer,
-  AgentSvc.defaultLayer,
-  Permission.defaultLayer,
-  Plugin.defaultLayer,
-  Config.defaultLayer,
-  LLM.defaultLayer,
-  Provider.defaultLayer,
-  status,
-).pipe(Layer.provideMerge(infra))
-const env = Layer.mergeAll(
-  TestLLMServer.layer,
-  SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps)),
-)
+function makeEnv<R>(llm: Layer.Layer<LLM.Service, never, R>) {
+  const deps = Layer.mergeAll(
+    Session.defaultLayer,
+    Snapshot.defaultLayer,
+    AgentSvc.defaultLayer,
+    Permission.defaultLayer,
+    Plugin.defaultLayer,
+    Config.defaultLayer,
+    llm,
+    Provider.defaultLayer,
+    status,
+  ).pipe(Layer.provideMerge(infra))
 
-const it = testEffect(env)
+  return Layer.mergeAll(
+    TestLLMServer.layer,
+    SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps)),
+  )
+}
+
+const it = testEffect(makeEnv(LLM.defaultLayer))
+const scripted = testEffect(makeEnv(processorLLM.layer()))
 
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
@@ -185,9 +195,107 @@ const boot = Effect.fn("test.boot")(function* () {
   return { processors, session, provider }
 })
 
+const processTextStream = Effect.fn("test.processTextStream")(function* (dir: string, text: string) {
+  const { processors, session, provider } = yield* boot()
+  const chat = yield* session.create({})
+  const parent = yield* user(chat.id, text)
+  const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+  const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+  const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+
+  yield* handle.process({
+    user: {
+      id: parent.id,
+      sessionID: chat.id,
+      role: "user",
+      time: parent.time,
+      agent: parent.agent,
+      model: { providerID: ref.providerID, modelID: ref.modelID },
+    } satisfies MessageV2.User,
+    sessionID: chat.id,
+    model: mdl,
+    agent: agent(),
+    system: [],
+    messages: [{ role: "user", content: text }],
+    tools: {},
+  } satisfies LLM.StreamInput)
+
+  return MessageV2.parts(msg.id)
+})
+
+const writeTextHook = Effect.fn("test.writeTextHook")(function* (dir: string, statement: string) {
+  yield* Effect.promise(async () => {
+    await fs.mkdir(path.join(dir, ".mimocode", "hooks"), { recursive: true })
+    await Bun.write(
+      path.join(dir, ".mimocode", "hooks", "text.ts"),
+      [
+        "export default {",
+        '  "experimental.text.complete": async (_input, output) => {',
+        `    ${statement}`,
+        "  },",
+        "}",
+      ].join("\n"),
+    )
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+scripted.live("session.processor does not persist empty streamed text parts", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        processorLLM.enqueue(textReply(""))
+        expect((yield* processTextStream(dir, "empty")).filter((part) => part.type === "text")).toEqual([])
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
+scripted.live("session.processor removes text cleared by a completion hook", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        yield* writeTextHook(dir, 'output.text = ""')
+        processorLLM.enqueue(textReply("drop me"))
+        expect((yield* processTextStream(dir, "strip")).filter((part) => part.type === "text")).toEqual([])
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
+scripted.live("session.processor cleans up hook-created text before retry", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        yield* writeTextHook(dir, 'if (!output.text) output.text = "hook text"')
+        processorLLM.enqueueFailure(
+          textReply("").filter((event) => event.type !== "finish-step"),
+          new APICallError({
+            message: "retry once",
+            url: "https://example.test/v1/chat/completions",
+            requestBodyValues: {},
+            statusCode: 503,
+            responseHeaders: { "retry-after-ms": "0" },
+            responseBody: '{"error":{"message":"retry once"}}',
+            isRetryable: true,
+          }),
+        )
+        processorLLM.enqueue(textReply(""))
+
+        const parts = yield* processTextStream(dir, "retry")
+        expect(processorLLM.calls).toBe(2)
+        expect(
+          parts
+            .filter((part): part is MessageV2.TextPart => part.type === "text")
+            .map((part) => part.text),
+        ).toEqual(["hook text"])
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
 
 it.live("session.processor effect tests capture llm input cleanly", () =>
   provideTmpdirServer(

@@ -149,23 +149,95 @@ pdfmetrics.registerFont(TTFont("Inter-Bold", "Inter-Bold.ttf"))
 c.setFont("Inter-Bold", 18)
 ```
 
-CJK: use the built-in CID fonts — no external files needed.
+### CJK (Chinese / Japanese / Korean) — mandatory protocol
+
+`setFont()` does not discover or register an arbitrary OS font family name.
+Every non-builtin font must first be registered from a font file (or be a
+built-in CID font); unknown names raise rather than silently substituting
+Helvetica. The common failure is caller code swallowing a registration error
+and then continuing with the previous/default font, often Helvetica, which has
+**no CJK glyphs**. CJK text can then render as black boxes (tofu), so:
+
+- **Never** reference a CJK font you have not verified on this machine.
+  "Source Han Sans / 思源黑体 / Noto Sans CJK" are usually NOT installed;
+  macOS `PingFang.ttc` and `Hiragino Sans GB` are CFF-flavored OpenType —
+  reportlab's `TTFont` only parses TrueType (`glyf`) outlines and raises on CFF.
+- Registration success proves only that reportlab parsed the font, not that it
+  contains the target glyphs. Render representative target-language text.
+- The terminal built-in CID fallback is language-specific — **never
+  Helvetica**, and never assume the Simplified Chinese `STSong-Light` covers
+  Traditional Chinese, Japanese, or Korean. See reportlab's
+  [Asian-font guide](https://docs.reportlab.com/reportlab/userguide/ch3_fonts/)
+  and verify names against the installed reportlab runtime; the guide's Korean
+  `HYSMyeongJoStd-Medium` spelling is not accepted by current releases.
+
+Resolve the font with this ladder (first hit wins) and use the returned name
+everywhere CJK text appears:
 
 ```python
+from pathlib import Path
+import warnings
 from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 
-pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
-c.setFont("STSong-Light", 14)
+# Replace these placeholders with project-controlled font files. For a plain
+# .ttf file the face index is 0; for a .ttc collection, inspect the collection
+# and record the intended face index explicitly instead of relying on index 0.
+CJK_TTF_CANDIDATES = {
+    "zh-Hans": [("assets/fonts/zh-Hans-body.ttf", 0)],
+    "zh-Hant": [("assets/fonts/zh-Hant-body.ttf", 0)],
+    "ja": [("assets/fonts/ja-body.ttf", 0)],
+    "ko": [("assets/fonts/ko-body.ttf", 0)],
+}
+
+CJK_CID_FALLBACKS = {
+    "zh-Hans": "STSong-Light",
+    "zh-Hant": "MSung-Light",
+    "ja": "HeiseiMin-W3",
+    # reportlab's runtime registry uses this spelling (without "Std").
+    "ko": "HYSMyeongJo-Medium",
+}
+
+def resolve_cjk_font(language="zh-Hans"):
+    if language not in CJK_CID_FALLBACKS:
+        raise ValueError(f"Unsupported CJK language: {language}")
+    alias = f"CJK-{language}"
+    for filename, subfont_index in CJK_TTF_CANDIDATES.get(language, []):
+        path = Path(filename)
+        if path.is_file():
+            try:
+                pdfmetrics.registerFont(
+                    TTFont(alias, str(path), subfontIndex=subfont_index)
+                )
+                return alias                # embedded; still verify target glyphs
+            except Exception as exc:
+                warnings.warn(f"Cannot register {path}: {exc}")
+                continue                    # unparseable face: try the next one
+    fallback = CJK_CID_FALLBACKS[language]
+    pdfmetrics.registerFont(UnicodeCIDFont(fallback))
+    return fallback
+
+CJK_FONT = resolve_cjk_font("zh-Hans")
+c.setFont(CJK_FONT, 14)
 c.drawString(50, 700, "简体中文示例")
 ```
 
-For a **Platypus** document (the multi-page report flow above), the CID font
+Populate only the language entries you ship and have verified. Do not copy OS
+font paths blindly: availability, outline format, and TTC face ordering vary by
+release. If no project font registers, the resolver uses reportlab's
+corresponding CID font. A registered TTF/TTC subset is embedded in the PDF,
+while CID fonts are **not embedded** and fidelity depends on the viewing
+machine. Prefer verified TTF/TTC files; treat the language-matched CID font as
+the safety net.
+
+For a **Platypus** document (the multi-page report flow above), the CJK font
 must also be set on the styles, not just the canvas — otherwise `Paragraph` /
-`Table` flowables fall back to Helvetica and CJK becomes black boxes. After
-`registerFont(UnicodeCIDFont("STSong-Light"))`, set `fontName="STSong-Light"`
-on each `ParagraphStyle` carrying CJK text and add `("FONTNAME", (0,0), (-1,-1),
-"STSong-Light")` to the `TableStyle` of any table with CJK cells.
+`Table` flowables fall back to Helvetica and CJK becomes black boxes. Set
+`fontName=CJK_FONT` on each `ParagraphStyle` carrying CJK text and add
+`("FONTNAME", (0, 0), (-1, -1), CJK_FONT)` to the `TableStyle` of any table
+with CJK cells. Headers/footers drawn in the `build` callback (§3) need
+`canv.setFont(CJK_FONT, …)` too if they contain CJK.
 
 ## 5. Subscripts / superscripts / inline markup
 
@@ -300,6 +372,9 @@ scripts/sanity_check.py out.pdf                # open + round-trip clean?
 
 Common regressions caught by the eyeball step:
 
+- Every CJK character is a black box → the selected font lacks those glyphs,
+  or registration failed and caller code continued with Helvetica → §4
+  `resolve_cjk_font(language=...)`
 - Black rectangles where subscripts should be → §5
 - Truncated table columns → widen `colWidths` or shrink `fontSize`
 - Missing images → paths are relative to `cwd`, not to the output file
