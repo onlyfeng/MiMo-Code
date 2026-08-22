@@ -40,7 +40,8 @@ export function displayMetadata(
   }
 }
 
-export function messageSelection(message: Message | undefined) {
+export function latestMessageSelection(messages: Message[]) {
+  const message = messages.at(-1)
   if (!message) return undefined
   if (message.role === "user") return message.model
   return {

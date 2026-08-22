@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { AssistantMessage, Provider, UserMessage } from "@mimo-ai/sdk/v2"
-import { displayMetadata, initial, messageSelection } from "../../../src/cli/cmd/tui/util/model"
+import { displayMetadata, initial, latestMessageSelection } from "../../../src/cli/cmd/tui/util/model"
 
 const providers = [
   {
@@ -80,7 +80,7 @@ describe("model display metadata", () => {
   })
 })
 
-describe("message model selection", () => {
+describe("latest message model selection", () => {
   test("reads provider, model, and variant from a user message", () => {
     const message = {
       id: "message-user",
@@ -91,7 +91,7 @@ describe("message model selection", () => {
       model: { providerID: "openai", modelID: "gpt-5.6-sol", variant: "high" },
     } satisfies UserMessage
 
-    expect(messageSelection(message)).toEqual({
+    expect(latestMessageSelection([message])).toEqual({
       providerID: "openai",
       modelID: "gpt-5.6-sol",
       variant: "high",
@@ -99,6 +99,14 @@ describe("message model selection", () => {
   })
 
   test("reads provider, model, and variant from an assistant message", () => {
+    const older = {
+      id: "message-user",
+      sessionID: "session",
+      role: "user",
+      time: { created: 1 },
+      agent: "explore",
+      model: { providerID: "openai", modelID: "gpt-5.6-sol", variant: "high" },
+    } satisfies UserMessage
     const message = {
       id: "message-assistant",
       sessionID: "session",
@@ -115,10 +123,14 @@ describe("message model selection", () => {
       variant: "thinking",
     } satisfies AssistantMessage
 
-    expect(messageSelection(message)).toEqual({
+    expect(latestMessageSelection([older, message])).toEqual({
       providerID: "ppio",
       modelID: "deepseek-v3",
       variant: "thinking",
     })
+  })
+
+  test("does not invent model metadata when no actor message is loaded", () => {
+    expect(latestMessageSelection([])).toBeUndefined()
   })
 })

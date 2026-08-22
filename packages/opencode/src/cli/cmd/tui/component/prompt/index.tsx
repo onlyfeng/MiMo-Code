@@ -7,6 +7,7 @@ import { Filesystem } from "@/util"
 import { useLocal } from "@tui/context/local"
 import { tint, useTheme } from "@tui/context/theme"
 import { EmptyBorder, SplitBorder } from "@tui/component/border"
+import { ModelMetadata } from "@tui/component/model-metadata"
 import { useSDK } from "@tui/context/sdk"
 import { useRoute } from "@tui/context/route"
 import { useProject } from "@tui/context/project"
@@ -1782,11 +1783,11 @@ export function Prompt(props: PromptProps) {
               syntaxStyle={syntax()}
             />
             <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
-              <box flexDirection="row" gap={1}>
+              <box flexDirection="row" gap={1} flexShrink={1}>
                 <Show when={local.agent.current()} fallback={<box height={1} />}>
                   {(agent) => (
                     <>
-                      <text fg={fadeColor(highlight(), agentMetaAlpha())}>
+                      <text fg={fadeColor(highlight(), agentMetaAlpha())} flexShrink={0}>
                         {store.mode === "shell"
                           ? "Shell"
                           : agent().name === "compose"
@@ -1794,22 +1795,17 @@ export function Prompt(props: PromptProps) {
                             : Locale.titlecase(agent().name)}
                       </text>
                       <Show when={store.mode === "normal"}>
-                        <box flexDirection="row" gap={1}>
+                        <box flexDirection="row" gap={1} flexShrink={1}>
                           <Show when={currentModelMetadata()}>
                             {(item) => (
-                              <>
-                                <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                                <text
-                                  flexShrink={0}
-                                  fg={fadeColor(keybind.leader ? theme.textMuted : theme.text, modelMetaAlpha())}
-                                >
-                                  {item().alias}
-                                </text>
-                                <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
-                                <text fg={fadeColor(theme.textMuted, modelMetaAlpha())} wrapMode="none">
-                                  {item().detail}
-                                </text>
-                              </>
+                              <ModelMetadata
+                                metadata={item()}
+                                aliasColor={fadeColor(
+                                  keybind.leader ? theme.textMuted : theme.text,
+                                  modelMetaAlpha(),
+                                )}
+                                detailColor={fadeColor(theme.textMuted, modelMetaAlpha())}
+                              />
                             )}
                           </Show>
                         </box>
@@ -1818,12 +1814,12 @@ export function Prompt(props: PromptProps) {
                   )}
                 </Show>
                 <Show when={local.neverAsk.current()}>
-                  <text>
+                  <text flexShrink={0}>
                     <span style={{ fg: theme.error, bold: true }}>«never-ask»</span>
                   </text>
                 </Show>
               </box>
-              <box flexDirection="row" gap={1} alignItems="center">
+              <box flexDirection="row" gap={1} alignItems="center" flexShrink={0}>
                 <Show when={hasRightContent()}>
                   {props.right}
                 </Show>
