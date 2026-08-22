@@ -8,6 +8,7 @@ import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
+import { TuiEvent } from "../../src/cli/cmd/tui/event"
 import { Command } from "../../src/command"
 import { Config } from "../../src/config"
 import { LSP } from "../../src/lsp"
@@ -738,6 +739,84 @@ it.live("loop calls LLM and returns assistant message", () =>
   ),
 )
 
+it.live("reported instruction files reach the normal model request", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const instruction = "instruction-delivery-normal: preserve this exact runtime constraint"
+      yield* Effect.promise(() => Bun.write(path.join(dir, "AGENTS.md"), instruction))
+
+      const bus = yield* Bus.Service
+      const loaded = defer<string[]>()
+      const off = yield* bus.subscribeCallback(TuiEvent.InstructionsLoaded, (event) =>
+        loaded.resolve(event.properties.files),
+      )
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Instruction delivery",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "text", text: "follow the project instructions" }],
+      })
+      yield* llm.text("done")
+      yield* prompt.loop({ sessionID: session.id })
+
+      expect(yield* Effect.promise(() => loaded.promise)).toContain("AGENTS.md")
+      off()
+      expect(JSON.stringify((yield* llm.inputs)[0].messages)).toContain(instruction)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("reported instruction files reach every MaxMode candidate request", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const instruction = "instruction-delivery-max-mode: preserve this exact runtime constraint"
+      yield* Effect.promise(() => Bun.write(path.join(dir, "AGENTS.md"), instruction))
+
+      const bus = yield* Bus.Service
+      const loaded = defer<string[]>()
+      const off = yield* bus.subscribeCallback(TuiEvent.InstructionsLoaded, (event) =>
+        loaded.resolve(event.properties.files),
+      )
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "MaxMode instruction delivery",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "max",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "text", text: "follow the project instructions" }],
+      })
+      yield* llm.text("candidate zero")
+      yield* llm.text("candidate one")
+      yield* llm.text("0")
+      yield* prompt.loop({ sessionID: session.id })
+
+      expect(yield* Effect.promise(() => loaded.promise)).toContain("AGENTS.md")
+      off()
+      const inputs = yield* llm.inputs
+      expect(inputs).toHaveLength(3)
+      expect(JSON.stringify(inputs[0].messages)).toContain(instruction)
+      expect(JSON.stringify(inputs[1].messages)).toContain(instruction)
+    }),
+    {
+      git: true,
+      config: (url) => ({ ...maxModeProviderCfg(url), agent: { max: { steps: 2 } } }),
+    },
+  ),
+)
+
 it.live("office attachment reminder respects effective skill permission", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
@@ -767,7 +846,7 @@ it.live("office attachment reminder respects effective skill permission", () =>
       yield* prompt.loop({ sessionID: session.id })
 
       const requests = yield* llm.inputs
-      expect(JSON.stringify(requests[0].messages)).toContain("Skill search trigger:")
+      expect(JSON.stringify(requests[0].messages)).not.toContain("Skill search trigger:")
       expect(JSON.stringify(requests[0].messages)).not.toContain(
         "The user's message attaches office document file(s).",
       )

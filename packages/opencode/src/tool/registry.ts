@@ -74,7 +74,7 @@ import * as BashInteractive from "./bash-interactive"
 import { resolveInvocationStyle } from "./invocation-style"
 import { BuiltinWorkflow } from "@/workflow/builtin"
 import { ToolScriptTool, renderToolScriptDeclarations } from "./tool-script"
-import { bindToolScriptRef, toolScriptRegistry } from "./tool-script-ref"
+import { bindToolScriptRef, TOOL_SCRIPT_EXCLUDED, toolScriptRegistry } from "./tool-script-ref"
 import { usesGPTToolset } from "./gpt"
 
 const log = Log.create({ service: "tool.registry" })
@@ -398,8 +398,21 @@ export const layer = Layer.effect(
 
       if (input.agent.toolAllowlist && !input.preserveMembership) {
         const allowed = new Set(input.agent.toolAllowlist)
+        const allowExecGateway =
+          useGPTTools &&
+          filtered.some(
+            (tool) =>
+              allowed.has(tool.id) &&
+              tool.id !== ToolScriptTool.id &&
+              tool.id !== "wait" &&
+              !TOOL_SCRIPT_EXCLUDED.has(tool.id),
+          )
         filtered = filtered.filter(
-          (tool) => tool.id === "invalid" || tool.id === MCP_TOOL_SEARCH_ID || allowed.has(tool.id),
+          (tool) =>
+            tool.id === "invalid" ||
+            tool.id === MCP_TOOL_SEARCH_ID ||
+            allowed.has(tool.id) ||
+            (tool.id === ToolScriptTool.id && allowExecGateway),
         )
       }
 

@@ -109,7 +109,6 @@ import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation
 import { ToolResultError } from "../tool/result-error"
 import { RecoverableError } from "../tool/recoverable"
 import { shouldAutoDream, shouldAutoDistill, DREAM_TASK, DISTILL_TASK, AUTO_DREAM_TITLE, AUTO_DISTILL_TITLE } from "./auto-dream"
-import { isDirectUserMessage, skillSearchReminderForSession } from "./skill-search-reminder"
 import {
   createMcpToolSearchCatalog,
   mcpToolCatalogBudget,
@@ -238,6 +237,17 @@ function isExtensionPath(filePath: string): boolean {
   return /\/\.mimocode\/(tools?|skills?)\//.test(filePath)
 }
 const elog = EffectLogger.create({ service: "session.prompt" })
+
+function isDirectUserMessage(message: MessageV2.WithParts | undefined) {
+  if (!message || message.info.role !== "user") return false
+  if (message.info.agentID && message.info.agentID !== "main") return false
+  if (message.info.provenance) return false
+  if (message.parts.some((part) => part.type === "text" && part.metadata?.origin?.kind === "cron")) return false
+  if (message.info.source) return message.info.source === "user"
+  return message.parts.some(
+    (part) => part.type === "file" || (part.type === "text" && !part.synthetic),
+  )
+}
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
@@ -950,7 +960,9 @@ export const layer = Layer.effect(
         ...input.agent,
         permission: Agent.runtimePermission(input.agent, input.session.permission),
       }
-      const skills = yield* sys.skills(runtimeAgent, { model: input.model })
+      const skills = yield* sys.skills(runtimeAgent, {
+        tools: userMessage.info.role === "user" ? userMessage.info.tools : undefined,
+      })
       const catalogText = skills
         ? ["<system-reminder>", SKILL_CATALOG_REMINDER_MARKER, skills, "</system-reminder>"].join("\n")
         : undefined
@@ -978,25 +990,6 @@ export const layer = Layer.effect(
           sessionID: userMessage.info.sessionID,
           type: "text",
           text: catalogText,
-          synthetic: true,
-        })
-        userMessage.parts.push(part)
-      }
-
-      // Search reminders apply only to eligible direct user sessions and models.
-      // They advise the primary agent when to search; the model still decides whether to call.
-      const reminder = skillSearchReminderForSession({
-        ...input,
-        permission: Agent.runtimePermission(input.agent, input.session.permission),
-        tools: userMessage.info.role === "user" ? userMessage.info.tools : undefined,
-      })
-      if (reminder) {
-        const part = yield* sessions.updatePart({
-          id: PartID.ascending(),
-          messageID: userMessage.info.id,
-          sessionID: userMessage.info.sessionID,
-          type: "text",
-          text: reminder,
           synthetic: true,
         })
         userMessage.parts.push(part)
