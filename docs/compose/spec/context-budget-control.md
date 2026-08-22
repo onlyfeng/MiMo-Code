@@ -1,12 +1,19 @@
 ---
 feature: context-budget-control
 status: in-progress
-updated: 2026-08-05
+updated: 2026-08-22
 branch: investigate/context-limit-double-rebuild
 commits: 028f3178..3b15062d
 ---
 
 # Context Budget Control (user-adjustable early compaction)
+
+> **Superseded provider decision (2026-08-22):** The fork now adopts upstream
+> #2149 and leaves Codex OAuth model limits at their catalog-reported values.
+> The fixed 372K clamp, its implementation record, and its original evidence
+> below are retained only as historical design context. `compaction.max_context`
+> remains the user-controlled way to compact earlier and can never raise a
+> provider-published limit.
 
 ## Report
 
@@ -16,7 +23,7 @@ The prompt and subagent footers divide usage by the internal trigger and mark a 
 
 The 2026-07-31 follow-up makes `usable()` the only automatic context-switch boundary. Checkpoint thresholds continue to keep the checkpoint fresh, but their final 80%/90% rung no longer triggers an early rebuild. The sidebar presents the user-controlled limit relative to the provider cap, so a 300K budget on a 922K model renders `limit 300K of 922K`; the reserve-adjusted trigger remains an internal detail available in `/status`.
 
-Separately, the merged PR #1926 was corrected: it assigned `limit.context = 300_000` for every `gpt-*` model under Codex OAuth, which *raised* the window for gpt-4o (128K) and gpt-3.5-turbo (16K), broke the `limit.context === 0` sentinel for image models, and never moved the compaction trigger for the 1M-class models it targeted because `usable()` reads `limit.input` when the catalog publishes one. It is now a clamp on both fields at **372,000** — the capacity OpenAI's Codex registry declares and that a 350,317-token request demonstrably reaches — applied only when a window exists and only when `limit.input` already exists. The 272K figure circulating for Codex is the 2x-input billing boundary, not capacity, so it ships as a documented `compaction.max_context` recipe (see S2.5).
+Separately, the merged PR #1926 was corrected: it assigned `limit.context = 300_000` for every `gpt-*` model under Codex OAuth, which *raised* the window for gpt-4o (128K) and gpt-3.5-turbo (16K), broke the `limit.context === 0` sentinel for image models, and never moved the compaction trigger for the 1M-class models it targeted because `usable()` reads `limit.input` when the catalog publishes one. The 2026-07-27 correction temporarily replaced that assignment with a clamp on both fields at **372,000**. Upstream #2149 later superseded the fixed provider cap, so Codex OAuth now keeps catalog-reported limits unchanged. The 272K billing boundary remains a documented `compaction.max_context` recipe (see S2.5).
 
 **Verification**
 
@@ -36,7 +43,7 @@ Separately, the merged PR #1926 was corrected: it assigned `limit.context = 300_
 3. Config merges cannot delete keys, and `null` would fail schema validation, so "reset to model default" is expressed as `0`. Writing a single leaf key (not a read-modify-write of the whole map) avoids promoting project-level entries into the user's global file and is safe for both the JSON `mergeDeep` and the JSONC `patchJsonc` writers.
 4. SDK regeneration is currently broken on `main`: `bun dev generate` emits a dangling `#/components/schemas/__schema0` ref from `ToolStateCompleted.providerOutput`, so `@hey-api/openapi-ts` fails. Confirmed at base commit; new config fields therefore need a narrow cast at the TUI boundary until that is fixed.
 5. `usable()` can be 0 for a positive window (window smaller than the reserves, or a large `compaction.reserved`), which would have rendered `Infinity%` in three footers. Any UI that divides by it needs the guard now in `tui/util/model.contextWindow`.
-6. Provider "context window" numbers in the wild are frequently a *billing* tier or a client's conservative default, not capacity — Codex ships 372K capacity, a 95% effective window, a 90% auto-compact default, and a 272K price boundary, all four called "the context window" somewhere. Ask which one a number is before hard-coding it into `limit`.
+6. Provider "context window" numbers in the wild are frequently a *billing* tier or a client's conservative default, not capacity. The 2026-07-27 investigation found 372K served capacity, a 95% effective window, a 90% auto-compact default, and a 272K price boundary, all four called "the context window" somewhere. Upstream #2149 later removed the fixed route cap; the current implementation trusts catalog limits and keeps cost policy in `compaction.max_context`.
 
 ## [S1] Problem
 
@@ -185,6 +192,10 @@ max_context: Schema.optional(
 Validation at write time (config load warns, slash command refuses): value must leave at least `reserved + outputReserve + 1` tokens, else it is ignored with a `log.warn` naming the model.
 
 ### S2.5 Provider-layer fix for Codex (independent of the user-facing knob)
+
+> **Historical:** This provider-layer clamp was implemented on 2026-07-27 and
+> removed when the fork adopted upstream #2149 on 2026-08-22. The code and
+> evidence in this section document the superseded decision.
 
 `packages/opencode/src/plugin/codex.ts` becomes a clamp that also closes the `limit.input` hole and respects the sentinel:
 
