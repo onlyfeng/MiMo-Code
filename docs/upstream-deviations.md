@@ -23,7 +23,7 @@ upstream synchronization re-evaluates an entry.
 - Last reviewed: 2026-08-22
 - Upstream review range: `5f2c3fb03780f0b0392a8fd7f4c90c96dc4e8969`..
   `f57520c08d4d10e64ac035e90ba561e889119c98`
-- Fork behavior head reviewed: `bec5e80eab71d2285b97c19114c59405d745c02f`
+- Fork behavior head reviewed: `eb4c0afe0a832a52d0cbfd0de22418b6f457f0e8`
 - Validation note: the incoming workflow excluded all of
   `runtime-worktree.test.ts` from normal shards and attempted to run only its
   quarantined `deadline-fired` case separately. That case remains skipped
@@ -350,6 +350,9 @@ upstream synchronization re-evaluates an entry.
   verify the rendered contract, not just the absence of conflicts. Re-verify the
   agent-variant fallback against `createUserMessage` whenever upstream changes
   variant resolution or `resolveModelRef`.
+- 2026-08-22 PDF/text live-sync review: the range did not touch model metadata,
+  effective variant resolution, or the prompt and subagent footer renderers;
+  provider/model and variant labels remain unconditional.
 - Reconsider only if: upstream exposes the resolved request-level model and
   variant through another surface the operator can read, or the server resolves
   the effective model/variant for a pending request so the TUI can ask for it
