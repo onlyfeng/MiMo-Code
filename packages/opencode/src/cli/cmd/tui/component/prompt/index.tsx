@@ -147,7 +147,15 @@ export function Prompt(props: PromptProps) {
     return current
       ? Model.displayMetadata(
           sync.data.provider,
-          { ...current, variant: local.model.variant.current() },
+          {
+            ...current,
+            variant: Model.effectiveVariant(sync.data.provider, {
+              agent: local.agent.current(),
+              groups: sync.data.config.model_groups,
+              selection: current,
+              selected: local.model.variant.current(),
+            }),
+          },
           local.model.parsed().model,
         )
       : undefined

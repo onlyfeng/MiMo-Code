@@ -29,6 +29,48 @@ export function name(
   return get(list, providerID, modelID)?.name ?? modelID
 }
 
+/**
+ * The `provider/model` the agent itself targets, resolved the way
+ * `Provider.resolveModelRef` resolves it when called with no context provider:
+ * a literal ref parses directly, a group ref takes the group default. An
+ * unresolvable ref (unknown group, or a built-in tier that only the server can
+ * expand) yields undefined, which callers must read as "unknown", never "match".
+ */
+function agentSelection(groups: Config["model_groups"], agent: { model?: Selection; modelRef?: string }) {
+  if (!agent.modelRef) return agent.model
+  if (agent.modelRef.includes("/")) return parse(agent.modelRef)
+  const group = groups?.[agent.modelRef]
+  if (!group) return undefined
+  return parse(typeof group === "string" ? group : group.default)
+}
+
+/**
+ * The variant the NEXT request will actually carry, mirroring the server's
+ * fallback in session/prompt.ts `createUserMessage`. An explicit selection always
+ * wins; otherwise the agent's configured variant applies, but only when the
+ * request targets the agent's own model and that model really defines the
+ * variant. Without this the prompt row reads `variant: none` while the server
+ * sends and persists the agent's variant.
+ */
+export function effectiveVariant(
+  list: Provider[] | ReadonlyMap<string, Provider> | undefined,
+  input: {
+    agent: { variant?: string; model?: Selection; modelRef?: string } | undefined
+    groups: Config["model_groups"]
+    selection: Selection
+    selected?: string
+  },
+) {
+  if (input.selected) return input.selected
+  if (!input.agent?.variant) return undefined
+  const agent = agentSelection(input.groups, input.agent)
+  if (!agent) return undefined
+  if (agent.providerID !== input.selection.providerID || agent.modelID !== input.selection.modelID) return undefined
+  return get(list, input.selection.providerID, input.selection.modelID)?.variants?.[input.agent.variant]
+    ? input.agent.variant
+    : undefined
+}
+
 export function displayMetadata(
   list: Provider[] | ReadonlyMap<string, Provider> | undefined,
   input: Selection & { variant?: string },
