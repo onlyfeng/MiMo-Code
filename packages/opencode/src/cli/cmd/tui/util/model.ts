@@ -32,9 +32,24 @@ export function name(
 /**
  * The `provider/model` the agent itself targets, resolved the way
  * `Provider.resolveModelRef` resolves it when called with no context provider:
- * a literal ref parses directly, a group ref takes the group default. An
- * unresolvable ref (unknown group, or a built-in tier that only the server can
- * expand) yields undefined, which callers must read as "unknown", never "match".
+ * a literal ref parses directly, a group ref takes the group default.
+ *
+ * A ref with no `model_groups` entry yields undefined, which callers must read
+ * as "unknown", never as "match". That deliberately stops short of the server's
+ * last branch, where an unconfigured built-in tier (`ultra`/`standard`/`lite`)
+ * falls through to `Provider.defaultModel()`. Electing that default is not a
+ * pure function of anything the TUI holds — it walks the recent list, the
+ * configured provider set and a server-side priority table — so mirroring it
+ * here would add a THIRD copy of default-model election (the server's, the
+ * fallback in context/local.tsx, and this one) whose branches already disagree
+ * on precedence. A stale copy would assert a variant the request never carries,
+ * which is worse than the understatement it replaces.
+ *
+ * The residual gap is one message wide: an agent on an unconfigured built-in
+ * tier shows `variant: none` on a session's FIRST turn even though the server
+ * may apply the agent's variant. From the second turn on there is nothing to
+ * predict — prompt/index.tsx seeds the variant store from the last user
+ * message's server-resolved value, so `selected` already carries it.
  */
 function agentSelection(groups: Config["model_groups"], agent: { model?: Selection; modelRef?: string }) {
   if (!agent.modelRef) return agent.model

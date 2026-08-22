@@ -199,7 +199,7 @@ describe("effective variant", () => {
     ).toBeUndefined()
   })
 
-  test("treats an unresolvable group ref as unknown rather than a match", () => {
+  test("treats an unconfigured built-in tier as unknown rather than a match", () => {
     expect(
       effectiveVariant(providers, {
         agent: { variant: "xhigh", modelRef: "lite" },
@@ -207,6 +207,16 @@ describe("effective variant", () => {
         selection,
       }),
     ).toBeUndefined()
+  })
+
+  test("resolves a built-in tier name once it has a model_groups entry", () => {
+    expect(
+      effectiveVariant(providers, {
+        agent: { variant: "xhigh", modelRef: "lite" },
+        groups: { lite: "openai/gpt-5.6-sol" },
+        selection,
+      }),
+    ).toBe("xhigh")
   })
 
   test("reports no variant when neither the user nor the agent chose one", () => {
