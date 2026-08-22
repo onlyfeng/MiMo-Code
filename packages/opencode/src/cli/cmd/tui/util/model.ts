@@ -45,11 +45,16 @@ export function name(
  * on precedence. A stale copy would assert a variant the request never carries,
  * which is worse than the understatement it replaces.
  *
- * The residual gap is one message wide: an agent on an unconfigured built-in
- * tier shows `variant: none` on a session's FIRST turn even though the server
- * may apply the agent's variant. From the second turn on there is nothing to
- * predict — prompt/index.tsx seeds the variant store from the last user
- * message's server-resolved value, so `selected` already carries it.
+ * The residual gap: an agent on an unconfigured built-in tier reads
+ * `variant: none` while the server applies the agent's variant. It closes when
+ * prompt/index.tsx seeds the variant store from the last user message's
+ * server-resolved value — but that seeding is keyed on a CHANGED session id,
+ * not on each turn, so it covers opening or re-entering a session and NOT an
+ * agent switch inside a live one (context/local.tsx only re-selects the model
+ * for a literal agent `model`, never for a tier `modelRef`). Closing the rest
+ * means electing the default here; the first three branches of `defaultModel()`
+ * are exact reads of state the TUI already holds, so a partial mirror is
+ * possible — it is declined as a design call, not because it cannot be written.
  */
 function agentSelection(groups: Config["model_groups"], agent: { model?: Selection; modelRef?: string }) {
   if (!agent.modelRef) return agent.model
