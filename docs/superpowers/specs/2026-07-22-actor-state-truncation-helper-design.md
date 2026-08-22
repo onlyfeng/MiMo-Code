@@ -1,5 +1,11 @@
 # Actor State Truncation Helper Design
 
+> **Status (2026-08-22):** Delivered through PR #45 at
+> `8376386b59e0876f520355394a9012880a1aa4bd`; the cross-runner surrogate-budget
+> test follow-up landed through PR #46 at
+> `6f24700f58ea5ea22fc29613458afb901921d188`. The future-tense branch and
+> implementation text below records the pre-implementation design baseline.
+
 ## Goal
 
 Remove the actor tool's duplicate UTF-8 prefix and suffix byte-slicing loops by sharing the boundary-safe primitives in text-truncate, while preserving every actor state-context token, byte-budget, marker, and head/tail allocation rule.

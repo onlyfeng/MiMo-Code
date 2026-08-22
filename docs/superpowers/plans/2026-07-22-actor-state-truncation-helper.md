@@ -1,5 +1,11 @@
 # Actor State Truncation Helper Implementation Plan
 
+> **Status (2026-08-22):** Implemented and merged through PR #45 at
+> `8376386b59e0876f520355394a9012880a1aa4bd`; the cross-runner surrogate-budget
+> test follow-up merged through PR #46 at
+> `6f24700f58ea5ea22fc29613458afb901921d188`. The unchecked boxes below are the
+> historical execution plan, not pending work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reuse the centralized UTF-8 boundary logic for actor state-context prefix and suffix slicing without changing actor-visible truncation behavior.
