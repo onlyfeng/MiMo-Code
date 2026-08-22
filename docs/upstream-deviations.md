@@ -13,6 +13,13 @@ upstream synchronization re-evaluates an entry.
 
 - Status: active
 - Scope: fork `main` and propagation from `main` to `dev/compat`
+- Branch scope: this copy extends the `main` registry with entries and
+  validation notes that apply only to `dev/compat`. Propagation runs upstream
+  `main` → fork `main` → fork `dev/compat` and never returns, so a deviation a
+  `dev/compat` change introduces must be recorded here — it will not reach the
+  `main` copy. `main` stays authoritative for everything the two branches share:
+  extend a shared entry with a `dev/compat` note rather than reworking its
+  wording here, so the copies stay diffable.
 - Last reviewed: 2026-08-22
 - Upstream review range: `bed9b0b2e8a8cb45c2576ada164ec412a31dbc31`..
   `5f2c3fb03780f0b0392a8fd7f4c90c96dc4e8969`
