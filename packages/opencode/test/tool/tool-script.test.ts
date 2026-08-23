@@ -480,6 +480,27 @@ return r.output;`,
     expect(result.output).toContain("found data-quality-platform")
   })
 
+  test("preserves a leading TypeScript const assertion", async () => {
+    const result = await runToolScript(`<const>[1, 2]; return "assertion preserved"`, [])
+
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output).toContain("assertion preserved")
+  })
+
+  test("preserves a leading TypeScript const generic arrow", async () => {
+    const result = await runToolScript(`<const T>(x: T) => x; return "generic preserved"`, [])
+
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output).toContain("generic preserved")
+  })
+
+  test("preserves a leading TypeScript const generic arrow with a default", async () => {
+    const result = await runToolScript(`<const T = string>(x: T) => x; return "default generic preserved"`, [])
+
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output).toContain("default generic preserved")
+  })
+
   test("pre-aborted signal cancels the execution", async () => {
     // A sync spin blocks the host event loop, so a timer-armed abort can never
     // fire mid-spin (the 60s active budget covers that in production). An
