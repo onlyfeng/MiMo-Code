@@ -14,6 +14,7 @@ they are never used as an `upstream` or `main behavior` review basis.
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `7c52b1412e9e39685b6975bdc4a4847fe2352647` | 6 | 13 | 211 paths; 19,057 insertions; 8,460 deletions | Retained the six shared rejection contracts and thirteen non-duplicating shared capability/process owners; adopted upstream custom-exec wrapper normalization while keeping the nested-authority and raw-size boundaries; restored the shared WebFetch target-classification baseline and scoped FC-010 to redirect permission/resource bounds; removed bounded upstream-format and loop-form drift. |
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39` | 6 | 13 | 211 paths; 19,073 insertions; 8,461 deletions | Correction: narrowed custom-exec leading-angle normalization to malformed variable-declaration assignments, preserving valid TypeScript const assertions and generic arrows while retaining the wrapper, raw-size, nested-authority, and timeout boundaries. |
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5` | 6 | 13 | 211 paths; 19,096 insertions; 8,469 deletions | Correction: use actual async-body TypeScript diagnostics for leading-angle repair; preserve already-valid const assertions and generic arrows, including default generics, and repair only an invalid source when removing the angle yields zero diagnostics. |
+| 2026-08-24 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8` | 6 | 13 | 213 paths; 19,110 insertions; 8,473 deletions | Correction: upstream still blocks only textual `fe80:` link-local addresses; fork main now blocks the complete numeric and DNS-resolved IPv6 `fe80::/10` range through FC-010 without adding a duplicate owner. |
 
 ## 2026-08-23 review details
 
@@ -161,6 +162,43 @@ git diff --shortstat \
 git diff --name-only \
   c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
   edc2d123cbebfadc8fb7a8a18c4974def0fc2be5 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-08-24 IPv6 link-local SSRF correction
+
+- Reviewed upstream remains `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`.
+- Corrected main behavior: `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8`.
+- Upstream has the same defect: its IPv6 classifier blocks only a textual
+  `fe80:` prefix. Fork main now blocks the complete `fe80::/10` range for both
+  numeric URLs and DNS-resolved family-6 addresses. FC-010 owns this
+  destination-classification hardening together with the WebFetch HTTP(S),
+  per-hop permission, manual-redirect, timeout, and response-size boundaries.
+- Active ownership remains FD=6 and FC=13; no duplicate FD or FC was added.
+
+### IPv6 correction changed-path calculation
+
+The 213-path, 19,110-insertion, 8,473-deletion total compares the same reviewed
+upstream tree with the corrected pre-documentation main behavior tree and
+excludes the same five registry/history tracking paths:
+
+```bash
+git diff --shortstat \
+  c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
+  e0389a146ad09a439bbb1009b5f01fc3cc63d7d8 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
+  e0389a146ad09a439bbb1009b5f01fc3cc63d7d8 -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
