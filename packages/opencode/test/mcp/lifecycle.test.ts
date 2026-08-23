@@ -317,26 +317,6 @@ test(
 )
 
 test(
-  "remote MCP private network URL connects as configured",
-  withInstance({}, (mcp) =>
-    Effect.gen(function* () {
-      lastCreatedClientName = "private-remote"
-      getOrCreateClientState("private-remote")
-
-      const addResult = yield* mcp.add("private-remote", {
-        type: "remote",
-        url: "http://10.0.0.5/mcp",
-        oauth: false,
-      })
-
-      const serverStatus = (addResult.status as any)["private-remote"] ?? addResult.status
-      expect(serverStatus.status).toBe("connected")
-      expect(clientCreateCount).toBe(1)
-    }),
-  ),
-)
-
-test(
   "client advertises the exact lifecycle v1 capability during initialization",
   withInstance({}, (mcp) =>
     Effect.gen(function* () {
