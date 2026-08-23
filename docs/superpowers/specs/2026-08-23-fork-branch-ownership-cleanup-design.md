@@ -1,6 +1,6 @@
 # Fork Branch Ownership Cleanup Design
 
-**Status:** approved in conversation; implementation pending written-spec review
+**Status:** approved; implementation pending
 **Date:** 2026-08-23
 **Repository:** `onlyfeng/MiMo-Code`
 
