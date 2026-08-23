@@ -32,6 +32,13 @@ const MAX_CODE_BYTES = 128 * 1024
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 const TRACE_TAIL_ENTRIES = 20
 
+function normalizeExecCode(code: string) {
+  return code
+    .replace(/^(\s*)<(?:parameter|paramter)(?:(?:\s+name\s*=|\s*=)\s*["']?code["']?)?\s*>\s*/i, "$1")
+    .replace(/^(\s*)<(?=(?:const|let|var)\b)/, "$1")
+    .replace(/(?:\s*<\/(?:parameter|paramter)>)+\s*(?:#{1,6}\s*)?$/i, "")
+}
+
 /** JSON Schema (zod v4 toJSONSchema output) → compact TS type text. Best-effort:
  * anything unrecognized renders as `unknown`, which is safe for declarations. */
 function schemaToTs(schema: any): string {
@@ -337,6 +344,7 @@ export const ToolScriptTool = Tool.define(
       }),
       execute: (params: { code: string; max_tool_calls?: number; timeout_seconds?: number }, ctx: Tool.Context) =>
         Effect.gen(function* () {
+          const code = normalizeExecCode(params.code)
           const maxToolCalls = params.max_tool_calls ?? MAX_TOOL_CALLS_DEFAULT
           const activeDeadlineMs = (params.timeout_seconds ?? ACTIVE_DEADLINE_S_DEFAULT) * 1000
           const trace: TraceEntry[] = []
@@ -363,7 +371,7 @@ export const ToolScriptTool = Tool.define(
               durationMs: t.durationMs,
               ...(t.error && { error: t.error.slice(0, 200) }),
             }))
-          if (Buffer.byteLength(params.code, "utf8") > MAX_CODE_BYTES) {
+          if (Buffer.byteLength(code, "utf8") > MAX_CODE_BYTES) {
             return {
               title: "code too large",
               metadata: { status: "code_error", toolCalls: 0, counts: tally(), recent: recentTail() },
@@ -453,7 +461,7 @@ export const ToolScriptTool = Tool.define(
           // runtimes expose Transpiler without a constructible implementation.
           // Report line/column relative to the CALLER's code (the wrapper adds one
           // line above), plus source text — a bare parse error is undebuggable.
-          const source = `globalThis.__main = async () => {\n${params.code}\n}`
+          const source = `globalThis.__main = async () => {\n${code}\n}`
           const result = ts.transpileModule(source, {
             reportDiagnostics: true,
             compilerOptions: {
@@ -461,7 +469,7 @@ export const ToolScriptTool = Tool.define(
               target: ts.ScriptTarget.ESNext,
             },
           })
-          const hasImport = /^\s*(import|export)\s/m.test(params.code)
+          const hasImport = /^\s*(import|export)\s/m.test(code)
           const formatDiagnostics = (diagnostics: readonly ts.Diagnostic[]): string => {
             const rendered = diagnostics
               .map((diagnostic) => {

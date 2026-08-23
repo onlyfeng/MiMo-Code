@@ -437,6 +437,42 @@ describe("exec", () => {
     expect(result.metadata.status).toBe("code_error")
   })
 
+  test("strips leaked parameter wrappers from custom exec source", async () => {
+    const wrapped = await runToolScript(`<parameter name="code">\nreturn { repaired: true }\n</parameter> ###`, [])
+    const trailing = await runToolScript(`return "trailing repaired"</paramter>`, [])
+    const repeated = await runToolScript(
+      `const results = [{ output: "first" }, { output: "second" }];
+return results.map((r, i) => \`RESULT \${i + 1}\\n\${r.output}\`).join("\\n---\\n");
+</parameter></parameter>`,
+      [],
+    )
+
+    expect(wrapped.metadata.status).toBe("completed")
+    expect(wrapped.output).toContain('"repaired": true')
+    expect(trailing.metadata.status).toBe("completed")
+    expect(trailing.output).toContain("trailing repaired")
+    expect(repeated.metadata.status).toBe("completed")
+    expect(repeated.output).toContain("RESULT 2\nsecond")
+  })
+
+  test("does not strip parameter-like text inside JavaScript strings", async () => {
+    const result = await runToolScript(`return "</parameter> ###"`, [])
+
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output).toContain("</parameter> ###")
+  })
+
+  test("strips a leaked opening angle bracket before a variable declaration", async () => {
+    const result = await runToolScript(
+      `<const r = { output: "found data-quality-platform" };
+return r.output;`,
+      [],
+    )
+
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output).toContain("found data-quality-platform")
+  })
+
   test("pre-aborted signal cancels the execution", async () => {
     // A sync spin blocks the host event loop, so a timer-armed abort can never
     // fire mid-spin (the 60s active budget covers that in production). An
