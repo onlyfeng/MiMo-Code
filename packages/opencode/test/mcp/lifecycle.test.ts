@@ -317,26 +317,6 @@ test(
 )
 
 test(
-  "remote MCP private network URL connects as configured",
-  withInstance({}, (mcp) =>
-    Effect.gen(function* () {
-      lastCreatedClientName = "private-remote"
-      getOrCreateClientState("private-remote")
-
-      const addResult = yield* mcp.add("private-remote", {
-        type: "remote",
-        url: "http://10.0.0.5/mcp",
-        oauth: false,
-      })
-
-      const serverStatus = (addResult.status as any)["private-remote"] ?? addResult.status
-      expect(serverStatus.status).toBe("connected")
-      expect(clientCreateCount).toBe(1)
-    }),
-  ),
-)
-
-test(
   "client advertises the exact lifecycle v1 capability during initialization",
   withInstance({}, (mcp) =>
     Effect.gen(function* () {
@@ -386,6 +366,28 @@ test(
       expect(invalidStatus.status).toBe("failed")
       expect(invalidStatus.error).toBe('Invalid MCP URL for "invalid-remote"')
       expect(clientCreateCount).toBe(0)
+    }),
+  ),
+)
+
+test(
+  "compat permits an RFC1918 remote MCP endpoint",
+  withInstance({}, (mcp) =>
+    Effect.gen(function* () {
+      lastCreatedClientName = "compat-private-remote"
+      getOrCreateClientState("compat-private-remote")
+
+      const addResult = yield* mcp.add("compat-private-remote", {
+        type: "remote",
+        url: "http://192.168.1.1/mcp",
+        oauth: false,
+      })
+
+      if (!("compat-private-remote" in addResult.status)) {
+        throw new Error("Expected add() to return the remote server status")
+      }
+      expect(addResult.status["compat-private-remote"]?.status).toBe("connected")
+      expect(clientCreateCount).toBe(1)
     }),
   ),
 )

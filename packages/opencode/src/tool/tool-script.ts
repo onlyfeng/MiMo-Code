@@ -32,6 +32,12 @@ const MAX_CODE_BYTES = 128 * 1024
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 const TRACE_TAIL_ENTRIES = 20
 
+function normalizeExecCode(code: string) {
+  return code
+    .replace(/^(\s*)<(?:parameter|paramter)(?:(?:\s+name\s*=|\s*=)\s*["']?code["']?)?\s*>\s*/i, "$1")
+    .replace(/(?:\s*<\/(?:parameter|paramter)>)+\s*(?:#{1,6}\s*)?$/i, "")
+}
+
 /** JSON Schema (zod v4 toJSONSchema output) → compact TS type text. Best-effort:
  * anything unrecognized renders as `unknown`, which is safe for declarations. */
 function schemaToTs(schema: any): string {
@@ -370,6 +376,14 @@ export const ToolScriptTool = Tool.define(
               output: `<exec status="code_error">\n<error_message>\ncode exceeds ${MAX_CODE_BYTES} bytes\n</error_message>\n</exec>`,
             }
           }
+          const normalized = normalizeExecCode(params.code)
+          if (Buffer.byteLength(normalized, "utf8") > MAX_CODE_BYTES) {
+            return {
+              title: "code too large",
+              metadata: { status: "code_error", toolCalls: 0, counts: tally(), recent: recentTail() },
+              output: `<exec status="code_error">\n<error_message>\ncode exceeds ${MAX_CODE_BYTES} bytes\n</error_message>\n</exec>`,
+            }
+          }
 
           const getDefs = toolScriptRegistry.current
           if (!getDefs) throw new Error("exec tool registry unavailable")
@@ -453,15 +467,24 @@ export const ToolScriptTool = Tool.define(
           // runtimes expose Transpiler without a constructible implementation.
           // Report line/column relative to the CALLER's code (the wrapper adds one
           // line above), plus source text — a bare parse error is undebuggable.
-          const source = `globalThis.__main = async () => {\n${params.code}\n}`
-          const result = ts.transpileModule(source, {
-            reportDiagnostics: true,
-            compilerOptions: {
-              module: ts.ModuleKind.ESNext,
-              target: ts.ScriptTarget.ESNext,
-            },
+          const transpile = (code: string) =>
+            ts.transpileModule(`globalThis.__main = async () => {\n${code}\n}`, {
+              reportDiagnostics: true,
+              compilerOptions: {
+                module: ts.ModuleKind.ESNext,
+                target: ts.ScriptTarget.ESNext,
+              },
           })
-          const hasImport = /^\s*(import|export)\s/m.test(params.code)
+          const original = transpile(normalized)
+          const candidate = normalized.replace(/^(\s*)<(?=(?:const|let|var)\b)/, "$1")
+          const repaired =
+            original.diagnostics?.length && candidate !== normalized ? transpile(candidate) : undefined
+          const result =
+            repaired && !repaired.diagnostics?.length
+              ? repaired
+              : original
+          const code = result === original ? normalized : candidate
+          const hasImport = /^\s*(import|export)\s/m.test(code)
           const formatDiagnostics = (diagnostics: readonly ts.Diagnostic[]): string => {
             const rendered = diagnostics
               .map((diagnostic) => {
