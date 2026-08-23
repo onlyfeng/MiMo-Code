@@ -44,3 +44,4 @@ export const extractComposeBundle = Effect.fn("Skill.extractComposeBundle")(func
   log.info("extracted compose skills", { root })
   return root
 })
+
