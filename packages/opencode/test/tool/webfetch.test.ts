@@ -140,23 +140,55 @@ describe("tool.webfetch", () => {
     )
   })
 
-  test("asks for redirected private network targets before fetching them", async () => {
-    const start = "https://example.com/start"
-    const internal = "http://10.0.0.5/wiki"
-    const asks: string[][] = []
-    const requested: string[] = []
+  test("rejects a private initial target before permission or request", async () => {
+    const events: string[] = []
     const context = {
       ...ctx,
       ask: (input: { patterns: ReadonlyArray<string> }) =>
         Effect.sync(() => {
-          asks.push([...input.patterns])
+          events.push(`ask:${input.patterns[0]}`)
         }),
     }
     const http = Layer.succeed(
       HttpClient.HttpClient,
       HttpClient.make((request) =>
         Effect.sync(() => {
-          requested.push(request.url)
+          events.push(`request:${request.url}`)
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response("must not fetch", { headers: { "content-type": "text/plain" } }),
+          )
+        }),
+      ),
+    )
+
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        await expect(exec({ url: "http://192.168.1.1/wiki", format: "text" }, http, context)).rejects.toThrow(
+          "SSRF protection",
+        )
+      },
+    })
+    expect(events).toEqual([])
+  })
+
+  test("rejects a private redirect before its permission or request", async () => {
+    const start = "https://93.184.216.34/start"
+    const internal = "http://192.168.1.1/wiki"
+    const events: string[] = []
+    const context = {
+      ...ctx,
+      ask: (input: { patterns: ReadonlyArray<string> }) =>
+        Effect.sync(() => {
+          events.push(`ask:${input.patterns[0]}`)
+        }),
+    }
+    const http = Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) =>
+        Effect.sync(() => {
+          events.push(`request:${request.url}`)
           if (request.url === start) {
             return HttpClientResponse.fromWeb(
               request,
@@ -165,7 +197,7 @@ describe("tool.webfetch", () => {
           }
           return HttpClientResponse.fromWeb(
             request,
-            new Response("internal knowledge", { headers: { "content-type": "text/plain; charset=utf-8" } }),
+            new Response("must not fetch", { headers: { "content-type": "text/plain" } }),
           )
         }),
       ),
@@ -174,37 +206,9 @@ describe("tool.webfetch", () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
-        const result = await exec({ url: start, format: "text" }, http, context)
-        expect(result.output).toBe("internal knowledge")
-        expect(requested).toEqual([start, internal])
-        expect(asks).toEqual([[start], [internal]])
+        await expect(exec({ url: start, format: "text" }, http, context)).rejects.toThrow("SSRF protection")
       },
     })
-  })
-
-  test("allows private network URLs as user-approved fetch targets", async () => {
-    const requested: string[] = []
-    const http = Layer.succeed(
-      HttpClient.HttpClient,
-      HttpClient.make((request) =>
-        Effect.sync(() => {
-          requested.push(request.url)
-          return HttpClientResponse.fromWeb(
-            request,
-            new Response("internal knowledge", { headers: { "content-type": "text/plain; charset=utf-8" } }),
-          )
-        }),
-      ),
-    )
-
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const url = "http://10.0.0.5/wiki"
-        const result = await exec({ url, format: "text" }, http)
-        expect(result.output).toBe("internal knowledge")
-        expect(requested).toEqual([url])
-      },
-    })
+    expect(events).toEqual([`ask:${start}`, `request:${start}`])
   })
 })
