@@ -260,19 +260,24 @@ registry or history commit does not advance either behavior reference.
 
 - Status: active
 - Canonical owner: shared `main` WebFetch execution boundary
-- Observable contract: WebFetch accepts only HTTP(S), asks the effective
-  `webfetch` permission for the initial URL and every redirect target, follows
-  redirects manually with a maximum of 10 hops, applies the request timeout,
-  and rejects responses larger than 5 MB. Address-class policy is outside this
-  entry and is not broadened by it.
+- Observable contract: WebFetch accepts only HTTP(S). Current destination
+  classification runs before permission for the initial URL and every manual
+  redirect target. Each target that passes classification triggers the effective
+  `webfetch` permission before its request; a rejected target stops before its
+  permission ask and request. Redirects are capped at 10 hops, the request
+  timeout applies, and responses larger than 5 MB are rejected. Address-class
+  policy is outside this entry and is not broadened by it.
 - Upstream relationship: shared upstream behavior adapted to retain the fork's
-  explicit per-hop permission boundary and resource-limit tests.
+  explicit per-hop permission boundary and resource-bound source contract.
 - Watch surfaces: `packages/opencode/src/tool/webfetch.ts`, its permission
   plumbing, and `packages/opencode/src/util/ssrf.ts` where target classification
   is applied before the WebFetch permission ask.
-- Tests/evidence: `packages/opencode/test/tool/webfetch.test.ts` proves HTTP(S)
-  validation, public redirect re-authorization, and classification-before-ask;
-  source review at main behavior confirms the 10-hop, timeout, and 5 MB bounds.
+- Tests/evidence: `packages/opencode/test/tool/webfetch.test.ts` proves redirect
+  target re-authorization through its local `Bun.serve` redirect and proves that
+  rejected initial and redirect targets stop before their permission ask and
+  request. Source review at main behavior confirms HTTP(S) scheme enforcement,
+  the 10-hop cap, timeout, and 5 MB bound; that test file has no focused scheme
+  or resource-bound regression for those source contracts.
   `packages/opencode/test/util/ssrf.test.ts` separately covers classification.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
   main behavior `7c52b1412e9e39685b6975bdc4a4847fe2352647`.
