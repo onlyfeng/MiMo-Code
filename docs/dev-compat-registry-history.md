@@ -12,6 +12,7 @@ never used as an inherited `main` or compat behavior review basis.
 | Date | Accepted `main` tip | Main behavior | Compat behavior | Active DC | Changed-path total | Decision summary |
 | --- | --- | --- | --- | ---: | --- | --- |
 | 2026-08-24 | `060b3adb1373a802e301f5bafce225b90407ef49` | `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5` | `f6abd31d57d3066a1924042670e3f59c26f8a0ca` | 7 | 47 paths; 3,643 insertions; 226 deletions | Retained approved private WebFetch and MCP reachability plus the existing platform, per-agent MaxMode, bounded-context, actor-context, and TUI metadata adaptations as compat-owned behavior. |
+| 2026-08-24 | `fd5064df420d5c2dbe424ddaa020bb54655bef64` | `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8` | `d0d44b7df7af60fe9ef4df634d53f6c0782d0f2c` | 7 | 47 paths; 3,643 insertions; 226 deletions | Adopted the shared full IPv6 link-local classifier correction while retaining approved private WebFetch and MCP reachability plus all existing compat-owned platform, model, context, actor, and TUI adaptations. |
 
 ## 2026-08-24 initial ownership review
 
@@ -172,3 +173,58 @@ classified as a compatibility capability.
   adaptations rather than shared-policy claims.
 - DC-TUI-001 records Legacy ID: FD-007 and both known `variant: none` limits;
   the shared FD/FC registries remain unchanged.
+
+## 2026-08-24 shared SSRF correction propagation
+
+- Accepted `origin/main` tip:
+  `fd5064df420d5c2dbe424ddaa020bb54655bef64`.
+- Inherited main behavior from the shared history:
+  `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8`.
+- Pre-documentation compat behavior:
+  `d0d44b7df7af60fe9ef4df634d53f6c0782d0f2c`.
+- Active ownership remains DC-NET-001, DC-NET-002, DC-PLATFORM-001,
+  DC-MODEL-001, DC-CONTEXT-001, DC-ACTOR-001, and DC-TUI-001.
+- Shared inheritance result: `packages/opencode/src/util/ssrf.ts`,
+  `packages/opencode/test/util/ssrf.test.ts`,
+  `docs/upstream-deviations.md`, `docs/fork-capabilities.md`,
+  `docs/fork-registry-history.md`, `bun.lock`, and
+  `packages/opencode/src/mcp/index.ts` are byte-identical to the accepted
+  `origin/main` tree.
+- DC-NET-001 still removes exactly the `assertSafeUrl` import and its initial
+  and redirect call sites from WebFetch. The inherited classifier and tests
+  now cover the complete IPv6 link-local `fe80::/10` range, but compat
+  WebFetch does not call that classifier; approved ordinary RFC1918 access
+  remains unchanged.
+- PR #66 review comment `discussion_r3839067435` identified that the prior
+  textual `fe80:` check did not cover the full link-local range. Main behavior
+  `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8` uses the first-hextet `/10`
+  mask and adds direct `fe80`, `fe90`, `fea0`, and `febf` plus DNS-resolved
+  `febf` regressions. This propagation inherits that source/test correction
+  without broadening the compat WebFetch call seam.
+
+### Corrected changed-path calculation
+
+The 47-path, 3,643-insertion, 226-deletion total compares the corrected
+inherited main behavior directly with the propagated pre-documentation compat
+behavior. It excludes the same five registry/history tracking paths. The
+complete ownership map remains identical to the initial review.
+
+```bash
+git diff --shortstat \
+  e0389a146ad09a439bbb1009b5f01fc3cc63d7d8 \
+  d0d44b7df7af60fe9ef4df634d53f6c0782d0f2c -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  e0389a146ad09a439bbb1009b5f01fc3cc63d7d8 \
+  d0d44b7df7af60fe9ef4df634d53f6c0782d0f2c -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
