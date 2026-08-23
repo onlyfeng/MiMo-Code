@@ -371,6 +371,28 @@ test(
 )
 
 test(
+  "compat permits an RFC1918 remote MCP endpoint",
+  withInstance({}, (mcp) =>
+    Effect.gen(function* () {
+      lastCreatedClientName = "compat-private-remote"
+      getOrCreateClientState("compat-private-remote")
+
+      const addResult = yield* mcp.add("compat-private-remote", {
+        type: "remote",
+        url: "http://192.168.1.1/mcp",
+        oauth: false,
+      })
+
+      if (!("compat-private-remote" in addResult.status)) {
+        throw new Error("Expected add() to return the remote server status")
+      }
+      expect(addResult.status["compat-private-remote"]?.status).toBe("connected")
+      expect(clientCreateCount).toBe(1)
+    }),
+  ),
+)
+
+test(
   "turn metadata is omitted unless the server advertises lifecycle v1",
   withInstance({}, (mcp) =>
     Effect.gen(function* () {

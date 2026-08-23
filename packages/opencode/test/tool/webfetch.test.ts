@@ -140,7 +140,8 @@ describe("tool.webfetch", () => {
     )
   })
 
-  test("rejects a private initial target before permission or request", async () => {
+  test("allows an approved RFC1918 fetch target", async () => {
+    const url = "http://192.168.1.1/wiki"
     const events: string[] = []
     const context = {
       ...ctx,
@@ -156,7 +157,7 @@ describe("tool.webfetch", () => {
           events.push(`request:${request.url}`)
           return HttpClientResponse.fromWeb(
             request,
-            new Response("must not fetch", { headers: { "content-type": "text/plain" } }),
+            new Response("intranet", { headers: { "content-type": "text/plain" } }),
           )
         }),
       ),
@@ -165,50 +166,10 @@ describe("tool.webfetch", () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
-        await expect(exec({ url: "http://192.168.1.1/wiki", format: "text" }, http, context)).rejects.toThrow(
-          "SSRF protection",
-        )
+        const result = await exec({ url, format: "text" }, http, context)
+        expect(result.output).toBe("intranet")
       },
     })
-    expect(events).toEqual([])
-  })
-
-  test("rejects a private redirect before its permission or request", async () => {
-    const start = "https://93.184.216.34/start"
-    const internal = "http://192.168.1.1/wiki"
-    const events: string[] = []
-    const context = {
-      ...ctx,
-      ask: (input: { patterns: ReadonlyArray<string> }) =>
-        Effect.sync(() => {
-          events.push(`ask:${input.patterns[0]}`)
-        }),
-    }
-    const http = Layer.succeed(
-      HttpClient.HttpClient,
-      HttpClient.make((request) =>
-        Effect.sync(() => {
-          events.push(`request:${request.url}`)
-          if (request.url === start) {
-            return HttpClientResponse.fromWeb(
-              request,
-              new Response(null, { status: 302, headers: { location: internal } }),
-            )
-          }
-          return HttpClientResponse.fromWeb(
-            request,
-            new Response("must not fetch", { headers: { "content-type": "text/plain" } }),
-          )
-        }),
-      ),
-    )
-
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        await expect(exec({ url: start, format: "text" }, http, context)).rejects.toThrow("SSRF protection")
-      },
-    })
-    expect(events).toEqual([`ask:${start}`, `request:${start}`])
+    expect(events).toEqual([`ask:${url}`, `request:${url}`])
   })
 })

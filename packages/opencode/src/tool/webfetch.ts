@@ -5,7 +5,6 @@ import * as Tool from "./tool"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 import { isImageAttachment } from "@/util/media"
-import { assertSafeUrl } from "@/util/ssrf"
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
@@ -32,7 +31,6 @@ export const WebFetchTool = Tool.define(
       execute: (params: z.infer<typeof parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
           assertHttpUrl(params.url)
-          yield* Effect.promise(() => assertSafeUrl(params.url))
 
           const ask = (url: string) =>
             ctx.ask({
@@ -99,7 +97,6 @@ export const WebFetchTool = Tool.define(
 
                 const redirectUrl = new URL(response.headers.location, url).toString()
                 assertHttpUrl(redirectUrl)
-                yield* Effect.promise(() => assertSafeUrl(redirectUrl))
                 yield* ask(redirectUrl)
                 return yield* fetchUrl(redirectUrl, redirects + 1)
               }
