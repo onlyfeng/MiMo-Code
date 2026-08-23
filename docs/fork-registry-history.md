@@ -12,6 +12,7 @@ they are never used as an `upstream` or `main behavior` review basis.
 | Date | Upstream | Main behavior | Active FD | Active FC | Changed-path total | Decision summary |
 | --- | --- | --- | ---: | ---: | --- | --- |
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `7c52b1412e9e39685b6975bdc4a4847fe2352647` | 6 | 13 | 211 paths; 19,057 insertions; 8,460 deletions | Retained the six shared rejection contracts and thirteen non-duplicating shared capability/process owners; adopted upstream custom-exec wrapper normalization while keeping the nested-authority and raw-size boundaries; restored the shared WebFetch target-classification baseline and scoped FC-010 to redirect permission/resource bounds; removed bounded upstream-format and loop-form drift. |
+| 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39` | 6 | 13 | 211 paths; 19,073 insertions; 8,461 deletions | Correction: narrowed custom-exec leading-angle normalization to malformed variable-declaration assignments, preserving valid TypeScript const assertions and generic arrows while retaining the wrapper, raw-size, nested-authority, and timeout boundaries. |
 
 ## 2026-08-23 review details
 
@@ -86,3 +87,41 @@ git diff --name-only \
 - The same commit restored upstream's `Object.entries(provider.models)` loop in
   `packages/opencode/src/plugin/codex.ts`; the unused key does not change the
   loop's model-cost mutation behavior.
+
+## 2026-08-23 tool-script normalization correction
+
+- Reviewed upstream remains `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`.
+- Corrected main behavior: `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+- The correction narrows the adopted custom-exec wrapper normalization: a
+  leading `<` is stripped only before a malformed `const`, `let`, or `var`
+  identifier assignment. Valid leading TypeScript `<const>[1, 2]` assertions
+  and `<const T>(x: T) => x` generic arrows remain source-preserving.
+- Active ownership remains FD=6 and FC=13. FD-006 still retains the raw-code
+  byte gate before and after normalization, `timeout_seconds`, direct-tool
+  permission visibility, and nested `bash`/`exec_command` exclusions.
+
+### Corrected changed-path calculation
+
+The corrected 211-path, 19,073-insertion, 8,461-deletion total compares the
+same reviewed upstream tree with the corrected pre-documentation main behavior
+tree and excludes the same five registry/history tracking paths:
+
+```bash
+git diff --shortstat \
+  c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
+  d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
+  d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
