@@ -1,0 +1,88 @@
+# Shared Fork Registry History
+
+This is the append-only audit ledger for upstream-to-`main` reviews. It lives on
+`main` and `dev/compat` inherits it unchanged. New reviews add rows; they do not
+rewrite the behavior references or decisions recorded by earlier rows.
+
+Pure registry/history commits may be recorded separately for traceability, but
+they are never used as an `upstream` or `main behavior` review basis.
+
+## Audit ledger
+
+| Date | Upstream | Main behavior | Active FD | Active FC | Changed-path total | Decision summary |
+| --- | --- | --- | ---: | ---: | --- | --- |
+| 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `7c52b1412e9e39685b6975bdc4a4847fe2352647` | 6 | 13 | 211 paths; 19,057 insertions; 8,460 deletions | Retained the six shared rejection contracts and thirteen non-duplicating shared capability/process owners; adopted upstream custom-exec wrapper normalization while keeping the nested-authority and raw-size boundaries; restored the shared WebFetch target-classification baseline and scoped FC-010 to redirect permission/resource bounds; removed bounded upstream-format and loop-form drift. |
+
+## 2026-08-23 review details
+
+- Prior reviewed upstream: `f57520c08d4d10e64ac035e90ba561e889119c98`
+- Freshly reviewed upstream: `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`
+- Prior fork `main` tip: `f63e6d4ee2eb26d7c43de32c69f61ae754b6eff0`
+- Main behavior: `7c52b1412e9e39685b6975bdc4a4847fe2352647`
+- Incremental upstream review: 5 commits, including 2 first-parent commits.
+- Main transition: 12 commits from the prior fork tip, including 10 non-merge
+  commits. The final behavior SHA includes the upstream merge, shared behavior
+  adjustments, tests, and bounded noise alignment before registry publication.
+- Active ownership result: FD-001, FD-002, FD-004, FD-005, FD-006, and FD-009;
+  FC-001 through FC-013. Missing FD numbers remain unused.
+- Path universe after exclusions: 90 paths under `packages/opencode/src`, 91
+  under `packages/opencode/test`, and 30 elsewhere, totaling 211 paths.
+
+### Changed-path calculation
+
+The 211-path, 19,057-insertion, 8,460-deletion total compares the reviewed
+upstream tree directly with the pre-documentation main behavior tree. It
+excludes all five registry/history tracking paths:
+
+```text
+docs/upstream-deviations.md
+docs/fork-capabilities.md
+docs/dev-compat-overrides.md
+docs/fork-registry-history.md
+docs/dev-compat-registry-history.md
+```
+
+Reproduction commands:
+
+```bash
+git diff --shortstat \
+  c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
+  7c52b1412e9e39685b6975bdc4a4847fe2352647 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
+  7c52b1412e9e39685b6975bdc4a4847fe2352647 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+### Decision notes
+
+- Shared behavior remains owned once: FDs own explicit upstream rejections;
+  FCs own extensions, adaptations, and process contracts without restating an
+  FD as a second authority.
+- FD-006 records the selective decision at the new upstream behavior: custom
+  outer-wrapper normalization was adopted, the nested shell bridge and typo
+  repair were rejected at the authority boundary, and the raw code size gate
+  remains before and after normalization.
+- Shared WebFetch behavior now keeps target classification in the source
+  baseline. FC-010 owns only HTTP(S), per-hop permission, manual redirects up to
+  10 hops, timeout, and the 5 MB response bound. Compatibility-only network
+  guarantees are not published in the shared registries.
+- Commit `7c52b1412e9e39685b6975bdc4a4847fe2352647` aligned 12 bounded format paths
+  exactly to upstream: 10 paths received only EOF/blank-line changes, one
+  example heading received upstream's trailing space, and
+  `example-of-the-three-elements.md` received upstream's two-space CommonMark
+  hard break. The last path is therefore recorded as exact upstream
+  format/render alignment, not as a blanket behavior-neutral change.
+- The same commit restored upstream's `Object.entries(provider.models)` loop in
+  `packages/opencode/src/plugin/codex.ts`; the unused key does not change the
+  loop's model-cost mutation behavior.
