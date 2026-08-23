@@ -455,6 +455,13 @@ return results.map((r, i) => \`RESULT \${i + 1}\\n\${r.output}\`).join("\\n---\\
     expect(repeated.output).toContain("RESULT 2\nsecond")
   })
 
+  test("rejects oversized raw code before stripping leaked wrappers", async () => {
+    const result = await runToolScript(`return 1${"</parameter>".repeat(11_000)}`, [])
+
+    expect(result.metadata.status).toBe("code_error")
+    expect(result.output).toContain("code exceeds 131072 bytes")
+  })
+
   test("does not strip parameter-like text inside JavaScript strings", async () => {
     const result = await runToolScript(`return "</parameter> ###"`, [])
 
