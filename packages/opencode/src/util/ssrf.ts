@@ -37,7 +37,7 @@ function isBlockedIPv4(ip: string): boolean {
 
 function isBlockedIPv6(ip: string): boolean {
   const normalized = ip.toLowerCase()
-  if (normalized.startsWith("fe80:")) return true // link-local
+  if ((parseInt(normalized.split(":")[0]!, 16) & 0xffc0) === 0xfe80) return true // link-local fe80::/10
   if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true // ULA
   // IPv4-mapped IPv6 in dotted-decimal form (::ffff:a.b.c.d)
   const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)

@@ -35,9 +35,12 @@ describe("assertSafeUrl", () => {
   })
 
   describe("blocks IPv6", () => {
-    test("blocks link-local", async () => {
-      await expect(assertSafeUrl("http://[fe80::1]/")).rejects.toThrow("SSRF protection")
-    })
+    test.each(["http://[fe80::1]/", "http://[fe90::1]/", "http://[fea0::1]/", "http://[febf::1]/"])(
+      "blocks link-local /10: %s",
+      async (url) => {
+        await expect(assertSafeUrl(url)).rejects.toThrow("SSRF protection")
+      },
+    )
 
     test("blocks ULA", async () => {
       await expect(assertSafeUrl("http://[fd00::1]/")).rejects.toThrow("SSRF protection")
@@ -86,6 +89,13 @@ describe("assertSafeUrl", () => {
 
     test("rejects a hostname that resolves to a blocked IP (rebinding)", async () => {
       const rebinding = async () => ({ address: "169.254.169.254", family: 4 })
+      await expect(assertSafeUrl("http://rebind.example.com/", rebinding)).rejects.toThrow(
+        "SSRF protection: hostname",
+      )
+    })
+
+    test("rejects a hostname that resolves to a link-local IPv6 address", async () => {
+      const rebinding = async () => ({ address: "febf::1", family: 6 })
       await expect(assertSafeUrl("http://rebind.example.com/", rebinding)).rejects.toThrow(
         "SSRF protection: hostname",
       )
