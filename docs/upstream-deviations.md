@@ -17,7 +17,7 @@ renumbered to close gaps.
 - Last reviewed: 2026-08-23
 - Upstream: `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`
 - Prior reviewed upstream: `f57520c08d4d10e64ac035e90ba561e889119c98`
-- Main behavior: `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`
+- Main behavior: `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`
 - Prior fork `main` tip: `f63e6d4ee2eb26d7c43de32c69f61ae754b6eff0`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
@@ -57,7 +57,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -87,7 +87,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/prompt-effect.test.ts` bind the reported file
   set to normal and MaxMode request payloads.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: one immutable per-request decision controls both the UI
   signal and model payload, with regressions proving identical instruction sets.
 
@@ -114,7 +114,7 @@ registry or history commit does not advance either behavior reference.
   is regenerated with `./packages/sdk/js/script/build.ts` rather than copied
   from upstream.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -145,7 +145,7 @@ registry or history commit does not advance either behavior reference.
   agent-generation, and `packages/opencode/test/tool/tool-script.test.ts`
   regressions cover alias conflicts and explicit harness overrides.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: the provider layer exposes one immutable model-mode
   value consumed unchanged by every prompt, discovery, registry, capture, and
   dispatch surface, with alias-conflict and GPT-4 regressions.
@@ -174,7 +174,7 @@ registry or history commit does not advance either behavior reference.
   `timeout_seconds`, and the pre/post-normalization byte checks; registry, skill,
   actor, and TUI visibility tests cover the outer authority surface.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - 2026-08-23 review: adopted the new upstream custom-exec wrapper
   normalization. Rejected the nested `bash`/`exec_command` bridge and its typo
   repair because they cross the authority boundary. The raw code size gate is
@@ -209,7 +209,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: upstream provides an atomic capture-and-spawn protocol
   with equivalent mode-specific validation, frozen authority/membership,
   deterministic failure settlement, and proof that live-context fallback is

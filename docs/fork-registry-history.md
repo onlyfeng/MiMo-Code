@@ -13,6 +13,7 @@ they are never used as an `upstream` or `main behavior` review basis.
 | --- | --- | --- | ---: | ---: | --- | --- |
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `7c52b1412e9e39685b6975bdc4a4847fe2352647` | 6 | 13 | 211 paths; 19,057 insertions; 8,460 deletions | Retained the six shared rejection contracts and thirteen non-duplicating shared capability/process owners; adopted upstream custom-exec wrapper normalization while keeping the nested-authority and raw-size boundaries; restored the shared WebFetch target-classification baseline and scoped FC-010 to redirect permission/resource bounds; removed bounded upstream-format and loop-form drift. |
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39` | 6 | 13 | 211 paths; 19,073 insertions; 8,461 deletions | Correction: narrowed custom-exec leading-angle normalization to malformed variable-declaration assignments, preserving valid TypeScript const assertions and generic arrows while retaining the wrapper, raw-size, nested-authority, and timeout boundaries. |
+| 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5` | 6 | 13 | 211 paths; 19,096 insertions; 8,469 deletions | Correction: use actual async-body TypeScript diagnostics for leading-angle repair; preserve already-valid const assertions and generic arrows, including default generics, and repair only an invalid source when removing the angle yields zero diagnostics. |
 
 ## 2026-08-23 review details
 
@@ -119,6 +120,47 @@ git diff --shortstat \
 git diff --name-only \
   c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
   d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-08-23 syntax-aware tool-script angle repair correction
+
+- Reviewed upstream remains `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`.
+- Corrected main behavior: `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
+- Explicit outer parameter wrappers are stripped before the existing async-body
+  TypeScript transpile. A leading-angle candidate is considered only if the
+  original wrapped source reports diagnostics, and is adopted only if it has
+  zero diagnostics after removing `<`; otherwise the original source and its
+  diagnostics remain authoritative. This preserves valid `<const>[1, 2]`,
+  `<const T>(x: T) => x`, and `<const T = string>(x: T) => x` source.
+- Active ownership remains FD=6 and FC=13. FD-006 still retains the raw-code
+  byte checks before and after outer-wrapper normalization, `timeout_seconds`,
+  direct-tool permission visibility, and nested `bash`/`exec_command`
+  exclusions.
+
+### Syntax-aware changed-path calculation
+
+The syntax-aware 211-path, 19,096-insertion, 8,469-deletion total compares the
+same reviewed upstream tree with the corrected pre-documentation main behavior
+tree and excludes the same five registry/history tracking paths:
+
+```bash
+git diff --shortstat \
+  c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
+  edc2d123cbebfadc8fb7a8a18c4974def0fc2be5 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
+  edc2d123cbebfadc8fb7a8a18c4974def0fc2be5 -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \

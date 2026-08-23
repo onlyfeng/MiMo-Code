@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-08-23
 - Upstream: `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`
 - Prior reviewed upstream: `f57520c08d4d10e64ac035e90ba561e889119c98`
-- Main behavior: `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`
+- Main behavior: `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`
 - Prior fork `main` tip: `f63e6d4ee2eb26d7c43de32c69f61ae754b6eff0`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
@@ -64,7 +64,7 @@ registry or history commit does not advance either behavior reference.
   tests, `packages/opencode/test/effect/runner.test.ts`, and actor/session tool
   tests at the reviewed main behavior.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: upstream provides equivalent generation ownership,
   cancellation settlement, persistent-peer wake, tombstone, and parent-notice
   guarantees with behavior-focused regressions.
@@ -90,7 +90,7 @@ registry or history commit does not advance either behavior reference.
   prefix-capture, rebuild, watermark, writer-timeout, memory-write, and
   system-prompt suites at the reviewed main behavior.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: upstream exposes the same canonical writer, isolated
   child, mode-specific prefix ownership, aligned delta, and disabled-checkpoint
   guidance behavior; FD-009 remains separately satisfied or retired.
@@ -111,7 +111,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/edit.test.ts`, and instance-disposal regressions
   at the reviewed main behavior.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: upstream provides equivalent session/actor/instance
   scoping, consumption, and disposal behavior with cross-actor/project tests.
 
@@ -131,7 +131,7 @@ registry or history commit does not advance either behavior reference.
   prefix/tool-search regressions prove URL rejection, pending imports, and
   request isolation at the reviewed main behavior.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: upstream matches URL validation, pending-import
   lifecycle, request isolation, and frozen membership; model identity and tool
   authority still satisfy FD-005 and FD-006.
@@ -155,7 +155,7 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: skill search/description/discovery suites, tool skill/search
   suites, and prompt skill-command tests at the reviewed main behavior.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: upstream uses one effective permission/tool decision
   across discovery and invocation and provides equivalent retryable,
   generation-aware producer behavior; FD-006 remains the tool-authority owner.
@@ -178,7 +178,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/plugin/subagent-progress-checker.test.ts` exercises
   enabled, disabled, absent, and instance-local configuration paths.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: the progress-checker hook no longer writes memory or
   upstream supplies an equivalent instance-local decision without HTTP/cwd
   coupling.
@@ -202,7 +202,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/bash.test.ts` cover exact-path, prefix, and
   missing-context behavior.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: upstream supplies equivalent protected-root,
   project/worktree containment, and optional-context semantics without
   forbidding legitimate temporary projects.
@@ -227,7 +227,7 @@ registry or history commit does not advance either behavior reference.
   exact-SHA CI for the reviewed behavior tree when published; local tests do not
   substitute for that remote evidence.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: runtime bounds may retire only with equivalent upstream
   settlement. The single test skip retires after the disposer is fixed and
   bounded exact-SHA CI proves process exit.
@@ -251,7 +251,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/trajectory.test.ts`, prompt regressions, and
   generated SDK/OpenAPI `source` fields at the reviewed main behavior.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: upstream provides equivalent provenance and complete
   hook/retry text-part lifecycle behavior, and regenerated artifacts preserve
   the same source discriminator.
@@ -280,7 +280,7 @@ registry or history commit does not advance either behavior reference.
   or resource-bound regression for those source contracts.
   `packages/opencode/test/util/ssrf.test.ts` separately covers classification.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: upstream preserves the same HTTP(S), per-hop
   permission, manual-redirect, timeout, and response-size contract with
   behavior-focused tests; destination classification remains separately audited.
@@ -301,7 +301,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/skill/mimocode-docs.test.ts`, and bundled-content
   reviews at the main behavior SHA.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: the corresponding prompts/content cease to ship or
   upstream guidance is factually equivalent for fork branch names, keys,
   runtime support, and user-facing errors.
@@ -322,7 +322,7 @@ registry or history commit does not advance either behavior reference.
   security links, and exact repository scoping in release/PR operations; these
   are process checks rather than runtime tests.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: fork ownership or publication topology changes through
   an explicit governance decision and every repository-facing route is updated.
 
@@ -341,6 +341,6 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/prompt-effect.test.ts` and step-budget coverage
   in `packages/opencode/test/session/max-mode.test.ts` at main behavior.
 - Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39`.
+  main behavior `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5`.
 - Retirement condition: MaxMode itself consumes and enforces the final-step
   tool choice with equivalent termination regressions.
