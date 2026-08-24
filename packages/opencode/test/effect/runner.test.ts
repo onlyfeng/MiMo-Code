@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect"
 import { Runner } from "../../src/effect"
 import { it } from "../lib/effect"
 
@@ -26,6 +26,21 @@ describe("Runner", () => {
       const observed = yield* runner.ensureRunning(Effect.sync(() => runner.state._tag))
       expect(observed).toBe("Running")
       expect(runner.state._tag).toBe("Idle")
+    }),
+  )
+
+  it.live(
+    "ensureRunning does not start work when starts are disabled",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const started = yield* Ref.make(false)
+      const starts = { enabled: true }
+      const runner = Runner.make<string>(s, { canStart: () => starts.enabled })
+      starts.enabled = false
+      const exit = yield* runner.ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected"))).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(yield* Ref.get(started)).toBe(false)
     }),
   )
 
@@ -412,6 +427,33 @@ describe("Runner", () => {
       const result = yield* runner.startShell(Effect.succeed("shell-done"))
       expect(result).toBe("shell-done")
       expect(runner.busy).toBe(false)
+    }),
+  )
+
+  it.live(
+    "shell does not start work when starts are disabled during onBusy",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const busy = yield* Deferred.make<void>()
+      const releaseBusy = yield* Deferred.make<void>()
+      const started = yield* Ref.make(false)
+      const starts = { enabled: true }
+      const runner = Runner.make<string>(s, {
+        canStart: () => starts.enabled,
+        onBusy: Deferred.succeed(busy, undefined).pipe(Effect.andThen(Deferred.await(releaseBusy))),
+      })
+      const caller = yield* runner
+        .startShell(Ref.set(started, true).pipe(Effect.as("unexpected")))
+        .pipe(Effect.forkChild)
+
+      yield* Deferred.await(busy)
+      starts.enabled = false
+      yield* Deferred.succeed(releaseBusy, undefined)
+      const exit = yield* Fiber.await(caller)
+
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(yield* Ref.get(started)).toBe(false)
+      expect(runner.state._tag).toBe("Idle")
     }),
   )
 

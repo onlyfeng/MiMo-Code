@@ -82,6 +82,7 @@ export const layer = Layer.effect(
         }),
         onBusy: isMain ? status.set(sessionID, { type: "busy" }) : Effect.void,
         onInterrupt,
+        canStart: () => !data.disposing,
         busy: () => {
           throw new Session.BusyError(sessionID)
         },
