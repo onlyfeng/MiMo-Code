@@ -16,6 +16,8 @@ import type { ProviderID, ModelID } from "@/provider/schema"
 import { Instance } from "@/project/instance"
 import { InstanceRef } from "@/effect/instance-ref"
 import { EffectBridge } from "@/effect"
+import { RunDisposal } from "@/session/run-disposal"
+import { WakeSourceDisposal } from "./wake-source"
 
 const log = Log.create({ service: "inbox" })
 
@@ -212,11 +214,28 @@ export const layer: Layer.Layer<
       // not affect delivery.
       const promptRef = boundPrompt ?? sessionPromptRef.current
       if (promptRef) {
+        const wakeSource = yield* RunDisposal
         const receiver = yield* sessions.get(input.receiverSessionID)
-        const receiverInstance = yield* Effect.promise(() =>
-          Instance.provide({ directory: receiver.directory, fn: () => Instance.current }),
+        const currentInstance = yield* InstanceRef
+        // Reusing the active context avoids a second Instance.provide, but keep
+        // its former async handoff so InboxArrived subscribers run promptly.
+        if (currentInstance?.directory === receiver.directory) yield* Effect.yieldNow
+        const receiverInstance =
+          currentInstance?.directory === receiver.directory
+            ? currentInstance
+            : yield* Effect.promise(() =>
+                Instance.provide({ directory: receiver.directory, fn: () => Instance.current }),
+              )
+        const receiverDisposal =
+          wakeSource.instance?.directory === receiver.directory ? wakeSource : { disposing: false as const }
+        const bridge = yield* EffectBridge.make().pipe(
+          Effect.provideService(InstanceRef, receiverInstance),
+          // The receiver owns its run lifetime. The sender generation is only
+          // provenance across directories; same-directory delivery keeps the
+          // shared marker so disposal cannot re-arm the receiver generation.
+          Effect.provideService(RunDisposal, receiverDisposal),
+          Effect.provideService(WakeSourceDisposal, wakeSource),
         )
-        const bridge = yield* EffectBridge.make().pipe(Effect.provideService(InstanceRef, receiverInstance))
         yield* Effect.acquireUseRelease(
           Effect.sync(() => bridge.fork(promptRef.loop({
             sessionID: input.receiverSessionID,

@@ -1,7 +1,7 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { InstanceState } from "@/effect"
-import { RunDisposal } from "./run-disposal"
+import { isRunDisposing, RunDisposal } from "./run-disposal"
 import { SessionID } from "./schema"
 import { Effect, Layer, Context } from "effect"
 import z from "zod"
@@ -71,7 +71,7 @@ export const layer = Layer.effect(
     })
 
     const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
-      if ((yield* RunDisposal).disposing) return
+      if (isRunDisposing(yield* RunDisposal)) return
       const data = yield* InstanceState.get(state)
       yield* bus.publish(Event.Status, { sessionID, status })
       if (status.type === "idle") {

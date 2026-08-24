@@ -8,6 +8,8 @@ import { EffectBridge } from "@/effect"
 import { awaitWithHardTimeout } from "@/effect/hard-timeout"
 import { Bus } from "@/bus"
 import { Inbox } from "@/inbox"
+import { isRunDisposing, RunDisposal } from "@/session/run-disposal"
+import { SessionRunState } from "@/session/run-state"
 import { Worktree } from "@/worktree"
 import { Provider } from "@/provider"
 import { Permission } from "@/permission"
@@ -313,6 +315,7 @@ export const layer = Layer.effect(
     // does not leak into start/resume's effect signatures. Used by launch() to
     // request a workflow's declared meta.permissions up front.
     const permissionService = yield* Permission.Service
+    const runState = yield* SessionRunState.Service
     // Resolve the Config service handle at layer scope (a legitimate layer dep,
     // satisfied by Config.defaultLayer) so the requirement is discharged here and
     // does NOT leak into start/resume's effect signatures. Only config.get() runs
@@ -518,7 +521,8 @@ export const layer = Layer.effect(
         yield* WorkflowPersistence.recordTerminal({ runID: entry.runID, status: "cancelled" }).pipe(Effect.ignore)
         entry.status = "cancelled"
         yield* Deferred.succeed(entry.deferred, { status: "cancelled" })
-        yield* bus.publish(WorkflowFinished, { sessionID: entry.sessionID, runID: entry.runID, status: "cancelled" })
+        if (!isRunDisposing(yield* RunDisposal))
+          yield* bus.publish(WorkflowFinished, { sessionID: entry.sessionID, runID: entry.runID, status: "cancelled" })
       })
 
     const waitFor = (childRunID: string) =>
@@ -528,7 +532,7 @@ export const layer = Layer.effect(
         return yield* Deferred.await(child.deferred)
       })
 
-    const launch = Effect.fn("WorkflowRuntime.launch")(function* (input: StartInput, runID: string, name: string) {
+    const launchImpl = Effect.fn("WorkflowRuntime.launch.impl")(function* (input: StartInput, runID: string, name: string) {
       // The guest body is the script with the `meta` literal blanked out (parseMeta
       // preserves line numbers). start already validated meta and resume only loads
       // a previously-validated script, so this parse is purely to extract the body;
@@ -1411,14 +1415,15 @@ export const layer = Layer.effect(
           yield* flushNow(entry)
           yield* WorkflowPersistence.recordTerminal({ runID, status: "completed" }).pipe(Effect.ignore)
           yield* Deferred.succeed(deferred, { status: "completed", result: result.success })
-          yield* bus.publish(WorkflowFinished, { sessionID: input.sessionID, runID, status: "completed" })
+          if (!isRunDisposing(yield* RunDisposal))
+            yield* bus.publish(WorkflowFinished, { sessionID: input.sessionID, runID, status: "completed" })
           // Notify the parent so its next turn drains a completion message, the
           // same way background actors notify on terminal (see actor/spawn.ts
           // forkWork.notify). Fire-and-forget: a notify failure (e.g. parent row
           // gone) must never fail the run, and wait-ers are already unblocked
           // above by Deferred.succeed. Skipped when notifyOnTerminal === false (the
           // tool's sync path returns the result inline; a notify would duplicate it).
-          if (input.notifyOnTerminal !== false)
+          if (input.notifyOnTerminal !== false && !isRunDisposing(yield* RunDisposal))
             yield* inbox
               .send({
                 receiverSessionID: input.sessionID,
@@ -1441,8 +1446,9 @@ export const layer = Layer.effect(
         yield* flushNow(entry)
         yield* WorkflowPersistence.recordTerminal({ runID, status: "failed", error }).pipe(Effect.ignore)
         yield* Deferred.succeed(deferred, { status: "failed", error })
-        yield* bus.publish(WorkflowFinished, { sessionID: input.sessionID, runID, status: "failed", error })
-        if (input.notifyOnTerminal !== false)
+        if (!isRunDisposing(yield* RunDisposal))
+          yield* bus.publish(WorkflowFinished, { sessionID: input.sessionID, runID, status: "failed", error })
+        if (input.notifyOnTerminal !== false && !isRunDisposing(yield* RunDisposal))
           yield* inbox
             .send({
               receiverSessionID: input.sessionID,
@@ -1457,6 +1463,13 @@ export const layer = Layer.effect(
 
       entry.fiber = yield* work.pipe(Effect.forkIn(scope))
       return { runID }
+    })
+
+    const launch = Effect.fn("WorkflowRuntime.launch")(function* (input: StartInput, runID: string, name: string) {
+      const inherited = yield* RunDisposal
+      if (isRunDisposing(inherited)) return yield* Effect.interrupt
+      if (inherited.instance) return yield* launchImpl(input, runID, name)
+      return yield* runState.withRunDisposal(launchImpl(input, runID, name))
     })
 
     const start = Effect.fn("WorkflowRuntime.start")(function* (input: StartInput) {
@@ -1601,6 +1614,7 @@ export const layer = Layer.effect(
 )
 
 export const defaultLayer = layer.pipe(
+  Layer.provide(SessionRunState.defaultLayer),
   Layer.provide(Bus.defaultLayer),
   Layer.provide(Inbox.defaultLayer),
   Layer.provide(Worktree.defaultLayer),

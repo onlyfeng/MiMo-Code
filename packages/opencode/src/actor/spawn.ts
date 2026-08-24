@@ -5,7 +5,7 @@ import type { Tool as AITool, ModelMessage } from "ai"
 import { Session } from "@/session"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRunState } from "@/session/run-state"
-import { RunDisposal } from "@/session/run-disposal"
+import { isRunDisposing, RunDisposal, type RunDisposalState } from "@/session/run-disposal"
 import { ActorRegistry } from "@/actor/registry"
 import { createActorLifecycle, type ForkGenerationOwner, type TerminalStatus } from "@/actor/lifecycle"
 import { TaskRegistry } from "@/task/registry"
@@ -13,7 +13,7 @@ import { TaskGate, MAX_TASK_GATE_SUBAGENT_REACT } from "@/task/gate"
 import { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import type { Actor, SpawnMode, ContextMode, ToolWhitelist, Lifecycle } from "@/actor/schema"
-import { deriveLiveness, DEFAULT_LIVENESS_STALL_MS } from "@/actor/schema"
+import { deriveLiveness } from "@/actor/schema"
 import * as ActorEvents from "@/actor/events"
 import { runTurn } from "@/actor/turn"
 import { spawnRef } from "@/actor/spawn-ref"
@@ -31,6 +31,7 @@ import { Log } from "@/util"
 import { Instance, type InstanceContext } from "@/project/instance"
 import { InstanceState } from "@/effect"
 import { InstanceRef } from "@/effect/instance-ref"
+import { WakeSourceDisposal } from "@/inbox/wake-source"
 
 const log = Log.create({ service: "actor.spawn" })
 
@@ -111,6 +112,24 @@ export interface ForkContext {
   readonly watermarkMsgID: MessageID
   readonly model: { providerID: ProviderID; modelID: ModelID }
 }
+
+type NotificationTarget = {
+  readonly instance: InstanceContext
+  readonly disposal: RunDisposalState
+}
+
+const withNotificationTarget = <A, E, R>(
+  target: NotificationTarget,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A | undefined, E, R> =>
+  Effect.suspend(() =>
+    isRunDisposing(target.disposal)
+      ? Effect.succeed(undefined)
+      : effect.pipe(
+          Effect.provideService(InstanceRef, target.instance),
+          Effect.provideService(RunDisposal, target.disposal),
+        ),
+  )
 
 export type AgentOutcome =
   | {
@@ -318,7 +337,44 @@ export const layer = Layer.effect(
     const taskRegistry = yield* TaskRegistry.Service
     const scope = yield* Scope.Scope
 
-    const lifecycleState = createActorLifecycle<MessageV2.WithParts, ForkContext>()
+    const layerNotificationTargets = new Map<string, NotificationTarget>()
+    const rememberNotificationTarget = (target: NotificationTarget) => {
+      if (isRunDisposing(target.disposal)) return false
+      const existing = layerNotificationTargets.get(target.instance.directory)
+      if (existing && !isRunDisposing(existing.disposal) && existing.instance !== target.instance) return false
+      layerNotificationTargets.set(target.instance.directory, target)
+      return true
+    }
+    yield* state
+      .withRunDisposal(
+        Effect.gen(function* () {
+          const disposal = yield* RunDisposal
+          if (!disposal.instance) return
+          rememberNotificationTarget({ instance: disposal.instance, disposal })
+        }),
+      )
+      .pipe(Effect.ignoreCause)
+
+    const captureNotificationTarget = (instance: InstanceContext) =>
+      state
+        .withRunDisposal(
+          Effect.gen(function* () {
+            const disposal = yield* RunDisposal
+            const target = { instance, disposal }
+            if (rememberNotificationTarget(target)) return target
+            const existing = layerNotificationTargets.get(instance.directory)
+            if (existing && !isRunDisposing(existing.disposal)) return existing
+            return undefined
+          }),
+        )
+        .pipe(
+          Effect.provideService(InstanceRef, instance),
+          Effect.provideService(RunDisposal, { disposing: false }),
+          Effect.exit,
+          Effect.map((exit) => (Exit.isSuccess(exit) ? exit.value : undefined)),
+        )
+
+    const lifecycleState = createActorLifecycle<MessageV2.WithParts, ForkContext, NotificationTarget>()
     const actorKey = lifecycleState.key
     const isCancelled = (sessionID: SessionID, actorID: string) =>
       lifecycleState.isCancelled(actorKey(sessionID, actorID))
@@ -403,10 +459,14 @@ export const layer = Layer.effect(
       instanceRef?: InstanceContext
     }) =>
       Effect.gen(function* () {
+        const parentDisposal = yield* RunDisposal
         const key = actorKey(input.sessionID, input.actorID)
         const outcome = yield* Deferred.make<AgentOutcome>()
         const description = input.description ?? input.agentType
-        const parentInstance = yield* InstanceState.context
+        const parentInstance = parentDisposal.instance ?? (yield* InstanceState.context)
+        const notificationTarget = { instance: parentInstance, disposal: parentDisposal }
+        if (rememberNotificationTarget(notificationTarget))
+          yield* lifecycleState.setNotificationTarget(key, notificationTarget)
         // Auto-start the bound task: spawning an actor for a task IS that task
         // beginning work. Status transition is a structural side-effect of spawn,
         // not a model action (the model maintains task status unreliably).
@@ -426,34 +486,36 @@ export const layer = Layer.effect(
           extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string },
         ) =>
           Effect.gen(function* () {
-            if ((yield* RunDisposal).disposing) return
+            if (isRunDisposing(yield* RunDisposal)) return
             if (!input.background || input.agentType === "checkpoint-writer") return
-            yield* Effect.all(
-              [
-                inbox
-                  .send({
-                    receiverSessionID: input.parentSessionID,
-                    receiverActorID: input.parentActorID ?? "main",
-                    senderSessionID: input.sessionID,
-                    senderActorID: input.actorID,
-                    type: "actor_notification",
-                    content: renderActorNotification({
-                      actorID: input.actorID,
-                      description,
-                      status,
-                      ...extra,
-                    }),
-                  })
-                  .pipe(Effect.ignoreCause({ log: "Warn", message: "actor inbox notification failed" })),
-                bus
-                  .publish(TuiEvent.ToastShow, {
-                    message: `Child "${description}" ${status}`,
-                    variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
-                  })
-                  .pipe(Effect.provideService(InstanceRef, parentInstance))
-                  .pipe(Effect.ignoreCause({ log: "Warn", message: "actor toast notification failed" })),
-              ],
-              { concurrency: "unbounded", discard: true },
+            yield* withNotificationTarget(
+              notificationTarget,
+              Effect.all(
+                [
+                  inbox
+                    .send({
+                      receiverSessionID: input.parentSessionID,
+                      receiverActorID: input.parentActorID ?? "main",
+                      senderSessionID: input.sessionID,
+                      senderActorID: input.actorID,
+                      type: "actor_notification",
+                      content: renderActorNotification({
+                        actorID: input.actorID,
+                        description,
+                        status,
+                        ...extra,
+                      }),
+                    })
+                    .pipe(Effect.ignoreCause({ log: "Warn", message: "actor inbox notification failed" })),
+                  bus
+                    .publish(TuiEvent.ToastShow, {
+                      message: `Child "${description}" ${status}`,
+                      variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
+                    })
+                    .pipe(Effect.ignoreCause({ log: "Warn", message: "actor toast notification failed" })),
+                ],
+                { concurrency: "unbounded", discard: true },
+              ),
             )
           })
         const settleFailure = (cause: Cause.Cause<unknown>) =>
@@ -984,9 +1046,48 @@ export const layer = Layer.effect(
       return { actorID, sessionID: input.sessionID, outcome }
     })
 
-    const spawn = Effect.fn("Actor.spawn")(function* (input: SpawnInput) {
+    const spawnImpl = Effect.fn("Actor.spawn.impl")(function* (input: SpawnInput) {
       if (input.mode === "peer") return yield* spawnPeer(input)
       return yield* spawnSubagent(input)
+    })
+
+    const spawn = Effect.fn("Actor.spawn")(function* (input: SpawnInput) {
+      const inherited = yield* RunDisposal
+      if (isRunDisposing(inherited)) return yield* Effect.interrupt
+      if (inherited.instance) {
+        const parent = yield* session.get(input.sessionID)
+        if (isRunDisposing(inherited)) return yield* Effect.interrupt
+        if (inherited.instance.directory !== parent.directory) return yield* Effect.interrupt
+        return yield* spawnImpl(input)
+      }
+      return yield* state.withRunDisposal(
+        Effect.gen(function* () {
+          const current = yield* RunDisposal
+          const parent = yield* session.get(input.sessionID)
+          if (isRunDisposing(current) || current.instance?.directory !== parent.directory)
+            return yield* Effect.interrupt
+          return yield* spawnImpl(input)
+        }),
+      )
+    })
+
+    const resolveNotificationTarget = Effect.fn("Actor.resolveNotificationTarget")(function* (
+      key: string,
+      parentSessionID: SessionID,
+      allowRemembered = false,
+    ) {
+      const parent = yield* session.get(parentSessionID)
+      const stored = yield* lifecycleState.getNotificationTarget(key)
+      if (stored && !isRunDisposing(stored.disposal) && stored.instance.directory === parent.directory) return stored
+      const disposal = yield* RunDisposal
+      const current = disposal.instance?.directory === parent.directory
+        ? ({ instance: disposal.instance, disposal } satisfies NotificationTarget)
+        : allowRemembered
+          ? layerNotificationTargets.get(parent.directory)
+          : undefined
+      if (!current || isRunDisposing(current.disposal) || current.instance.directory !== parent.directory) return undefined
+      yield* lifecycleState.setNotificationTarget(key, current)
+      return current
     })
 
     // Unified parent notification used by woken persistent turns and by the
@@ -1000,7 +1101,6 @@ export const layer = Layer.effect(
       extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string } = {},
     ) =>
       Effect.gen(function* () {
-        if ((yield* RunDisposal).disposing) return
         if (!actor) return
         if (!actor.background) return
         if (actor.mode !== "peer" && actor.mode !== "subagent") return
@@ -1009,12 +1109,11 @@ export const layer = Layer.effect(
         // its parentID); a subagent shares the parent's session.
         const parentSessionID = actor.mode === "peer" ? (yield* session.get(sessionID)).parentID : sessionID
         if (!parentSessionID) return
-        const parent = yield* session.get(parentSessionID)
-        const parentInstance = yield* Effect.promise(() =>
-          Instance.provide({ directory: parent.directory, fn: () => Instance.current }),
-        )
-        yield* inbox
-          .send({
+        const notificationTarget = yield* resolveNotificationTarget(actorKey(sessionID, actorID), parentSessionID)
+        if (!notificationTarget) return
+        yield* withNotificationTarget(
+          notificationTarget,
+          inbox.send({
             receiverSessionID: parentSessionID,
             receiverActorID: actor.parentActorID ?? "main",
             senderSessionID: sessionID,
@@ -1026,24 +1125,28 @@ export const layer = Layer.effect(
               status,
               ...extra,
             }),
-          })
-          .pipe(Effect.ignore)
-        yield* bus
-          .publish(TuiEvent.ToastShow, {
+          }),
+        ).pipe(Effect.ignoreCause)
+        yield* withNotificationTarget(
+          notificationTarget,
+          bus.publish(TuiEvent.ToastShow, {
             message: `Child "${actor.description}" ${status}`,
             variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
-          })
-          .pipe(Effect.provideService(InstanceRef, parentInstance), Effect.ignoreCause)
-      }).pipe(Effect.catchCause((cause) => Effect.logError(`terminal notify failed: ${cause}`)))
+          }),
+        ).pipe(Effect.ignoreCause)
+      }).pipe(Effect.catchCause((cause) => Effect.logError(`terminal notify failed: ${Cause.pretty(cause)}`)))
 
-    const runPersistentTurnImpl = Effect.fn("Actor.runPersistentTurn.impl")(function* (input: {
-      sessionID: SessionID
-      actorID: string
-      work: Effect.Effect<MessageV2.WithParts>
-      onInterrupt: Effect.Effect<MessageV2.WithParts>
-      notifyParentOnComplete: boolean
-      inboxID?: string
-    }) {
+    const runPersistentTurnImpl = Effect.fn("Actor.runPersistentTurn.impl")(function* (
+      input: {
+        sessionID: SessionID
+        actorID: string
+        work: Effect.Effect<MessageV2.WithParts>
+        onInterrupt: Effect.Effect<MessageV2.WithParts>
+        notifyParentOnComplete: boolean
+        inboxID?: string
+      },
+      wakeSource: RunDisposalState | undefined,
+    ) {
       const actor = yield* actorReg.get(input.sessionID, input.actorID)
       const key = actorKey(input.sessionID, input.actorID)
       if (!actor || actor.lifecycle !== "persistent" || (actor.mode !== "peer" && actor.mode !== "subagent")) {
@@ -1053,6 +1156,19 @@ export const layer = Layer.effect(
           if (input.inboxID && !(yield* inbox.has(input.inboxID))) return yield* input.onInterrupt
           const result = yield* state.ensureRunning(input.sessionID, input.actorID, input.onInterrupt, input.work)
           if (!input.inboxID || !(yield* inbox.has(input.inboxID))) return result
+        }
+      }
+      if (wakeSource?.instance && !isRunDisposing(wakeSource)) {
+        const parentSessionID = actor.mode === "peer" ? (yield* session.get(input.sessionID)).parentID : input.sessionID
+        if (parentSessionID) {
+          const parent = yield* session.get(parentSessionID)
+          if (parent.directory === wakeSource.instance.directory) {
+            const target = {
+              instance: wakeSource.instance,
+              disposal: wakeSource,
+            }
+            if (rememberNotificationTarget(target)) yield* lifecycleState.setNotificationTarget(key, target)
+          }
         }
       }
       if (actor.status === "idle" && actor.lastOutcome === "cancelled") {
@@ -1160,10 +1276,12 @@ export const layer = Layer.effect(
       )
     })
 
-    const runPersistentTurn = Effect.fn("Actor.runPersistentTurn")(
-      (input: Parameters<typeof runPersistentTurnImpl>[0]) =>
-        runPersistentTurnImpl(input).pipe(state.withRunDisposal),
-    )
+    const runPersistentTurn = Effect.fn("Actor.runPersistentTurn")(function* (
+      input: Parameters<typeof runPersistentTurnImpl>[0],
+    ) {
+      const wakeSource = yield* WakeSourceDisposal
+      return yield* runPersistentTurnImpl(input, wakeSource).pipe(state.withRunDisposal)
+    })
 
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
@@ -1326,28 +1444,39 @@ export const layer = Layer.effect(
     // exclude SYSTEM_SPAWNED_AGENT_TYPES, address the parent's main inbox.
     const notifyStalled = (actor: Actor, stalledForMs: number) =>
       Effect.gen(function* () {
-        if (!actor.background) return
-        if (actor.mode !== "peer" && actor.mode !== "subagent") return
-        if (SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)) return
+        if (!actor.background) return false
+        if (actor.mode !== "peer" && actor.mode !== "subagent") return false
+        if (SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)) return false
         const parentSessionID = actor.mode === "peer" ? (yield* session.get(actor.sessionID)).parentID : actor.sessionID
-        if (!parentSessionID) return
-        yield* inbox
-          .send({
-            receiverSessionID: parentSessionID,
-            receiverActorID: actor.parentActorID ?? "main",
-            senderSessionID: actor.sessionID,
-            senderActorID: actor.actorID,
-            type: "actor_notification",
-            content: renderActorNotification({
-              actorID: actor.actorID,
-              description: actor.description,
-              status: "stalled",
-              stalledForMs,
-            }),
-          })
-          .pipe(Effect.ignore)
-        yield* bus
-          .publish(ActorEvents.ActorStalled, {
+        if (!parentSessionID) return false
+        const notificationTarget = yield* resolveNotificationTarget(
+          actorKey(actor.sessionID, actor.actorID),
+          parentSessionID,
+          true,
+        )
+        if (!notificationTarget) return false
+        const delivered = yield* withNotificationTarget(
+          notificationTarget,
+          inbox
+            .send({
+              receiverSessionID: parentSessionID,
+              receiverActorID: actor.parentActorID ?? "main",
+              senderSessionID: actor.sessionID,
+              senderActorID: actor.actorID,
+              type: "actor_notification",
+              content: renderActorNotification({
+                actorID: actor.actorID,
+                description: actor.description,
+                status: "stalled",
+                stalledForMs,
+              }),
+            })
+            .pipe(Effect.as(true)),
+        ).pipe(Effect.catchCause(() => Effect.succeed(false)))
+        if (delivered !== true) return false
+        yield* withNotificationTarget(
+          notificationTarget,
+          bus.publish(ActorEvents.ActorStalled, {
             sessionID: actor.sessionID,
             actorID: actor.actorID,
             description: actor.description,
@@ -1356,15 +1485,23 @@ export const layer = Layer.effect(
             // step clock while the predicate read the activity clock is a trap.
             lastActivityTime: actor.lastActivityTime ?? actor.time.created,
             stalledDuration: stalledForMs,
-          })
-          .pipe(Effect.ignore)
-        yield* Effect.promise(() =>
-          Bus.publish(TuiEvent.ToastShow, {
-            message: `Child "${actor.description}" appears stalled (no activity for ${Math.floor(stalledForMs / 1000)}s)`,
-            variant: "info",
           }),
-        ).pipe(Effect.ignore)
-      }).pipe(Effect.catchCause((cause) => Effect.logError(`stall notify failed: ${cause}`)))
+        ).pipe(Effect.ignoreCause)
+        yield* withNotificationTarget(
+          notificationTarget,
+          Effect.promise(() =>
+            Bus.publish(TuiEvent.ToastShow, {
+              message: `Child "${actor.description}" appears stalled (no activity for ${Math.floor(stalledForMs / 1000)}s)`,
+              variant: "info",
+            }),
+          ),
+        ).pipe(Effect.ignoreCause)
+        return true
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError(`stall notify failed: ${Cause.pretty(cause)}`).pipe(Effect.as(false)),
+        ),
+      )
 
     const scanStalled = Effect.gen(function* () {
       const now = Date.now()
@@ -1376,46 +1513,61 @@ export const layer = Layer.effect(
         const live = deriveLiveness(actor, now)
         if (live === "stalled") {
           if (notified.has(key)) continue // already warned this episode — debounce
-          notified.add(key)
           // Report the quantity the classification actually used — silence since
           // the last part write, or since spawn when nothing has landed — not
           // time since the last completed step, which deriveLiveness no longer
           // reads. A number that disagrees with its own predicate is a bug.
-          yield* notifyStalled(actor, now - (actor.lastActivityTime ?? actor.time.created))
+          if (yield* notifyStalled(actor, now - (actor.lastActivityTime ?? actor.time.created))) notified.add(key)
           continue
         }
         // Not stalled (progressing/terminal) → re-arm so a future re-stall notifies.
         notified.delete(key)
       }
-      // Drop debounce keys for actors that fell out of listActive entirely
-      // (went terminal / row gone) so the set can't grow unbounded and a
-      // recycled id re-arms cleanly.
-      for (const key of notified) if (!seen.has(key)) notified.delete(key)
-    }).pipe(Effect.catchCause((cause) => Effect.logError(`stall watchdog scan failed: ${cause}`)))
+      return seen
+    }).pipe(Effect.catchCause((cause) => Effect.logError(`stall watchdog scan failed: ${Cause.pretty(cause)}`)))
 
-    // Fork the watchdog into the instance (layer) scope. CRITICAL (T41 lesson):
-    // once the fiber detaches, Instance.current ALS context is lost, so
-    // actorReg.listActive / inbox.send → Database.use → Client() →
-    // InstanceState.bind would throw NotFound(instance). We capture the instance
-    // context that is ALS-bound HERE at layer-build time and re-provide it via
-    // InstanceRef, whose fallback path InstanceState.bind reads off the fiber
-    // context. `undefined` (no instance at build, e.g. some test harnesses) is a
-    // safe no-op — Database.use then takes its own NotFound fallback.
-    const watchdogInstance = yield* Effect.sync(() => {
-      try {
-        return Instance.current
-      } catch {
-        return undefined
-      }
-    })
-    yield* scanStalled.pipe(
+    // The layer can serve multiple instance generations. Each tick scans only
+    // directories with a live, explicitly captured generation target; disposing
+    // one directory therefore neither re-arms it nor terminates the scheduler for
+    // the others.
+    const scanRememberedTargets = Effect.suspend(() =>
+      Effect.gen(function* () {
+        const scans = yield* Effect.forEach(
+          [...layerNotificationTargets.values()],
+          (target) =>
+            Effect.gen(function* () {
+              const current = isRunDisposing(target.disposal)
+                ? yield* Effect.promise(() => Instance.peek(target.instance.directory)).pipe(
+                    Effect.flatMap((instance) =>
+                      instance ? captureNotificationTarget(instance) : Effect.succeed(undefined),
+                    ),
+                  )
+                : target
+              if (!current || isRunDisposing(current.disposal)) return undefined
+              return yield* withNotificationTarget(current, scanStalled)
+            }),
+          { concurrency: 1 },
+        )
+        if (!scans.some((seen) => seen !== undefined)) return
+        const seen = new Set<string>(scans.flatMap((keys) => keys ? [...keys] : []))
+        // Cleanup is tick-wide, not per directory: an empty worktree registry
+        // must not re-arm an actor observed by another live generation.
+        for (const key of notified) if (!seen.has(key)) notified.delete(key)
+      }),
+    )
+    yield* scanRememberedTargets.pipe(
       Effect.repeat(Schedule.spaced(WATCHDOG_SCAN_INTERVAL_MS)),
-      Effect.provideService(InstanceRef, watchdogInstance),
       Effect.ignore,
       Effect.forkIn(scope),
     )
 
-    const impl = Service.of({ spawn, cancel, getForkContext, runPersistentTurn, scanStalledOnce: () => scanStalled })
+    const scanStalledOnce = () =>
+      Effect.gen(function* () {
+        const instance = yield* InstanceState.context
+        if (!instance.disposing) yield* captureNotificationTarget(instance)
+        yield* scanRememberedTargets
+      })
+    const impl = Service.of({ spawn, cancel, getForkContext, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it

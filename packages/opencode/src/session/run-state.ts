@@ -3,7 +3,7 @@ import { Runner } from "@/effect"
 import { Effect, Exit, Layer, Scope, Context } from "effect"
 import * as Session from "./session"
 import { MessageV2 } from "./message-v2"
-import { RunDisposal } from "./run-disposal"
+import { isRunDisposing, RunDisposal } from "./run-disposal"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
 
@@ -37,8 +37,9 @@ export const layer = Layer.effect(
     const elog = EffectLogger.create({ service: "SessionRunState" })
 
     const state = yield* InstanceState.make(
-      Effect.fn("SessionRunState.state")(function* () {
+      Effect.fn("SessionRunState.state")(function* (instance) {
         const data = {
+          instance,
           scope: yield* Scope.make("parallel"),
           runners: new Map<string, Runner.Runner<MessageV2.WithParts>>(),
           disposing: false,
@@ -62,11 +63,20 @@ export const layer = Layer.effect(
       }),
     )
 
+    const currentState = Effect.fn("SessionRunState.currentState")(function* () {
+      const instance = yield* InstanceState.context
+      if (instance.disposing) return yield* Effect.interrupt
+      const data = yield* InstanceState.get(state)
+      if (instance.disposing || data.disposing || data.instance !== instance) return yield* Effect.interrupt
+      return data
+    })
+
     const withRunDisposal = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       Effect.gen(function* () {
-        if ((yield* RunDisposal).disposing) return yield* Effect.interrupt
-        const data = yield* InstanceState.get(state)
-        if (data.disposing) return yield* Effect.interrupt
+        const inherited = yield* RunDisposal
+        if (isRunDisposing(inherited)) return yield* Effect.interrupt
+        const data = yield* currentState()
+        if (isRunDisposing(inherited) || data.disposing) return yield* Effect.interrupt
         return yield* effect.pipe(Effect.provideService(RunDisposal, data))
       })
 
@@ -76,9 +86,10 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
     ) {
       const key = runnerKey(sessionID, agentID)
-      if ((yield* RunDisposal).disposing) return yield* Effect.interrupt
-      const data = yield* InstanceState.get(state)
-      if (data.disposing) return yield* Effect.interrupt
+      const inherited = yield* RunDisposal
+      if (isRunDisposing(inherited)) return yield* Effect.interrupt
+      const data = yield* currentState()
+      if (isRunDisposing(inherited) || data.disposing) return yield* Effect.interrupt
       const existing = data.runners.get(key)
       if (existing) return { data, runner: existing }
       const isMain = agentID === "main"
@@ -102,16 +113,14 @@ export const layer = Layer.effect(
     })
 
     const assertNotBusy = Effect.fn("SessionRunState.assertNotBusy")(function* (sessionID: SessionID) {
-      const data = yield* InstanceState.get(state)
-      if (data.disposing) return
+      const data = yield* currentState()
       const existing = data.runners.get(runnerKey(sessionID, "main"))
       if (existing?.busy) throw new Session.BusyError(sessionID)
     })
 
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
       const key = runnerKey(sessionID, "main")
-      const data = yield* InstanceState.get(state)
-      if (data.disposing) return
+      const data = yield* currentState()
       const existing = data.runners.get(key)
       if (!existing || !existing.busy) {
         yield* status.set(sessionID, { type: "idle" })
@@ -125,8 +134,7 @@ export const layer = Layer.effect(
       agentID: string,
     ) {
       const key = runnerKey(sessionID, agentID)
-      const data = yield* InstanceState.get(state)
-      if (data.disposing) return
+      const data = yield* currentState()
       const existing = data.runners.get(key)
       if (!existing || !existing.busy) return
       yield* existing.cancel
@@ -137,8 +145,7 @@ export const layer = Layer.effect(
       agentID: string,
     ) {
       const key = runnerKey(sessionID, agentID)
-      const data = yield* InstanceState.get(state)
-      if (data.disposing) return
+      const data = yield* currentState()
       const existing = data.runners.get(key)
       if (!existing || !existing.busy) return
       yield* existing.cancelDetached

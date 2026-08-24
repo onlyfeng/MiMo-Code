@@ -82,6 +82,7 @@ export const layer = Layer.effect(
 
     function publish<D extends BusEvent.Definition>(def: D, properties: z.output<D["properties"]>) {
       return Effect.gen(function* () {
+        if ((yield* InstanceState.context).disposing) return
         const s = yield* InstanceState.get(state)
         const payload: Payload = { type: def.type, properties }
         log.debug("publishing", { type: def.type })

@@ -89,3 +89,49 @@ test("targeted disposal is bounded and cannot evict a replacement", async () => 
     await Instance.disposeDirectory(tmp.path)
   }
 }, 5_000)
+
+test("a stale instance continuation cannot dispose its replacement", async () => {
+  await using tmp = await tmpdir()
+  const original = await Instance.provide({ directory: tmp.path, fn: () => Instance.current })
+  const replacement = await Instance.reload({ directory: tmp.path })
+
+  await Instance.restore(original, () => Instance.dispose())
+  const current = await Instance.provide({ directory: tmp.path, fn: () => Instance.current })
+
+  expect(original.disposing).toBe(true)
+  expect(current).toBe(replacement)
+})
+
+test("peek observes only an existing live generation and never boots one", async () => {
+  await using tmp = await tmpdir()
+  let initialized = 0
+  const original = await Instance.provide({
+    directory: tmp.path,
+    init: () => {
+      initialized++
+      return Promise.resolve()
+    },
+    fn: () => Instance.current,
+  })
+
+  expect(await Instance.peek(tmp.path)).toBe(original)
+  await Instance.restore(original, () => Instance.dispose())
+  expect(await Instance.peek(tmp.path)).toBeUndefined()
+  expect(initialized).toBe(1)
+})
+
+test("concurrent reloads serialize and mark the superseded generation", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({ directory: tmp.path, fn: () => undefined })
+
+  const [first, second] = await Promise.all([
+    Instance.reload({ directory: tmp.path }),
+    Instance.reload({ directory: tmp.path }),
+  ])
+  const current = await Instance.provide({ directory: tmp.path, fn: () => Instance.current })
+
+  expect(first).not.toBe(second)
+  expect(first.disposing).toBe(true)
+  expect(second.disposing).toBe(false)
+  expect(current).toBe(second)
+})

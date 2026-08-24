@@ -172,6 +172,63 @@ describe("SessionRunState instance disposal", () => {
   )
 
   it.live(
+    "rejects a stale instance context even when no disposal marker was inherited",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          let entered = false
+
+          yield* run.assertNotBusy(SessionID.make("session-run-state-stale-instance"))
+          yield* Effect.promise(() => Instance.dispose())
+          const exit = yield* run
+            .withRunDisposal(
+              Effect.sync(() => {
+                entered = true
+              }),
+            )
+            .pipe(Effect.exit)
+
+          expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+          expect(entered).toBe(false)
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "rejects an inherited marker as soon as its instance starts disposing",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const marker = yield* run.withRunDisposal(
+            Effect.gen(function* () {
+              return yield* RunDisposal
+            }),
+          )
+          let entered = false
+          const instance = marker.instance
+          if (!instance) return yield* Effect.die("run marker did not capture its instance")
+          instance.disposing = true
+
+          const exit = yield* run
+            .withRunDisposal(
+              Effect.sync(() => {
+                entered = true
+              }),
+            )
+            .pipe(Effect.provideService(RunDisposal, marker), Effect.exit)
+
+          expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+          expect(entered).toBe(false)
+          return undefined
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
     "keeps the disposal marker across a caller continuation",
     () =>
       provideTmpdirInstance(() =>
