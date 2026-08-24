@@ -23,6 +23,7 @@ export interface Interface {
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
   ) => Effect.Effect<MessageV2.WithParts>
+  readonly withRunDisposal: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunState") {}
@@ -60,6 +61,14 @@ export const layer = Layer.effect(
         return data
       }),
     )
+
+    const withRunDisposal = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Effect.gen(function* () {
+        if ((yield* RunDisposal).disposing) return yield* Effect.interrupt
+        const data = yield* InstanceState.get(state)
+        if (data.disposing) return yield* Effect.interrupt
+        return yield* effect.pipe(Effect.provideService(RunDisposal, data))
+      })
 
     const runner = Effect.fn("SessionRunState.runner")(function* (
       sessionID: SessionID,
@@ -158,7 +167,7 @@ export const layer = Layer.effect(
         .pipe(Effect.provideService(RunDisposal, current.data))
     })
 
-    return Service.of({ assertNotBusy, cancel, cancelActor, cancelActorDetached, ensureRunning, startShell })
+    return Service.of({ assertNotBusy, cancel, cancelActor, cancelActorDetached, ensureRunning, startShell, withRunDisposal })
   }),
 )
 

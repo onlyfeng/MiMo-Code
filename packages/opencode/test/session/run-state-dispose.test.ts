@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from "effect"
 import { Bus } from "../../src/bus"
 import { GlobalBus } from "../../src/bus/global"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -166,6 +166,48 @@ describe("SessionRunState instance disposal", () => {
           expect(Exit.isFailure(ensureExit) && Cause.hasInterruptsOnly(ensureExit.cause)).toBe(true)
           expect(Exit.isFailure(shellExit) && Cause.hasInterruptsOnly(shellExit.cause)).toBe(true)
           expect(started).toEqual([])
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "keeps the disposal marker across a caller continuation",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          const marker = yield* Ref.make(false)
+          const restarted = yield* Ref.make(false)
+          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
+          const caller = yield* run
+            .withRunDisposal(
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.andThen(
+                  Effect.gen(function* () {
+                    yield* Ref.set(marker, (yield* RunDisposal).disposing)
+                    return yield* run.startShell(
+                      SessionID.make("session-run-state-dispose-continuation"),
+                      Effect.interrupt,
+                      Ref.set(restarted, true).pipe(Effect.andThen(Effect.interrupt)),
+                    )
+                  }),
+                ),
+              ),
+            )
+            .pipe(Effect.exit, Effect.forkChild)
+
+          yield* Deferred.await(entered)
+          yield* Effect.promise(() => Instance.dispose())
+          yield* Deferred.succeed(release, undefined)
+          const exit = yield* Fiber.join(caller)
+
+          expect(yield* Ref.get(marker)).toBe(true)
+          expect(yield* Ref.get(restarted)).toBe(false)
+          expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
         }),
       ),
     5_000,

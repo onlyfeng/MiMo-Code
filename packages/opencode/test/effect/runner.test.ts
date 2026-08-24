@@ -563,6 +563,50 @@ describe("Runner", () => {
   )
 
   it.live(
+    "queued callers do not start when starts are disabled before shell handoff",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const releaseShell = yield* Deferred.make<void>()
+      const reentered = yield* Deferred.make<void>()
+      const started = yield* Ref.make(false)
+      const starts = { enabled: true }
+      const runner = Runner.make<string>(s, {
+        canStart: () => starts.enabled,
+        onInterrupt: Effect.interrupt,
+        onReentryWarn: () => Deferred.succeed(reentered, undefined).pipe(Effect.asVoid),
+      })
+      const state = () => runner.state
+      const shell = yield* runner
+        .startShell(Deferred.await(releaseShell).pipe(Effect.as("shell")))
+        .pipe(Effect.forkChild)
+      while (state()._tag !== "Shell") yield* Effect.yieldNow
+
+      const first = yield* runner
+        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")))
+        .pipe(Effect.forkChild)
+      while (state()._tag !== "ShellThenRun") yield* Effect.yieldNow
+      const second = yield* runner
+        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")))
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(reentered)
+
+      starts.enabled = false
+      yield* Deferred.succeed(releaseShell, undefined)
+      const [shellExit, firstExit, secondExit] = yield* Effect.all([
+        Fiber.await(shell),
+        Fiber.await(first),
+        Fiber.await(second),
+      ])
+
+      expect(Exit.isSuccess(shellExit)).toBe(true)
+      expect(Exit.isFailure(firstExit) && Cause.hasInterruptsOnly(firstExit.cause)).toBe(true)
+      expect(Exit.isFailure(secondExit) && Cause.hasInterruptsOnly(secondExit.cause)).toBe(true)
+      expect(yield* Ref.get(started)).toBe(false)
+      expect(state()._tag).toBe("Idle")
+    }),
+  )
+
+  it.live(
     "multiple ensureRunning callers share the queued run behind shell",
     Effect.gen(function* () {
       const s = yield* Scope.Scope

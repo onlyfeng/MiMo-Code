@@ -112,6 +112,11 @@ export const make = <A, E = never>(
         Effect.fnUntraced(function* (st) {
           if (st._tag === "Shell" && st.shell.id === id) return [idle, { _tag: "Idle" }] as const
           if (st._tag === "ShellThenRun" && st.shell.id === id) {
+            if (opts?.canStart?.() === false)
+              return [
+                Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.andThen(idle), Effect.asVoid),
+                { _tag: "Idle" },
+              ] as const
             const run = yield* startRun(st.run.work, st.run.done)
             return [
               (opts?._testHooks?.beforeRunStart ?? Effect.void).pipe(

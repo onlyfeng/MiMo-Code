@@ -5,6 +5,7 @@ import type { Tool as AITool, ModelMessage } from "ai"
 import { Session } from "@/session"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRunState } from "@/session/run-state"
+import { RunDisposal } from "@/session/run-disposal"
 import { ActorRegistry } from "@/actor/registry"
 import { createActorLifecycle, type ForkGenerationOwner, type TerminalStatus } from "@/actor/lifecycle"
 import { TaskRegistry } from "@/task/registry"
@@ -993,6 +994,7 @@ export const layer = Layer.effect(
       extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string } = {},
     ) =>
       Effect.gen(function* () {
+        if ((yield* RunDisposal).disposing) return
         if (!actor) return
         if (!actor.background) return
         if (actor.mode !== "peer" && actor.mode !== "subagent") return
@@ -1149,7 +1151,7 @@ export const layer = Layer.effect(
             return terminalResult.value
           }
         }),
-      )
+      ).pipe(state.withRunDisposal)
     })
 
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
