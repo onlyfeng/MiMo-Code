@@ -608,6 +608,31 @@ describe("session tool", () => {
     ),
   )
 
+  it.live("cancel preserves a linked worktree not created for the child", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const worktree = yield* Worktree.Service
+        const parent = yield* sessions.create({ title: "Parent" })
+        const existing = yield* worktree.create({ name: "user-owned" })
+        const tool = yield* (yield* SessionTool).init()
+        const created = yield* tool.execute(
+          { operation: { action: "create", task: "use existing", mode: "build", dir: existing.directory } },
+          ctx(parent.id),
+        )
+
+        const result = yield* tool.execute(
+          { operation: { action: "cancel", sessionID: created.metadata.sessionID! } },
+          ctx(parent.id),
+        )
+
+        expect(result.output).not.toContain("Removed its worktree")
+        expect(existsSync(existing.directory)).toBe(true)
+      }),
+      { git: true },
+    ),
+  )
+
   it.live("status reports derived liveness + turnCount + lastTurnTime for a child", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
