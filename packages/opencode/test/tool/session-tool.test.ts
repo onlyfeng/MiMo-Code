@@ -8,6 +8,7 @@ import { Effect, Layer } from "effect"
 setDefaultTimeout(30_000)
 import { Agent } from "../../src/agent/agent"
 import { Actor } from "../../src/actor/spawn"
+import { spawnRef } from "../../src/actor/spawn-ref"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorRegistryTable } from "../../src/actor/actor.sql"
 import { DEFAULT_LIVENESS_STALL_MS } from "../../src/actor/schema"
@@ -534,6 +535,36 @@ describe("session tool", () => {
 
         expect(yield* sessions.worktreeOwnership(child.id)).toEqual(ownership)
       }),
+    ),
+  )
+
+  it.live("create reclaims its worktree when peer spawn fails", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const git = yield* Git.Service
+        const parent = yield* sessions.create({ title: "Parent" })
+        const tool = yield* (yield* SessionTool).init()
+        const original = spawnRef.current ?? (yield* Effect.die(new Error("Actor service unavailable in test")))
+        const count = Effect.fn(function* () {
+          const result = yield* git.run(["worktree", "list", "--porcelain"], { cwd: dir })
+          return result.text().split("\n").filter((line) => line.startsWith("worktree ")).length
+        })
+        expect(yield* count()).toBe(1)
+
+        spawnRef.current = { ...original, spawn: () => Effect.die(new Error("simulated spawn failure")) }
+        const exit = yield* Effect.exit(
+          tool.execute(
+            { operation: { action: "create", task: "fail", mode: "build", dir, isolate: true } },
+            ctx(parent.id),
+          ),
+        )
+        spawnRef.current = original
+
+        expect(exit._tag).toBe("Failure")
+        expect(yield* count()).toBe(1)
+      }),
+      { git: true },
     ),
   )
 

@@ -824,23 +824,39 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
               " (note: --isolate ignored — directory is not a git repo or worktree creation failed; running shared)"
         }
 
-        const result = yield* actor.spawn({
-          mode: "peer",
-          sessionID: ctx.sessionID as SessionID,
-          agentType: op.mode ?? "build",
-          task: op.task,
-          description: op.title ?? op.task.slice(0, 40),
-          context: "none",
-          tools: "INHERIT",
-          ...(model ? { model } : {}),
-          background: true,
-          parentActorID: ctx.actorID,
-          lifecycle: "persistent",
-          cwd: effectiveDir,
-          ...(ownedWorktree
-            ? { worktreeOwnership: { directory: ownedWorktree.directory, branch: ownedWorktree.branch } }
-            : {}),
-        })
+        const spawnExit = yield* Effect.exit(
+          actor.spawn({
+            mode: "peer",
+            sessionID: ctx.sessionID as SessionID,
+            agentType: op.mode ?? "build",
+            task: op.task,
+            description: op.title ?? op.task.slice(0, 40),
+            context: "none",
+            tools: "INHERIT",
+            ...(model ? { model } : {}),
+            background: true,
+            parentActorID: ctx.actorID,
+            lifecycle: "persistent",
+            cwd: effectiveDir,
+            ...(ownedWorktree
+              ? { worktreeOwnership: { directory: ownedWorktree.directory, branch: ownedWorktree.branch } }
+              : {}),
+          }),
+        )
+        if (spawnExit._tag !== "Success") {
+          if (ownedWorktree && (yield* git.branch(ownedWorktree.directory)) === ownedWorktree.branch) {
+            const cleanupContext = yield* Effect.exit(
+              Effect.promise(() => Instance.provide({ directory: ownedWorktree.directory, fn: () => Instance.current })),
+            )
+            if (cleanupContext._tag === "Success") {
+              yield* worktreeSvc
+                .remove({ directory: ownedWorktree.directory })
+                .pipe(Effect.provideService(InstanceRef, cleanupContext.value), Effect.exit)
+            }
+          }
+          return yield* Effect.failCause(spawnExit.cause)
+        }
+        const result = spawnExit.value
         // spawnPeer titles the child session `${agentType}: ${task}`; honor an
         // explicit --title by overwriting it so `session list` shows what the
         // orchestrator asked for. When --topic is set, prefix the title with a

@@ -524,7 +524,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       if (input.worktreeOwnership) {
         yield* storage
           .write(worktreeOwnershipKey(result.id), input.worktreeOwnership)
-          .pipe(Effect.catch(() => Effect.void))
+          .pipe(Effect.orDie)
       }
       yield* Effect.sync(() => SyncEvent.run(Event.Created, { sessionID: result.id, info: result }))
 
