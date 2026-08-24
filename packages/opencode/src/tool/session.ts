@@ -1140,8 +1140,10 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
         // Remove the child's worktree in ITS OWN project's Instance: a child may
         // live in a worktree of a DIFFERENT project than us, and Worktree.remove's
         // `git worktree remove` resolves against the ambient Instance. Resolve the
-        // child dir's InstanceContext and provide it as InstanceRef. Worktree.remove
-        // is a no-op for a non-worktree dir, so shared-dir children are safe.
+        // child dir's InstanceContext and provide it as InstanceRef. Only call
+        // Worktree.remove for a linked worktree. A shared or cross-project
+        // primary directory must stay live; calling it there disposes the active
+        // project instance before git refuses to remove its main tree.
         // Best-effort throughout (Effect.exit): never fail the cancel. The
         // orchestrator only cancels once a child's work is merged or abandoned
         // (prompt rule), so this never discards live work.
@@ -1151,7 +1153,7 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
           const ctxExit = yield* Effect.exit(
             Effect.promise(() => Instance.provide({ directory: child.directory, fn: () => Instance.current })),
           )
-          if (ctxExit._tag === "Success") {
+          if (ctxExit._tag === "Success" && ctxExit.value.worktree !== ctxExit.value.project.worktree) {
             const remExit = yield* worktreeSvc
               .remove({ directory: child.directory })
               .pipe(Effect.provideService(InstanceRef, ctxExit.value), Effect.exit)
