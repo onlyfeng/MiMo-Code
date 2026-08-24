@@ -27,7 +27,7 @@ import { Git } from "@/git"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import { assembleFleet, renderFleetTable } from "./fleet"
 import type { FleetActorInput, WorktreeEntry } from "./fleet"
-import type { SessionID, MessageID } from "../session/schema"
+import { SessionID, type MessageID } from "../session/schema"
 import type { ProviderID, ModelID } from "../provider/schema"
 
 const KNOWN_VERBS = ["create", "send", "switch", "list", "dashboard", "status", "cancel", "ask", "join", "setmode", "approve", "grant-approval"]
@@ -795,6 +795,7 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
         let effectiveDir = targetDir
         let isolateNotice = ""
         let ownedWorktree: Worktree.Info | undefined
+        let createdSessionID: SessionID | undefined
         if (op.isolate) {
           // LOAD-BEARING: Worktree.create resolves against the AMBIENT Instance
           // (InstanceState.context = (yield* InstanceRef) ?? Instance.current).
@@ -841,9 +842,13 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
             ...(ownedWorktree
               ? { worktreeOwnership: { directory: ownedWorktree.directory, branch: ownedWorktree.branch } }
               : {}),
+            onActorID: (actorID) => {
+              createdSessionID = SessionID.make(actorID)
+            },
           }),
         )
         if (spawnExit._tag !== "Success") {
+          if (createdSessionID) yield* sessions.remove(createdSessionID)
           if (ownedWorktree && (yield* git.branch(ownedWorktree.directory)) === ownedWorktree.branch) {
             const cleanupContext = yield* Effect.exit(
               Effect.promise(() => Instance.provide({ directory: ownedWorktree.directory, fn: () => Instance.current })),

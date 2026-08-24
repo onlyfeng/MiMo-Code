@@ -276,14 +276,10 @@ export interface SpawnInput {
   format?: MessageV2.OutputFormat
   /**
    * Fired SYNCHRONOUSLY with the freshly-allocated actorID inside the spawn
-   * Effect — right after the actor is registered, BEFORE its work fiber detaches
-   * (forkWork forks into the actor scope). Lets a caller record the child id the
-   * instant the actor exists, closing the window where an in-flight spawn would
-   * otherwise be invisible to a concurrent cancel/reclaim. The WorkflowRuntime
-   * uses this to add the id to its reclaim set before detach (MR104 #2). Best-
-   * effort: a throw is swallowed so a buggy callback can't fail the spawn. Only
-   * the subagent path invokes it (the workflow spawns subagents); spawnPeer does
-   * not — peers are not orchestrated by the workflow runtime.
+   * Effect. Peers fire immediately after their child session is created so the
+   * caller can roll it back if later setup fails; subagents fire after registry
+   * registration and before their work fiber detaches. Best-effort: a throw is
+   * swallowed so a buggy callback can't fail the spawn.
    */
   onActorID?: (actorID: string) => void
   /**
@@ -932,6 +928,7 @@ export const layer = Layer.effect(
         ...(input.cwd ? { directory: input.cwd } : {}),
         ...(input.worktreeOwnership ? { worktreeOwnership: input.worktreeOwnership } : {}),
       })
+      if (input.onActorID) yield* Effect.sync(() => input.onActorID!(child.id)).pipe(Effect.ignore)
       const key = actorKey(child.id, child.id)
       const lifecycle = input.lifecycle ?? "persistent"
       if (lifecycle === "persistent") yield* lifecycleState.retainPersistent(key)

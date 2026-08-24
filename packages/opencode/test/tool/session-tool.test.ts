@@ -538,21 +538,50 @@ describe("session tool", () => {
     ),
   )
 
-  it.live("create reclaims its worktree when peer spawn fails", () =>
+  it.live("create rolls back child state and worktree when peer spawn fails", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {
         const sessions = yield* Session.Service
+        const actorReg = yield* ActorRegistry.Service
         const git = yield* Git.Service
         const parent = yield* sessions.create({ title: "Parent" })
         const tool = yield* (yield* SessionTool).init()
         const original = spawnRef.current ?? (yield* Effect.die(new Error("Actor service unavailable in test")))
+        let failedChildID: SessionID | undefined
         const count = Effect.fn(function* () {
           const result = yield* git.run(["worktree", "list", "--porcelain"], { cwd: dir })
           return result.text().split("\n").filter((line) => line.startsWith("worktree ")).length
         })
         expect(yield* count()).toBe(1)
 
-        spawnRef.current = { ...original, spawn: () => Effect.die(new Error("simulated spawn failure")) }
+        spawnRef.current = {
+          ...original,
+          spawn: (input) =>
+            Effect.gen(function* () {
+              const child = yield* sessions.create({
+                parentID: input.sessionID,
+                title: `${input.agentType}: ${input.task}`,
+                directory: input.cwd,
+                worktreeOwnership: input.worktreeOwnership,
+              })
+              failedChildID = child.id
+              input.onActorID?.(child.id)
+              yield* actorReg.register({
+                sessionID: child.id,
+                actorID: child.id,
+                mode: "peer",
+                parentActorID: input.parentActorID,
+                agent: input.agentType,
+                description: input.description ?? input.agentType,
+                contextMode: input.context,
+                contextWatermark: undefined,
+                background: input.background,
+                lifecycle: input.lifecycle ?? "persistent",
+                tools: input.tools,
+              })
+              return yield* Effect.die(new Error("simulated spawn failure"))
+            }),
+        }
         const exit = yield* Effect.exit(
           tool.execute(
             { operation: { action: "create", task: "fail", mode: "build", dir, isolate: true } },
@@ -562,6 +591,10 @@ describe("session tool", () => {
         spawnRef.current = original
 
         expect(exit._tag).toBe("Failure")
+        const childID = failedChildID ?? (yield* Effect.die(new Error("fake peer did not create a child")))
+        expect(yield* sessions.children(parent.id)).toEqual([])
+        expect(yield* actorReg.get(childID, childID)).toBeUndefined()
+        expect(yield* sessions.worktreeOwnership(childID)).toBeUndefined()
         expect(yield* count()).toBe(1)
       }),
       { git: true },
