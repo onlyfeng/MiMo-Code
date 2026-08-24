@@ -1,7 +1,6 @@
 import { describe, expect, afterEach } from "bun:test"
 import { Effect } from "effect"
 import { Session } from "../../src/session"
-import { SessionRunState } from "../../src/session/run-state"
 import { Instance } from "../../src/project/instance"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -283,15 +282,6 @@ describe("WorkflowRuntime cancel cascade", () => {
         yield* runtime.cancel({ runID })
         const s = yield* runtime.status({ runID })
         expect(s.status).toBe("cancelled")
-        // Quiesce the parent session before the fixture scope closes. Reclaiming the
-        // children makes each one notify the parent's main inbox, which re-arms the
-        // parent's `main` runner against the auto-answering test LLM. A runner still
-        // "Running" when SessionRunState's instance-state finalizer fires deadlocks
-        // teardown: finalizers run uninterruptibly, so the finalizer's
-        // `Deferred.await(run.done)` cannot be timed out and the test hangs long
-        // after this assertion already passed. Cancelling here (interruptible, so
-        // the bound actually applies) drains the runner map first.
-        yield* (yield* SessionRunState.Service).cancel(parent.id).pipe(Effect.timeout("5 seconds"), Effect.ignore)
       }),
       { git: true, config: providerCfg },
     ),
@@ -369,15 +359,13 @@ describe("WorkflowRuntime cancel cascade", () => {
         // Every spawned child was reclaimed: cancel stamped lastOutcome="cancelled"
         // on each. An orphan (never reclaimed) would have lastOutcome unset here.
         expect(children.filter((a) => a.lastOutcome !== "cancelled")).toEqual([])
-        // Drain the parent's runner map before the fixture scope closes (see above).
-        yield* (yield* SessionRunState.Service).cancel(parent.id).pipe(Effect.timeout("5 seconds"), Effect.ignore)
       }),
       { git: true, config: providerCfg },
     ),
     // Same budget as the 3-child sibling above. Worst case is dominated by cancel's
     // own two 5s bounds (fiber interrupt + child reclaim, the latter unbounded-
     // concurrency so the 8-way fan-out costs one bound, not eight); on top of that
-    // this case adds up to 3s of registry polling and the bounded 5s drain.
+    // this case adds up to 3s of registry polling.
     120_000,
   )
 })

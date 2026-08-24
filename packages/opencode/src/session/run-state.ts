@@ -1,8 +1,9 @@
 import { EffectLogger, InstanceState } from "@/effect"
 import { Runner } from "@/effect"
-import { Effect, Layer, Scope, Context } from "effect"
+import { Effect, Exit, Layer, Scope, Context } from "effect"
 import * as Session from "./session"
 import { MessageV2 } from "./message-v2"
+import { RunDisposal } from "./run-disposal"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
 
@@ -36,18 +37,27 @@ export const layer = Layer.effect(
 
     const state = yield* InstanceState.make(
       Effect.fn("SessionRunState.state")(function* () {
-        const scope = yield* Scope.Scope
-        const runners = new Map<string, Runner.Runner<MessageV2.WithParts>>()
+        const data = {
+          scope: yield* Scope.make("parallel"),
+          runners: new Map<string, Runner.Runner<MessageV2.WithParts>>(),
+          disposing: false,
+        }
         yield* Effect.addFinalizer(
           Effect.fnUntraced(function* () {
-            yield* Effect.forEach(runners.values(), (runner) => runner.cancel, {
+            data.disposing = true
+            const runners = [...data.runners.values()]
+            data.runners.clear()
+            yield* Effect.forEach(runners, (runner) => runner.cancelDetached, {
               concurrency: "unbounded",
               discard: true,
             })
-            runners.clear()
+            yield* Scope.close(data.scope, Exit.void).pipe(
+              Effect.forkDetach({ startImmediately: true }),
+              Effect.asVoid,
+            )
           }),
         )
-        return { runners, scope }
+        return data
       }),
     )
 
@@ -58,20 +68,18 @@ export const layer = Layer.effect(
     ) {
       const key = runnerKey(sessionID, agentID)
       const data = yield* InstanceState.get(state)
+      if (data.disposing) return yield* Effect.interrupt
       const existing = data.runners.get(key)
-      if (existing) return existing
+      if (existing) return { data, runner: existing }
       const isMain = agentID === "main"
       const next = Runner.make<MessageV2.WithParts>(data.scope, {
         label: key,
         onReentryWarn: (info) => elog.warn("runner-reentry", info),
-        onIdle: isMain
-          ? Effect.gen(function* () {
-              data.runners.delete(key)
-              yield* status.set(sessionID, { type: "idle" })
-            })
-          : Effect.sync(() => {
-              data.runners.delete(key)
-            }),
+        onIdle: Effect.gen(function* () {
+          data.runners.delete(key)
+          if (!isMain || data.disposing) return
+          yield* status.set(sessionID, { type: "idle" })
+        }),
         onBusy: isMain ? status.set(sessionID, { type: "busy" }) : Effect.void,
         onInterrupt,
         busy: () => {
@@ -79,11 +87,12 @@ export const layer = Layer.effect(
         },
       })
       data.runners.set(key, next)
-      return next
+      return { data, runner: next }
     })
 
     const assertNotBusy = Effect.fn("SessionRunState.assertNotBusy")(function* (sessionID: SessionID) {
       const data = yield* InstanceState.get(state)
+      if (data.disposing) return
       const existing = data.runners.get(runnerKey(sessionID, "main"))
       if (existing?.busy) throw new Session.BusyError(sessionID)
     })
@@ -91,6 +100,7 @@ export const layer = Layer.effect(
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
       const key = runnerKey(sessionID, "main")
       const data = yield* InstanceState.get(state)
+      if (data.disposing) return
       const existing = data.runners.get(key)
       if (!existing || !existing.busy) {
         yield* status.set(sessionID, { type: "idle" })
@@ -105,6 +115,7 @@ export const layer = Layer.effect(
     ) {
       const key = runnerKey(sessionID, agentID)
       const data = yield* InstanceState.get(state)
+      if (data.disposing) return
       const existing = data.runners.get(key)
       if (!existing || !existing.busy) return
       yield* existing.cancel
@@ -116,6 +127,7 @@ export const layer = Layer.effect(
     ) {
       const key = runnerKey(sessionID, agentID)
       const data = yield* InstanceState.get(state)
+      if (data.disposing) return
       const existing = data.runners.get(key)
       if (!existing || !existing.busy) return
       yield* existing.cancelDetached
@@ -127,7 +139,10 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
     ) {
-      return yield* (yield* runner(sessionID, agentID, onInterrupt)).ensureRunning(work)
+      const current = yield* runner(sessionID, agentID, onInterrupt)
+      return yield* current.runner
+        .ensureRunning(work)
+        .pipe(Effect.provideService(RunDisposal, current.data))
     })
 
     const startShell = Effect.fn("SessionRunState.startShell")(function* (
@@ -135,7 +150,10 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
     ) {
-      return yield* (yield* runner(sessionID, "main", onInterrupt)).startShell(work)
+      const current = yield* runner(sessionID, "main", onInterrupt)
+      return yield* current.runner
+        .startShell(work)
+        .pipe(Effect.provideService(RunDisposal, current.data))
     })
 
     return Service.of({ assertNotBusy, cancel, cancelActor, cancelActorDetached, ensureRunning, startShell })
