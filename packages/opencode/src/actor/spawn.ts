@@ -260,6 +260,10 @@ export interface SpawnInput {
   // policy (the session tool creates a worktree and passes its dir here). When
   // unset, the child shares the spawner's directory.
   cwd?: string
+  // Peer-only deletion provenance. SessionTool supplies this only when it
+  // created the cwd via `session create --isolate`; spawnPeer persists it before
+  // publishing/registering the child so cancellation never infers ownership.
+  worktreeOwnership?: { directory: string; branch: string }
   forkContext?: ForkContext // NEW
   lifecycle?: Lifecycle
   /**
@@ -926,6 +930,7 @@ export const layer = Layer.effect(
         contextFrom: input.context === "full" ? input.sessionID : undefined,
         title: `${input.agentType}: ${input.task.slice(0, 40)}`,
         ...(input.cwd ? { directory: input.cwd } : {}),
+        ...(input.worktreeOwnership ? { worktreeOwnership: input.worktreeOwnership } : {}),
       })
       const key = actorKey(child.id, child.id)
       const lifecycle = input.lifecycle ?? "persistent"

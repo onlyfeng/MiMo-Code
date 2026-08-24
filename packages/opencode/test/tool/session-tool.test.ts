@@ -523,6 +523,20 @@ describe("session tool", () => {
     ),
   )
 
+  it.live("session creation persists supplied worktree ownership", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const parent = yield* sessions.create({ title: "Parent" })
+        const ownership = { directory: dir, branch: "mimocode/owned-before-register" }
+
+        const child = yield* sessions.create({ parentID: parent.id, directory: dir, worktreeOwnership: ownership })
+
+        expect(yield* sessions.worktreeOwnership(child.id)).toEqual(ownership)
+      }),
+    ),
+  )
+
   // NOTE: the `--isolate` non-git degrade path (dir is not a git repo → run
   // shared + "--isolate ignored" notice) is verified by source inspection, not a
   // unit test: provideTmpdirInstance dirs resolve as git-capable in this harness

@@ -837,14 +837,10 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
           parentActorID: ctx.actorID,
           lifecycle: "persistent",
           cwd: effectiveDir,
+          ...(ownedWorktree
+            ? { worktreeOwnership: { directory: ownedWorktree.directory, branch: ownedWorktree.branch } }
+            : {}),
         })
-        if (ownedWorktree) {
-          yield* sessions.setWorktreeOwnership({
-            sessionID: result.sessionID,
-            directory: ownedWorktree.directory,
-            branch: ownedWorktree.branch,
-          })
-        }
         // spawnPeer titles the child session `${agentType}: ${task}`; honor an
         // explicit --title by overwriting it so `session list` shows what the
         // orchestrator asked for. When --topic is set, prefix the title with a
