@@ -426,6 +426,7 @@ export const layer = Layer.effect(
           extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string },
         ) =>
           Effect.gen(function* () {
+            if ((yield* RunDisposal).disposing) return
             if (!input.background || input.agentType === "checkpoint-writer") return
             yield* Effect.all(
               [
@@ -812,8 +813,13 @@ export const layer = Layer.effect(
           Effect.ensuring(lifecycleState.finishForkWork(key, input.generation, input.lifecycle)),
         )
         const boundWork = input.instanceRef ? work.pipe(Effect.provideService(InstanceRef, input.instanceRef)) : work
-        const fiber = yield* boundWork.pipe(Effect.forkIn(scope))
-        return { fiber, outcome }
+        // The child inherits this receiver-generation marker when forked, so a
+        // terminal continuation that outlives disposal cannot re-arm the instance.
+        const fork = Effect.gen(function* () {
+          const fiber = yield* boundWork.pipe(Effect.forkIn(scope))
+          return { fiber, outcome }
+        }).pipe(state.withRunDisposal)
+        return yield* (input.instanceRef ? fork.pipe(Effect.provideService(InstanceRef, input.instanceRef)) : fork)
       })
 
     const abortSetup = (

@@ -528,6 +528,52 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
     ),
   )
 
+  it.live("instance disposal suppresses initial background completion notification", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "dispose-initial-notification",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const successEntered = yield* Deferred.make<void>()
+        const releaseSuccess = yield* Deferred.make<void>()
+        yield* Effect.addFinalizer(() => Deferred.succeed(releaseSuccess, undefined).pipe(Effect.ignore))
+
+        yield* llm.text("**Status**: success\n**Summary**: disposed")
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "build",
+          task: "complete while the instance is disposing",
+          description: "disposed initial turn",
+          context: "none",
+          tools: ["read"],
+          background: true,
+          model: ref,
+          onActorID: (id) => {
+            successWriteGate = {
+              sessionID: parent.id,
+              actorID: id,
+              entered: successEntered,
+              release: releaseSuccess,
+            }
+          },
+        })
+
+        yield* Deferred.await(successEntered).pipe(Effect.timeout("5 seconds"))
+        yield* Effect.promise(() => Instance.dispose()).pipe(Effect.timeout("5 seconds"))
+        yield* Deferred.succeed(releaseSuccess, undefined)
+        const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("5 seconds"))
+
+        expect(outcome.status).toBe("success")
+        expect(yield* parentInboxRows(parent.id)).toHaveLength(0)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
   // Regression guard: a background subagent whose turn reports a failure status
   // still notifies the parent EXACTLY once (no double-notify introduced by the
   // unified terminal path). An LLM-level error is absorbed by the prompt (the
