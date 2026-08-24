@@ -67,6 +67,7 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
     ) {
       const key = runnerKey(sessionID, agentID)
+      if ((yield* RunDisposal).disposing) return yield* Effect.interrupt
       const data = yield* InstanceState.get(state)
       if (data.disposing) return yield* Effect.interrupt
       const existing = data.runners.get(key)

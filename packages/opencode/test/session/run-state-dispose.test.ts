@@ -1,9 +1,10 @@
 import { describe, expect } from "bun:test"
-import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Bus } from "../../src/bus"
 import { GlobalBus } from "../../src/bus/global"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Instance } from "../../src/project/instance"
+import { RunDisposal } from "../../src/session/run-disposal"
 import { SessionRunState } from "../../src/session/run-state"
 import { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
@@ -134,6 +135,37 @@ describe("SessionRunState instance disposal", () => {
           )
 
           expect(Exit.isSuccess(disposeExit)).toBe(true)
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "does not recreate runners from inherited disposal context after cache invalidation",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const sessionID = SessionID.make("session-run-state-dispose-restart")
+          const started: string[] = []
+          const work = (label: string) =>
+            Effect.sync(() => started.push(label)).pipe(
+              Effect.andThen(Effect.die(new Error(`unexpected ${label} start`))),
+            )
+
+          yield* run.assertNotBusy(sessionID)
+          yield* Effect.promise(() => Instance.dispose())
+
+          const ensureExit = yield* run
+            .ensureRunning(sessionID, "main", Effect.interrupt, work("ensure"))
+            .pipe(Effect.provideService(RunDisposal, { disposing: true }), Effect.exit)
+          const shellExit = yield* run
+            .startShell(sessionID, Effect.interrupt, work("shell"))
+            .pipe(Effect.provideService(RunDisposal, { disposing: true }), Effect.exit)
+
+          expect(Exit.isFailure(ensureExit) && Cause.hasInterruptsOnly(ensureExit.cause)).toBe(true)
+          expect(Exit.isFailure(shellExit) && Cause.hasInterruptsOnly(shellExit.cause)).toBe(true)
+          expect(started).toEqual([])
         }),
       ),
     5_000,
