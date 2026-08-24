@@ -4553,15 +4553,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           inboxID: input.inboxID,
         })
       }
-      while (true) {
-        const result = yield* state.ensureRunning(
-          input.sessionID,
-          agentID,
-          lastAssistant(input.sessionID, agentID),
-          work,
-        )
-        if (!input.inboxID || !(yield* inbox.has(input.inboxID))) return result
-      }
+      return yield* Effect.gen(function* () {
+        while (true) {
+          const result = yield* state.ensureRunning(
+            input.sessionID,
+            agentID,
+            lastAssistant(input.sessionID, agentID),
+            work,
+          )
+          if (!input.inboxID || !(yield* inbox.has(input.inboxID))) return result
+        }
+      }).pipe(state.withRunDisposal)
     })
 
     const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.shell")(

@@ -1036,7 +1036,7 @@ export const layer = Layer.effect(
           .pipe(Effect.provideService(InstanceRef, parentInstance), Effect.ignoreCause)
       }).pipe(Effect.catchCause((cause) => Effect.logError(`terminal notify failed: ${cause}`)))
 
-    const runPersistentTurn = Effect.fn("Actor.runPersistentTurn")(function* (input: {
+    const runPersistentTurnImpl = Effect.fn("Actor.runPersistentTurn.impl")(function* (input: {
       sessionID: SessionID
       actorID: string
       work: Effect.Effect<MessageV2.WithParts>
@@ -1157,8 +1157,13 @@ export const layer = Layer.effect(
             return terminalResult.value
           }
         }),
-      ).pipe(state.withRunDisposal)
+      )
     })
+
+    const runPersistentTurn = Effect.fn("Actor.runPersistentTurn")(
+      (input: Parameters<typeof runPersistentTurnImpl>[0]) =>
+        runPersistentTurnImpl(input).pipe(state.withRunDisposal),
+    )
 
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
