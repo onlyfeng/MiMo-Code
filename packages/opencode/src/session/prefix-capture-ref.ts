@@ -20,6 +20,7 @@ import type { Permission } from "../permission"
 
 export interface PrefixCaptureResult {
   readonly system: string[]
+  readonly turnContext: string | undefined
   readonly tools: Record<string, AITool>
   readonly loadedMcpTools?: readonly string[]
   readonly inheritedMessages: ModelMessage[]

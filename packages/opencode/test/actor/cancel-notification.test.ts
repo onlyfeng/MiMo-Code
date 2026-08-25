@@ -1894,6 +1894,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           model: ref,
           forkContext: {
             system: ["success-context"],
+            turnContext: undefined,
             tools: {},
             inheritedMessages: [],
             parentPermission: [],
@@ -2015,6 +2016,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           model: ref,
           forkContext: {
             system: ["failure-context"],
+            turnContext: undefined,
             tools: {},
             inheritedMessages: [],
             parentPermission: [],

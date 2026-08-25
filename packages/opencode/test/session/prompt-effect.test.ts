@@ -1218,6 +1218,37 @@ it.live("serializes concurrent first-query pinning", () =>
   ),
 )
 
+it.live("resume continues an incomplete assistant without creating or rewriting a user message", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const seeded = yield* seed(chat.id)
+      const before = yield* sessions.messages({ sessionID: chat.id })
+      yield* llm.text("world")
+
+      const candidate = yield* prompt.recovery({ sessionID: chat.id })
+      expect(candidate).toEqual([{ assistantMessageID: seeded.assistant.id, parentMessageID: seeded.user.id, created: expect.any(Number) }])
+      const result = yield* prompt.resume({
+        sessionID: chat.id,
+        assistantMessageID: seeded.assistant.id,
+      })
+
+      const after = yield* sessions.messages({ sessionID: chat.id })
+      expect(after.filter((message) => message.info.role === "user")).toHaveLength(1)
+      expect(after.length).toBe(before.length + 1)
+      expect(after.find((message) => message.info.id === seeded.assistant.id)?.info).toMatchObject(seeded.assistant)
+      expect(result.info.role).toBe("assistant")
+      expect(result.info.id).not.toBe(seeded.assistant.id)
+      expect(result.parts.some((part) => part.type === "text" && part.text === "world")).toBe(true)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
 
 it.live("reported instruction files reach the normal model request", () =>
   provideTmpdirServer(
@@ -1507,6 +1538,36 @@ it.live("request preflight overflow terminates on unrecoverable static prefix", 
       expect(yield* llm.hits).toHaveLength(0)
     }),
     { git: true, config: staticPreflightOverflowCfg },
+  ),
+)
+
+it.live("request preflight treats current turn context as unrecoverable", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Turn context preflight overflow" })
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        noReply: true,
+        system: "CURRENT_TURN_CONTEXT_MUST_BE_COUNTED\n" + "x".repeat(400 * 1024),
+        parts: [{ type: "text", text: "hello" }],
+      })
+      yield* llm.text("provider must not be called")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role === "assistant") {
+        expect(result.info.finish).toBe("error")
+        expect(result.info.error?.name).toBe("ModelError")
+      }
+      expect(result.parts).toEqual([])
+      expect(yield* llm.hits).toHaveLength(0)
+    }),
+    { git: true, config: recoverableOverflowCfg },
   ),
 )
 
@@ -2934,29 +2995,41 @@ it.live("context full subagent uses maxMode candidate judge replay path", () =>
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
       const parentMsg = yield* user(chat.id, "parent context")
+      const child = yield* sessions.create({
+        parentID: chat.id,
+        title: "Fork maxMode child",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const frozenTurnContext = "FROZEN_PARENT_TURN_CONTEXT"
+      const childLiveContext = "CHILD_LIVE_CONTEXT_MUST_NOT_OVERRIDE"
       const forkCtx: Actor.ForkContext = {
         system: ["fork-system"],
         tools: {},
         inheritedMessages: [{ role: "user", content: "inherited parent context" }],
+        turnContext: frozenTurnContext,
         parentPermission: [],
         watermarkMsgID: parentMsg.id,
         model: ref,
       }
       const prev = spawnRef.current
-      spawnRef.current = {
+      const actor = {
         spawn: () => Effect.die("unexpected spawn in fork maxMode test"),
         cancel: () => Effect.void,
-        getForkContext: (_sessionID, actorID) => Effect.succeed(actorID === "general-1" ? forkCtx : undefined),
+        getForkContext: (sessionID: SessionID, actorID: string) =>
+          Effect.succeed(sessionID === child.id && actorID === child.id ? forkCtx : undefined),
       }
+      spawnRef.current = actor
+      const releaseActor = (yield* SessionPrompt.Service).bindActor?.(actor)
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
+          releaseActor?.()
           spawnRef.current = prev
         }),
       )
       yield* actorRegistry.register({
-        sessionID: chat.id,
-        actorID: "general-1",
-        mode: "subagent",
+        sessionID: child.id,
+        actorID: child.id,
+        mode: "peer",
         agent: "general",
         description: "fork maxMode",
         contextMode: "full",
@@ -2970,16 +3043,22 @@ it.live("context full subagent uses maxMode candidate judge replay path", () =>
       yield* llm.text("1")
 
       const result = yield* (yield* SessionPrompt.Service).prompt({
-        sessionID: chat.id,
+        sessionID: child.id,
         agent: "general",
-        agentID: "general-1",
+        agentID: child.id,
         model: ref,
+        system: childLiveContext,
         parts: [{ type: "text", text: "handle fork task" }],
       })
 
       expect(result.info.role).toBe("assistant")
-      expect(result.parts.some((part) => part.type === "text" && part.text === "candidate one")).toBe(true)
       expect(yield* llm.calls).toBe(3)
+      expect(result.parts.some((part) => part.type === "text" && part.text === "candidate one")).toBe(true)
+      for (const input of yield* llm.inputs) {
+        const messages = JSON.stringify(input.messages)
+        expect(messages.split(frozenTurnContext)).toHaveLength(2)
+        expect(messages).not.toContain(childLiveContext)
+      }
     }),
     { git: true, config: maxModeProviderCfg },
   ),

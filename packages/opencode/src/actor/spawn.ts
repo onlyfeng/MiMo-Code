@@ -74,6 +74,8 @@ This format lets the spawning agent and the checkpoint writer extract your progr
 
 export interface ForkContext {
   readonly system: string[]
+  /** Parent turn context frozen at capture time and replayed instead of child live context. */
+  readonly turnContext: string | undefined
   /**
    * Ordered parent-captured builtin and MCP schema pool at the watermark.
    * With MCP Tool Search this includes the parent's then-searchable MCP pool;

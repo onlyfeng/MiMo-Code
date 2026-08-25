@@ -28,6 +28,7 @@ type RequestEstimateInput = {
   prebuiltSystem?: string[]
   system?: string[]
   messages: ModelMessage[]
+  unshrinkableMessages?: ModelMessage[]
   tools?: Record<string, unknown>
   toolChoice?: unknown
 }
@@ -158,7 +159,7 @@ export function classifyRequestOverflow(
 ): RequestOverflowClassification {
   const requestTokens = estimateRequestTokens(input)
   if (!isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens })) return { type: "ok" }
-  const staticTokens = estimateRequestTokens({ ...input, messages: [] })
+  const staticTokens = estimateRequestTokens({ ...input, messages: input.unshrinkableMessages ?? [] })
   return isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens: staticTokens })
     ? { type: "overflow-static", requestTokens, staticTokens }
     : { type: "overflow", requestTokens, staticTokens }

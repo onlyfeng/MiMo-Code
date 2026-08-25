@@ -372,6 +372,7 @@ describe("classifier routing — integration", () => {
               const watermarkMsgID = MessageID.ascending()
               const forkCtx: Actor.ForkContext = {
                 system: ["fork-system-prompt"],
+                turnContext: undefined,
                 tools: {},
                 inheritedMessages: [],
                 parentPermission: [],
@@ -453,6 +454,7 @@ describe("classifier routing — integration", () => {
               const watermarkMsgID = MessageID.ascending()
               const forkCtx: Actor.ForkContext = {
                 system: ["fork-system-prompt"],
+                turnContext: undefined,
                 tools: {},
                 inheritedMessages: [],
                 parentPermission: [],
@@ -543,6 +545,7 @@ describe("classifier routing — integration", () => {
 
               const forkCtx: Actor.ForkContext = {
                 system: ["fork-system-prompt"],
+                turnContext: undefined,
                 tools: {
                   session: tool({
                     description: "frozen parent session description",
@@ -659,6 +662,7 @@ describe("classifier routing — integration", () => {
 
               const forkCtx: Actor.ForkContext = {
                 system: ["fork-system-prompt"],
+                turnContext: undefined,
                 tools: {
                   session: tool({
                     description: "frozen parent session description",
@@ -757,6 +761,7 @@ description: Inspect restricted quasar telemetry.
 
               const forkCtx: Actor.ForkContext = {
                 system: ["fork-system-prompt"],
+                turnContext: undefined,
                 tools: { skill_search: {} as Actor.ForkContext["tools"][string] },
                 inheritedMessages: [],
                 parentPermission: [

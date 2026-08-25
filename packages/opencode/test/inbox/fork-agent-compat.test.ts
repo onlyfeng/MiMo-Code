@@ -289,6 +289,7 @@ describe("Fork-agent inbox compat (Plan 4 / Task 5)", () => {
 
         const fakeForkCtx: Actor.ForkContext = {
           system: ["inherited-system-prompt"],
+          turnContext: undefined,
           tools: {},
           inheritedMessages: inheritedMessages as unknown as import("ai").ModelMessage[],
           parentPermission: [],

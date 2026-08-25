@@ -75,6 +75,7 @@ const recordingActor = Layer.effect(
         }))
         return {
           system: [] as string[],
+          turnContext: undefined,
           tools: {},
           inheritedMessages: [{ role: "user", content: "checkpoint fixture" }],
           parentPermission: [],

@@ -611,6 +611,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
           model: ref,
           forkContext: {
             system: ["persistent-peer-system"],
+            turnContext: undefined,
             tools: {},
             inheritedMessages: [],
             parentPermission: [],

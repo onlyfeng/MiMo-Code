@@ -9,6 +9,7 @@ export const bindCheckpointPrefixCapture = Effect.gen(function* () {
   const capture: PrefixCaptureFn = () =>
     Effect.succeed({
       system: [],
+      turnContext: undefined,
       tools: {},
       inheritedMessages: [{ role: "user", content: "checkpoint fixture" }],
       parentPermission: [],

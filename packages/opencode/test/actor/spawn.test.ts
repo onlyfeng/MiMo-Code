@@ -628,6 +628,7 @@ describe("Actor.spawn subagent mode", () => {
           model: ref,
           forkContext: {
             system: ["test-system"],
+            turnContext: undefined,
             tools: {},
             inheritedMessages: [],
             parentPermission: [],
@@ -1096,6 +1097,7 @@ describe("Actor forkContext lifecycle", () => {
           })
           const forkContext = {
             system: ["setup-failure-context"],
+            turnContext: undefined,
             tools: {},
             inheritedMessages: [],
             parentPermission: [],
@@ -1152,6 +1154,7 @@ describe("Actor forkContext lifecycle", () => {
 
         const fakeForkCtx = {
           system: ["test-system"],
+          turnContext: undefined,
           tools: {},
           inheritedMessages: [],
           parentPermission: [],
@@ -1210,6 +1213,7 @@ describe("Actor forkContext lifecycle", () => {
           })
           const forkContext = {
             system: ["test-system"],
+            turnContext: undefined,
             tools: {},
             inheritedMessages: [],
             parentPermission: [],
@@ -1501,6 +1505,7 @@ describe("Actor forkContext lifecycle", () => {
 describe("mode × contextMode matrix", () => {
   const fakeForkCtx: Actor.ForkContext = {
     system: ["test-system"],
+    turnContext: undefined,
     tools: {},
     inheritedMessages: [],
     parentPermission: [],

@@ -88,6 +88,7 @@ function installRecordingCapture() {
       })
       return {
         system: ["sys-canned"],
+        turnContext: undefined,
         tools: {},
         inheritedMessages: [{ role: "user" as const, content: "canned" } as never],
         parentPermission: [],
@@ -593,6 +594,7 @@ describe("checkpoint writer forkContext shape per mode", () => {
               })
               return {
                 system: ["sys-canned"],
+                turnContext: undefined,
                 tools: {},
                 inheritedMessages: [],
                 parentPermission: [],

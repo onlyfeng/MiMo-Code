@@ -31,6 +31,7 @@ import { classifyRequestOverflow, contextPressureLevel, usable, isOverflow as ov
 import { Config } from "@/config"
 import { isMemoryWriteEnabled } from "@/memory/write-gate"
 import { Global } from "@/global"
+import { NotFoundError } from "@/storage"
 import { Bus } from "../bus"
 import { ProviderTransform } from "../provider"
 import { SystemPrompt } from "./system"
@@ -72,6 +73,7 @@ import { SessionSummary } from "./summary"
 import { NamedError } from "@mimo-ai/shared/util/error"
 import { SessionProcessor } from "./processor"
 import { buildLLMRequestPrefix } from "./llm-request-prefix"
+import { checkConflict, type ConflictResult } from "@/tool/conflict-detection"
 import {
   serializeTrajectoryMessages,
   withAssistantParts,
@@ -261,6 +263,8 @@ function isDirectUserMessage(message: MessageV2.WithParts | undefined) {
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
+  readonly recovery: (input: { sessionID: SessionID; agentID?: string }) => Effect.Effect<RecoveryCandidate[]>
+  readonly resume: (input: ResumeTurnInput) => Effect.Effect<MessageV2.WithParts, InstanceType<typeof NotFoundError>>
   readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
   readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
@@ -270,6 +274,19 @@ export interface Interface {
   readonly predict: (input: { sessionID: SessionID }) => Effect.Effect<string>
   /** Internal cycle-breaker: binds this prompt layer to its owning Actor layer. */
   readonly bindActor?: (actor: ActorInterface) => () => void
+}
+
+export interface RecoveryCandidate {
+  assistantMessageID: MessageID
+  parentMessageID: MessageID
+  created: number
+}
+
+export interface ResumeTurnInput {
+  sessionID: SessionID
+  assistantMessageID: MessageID
+  agentID?: string
+  task_id?: string
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
@@ -329,6 +346,7 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const empty = {
           system: [] as string[],
+          turnContext: undefined as string | undefined,
           tools: {} as Record<string, AITool>,
           loadedMcpTools: [] as string[],
           inheritedMessages: [] as ModelMessage[],
@@ -379,7 +397,7 @@ export const layer = Layer.effect(
           Effect.provideService(ToolRegistry.Service, registry),
           Effect.catch(() => Effect.succeed(empty)),
         )
-        return { ...prefix, parentPermission: capturePermission }
+        return { ...prefix, turnContext: capturePrompt.system, parentPermission: capturePermission }
       })
     prefixCaptureRef.current = capture
     yield* Effect.addFinalizer(() =>
@@ -2845,6 +2863,39 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       throw new Error("Impossible")
     })
 
+    const recovery = Effect.fn("SessionPrompt.recovery")(function* (input: { sessionID: SessionID; agentID?: string }) {
+      if ((yield* status.get(input.sessionID)).type !== "idle") return []
+      const msgs = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
+      const candidates: RecoveryCandidate[] = []
+      for (const [index, msg] of msgs.entries()) {
+        if (msg.info.role !== "assistant" || "completed" in msg.info.time) continue
+        const assistant = msg.info
+        if (!msgs.some((parent) => parent.info.role === "user" && parent.info.id === assistant.parentID)) continue
+        if (msgs.slice(index + 1).some((later) => later.info.role === "user" || later.info.role === "assistant")) continue
+        candidates.push({
+          assistantMessageID: assistant.id,
+          parentMessageID: assistant.parentID,
+          created: assistant.time.created,
+        })
+      }
+      return candidates
+    })
+
+    const abandonRecoveredAssistant = Effect.fn("SessionPrompt.abandonRecoveredAssistant")(function* (input: {
+      sessionID: SessionID
+      assistantMessageID: MessageID
+      agentID?: string
+    }) {
+      const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
+      const message = messages.find((item) => item.info.id === input.assistantMessageID)
+      if (!message || message.info.role !== "assistant" || "completed" in message.info.time) return
+      yield* sessions.updateMessage({
+        ...message.info,
+        time: { ...message.info.time, completed: Date.now() },
+        error: new MessageV2.AbortedError({ message: "Abandoned: resumed as a new assistant turn" }).toObject(),
+      })
+    })
+
     const runLoop: (
       sessionID: SessionID,
       agentID?: string,
@@ -4039,9 +4090,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     processArgs.activeTools,
                   )
                   const cfg = yield* config.get()
+                  const turnContext = LLM.turnContextMessages(processArgs.user)
                   const overflow = classifyRequestOverflow({
                     ...processArgs,
                     cfg,
+                    messages: LLM.appendTurnContext(
+                      processArgs.messages,
+                      processArgs.user,
+                      processArgs.mergeTurnContextIntoLastUser,
+                    ),
+                    // Compaction can shrink historical messages, but it cannot
+                    // remove the current turn context. Keep it in the static
+                    // re-estimate so an oversized reminder terminates instead
+                    // of entering a recovery loop that can never make progress.
+                    unshrinkableMessages: turnContext,
                     tools: wireTools,
                     model: processArgs.model,
                   })
@@ -4151,7 +4213,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 return "break" as const
               }
               const result = yield* runStep({
-                user: lastUser,
+                user: { ...lastUser, system: forkCtx.turnContext },
                 // LLM.resolveTools must not apply the child allowlist a
                 // second time: forkTools already carries the exact frozen
                 // parent membership. Live closures still enforce that
@@ -4171,6 +4233,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 system: additions,
                 prebuiltSystem,
                 messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
+                mergeTurnContextIntoLastUser: true,
                 tools: forkTools,
                 activeTools: activeTools.filter((id) => forkTools[id]),
                 model,
@@ -4305,9 +4368,34 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               ...instructions.content,
               ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
             ]
-            // `buildLLMRequestPrefix` also returns schema-only tools for frozen fork
-            // capture. The main request keeps `tools` from resolveTools because those
-            // entries carry the live execute closures needed for dispatch.
+            // Auto-worktree: inject hint on first assistant-less turn if conflict detected.
+            // Checks for no assistant messages (survives compaction/rebuild) + in main worktree.
+            const isGitProject = ctx.project.vcs === "git"
+            const isMainWorktree = ctx.worktree === ctx.project.worktree
+            if (isGitProject && isMainWorktree) {
+              const isFirstAssistantTurn = !msgs.some((m) => m.info.role === "assistant")
+              if (isFirstAssistantTurn) {
+                const conflict = (yield* Effect.promise(() => checkConflict(ctx.directory, sessionID))) as ConflictResult
+                if (conflict.hasConflict) {
+                  additions.push(`
+⚠️ Auto-Worktree Notice
+
+This session is running in the main worktree. If you need to write or edit files, consider creating an isolated worktree first:
+
+- Create an isolated worktree: \`git worktree add <path> -b <branch>\` with a path outside the project directory
+
+Conflict detected: ${conflict.reason}${conflict.activeSessionId ? ` (session: ${conflict.activeSessionId})` : ""}
+
+If this task is a simple fix, Q&A, or read-only operation, you can skip this notice and continue.`)
+                }
+              }
+            }
+            // Note: `buildLLMRequestPrefix` also returns a `tools` field, but we
+            // intentionally don't use it here — the `tools` variable from `resolveTools`
+            // (set earlier via `handle.process({tools: ...})`) carries `execute` closures
+            // the AI SDK needs for runtime tool dispatch, while `buildLLMRequestPrefix`
+            // produces schema-only tools. Schema bytes match between both paths (both call
+            // registry.tools with identical args), so prefix cache parity holds.
             // Main runLoop: no watermark — LLM must see the full msgs list,
             // including this turn's intermediate assistant turns (tool reads,
             // task creates, etc.) so each step doesn't replay from the bare
@@ -4320,8 +4408,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 model,
                 msgs,
                 additions,
-              permission: session.permission,
-              prompt: sessionPrompt,
+                permission: session.permission,
+                prompt: sessionPrompt,
               }).pipe(
                 Effect.provideService(LLM.Service, llm),
                 Effect.provideService(ToolRegistry.Service, registry),
@@ -4338,6 +4426,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               system: additions,
               prebuiltSystem,
               messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
+              mergeTurnContextIntoLastUser: true,
               tools,
               activeTools,
               model,
@@ -4987,9 +5076,43 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return result
     })
 
+    const resume = Effect.fn("SessionPrompt.resume")(function* (input: ResumeTurnInput) {
+      yield* state.assertNotBusy(input.sessionID)
+      const candidates = yield* recovery({ sessionID: input.sessionID, agentID: input.agentID })
+      const candidate = candidates.find((item) => item.assistantMessageID === input.assistantMessageID)
+      if (candidate === undefined) {
+        return yield* Effect.fail(
+          new NotFoundError({
+            message: "No resumable interrupted turn found for assistant message " + input.assistantMessageID,
+          }),
+        )
+      }
+      const agentID = input.agentID ?? "main"
+      return yield* state.ensureRunning(
+        input.sessionID,
+        agentID,
+        lastAssistant(input.sessionID, agentID),
+        runLoop(input.sessionID, agentID, input.task_id).pipe(
+          Effect.ensuring(
+            abandonRecoveredAssistant({ sessionID: input.sessionID, assistantMessageID: input.assistantMessageID, agentID }).pipe(
+              Effect.catchCause((cause) =>
+                elog.warn("recovered-assistant-abandon-failed", {
+                  sessionID: input.sessionID,
+                  messageID: input.assistantMessageID,
+                  cause,
+                }),
+              ),
+            ),
+          ),
+        ),
+      )
+    })
+
     const impl = Service.of({
       cancel,
       prompt,
+      recovery,
+      resume,
       loop,
       shell,
       command,

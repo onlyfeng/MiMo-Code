@@ -22,8 +22,10 @@ import { spawnRef } from "../../src/actor/spawn-ref"
 import type { SpawnInput, AgentOutcome } from "../../src/actor/spawn"
 import { prefixCaptureRef, type PrefixCaptureFn } from "../../src/session/prefix-capture-ref"
 import { Team } from "../../src/team"
+import { Inbox } from "../../src/inbox"
 import { Truncate } from "../../src/tool"
 import { ToolRegistry } from "../../src/tool"
+import { RecoverableError } from "../../src/tool/recoverable"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -32,6 +34,114 @@ let prevPrefixCaptureRef: typeof prefixCaptureRef.current
 beforeAll(() => {
   prevSpawnRef = spawnRef.current
   prevPrefixCaptureRef = prefixCaptureRef.current
+})
+
+describe("Actor tool fromExec guard", () => {
+  it.live("subagent calling spawn via exec receives RecoverableError", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        yield* installMockSpawn()
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        const exit = yield* Effect.exit(def.execute(
+          {
+            operation: {
+              action: "spawn",
+              description: "nested spawn attempt",
+              prompt: "should be blocked",
+              subagent_type: "general",
+            },
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "general",
+            abort: new AbortController().signal,
+            extra: { fromExec: true },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        ))
+
+        expect(exit._tag).toBe("Failure")
+        if (exit._tag === "Failure") {
+          const causeStr = String(exit.cause)
+          expect(causeStr).toContain("Subagents can only use actor send")
+        }
+      }),
+    ),
+  )
+
+  it.live("subagent calling send via exec is allowed", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        const result = yield* def.execute(
+          {
+            operation: {
+              action: "send",
+              to_actor_id: "ses_nonexistent",
+              content: "hello",
+            },
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "general",
+            abort: new AbortController().signal,
+            extra: { fromExec: true },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        ).pipe(Effect.provide(Inbox.defaultLayer))
+
+        expect(result.title).toBe("Send failed: receiver not found")
+        expect(result.metadata.error).toBe("receiver not found")
+        expect(result.metadata.receiver_actor_id).toBe("ses_nonexistent")
+      }),
+    ),
+  )
+
+  it.live("primary agent calling spawn via exec is not blocked", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        yield* installMockSpawn()
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        const result = yield* def.execute(
+          {
+            operation: {
+              action: "spawn",
+              description: "legitimate spawn",
+              prompt: "go do something",
+              subagent_type: "general",
+            },
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { fromExec: true },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(result.metadata.sessionId).toBe(chat.id)
+      }),
+    ),
+  )
 })
 
 afterEach(async () => {
@@ -984,13 +1094,16 @@ describe("Actor tool full context", () => {
         })
         const messages = yield* session.messages({ sessionID: chat.id })
         const inheritedMessages = [{ role: "user" as const, content: "captured parent prefix" } as never]
+        const turnContext = "captured parent turn context"
         prefixCaptureRef.current = (input) =>
           Effect.sync(() => {
             capturedPrefixInput = input
             return {
               system: ["captured system"],
               tools: {},
+              loadedMcpTools: [],
               inheritedMessages,
+              turnContext,
               parentPermission: [],
             }
           })
@@ -1029,7 +1142,9 @@ describe("Actor tool full context", () => {
         expect(capturedInput?.forkContext).toEqual({
           system: ["captured system"],
           tools: {},
+          loadedMcpTools: [],
           inheritedMessages,
+          turnContext,
           parentPermission: [],
           watermarkMsgID: watermark.id,
           model: ref,
@@ -1055,6 +1170,7 @@ describe("Actor tool full context", () => {
               : () =>
                   Effect.succeed({
                     system: ["captured system"],
+                    turnContext: undefined,
                     tools: {},
                     inheritedMessages: [],
                     parentPermission: [],

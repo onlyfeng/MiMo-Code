@@ -854,6 +854,7 @@ export const layer: Layer.Layer<
               })
               return {
                 system: prefix.system,
+                turnContext: prefix.turnContext,
                 tools: prefix.tools,
                 loadedMcpTools: prefix.loadedMcpTools,
                 inheritedMessages: prefix.inheritedMessages,
@@ -888,6 +889,7 @@ export const layer: Layer.Layer<
 
             return {
               system: writerPrefix.system,
+              turnContext: writerPrefix.turnContext,
               tools: writerPrefix.tools,
               loadedMcpTools: writerPrefix.loadedMcpTools,
               inheritedMessages: writerPrefix.inheritedMessages,
