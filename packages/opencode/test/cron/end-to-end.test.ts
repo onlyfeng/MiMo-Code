@@ -76,11 +76,15 @@ const stubPrompt = Layer.succeed(
         const out: MessageV2.WithParts = { info, parts: [text] }
         return out
       }),
+    startPrompt: () => Effect.die("startPrompt not expected in cron end-to-end test"),
     recovery: () => Effect.succeed([]),
+    startResume: () => Effect.die("startResume not expected in cron end-to-end test"),
     resume: () => Effect.die("resume not expected in cron end-to-end test"),
+    startSummarize: () => Effect.die("startSummarize not expected in cron end-to-end test"),
     loop: () => Effect.die("loop not expected in end-to-end test"),
     shell: () => Effect.die("shell not expected in end-to-end test"),
     command: () => Effect.die("command not expected in end-to-end test"),
+    startCommand: () => Effect.die("startCommand not expected in end-to-end test"),
     resolvePromptParts: () => Effect.succeed([]),
     sweepOrphanAssistants: () => Effect.void,
     sweepOrphanToolParts: () => Effect.void,

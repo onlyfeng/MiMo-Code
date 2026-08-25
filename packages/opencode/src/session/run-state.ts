@@ -1,11 +1,28 @@
 import { EffectLogger, InstanceState } from "@/effect"
 import { Runner } from "@/effect"
-import { Effect, Exit, Layer, Scope, Context } from "effect"
+import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect"
 import * as Session from "./session"
 import { MessageV2 } from "./message-v2"
 import { isRunDisposing, RunDisposal } from "./run-disposal"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
+
+type RunnerEntry = {
+  runner: Runner.Runner<MessageV2.WithParts>
+  control: {
+    statusLock: ReturnType<typeof Semaphore.makeUnsafe>
+    latest: number
+    active: boolean
+    leases: number
+  }
+  cleanup: () => void
+}
+
+const release = (entry: RunnerEntry) =>
+  Effect.sync(() => {
+    entry.control.leases--
+    entry.cleanup()
+  })
 
 export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void>
@@ -18,6 +35,12 @@ export interface Interface {
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
   ) => Effect.Effect<MessageV2.WithParts>
+  readonly startRunning: (
+    sessionID: SessionID,
+    agentID: string,
+    onInterrupt: Effect.Effect<MessageV2.WithParts>,
+    work: Effect.Effect<MessageV2.WithParts>,
+  ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>>
   readonly startShell: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
@@ -41,7 +64,7 @@ export const layer = Layer.effect(
         const data = {
           instance,
           scope: yield* Scope.make("parallel"),
-          runners: new Map<string, Runner.Runner<MessageV2.WithParts>>(),
+          runners: new Map<string, RunnerEntry>(),
           disposing: false,
         }
         yield* Effect.addFinalizer(
@@ -49,7 +72,7 @@ export const layer = Layer.effect(
             data.disposing = true
             const runners = [...data.runners.values()]
             data.runners.clear()
-            yield* Effect.forEach(runners, (runner) => runner.cancelDetached, {
+            yield* Effect.forEach(runners, (entry) => entry.runner.cancelDetached, {
               concurrency: "unbounded",
               discard: true,
             })
@@ -83,7 +106,6 @@ export const layer = Layer.effect(
     const runner = Effect.fn("SessionRunState.runner")(function* (
       sessionID: SessionID,
       agentID: string,
-      onInterrupt: Effect.Effect<MessageV2.WithParts>,
     ) {
       const key = runnerKey(sessionID, agentID)
       const inherited = yield* RunDisposal
@@ -91,42 +113,71 @@ export const layer = Layer.effect(
       const data = yield* currentState()
       if (isRunDisposing(inherited) || data.disposing) return yield* Effect.interrupt
       const existing = data.runners.get(key)
-      if (existing) return { data, runner: existing }
+      if (existing) {
+        existing.control.leases++
+        return { data, entry: existing }
+      }
       const isMain = agentID === "main"
-      const next = Runner.make<MessageV2.WithParts>(data.scope, {
+      const control = {
+        statusLock: Semaphore.makeUnsafe(1),
+        latest: 0,
+        active: false,
+        leases: 1,
+      }
+      const cleanup = () => {
+        const current = data.runners.get(key)
+        if (control.leases !== 0 || control.active || current?.control !== control || current.runner.busy) return
+        data.runners.delete(key)
+      }
+      const next: Runner.Runner<MessageV2.WithParts> = Runner.make<MessageV2.WithParts>(data.scope, {
         label: key,
         onReentryWarn: (info) => elog.warn("runner-reentry", info),
-        onIdle: Effect.gen(function* () {
-          data.runners.delete(key)
-          if (!isMain || data.disposing) return
-          yield* status.set(sessionID, { type: "idle" })
-        }),
-        onBusy: isMain ? status.set(sessionID, { type: "busy" }) : Effect.void,
-        onInterrupt,
+        onStart: (id) => {
+          control.latest = id
+          control.active = true
+        },
+        onIdle: (id) =>
+          control.statusLock.withPermits(1)(
+            Effect.gen(function* () {
+              if (data.runners.get(key)?.runner !== next || id !== control.latest) return
+              control.active = false
+              if (isMain && !data.disposing) yield* status.set(sessionID, { type: "idle" })
+              cleanup()
+            }),
+          ),
+        onBusy: isMain ? control.statusLock.withPermits(1)(status.set(sessionID, { type: "busy" })) : Effect.void,
         canStart: () => !data.disposing,
         busy: () => {
           throw new Session.BusyError(sessionID)
         },
       })
-      data.runners.set(key, next)
-      return { data, runner: next }
+      const entry = { runner: next, control, cleanup }
+      data.runners.set(key, entry)
+      return { data, entry }
     })
 
     const assertNotBusy = Effect.fn("SessionRunState.assertNotBusy")(function* (sessionID: SessionID) {
       const data = yield* currentState()
       const existing = data.runners.get(runnerKey(sessionID, "main"))
-      if (existing?.busy) throw new Session.BusyError(sessionID)
+      if (existing && (existing.control.active || existing.runner.busy)) throw new Session.BusyError(sessionID)
     })
 
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
-      const key = runnerKey(sessionID, "main")
-      const data = yield* currentState()
-      const existing = data.runners.get(key)
-      if (!existing || !existing.busy) {
-        yield* status.set(sessionID, { type: "idle" })
-        return
-      }
-      yield* existing.cancel
+      const existing = (yield* runner(sessionID, "main")).entry
+      yield* Effect.gen(function* () {
+        if (existing.control.active || existing.runner.busy) {
+          yield* existing.runner.cancel
+          return
+        }
+        yield* existing.control.statusLock.withPermits(1)(
+          Effect.gen(function* () {
+            if (existing.control.active || existing.runner.busy) return
+            yield* status.set(sessionID, { type: "idle" })
+          }),
+        )
+      }).pipe(
+        Effect.ensuring(release(existing)),
+      )
     })
 
     const cancelActor = Effect.fn("SessionRunState.cancelActor")(function* (
@@ -136,8 +187,11 @@ export const layer = Layer.effect(
       const key = runnerKey(sessionID, agentID)
       const data = yield* currentState()
       const existing = data.runners.get(key)
-      if (!existing || !existing.busy) return
-      yield* existing.cancel
+      if (!existing) return
+      existing.control.leases++
+      yield* (existing.control.active || existing.runner.busy ? existing.runner.cancel : Effect.void).pipe(
+        Effect.ensuring(release(existing)),
+      )
     })
 
     const cancelActorDetached = Effect.fn("SessionRunState.cancelActorDetached")(function* (
@@ -147,8 +201,11 @@ export const layer = Layer.effect(
       const key = runnerKey(sessionID, agentID)
       const data = yield* currentState()
       const existing = data.runners.get(key)
-      if (!existing || !existing.busy) return
-      yield* existing.cancelDetached
+      if (!existing) return
+      existing.control.leases++
+      yield* (existing.control.active || existing.runner.busy ? existing.runner.cancelDetached : Effect.void).pipe(
+        Effect.ensuring(release(existing)),
+      )
     })
 
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (
@@ -157,10 +214,13 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
     ) {
-      const current = yield* runner(sessionID, agentID, onInterrupt)
-      return yield* current.runner
-        .ensureRunning(work)
-        .pipe(Effect.provideService(RunDisposal, current.data))
+      const current = yield* runner(sessionID, agentID)
+      return yield* current.entry.runner
+        .ensureRunning(work, onInterrupt)
+        .pipe(
+          Effect.provideService(RunDisposal, current.data),
+          Effect.ensuring(release(current.entry)),
+        )
     })
 
     const startShell = Effect.fn("SessionRunState.startShell")(function* (
@@ -168,13 +228,41 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
     ) {
-      const current = yield* runner(sessionID, "main", onInterrupt)
-      return yield* current.runner
-        .startShell(work)
-        .pipe(Effect.provideService(RunDisposal, current.data))
+      const current = yield* runner(sessionID, "main")
+      return yield* current.entry.runner
+        .startShell(work, onInterrupt)
+        .pipe(
+          Effect.provideService(RunDisposal, current.data),
+          Effect.ensuring(release(current.entry)),
+        )
     })
 
-    return Service.of({ assertNotBusy, cancel, cancelActor, cancelActorDetached, ensureRunning, startShell, withRunDisposal })
+    const startRunning = Effect.fn("SessionRunState.startRunning")(function* (
+      sessionID: SessionID,
+      agentID: string,
+      onInterrupt: Effect.Effect<MessageV2.WithParts>,
+      work: Effect.Effect<MessageV2.WithParts>,
+    ) {
+      const current = yield* runner(sessionID, agentID)
+      const completion = yield* current.entry.runner
+        .startRunning(work, onInterrupt)
+        .pipe(
+          Effect.provideService(RunDisposal, current.data),
+          Effect.ensuring(release(current.entry)),
+        )
+      return completion.pipe(Effect.provideService(RunDisposal, current.data))
+    })
+
+    return Service.of({
+      assertNotBusy,
+      cancel,
+      cancelActor,
+      cancelActorDetached,
+      ensureRunning,
+      startRunning,
+      startShell,
+      withRunDisposal,
+    })
   }),
 )
 

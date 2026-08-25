@@ -297,13 +297,13 @@ describe("Manual /rebuild: on-the-spot rebuild driven through SessionPrompt.comm
                 const before = yield* sessions.messages({ sessionID: info.id })
                 const countBefore = before.length
 
-                // Drive the real handler.
-                const result = yield* prompt.command({
+                // Drive the atomically-admitted handler used by the HTTP route.
+                const result = yield* (yield* prompt.startCommand({
                   sessionID: info.id,
                   command: Command.Default.REBUILD,
                   arguments: "",
                   agent: "build",
-                })
+                }))
 
                 // A MANUAL /rebuild must NOT enter the runLoop: the user asked
                 // no question, so the LLM was never called.
@@ -356,8 +356,11 @@ describe("Manual /rebuild: on-the-spot rebuild driven through SessionPrompt.comm
                 ).toBe(true)
 
                 // …and the status is CLEARED again: /rebuild must settle to idle
-                // so the outcome text cannot leak into the following turn.
+                // so the outcome text cannot leak into the following turn. Runner
+                // owns that single terminal transition for atomically-admitted
+                // commands; the handler must not publish an early false-idle.
                 expect(lifecycle.at(-1)).toBe("idle")
+                expect(lifecycle.filter((item) => item === "idle")).toHaveLength(1)
               }),
             ),
         })

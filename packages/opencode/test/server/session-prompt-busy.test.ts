@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { Effect } from "effect"
+import { Deferred, Effect } from "effect"
 import { Hono } from "hono"
 import { ErrorMiddleware } from "../../src/server/middleware"
 import { Server } from "../../src/server/server"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { SessionRunState } from "../../src/session/run-state"
+import { SessionCompaction } from "../../src/session/compaction"
 import { AppRuntime } from "../../src/effect/app-runtime"
+import { Bus } from "../../src/bus"
 import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
 
@@ -148,5 +150,69 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
     expect(result.firstStatus).toBe(409)
     expect(result.abortStatus).toBe(200)
     expect(result.secondStatus).not.toBe(409)
+  })
+})
+
+describe("POST /session/:sessionID/summarize busy-runner behavior", () => {
+  test("returns 409 before writing a compaction boundary", async () => {
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
+
+    const result = await Instance.provide({
+      directory: tmp.path,
+      fn: async () =>
+        AppRuntime.runPromise(
+          Effect.gen(function* () {
+            const sessions = yield* Session.Service
+            const session = yield* sessions.create({ title: "summarize admission test" })
+            const state = yield* SessionRunState.Service
+            const bus = yield* Bus.Service
+            const started = yield* Deferred.make<void>()
+            const owner = yield* state.startRunning(
+              session.id,
+              "main",
+              Effect.interrupt,
+              Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+            )
+            yield* Deferred.await(started)
+            let resolveCompacted!: () => void
+            const compacted = new Promise<void>((resolve) => {
+              resolveCompacted = resolve
+            })
+            const unsubscribe = yield* bus.subscribeCallback(SessionCompaction.Event.Compacted, (event) => {
+              if (event.properties.sessionID === session.id) resolveCompacted()
+            })
+            const request = Promise.resolve(
+              Server.Default().app.request(
+                `/session/${session.id}/summarize?directory=${encodeURIComponent(tmp.path)}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ providerID: "test", modelID: "test-model", auto: false }),
+                },
+              ),
+            )
+            const first = yield* Effect.promise(() =>
+              Promise.race([
+                request.then((response) => ({ type: "response" as const, response })),
+                compacted.then(() => ({ type: "compacted" as const })),
+              ]),
+            )
+
+            yield* state.cancel(session.id)
+            yield* owner.pipe(Effect.exit)
+            const response = first.type === "response" ? first.response : yield* Effect.promise(() => request)
+            unsubscribe()
+            const messages = yield* sessions.messages({ sessionID: session.id, agentID: "main" })
+
+            return {
+              first: first.type,
+              status: response.status,
+              hasCompaction: messages.some((message) => message.parts.some((part) => part.type === "compaction")),
+            }
+          }),
+        ),
+    })
+
+    expect(result).toEqual({ first: "response", status: 409, hasCompaction: false })
   })
 })

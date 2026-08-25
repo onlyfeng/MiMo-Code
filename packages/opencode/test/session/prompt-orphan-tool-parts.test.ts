@@ -121,6 +121,46 @@ describe("sweepOrphanToolParts", () => {
     ),
   )
 
+  it.live("honors an explicit non-idle admission snapshot", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const svc = yield* SessionPrompt.Service
+        const session = yield* sessions.create({})
+        const part = yield* seedRunningToolPart(dir, session.id)
+
+        yield* svc.sweepOrphanToolParts(session.id, false)
+
+        const after = yield* readPart(session.id, part.id)
+        if (after?.type !== "tool") throw new Error("expected a tool part")
+        expect(after.state.status).toBe("running")
+      }),
+    ),
+  )
+
+  it.live("startPrompt repairs an orphan using its idle admission snapshot", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const svc = yield* SessionPrompt.Service
+        const session = yield* sessions.create({})
+        const part = yield* seedRunningToolPart(dir, session.id)
+
+        yield* (yield* svc.startPrompt({
+          sessionID: session.id,
+          noReply: true,
+          parts: [{ type: "text", text: "continue after recovery" }],
+        }))
+
+        const after = yield* readPart(session.id, part.id)
+        if (after?.type !== "tool") throw new Error("expected a tool part")
+        expect(after.state.status).toBe("error")
+        if (after.state.status !== "error") throw new Error("expected an error state")
+        expect(after.state.metadata?.interrupted).toBe(true)
+      }),
+    ),
+  )
+
   it.live("leaves a retrying session's tool part alone", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {

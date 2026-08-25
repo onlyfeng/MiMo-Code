@@ -31,6 +31,7 @@ const ACTIVE_DEADLINE_S_DEFAULT = 60
 const ACTIVE_DEADLINE_S_CEILING = 600
 const WALL_DEADLINE_MS = 30 * 60 * 1000
 const MAX_RESULT_BYTES = 256 * 1024
+const MAX_SUB_PARTS_BYTES = 256 * 1024
 const MAX_LOG_BYTES = 64 * 1024
 const MAX_CODE_BYTES = 128 * 1024
 const MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -319,6 +320,53 @@ export type ExecSubPartSnapshot = {
 
 export const EXEC_METADATA_SCHEMA = 1
 
+const EXEC_SUB_PART_TRUNCATED = "[truncated: exec sub_parts byte budget]"
+
+function compactExecSubPart(part: ExecSubPartSnapshot): ExecSubPartSnapshot {
+  const shared = {
+    input: { truncated: true },
+    metadata: { truncated: true },
+    time: { ...part.state.time },
+  }
+  if (part.state.status === "completed") {
+    return {
+      seq: part.seq,
+      type: "tool",
+      callID: part.callID,
+      tool: part.tool,
+      state: {
+        status: "completed",
+        ...shared,
+        title: EXEC_SUB_PART_TRUNCATED,
+        output: EXEC_SUB_PART_TRUNCATED,
+      },
+    }
+  }
+  if (part.state.status === "error") {
+    return {
+      seq: part.seq,
+      type: "tool",
+      callID: part.callID,
+      tool: part.tool,
+      state: {
+        status: "error",
+        ...shared,
+        error: EXEC_SUB_PART_TRUNCATED,
+      },
+    }
+  }
+  return {
+    seq: part.seq,
+    type: "tool",
+    callID: part.callID,
+    tool: part.tool,
+    state: {
+      status: "running",
+      ...shared,
+    },
+  }
+}
+
 function metadataRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {}
   return value as Record<string, unknown>
@@ -403,16 +451,48 @@ export function viewExecSubtools(metadata: unknown): ExecSubPartSnapshot[] {
 
 function makeSemaphore(max: number) {
   let active = 0
-  const queue: Array<() => void> = []
-  return async <T>(fn: () => Promise<T>): Promise<T> => {
-    if (active >= max) await new Promise<void>((resolve) => queue.push(resolve))
+  let closed = false
+  const queue: Array<{ start: () => void; reject: (reason: Error) => void }> = []
+  const error = () => new Error("exec terminated before nested tool started")
+  const release = () => {
+    active--
+    if (closed) return
+    queue.shift()?.start()
+  }
+  const runNow = <T>(fn: () => Promise<T>): Promise<T> => {
     active++
     try {
-      return await fn()
-    } finally {
-      active--
-      queue.shift()?.()
+      return fn().then(
+        (value) => {
+          release()
+          return value
+        },
+        (reason) => {
+          release()
+          throw reason
+        },
+      )
+    } catch (reason) {
+      release()
+      return Promise.reject(reason)
     }
+  }
+  return {
+    run: <T>(fn: () => Promise<T>): Promise<T> => {
+      if (closed) return Promise.reject(error())
+      if (active < max) return runNow(fn)
+      return new Promise<T>((resolve, reject) => {
+        queue.push({
+          start: () => runNow(fn).then(resolve, reject),
+          reject,
+        })
+      })
+    },
+    close: () => {
+      if (closed) return
+      closed = true
+      for (const waiter of queue.splice(0)) waiter.reject(error())
+    },
   }
 }
 
@@ -462,8 +542,8 @@ export const ToolScriptTool = Tool.define(
             dirty: boolean
             closed: boolean
           } = { pending: Promise.resolve(), dirty: false, closed: false }
-          const snapshotSubParts = () =>
-            subParts.map((part) => ({
+          const snapshotSubParts = () => {
+            const full = subParts.map((part) => ({
               ...part,
               state: {
                 ...part.state,
@@ -477,13 +557,47 @@ export const ToolScriptTool = Tool.define(
                 ...(part.state.attachments ? { attachments: [...part.state.attachments] } : {}),
               },
             }))
+            const originalBytes = Buffer.byteLength(JSON.stringify(full), "utf8")
+            if (originalBytes <= MAX_SUB_PARTS_BYTES) {
+              return { subParts: full, truncated: false, omitted: 0, originalBytes }
+            }
+            const compact = full.map(compactExecSubPart)
+            const bounded: ExecSubPartSnapshot[] = []
+            let bytes = 2
+            for (const part of compact) {
+              const partBytes = Buffer.byteLength(JSON.stringify(part), "utf8")
+              const separatorBytes = bounded.length ? 1 : 0
+              if (bytes + separatorBytes + partBytes > MAX_SUB_PARTS_BYTES) continue
+              bounded.push(part)
+              bytes += separatorBytes + partBytes
+            }
+            return {
+              subParts: bounded,
+              truncated: true,
+              omitted: full.length - bounded.length,
+              originalBytes,
+            }
+          }
+          const subPartMetadata = () => {
+            const snapshot = snapshotSubParts()
+            return {
+              exec_schema: EXEC_METADATA_SCHEMA,
+              sub_parts: snapshot.subParts,
+              ...(snapshot.truncated
+                ? {
+                    sub_parts_truncated: true,
+                    sub_parts_omitted: snapshot.omitted,
+                    sub_parts_original_bytes: snapshot.originalBytes,
+                  }
+                : {}),
+            }
+          }
           const terminalMetadata = (status: string) => ({
             status,
             toolCalls: subParts.length,
             counts: tally(),
             recent: recentTail(),
-            exec_schema: EXEC_METADATA_SCHEMA,
-            sub_parts: snapshotSubParts(),
+            ...subPartMetadata(),
           })
           // completeToolCall REPLACES part metadata with execute()'s return value,
           // so every terminal return re-publishes the complete nested metadata —
@@ -651,6 +765,27 @@ export const ToolScriptTool = Tool.define(
           let logBytes = 0
           let calls = 0
           const withSlot = makeSemaphore(MAX_CONCURRENT)
+          const nestedController = new AbortController()
+          const nestedAbort = AbortSignal.any([ctx.abort, nestedController.signal])
+          const admittedCalls = new Set<Promise<unknown>>()
+          let lifecycleClosed = false
+          let closeNestedCallsPromise: Promise<void> | undefined
+          const trackCall = <T>(call: Promise<T>) => {
+            admittedCalls.add(call)
+            void call.then(
+              () => admittedCalls.delete(call),
+              () => admittedCalls.delete(call),
+            )
+            return call
+          }
+          const closeNestedCalls = () => {
+            if (closeNestedCallsPromise) return closeNestedCallsPromise
+            lifecycleClosed = true
+            withSlot.close()
+            nestedController.abort(new Error("exec terminated"))
+            closeNestedCallsPromise = Promise.allSettled(admittedCalls).then(() => {})
+            return closeNestedCallsPromise
+          }
 
           // Live progress for the TUI: after each settled call, publish the
           // aggregated counts, complete nested metadata records, and a bounded
@@ -665,8 +800,7 @@ export const ToolScriptTool = Tool.define(
               toolCalls: subParts.length,
               counts: tally(),
               recent: recentTail(),
-              exec_schema: EXEC_METADATA_SCHEMA,
-              sub_parts: snapshotSubParts(),
+              ...subPartMetadata(),
             }
             progress.pending = progress.pending
               .then(() => bridge.promise(ctx.metadata({ metadata })))
@@ -695,6 +829,7 @@ export const ToolScriptTool = Tool.define(
                 clearTimeout(progress.timer)
                 progress.timer = undefined
               }
+              await closeNestedCalls()
               closeProgress()
               enqueueProgress()
               progress.closed = true
@@ -721,6 +856,7 @@ export const ToolScriptTool = Tool.define(
           }
 
           const callTool: HostFn = (name: unknown, args: unknown) => {
+            if (lifecycleClosed) return Promise.reject(new Error("exec terminated before nested tool started"))
             const id = String(name)
             const alias = TOOL_SCRIPT_ALIASES[id as keyof typeof TOOL_SCRIPT_ALIASES]
             const def = byId.get(alias ?? id)
@@ -752,6 +888,7 @@ export const ToolScriptTool = Tool.define(
               ...ctx,
               extra: { ...ctx.extra, fromExec: true },
               callID,
+              abort: nestedAbort,
               // Capture nested metadata in its own record. Forwarding it to the
               // outer context would replace exec's title and lose sibling calls.
               metadata: (value: { title?: string; metadata?: Record<string, unknown> }) =>
@@ -846,7 +983,7 @@ export const ToolScriptTool = Tool.define(
                     tool.execute!(args ?? {}, {
                       toolCallId: subCtx.callID,
                       messages: [],
-                      abortSignal: ctx.abort,
+                      abortSignal: subCtx.abort,
                     }),
                   ),
                 catch: (err) => (err instanceof Error ? err : new Error(String(err))),
@@ -882,8 +1019,9 @@ export const ToolScriptTool = Tool.define(
                   })),
                 )
               : executeMcp(mcpDef!)
-            return withSlot(() =>
-              bridge
+            return trackCall(
+              withSlot.run(() =>
+                bridge
                 .promise(executeBuiltin)
                 .then(
                   (result) => {
@@ -939,6 +1077,7 @@ export const ToolScriptTool = Tool.define(
                     throw new Error(`${id}: ${message}`)
                   },
                 ),
+              ),
             )
           }
 

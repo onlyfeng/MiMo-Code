@@ -73,6 +73,7 @@ import { createPress } from "../../ui/press"
 import { WorkflowTree } from "@tui/component/workflow-tree"
 import { SubagentFooter } from "./subagent-footer.tsx"
 import { DialogSubagent } from "./dialog-subagent.tsx"
+import { ExecExpandedBody } from "./exec-expanded"
 import { isActorToolRunning } from "./actor-tool-state"
 import { Flag } from "@/flag/flag"
 import { parseActorNotification } from "@/inbox/render"
@@ -2532,6 +2533,7 @@ function ExecSubtoolGroup(props: {
 // the direct actor navigation path whenever a target reference is available.
 function ToolScript(props: ToolProps<typeof ToolScriptTool>) {
   const { theme } = useTheme()
+  const ctx = use()
   const hoverControl = { clear: () => {} }
   const [expanded, setExpanded] = createSignal(false)
   const isRunning = createMemo(() => props.part.state.status === "running")
@@ -2614,13 +2616,17 @@ function ToolScript(props: ToolProps<typeof ToolScriptTool>) {
         onClick={() => setExpanded(false)}
         hoverControl={hoverControl}
       >
-        <box gap={1}>
-          <text fg={theme.textMuted}>{((props.input.code as string | undefined) ?? "").trim()}</text>
+        <ExecExpandedBody
+          code={props.input.code}
+          output={props.output}
+          columns={Collapse.columns(ctx.width)}
+          failed={failed()}
+          colors={{ muted: theme.textMuted, text: theme.text, error: theme.error }}
+        >
           <Show when={subParts().length > 0}>
             <ExecSubtoolGroup parts={subParts()} parent={props.part} message={props.message} clearParentHover={hoverControl.clear} />
           </Show>
-          <text fg={theme.textMuted}>Click to collapse</text>
-        </box>
+        </ExecExpandedBody>
       </BlockTool>
     </Show>
   )

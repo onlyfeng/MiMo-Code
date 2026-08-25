@@ -4527,6 +4527,10 @@ export type SessionInitErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
 }
 
 export type SessionInitError = SessionInitErrors[keyof SessionInitErrors]
@@ -4712,6 +4716,10 @@ export type SessionSummarizeErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
 }
 
 export type SessionSummarizeError = SessionSummarizeErrors[keyof SessionSummarizeErrors]
@@ -5045,7 +5053,6 @@ export type SessionRecoveryData = {
   query?: {
     directory?: string
     workspace?: string
-    agentID?: string
   }
   url: "/session/{sessionID}/recovery"
 }
@@ -5085,8 +5092,6 @@ export type SessionResumeData = {
   query?: {
     directory?: string
     workspace?: string
-    agentID?: string
-    task_id?: string
   }
   url: "/session/{sessionID}/turn/{assistantMessageID}/resume"
 }
@@ -5176,6 +5181,10 @@ export type SessionPromptAsyncErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
 }
 
 export type SessionPromptAsyncError = SessionPromptAsyncErrors[keyof SessionPromptAsyncErrors]
@@ -5237,6 +5246,10 @@ export type SessionCommandErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
 }
 
 export type SessionCommandError = SessionCommandErrors[keyof SessionCommandErrors]
@@ -5322,6 +5335,10 @@ export type SessionShellErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
 }
 
 export type SessionShellError = SessionShellErrors[keyof SessionShellErrors]
