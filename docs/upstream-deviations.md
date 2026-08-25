@@ -14,11 +14,11 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-08-24
-- Upstream: `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`
-- Prior reviewed upstream: `f57520c08d4d10e64ac035e90ba561e889119c98`
-- Main behavior: `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8`
-- Prior fork `main` tip: `f63e6d4ee2eb26d7c43de32c69f61ae754b6eff0`
+- Last reviewed: 2026-08-25
+- Upstream: `5e32992a97ed7f8d2d00e4c312133716292dab9e`
+- Prior reviewed upstream: `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`
+- Main behavior: `1cfe7efc8f13da6157f30324c4eeac0111e99115`
+- Prior fork `main` tip: `98f1652bcab2038989f6e522fe41a2cb35b5e90f`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -56,8 +56,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/bash.test.ts`, and
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
-- Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8`.
+- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
+  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -86,8 +86,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/max-mode.test.ts`, and
   `packages/opencode/test/session/prompt-effect.test.ts` bind the reported file
   set to normal and MaxMode request payloads.
-- Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8`.
+- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
+  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
 - Retirement condition: one immutable per-request decision controls both the UI
   signal and model payload, with regressions proving identical instruction sets.
 
@@ -113,8 +113,8 @@ registry or history commit does not advance either behavior reference.
   generated-artifact checks at the reviewed main behavior; the JavaScript SDK
   is regenerated with `./packages/sdk/js/script/build.ts` rather than copied
   from upstream.
-- Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8`.
+- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
+  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -144,8 +144,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: system-prompt, GPT helper, request-prefix, tool-registry,
   agent-generation, and `packages/opencode/test/tool/tool-script.test.ts`
   regressions cover alias conflicts and explicit harness overrides.
-- Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8`.
+- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
+  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
 - Retirement condition: the provider layer exposes one immutable model-mode
   value consumed unchanged by every prompt, discovery, registry, capture, and
   dispatch surface, with alias-conflict and GPT-4 regressions.
@@ -155,26 +155,39 @@ registry or history commit does not advance either behavior reference.
 - Status: active
 - Canonical owner: fork `main` direct-tool and nested-execution authority boundary
 - Observable contract: GPT/Codex models retain direct permission-visible tools.
-  Nested `exec` excludes shell/control capabilities including `bash` and the
-  `exec_command` alias, respects request-scoped allowlists, and keeps the public
-  compute budget as `timeout_seconds` in seconds. Custom outer code wrappers may
-  be normalized, but the 128 KiB raw-code limit is enforced both before and
-  after normalization.
+  Nested `exec` excludes `actor`, shell/control capabilities including `bash`
+  and the `exec_command` alias, respects request-scoped allowlists, and keeps the
+  public compute budget as `timeout_seconds` in seconds. Custom outer code
+  wrappers may be normalized, but the 128 KiB raw-code limit is enforced both
+  before and after normalization. Replayable nested parts are capped at 256 KiB,
+  and the expanded TUI retains bounded ANSI-free outer output alongside live
+  children.
 - Upstream relationship: selectively adopts safe custom-exec input
   normalization from upstream while rejecting its compact single-exec authority
-  model and nested shell bridge.
+  model, nested shell bridge, and nested actor send-only exposure. The
+  `fromExec` actor guard is retained as defense in depth, not as authority to
+  expose `actor` inside `exec`.
 - Watch surfaces: `packages/opencode/src/agent/prompt/generate-gpt.txt`,
   `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/tool/registry.ts`,
   `packages/opencode/src/tool/tool-script-ref.ts`,
   `packages/opencode/src/tool/tool-script.ts`,
-  `packages/opencode/src/tool/tool-script.txt`, and the TUI tool-visibility path.
+  `packages/opencode/src/tool/tool-script.txt`,
+  `packages/opencode/src/cli/cmd/tui/routes/session/index.tsx`, and
+  `packages/opencode/src/cli/cmd/tui/routes/session/exec-expanded.tsx`.
 - Tests/evidence: `packages/opencode/test/tool/tool-script.test.ts` covers direct
   visibility, exclusions, wrapper normalization, request allowlists,
-  `timeout_seconds`, and the pre/post-normalization byte checks; registry, skill,
-  actor, and TUI visibility tests cover the outer authority surface.
-- Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8`.
+  `timeout_seconds`, pre/post-normalization byte checks, replay schema, the
+  256 KiB terminal snapshot, and close-abort-join settlement. Registry, skill,
+  actor, and TUI visibility tests cover the outer authority surface;
+  `packages/opencode/test/cli/tui/exec-expanded.test.tsx` covers bounded
+  ANSI-free outer output with and without nested parts.
+- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
+  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
+- 2026-08-25 review: adopted replayable nested parts and live child lifecycle
+  updates while retaining the nested actor/shell/control exclusions. Early
+  termination now closes admission, aborts running calls, rejects queued calls,
+  joins cleanup, and persists only a bounded terminal snapshot.
 - 2026-08-23 review: adopted the new upstream custom-exec wrapper
   normalization. Rejected the nested `bash`/`exec_command` bridge and its typo
   repair because they cross the authority boundary. The raw code size gate is
@@ -208,8 +221,8 @@ registry or history commit does not advance either behavior reference.
   child-session/fork-mode/main-slice/prefix-capture/watermark tests, and
   `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
-- Review basis: upstream `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`;
-  main behavior `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8`.
+- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
+  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
 - Retirement condition: upstream provides an atomic capture-and-spawn protocol
   with equivalent mode-specific validation, frozen authority/membership,
   deterministic failure settlement, and proof that live-context fallback is
