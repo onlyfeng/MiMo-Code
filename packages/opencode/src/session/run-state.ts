@@ -8,7 +8,7 @@ import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
 
 type RunnerEntry = {
-  runner: Runner.Runner<MessageV2.WithParts>
+  runner: Runner.Runner<MessageV2.WithParts, never, Session.BusyError>
   control: {
     statusLock: ReturnType<typeof Semaphore.makeUnsafe>
     latest: number
@@ -25,7 +25,13 @@ const release = (entry: RunnerEntry) =>
   })
 
 export interface Interface {
-  readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void>
+  readonly assertNotBusy: (sessionID: SessionID, agentID?: string) => Effect.Effect<void, Session.BusyError>
+  readonly start: (
+    sessionID: SessionID,
+    agentID: string,
+    onInterrupt: Effect.Effect<MessageV2.WithParts>,
+    work: Effect.Effect<MessageV2.WithParts>,
+  ) => Effect.Effect<void, Session.BusyError>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly cancelActor: (sessionID: SessionID, agentID: string) => Effect.Effect<void>
   readonly cancelActorDetached: (sessionID: SessionID, agentID: string) => Effect.Effect<void>
@@ -40,12 +46,12 @@ export interface Interface {
     agentID: string,
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
-  ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>>
+  ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, Session.BusyError>
   readonly startShell: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
-  ) => Effect.Effect<MessageV2.WithParts>
+  ) => Effect.Effect<MessageV2.WithParts, Session.BusyError>
   readonly withRunDisposal: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 }
 
@@ -129,7 +135,11 @@ export const layer = Layer.effect(
         if (control.leases !== 0 || control.active || current?.control !== control || current.runner.busy) return
         data.runners.delete(key)
       }
-      const next: Runner.Runner<MessageV2.WithParts> = Runner.make<MessageV2.WithParts>(data.scope, {
+      const next: Runner.Runner<MessageV2.WithParts, never, Session.BusyError> = Runner.make<
+        MessageV2.WithParts,
+        never,
+        Session.BusyError
+      >(data.scope, {
         label: key,
         onReentryWarn: (info) => elog.warn("runner-reentry", info),
         onStart: (id) => {
@@ -147,19 +157,38 @@ export const layer = Layer.effect(
           ),
         onBusy: isMain ? control.statusLock.withPermits(1)(status.set(sessionID, { type: "busy" })) : Effect.void,
         canStart: () => !data.disposing,
-        busy: () => {
-          throw new Session.BusyError(sessionID)
-        },
+        busy: () => new Session.BusyError(sessionID),
       })
       const entry = { runner: next, control, cleanup }
       data.runners.set(key, entry)
       return { data, entry }
     })
 
-    const assertNotBusy = Effect.fn("SessionRunState.assertNotBusy")(function* (sessionID: SessionID) {
+    const assertNotBusy = Effect.fn("SessionRunState.assertNotBusy")(function* (
+      sessionID: SessionID,
+      agentID = "main",
+    ) {
       const data = yield* currentState()
-      const existing = data.runners.get(runnerKey(sessionID, "main"))
-      if (existing && (existing.control.active || existing.runner.busy)) throw new Session.BusyError(sessionID)
+      const existing = data.runners.get(runnerKey(sessionID, agentID))
+      if (existing && (existing.control.active || existing.runner.busy))
+        return yield* Effect.fail(new Session.BusyError(sessionID))
+      return
+    })
+
+    const start: Interface["start"] = Effect.fn("SessionRunState.start")(function* (
+      sessionID: SessionID,
+      agentID: string,
+      onInterrupt: Effect.Effect<MessageV2.WithParts>,
+      work: Effect.Effect<MessageV2.WithParts>,
+    ) {
+      const current = yield* runner(sessionID, agentID)
+      yield* current.entry.runner
+        .start(work, onInterrupt)
+        .pipe(
+          Effect.provideService(RunDisposal, current.data),
+          Effect.ensuring(release(current.entry)),
+        )
+      return
     })
 
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
@@ -259,6 +288,7 @@ export const layer = Layer.effect(
       cancelActor,
       cancelActorDetached,
       ensureRunning,
+      start,
       startRunning,
       startShell,
       withRunDisposal,

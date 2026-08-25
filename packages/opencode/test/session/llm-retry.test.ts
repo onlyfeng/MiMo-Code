@@ -1,5 +1,55 @@
 import { describe, test, expect } from "bun:test"
-import { isTransientCapacityError } from "../../src/session/llm"
+import { Effect, Stream } from "effect"
+import { isTransientCapacityError, protectRequestReplayBoundary, type Event } from "../../src/session/llm"
+
+describe("protectRequestReplayBoundary", () => {
+  test("keeps a raw cause after provider output out of request retry", async () => {
+    const reset = Object.assign(new Error("socket connection closed unexpectedly"), { code: "ECONNRESET" })
+    let attempts = 0
+    const attempt = () => {
+      attempts++
+      if (attempts > 1)
+        return Stream.succeed({ type: "text-delta", id: "replayed", text: "REPLAYED" } as Event)
+      return protectRequestReplayBoundary(
+        Stream.concat(
+          Stream.succeed({ type: "text-delta", id: "committed", text: "COMMITTED" } as Event),
+          Stream.fail(reset),
+        ),
+      )
+    }
+
+    const events = await Effect.runPromise(
+      attempt().pipe(
+        Stream.catchCause(() => attempt()),
+        Stream.runCollect,
+      ),
+    )
+
+    expect(attempts).toBe(1)
+    expect(Array.from(events).map((event) => event.type)).toEqual(["text-delta", "error"])
+  })
+
+  test("leaves a raw cause before provider output eligible for request retry", async () => {
+    const reset = Object.assign(new Error("socket connection closed unexpectedly"), { code: "ECONNRESET" })
+    let attempts = 0
+    const attempt = () => {
+      attempts++
+      if (attempts > 1)
+        return Stream.succeed({ type: "text-delta", id: "retried", text: "RETRIED" } as Event)
+      return protectRequestReplayBoundary(Stream.fail(reset))
+    }
+
+    const events = await Effect.runPromise(
+      attempt().pipe(
+        Stream.catchCause(() => attempt()),
+        Stream.runCollect,
+      ),
+    )
+
+    expect(attempts).toBe(2)
+    expect(Array.from(events).map((event) => event.type)).toEqual(["text-delta"])
+  })
+})
 
 describe("isTransientCapacityError", () => {
   test("returns false for plain Error", () => {
@@ -26,7 +76,7 @@ describe("isTransientCapacityError", () => {
   })
 
   test("returns false for non-retryable HTTP statuses", () => {
-    for (const status of [400, 401, 403, 404, 422]) {
+    for (const status of [400, 401, 403, 404, 422, 501, 505]) {
       const err = Object.assign(new Error("client"), { status })
       expect(isTransientCapacityError(err)).toBe(false)
     }

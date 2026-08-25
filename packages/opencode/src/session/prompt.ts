@@ -263,17 +263,28 @@ function isDirectUserMessage(message: MessageV2.WithParts | undefined) {
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
-  readonly startPrompt: (input: PromptInput) => Effect.Effect<Effect.Effect<MessageV2.WithParts>>
+  readonly startPrompt: (
+    input: PromptInput,
+  ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, Session.BusyError>
   readonly recovery: (input: { sessionID: SessionID }) => Effect.Effect<RecoveryCandidate[]>
   readonly startResume: (
     input: ResumeTurnInput,
-  ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError>>
-  readonly resume: (input: ResumeTurnInput) => Effect.Effect<MessageV2.WithParts, InstanceType<typeof NotFoundError>>
-  readonly startSummarize: (input: SummarizeInput) => Effect.Effect<Effect.Effect<MessageV2.WithParts>>
+  ) => Effect.Effect<
+    Effect.Effect<MessageV2.WithParts>,
+    InstanceType<typeof NotFoundError> | Session.BusyError
+  >
+  readonly resume: (
+    input: ResumeTurnInput,
+  ) => Effect.Effect<MessageV2.WithParts, InstanceType<typeof NotFoundError> | Session.BusyError>
+  readonly startSummarize: (
+    input: SummarizeInput,
+  ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, Session.BusyError>
   readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
-  readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
+  readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
-  readonly startCommand: (input: CommandInput) => Effect.Effect<Effect.Effect<MessageV2.WithParts>>
+  readonly startCommand: (
+    input: CommandInput,
+  ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, Session.BusyError>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
   readonly sweepOrphanAssistants: (sessionID: SessionID, immediate?: boolean) => Effect.Effect<void>
   readonly sweepOrphanToolParts: (sessionID: SessionID, immediate?: boolean) => Effect.Effect<void>
@@ -1237,7 +1248,7 @@ Plan mode is active. The user wants you to research and design, NOT to execute y
 ## What you MUST NOT do
 - Do NOT edit or create any file other than the plan file below. Writes to non-plan files are blocked outright and will fail — do not attempt them and do not ask the user to approve them.
 - Do NOT run \`test\`, \`lint\`, \`typecheck\`, \`build\`, or similar project commands. These are NOT safe by default: \`lint\` is often configured with \`--fix\`, \`test\` may write snapshots or touch a database, \`build\` writes artifacts, and scripts behind them can do anything. The ONLY exception is if you have explicitly verified — by reading the exact command/config — that this specific invocation has no side effects (no \`--fix\`/\`--write\`, no file/state/db mutation). If you cannot verify that, treat it as forbidden and note it in the plan instead.
-- Do NOT run any other side-effecting \`bash\`: no commits, no \`git push\`, no installing/removing packages, no writing/moving/deleting files, no changing configs, no \`change_directory\`, no \`workflow\`.
+- Do NOT run any other side-effecting \`bash\`: no commits, no \`git push\`, no installing/removing packages, no writing/moving/deleting files, no changing configs, no \`workflow\`.
 - If you find yourself wanting to mutate something to make progress, that's a signal to write it into the plan instead and continue researching read-only.
 
 Use good judgment: take the read-only action yourself rather than pushing avoidable confirmation prompts onto the user. Only the plan file is writable.
@@ -4071,7 +4082,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
             const format = lastUser.format ?? { type: "text" as const }
-            const maxModeCfg = (yield* config.get()).experimental?.maxMode
+            const cfg = yield* config.get()
+            const maxModeCfg = cfg.experimental?.maxMode
             const useMaxMode = MaxMode.shouldRunMaxModeStep({
               agent,
               maxMode: maxModeCfg,
@@ -4126,7 +4138,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     LLM.resolveTools(processArgs),
                     processArgs.activeTools,
                   )
-                  const cfg = yield* config.get()
                   const turnContext = LLM.turnContextMessages(processArgs.user)
                   const overflow = classifyRequestOverflow({
                     ...processArgs,
@@ -4174,6 +4185,34 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       // Only the main agent owns session status; subagents (incl. forks)
                       // pass undefined so runMaxStep's internal no-op guard skips the write.
                       setStatus: maxModeSetStatus,
+                      retryConfig: cfg,
+                      onRetry:
+                        resolvedAgentID === "main"
+                          ? (info) =>
+                              Effect.gen(function* () {
+                                const attempt = yield* status.setRetry(sessionID, {
+                                  type: "retry",
+                                  attempt: info.attempt,
+                                  phaseAttempt: info.attempt,
+                                  message: info.message,
+                                  next: info.next,
+                                  phase: info.phase,
+                                  scope: info.scope,
+                                })
+                                yield* bus.publish(Session.Event.RetryAttempt, {
+                                  sessionID,
+                                  messageID: handle.message.id,
+                                  attempt,
+                                  phaseAttempt: info.attempt,
+                                  maxAttempts: info.maxAttempts,
+                                  phase: info.phase,
+                                  kind: info.kind,
+                                  scope: info.scope,
+                                  reason: info.message,
+                                  nextDelayMs: info.nextDelayMs,
+                                })
+                              })
+                          : undefined,
                     })
                   : handle.process(processArgs))
                 if (result === "overflow") yield* finalizeOverflowAssistant()
@@ -4800,7 +4839,7 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
       }).pipe(state.withRunDisposal)
     })
 
-    const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.shell")(
+    const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError> = Effect.fn("SessionPrompt.shell")(
       function* (input: ShellInput) {
         return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input))
       },

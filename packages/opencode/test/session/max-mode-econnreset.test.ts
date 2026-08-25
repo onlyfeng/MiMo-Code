@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import * as Stream from "effect/Stream"
-import { APICallError } from "ai"
 import { runCandidate, judge, type Candidate, type MaxStepInput } from "../../src/session/max-mode"
 import type { LLM } from "../../src/session/llm"
 
@@ -20,26 +19,16 @@ function expectCandidate(value: Candidate | null | "text-repeat"): Candidate {
  *   3. a non-transient error part falls through to the catch fallback.
  *
  * The mock stream yields synchronously-constructed events, so the only real
- * wall-clock cost is persistentRetrySchedule's first backoff (~500ms/attempt).
+ * wall-clock cost is the coordinator's local max-mode backoff (~500ms/attempt).
  */
 
 const econnreset = () => Object.assign(new Error("socket connection closed unexpectedly"), { code: "ECONNRESET" })
 const httpBadRequest = () => Object.assign(new Error("Bad Request"), { status: 400 })
-const gptServerOverloaded = (code = "server_is_overloaded") => ({
-  type: "error",
-  sequence_number: 2,
-  error: {
-    type: "service_unavailable_error",
-    code,
-    message: "The server is currently overloaded.",
-    param: null,
-  },
-})
 
 /** Build a mock LLM whose stream fails `failTimes` times (error part) then succeeds. */
 function mockLLM(opts: {
   failTimes: number
-  makeError: (attempt: number) => unknown
+  makeError: () => Error
   goodEvents: LLM.Event[]
   errorEvents?: LLM.Event[]
 }): { llm: LLM.Interface; attempts: () => number } {
@@ -50,7 +39,7 @@ function mockLLM(opts: {
       const thisAttempt = attempt++
       const events: LLM.Event[] =
         thisAttempt < opts.failTimes
-          ? [...(opts.errorEvents ?? []), { type: "error", error: opts.makeError(thisAttempt) } as LLM.Event]
+          ? [...(opts.errorEvents ?? []), { type: "error", error: opts.makeError() } as LLM.Event]
           : opts.goodEvents
       return Stream.fromIterable(events)
     },
@@ -64,26 +53,12 @@ function baseInput(llm: LLM.Interface): MaxStepInput {
     llm,
     user: {} as any,
     agent: {} as any,
-    model: {
-      id: "deepseek-v3.2",
-      api: { id: "deepseek-v3.2" },
-      providerID: "deepseek",
-    } as MaxStepInput["model"],
+    model: {} as any,
     sessionID: "ses_test",
     system: [],
     messages: [],
     tools: {},
   }
-}
-
-function gptInput(llm: LLM.Interface): MaxStepInput {
-  const input = baseInput(llm)
-  input.model = {
-    id: "gpt-5.4",
-    api: { id: "gpt-5.4" },
-    providerID: "openai",
-  } as MaxStepInput["model"]
-  return input
 }
 
 describe("max-mode ECONNRESET handling (integration)", () => {
@@ -192,128 +167,6 @@ describe("max-mode ECONNRESET handling (integration)", () => {
     expect(attempts()).toBe(1) // no retry for a 400
     expect(result.pick).toBe(0) // graceful fallback
   })
-
-  test("candidate retries GPT server overload exactly three times before recovering", async () => {
-    const { llm, attempts } = mockLLM({
-      failTimes: 3,
-      makeError: () => gptServerOverloaded(),
-      errorEvents: [{ type: "text-delta", text: "PARTIAL " } as LLM.Event],
-      goodEvents: [
-        { type: "text-delta", text: "recovered" } as LLM.Event,
-        { type: "finish-step", finishReason: "stop", usage: { inputTokens: 1, outputTokens: 1 } } as LLM.Event,
-      ],
-    })
-
-    const candidate = expectCandidate(await Effect.runPromise(runCandidate(gptInput(llm), 0)))
-
-    expect(attempts()).toBe(4)
-    expect(candidate.text).toBe("recovered")
-  })
-
-  test("judge retries GPT server overload exactly three times before recovering", async () => {
-    const { llm, attempts } = mockLLM({
-      failTimes: 3,
-      makeError: () => gptServerOverloaded(),
-      goodEvents: [
-        { type: "text-delta", text: "1" } as LLM.Event,
-        { type: "finish-step", finishReason: "stop", usage: { inputTokens: 1, outputTokens: 1 } } as LLM.Event,
-      ],
-    })
-    const candidates = [
-      { index: 0, reasoning: "", text: "a", toolCalls: [], finishReason: "stop" },
-      { index: 1, reasoning: "", text: "b", toolCalls: [], finishReason: "stop" },
-    ]
-
-    const result = await Effect.runPromise(judge(gptInput(llm), candidates as any))
-
-    expect(attempts()).toBe(4)
-    expect(result.pick).toBe(1)
-  })
-
-  test("candidate stops after three retries when GPT server overload persists", async () => {
-    const { llm, attempts } = mockLLM({
-      failTimes: 99,
-      makeError: () => gptServerOverloaded(),
-      goodEvents: [],
-    })
-
-    expect(await Effect.runPromise(runCandidate(gptInput(llm), 0))).toBeNull()
-    expect(attempts()).toBe(4)
-  })
-
-  test("candidate does not apply the overload retry to a non-GPT model", async () => {
-    const { llm, attempts } = mockLLM({
-      failTimes: 99,
-      makeError: () => gptServerOverloaded(),
-      goodEvents: [],
-    })
-
-    expect(await Effect.runPromise(runCandidate(baseInput(llm), 0))).toBeNull()
-    expect(attempts()).toBe(1)
-  })
-
-  test("candidate does not apply the overload retry to another GPT server error", async () => {
-    const { llm, attempts } = mockLLM({
-      failTimes: 99,
-      makeError: () => gptServerOverloaded("server_error"),
-      goodEvents: [],
-    })
-
-    expect(await Effect.runPromise(runCandidate(gptInput(llm), 0))).toBeNull()
-    expect(attempts()).toBe(1)
-  })
-
-  test("candidate contains a malformed APIError-shaped stream part", async () => {
-    const { llm, attempts } = mockLLM({
-      failTimes: 99,
-      makeError: () => ({ name: "APIError" }),
-      goodEvents: [],
-    })
-
-    const exit = await Effect.runPromiseExit(runCandidate(gptInput(llm), 0))
-
-    expect(exit._tag).toBe("Success")
-    if (exit._tag === "Success") expect(exit.value).toBeNull()
-    expect(attempts()).toBe(1)
-  })
-
-  test("candidate keeps one overload budget across an interleaved network retry", async () => {
-    const errors = [
-      gptServerOverloaded(),
-      gptServerOverloaded(),
-      gptServerOverloaded(),
-      econnreset(),
-      gptServerOverloaded(),
-    ]
-    const { llm, attempts } = mockLLM({
-      failTimes: errors.length,
-      makeError: (attempt) => errors[attempt],
-      goodEvents: [{ type: "text-delta", text: "must not recover" } as LLM.Event],
-    })
-
-    expect(await Effect.runPromise(runCandidate(gptInput(llm), 0))).toBeNull()
-    expect(attempts()).toBe(5)
-  })
-
-  test("candidate does not pass a native 503 GPT overload to the generic retry budget", async () => {
-    const responseBody = JSON.stringify(gptServerOverloaded())
-    const { llm, attempts } = mockLLM({
-      failTimes: 4,
-      makeError: () =>
-        new APICallError({
-          message: "The server is currently overloaded.",
-          url: "https://api.openai.com/v1/responses",
-          requestBodyValues: {},
-          statusCode: 503,
-          responseBody,
-          isRetryable: true,
-        }),
-      goodEvents: [{ type: "text-delta", text: "must not recover" } as LLM.Event],
-    })
-
-    expect(await Effect.runPromise(runCandidate(gptInput(llm), 0))).toBeNull()
-    expect(attempts()).toBe(4)
-  })
 })
 
 describe("max-mode defect handling (SSE timeout surfaces as Cause.die)", () => {
@@ -351,7 +204,7 @@ describe("max-mode defect handling (SSE timeout surfaces as Cause.die)", () => {
 
   const sseTimeout = () => new Error("SSE read timed out")
   // A non-transient defect: not retried, so containment is proven in 1 attempt
-  // without waiting out persistentRetrySchedule's ~8min backoff exhaustion.
+  // without waiting out the coordinator's long backoff exhaustion.
   const fatalDefect = () => new Error("unexpected internal stream failure")
 
   test("candidate contains a transient defect and retries to recovery (no fiber crash)", async () => {

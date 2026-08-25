@@ -1,13 +1,14 @@
-import { Cause, Duration, Effect, Pull, Schedule } from "effect"
+import { Cause, Effect } from "effect"
 import * as Stream from "effect/Stream"
 import type { ModelMessage, Tool as AITool } from "ai"
 import { LLM } from "./llm"
 import { SessionProcessor } from "./processor"
 import * as Session from "./session"
+import { ProviderError } from "@/provider"
 import type { Provider } from "@/provider"
 import type { Agent } from "@/agent/agent"
 import { MessageV2 } from "./message-v2"
-import { SessionRetry } from "./retry"
+import * as SessionRetry from "./retry"
 import { createTextNgramMonitor, isTextNgramRepeat, textNgramRepeat } from "./prompt/text-ngram-detection"
 import type { Permission } from "@/permission"
 import { Log } from "@/util"
@@ -88,46 +89,23 @@ export type MaxStepInput = {
    * or undefined to clear back to a plain busy state.
    */
   setStatus?: (message: string | undefined) => Effect.Effect<void>
+  onRetry?: (info: { attempt: number; maxAttempts: number; phase: SessionRetry.RetryPhase; scope: SessionRetry.RetryScope; kind: SessionRetry.RetryKind; message: string; next: number; nextDelayMs: number }) => Effect.Effect<void>
+  retryConfig?: SessionRetry.RetryConfigSource
 }
 
-/** Match the processor's exact GPT Responses overload policy for raw stream error parts. */
-function isGptServerOverloaded(input: MaxStepInput, error: unknown) {
-  try {
-    if (!SessionRetry.isGptModel(input.model)) return false
-    const parsed = MessageV2.APIError.Schema.safeParse(error)
-    return SessionRetry.isGptServerOverloadedError(
-      parsed.success
-        ? parsed.data
-        : MessageV2.fromError(error, {
-            providerID: input.model.providerID,
-          }),
-    )
-  } catch {
-    return false
-  }
-}
-
-function retrySchedule(input: MaxStepInput) {
-  return Schedule.fromStep(
-    Effect.gen(function* () {
-      const persistent = yield* Schedule.toStep(LLM.persistentRetrySchedule)
-      let overloadRetries = 0
-
-      return (now: number, error: unknown) => {
-        if (isGptServerOverloaded(input, error)) {
-          overloadRetries++
-          if (overloadRetries > SessionRetry.GPT_OVERLOAD_RETRIES) return Cause.done(undefined)
-          return Effect.succeed([undefined, Duration.zero] as [undefined, Duration.Duration])
-        }
-        if (!LLM.isTransientCapacityError(error)) return Cause.done(undefined)
-        return Pull.matchEffect(persistent(now, error), {
-          onSuccess: ([, delay]) => Effect.succeed([undefined, delay] as [undefined, Duration.Duration]),
-          onFailure: Effect.failCause,
-          onDone: () => Cause.done(undefined),
-        })
-      }
-    }),
-  )
+function retryPolicy(input: MaxStepInput, scope: "max-candidate" | "max-judge", aborted: () => boolean) {
+  const retryConfig = SessionRetry.resolve(input.retryConfig, input.model.providerID)
+  return SessionRetry.policy({
+    phase: "stream",
+    scope,
+    budget: (decision) => SessionRetry.budgetFor(retryConfig, decision),
+    jitterRatio: retryConfig.jitterRatio,
+    parse: (error) => MessageV2.fromError(error, { providerID: input.model.providerID, aborted: aborted(), allow404Retry: ProviderError.allowsModelNotFoundRetry(input.model) }),
+    set: (info) =>
+      input.onRetry
+        ? input.onRetry({ ...info, nextDelayMs: Math.max(0, info.next - Date.now()) })
+        : Effect.void,
+  })
 }
 
 /**
@@ -150,8 +128,7 @@ export function toSchemaOnlyTools(tools: Record<string, AITool>): Record<string,
  * proposed tool calls without executing anything. Returns null on failure so a
  * single bad draw doesn't sink the whole step.
  *
- * Transient network failures (ECONNRESET / EPIPE / SSE timeout / 5xx) are
- * retried with the same persistent schedule the normal stream path uses. This
+ * Transient network failures are retried with a bounded local schedule. This
  * is safe — and deliberately broader than the normal path — because a
  * candidate emits NOTHING externally until it completes: each attempt rebuilds
  * a fresh accumulator, so re-streaming after a mid-stream reset cannot
@@ -161,8 +138,9 @@ export function toSchemaOnlyTools(tools: Record<string, AITool>): Record<string,
  */
 // Exported for integration tests (drives the real candidate path with a mock
 // llm.stream). Not part of the public surface — call sites use runMaxStep.
-export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<Candidate | null | "text-repeat"> =>
-  Effect.gen(function* () {
+export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<Candidate | null | "text-repeat"> => {
+  let aborted = false
+  return Effect.gen(function* () {
     const monitor = createTextNgramMonitor()
     // Fresh accumulator per attempt: the retry below re-runs this whole block,
     // so partial reasoning/text/toolCalls from a failed attempt must not carry
@@ -243,10 +221,7 @@ export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<
       (cause) => !Cause.hasInterruptsOnly(cause),
       (cause) => Effect.fail(Cause.squash(cause)),
     ),
-    // OpenAI Responses emits overloads as raw stream parts. The unified
-    // schedule keeps one three-retry overload budget across interleaved errors,
-    // while delegating every other transient to the existing persistent step.
-    Effect.retry(retrySchedule(input)),
+    Effect.retry(retryPolicy(input, "max-candidate", () => aborted)),
     Effect.catchIf(isTextNgramRepeat, () => Effect.succeed("text-repeat" as const)),
     Effect.catch((e) =>
       Effect.sync(() => {
@@ -254,7 +229,9 @@ export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<
         return null
       }),
     ),
+    Effect.onInterrupt(() => Effect.sync(() => { aborted = true })),
   )
+}
 
 /** Render a candidate compactly for the judge. `label` is its judge-facing index. */
 export function renderCandidate(c: Candidate, label: number): string {
@@ -311,8 +288,9 @@ export function parseJudgeIndex(out: string, count: number): number {
  * token usage. Falls back to index 0 on any parse/out-of-range issue.
  */
 /** Exported for integration tests; call sites go through runMaxStep. */
-export const judge = (input: MaxStepInput, candidates: Candidate[]): Effect.Effect<{ pick: number; usage?: any }> =>
-  Effect.gen(function* () {
+export const judge = (input: MaxStepInput, candidates: Candidate[]): Effect.Effect<{ pick: number; usage?: any }> => {
+  let aborted = false
+  return Effect.gen(function* () {
     if (candidates.length === 1) return { pick: 0, usage: undefined }
 
     const rendered = candidates.map((c, i) => renderCandidate(c, i)).join("\n\n")
@@ -366,14 +344,16 @@ export const judge = (input: MaxStepInput, candidates: Candidate[]): Effect.Effe
     // `out`/`usage` locally and emits nothing externally until it returns, so
     // re-streaming after a mid-stream reset is safe. Without this, a single
     // ECONNRESET during judging silently collapses the whole step to pick 0.
-    Effect.retry(retrySchedule(input)),
+    Effect.retry(retryPolicy(input, "max-judge", () => aborted)),
     Effect.catch((e) => {
       log.warn("judge failed, defaulting to candidate 0", {
         error: e instanceof Error ? e.message : String(e),
       })
       return Effect.succeed({ pick: 0, usage: undefined })
     }),
+    Effect.onInterrupt(() => Effect.sync(() => { aborted = true })),
   )
+}
 
 /**
  * Run one max-mode step: N parallel propose-only candidates → judge picks the

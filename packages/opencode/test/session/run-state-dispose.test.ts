@@ -33,6 +33,7 @@ const status = Layer.succeed(
   SessionStatus.Service.of({
     get: () => Effect.succeed({ type: "idle" }),
     list: () => Effect.succeed(new Map()),
+    setRetry: (_, next) => Effect.succeed(next.attempt),
     set: (sessionID, next) =>
       Effect.gen(function* () {
         const busyGate = statusBusyGate

@@ -9,6 +9,7 @@ import { Config } from "../../src/config"
 import { LLM } from "../../src/session/llm"
 import { Memory } from "../../src/memory"
 import { MessageV2 } from "../../src/session/message-v2"
+import { SessionStatus } from "../../src/session/status"
 import { Plugin } from "../../src/plugin"
 import { Instance } from "../../src/project/instance"
 import { MessageID, SessionID } from "../../src/session/schema"
@@ -115,6 +116,7 @@ describe("session.llm GitLab workflow system prompt", () => {
                 plugin,
                 ActorRegistry.defaultLayer,
                 Memory.defaultLayer,
+                SessionStatus.defaultLayer,
               ),
             ),
           ),
