@@ -459,6 +459,76 @@ describe("exec", () => {
     expect(parts.every((part) => part.state.status !== "running")).toBe(true)
   })
 
+  test("cancels running calls, rejects queued calls, and joins before an early terminal", async () => {
+    const started: string[] = []
+    const cancelled: string[] = []
+    const sideEffects: string[] = []
+    const parameters = z.object({ value: z.string() })
+    const slow: Tool.Def<typeof parameters> = {
+      id: "slow",
+      description: "fake cancellable slow tool",
+      parameters,
+      execute: (args, ctx) =>
+        Effect.promise(
+          () =>
+            new Promise<{ title: string; output: string; metadata: Record<string, unknown> }>((resolve, reject) => {
+              started.push(args.value)
+              const timer = setTimeout(() => {
+                sideEffects.push(args.value)
+                resolve({ title: "Slow", output: args.value, metadata: {} })
+              }, 100)
+              const onAbort = () => {
+                clearTimeout(timer)
+                cancelled.push(args.value)
+                reject(new Error("nested exec aborted"))
+              }
+              if (ctx.abort.aborted) return onAbort()
+              ctx.abort.addEventListener("abort", onAbort, { once: true })
+            }),
+        ),
+    }
+    const result = await runToolScript(
+      `
+      const calls = []
+      for (let i = 0; i < 8; i++) calls.push(tools.slow({ value: String(i) }))
+      calls.push(tools.slow({ value: "queued" }))
+      throw new Error("kapow")
+      `,
+      [slow],
+      undefined,
+      { maxToolCalls: 9 },
+    )
+
+    expect(result.metadata.status).toBe("code_error")
+    expect(started.toSorted()).toEqual(["0", "1", "2", "3", "4", "5", "6", "7"])
+    expect(cancelled.toSorted()).toEqual(["0", "1", "2", "3", "4", "5", "6", "7"])
+    expect(sideEffects).toEqual([])
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(started).not.toContain("queued")
+    expect(sideEffects).toEqual([])
+  })
+
+  test("caps the final serialized sub_parts snapshot at 256 KiB", async () => {
+    const payload = "x".repeat(4096)
+    const result = await runToolScript(
+      `
+      await Promise.all(Array.from({ length: 500 }, (_, i) => tools.large({ value: String(i) })))
+      return "done"
+      `,
+      [fakeDef("large", async (args) => `${args.value}:${payload}`)],
+      undefined,
+      { maxToolCalls: 500 },
+    )
+    const subParts = result.metadata.sub_parts as ExecSubPartSnapshot[]
+
+    expect(result.metadata.status).toBe("completed")
+    expect(Buffer.byteLength(JSON.stringify(subParts), "utf8")).toBeLessThanOrEqual(256 * 1024)
+    expect(result.metadata.sub_parts_truncated).toBe(true)
+    expect(result.metadata.sub_parts_omitted).toBe(0)
+    expect(subParts).toHaveLength(500)
+    expect(viewExecSubtools(result.metadata)).toHaveLength(500)
+  }, 15_000)
+
   test("accepts TypeScript syntax (types stripped by transpiler)", async () => {
     const result = await runToolScript(
       `

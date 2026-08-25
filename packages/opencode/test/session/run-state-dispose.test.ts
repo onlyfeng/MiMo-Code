@@ -1,9 +1,10 @@
-import { describe, expect } from "bun:test"
+import { afterEach, describe, expect } from "bun:test"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from "effect"
 import { Bus } from "../../src/bus"
 import { GlobalBus } from "../../src/bus/global"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Instance } from "../../src/project/instance"
+import { Session } from "../../src/session"
 import { RunDisposal } from "../../src/session/run-disposal"
 import { SessionRunState } from "../../src/session/run-state"
 import { SessionID } from "../../src/session/schema"
@@ -11,14 +12,49 @@ import { SessionStatus } from "../../src/session/status"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
+let statusRaceGate:
+  | {
+      sessionID: SessionID
+      idleEntered: Deferred.Deferred<void>
+      releaseIdle: Deferred.Deferred<void>
+      seen: string[]
+    }
+  | undefined
+let statusBusyGate:
+  | {
+      sessionID: SessionID
+      entered: Deferred.Deferred<void>
+      release: Deferred.Deferred<void>
+    }
+  | undefined
+
 const status = Layer.succeed(
   SessionStatus.Service,
   SessionStatus.Service.of({
     get: () => Effect.succeed({ type: "idle" }),
     list: () => Effect.succeed(new Map()),
-    set: () => Effect.void,
+    set: (sessionID, next) =>
+      Effect.gen(function* () {
+        const busyGate = statusBusyGate
+        if (busyGate?.sessionID === sessionID && next.type === "busy") {
+          yield* Deferred.succeed(busyGate.entered, undefined)
+          yield* Deferred.await(busyGate.release)
+        }
+        const gate = statusRaceGate
+        if (!gate || gate.sessionID !== sessionID) return
+        if (next.type === "idle") {
+          yield* Deferred.succeed(gate.idleEntered, undefined)
+          yield* Deferred.await(gate.releaseIdle)
+        }
+        gate.seen.push(next.type)
+      }),
   }),
 )
+
+afterEach(() => {
+  statusRaceGate = undefined
+  statusBusyGate = undefined
+})
 
 const it = testEffect(
   Layer.mergeAll(
@@ -166,6 +202,379 @@ describe("SessionRunState instance disposal", () => {
           expect(Exit.isFailure(ensureExit) && Cause.hasInterruptsOnly(ensureExit.cause)).toBe(true)
           expect(Exit.isFailure(shellExit) && Cause.hasInterruptsOnly(shellExit.cause)).toBe(true)
           expect(started).toEqual([])
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "atomically admits only one main run",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const sessionID = SessionID.make("session-run-state-exclusive-start")
+          const release = yield* Deferred.make<void>()
+
+          const first = yield* run.startRunning(
+            sessionID,
+            "main",
+            Effect.interrupt,
+            Deferred.await(release).pipe(Effect.andThen(Effect.die("exclusive test released"))),
+          )
+          const second = yield* run
+            .startRunning(
+              sessionID,
+              "main",
+              Effect.interrupt,
+              Effect.die("concurrent work must not run"),
+            )
+            .pipe(Effect.exit)
+
+          expect(Exit.isFailure(second) && Cause.squash(second.cause)).toBeInstanceOf(Session.BusyError)
+          yield* Deferred.succeed(release, undefined)
+          yield* first.pipe(Effect.exit)
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "stale cancelled cleanup cannot delete a replacement runner",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const sessionID = SessionID.make("session-run-state-stale-cleanup")
+          const firstStarted = yield* Deferred.make<void>()
+          const cleanupStarted = yield* Deferred.make<void>()
+          const releaseCleanup = yield* Deferred.make<void>()
+          const releaseThird = yield* Deferred.make<void>()
+
+          yield* run
+            .startRunning(
+              sessionID,
+              "main",
+              Effect.interrupt,
+              Deferred.succeed(firstStarted, undefined).pipe(
+                Effect.andThen(Effect.never),
+                Effect.onInterrupt(() =>
+                  Deferred.succeed(cleanupStarted, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseCleanup)),
+                  ),
+                ),
+              ),
+            )
+            .pipe(Effect.asVoid)
+          yield* Deferred.await(firstStarted)
+
+          const cancelling = yield* run.cancel(sessionID).pipe(Effect.forkChild)
+          yield* Deferred.await(cleanupStarted)
+
+          const second = yield* run.startRunning(
+            sessionID,
+            "main",
+            Effect.interrupt,
+            Effect.die("second run completed"),
+          )
+          yield* second.pipe(Effect.exit)
+
+          const third = yield* run.startRunning(
+            sessionID,
+            "main",
+            Effect.interrupt,
+            Deferred.await(releaseThird).pipe(Effect.andThen(Effect.die("third run completed"))),
+          )
+
+          yield* Deferred.succeed(releaseCleanup, undefined)
+          yield* Fiber.await(cancelling)
+          const fourth = yield* run
+            .startRunning(sessionID, "main", Effect.interrupt, Effect.die("fourth work must not run"))
+            .pipe(Effect.exit)
+
+          expect(Exit.isFailure(fourth) && Cause.squash(fourth.cause)).toBeInstanceOf(Session.BusyError)
+          yield* Deferred.succeed(releaseThird, undefined)
+          yield* third.pipe(Effect.exit)
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "a stale idle publication cannot overwrite a newly admitted busy run",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const sessionID = SessionID.make("session-run-state-stale-idle")
+          const firstStarted = yield* Deferred.make<void>()
+          const finishFirst = yield* Deferred.make<void>()
+          const secondStarted = yield* Deferred.make<void>()
+          const finishSecond = yield* Deferred.make<void>()
+          const idleEntered = yield* Deferred.make<void>()
+          const releaseIdle = yield* Deferred.make<void>()
+          const seen: string[] = []
+          statusRaceGate = { sessionID, idleEntered, releaseIdle, seen }
+          yield* Effect.addFinalizer(() =>
+            Effect.all(
+              [
+                Deferred.succeed(finishFirst, undefined),
+                Deferred.succeed(finishSecond, undefined),
+                Deferred.succeed(releaseIdle, undefined),
+              ],
+              { discard: true },
+            ).pipe(Effect.ignore),
+          )
+
+          const first = yield* run.startRunning(
+            sessionID,
+            "main",
+            Effect.interrupt,
+            Deferred.succeed(firstStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(finishFirst)),
+              Effect.andThen(Effect.die("first complete")),
+            ),
+          )
+          yield* Deferred.await(firstStarted)
+          yield* Deferred.succeed(finishFirst, undefined)
+          yield* Deferred.await(idleEntered)
+
+          const admittingSecond = yield* run
+            .startRunning(
+              sessionID,
+              "main",
+              Effect.interrupt,
+              Deferred.succeed(secondStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(finishSecond)),
+                Effect.andThen(Effect.die("second complete")),
+              ),
+            )
+            .pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(releaseIdle, undefined)
+          const second = yield* Fiber.join(admittingSecond).pipe(Effect.timeout("1 second"))
+          yield* Deferred.await(secondStarted).pipe(Effect.timeout("1 second"))
+
+          expect(seen.at(-1)).toBe("busy")
+
+          yield* Deferred.succeed(finishSecond, undefined)
+          yield* Effect.all([first.pipe(Effect.exit), second.pipe(Effect.exit)], { discard: true })
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "a stale idle publication cannot overwrite a newly ensured busy run",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const sessionID = SessionID.make("session-run-state-stale-idle-ensure")
+          const firstStarted = yield* Deferred.make<void>()
+          const finishFirst = yield* Deferred.make<void>()
+          const secondStarted = yield* Deferred.make<void>()
+          const finishSecond = yield* Deferred.make<void>()
+          const idleEntered = yield* Deferred.make<void>()
+          const releaseIdle = yield* Deferred.make<void>()
+          const seen: string[] = []
+          statusRaceGate = { sessionID, idleEntered, releaseIdle, seen }
+          yield* Effect.addFinalizer(() =>
+            Effect.all(
+              [
+                Deferred.succeed(finishFirst, undefined),
+                Deferred.succeed(finishSecond, undefined),
+                Deferred.succeed(releaseIdle, undefined),
+              ],
+              { discard: true },
+            ).pipe(Effect.ignore),
+          )
+
+          const first = yield* run.startRunning(
+            sessionID,
+            "main",
+            Effect.interrupt,
+            Deferred.succeed(firstStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(finishFirst)),
+              Effect.andThen(Effect.die("first complete")),
+            ),
+          )
+          yield* Deferred.await(firstStarted)
+          yield* Deferred.succeed(finishFirst, undefined)
+          yield* Deferred.await(idleEntered)
+
+          const second = yield* run
+            .ensureRunning(
+              sessionID,
+              "main",
+              Effect.interrupt,
+              Deferred.succeed(secondStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(finishSecond)),
+                Effect.andThen(Effect.die("second complete")),
+              ),
+            )
+            .pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(releaseIdle, undefined)
+          yield* Deferred.await(secondStarted).pipe(Effect.timeout("1 second"))
+
+          expect(seen.at(-1)).toBe("busy")
+
+          yield* Deferred.succeed(finishSecond, undefined)
+          yield* Effect.all([first.pipe(Effect.exit), Fiber.await(second)], { discard: true })
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "an idle abort publication cannot overwrite a newly admitted busy run",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const sessionID = SessionID.make("session-run-state-idle-abort")
+          const finishFirst = yield* Deferred.make<void>()
+          const secondStarted = yield* Deferred.make<void>()
+          const finishSecond = yield* Deferred.make<void>()
+
+          const first = yield* run.startRunning(
+            sessionID,
+            "main",
+            Effect.interrupt,
+            Deferred.await(finishFirst).pipe(Effect.andThen(Effect.die("first complete"))),
+          )
+          yield* Deferred.succeed(finishFirst, undefined)
+          yield* first.pipe(Effect.exit)
+
+          const idleEntered = yield* Deferred.make<void>()
+          const releaseIdle = yield* Deferred.make<void>()
+          const seen: string[] = []
+          statusRaceGate = { sessionID, idleEntered, releaseIdle, seen }
+          yield* Effect.addFinalizer(() =>
+            Effect.all(
+              [Deferred.succeed(finishSecond, undefined), Deferred.succeed(releaseIdle, undefined)],
+              { discard: true },
+            ).pipe(Effect.ignore),
+          )
+
+          const cancelling = yield* run.cancel(sessionID).pipe(Effect.forkChild)
+          yield* Deferred.await(idleEntered)
+          const admitting = yield* run
+            .startRunning(
+              sessionID,
+              "main",
+              Effect.interrupt,
+              Deferred.succeed(secondStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(finishSecond)),
+                Effect.andThen(Effect.die("second complete")),
+              ),
+            )
+            .pipe(Effect.forkChild)
+
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(releaseIdle, undefined)
+          const second = yield* Fiber.join(admitting).pipe(Effect.timeout("1 second"))
+          yield* Effect.all([Fiber.await(cancelling), Deferred.await(secondStarted)], { discard: true })
+
+          expect(seen.at(-1)).toBe("busy")
+
+          yield* Deferred.succeed(finishSecond, undefined)
+          yield* second.pipe(Effect.exit)
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "uses the current run's interrupt fallback after returning to idle",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const sessionID = SessionID.make("session-run-state-current-interrupt")
+          const interrupted: string[] = []
+          const runOnce = (label: string) =>
+            Effect.gen(function* () {
+              const completion = yield* run.startRunning(
+                sessionID,
+                "main",
+                Effect.sync(() => interrupted.push(label)).pipe(Effect.andThen(Effect.interrupt)),
+                Effect.never,
+              )
+              const caller = yield* completion.pipe(Effect.forkChild)
+              yield* run.cancel(sessionID)
+              yield* Fiber.await(caller)
+            })
+
+          yield* runOnce("first")
+          yield* runOnce("second")
+
+          expect(interrupted).toEqual(["first", "second"])
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "keeps shell admission cancelable when its caller is interrupted during busy publication",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const sessionID = SessionID.make("session-run-state-shell-admission-interrupt")
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          statusBusyGate = { sessionID, entered, release }
+          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
+
+          const caller = yield* run.startShell(sessionID, Effect.interrupt, Effect.never).pipe(Effect.forkChild)
+          yield* Deferred.await(entered)
+          const interrupting = yield* Fiber.interrupt(caller).pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.await(interrupting)
+          yield* run.cancel(sessionID)
+
+          const available = yield* run.assertNotBusy(sessionID).pipe(Effect.exit)
+          expect(Exit.isSuccess(available)).toBe(true)
+        }),
+      ),
+    5_000,
+  )
+
+  it.live(
+    "does not strand admission when a cancel caller is interrupted during work cleanup",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const sessionID = SessionID.make("session-run-state-cancel-caller-interrupt")
+          const cleanupStarted = yield* Deferred.make<void>()
+          const releaseCleanup = yield* Deferred.make<void>()
+          yield* Effect.addFinalizer(() => Deferred.succeed(releaseCleanup, undefined).pipe(Effect.ignore))
+
+          const completion = yield* run.startRunning(
+            sessionID,
+            "main",
+            Effect.interrupt,
+            Effect.never.pipe(
+              Effect.onInterrupt(() =>
+                Deferred.succeed(cleanupStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseCleanup)),
+                ),
+              ),
+            ),
+          )
+          const cancelling = yield* run.cancel(sessionID).pipe(Effect.forkChild)
+          yield* Deferred.await(cleanupStarted)
+          yield* Fiber.interrupt(cancelling)
+          yield* Deferred.succeed(releaseCleanup, undefined)
+          yield* completion.pipe(Effect.exit)
+          yield* run.cancel(sessionID)
+
+          const available = yield* run.assertNotBusy(sessionID).pipe(Effect.exit)
+          expect(Exit.isSuccess(available)).toBe(true)
         }),
       ),
     5_000,

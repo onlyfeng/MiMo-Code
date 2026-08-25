@@ -96,7 +96,7 @@ import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { Truncate } from "@/tool"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util"
-import { Cause, Effect, Exit, Layer, Option, Scope, Context } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Option, Scope, Context } from "effect"
 import { EffectLogger } from "@/effect"
 import { InstanceState } from "@/effect"
 import { ActorTool, type ActorPromptOps } from "@/tool/actor"
@@ -263,14 +263,20 @@ function isDirectUserMessage(message: MessageV2.WithParts | undefined) {
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
-  readonly recovery: (input: { sessionID: SessionID; agentID?: string }) => Effect.Effect<RecoveryCandidate[]>
+  readonly startPrompt: (input: PromptInput) => Effect.Effect<Effect.Effect<MessageV2.WithParts>>
+  readonly recovery: (input: { sessionID: SessionID }) => Effect.Effect<RecoveryCandidate[]>
+  readonly startResume: (
+    input: ResumeTurnInput,
+  ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError>>
   readonly resume: (input: ResumeTurnInput) => Effect.Effect<MessageV2.WithParts, InstanceType<typeof NotFoundError>>
+  readonly startSummarize: (input: SummarizeInput) => Effect.Effect<Effect.Effect<MessageV2.WithParts>>
   readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
   readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
+  readonly startCommand: (input: CommandInput) => Effect.Effect<Effect.Effect<MessageV2.WithParts>>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
   readonly sweepOrphanAssistants: (sessionID: SessionID, immediate?: boolean) => Effect.Effect<void>
-  readonly sweepOrphanToolParts: (sessionID: SessionID) => Effect.Effect<void>
+  readonly sweepOrphanToolParts: (sessionID: SessionID, immediate?: boolean) => Effect.Effect<void>
   readonly predict: (input: { sessionID: SessionID }) => Effect.Effect<string>
   /** Internal cycle-breaker: binds this prompt layer to its owning Actor layer. */
   readonly bindActor?: (actor: ActorInterface) => () => void
@@ -285,8 +291,13 @@ export interface RecoveryCandidate {
 export interface ResumeTurnInput {
   sessionID: SessionID
   assistantMessageID: MessageID
-  agentID?: string
-  task_id?: string
+}
+
+export interface SummarizeInput {
+  sessionID: SessionID
+  providerID: ProviderID
+  modelID: ModelID
+  auto: boolean
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
@@ -2772,8 +2783,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     //      publishes status for the main slice (`if (isMain) status.set(...)`), so a
     //      subagent slice can be executing tools while the session status reads
     //      `idle` — its parts are out of scope.
-    const sweepOrphanToolParts = Effect.fn("SessionPrompt.sweepOrphanToolParts")(function* (sessionID: SessionID) {
-      if ((yield* status.get(sessionID)).type !== "idle") return
+    const sweepOrphanToolParts = Effect.fn("SessionPrompt.sweepOrphanToolParts")(function* (
+      sessionID: SessionID,
+      idleAtAdmission?: boolean,
+    ) {
+      const idle = idleAtAdmission ?? ((yield* status.get(sessionID)).type === "idle")
+      if (!idle) return
       for (const m of yield* sessions.messages({ sessionID })) {
         if (m.info.role !== "assistant") continue
         for (const part of m.parts) {
@@ -2796,50 +2811,58 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
     })
 
+    const promptWork = Effect.fnUntraced(function* (
+      input: PromptInput,
+      run: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>,
+      idleAtAdmission?: boolean,
+    ) {
+      const session = yield* sessions.get(input.sessionID)
+      if (input.source !== "spawn" && input.source !== "hook") {
+        yield* revert.cleanup(session)
+        // An idle session has no active runner, so any dangling assistant is a
+        // true orphan from a hard interruption — sweep it now (age-independent)
+        // so a fresh message is not rendered as stuck QUEUED behind it.
+        const idle = idleAtAdmission ?? ((yield* status.get(input.sessionID)).type === "idle")
+        yield* sweepOrphanAssistants(input.sessionID, idle)
+        // Same recovery point, same idleness argument: repair tool parts a killed
+        // process left stuck at `running`. Self-gated on idle (see the function).
+        //
+        // These two look mergeable into one message fetch. They are not:
+        // `sweepOrphanAssistants` reads EVERY slice (`agentID: "*"`) while this one
+        // reads the MAIN slice only, and that difference is load-bearing.
+        // `SessionProcessor` publishes status for the main slice alone, so a subagent
+        // slice can be mid-tool while the session status reads `idle` — scanning only
+        // main is what stops this sweep from rewriting a live subagent's `running`
+        // part. Sharing a fetch would mean taking the wider read and re-filtering
+        // here, which is precisely where that property would get lost. The cost is
+        // also smaller than it looks: this returns after one status lookup unless the
+        // session is genuinely idle.
+        yield* sweepOrphanToolParts(input.sessionID, idleAtAdmission)
+      }
+      const message = yield* createUserMessage(input)
+      yield* sessions.touch(input.sessionID)
+
+      const permissions: Permission.Ruleset = []
+      for (const [t, enabled] of Object.entries(input.tools ?? {})) {
+        permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
+      }
+      if (permissions.length > 0) {
+        session.permission = permissions
+        yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
+      }
+
+      if (input.noReply === true) return message
+      // Short-circuit: when the message was dropped for being empty-content
+      // (hasSubstantiveContent returned false → parts: []), skip the model
+      // turn entirely. Running loop() here would produce a spurious assistant
+      // response with no user turn.
+      if (message.parts.length === 0) return message
+      return yield* run({ sessionID: input.sessionID, agentID: input.agentID ?? "main", task_id: input.task_id })
+    })
+
     const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
       function* (input: PromptInput) {
-        const session = yield* sessions.get(input.sessionID)
-        if (input.source !== "spawn" && input.source !== "hook") {
-          yield* revert.cleanup(session)
-          // An idle session has no active runner, so any dangling assistant is a
-          // true orphan from a hard interruption — sweep it now (age-independent)
-          // so a fresh message is not rendered as stuck QUEUED behind it.
-          const idle = (yield* status.get(input.sessionID)).type === "idle"
-          yield* sweepOrphanAssistants(input.sessionID, idle)
-          // Same recovery point, same idleness argument: repair tool parts a killed
-          // process left stuck at `running`. Self-gated on idle (see the function).
-          //
-          // These two look mergeable into one message fetch. They are not:
-          // `sweepOrphanAssistants` reads EVERY slice (`agentID: "*"`) while this one
-          // reads the MAIN slice only, and that difference is load-bearing.
-          // `SessionProcessor` publishes status for the main slice alone, so a subagent
-          // slice can be mid-tool while the session status reads `idle` — scanning only
-          // main is what stops this sweep from rewriting a live subagent's `running`
-          // part. Sharing a fetch would mean taking the wider read and re-filtering
-          // here, which is precisely where that property would get lost. The cost is
-          // also smaller than it looks: this returns after one status lookup unless the
-          // session is genuinely idle.
-          yield* sweepOrphanToolParts(input.sessionID)
-        }
-        const message = yield* createUserMessage(input)
-        yield* sessions.touch(input.sessionID)
-
-        const permissions: Permission.Ruleset = []
-        for (const [t, enabled] of Object.entries(input.tools ?? {})) {
-          permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
-        }
-        if (permissions.length > 0) {
-          session.permission = permissions
-          yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
-        }
-
-        if (input.noReply === true) return message
-        // Short-circuit: when the message was dropped for being empty-content
-        // (hasSubstantiveContent returned false → parts: []), skip the model
-        // turn entirely. Running loop() here would produce a spurious assistant
-        // response with no user turn.
-        if (message.parts.length === 0) return message
-        return yield* loop({ sessionID: input.sessionID, agentID: input.agentID ?? "main", task_id: input.task_id })
+        return yield* promptWork(input, loop)
       },
     )
 
@@ -2863,9 +2886,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       throw new Error("Impossible")
     })
 
-    const recovery = Effect.fn("SessionPrompt.recovery")(function* (input: { sessionID: SessionID; agentID?: string }) {
-      if ((yield* status.get(input.sessionID)).type !== "idle") return []
-      const msgs = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
+    const startPrompt = Effect.fn("SessionPrompt.startPrompt")(function* (input: PromptInput) {
+      const agentID = input.agentID ?? "main"
+      const idle = (yield* status.get(input.sessionID)).type === "idle"
+      return yield* state.startRunning(
+        input.sessionID,
+        agentID,
+        lastAssistant(input.sessionID, agentID).pipe(Effect.catchCause(() => Effect.interrupt)),
+        promptWork(input, (next) => runLoop(next.sessionID, next.agentID, next.task_id), idle),
+      )
+    })
+
+    const recoveryCandidates = Effect.fn("SessionPrompt.recoveryCandidates")(function* (sessionID: SessionID) {
+      const msgs = yield* sessions.messages({ sessionID, agentID: "main" })
       const candidates: RecoveryCandidate[] = []
       for (const [index, msg] of msgs.entries()) {
         if (msg.info.role !== "assistant" || "completed" in msg.info.time) continue
@@ -2881,12 +2914,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return candidates
     })
 
+    const recovery = Effect.fn("SessionPrompt.recovery")(function* (input: { sessionID: SessionID }) {
+      if ((yield* status.get(input.sessionID)).type !== "idle") return []
+      return yield* recoveryCandidates(input.sessionID)
+    })
+
     const abandonRecoveredAssistant = Effect.fn("SessionPrompt.abandonRecoveredAssistant")(function* (input: {
       sessionID: SessionID
       assistantMessageID: MessageID
-      agentID?: string
     }) {
-      const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
+      const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
       const message = messages.find((item) => item.info.id === input.assistantMessageID)
       if (!message || message.info.role !== "assistant" || "completed" in message.info.time) return
       yield* sessions.updateMessage({
@@ -4769,7 +4806,11 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
       },
     )
 
-    const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
+    const commandWork = Effect.fnUntraced(function* (
+      input: CommandInput,
+      send: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>,
+      runnerOwnsIdle = false,
+    ) {
       yield* elog.info("command", { sessionID: input.sessionID, command: input.command, agent: input.agent })
       const cmd = yield* commands.get(input.command)
       if (!cmd) {
@@ -4789,7 +4830,7 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
         const condition = input.arguments.trim()
         if (condition === "" || condition === "clear" || condition === "reset") {
           yield* goal.clear(input.sessionID)
-          return yield* prompt({
+          return yield* send({
             sessionID: input.sessionID,
             messageID: input.messageID,
             agent: agentName,
@@ -4828,8 +4869,9 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
       // busy-status mechanism that drives "Rebuilding context…" /
       // "Writing checkpoint…" — NOT through a persisted synthetic user message.
       // The busy status is set BEFORE any work so the TUI spinner lights up
-      // immediately; because the runLoop is never entered, its onIdle won't
-      // clear busy status, so every return path clears idle explicitly.
+      // immediately. Legacy direct command callers own their idle transition;
+      // atomically-admitted callers leave it to Runner.onIdle after all command
+      // reads and writes have completed.
       if (input.command === Command.Default.REBUILD) {
         const msgs = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
         const lastUser = msgs.findLast((m) => m.info.role === "user")
@@ -4841,7 +4883,8 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
         // existing last user message so callers still receive a WithParts.
         const settle = Effect.fn("SessionPrompt.rebuild.settle")(function* (message: string) {
           yield* status.set(input.sessionID, { type: "busy", message }).pipe(Effect.catch(() => Effect.void))
-          yield* status.set(input.sessionID, { type: "idle" }).pipe(Effect.catch(() => Effect.void))
+          if (!runnerOwnsIdle)
+            yield* status.set(input.sessionID, { type: "idle" }).pipe(Effect.catch(() => Effect.void))
         })
         const compactedInsteadMsg =
           "No checkpoint could be written (the checkpoint writer failed), so the context was compacted instead — earlier messages were dropped rather than rebuilt from a checkpoint."
@@ -5056,7 +5099,7 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
         { parts },
       )
 
-      const result = yield* prompt({
+      const result = yield* send({
         sessionID: input.sessionID,
         messageID: input.messageID,
         model: userModel,
@@ -5076,46 +5119,110 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
       return result
     })
 
-    const resume = Effect.fn("SessionPrompt.resume")(function* (input: ResumeTurnInput) {
-      yield* state.assertNotBusy(input.sessionID)
-      const candidates = yield* recovery({ sessionID: input.sessionID, agentID: input.agentID })
-      const candidate = candidates.find((item) => item.assistantMessageID === input.assistantMessageID)
-      if (candidate === undefined) {
-        return yield* Effect.fail(
+    const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
+      return yield* commandWork(input, prompt)
+    })
+
+    const startCommand = Effect.fn("SessionPrompt.startCommand")(function* (input: CommandInput) {
+      const idle = (yield* status.get(input.sessionID)).type === "idle"
+      return yield* state.startRunning(
+        input.sessionID,
+        "main",
+        lastAssistant(input.sessionID, "main").pipe(Effect.catchCause(() => Effect.interrupt)),
+        commandWork(
+          input,
+          (next) =>
+            promptWork(next, (loopInput) => runLoop(loopInput.sessionID, loopInput.agentID, loopInput.task_id), idle),
+          true,
+        ),
+      )
+    })
+
+    const startSummarize = Effect.fn("SessionPrompt.startSummarize")(function* (input: SummarizeInput) {
+      return yield* state.startRunning(
+        input.sessionID,
+        "main",
+        lastAssistant(input.sessionID, "main").pipe(Effect.catchCause(() => Effect.interrupt)),
+        Effect.gen(function* () {
+          yield* revert.cleanup(yield* sessions.get(input.sessionID))
+          const msgs = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
+          const lastUser = msgs.findLast((message) => message.info.role === "user")
+          const currentAgent =
+            lastUser?.info.role === "user" && lastUser.info.agent
+              ? lastUser.info.agent
+              : yield* agents.defaultAgent()
+          yield* compaction.create({
+            sessionID: input.sessionID,
+            agent: currentAgent,
+            model: { providerID: input.providerID, modelID: input.modelID },
+            auto: input.auto,
+            agentID: "main",
+          })
+          return yield* runLoop(input.sessionID, "main")
+        }),
+      )
+    })
+
+    const startResume = Effect.fn("SessionPrompt.startResume")(function* (input: ResumeTurnInput) {
+      const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError>>()
+      const validate = Effect.gen(function* () {
+        const candidates = yield* recoveryCandidates(input.sessionID)
+        if (candidates.some((item) => item.assistantMessageID === input.assistantMessageID)) return
+        yield* Effect.fail(
           new NotFoundError({
             message: "No resumable interrupted turn found for assistant message " + input.assistantMessageID,
           }),
         )
-      }
-      const agentID = input.agentID ?? "main"
-      return yield* state.ensureRunning(
+      })
+      const completion = yield* state.startRunning(
         input.sessionID,
-        agentID,
-        lastAssistant(input.sessionID, agentID),
-        runLoop(input.sessionID, agentID, input.task_id).pipe(
-          Effect.ensuring(
-            abandonRecoveredAssistant({ sessionID: input.sessionID, assistantMessageID: input.assistantMessageID, agentID }).pipe(
-              Effect.catchCause((cause) =>
-                elog.warn("recovered-assistant-abandon-failed", {
-                  sessionID: input.sessionID,
-                  messageID: input.assistantMessageID,
-                  cause,
-                }),
+        "main",
+        lastAssistant(input.sessionID, "main"),
+        validate.pipe(
+          Effect.onExit((exit) => Deferred.done(admitted, Exit.isSuccess(exit) ? Exit.void : exit).pipe(Effect.ignore)),
+          Effect.orDie,
+          Effect.andThen(
+            runLoop(input.sessionID, "main").pipe(
+              Effect.ensuring(
+                abandonRecoveredAssistant({ sessionID: input.sessionID, assistantMessageID: input.assistantMessageID }).pipe(
+                  Effect.catchCause((cause) =>
+                    elog.warn("recovered-assistant-abandon-failed", {
+                      sessionID: input.sessionID,
+                      messageID: input.assistantMessageID,
+                      cause,
+                    }),
+                  ),
+                ),
               ),
             ),
           ),
         ),
       )
+      const admission = yield* Effect.raceFirst(
+        Deferred.await(admitted),
+        completion.pipe(Effect.andThen(Effect.interrupt)),
+      ).pipe(Effect.exit)
+      if (Exit.isSuccess(admission)) return completion
+      yield* completion.pipe(Effect.exit)
+      return yield* Effect.failCause(admission.cause)
+    })
+
+    const resume = Effect.fn("SessionPrompt.resume")(function* (input: ResumeTurnInput) {
+      return yield* (yield* startResume(input))
     })
 
     const impl = Service.of({
       cancel,
       prompt,
+      startPrompt,
       recovery,
+      startResume,
       resume,
+      startSummarize,
       loop,
       shell,
       command,
+      startCommand,
       resolvePromptParts,
       sweepOrphanAssistants,
       sweepOrphanToolParts,

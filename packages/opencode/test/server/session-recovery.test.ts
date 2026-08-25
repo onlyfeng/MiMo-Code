@@ -17,6 +17,51 @@ afterEach(async () => {
 })
 
 describe("session turn recovery routes", () => {
+  test("does not expose or resume interrupted actor turns", async () => {
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
+    const result = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => AppRuntime.runPromise(Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({ title: "actor recovery boundary" })
+        const user = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "build",
+          agentID: "peer-1",
+          model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+          time: { created: Date.now() },
+        })
+        const assistant = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "assistant",
+          parentID: user.id,
+          sessionID: session.id,
+          mode: "build",
+          agent: "build",
+          agentID: "peer-1",
+          path: { cwd: tmp.path, root: tmp.path },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: ModelID.make("test-model"),
+          providerID: ProviderID.make("test"),
+          time: { created: Date.now() },
+        })
+        const app = Server.Default().app
+        const query = `?directory=${encodeURIComponent(tmp.path)}&agentID=peer-1&task_id=T1`
+        const listed = yield* Effect.promise(() => Promise.resolve(app.request(`/session/${session.id}/recovery${query}`)))
+        const candidates = yield* Effect.promise(() => listed.json())
+        const resumed = yield* Effect.promise(() =>
+          Promise.resolve(app.request(`/session/${session.id}/turn/${assistant.id}/resume${query}`, { method: "POST" })),
+        )
+        return { listed: listed.status, candidates, resumed: resumed.status }
+      })),
+    })
+
+    expect(result).toEqual({ listed: 200, candidates: [], resumed: 404 })
+  })
+
   test("lists the latest incomplete assistant and accepts resume without a new prompt", async () => {
     await using tmp = await tmpdir({ git: true, root: "cwd" })
     const result = await Instance.provide({
@@ -60,7 +105,7 @@ describe("session turn recovery routes", () => {
         })
         const query = `?directory=${encodeURIComponent(tmp.path)}`
         const listed = yield* Effect.promise(() => Promise.resolve(app.request(`/session/${session.id}/recovery${query}`)))
-        const candidates = yield* Effect.promise(() => listed.json() as Promise<Array<{ assistantMessageID: string; parentMessageID: string; created: number }>>)
+        const candidates: unknown = yield* Effect.promise(() => listed.json())
         const missing = yield* Effect.promise(() =>
           Promise.resolve(app.request(`/session/${session.id}/turn/${MessageID.ascending()}/resume${query}`, { method: "POST" })),
         )
@@ -83,5 +128,98 @@ describe("session turn recovery routes", () => {
     expect(result.errors.length).toBeGreaterThan(0)
     expect(result.abandoned?.time.completed).toEqual(expect.any(Number))
     expect(result.abandoned?.error?.data.message).toContain("Abandoned")
+  })
+
+  test("atomically accepts only one of two concurrent resume requests", async () => {
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
+    const statuses = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => AppRuntime.runPromise(Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({ title: "concurrent recovery admission" })
+        const user = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "build",
+          model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+          time: { created: Date.now() },
+        })
+        const assistant = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "assistant",
+          parentID: user.id,
+          sessionID: session.id,
+          mode: "build",
+          agent: "build",
+          path: { cwd: tmp.path, root: tmp.path },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: ModelID.make("test-model"),
+          providerID: ProviderID.make("test"),
+          time: { created: Date.now() },
+        })
+        const app = Server.Default().app
+        const url = `/session/${session.id}/turn/${assistant.id}/resume?directory=${encodeURIComponent(tmp.path)}`
+        const responses = yield* Effect.promise(() =>
+          Promise.all([
+            app.request(url, { method: "POST" }),
+            app.request(url, { method: "POST" }),
+          ]),
+        )
+        return responses.map((response) => response.status).sort((a, b) => a - b)
+      })),
+    })
+
+    expect(statuses).toEqual([202, 409])
+  })
+
+  test("shares atomic admission with the ordinary prompt route", async () => {
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
+    const statuses = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => AppRuntime.runPromise(Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({ title: "prompt recovery admission" })
+        const user = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "build",
+          model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+          time: { created: Date.now() },
+        })
+        const assistant = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "assistant",
+          parentID: user.id,
+          sessionID: session.id,
+          mode: "build",
+          agent: "build",
+          path: { cwd: tmp.path, root: tmp.path },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: ModelID.make("test-model"),
+          providerID: ProviderID.make("test"),
+          time: { created: Date.now() },
+        })
+        const app = Server.Default().app
+        const query = `?directory=${encodeURIComponent(tmp.path)}`
+        const responses = yield* Effect.promise(() =>
+          Promise.all([
+            app.request(`/session/${session.id}/message${query}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ parts: [{ type: "text", text: "new prompt" }] }),
+            }),
+            app.request(`/session/${session.id}/turn/${assistant.id}/resume${query}`, { method: "POST" }),
+          ]),
+        )
+        return responses.map((response) => response.status).sort((a, b) => a - b)
+      })),
+    })
+
+    expect(statuses).toContain(409)
+    expect(statuses.filter((status) => status === 200 || status === 202)).toHaveLength(1)
   })
 })

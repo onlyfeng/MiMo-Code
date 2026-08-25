@@ -613,7 +613,7 @@ const live: Layer.Layer<
           approvalHandler?: (approvalTools: { name: string; args: string }[]) => Promise<{ approved: boolean }>
         }
         workflowModel.sessionID = input.sessionID
-        workflowModel.systemPrompt = system.join("\n")
+        workflowModel.systemPrompt = providerSystem.join("\n")
         workflowModel.toolExecutor = async (toolName, argsJson, _requestID) => {
           const registered = Object.keys(tools)
           const resolvedName = ToolCompat.resolveName(toolName, registered) ?? toolName
@@ -728,7 +728,7 @@ const live: Layer.Layer<
               ...providerSystem.map((content) => ({ role: "system", content })),
               ...(isOpenaiOauth || isWorkflow ? requestMessages : requestMessagesWithContext),
             ],
-            systemPrompt: system,
+            systemPrompt: providerSystem,
           },
           {},
         )

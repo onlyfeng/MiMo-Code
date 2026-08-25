@@ -7,14 +7,12 @@ import { Session } from "@/session"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRunState } from "@/session/run-state"
-import { SessionCompaction } from "@/session/compaction"
 import { SessionRevert } from "@/session/revert"
 import { SessionShare } from "@/share"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { Effect } from "effect"
-import { Agent } from "@/agent/agent"
 import { Snapshot } from "@/snapshot"
 import { Command } from "@/command"
 import { Log } from "@/util"
@@ -33,7 +31,6 @@ import { Bus } from "@/bus"
 import { NamedError } from "@mimo-ai/shared/util/error"
 import { jsonRequest, runRequest } from "./trace"
 import { RateLimitMiddleware } from "../../rate-limit"
-import { NotFoundError } from "@/storage"
 
 const log = Log.create({ service: "server" })
 
@@ -428,7 +425,7 @@ export const SessionRoutes = lazy(() =>
               },
             },
           },
-          ...errors(400, 404),
+          ...errors(400, 404, 409),
         },
       }),
       validator(
@@ -450,13 +447,13 @@ export const SessionRoutes = lazy(() =>
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
           const svc = yield* SessionPrompt.Service
-          yield* svc.command({
+          yield* (yield* svc.startCommand({
             sessionID,
             messageID: body.messageID,
             model: body.providerID + "/" + body.modelID,
             command: Command.Default.INIT,
             arguments: "",
-          })
+          }))
           return true
         }),
     )
@@ -644,7 +641,7 @@ export const SessionRoutes = lazy(() =>
               },
             },
           },
-          ...errors(400, 404),
+          ...errors(400, 404, 409),
         },
       }),
       validator(
@@ -665,26 +662,8 @@ export const SessionRoutes = lazy(() =>
         jsonRequest("SessionRoutes.summarize", c, function* () {
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
-          const session = yield* Session.Service
-          const revert = yield* SessionRevert.Service
-          const compact = yield* SessionCompaction.Service
-          const prompt = yield* SessionPrompt.Service
-          const agent = yield* Agent.Service
-
-          yield* revert.cleanup(yield* session.get(sessionID))
-          const currentAgent = yield* resolveCurrentAgent(sessionID, yield* agent.defaultAgent())
-
-          yield* compact.create({
-            sessionID,
-            agent: currentAgent,
-            model: {
-              providerID: body.providerID,
-              modelID: body.modelID,
-            },
-            auto: body.auto,
-            agentID: "main",
-          })
-          yield* prompt.loop({ sessionID })
+          const svc = yield* SessionPrompt.Service
+          yield* (yield* svc.startSummarize({ sessionID, ...body }))
           return true
         }),
     )
@@ -1002,7 +981,7 @@ export const SessionRoutes = lazy(() =>
       "/:sessionID/recovery",
       describeRoute({
         summary: "List interrupted turn recovery candidates",
-        description: "Return the latest incomplete assistant turn that can be resumed without creating a user message.",
+        description: "Return incomplete main-agent turns that can be resumed without creating a user message.",
         operationId: "session.recovery",
         responses: {
           200: {
@@ -1021,20 +1000,19 @@ export const SessionRoutes = lazy(() =>
         },
       }),
       validator("param", z.object({ sessionID: SessionID.zod })),
-      validator("query", z.object({ agentID: z.string().optional() })),
+      validator("query", z.object({})),
       async (c) =>
         jsonRequest("SessionRoutes.recovery", c, function* () {
           const sessionID = c.req.valid("param").sessionID
-          const query = c.req.valid("query")
           const svc = yield* SessionPrompt.Service
-          return yield* svc.recovery({ sessionID, agentID: query.agentID })
+          return yield* svc.recovery({ sessionID })
         }),
     )
     .post(
       "/:sessionID/turn/:assistantMessageID/resume",
       describeRoute({
         summary: "Resume an interrupted turn",
-        description: "Resume an incomplete assistant turn without creating another user message.",
+        description: "Resume an incomplete main-agent turn without creating another user message.",
         operationId: "session.resume",
         responses: {
           202: { description: "Resume accepted" },
@@ -1048,43 +1026,23 @@ export const SessionRoutes = lazy(() =>
       validator("query", z.object({
         directory: z.string().optional(),
         workspace: z.string().optional(),
-        agentID: z.string().optional(),
-        task_id: z.string().optional(),
       })),
       async (c) => {
         const params = c.req.valid("param")
-        const query = c.req.valid("query")
-        await runRequest(
-          "SessionRoutes.resume.assertNotBusy",
-          c,
-          SessionRunState.Service.use((svc) => svc.assertNotBusy(params.sessionID)),
-        )
-        await runRequest(
-          "SessionRoutes.resume.validate",
+        const completion = await runRequest(
+          "SessionRoutes.resume.start",
           c,
           SessionPrompt.Service.use((svc) =>
-            svc.recovery({ sessionID: params.sessionID, agentID: query.agentID }).pipe(
-              Effect.flatMap((candidates) =>
-                candidates.some((candidate) => candidate.assistantMessageID === params.assistantMessageID)
-                  ? Effect.void
-                  : Effect.fail(
-                      new NotFoundError({
-                        message: "No resumable interrupted turn found for assistant message " + params.assistantMessageID,
-                      }),
-                    ),
-              ),
-            ),
+            svc.startResume({
+              sessionID: params.sessionID,
+              assistantMessageID: params.assistantMessageID,
+            }),
           ),
         )
         void runRequest(
           "SessionRoutes.resume",
           c,
-          SessionPrompt.Service.use((svc) => svc.resume({
-            sessionID: params.sessionID,
-            assistantMessageID: params.assistantMessageID,
-            agentID: query.agentID,
-            task_id: query.task_id,
-          })),
+          completion,
         ).catch((error) => {
           log.error("session resume failed", { sessionID: params.sessionID, error })
           const failure =
@@ -1128,23 +1086,15 @@ export const SessionRoutes = lazy(() =>
       validator("json", SessionPrompt.PromptInput.omit({ sessionID: true })),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
-
-        // Pre-check: bail with 409 Conflict if the session's main runner is busy
-        // with another request. Without this guard, ensureRunning silently queues
-        // the new work behind the existing runner (which may be a zombie from a
-        // SIGKILL'd previous client), causing the new client to hang for the
-        // duration of the old runner's retry envelope. Caller's recovery path:
-        // POST /:sessionID/abort to free the runner, then retry this POST.
-        await runRequest(
-          "SessionRoutes.prompt.assertNotBusy",
+        const completion = await runRequest(
+          "SessionRoutes.prompt.start",
           c,
-          SessionRunState.Service.use((svc) => svc.assertNotBusy(sessionID)),
+          SessionPrompt.Service.use((svc) => svc.startPrompt({ ...c.req.valid("json"), sessionID })),
         )
 
         c.status(200)
         c.header("Content-Type", "application/json")
         return stream(c, async (stream) => {
-          const body = c.req.valid("json")
           // If the HTTP client gives up (TUI exits, driver kills its `mimo run`
           // client on its own per-turn timeout, network drop), we have to drive
           // the server-side runner to Idle ourselves. Otherwise the prompt
@@ -1185,7 +1135,7 @@ export const SessionRoutes = lazy(() =>
             const msg = await runRequest(
               "SessionRoutes.prompt",
               c,
-              SessionPrompt.Service.use((svc) => svc.prompt({ ...body, sessionID })),
+              completion,
             )
             // Safety invariant: no await/yield between this write and the
             // clearInterval below (reached synchronously via finally) — else the
@@ -1212,7 +1162,7 @@ export const SessionRoutes = lazy(() =>
           204: {
             description: "Prompt accepted",
           },
-          ...errors(400, 404),
+          ...errors(400, 404, 409),
         },
       }),
       validator(
@@ -1225,10 +1175,15 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
+        const completion = await runRequest(
+          "SessionRoutes.prompt_async.start",
+          c,
+          SessionPrompt.Service.use((svc) => svc.startPrompt({ ...body, sessionID })),
+        )
         void runRequest(
           "SessionRoutes.prompt_async",
           c,
-          SessionPrompt.Service.use((svc) => svc.prompt({ ...body, sessionID })),
+          completion,
         ).catch((err) => {
           log.error("prompt_async failed", { sessionID, error: err })
           void Bus.publish(Session.Event.Error, {
@@ -1260,7 +1215,7 @@ export const SessionRoutes = lazy(() =>
               },
             },
           },
-          ...errors(400, 404),
+          ...errors(400, 404, 409),
         },
       }),
       validator(
@@ -1275,7 +1230,7 @@ export const SessionRoutes = lazy(() =>
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
           const svc = yield* SessionPrompt.Service
-          return yield* svc.command({ ...body, sessionID })
+          return yield* (yield* svc.startCommand({ ...body, sessionID }))
         }),
     )
     .post(
@@ -1331,7 +1286,7 @@ export const SessionRoutes = lazy(() =>
               },
             },
           },
-          ...errors(400, 404),
+          ...errors(400, 404, 409),
         },
       }),
       validator(

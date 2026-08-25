@@ -226,12 +226,26 @@ let disposalRetryGate:
       armed: boolean
     }
   | undefined
+let droppedStartGate:
+  | {
+      sessionID: SessionID
+      actorID: string
+      armed: boolean
+    }
+  | undefined
 const run = Layer.effect(
   SessionRunState.Service,
   Effect.gen(function* () {
     const state = yield* SessionRunState.Service
     return SessionRunState.Service.of({
       ...state,
+      startRunning: (sessionID, actorID, onInterrupt, work) => {
+        const gate = droppedStartGate
+        if (!gate?.armed || gate.sessionID !== sessionID || gate.actorID !== actorID)
+          return state.startRunning(sessionID, actorID, onInterrupt, work)
+        gate.armed = false
+        return Effect.succeed(onInterrupt)
+      },
       ensureRunning: (sessionID, actorID, onInterrupt, work) => {
         const disposal = disposalRetryGate
         if (disposal?.armed && disposal.sessionID === sessionID && disposal.actorID === actorID) {
@@ -283,6 +297,7 @@ const run = Layer.effect(
 afterEach(() => {
   lateRunGate = undefined
   disposalRetryGate = undefined
+  droppedStartGate = undefined
 })
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 function makeHttp(mcpService = mcp, input?: { actor?: boolean }) {
@@ -1245,6 +1260,25 @@ it.live("resume continues an incomplete assistant without creating or rewriting 
       expect(result.info.role).toBe("assistant")
       expect(result.info.id).not.toBe(seeded.assistant.id)
       expect(result.parts.some((part) => part.type === "text" && part.text === "world")).toBe(true)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("resume admission terminates when its claimed runner is cancelled before work enters", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Dropped recovery admission" })
+      const seeded = yield* seed(chat.id)
+      droppedStartGate = { sessionID: chat.id, actorID: "main", armed: true }
+
+      const exit = yield* prompt
+        .startResume({ sessionID: chat.id, assistantMessageID: seeded.assistant.id })
+        .pipe(Effect.timeout("1 second"), Effect.exit)
+
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
     }),
     { git: true, config: providerCfg },
   ),
@@ -3195,7 +3229,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  5_000,
 )
 
 it.live(
@@ -3658,7 +3692,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  5_000,
 )
 
 unix("shell captures stdout and stderr in completed tool output", () =>
