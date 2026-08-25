@@ -27,7 +27,7 @@ import { Git } from "@/git"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import { assembleFleet, renderFleetTable } from "./fleet"
 import type { FleetActorInput, WorktreeEntry } from "./fleet"
-import type { SessionID, MessageID } from "../session/schema"
+import { SessionID, type MessageID } from "../session/schema"
 import type { ProviderID, ModelID } from "../provider/schema"
 
 const KNOWN_VERBS = ["create", "send", "switch", "list", "dashboard", "status", "cancel", "ask", "join", "setmode", "approve", "grant-approval"]
@@ -794,6 +794,8 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
 
         let effectiveDir = targetDir
         let isolateNotice = ""
+        let ownedWorktree: Worktree.Info | undefined
+        let createdSessionID: SessionID | undefined
         if (op.isolate) {
           // LOAD-BEARING: Worktree.create resolves against the AMBIENT Instance
           // (InstanceState.context = (yield* InstanceRef) ?? Instance.current).
@@ -808,35 +810,58 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
           const ctxResult = yield* Effect.exit(
             Effect.promise(() => Instance.provide({ directory: targetDir, fn: () => Instance.current })),
           )
-          const wtDir = ctxResult._tag === "Success"
+          ownedWorktree = ctxResult._tag === "Success"
             ? yield* worktreeSvc
                 .create({ name: op.title ?? op.task.slice(0, 40) })
                 .pipe(
                   Effect.provideService(InstanceRef, ctxResult.value),
                   Effect.exit,
-                  Effect.map((exit) => (exit._tag === "Success" ? exit.value.directory : undefined)),
+                  Effect.map((exit) => (exit._tag === "Success" ? exit.value : undefined)),
                 )
             : undefined
-          if (wtDir) effectiveDir = wtDir
+          if (ownedWorktree) effectiveDir = ownedWorktree.directory
           else
             isolateNotice =
               " (note: --isolate ignored — directory is not a git repo or worktree creation failed; running shared)"
         }
 
-        const result = yield* actor.spawn({
-          mode: "peer",
-          sessionID: ctx.sessionID as SessionID,
-          agentType: op.mode ?? "build",
-          task: op.task,
-          description: op.title ?? op.task.slice(0, 40),
-          context: "none",
-          tools: "INHERIT",
-          ...(model ? { model } : {}),
-          background: true,
-          parentActorID: ctx.actorID,
-          lifecycle: "persistent",
-          cwd: effectiveDir,
-        })
+        const spawnExit = yield* Effect.exit(
+          actor.spawn({
+            mode: "peer",
+            sessionID: ctx.sessionID as SessionID,
+            agentType: op.mode ?? "build",
+            task: op.task,
+            description: op.title ?? op.task.slice(0, 40),
+            context: "none",
+            tools: "INHERIT",
+            ...(model ? { model } : {}),
+            background: true,
+            parentActorID: ctx.actorID,
+            lifecycle: "persistent",
+            cwd: effectiveDir,
+            ...(ownedWorktree
+              ? { worktreeOwnership: { directory: ownedWorktree.directory, branch: ownedWorktree.branch } }
+              : {}),
+            onActorID: (actorID) => {
+              createdSessionID = SessionID.make(actorID)
+            },
+          }),
+        )
+        if (spawnExit._tag !== "Success") {
+          if (createdSessionID) yield* sessions.remove(createdSessionID)
+          if (ownedWorktree && (yield* git.branch(ownedWorktree.directory)) === ownedWorktree.branch) {
+            const cleanupContext = yield* Effect.exit(
+              Effect.promise(() => Instance.provide({ directory: ownedWorktree.directory, fn: () => Instance.current })),
+            )
+            if (cleanupContext._tag === "Success") {
+              yield* worktreeSvc
+                .remove({ directory: ownedWorktree.directory })
+                .pipe(Effect.provideService(InstanceRef, cleanupContext.value), Effect.exit)
+            }
+          }
+          return yield* Effect.failCause(spawnExit.cause)
+        }
+        const result = spawnExit.value
         // spawnPeer titles the child session `${agentType}: ${task}`; honor an
         // explicit --title by overwriting it so `session list` shows what the
         // orchestrator asked for. When --topic is set, prefix the title with a
@@ -1137,25 +1162,32 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
       if (op.action === "cancel") {
         const actor = yield* requireActor()
         yield* actor.cancel(op.sessionID as SessionID, op.sessionID, "graceful")
-        // Remove the child's worktree in ITS OWN project's Instance: a child may
-        // live in a worktree of a DIFFERENT project than us, and Worktree.remove's
-        // `git worktree remove` resolves against the ambient Instance. Resolve the
-        // child dir's InstanceContext and provide it as InstanceRef. Worktree.remove
-        // is a no-op for a non-worktree dir, so shared-dir children are safe.
+        // Remove only a worktree this session tool created for this child. Merely
+        // being a linked worktree is not ownership: --dir may point at an existing
+        // checkout, or the orchestrator itself may run in one. The durable marker
+        // records both path and branch; cancellation fails closed if either changed.
+        // Resolve the owned child dir's InstanceContext and provide it as
+        // InstanceRef because it may belong to a DIFFERENT project than us.
         // Best-effort throughout (Effect.exit): never fail the cancel. The
         // orchestrator only cancels once a child's work is merged or abandoned
         // (prompt rule), so this never discards live work.
         const child = yield* sessions.get(op.sessionID as SessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
         let removed = false
         if (child) {
-          const ctxExit = yield* Effect.exit(
-            Effect.promise(() => Instance.provide({ directory: child.directory, fn: () => Instance.current })),
-          )
-          if (ctxExit._tag === "Success") {
-            const remExit = yield* worktreeSvc
-              .remove({ directory: child.directory })
-              .pipe(Effect.provideService(InstanceRef, ctxExit.value), Effect.exit)
-            removed = remExit._tag === "Success" ? remExit.value : false
+          const ownershipExit = yield* Effect.exit(sessions.worktreeOwnership(child.id))
+          const ownership = ownershipExit._tag === "Success" ? ownershipExit.value : undefined
+          const branch = ownership?.directory === child.directory ? yield* git.branch(child.directory) : undefined
+          if (ownership && branch === ownership.branch) {
+            const ctxExit = yield* Effect.exit(
+              Effect.promise(() => Instance.provide({ directory: child.directory, fn: () => Instance.current })),
+            )
+            if (ctxExit._tag === "Success" && ctxExit.value.worktree !== ctxExit.value.project.worktree) {
+              const remExit = yield* worktreeSvc
+                .remove({ directory: child.directory })
+                .pipe(Effect.provideService(InstanceRef, ctxExit.value), Effect.exit)
+              removed = remExit._tag === "Success" ? remExit.value : false
+              if (removed) yield* sessions.clearWorktreeOwnership(child.id).pipe(Effect.ignore)
+            }
           }
         }
         return {

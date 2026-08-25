@@ -41,6 +41,7 @@ export const make = <A, E = never>(
     onIdle?: Effect.Effect<void>
     onBusy?: Effect.Effect<void>
     onInterrupt?: Effect.Effect<A, E>
+    canStart?: () => boolean
     busy?: () => never
     label?: string
     onReentryWarn?: (info: { label: string; existingRunId: number }) => Effect.Effect<void>
@@ -111,6 +112,11 @@ export const make = <A, E = never>(
         Effect.fnUntraced(function* (st) {
           if (st._tag === "Shell" && st.shell.id === id) return [idle, { _tag: "Idle" }] as const
           if (st._tag === "ShellThenRun" && st.shell.id === id) {
+            if (opts?.canStart?.() === false)
+              return [
+                Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.andThen(idle), Effect.asVoid),
+                { _tag: "Idle" },
+              ] as const
             const run = yield* startRun(st.run.work, st.run.done)
             return [
               (opts?._testHooks?.beforeRunStart ?? Effect.void).pipe(
@@ -132,6 +138,7 @@ export const make = <A, E = never>(
       SynchronizedRef.modifyEffect(
         ref,
         Effect.fnUntraced(function* (st) {
+          if (opts?.canStart?.() === false) return [Effect.interrupt, st] as const
           switch (st._tag) {
             case "Running":
             case "ShellThenRun":
@@ -158,6 +165,7 @@ export const make = <A, E = never>(
               ] as const
             }
           }
+          return [Effect.interrupt, st] as const
         }),
       ).pipe(Effect.flatten),
     ).pipe(
@@ -170,6 +178,7 @@ export const make = <A, E = never>(
     SynchronizedRef.modifyEffect(
       ref,
       Effect.fnUntraced(function* (st) {
+        if (opts?.canStart?.() === false) return [Effect.interrupt, st] as const
         if (st._tag !== "Idle") {
           return [
             Effect.sync(() => {
@@ -180,6 +189,7 @@ export const make = <A, E = never>(
           ] as const
         }
         yield* busy
+        if (opts?.canStart?.() === false) return [Effect.interrupt, st] as const
         const id = next()
         const fiber = yield* work.pipe(Effect.ensuring(finishShell(id)), Effect.forkChild)
         const shell = { id, fiber } satisfies ShellHandle<A, E>

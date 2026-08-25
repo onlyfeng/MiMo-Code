@@ -37,6 +37,15 @@ const log = Log.create({ service: "session" })
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
 const promptLocks = new Map<SessionID, Semaphore.Semaphore>()
+const WorktreeOwnership = z.strictObject({
+  directory: z.string(),
+  branch: z.string(),
+})
+type WorktreeOwnership = z.infer<typeof WorktreeOwnership>
+
+function worktreeOwnershipKey(sessionID: SessionID) {
+  return ["session_worktree", sessionID]
+}
 
 function promptLock(sessionID: SessionID) {
   const current = promptLocks.get(sessionID)
@@ -395,12 +404,16 @@ export interface Interface {
     contextFrom?: SessionID
     contextWatermark?: MessageID
     title?: string
+    directory?: string
+    worktreeOwnership?: WorktreeOwnership
     permission?: Permission.Ruleset
     workspaceID?: WorkspaceID
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info>
+  readonly worktreeOwnership: (sessionID: SessionID) => Effect.Effect<WorktreeOwnership | undefined>
+  readonly clearWorktreeOwnership: (sessionID: SessionID) => Effect.Effect<void>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
   readonly setPermission: (input: { sessionID: SessionID; permission: Permission.Ruleset }) => Effect.Effect<void>
@@ -483,6 +496,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       contextWatermark?: MessageID
       workspaceID?: WorkspaceID
       directory: string
+      worktreeOwnership?: WorktreeOwnership
       permission?: Permission.Ruleset
       prompt?: PromptConfig
     }) {
@@ -507,6 +521,11 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       }
       log.info("created", result)
 
+      if (input.worktreeOwnership) {
+        yield* storage
+          .write(worktreeOwnershipKey(result.id), input.worktreeOwnership)
+          .pipe(Effect.orDie)
+      }
       yield* Effect.sync(() => SyncEvent.run(Event.Created, { sessionID: result.id, info: result }))
 
       yield* actorReg.register({
@@ -539,6 +558,22 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       const row = yield* db((d) => d.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
       if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
       return fromRow(row)
+    })
+
+    const worktreeOwnership: Interface["worktreeOwnership"] = Effect.fn("Session.worktreeOwnership")(
+      function* (sessionID) {
+        const raw = yield* storage
+          .read<unknown>(worktreeOwnershipKey(sessionID))
+          .pipe(Effect.catch(() => Effect.succeed(undefined)))
+        const parsed = WorktreeOwnership.safeParse(raw)
+        return parsed.success ? parsed.data : undefined
+      },
+    )
+
+    const clearWorktreeOwnership: Interface["clearWorktreeOwnership"] = Effect.fn(
+      "Session.clearWorktreeOwnership",
+    )(function* (sessionID) {
+      yield* storage.remove(worktreeOwnershipKey(sessionID)).pipe(Effect.catch(() => Effect.void))
     })
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID, options?: { visible?: boolean }) {
@@ -607,6 +642,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           forwardRef.clearParentGrants(sessionID)
           promptLocks.delete(sessionID)
         })
+        yield* clearWorktreeOwnership(sessionID).pipe(Effect.ignore)
       } catch (e) {
         log.error(e)
       }
@@ -661,8 +697,10 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       // In-process only (deliberately NOT on the public CreateInput / HTTP body,
       // where it would collide with the route's `directory` query selector). Set
       // once at creation by an in-process caller — e.g. spawnPeer placing a child
-      // session in its own worktree dir. Defaults to the current instance dir.
+      // session in its own worktree dir and attaching deletion provenance before
+      // publishing it. The directory defaults to the current instance dir.
       directory?: string
+      worktreeOwnership?: WorktreeOwnership
       permission?: Permission.Ruleset
       workspaceID?: WorkspaceID
     }) {
@@ -673,6 +711,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         contextFrom: input?.contextFrom,
         contextWatermark: input?.contextWatermark,
         directory,
+        worktreeOwnership: input?.worktreeOwnership,
         title: input?.title,
         permission: input?.permission,
         prompt: input?.parentID ? (yield* get(input.parentID)).prompt : undefined,
@@ -890,6 +929,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       fork,
       touch,
       get,
+      worktreeOwnership,
+      clearWorktreeOwnership,
       setTitle,
       setArchived,
       setPermission,

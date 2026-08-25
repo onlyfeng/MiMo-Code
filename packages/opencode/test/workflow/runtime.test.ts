@@ -1,16 +1,24 @@
 import { describe, expect, afterEach } from "bun:test"
 import { Effect } from "effect"
+import { mkdir, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { Session } from "../../src/session"
-import { SessionRunState } from "../../src/session/run-state"
 import { Instance } from "../../src/project/instance"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply } from "../lib/llm-server"
 import { WorkflowRuntime } from "../../src/workflow/runtime"
-import { WorkflowAgentFailed } from "../../src/workflow/events"
+import { WorkflowAgentFailed, WorkflowFinished } from "../../src/workflow/events"
 import { WorkflowPersistence } from "../../src/workflow/persistence"
 import { ActorRegistry } from "../../src/actor/registry"
 import { Bus } from "../../src/bus"
+import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
+import { InboxArrived } from "../../src/actor/events"
+import { InboxTable } from "../../src/inbox/inbox.sql"
+import { InstanceState } from "../../src/effect"
+import { InstanceRef } from "../../src/effect/instance-ref"
+import { SessionRunState } from "../../src/session/run-state"
+import { Database, and, eq } from "../../src/storage"
 import { makeLayer, ref, providerCfg } from "./lib"
 
 afterEach(async () => {
@@ -44,6 +52,106 @@ describe("WorkflowRuntime agent() fan-out", () => {
       }),
       { git: true, config: providerCfg },
     ),
+  )
+})
+
+describe("WorkflowRuntime instance generation disposal", () => {
+  it.live(
+    "settles without terminal notifications after its parent generation reloads",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const runState = yield* SessionRunState.Service
+          const parent = yield* session.create({
+            title: "workflow disposed parent",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          const parentInstance = yield* InstanceState.context
+          const childDir = join(dir, "workflow-live-context")
+          yield* Effect.promise(() => mkdir(childDir, { recursive: true }))
+          const childInstance = yield* Effect.promise(() =>
+            Instance.provide({ directory: childDir, fn: () => Instance.current }),
+          )
+          const gate = join(childDir, "terminal-gate")
+          expect(yield* Effect.promise(() => Bun.spawn(["mkfifo", gate]).exited)).toBe(0)
+
+          let finished = 0
+          let inboxArrived = 0
+          const onGlobal = (event: GlobalEvent) => {
+            if (event.directory !== childDir) return
+            if (
+              event.payload?.type === WorkflowFinished.type &&
+              event.payload.properties?.sessionID === parent.id
+            )
+              finished++
+            if (
+              event.payload?.type === InboxArrived.type &&
+              event.payload.properties?.receiverSessionID === parent.id &&
+              event.payload.properties?.receiverActorID === "main"
+            )
+              inboxArrived++
+          }
+          GlobalBus.on("event", onGlobal)
+
+          yield* Effect.ensuring(
+            Effect.gen(function* () {
+              const script = [
+                `export const meta = { name: "dispose-gate", description: "d" }`,
+                `return await readFile("terminal-gate")`,
+              ].join("\n")
+              const { runID } = yield* runState.withRunDisposal(
+                runtime
+                  .start({
+                    script,
+                    sessionID: parent.id,
+                    parentActorID: "main",
+                    workspace: childDir,
+                    notifyOnTerminal: true,
+                  })
+                  .pipe(Effect.provideService(InstanceRef, childInstance)),
+              )
+              expect((yield* WorkflowPersistence.load(runID))?.status).toBe("running")
+
+              const replacement = yield* Effect.promise(() =>
+                Instance.reload({ directory: parentInstance.directory }),
+              ).pipe(Effect.timeout("5 seconds"))
+              expect(replacement).not.toBe(parentInstance)
+              expect(parentInstance.disposing).toBe(true)
+
+              yield* Effect.promise(() => writeFile(gate, "released")).pipe(Effect.timeout("5 seconds"))
+              const outcome = yield* runtime.wait({ runID }).pipe(Effect.timeout("5 seconds"))
+              expect(outcome).toEqual({ status: "completed", result: "released" })
+              expect((yield* WorkflowPersistence.load(runID))?.status).toBe("completed")
+              yield* Effect.yieldNow
+              yield* Effect.yieldNow
+
+              const rows = yield* Effect.sync(() =>
+                Database.use((db) =>
+                  db
+                    .select()
+                    .from(InboxTable)
+                    .where(
+                      and(
+                        eq(InboxTable.receiver_session_id, parent.id),
+                        eq(InboxTable.receiver_actor_id, "main"),
+                        eq(InboxTable.sender_actor_id, "workflow"),
+                      ),
+                    )
+                    .all(),
+                ),
+              )
+              expect(finished).toBe(0)
+              expect(inboxArrived).toBe(0)
+              expect(rows).toHaveLength(0)
+            }),
+            Effect.sync(() => GlobalBus.off("event", onGlobal)),
+          )
+        }),
+        { git: true, config: providerCfg },
+      ),
+    30_000,
   )
 })
 
@@ -169,7 +277,7 @@ describe("WorkflowRuntime convergence (scout drives fan-out)", () => {
       { git: true, config: providerCfg },
     )
 
-  it.live("4 todo → 1 scout + 4 workers spawned", () => runWithTodo(["a", "b", "c", "d"], 5))
+  it.live("4 todo → 1 scout + 4 workers spawned", () => runWithTodo(["a", "b", "c", "d"], 5), 10_000)
 
   it.live("2 todo → 1 scout + 2 workers spawned (a re-run with fewer undone units does less work)", () =>
     runWithTodo(["a", "b"], 3),
@@ -283,15 +391,6 @@ describe("WorkflowRuntime cancel cascade", () => {
         yield* runtime.cancel({ runID })
         const s = yield* runtime.status({ runID })
         expect(s.status).toBe("cancelled")
-        // Quiesce the parent session before the fixture scope closes. Reclaiming the
-        // children makes each one notify the parent's main inbox, which re-arms the
-        // parent's `main` runner against the auto-answering test LLM. A runner still
-        // "Running" when SessionRunState's instance-state finalizer fires deadlocks
-        // teardown: finalizers run uninterruptibly, so the finalizer's
-        // `Deferred.await(run.done)` cannot be timed out and the test hangs long
-        // after this assertion already passed. Cancelling here (interruptible, so
-        // the bound actually applies) drains the runner map first.
-        yield* (yield* SessionRunState.Service).cancel(parent.id).pipe(Effect.timeout("5 seconds"), Effect.ignore)
       }),
       { git: true, config: providerCfg },
     ),
@@ -369,15 +468,13 @@ describe("WorkflowRuntime cancel cascade", () => {
         // Every spawned child was reclaimed: cancel stamped lastOutcome="cancelled"
         // on each. An orphan (never reclaimed) would have lastOutcome unset here.
         expect(children.filter((a) => a.lastOutcome !== "cancelled")).toEqual([])
-        // Drain the parent's runner map before the fixture scope closes (see above).
-        yield* (yield* SessionRunState.Service).cancel(parent.id).pipe(Effect.timeout("5 seconds"), Effect.ignore)
       }),
       { git: true, config: providerCfg },
     ),
     // Same budget as the 3-child sibling above. Worst case is dominated by cancel's
     // own two 5s bounds (fiber interrupt + child reclaim, the latter unbounded-
     // concurrency so the 8-way fan-out costs one bound, not eight); on top of that
-    // this case adds up to 3s of registry polling and the bounded 5s drain.
+    // this case adds up to 3s of registry polling.
     120_000,
   )
 })

@@ -10,7 +10,10 @@ const TypeId = "~opencode/InstanceState"
 
 export interface InstanceState<A, E = never, R = never> {
   readonly [TypeId]: typeof TypeId
-  readonly cache: ScopedCache.ScopedCache<string, A, E, R>
+  readonly cache: ScopedCache.ScopedCache<number, A, E, R>
+  readonly contexts: Map<string, Set<InstanceContext>>
+  readonly generations: Map<number, InstanceContext>
+  readonly disposed: WeakSet<InstanceContext>
 }
 
 export const bind = <F extends (...args: any[]) => any>(fn: F): F => {
@@ -40,16 +43,34 @@ export const make = <A, E = never, R = never>(
   opts?: { phase?: "normal" | "late" },
 ): Effect.Effect<InstanceState<A, E, Exclude<R, Scope.Scope>>, never, R | Scope.Scope> =>
   Effect.gen(function* () {
-    const cache = yield* ScopedCache.make<string, A, E, R>({
+    const generations = new Map<number, InstanceContext>()
+    const cache = yield* ScopedCache.make<number, A, E, R>({
       capacity: Number.POSITIVE_INFINITY,
-      lookup: () =>
-        Effect.gen(function* () {
-          return yield* init(yield* context)
-        }),
+      lookup: (generation) => init(generations.get(generation)!),
     })
+    const contexts = new Map<string, Set<InstanceContext>>()
+    const disposed = new WeakSet<InstanceContext>()
 
     const off = registerDisposer(
-      (directory) => Effect.runPromise(ScopedCache.invalidate(cache, directory).pipe(Effect.provide(EffectLogger.layer))),
+      async (directory, instance) => {
+        const targets = instance ? [instance] : [...(contexts.get(directory) ?? [])]
+        targets.forEach((target) => disposed.add(target))
+        await Promise.all(
+          targets.map((target) =>
+            Effect.runPromise(
+              ScopedCache.invalidate(cache, target.generation).pipe(Effect.provide(EffectLogger.layer)),
+            ),
+          ),
+        )
+        targets.forEach((target) => generations.delete(target.generation))
+        if (!instance) {
+          contexts.delete(directory)
+          return
+        }
+        const directoryContexts = contexts.get(directory)
+        directoryContexts?.delete(instance)
+        if (directoryContexts?.size === 0) contexts.delete(directory)
+      },
       { phase: opts?.phase },
     )
     yield* Effect.addFinalizer(() => Effect.sync(off))
@@ -57,12 +78,24 @@ export const make = <A, E = never, R = never>(
     return {
       [TypeId]: TypeId,
       cache,
+      contexts,
+      generations,
+      disposed,
     }
   })
 
 export const get = <A, E, R>(self: InstanceState<A, E, R>) =>
   Effect.gen(function* () {
-    return yield* ScopedCache.get(self.cache, yield* directory)
+    const instance = yield* context
+    if (instance.disposing || self.disposed.has(instance)) return yield* Effect.interrupt
+    const existing = self.contexts.get(instance.directory)
+    if (existing) existing.add(instance)
+    else self.contexts.set(instance.directory, new Set([instance]))
+    self.generations.set(instance.generation, instance)
+    const value = yield* ScopedCache.get(self.cache, instance.generation)
+    if (!instance.disposing && !self.disposed.has(instance)) return value
+    yield* ScopedCache.invalidate(self.cache, instance.generation)
+    return yield* Effect.interrupt
   })
 
 export const use = <A, E, R, B>(self: InstanceState<A, E, R>, select: (value: A) => B) => Effect.map(get(self), select)
@@ -74,10 +107,16 @@ export const useEffect = <A, E, R, B, E2, R2>(
 
 export const has = <A, E, R>(self: InstanceState<A, E, R>) =>
   Effect.gen(function* () {
-    return yield* ScopedCache.has(self.cache, yield* directory)
+    return yield* ScopedCache.has(self.cache, (yield* context).generation)
   })
 
 export const invalidate = <A, E, R>(self: InstanceState<A, E, R>) =>
   Effect.gen(function* () {
-    return yield* ScopedCache.invalidate(self.cache, yield* directory)
+    const instance = yield* context
+    const result = yield* ScopedCache.invalidate(self.cache, instance.generation)
+    const directoryContexts = self.contexts.get(instance.directory)
+    directoryContexts?.delete(instance)
+    if (directoryContexts?.size === 0) self.contexts.delete(instance.directory)
+    self.generations.delete(instance.generation)
+    return result
   })
