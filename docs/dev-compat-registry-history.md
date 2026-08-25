@@ -15,6 +15,7 @@ never used as an inherited `main` or compat behavior review basis.
 | 2026-08-24 | `fd5064df420d5c2dbe424ddaa020bb54655bef64` | `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8` | `d0d44b7df7af60fe9ef4df634d53f6c0782d0f2c` | 7 | 47 paths; 3,643 insertions; 226 deletions | Adopted the shared full IPv6 link-local classifier correction while retaining approved private WebFetch and MCP reachability plus all existing compat-owned platform, model, context, actor, and TUI adaptations. |
 | 2026-08-25 | `98f1652bcab2038989f6e522fe41a2cb35b5e90f` | `413711ced1e60c408caefb10c585a2be8c4b5f01` | `166737181cff131961b0b84977afd230c556755b` | 7 | 47 paths; 3,643 insertions; 226 deletions | Adopted shared instance-disposal, runner, actor-notification, workflow-cleanup, and owned-worktree lifecycle hardening while retaining all seven compat-owned adaptations unchanged. |
 | 2026-08-25 | `e65c86f341f2a5f15d375cc087e33b17037e36ca` | `1cfe7efc8f13da6157f30324c4eeac0111e99115` | `ca446d40348b62fe4174e34fe0cf5a311fa12c06` | 7 | 59 paths; 3,737 insertions; 228 deletions | Adopted the audited upstream recovery, turn-context, replayable nested-exec, bundled-skill, Desktop notification-card, and auto-worktree changes plus shared lifecycle corrections while preserving all seven compat-owned network, platform, model, context, actor, and TUI adaptations. |
+| 2026-08-25 | `12b4bacedd3d0cb961578b29bfa7f613f6ac443f` | `6ae30e66ab0ecbb526f85009d300e7c2533fe72c` | `bcbd16fc237a5b2c6f2800afe834830ad739aa01` | 7 | 58 paths; 3,593 insertions; 233 deletions | Inherited fixed instance cwd with inert SDK compatibility, centralized bounded retry, typed admission, and main-only recovery/resume publication while preserving all seven compat-owned network, platform, per-agent MaxMode, bounded-context, actor-context, and TUI adaptations. |
 
 ## 2026-08-24 initial ownership review
 
@@ -323,6 +324,108 @@ git diff --shortstat \
 git diff --name-only \
   1cfe7efc8f13da6157f30324c4eeac0111e99115 \
   ca446d40348b62fe4174e34fe0cf5a311fa12c06 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-08-25 fixed-cwd and retry synchronization propagation
+
+- Accepted fork `main` audit tip:
+  `12b4bacedd3d0cb961578b29bfa7f613f6ac443f`.
+- Inherited main behavior:
+  `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Prior compat tip: `19cad20c689eaa027db802cc942a374afa1b50bf`.
+- Intermediate compat behavior:
+  `79bfd1bdb62fe4eb61a26be8fe44c4abbc848f6d`, whose parents are the prior
+  compat tip and intermediate main behavior `30d7d629`.
+- Final compat behavior: `bcbd16fc237a5b2c6f2800afe834830ad739aa01`,
+  whose parents are intermediate compat behavior `79bfd1bd` and final main
+  behavior `6ae30e66`.
+- Main-audit inheritance merge:
+  `627d6641ac1d24eb1ff618cba1d471be4cf11eb6`, whose parents are final compat
+  behavior `bcbd16fc` and accepted main audit tip `12b4bace`. This documentation
+  merge does not advance either behavior reference.
+- Active ownership remains DC-NET-001, DC-NET-002, DC-PLATFORM-001,
+  DC-MODEL-001, DC-CONTEXT-001, DC-ACTOR-001, and DC-TUI-001. No eighth
+  compat-only owner was added.
+- The shared `AR-20260825-R3` 9/9 capability inventory is inherited through the
+  accepted main audit. Every shared capability keeps `canonical_owner=shared
+  main`; this propagation changes only the recorded compat counterpart.
+
+### Compat decisions
+
+- DC-MODEL-001 retains per-agent MaxMode over the inherited bounded
+  candidate/judge retry coordinator. Eligible subagents can execute MaxMode but
+  cannot write session-global retry status or publish `RetryAttempt` events;
+  structured-output and final-step exclusions remain intact.
+- DC-CONTEXT-001 retains caps, non-throwing serialization, active-tool
+  accounting, and request preflight around the inherited retry coordinator.
+  It consumes the fixed `Instance.directory` and does not add a cwd setter,
+  clear path, event publisher, TUI override, or `change_directory` tool.
+- DC-ACTOR-001 retains frozen full-context membership and static-prefix
+  overflow handling. Children keep the admitted instance cwd; the inherited
+  `SessionCwd.Event.Changed` and generated `EventSessionCwd` remain inert SDK
+  compatibility declarations rather than a live context or authority channel.
+- DC-NET-001, DC-NET-002, DC-PLATFORM-001, and DC-TUI-001 preserve their prior
+  call-seam, platform, and presentation contracts. None receives ownership of
+  shared retry, fixed cwd, typed admission, or main-only recovery/resume.
+- Harness validation used
+  `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true` as the compat baseline. Default-path
+  invocations cleared ambient `MIMOCODE_EXPERIMENTAL`,
+  `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and `MIMOCODE_CODEX_MODE`.
+
+### Validation evidence
+
+The broader intermediate matrix ran at `79bfd1bd`; it is not claimed as a full
+rerun at the final compat SHA. Its six independently completed Bun test groups
+were:
+
+- message-v2, overflow, LLM retry, provider error, and processor Effect:
+  153 pass, 2 skip, 0 fail;
+- MaxMode unit and EConnReset integration: 23 pass, 0 skip, 0 fail;
+- prompt Effect cases matching `MaxMode|maxMode|request preflight`: 11 pass,
+  0 skip, 0 fail;
+- actor tool, classifier integration, and fork-agent compatibility: 41 pass,
+  0 skip, 0 fail;
+- WebFetch, SSRF, MCP lifecycle, ripgrep, archive, and TUI model metadata:
+  110 pass, 0 skip, 0 fail;
+- agent, generated OpenAPI references, and TUI session-status store: 59 pass,
+  0 skip, 0 fail.
+
+The intermediate total is 397 pass, 2 documented skips, and 0 failures. Final
+compat `bcbd16fc` then passed 3 focused regressions with 0 failures: published
+OpenAPI recovery/resume remains main-only, subagent MaxMode retry cannot write
+global status/events, and a full-context subagent uses the MaxMode
+candidate/judge replay path. Package and SDK typecheck passed, and JavaScript
+SDK generation was idempotent at the final compat behavior.
+
+### Shared inheritance and changed-path calculation
+
+At audit merge `627d6641`, `AGENTS.md`, `docs/upstream-deviations.md`,
+`docs/fork-capabilities.md`, and `docs/fork-registry-history.md` are
+byte-identical to accepted main tip `12b4bace`. The two compat registries remain
+the branch-specific registry overlays.
+
+The 58-path, 3,593-insertion, 233-deletion total compares final inherited main
+behavior with final compat behavior and excludes all five shared/compat
+registry tracking paths:
+
+```bash
+git diff --shortstat \
+  6ae30e66ab0ecbb526f85009d300e7c2533fe72c \
+  bcbd16fc237a5b2c6f2800afe834830ad739aa01 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  6ae30e66ab0ecbb526f85009d300e7c2533fe72c \
+  bcbd16fc237a5b2c6f2800afe834830ad739aa01 -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
