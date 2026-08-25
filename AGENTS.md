@@ -138,6 +138,14 @@ guard typechecks, reads correctly in review, and does nothing.
 - Avoid mocks as much as possible
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+- For default-path validation, including upstream-sync regressions, unset ambient
+  `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and
+  `MIMOCODE_CODEX_MODE`. Preserve and report package-owned preload flags as the
+  harness baseline; tests for opt-in behavior must enable only their target
+  selector beyond that baseline and report the full non-default environment.
+  To prove a feature is off by default, use an isolated non-test child process
+  with its selector removed before the flag module loads; the package test
+  process is not proof when its preload enables that feature.
 
 ## Type Checking
 

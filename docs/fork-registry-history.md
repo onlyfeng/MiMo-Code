@@ -16,6 +16,7 @@ they are never used as an `upstream` or `main behavior` review basis.
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5` | 6 | 13 | 211 paths; 19,096 insertions; 8,469 deletions | Correction: use actual async-body TypeScript diagnostics for leading-angle repair; preserve already-valid const assertions and generic arrows, including default generics, and repair only an invalid source when removing the angle yields zero diagnostics. |
 | 2026-08-24 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8` | 6 | 13 | 213 paths; 19,110 insertions; 8,473 deletions | Correction: upstream still blocks only textual `fe80:` link-local addresses; fork main now blocks the complete numeric and DNS-resolved IPv6 `fe80::/10` range through FC-010 without adding a duplicate owner. |
 | 2026-08-25 | `5e32992a97ed7f8d2d00e4c312133716292dab9e` | `1cfe7efc8f13da6157f30324c4eeac0111e99115` | 6 | 13 | 234 paths; 22,785 insertions; 8,955 deletions | Adopted upstream recovery, turn-context, replayable nested-exec, bundled-skill, Desktop notification-card, and auto-worktree changes; hardened main run admission/cancellation, recovery mutation, nested-exec terminal settlement, TUI rendering, and GitLab workflow context without weakening the six FD or thirteen FC contracts. |
+| 2026-08-25 | `fa6fdf176cef7f82659705b555333d6302725748` | `6ae30e66ab0ecbb526f85009d300e7c2533fe72c` | 6 | 13 | 240 paths; 23,405 insertions; 9,188 deletions | Adopted fixed instance cwd with an inert SDK-compatibility event schema, centralized retry configuration/classification/request/live-step/status coordination, bounded MaxMode retry, and typed busy admission; corrected four retry boundary/configuration seams and published main-only recovery/resume while retaining all six FD and thirteen FC contracts. |
 
 ## 2026-08-23 review details
 
@@ -284,6 +285,152 @@ git diff --shortstat \
 git diff --name-only \
   5e32992a97ed7f8d2d00e4c312133716292dab9e \
   1cfe7efc8f13da6157f30324c4eeac0111e99115 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-08-25 fixed instance cwd, SDK compatibility, and retry coordinator synchronization
+
+- Prior reviewed upstream: `5e32992a97ed7f8d2d00e4c312133716292dab9e`.
+- Freshly reviewed upstream: `fa6fdf176cef7f82659705b555333d6302725748`.
+- Prior fork `main` tip: `e65c86f341f2a5f15d375cc087e33b17037e36ca`.
+- Intermediate main behavior: `30d7d6290f1e4112399fa0be795775c6eb8238e3`;
+  its parents are prior fork `main` tip and upstream `e32a0a3e`.
+- Final main merge and behavior: `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`;
+  its parents are intermediate main behavior `30d7d629` and upstream
+  `fa6fdf17`.
+- Incoming range: 3 first-parent commits, 65 paths, 3,323 insertions, and
+  901 deletions from the prior reviewed upstream.
+- Main transition: two first-parent merge commits. Their combined first-parent
+  tree delta is 60 paths, 3,720 insertions, and 911 deletions.
+- Final main `6ae30e66` passed 77 focused OpenAPI-reference and tool-script
+  tests with 0 failures. Package and SDK typecheck and idempotent JavaScript
+  SDK generation passed.
+- Intermediate compat behavior: `79bfd1bdb62fe4eb61a26be8fe44c4abbc848f6d`;
+  its parents are prior compat tip `19cad20c689eaa027db802cc942a374afa1b50bf`
+  and intermediate main behavior `30d7d629`.
+- Frozen compat behavior: `bcbd16fc237a5b2c6f2800afe834830ad739aa01`;
+  its parents are intermediate compat behavior `79bfd1bd` and final main
+  behavior `6ae30e66`.
+- The compat delta is 58 paths, 3,593 insertions, and 233 deletions after the
+  same five registry/history exclusions. The broader intermediate compat matrix
+  at `79bfd1bd` completed 397 tests with 2 documented skips and 0 failures;
+  package typecheck, lint, and idempotent JavaScript SDK generation passed.
+  Final compat `bcbd16fc` passed 3 focused regressions with 0 failures, package
+  and SDK typecheck, and idempotent JavaScript SDK generation.
+- Active ownership remains FD=6 and FC=13; no duplicate owner was added.
+- Path universe after exclusions: 103 paths under `packages/opencode/src`, 106
+  under `packages/opencode/test`, and 31 elsewhere, totaling 240 paths.
+
+### Decision notes
+
+- Adopted removal of mutable session cwd and `change_directory`.
+  `SessionCwd.get()` now resolves only `Instance.directory`; callers use
+  absolute paths or explicit `workdir`. FC-007 retains the protected-root,
+  project/worktree containment, deletion, and optional-context boundaries.
+  Upstream `fa6fdf17` restores `SessionCwd.Event.Changed` and generated
+  `EventSessionCwd` only as an inert SDK-compatibility schema: there is no
+  setter, clear path, event publisher, TUI override, or mutable cwd state.
+- The same upstream regeneration exposes the already-adopted `worktree.auto`
+  client that was present in intermediate main `30d7d629` and inventoried in
+  the prior audit. This is generated-surface convergence, not a tenth
+  capability or a new owner.
+- Adopted one configurable retry coordinator and corrected four seams before
+  freezing main behavior: raw faults after provider output cannot re-enter
+  request retry; bounded network mode remains finite when `maxRetries` is
+  omitted; top-level jitter defaults propagate through budget/provider
+  precedence; and request-scoped setup failures retain request budget and
+  telemetry even when their error kind is stream-shaped.
+- Preserved the tool side-effect boundary. A completed tool call followed by an
+  in-band retryable 503 or a raw stream fault does not replay the whole model
+  step, make a second provider call, or execute the tool twice.
+- Adopted bounded candidate/judge MaxMode retry with fresh attempt-local
+  accumulators. Subagents may execute eligible MaxMode work but cannot publish
+  session-global retry status or `RetryAttempt` events; FC-013's tool-free final
+  step remains unchanged.
+- Adopted typed Runner admission and `Session.BusyError` while retaining fork
+  generation, cancellation, stale-idle, persistent-peer, and disposal
+  hardening. Recovery/resume remain main-only and atomically admitted; upstream
+  agent/task selectors and `resumeBackground` were rejected.
+- Regenerated the published OpenAPI from resolved fork routes. Runtime and
+  published recovery/resume operations omit their upstream agent/task selectors,
+  describe main-agent behavior, and retain the stable HTTP 409 busy boundary.
+- Detached workflow and callback effects retain their owning Effect context.
+  The accompanying `AGENTS.md` default-environment rule is an FC-008
+  publication/process companion: default-path validation clears ambient
+  `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and
+  `MIMOCODE_CODEX_MODE`, while package-owned preload flags remain a separately
+  reported harness baseline. Opt-in tests add only their target selector beyond
+  that baseline; default-off assertions for a preload-enabled feature require
+  an isolated non-test child process with its selector removed before flag
+  import. This rule does not advance the frozen main behavior or this
+  changed-path calculation.
+- The incoming range contains no workflow, dependency/lockfile, migration, or
+  repository-governance change. All six FD and thirteen FC contracts remain
+  active after reviewing clean merges as well as conflict resolutions.
+
+### Capability inventory (9/9)
+
+`AR-20260825-R3` is the audit range used by every row:
+`old_upstream=5e32992a97ed7f8d2d00e4c312133716292dab9e`,
+`new_upstream=fa6fdf176cef7f82659705b555333d6302725748`,
+`main_merge=main_behavior=6ae30e66ab0ecbb526f85009d300e7c2533fe72c`,
+and
+`compat_merge=compat_behavior=bcbd16fc237a5b2c6f2800afe834830ad739aa01`.
+
+`INTERMEDIATE-MATRIX` below means the broader row-specific main tests ran at
+`30d7d629`, while compat `79bfd1bd` completed 397 tests with 2 documented skips
+and 0 failures plus package typecheck, lint, and idempotent SDK generation. It
+is intermediate behavior evidence, not a claim that the full matrix reran at
+the final SHAs. `FINAL-MAIN-VERIFIED` means `6ae30e66` completed 77 focused
+OpenAPI-reference and tool-script tests with 0 failures, package and SDK
+typecheck, and idempotent SDK generation. `COMPAT-VERIFIED` means `bcbd16fc`
+completed 3 focused published-OpenAPI/main-only, subagent MaxMode retry
+status/event-isolation, and
+full-context MaxMode regressions with 0 failures, package and SDK typecheck, and
+idempotent SDK generation. Every listed `packages/opencode` test command cleared
+the three ambient selectors above and ran with the package-owned
+`MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true` preload baseline.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Fixed instance cwd, `change_directory` removal, and inert SDK compatibility | `AR-20260825-R3` | `2b537aa9`; `SessionCwd.get`; deleted `change-directory.ts`; `fa6fdf17` `SessionCwd.Event.Changed`, generated `EventSessionCwd`, and OpenAPI schema; no publisher | FC-007 fixed cwd, inert compatibility schema, and protected-root/deletion boundaries | `bcbd16fc` inherits the shared cwd/tool/schema surface unchanged; no DC owner overlaps | complementary | behavior, contract, schema-config, docs, tests | shared main | Adopt removal and inert schema; use absolute paths or explicit `workdir`; never restore mutation or publication | Final source/generated residual audit proves no setter, clear path, or `Event.Changed` publisher; the removed upstream focused cwd test is not claimed as runtime evidence; `INTERMEDIATE-MATRIX`; `FINAL-MAIN-VERIFIED`; `COMPAT-VERIFIED` |
+| 2 | Retry configuration and budgets | `AR-20260825-R3` | `e32a0a3e`; `config/retry.ts` `ConfigRetry.Budget`/`Info`; `session/retry.ts` `resolve`/`budgetFor`/`policy` | Shared config plus finite bounded-network default and global/budget/provider jitter precedence | `bcbd16fc` inherits shared config; DC-MODEL-001 consumes it without changing ownership | partial duplicate | schema-config, behavior, generated API, tests | shared main | Adopt and correct configuration precedence and bounded defaults | `INTERMEDIATE-MATRIX`: bounded-network, jitter-precedence, deadline, and budget tests passed; `FINAL-MAIN-VERIFIED`; `COMPAT-VERIFIED` |
+| 3 | Error normalization and retry classifier | `AR-20260825-R3` | `e32a0a3e`; `provider/error.ts` `summarizeCause`/`isRetryableNetworkError`/`allowsModelNotFoundRetry`; `message-v2.ts` `fromError`/`isAuthError` | One classifier for request/live/MaxMode policy with abort precedence and adapter-scoped 404 retry | `bcbd16fc` inherits the classifier; DC-CONTEXT-001 retains bounded error serialization | partial duplicate | behavior, error contract, tests | shared main | Adopt shared normalization/classification | `INTERMEDIATE-MATRIX`: provider-error, message normalization, auth/abort, and 404 regressions passed; `FINAL-MAIN-VERIFIED`; `COMPAT-VERIFIED` |
+| 4 | Pre-output request-phase retry | `AR-20260825-R3` | `e32a0a3e`; `session/llm.ts` `retryRequest`/`protectRequestReplayBoundary`; `session/retry.ts` request-scope phase/budget | Provider SDK retry stays disabled; output-free faults may retry, post-output raw faults stay out, and request scope controls budget/telemetry | `bcbd16fc` reuses the already preflighted bounded request; DC-CONTEXT-001 caps and active-tool accounting remain mandatory | partial duplicate | behavior, request boundary, status, tests | shared main | Adopt and correct request replay/telemetry boundaries | `INTERMEDIATE-MATRIX`: before/after-provider-output and stream-shaped setup-error regressions passed; `FINAL-MAIN-VERIFIED`; `COMPAT-VERIFIED` |
+| 5 | Live-step retry and tool side-effect boundary | `AR-20260825-R3` | `e32a0a3e`; `session/processor.ts` `ctx.retrySafe`; tool-call transition; `SessionRetry.policy` `replaySafe` | FC-009 removes attempt-local parts only while replay-safe and forbids whole-step replay after a tool call | `bcbd16fc` inherits the boundary while retaining DC-CONTEXT-001 caps and DC-ACTOR-001 frozen context | partial duplicate | behavior, persistence, side-effect boundary, tests | shared main | Adopt and adapt with FC-009 text-part lifecycle | `INTERMEDIATE-MATRIX`: in-band 503 and raw-fault characterizations each prove one provider/tool execution after a completed side effect; `FINAL-MAIN-VERIFIED`; `COMPAT-VERIFIED` |
+| 6 | Retry status, attempt, and notice events | `AR-20260825-R3` | `e32a0a3e`; `session/status.ts` `setRetry`; `Session.Event.RetryAttempt`; TUI status and generated API fields | Global and phase attempts, persistent `maxAttempts: 0`, notice/idle reset, and main-only MaxMode status/event writes | `bcbd16fc` inherits the event schema and retains DC-MODEL-001 subagent status isolation | partial duplicate | event schema, API, TUI behavior, tests | shared main | Adopt fields/UI and preserve main-agent publication gate | `INTERMEDIATE-MATRIX`: retry/status/TUI/global-attempt regressions passed; `FINAL-MAIN-VERIFIED`; `COMPAT-VERIFIED` |
+| 7 | Bounded MaxMode candidate/judge retry | `AR-20260825-R3` | `e32a0a3e`; `session/max-mode.ts` `retryPolicy`/`runCandidate`/`judge`; `max-mode-econnreset.test.ts` | FC-013 combines bounded retry with the tool-free final step and main-only status/event writes | `bcbd16fc` retains DC-MODEL-001 per-agent opt-in, preflight/caps, and structured-output/final-step exclusions | partial duplicate | behavior, config, status isolation, tests | shared main | Adopt bounded retry; retain fork final-step and status isolation | `INTERMEDIATE-MATRIX`: MaxMode routing/final-step and candidate/judge EConnReset regressions passed; `FINAL-MAIN-VERIFIED`; `COMPAT-VERIFIED` |
+| 8 | Typed Runner admission and hardened lifecycle | `AR-20260825-R3` | `e32a0a3e`; `effect/runner.ts` `Runner<A,E,B>`/`start`; `session/run-state.ts`; Effect-context bridge call sites | FC-001 retains `startRunning`, generation IDs, two-phase cancellation, stale-idle exclusion, detached cancel, and disposal | `bcbd16fc` inherits the same shared FC-001 lifecycle and typed busy failures | complementary | type/API, concurrency, cancellation, Effect context, tests | shared main | Layer typed busy/start API over the stronger atomic fork lifecycle | `INTERMEDIATE-MATRIX`: runner/run-state focused matrix passed 46 tests with 0 failures; `FINAL-MAIN-VERIFIED`; `COMPAT-VERIFIED` |
+| 9 | Recovery/resume lifecycle and published API | `AR-20260825-R3` | `e32a0a3e`; `server/routes/instance/session.ts` recovery/resume; `session/prompt.ts` `ResumeTurnInput`/`startResume`; `openapi-refs.test.ts` | FC-001 keeps atomic main-only admission, typed `Session.BusyError`, and stable 409; no `resumeBackground` | `bcbd16fc` inherits shared admission/API while retaining DC-CONTEXT-001 preflight and DC-ACTOR-001 frozen context | conflicting | API/schema, identity, admission, concurrency, tests | shared main | Adopt typed errors; reject upstream agent/task selectors, background resume, and assert-then-start TOCTOU | `INTERMEDIATE-MATRIX`: resume service 2/2, server recovery/busy 8/8, and runtime/published main-only OpenAPI regressions passed; `FINAL-MAIN-VERIFIED`; `COMPAT-VERIFIED` |
+
+Inventory count is 9 and result-row count is 9. Every row records an audit
+range, commit/path/symbol evidence, both branch counterparts, relationship,
+drift, canonical owner, disposition, and status evidence; no incoming
+capability remains unclassified.
+
+### Changed-path calculation
+
+The 240-path, 23,405-insertion, 9,188-deletion total compares the freshly
+reviewed upstream tree with the frozen pre-documentation main behavior and
+excludes all five shared/compat registry tracking paths:
+
+```bash
+git diff --shortstat \
+  fa6fdf176cef7f82659705b555333d6302725748 \
+  6ae30e66ab0ecbb526f85009d300e7c2533fe72c -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  fa6fdf176cef7f82659705b555333d6302725748 \
+  6ae30e66ab0ecbb526f85009d300e7c2533fe72c -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
