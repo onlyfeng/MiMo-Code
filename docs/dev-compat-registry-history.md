@@ -14,6 +14,7 @@ never used as an inherited `main` or compat behavior review basis.
 | 2026-08-24 | `060b3adb1373a802e301f5bafce225b90407ef49` | `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5` | `f6abd31d57d3066a1924042670e3f59c26f8a0ca` | 7 | 47 paths; 3,643 insertions; 226 deletions | Retained approved private WebFetch and MCP reachability plus the existing platform, per-agent MaxMode, bounded-context, actor-context, and TUI metadata adaptations as compat-owned behavior. |
 | 2026-08-24 | `fd5064df420d5c2dbe424ddaa020bb54655bef64` | `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8` | `d0d44b7df7af60fe9ef4df634d53f6c0782d0f2c` | 7 | 47 paths; 3,643 insertions; 226 deletions | Adopted the shared full IPv6 link-local classifier correction while retaining approved private WebFetch and MCP reachability plus all existing compat-owned platform, model, context, actor, and TUI adaptations. |
 | 2026-08-25 | `98f1652bcab2038989f6e522fe41a2cb35b5e90f` | `413711ced1e60c408caefb10c585a2be8c4b5f01` | `166737181cff131961b0b84977afd230c556755b` | 7 | 47 paths; 3,643 insertions; 226 deletions | Adopted shared instance-disposal, runner, actor-notification, workflow-cleanup, and owned-worktree lifecycle hardening while retaining all seven compat-owned adaptations unchanged. |
+| 2026-08-25 | `e65c86f341f2a5f15d375cc087e33b17037e36ca` | `1cfe7efc8f13da6157f30324c4eeac0111e99115` | `ca446d40348b62fe4174e34fe0cf5a311fa12c06` | 7 | 59 paths; 3,737 insertions; 228 deletions | Adopted the audited upstream recovery, turn-context, replayable nested-exec, bundled-skill, Desktop notification-card, and auto-worktree changes plus shared lifecycle corrections while preserving all seven compat-owned network, platform, model, context, actor, and TUI adaptations. |
 
 ## 2026-08-24 initial ownership review
 
@@ -255,3 +256,76 @@ git diff --name-only \
   `c325dadb34b0bf3be95accbaaf5dd5bd96022e91`; the compat delta remains 47
   paths, 3,643 insertions, and 226 deletions after excluding the five registry
   and history files.
+
+## 2026-08-25 upstream synchronization propagation
+
+- Accepted fork `main` tip:
+  `e65c86f341f2a5f15d375cc087e33b17037e36ca`.
+- Inherited main behavior:
+  `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
+- Initial main-to-compat merge behavior:
+  `d346cc168b10df75769f44e3a4a8cba9a4d44259`.
+- Corrected pre-documentation compat behavior:
+  `ca446d40348b62fe4174e34fe0cf5a311fa12c06`.
+- Active ownership remains DC-NET-001, DC-NET-002, DC-PLATFORM-001,
+  DC-MODEL-001, DC-CONTEXT-001, DC-ACTOR-001, and DC-TUI-001.
+- The inherited shared registry supplies the complete 10/10 capability
+  inventory for audit range `AR-20260825`; every incoming capability has a
+  canonical owner, disposition, and status evidence.
+- DC-CONTEXT-001 preserves all UTF-8 caps, non-throwing serialization, active
+  tool filtering, and overflow routing while counting the newly inherited
+  current-turn context as an unshrinkable request component.
+- DC-ACTOR-001 preserves fail-closed FD-009 admission and extends the inherited
+  turn-context path with the parent's frozen `turnContext`; child live context
+  cannot replace that captured membership.
+- The compat delta grew from 47 to 59 paths. The 12 new paths are all
+  DC-ACTOR-001 carriers or fixtures for the frozen `turnContext` shape:
+  `packages/opencode/src/actor/spawn.ts`,
+  `packages/opencode/src/session/checkpoint.ts`,
+  `packages/opencode/src/session/prefix-capture-ref.ts`,
+  `packages/opencode/src/tool/session.ts`,
+  `packages/opencode/test/actor/cancel-notification.test.ts`,
+  `packages/opencode/test/actor/spawn-notification.test.ts`,
+  `packages/opencode/test/actor/spawn.test.ts`,
+  `packages/opencode/test/inbox/fork-agent-compat.test.ts`,
+  `packages/opencode/test/session/checkpoint-fork-mode.test.ts`,
+  `packages/opencode/test/session/checkpoint-main-slice.test.ts`,
+  `packages/opencode/test/session/checkpoint-prefix-capture-fixture.ts`, and
+  `packages/opencode/test/session/classify-integration.test.ts`. No other DC
+  owner count changed.
+- DC-MODEL-001 remains integrated with the shared run-step path: per-agent
+  MaxMode keeps its structured-output and final-step exclusions without writing
+  subagent session status. The generated SDK retains both shared recovery/resume
+  methods and compat-only `maxMode` fields.
+- DC-NET-001, DC-NET-002, DC-PLATFORM-001, and DC-TUI-001 do not overlap the
+  incoming range and remain unchanged. The shared Desktop notification cards
+  do not replace the compat TUI metadata owner.
+- Compat validation at the behavior tree completed 250 affected tests with
+  2 documented skips and 0 failures, package typechecks, idempotent JavaScript
+  SDK generation, and an independent frozen-context/patch-equivalence audit.
+
+### Changed-path calculation
+
+The 59-path, 3,737-insertion, 228-deletion total compares inherited main
+behavior with the corrected pre-documentation compat behavior and excludes all
+five shared/compat registry tracking paths:
+
+```bash
+git diff --shortstat \
+  1cfe7efc8f13da6157f30324c4eeac0111e99115 \
+  ca446d40348b62fe4174e34fe0cf5a311fa12c06 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  1cfe7efc8f13da6157f30324c4eeac0111e99115 \
+  ca446d40348b62fe4174e34fe0cf5a311fa12c06 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
