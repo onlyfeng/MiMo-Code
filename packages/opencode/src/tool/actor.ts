@@ -22,6 +22,7 @@ import { TaskRegistry } from "@/task/registry"
 import { TaskID } from "@/task/schema"
 import { SessionCheckpoint } from "@/session/checkpoint"
 import { prefixCaptureRef } from "@/session/prefix-capture-ref"
+import { EffectBridge } from "@/effect"
 import { inboxServiceRef } from "@/inbox/inbox-ref"
 import { Effect, Deferred } from "effect"
 
@@ -529,6 +530,7 @@ export const ActorTool = Tool.define(
 
       const run = Effect.fn("ActorTool.execute")(function* (input: z.infer<typeof parameters>, ctx: Tool.Context) {
         const op = input.operation
+        const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
 
         // When called through exec, subagents may only use `send` to communicate
@@ -900,7 +902,7 @@ export const ActorTool = Tool.define(
         // unlike ActorWaiter, which resolves on the row's first `idle` and would
         // miss the gate's downgrade.
         function cancelHandler() {
-          Effect.runFork(actor.cancel(spawnResult.sessionID, spawnResult.actorID, "graceful"))
+          bridge.fork(actor.cancel(spawnResult.sessionID, spawnResult.actorID, "graceful"))
         }
         const outcome = yield* Effect.acquireUseRelease(
           Effect.sync(() => {

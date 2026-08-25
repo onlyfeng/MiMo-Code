@@ -1250,6 +1250,78 @@ it.live("reported instruction files reach every MaxMode candidate request", () =
   ),
 )
 
+it.live("MaxMode candidate retries publish global attempts and retry status", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const bus = yield* Bus.Service
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "MaxMode retry observability",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const statuses: Array<{ attempt: number; phaseAttempt?: number; scope?: string }> = []
+      const attempts: Array<{ attempt: number; phaseAttempt: number; scope: string }> = []
+      const offStatus = yield* bus.subscribeCallback(SessionStatus.Event.Status, (event) => {
+        if (event.properties.sessionID !== chat.id || event.properties.status.type !== "retry") return
+        statuses.push({
+          attempt: event.properties.status.attempt,
+          phaseAttempt: event.properties.status.phaseAttempt,
+          scope: event.properties.status.scope,
+        })
+      })
+      const offAttempt = yield* bus.subscribeCallback(Session.Event.RetryAttempt, (event) => {
+        if (event.properties.sessionID !== chat.id || event.properties.scope !== "max-candidate") return
+        attempts.push({
+          attempt: event.properties.attempt,
+          phaseAttempt: event.properties.phaseAttempt,
+          scope: event.properties.scope,
+        })
+      })
+
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "max",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "text", text: "retry both candidates once" }],
+      })
+      yield* llm.error(503, { error: "candidate zero unavailable" })
+      yield* llm.error(503, { error: "candidate one unavailable" })
+      yield* llm.text("candidate zero recovered")
+      yield* llm.text("candidate one recovered")
+      yield* llm.text("0")
+
+      yield* prompt.loop({ sessionID: chat.id })
+      offStatus()
+      offAttempt()
+
+      expect({ statuses, attempts }).toStrictEqual({
+        statuses: [
+          { attempt: 1, phaseAttempt: 1, scope: "max-candidate" },
+          { attempt: 2, phaseAttempt: 1, scope: "max-candidate" },
+        ],
+        attempts: [
+          { attempt: 1, phaseAttempt: 1, scope: "max-candidate" },
+          { attempt: 2, phaseAttempt: 1, scope: "max-candidate" },
+        ],
+      })
+    }),
+    {
+      git: true,
+      config: (url) => ({
+        ...maxModeProviderCfg(url),
+        agent: { max: { steps: 2 } },
+        retry: {
+          request: { maxRetries: 0 },
+          maxCandidate: { maxRetries: 1, initialDelayMs: 1, maxDelayMs: 1 },
+          jitterRatio: 0,
+        },
+      }),
+    },
+  ),
+)
+
 it.live("office attachment reminder respects effective skill permission", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {

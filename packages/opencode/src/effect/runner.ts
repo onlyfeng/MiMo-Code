@@ -1,14 +1,18 @@
 import { Cause, Deferred, Effect, Exit, Fiber, Schema, Scope, SynchronizedRef } from "effect"
 
-export interface Runner<A, E = never> {
+export interface Runner<A, E = never, B = never> {
   readonly state: State<A, E>
   readonly busy: boolean
   readonly ensureRunning: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly startRunning: (
     work: Effect.Effect<A, E>,
     onInterrupt?: Effect.Effect<A, E>,
-  ) => Effect.Effect<Effect.Effect<A, E>>
-  readonly startShell: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<A, E>
+  ) => Effect.Effect<Effect.Effect<A, E>, B>
+  readonly start: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<void, B>
+  readonly startShell: (
+    work: Effect.Effect<A, E>,
+    onInterrupt?: Effect.Effect<A, E>,
+  ) => Effect.Effect<A, E | B>
   readonly cancel: Effect.Effect<void>
   readonly cancelDetached: Effect.Effect<void>
 }
@@ -52,7 +56,7 @@ export type State<A, E> =
   | ActiveState<A, E>
   | { readonly _tag: "Cancelling"; readonly cancellation: CancellationHandle<A, E> }
 
-export const make = <A, E = never>(
+export const make = <A, E = never, B = never>(
   scope: Scope.Scope,
   opts?: {
     onIdle?: (id: number) => Effect.Effect<void>
@@ -61,7 +65,7 @@ export const make = <A, E = never>(
     onStart?: (id: number) => void
     onInterrupt?: Effect.Effect<A, E>
     canStart?: () => boolean
-    busy?: () => never
+    busy?: () => B
     label?: string
     onReentryWarn?: (info: { label: string; existingRunId: number }) => Effect.Effect<void>
     /** @internal Deterministic scheduling seams for Runner race tests. */
@@ -72,7 +76,7 @@ export const make = <A, E = never>(
       onRunExit?: Effect.Effect<void>
     }
   },
-): Runner<A, E> => {
+): Runner<A, E, B> => {
   const ref = SynchronizedRef.makeUnsafe<State<A, E>>({ _tag: "Idle" })
   const idle = opts?.onIdle ?? (() => Effect.void)
   const busy = opts?.onBusy ?? Effect.void
@@ -138,6 +142,9 @@ export const make = <A, E = never>(
         (e): Effect.Effect<A, E> => (e instanceof Cancelled ? (onInterrupt ?? Effect.die(e)) : Effect.fail(e)),
       ),
     )
+
+  const busyFailure = <C>(): Effect.Effect<C, B> =>
+    opts?.busy ? Effect.fail(opts.busy()) : Effect.die(new Error("Runner is busy"))
 
   const finishShell = (id: number) =>
     Effect.uninterruptible(
@@ -222,7 +229,7 @@ export const make = <A, E = never>(
   const startRunning = (
     work: Effect.Effect<A, E>,
     onInterrupt = defaultOnInterrupt,
-  ): Effect.Effect<Effect.Effect<A, E>> =>
+  ): Effect.Effect<Effect.Effect<A, E>, B> =>
     Effect.uninterruptibleMask((restore) =>
       SynchronizedRef.modifyEffect(
         ref,
@@ -238,13 +245,7 @@ export const make = <A, E = never>(
               st,
             ] as const
           if (st._tag !== "Idle") {
-            return [
-              Effect.sync(() => {
-                if (opts?.busy) opts.busy()
-                throw new Error("Runner is busy")
-              }),
-              st,
-            ] as const
+            return [busyFailure<Effect.Effect<A, E>>(), st] as const
           }
           const id = next()
           yield* busy
@@ -269,10 +270,15 @@ export const make = <A, E = never>(
       ).pipe(Effect.flatten),
     )
 
+  const start = (
+    work: Effect.Effect<A, E>,
+    onInterrupt = defaultOnInterrupt,
+  ): Effect.Effect<void, B> => startRunning(work, onInterrupt).pipe(Effect.asVoid)
+
   const startShell = (
     work: Effect.Effect<A, E>,
     onInterrupt = defaultOnInterrupt,
-  ): Effect.Effect<A, E> =>
+  ): Effect.Effect<A, E | B> =>
     Effect.uninterruptibleMask((restore) =>
       SynchronizedRef.modifyEffect(
         ref,
@@ -288,13 +294,7 @@ export const make = <A, E = never>(
               st,
             ] as const
           if (st._tag !== "Idle") {
-            return [
-              Effect.sync(() => {
-                if (opts?.busy) opts.busy()
-                throw new Error("Runner is busy")
-              }),
-              st,
-            ] as const
+            return [busyFailure<A>(), st] as readonly [Effect.Effect<A, E | B>, State<A, E>]
           }
           const id = next()
           yield* busy
@@ -318,7 +318,7 @@ export const make = <A, E = never>(
               }),
             ),
             { _tag: "Shell", shell },
-          ] as const
+          ] as readonly [Effect.Effect<A, E | B>, State<A, E>]
         }),
       ).pipe(Effect.flatten),
     )
@@ -392,6 +392,7 @@ export const make = <A, E = never>(
     },
     ensureRunning,
     startRunning,
+    start,
     startShell,
     cancel,
     cancelDetached,

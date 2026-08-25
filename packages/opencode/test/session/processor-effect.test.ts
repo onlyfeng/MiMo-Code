@@ -1,9 +1,11 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { APICallError } from "@ai-sdk/provider"
 import { beforeEach, expect } from "bun:test"
+import { tool } from "ai"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import fs from "node:fs/promises"
 import path from "path"
+import z from "zod"
 import type { Agent } from "../../src/agent/agent"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
@@ -297,6 +299,53 @@ scripted.live("session.processor cleans up hook-created text before retry", () =
   ),
 )
 
+scripted.live("session.processor does not replay retryable stream errors after a tool call", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        processorLLM.enqueueFailure(
+          [
+            { type: "start-step" },
+            { type: "tool-input-start", id: "call_side_effect", toolName: "side_effect" },
+            { type: "tool-input-end" },
+            {
+              type: "tool-call",
+              toolCallId: "call_side_effect",
+              toolName: "side_effect",
+              input: { value: 1 },
+            },
+            { type: "tool-result", toolCallId: "call_side_effect", output: "effect committed" },
+          ],
+          new APICallError({
+            message: "stream failed after tool call",
+            url: "https://example.test/v1/chat/completions",
+            requestBodyValues: {},
+            statusCode: 503,
+            responseHeaders: { "retry-after-ms": "0" },
+            responseBody: '{"error":{"message":"stream failed after tool call"}}',
+            isRetryable: true,
+          }),
+        )
+        processorLLM.enqueue(textReply("must not replay"))
+
+        const parts = yield* processTextStream(dir, "tool boundary")
+        const tools = parts.filter((part): part is MessageV2.ToolPart => part.type === "tool")
+
+        expect(processorLLM.calls).toBe(1)
+        expect(tools).toHaveLength(1)
+        expect(tools[0]).toMatchObject({
+          callID: "call_side_effect",
+          tool: "side_effect",
+          state: { status: "completed", input: { value: 1 }, output: "effect committed" },
+        })
+      }),
+    {
+      git: true,
+      config: (url) => ({ ...providerCfg(url), retry: { request: { maxRetries: 1 } } }),
+    },
+  ),
+)
+
 it.live("session.processor effect tests capture llm input cleanly", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
@@ -572,6 +621,81 @@ it.live("session.processor effect tests reset reasoning state across retries", (
   ),
 )
 
+it.live("session.processor effect tests do not request-replay a raw stream failure after a tool side effect", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        let executions = 0
+        const first = reply().tool("side_effect", { value: 1 }).item()
+        if (first.type !== "sse") return yield* Effect.die("expected SSE fixture")
+
+        yield* llm.push(
+          raw({
+            head: first.head,
+            tail: first.tail,
+            error: Object.assign(new Error("connection reset after tool result"), { code: "ECONNRESET" }),
+          }),
+          reply().text("must not replay").stop(),
+        )
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "tool boundary")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies MessageV2.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "tool boundary" }],
+          tools: {
+            side_effect: tool({
+              description: "Commit one observable side effect",
+              inputSchema: z.object({ value: z.number() }),
+              execute: async () => {
+                executions++
+                return { title: "Side effect", output: "effect committed", metadata: {} }
+              },
+            }),
+          },
+        })
+
+        const parts = MessageV2.parts(msg.id)
+        const sideEffects = parts.filter((part): part is MessageV2.ToolPart => part.type === "tool")
+        const calls = yield* llm.calls
+
+        expect({ value, calls, executions, sideEffects: sideEffects.length }).toEqual({
+          value: "continue",
+          calls: 1,
+          executions: 1,
+          sideEffects: 1,
+        })
+        expect(sideEffects).toHaveLength(1)
+        expect(sideEffects[0]).toMatchObject({
+          tool: "side_effect",
+          state: { status: "completed", input: { value: 1 }, output: "effect committed" },
+        })
+        expect(parts.some((part) => part.type === "text" && part.text === "must not replay")).toBe(false)
+      }),
+    { git: true, config: (url) => ({ ...providerCfg(url), retry: { request: { maxRetries: 1 } } }) },
+  ),
+)
+
 it.live("session.processor effect tests do not retry unknown json errors", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
@@ -662,24 +786,14 @@ it.live("session.processor effect tests retry recognized structured json errors"
   ),
 )
 
-// TODO: Re-enable after we restructure the retry-status path.
-// Task 1 of docs/superpowers/plans/2026-05-17-retry-and-timeout-tuning.md
-// bumped streamText maxRetries 0→10. AI SDK now consumes 503 (and other
-// transient HTTP errors) inside its own exp-backoff loop, so the outer
-// Effect-based SessionRetry.policy at processor.ts:568 never sees this
-// error and the `type: "retry"` status banner never publishes for the
-// single-503 fixture this test uses. The user-facing contract changed:
-// silent retries during the SDK window, banner only when AI SDK gives
-// up after 10+ retries. A proper rewrite would either inject 11+
-// errors (so AI SDK exhausts then outer retry fires) or use a
-// non-AI-SDK-retryable error path.
-it.live.skip("session.processor effect tests publish retry status updates", () =>
+it.live("session.processor effect tests publish retry status updates", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
       Effect.gen(function* () {
         const { processors, session, provider } = yield* boot()
         const bus = yield* Bus.Service
 
+        yield* llm.error(503, { error: "boom" })
         yield* llm.error(503, { error: "boom" })
         yield* llm.text("")
 
@@ -688,9 +802,21 @@ it.live.skip("session.processor effect tests publish retry status updates", () =
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
         const states: number[] = []
+        const retryEvents: Array<{ attempt: number; phaseAttempt: number; maxAttempts: number; phase: string; kind: string; scope: string }> = []
         const off = yield* bus.subscribeCallback(SessionStatus.Event.Status, (evt) => {
           if (evt.properties.sessionID !== chat.id) return
           if (evt.properties.status.type === "retry") states.push(evt.properties.status.attempt)
+        })
+        const offRetry = yield* bus.subscribeCallback(Session.Event.RetryAttempt, (evt) => {
+          if (evt.properties.sessionID !== chat.id) return
+          retryEvents.push({
+            attempt: evt.properties.attempt,
+            phaseAttempt: evt.properties.phaseAttempt,
+            maxAttempts: evt.properties.maxAttempts,
+            phase: evt.properties.phase,
+            kind: evt.properties.kind,
+            scope: evt.properties.scope,
+          })
         })
         const handle = yield* processors.create({
           assistantMessage: msg,
@@ -716,12 +842,79 @@ it.live.skip("session.processor effect tests publish retry status updates", () =
         })
 
         off()
+        offRetry()
 
         expect(value).toBe("continue")
-        expect(yield* llm.calls).toBe(2)
-        expect(states).toStrictEqual([1])
+        expect(yield* llm.calls).toBe(3)
+        expect(states).toStrictEqual([1, 2])
+        expect(retryEvents).toContainEqual({
+          attempt: 2,
+          phaseAttempt: 1,
+          maxAttempts: 8,
+          phase: "stream",
+          kind: "server",
+          scope: "live-step",
+        })
       }),
-    { git: true, config: (url) => providerCfg(url) },
+    {
+      git: true,
+      config: (url) => ({ ...providerCfg(url), retry: { request: { maxRetries: 1 } } }),
+    },
+  ),
+)
+
+it.live("session.processor effect tests keep subagent request retries out of session status", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        const bus = yield* Bus.Service
+
+        yield* llm.error(503, { error: "boom" })
+        yield* llm.text("after")
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "subagent retry")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const retries: number[] = []
+        const off = yield* bus.subscribeCallback(SessionStatus.Event.Status, (evt) => {
+          if (evt.properties.sessionID !== chat.id || evt.properties.status.type !== "retry") return
+          retries.push(evt.properties.status.attempt)
+        })
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies MessageV2.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          agentID: "explore-1",
+          system: [],
+          messages: [{ role: "user", content: "subagent retry" }],
+          tools: {},
+        })
+
+        off()
+        expect(value).toBe("continue")
+        expect(yield* llm.calls).toBe(2)
+        expect(retries).toStrictEqual([])
+      }),
+    {
+      git: true,
+      config: (url) => ({ ...providerCfg(url), retry: { request: { maxRetries: 1 } } }),
+    },
   ),
 )
 
