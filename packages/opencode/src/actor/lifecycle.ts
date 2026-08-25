@@ -45,8 +45,9 @@ export type CancelOwnership<Result> =
       claimed: boolean
     }
 
-export function createActorLifecycle<Result, ContextValue>() {
+export function createActorLifecycle<Result, ContextValue, NotificationTarget = never>() {
   const forkContexts = new Map<string, ContextValue>()
+  const notificationTargets = new Map<string, NotificationTarget>()
   const cancelledActors = new Set<string>()
   const deliveredActors = new Map<string, number>()
   const liveActors = new Map<string, number>()
@@ -120,6 +121,7 @@ export function createActorLifecycle<Result, ContextValue>() {
       finishGenerationState(actorKey, owner)
       if (lifecycle === "persistent") return
       forkContexts.delete(actorKey)
+      notificationTargets.delete(actorKey)
       persistentActors.delete(actorKey)
       deliveredActors.delete(actorKey)
       if (!liveActors.has(actorKey)) generationCounters.delete(actorKey)
@@ -170,6 +172,7 @@ export function createActorLifecycle<Result, ContextValue>() {
   const retire = (actorKey: string) =>
     Effect.sync(() => {
       forkContexts.delete(actorKey)
+      notificationTargets.delete(actorKey)
       persistentActors.delete(actorKey)
       deliveredActors.delete(actorKey)
       if (!generationOwners.has(actorKey)) generationCounters.delete(actorKey)
@@ -182,6 +185,9 @@ export function createActorLifecycle<Result, ContextValue>() {
     releasePersistent: (actorKey: string) => Effect.sync(() => persistentActors.delete(actorKey)),
     setForkContext: (actorKey: string, context: ContextValue) => Effect.sync(() => forkContexts.set(actorKey, context)),
     getForkContext: (actorKey: string) => Effect.sync(() => forkContexts.get(actorKey)),
+    setNotificationTarget: (actorKey: string, target: NotificationTarget) =>
+      Effect.sync(() => notificationTargets.set(actorKey, target)),
+    getNotificationTarget: (actorKey: string) => Effect.sync(() => notificationTargets.get(actorKey)),
     startFork,
     currentGeneration: (actorKey: string) => Effect.sync(() => generationOwners.get(actorKey)),
     hasGeneration: (actorKey: string) => Effect.sync(() => generationOwners.has(actorKey)),

@@ -11,15 +11,18 @@ import { WorkspaceContext } from "@/control-plane/workspace-context"
 import { parse as pathParse } from "path"
 
 export interface InstanceContext {
+  generation: number
   directory: string
   worktree: string
   project: Project.Info
+  disposing: boolean
 }
 
 const context = LocalContext.create<InstanceContext>("instance")
 const cache = new Map<string, Promise<InstanceContext>>()
 const directoryDisposals = new Map<string, Promise<void>>()
 const active = new Map<string, number>()
+let nextGeneration = 0
 const project = makeRuntime(Project.Service, Project.defaultLayer)
 const DIRECTORY_DISPOSE_TIMEOUT = 2_000
 
@@ -66,16 +69,20 @@ function boot(input: { directory: string; init?: () => Promise<any>; worktree?: 
     const ctx =
       input.project && input.worktree
         ? {
+            generation: ++nextGeneration,
             directory: input.directory,
             worktree: input.worktree,
             project: input.project,
+            disposing: false,
           }
         : await project
             .runPromise((svc) => svc.fromDirectory(input.directory))
             .then(({ project, sandbox }) => ({
+              generation: ++nextGeneration,
               directory: input.directory,
               worktree: sandbox,
               project,
+              disposing: false,
             }))
     await context.provide(ctx, async () => {
       await input.init?.()
@@ -106,13 +113,31 @@ function leave(directory: string) {
   active.delete(directory)
 }
 
+async function serializeDirectory<R>(directory: string, fn: () => Promise<R>) {
+  const previous = directoryDisposals.get(directory) ?? Promise.resolve()
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const queued = previous.then(() => gate)
+  directoryDisposals.set(directory, queued)
+  await previous
+  try {
+    return await fn()
+  } finally {
+    release()
+    if (directoryDisposals.get(directory) === queued) directoryDisposals.delete(directory)
+  }
+}
+
 async function disposeCached(directory: string, current: Promise<InstanceContext>) {
   const ctx = await current.catch(() => undefined)
   if (!ctx || cache.get(directory) !== current) return
 
+  ctx.disposing = true
   cache.delete(directory)
   Log.Default.info("disposing instance", { directory })
-  await context.provide(ctx, () => disposeInstance(directory))
+  await context.provide(ctx, () => disposeInstance(directory, ctx))
 
   GlobalBus.emit("event", {
     directory,
@@ -169,6 +194,14 @@ export const Instance = {
   get project() {
     return context.use().project
   },
+  async peek(input: string): Promise<InstanceContext | undefined> {
+    const directory = AppFileSystem.resolve(input)
+    const current = cache.get(directory)
+    if (!current) return undefined
+    const ctx = await current.catch(() => undefined)
+    if (!ctx || cache.get(directory) !== current || ctx.disposing) return undefined
+    return ctx
+  },
 
   /**
    * Check if a path is within the project boundary.
@@ -202,68 +235,56 @@ export const Instance = {
   },
   async reload(input: { directory: string; init?: () => Promise<any>; project?: Project.Info; worktree?: string }) {
     const directory = AppFileSystem.resolve(input.directory)
-    await directoryDisposals.get(directory)
-    Log.Default.info("reloading instance", { directory })
-    await disposeInstance(directory)
-    cache.delete(directory)
-    const next = track(directory, boot({ ...input, directory }))
+    return serializeDirectory(directory, async () => {
+      Log.Default.info("reloading instance", { directory })
+      const current = cache.get(directory)
+      const ctx = await current?.catch(() => undefined)
+      if (ctx && cache.get(directory) === current) ctx.disposing = true
+      await disposeInstance(directory, ctx)
+      if (cache.get(directory) === current) cache.delete(directory)
+      const next = track(directory, boot({ ...input, directory }))
 
-    GlobalBus.emit("event", {
-      directory,
-      project: input.project?.id,
-      workspace: WorkspaceContext.workspaceID,
-      payload: {
-        type: "server.instance.disposed",
-        properties: {
-          directory,
+      GlobalBus.emit("event", {
+        directory,
+        project: input.project?.id,
+        workspace: WorkspaceContext.workspaceID,
+        payload: {
+          type: "server.instance.disposed",
+          properties: {
+            directory,
+          },
         },
-      },
-    })
+      })
 
-    return await next
+      return await next
+    })
   },
   async disposeDirectory(input: string) {
     const directory = AppFileSystem.resolve(input)
     assertSafeDirectory(directory)
-    const pending = directoryDisposals.get(directory)
-    if (pending) return pending
-    const current = cache.get(directory)
-    if (!current) return
+    return serializeDirectory(directory, async () => {
+      const current = cache.get(directory)
+      if (!current) return
 
-    // NOTE: withTimeout only bounds the *wait*, not the underlying promise —
-    // a slow disposer may still complete after the timeout fires.  The
-    // directoryDisposals guard above is a soft happens-before (bounded by
-    // DIRECTORY_DISPOSE_TIMEOUT), not a true barrier.  If a disposer times
-    // out and the same directory is re-provided immediately, the background
-    // disposer can still race with the new instance and tear down
-    // per-directory state (e.g. session-cwd entries) once it finally finishes.
-    const cleanup = withTimeout(disposeCached(directory, current), DIRECTORY_DISPOSE_TIMEOUT).catch((error) => {
-      Log.Default.warn("instance dispose did not complete", { directory, error })
+      // NOTE: withTimeout only bounds the *wait*, not the underlying promise —
+      // a slow disposer may still complete after the timeout fires. The
+      // directory guard is therefore a soft happens-before, not a true barrier.
+      await withTimeout(disposeCached(directory, current), DIRECTORY_DISPOSE_TIMEOUT).catch((error) => {
+        Log.Default.warn("instance dispose did not complete", { directory, error })
+      })
     })
-    directoryDisposals.set(directory, cleanup)
-    try {
-      await cleanup
-    } finally {
-      if (directoryDisposals.get(directory) === cleanup) directoryDisposals.delete(directory)
-    }
   },
   async dispose() {
-    const directory = Instance.directory
-    const project = Instance.project
-    Log.Default.info("disposing instance", { directory })
-    await disposeInstance(directory)
-    cache.delete(directory)
-
-    GlobalBus.emit("event", {
-      directory,
-      project: project.id,
-      workspace: WorkspaceContext.workspaceID,
-      payload: {
-        type: "server.instance.disposed",
-        properties: {
-          directory,
-        },
-      },
+    const current = Instance.current
+    const directory = current.directory
+    return serializeDirectory(directory, async () => {
+      const cached = cache.get(directory)
+      const cachedContext = await cached?.catch(() => undefined)
+      if (!cached || cachedContext !== current || cache.get(directory) !== cached) {
+        current.disposing = true
+        return
+      }
+      await disposeCached(directory, cached)
     })
   },
   async disposeAll() {

@@ -8,6 +8,7 @@ import { Effect, Layer } from "effect"
 setDefaultTimeout(30_000)
 import { Agent } from "../../src/agent/agent"
 import { Actor } from "../../src/actor/spawn"
+import { spawnRef } from "../../src/actor/spawn-ref"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorRegistryTable } from "../../src/actor/actor.sql"
 import { DEFAULT_LIVENESS_STALL_MS } from "../../src/actor/schema"
@@ -523,6 +524,83 @@ describe("session tool", () => {
     ),
   )
 
+  it.live("session creation persists supplied worktree ownership", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const parent = yield* sessions.create({ title: "Parent" })
+        const ownership = { directory: dir, branch: "mimocode/owned-before-register" }
+
+        const child = yield* sessions.create({ parentID: parent.id, directory: dir, worktreeOwnership: ownership })
+
+        expect(yield* sessions.worktreeOwnership(child.id)).toEqual(ownership)
+      }),
+    ),
+  )
+
+  it.live("create rolls back child state and worktree when peer spawn fails", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const actorReg = yield* ActorRegistry.Service
+        const git = yield* Git.Service
+        const parent = yield* sessions.create({ title: "Parent" })
+        const tool = yield* (yield* SessionTool).init()
+        const original = spawnRef.current ?? (yield* Effect.die(new Error("Actor service unavailable in test")))
+        let failedChildID: SessionID | undefined
+        const count = Effect.fn(function* () {
+          const result = yield* git.run(["worktree", "list", "--porcelain"], { cwd: dir })
+          return result.text().split("\n").filter((line) => line.startsWith("worktree ")).length
+        })
+        expect(yield* count()).toBe(1)
+
+        spawnRef.current = {
+          ...original,
+          spawn: (input) =>
+            Effect.gen(function* () {
+              const child = yield* sessions.create({
+                parentID: input.sessionID,
+                title: `${input.agentType}: ${input.task}`,
+                directory: input.cwd,
+                worktreeOwnership: input.worktreeOwnership,
+              })
+              failedChildID = child.id
+              input.onActorID?.(child.id)
+              yield* actorReg.register({
+                sessionID: child.id,
+                actorID: child.id,
+                mode: "peer",
+                parentActorID: input.parentActorID,
+                agent: input.agentType,
+                description: input.description ?? input.agentType,
+                contextMode: input.context,
+                contextWatermark: undefined,
+                background: input.background,
+                lifecycle: input.lifecycle ?? "persistent",
+                tools: input.tools,
+              })
+              return yield* Effect.die(new Error("simulated spawn failure"))
+            }),
+        }
+        const exit = yield* Effect.exit(
+          tool.execute(
+            { operation: { action: "create", task: "fail", mode: "build", dir, isolate: true } },
+            ctx(parent.id),
+          ),
+        )
+        spawnRef.current = original
+
+        expect(exit._tag).toBe("Failure")
+        const childID = failedChildID ?? (yield* Effect.die(new Error("fake peer did not create a child")))
+        expect(yield* sessions.children(parent.id)).toEqual([])
+        expect(yield* actorReg.get(childID, childID)).toBeUndefined()
+        expect(yield* sessions.worktreeOwnership(childID)).toBeUndefined()
+        expect(yield* count()).toBe(1)
+      }),
+      { git: true },
+    ),
+  )
+
   // NOTE: the `--isolate` non-git degrade path (dir is not a git repo → run
   // shared + "--isolate ignored" notice) is verified by source inspection, not a
   // unit test: provideTmpdirInstance dirs resolve as git-capable in this harness
@@ -603,6 +681,31 @@ describe("session tool", () => {
         expect(result.metadata.sessionID).toBe(childID)
         expect(result.output).toContain(childID)
         if (result.output.includes("Removed its worktree")) expect(existsSync(childDir)).toBe(false)
+      }),
+      { git: true },
+    ),
+  )
+
+  it.live("cancel preserves a linked worktree not created for the child", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const worktree = yield* Worktree.Service
+        const parent = yield* sessions.create({ title: "Parent" })
+        const existing = yield* worktree.create({ name: "user-owned" })
+        const tool = yield* (yield* SessionTool).init()
+        const created = yield* tool.execute(
+          { operation: { action: "create", task: "use existing", mode: "build", dir: existing.directory } },
+          ctx(parent.id),
+        )
+
+        const result = yield* tool.execute(
+          { operation: { action: "cancel", sessionID: created.metadata.sessionID! } },
+          ctx(parent.id),
+        )
+
+        expect(result.output).not.toContain("Removed its worktree")
+        expect(existsSync(existing.directory)).toBe(true)
       }),
       { git: true },
     ),

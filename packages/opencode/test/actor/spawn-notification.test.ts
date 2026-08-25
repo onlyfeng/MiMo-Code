@@ -450,6 +450,133 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
     ),
   )
 
+  it.live("isolated peer suppresses a disposed parent then retargets its restarted generation", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ dir, llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const inbox = yield* Inbox.Service
+        const bus = yield* Bus.Service
+        const prompt = yield* SessionPrompt.Service
+        const parent = yield* session.create({
+          title: "notification-test-disposed-parent",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const parentInstance = yield* InstanceState.context
+        const childDir = join(dir, "disposed-parent-child-worktree")
+        yield* Effect.promise(() => mkdir(childDir, { recursive: true }))
+        const childInstance = yield* Effect.promise(() =>
+          Instance.provide({ directory: childDir, fn: () => Instance.current }),
+        )
+        const runState = yield* SessionRunState.Service
+        const response = Promise.withResolvers<void>()
+        yield* llm.hold("done", response.promise)
+
+        let notifications = 0
+        const onGlobal = (event: GlobalEvent) => {
+          if (event.payload?.type !== InboxArrived.type) return
+          if (event.payload.properties?.receiverSessionID !== parent.id) return
+          if (event.payload.properties?.receiverActorID !== "main") return
+          notifications++
+        }
+        GlobalBus.on("event", onGlobal)
+
+        yield* Effect.ensuring(
+          Effect.fnUntraced(function* () {
+            // Match WorkflowRuntime's isolated bridge: the parent generation is
+            // inherited while InstanceRef already points at the child worktree.
+            const result = yield* runState.withRunDisposal(
+              actor
+                .spawn({
+                  mode: "peer",
+                  sessionID: parent.id,
+                  agentType: "build",
+                  task: "finish after the parent is disposed",
+                  description: "disposed parent peer",
+                  context: "none",
+                  tools: ["read"],
+                  background: true,
+                  model: ref,
+                  cwd: childDir,
+                })
+                .pipe(Effect.provideService(InstanceRef, childInstance)),
+            )
+            yield* llm.wait(1).pipe(Effect.timeout("5 seconds"))
+            yield* Effect.promise(() => Instance.restore(parentInstance, () => Instance.dispose())).pipe(
+              Effect.timeout("5 seconds"),
+            )
+            response.resolve()
+            const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("5 seconds"))
+
+            expect(outcome.status).toBe("success")
+            expect(notifications).toBe(0)
+
+            const restartedParent = yield* Effect.promise(() =>
+              Instance.provide({ directory: parentInstance.directory, fn: () => Instance.current }),
+            )
+            expect(restartedParent).not.toBe(parentInstance)
+            const wakeStarted = yield* Deferred.make<void>()
+            yield* llm.textMatch((request) => {
+              if (!JSON.stringify(request.body).includes("restarted-parent-wake-token")) return false
+              Effect.runFork(Deferred.succeed(wakeStarted, undefined))
+              return true
+            }, "wake completed")
+
+            const wakeDone = yield* Deferred.make<void>()
+            const restorePrompt = inbox.bindPrompt?.({
+              loop: (input) =>
+                prompt.loop(input).pipe(
+                  input.sessionID === result.sessionID && input.agentID === result.actorID
+                    ? Effect.ensuring(Deferred.succeed(wakeDone, undefined))
+                    : (effect) => effect,
+                ),
+            })
+            if (restorePrompt) yield* Effect.addFinalizer(() => Effect.sync(restorePrompt))
+
+            let restartedNotifications = 0
+            const restartedNotified = yield* Deferred.make<void>()
+            const off = yield* bus
+              .subscribeCallback(InboxArrived, (event) => {
+                if (event.properties.receiverSessionID !== parent.id) return
+                if (event.properties.receiverActorID !== "main") return
+                if (event.properties.senderSessionID !== result.sessionID) return
+                if (event.properties.senderActorID !== result.actorID) return
+                restartedNotifications++
+                Effect.runFork(Deferred.succeed(restartedNotified, undefined))
+              })
+              .pipe(Effect.provideService(InstanceRef, restartedParent))
+            yield* Effect.addFinalizer(() => Effect.sync(off))
+
+            yield* runState
+              .withRunDisposal(
+                inbox
+                  .send({
+                    receiverSessionID: result.sessionID,
+                    receiverActorID: result.actorID,
+                    senderSessionID: parent.id,
+                    senderActorID: "main",
+                    content: "restarted-parent-wake-token",
+                  })
+                  .pipe(Effect.orDie),
+              )
+              .pipe(Effect.provideService(InstanceRef, restartedParent))
+
+            yield* Deferred.await(wakeDone).pipe(Effect.timeout("5 seconds"))
+            yield* Deferred.await(wakeStarted).pipe(Effect.timeout("5 seconds"))
+            yield* Deferred.await(restartedNotified).pipe(Effect.timeout("5 seconds"))
+            expect(restartedNotifications).toBe(1)
+            expect(notifications).toBe(1)
+          })(),
+          Effect.sync(() => {
+            response.resolve()
+            GlobalBus.off("event", onGlobal)
+          }),
+        )
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
   it.live("full-context persistent peer runs a woken turn and notifies its parent exactly once", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {

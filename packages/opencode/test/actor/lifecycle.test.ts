@@ -68,14 +68,16 @@ describe("actor lifecycle coordinator", () => {
   it.effect(
     "retains persistent context and numbering but releases ephemeral ownership",
     Effect.gen(function* () {
-      const lifecycle = createActorLifecycle<string, string>()
+      const lifecycle = createActorLifecycle<string, string, string>()
       const persistent = lifecycle.key(SessionID.make("session"), "persistent")
       yield* lifecycle.retainPersistent(persistent)
       yield* lifecycle.setForkContext(persistent, "persistent-context")
+      yield* lifecycle.setNotificationTarget(persistent, "persistent-target")
       const first = yield* lifecycle.startFork(persistent)
       yield* lifecycle.finishForkWork(persistent, first, "persistent")
 
       expect(yield* lifecycle.getForkContext(persistent)).toBe("persistent-context")
+      expect(yield* lifecycle.getNotificationTarget(persistent)).toBe("persistent-target")
       const wake = yield* lifecycle.acquireWake(persistent)
       expect(wake._tag).toBe("owner")
       if (wake._tag !== "owner") throw new Error("expected persistent wake owner")
@@ -83,13 +85,16 @@ describe("actor lifecycle coordinator", () => {
       yield* lifecycle.finishWake(persistent, wake.owner, Exit.succeed("done"))
       yield* lifecycle.retire(persistent)
       expect(yield* lifecycle.getForkContext(persistent)).toBeUndefined()
+      expect(yield* lifecycle.getNotificationTarget(persistent)).toBeUndefined()
       expect((yield* lifecycle.startFork(persistent)).generation).toBe(1)
 
       const ephemeral = lifecycle.key(SessionID.make("session"), "ephemeral")
       yield* lifecycle.setForkContext(ephemeral, "ephemeral-context")
+      yield* lifecycle.setNotificationTarget(ephemeral, "ephemeral-target")
       const ephemeralOwner = yield* lifecycle.startFork(ephemeral)
       yield* lifecycle.finishForkWork(ephemeral, ephemeralOwner, "ephemeral")
       expect(yield* lifecycle.getForkContext(ephemeral)).toBeUndefined()
+      expect(yield* lifecycle.getNotificationTarget(ephemeral)).toBeUndefined()
       expect((yield* lifecycle.startFork(ephemeral)).generation).toBe(1)
     }),
   )

@@ -357,6 +357,50 @@ describe("Actor stall watchdog (T40)", () => {
     ),
   )
 
+  it.live("reload hands the automatic watchdog to the existing replacement generation", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* () {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const actorReg = yield* ActorRegistry.Service
+        const instance = Instance.current
+        const parent = yield* session.create({
+          title: "stall-watchdog-reload",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const child = yield* session.create({ parentID: parent.id, title: "reload peer" })
+        yield* actorReg.register({
+          sessionID: child.id,
+          actorID: child.id,
+          mode: "peer",
+          parentActorID: "main",
+          agent: "build",
+          description: "reload-stalled peer",
+          contextMode: "none",
+          contextWatermark: undefined,
+          background: true,
+          lifecycle: "persistent",
+        })
+        yield* actor.scanStalledOnce!()
+        yield* backdateTurn(child.id, child.id, DEFAULT_LIVENESS_STALL_MS + 60_000)
+
+        yield* Effect.promise(() =>
+          Instance.reload({
+            directory: instance.directory,
+            project: instance.project,
+            worktree: instance.worktree,
+          }),
+        )
+        yield* actor.scanStalledOnce!()
+
+        const rows = yield* parentInboxRows(parent.id)
+        expect(rows).toHaveLength(1)
+        expect((rows[0].content as { text?: string }).text).toContain("reload-stalled peer")
+      }),
+      { git: true },
+    ),
+  )
+
   it.live("a running woken peer is visible to the watchdog with per-episode debounce", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {

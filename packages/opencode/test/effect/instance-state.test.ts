@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { Deferred, Duration, Effect, Exit, Fiber, Layer, ManagedRuntime, Context } from "effect"
 import { InstanceState } from "../../src/effect"
 import { InstanceRef } from "../../src/effect/instance-ref"
+import { registerDisposer } from "../../src/effect/instance-registry"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 
@@ -84,6 +85,132 @@ test("InstanceState invalidates on reload", async () => {
       }),
     ),
   )
+})
+
+test("a timed-out old disposer cannot invalidate replacement generation state", async () => {
+  await using tmp = await tmpdir()
+  let started!: () => void
+  let finish!: () => void
+  let invalidated!: () => void
+  const disposing = new Promise<void>((resolve) => (started = resolve))
+  const blocked = new Promise<void>((resolve) => (finish = resolve))
+  const oldInvalidated = new Promise<void>((resolve) => (invalidated = resolve))
+  const unregister = registerDisposer(async (directory) => {
+    if (directory !== tmp.path) return
+    started()
+    await blocked
+  })
+
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          let n = 0
+          const state = yield* InstanceState.make(
+            () =>
+              Effect.acquireRelease(
+                Effect.sync(() => ({ n: ++n })),
+                (value) => Effect.sync(() => value.n === 1 && invalidated()),
+              ),
+            { phase: "late" },
+          )
+          const first = yield* Effect.promise(() => access(state, tmp.path))
+          const dispose = Instance.disposeDirectory(tmp.path)
+          yield* Effect.promise(() => disposing)
+          const replacement = access(state, tmp.path)
+
+          yield* Effect.promise(() => dispose)
+          const second = yield* Effect.promise(() => replacement)
+          finish()
+          yield* Effect.promise(() => oldInvalidated)
+          const third = yield* Effect.promise(() => access(state, tmp.path))
+
+          expect(first).not.toBe(second)
+          expect(third).toBe(second)
+          expect(n).toBe(2)
+        }),
+      ),
+    )
+  } finally {
+    finish()
+    unregister()
+    await Instance.disposeDirectory(tmp.path)
+  }
+}, 7_000)
+
+test("a disposed generation cannot recreate InstanceState", async () => {
+  await using tmp = await tmpdir()
+
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        let n = 0
+        const state = yield* InstanceState.make(() => Effect.sync(() => ({ n: ++n })))
+        const stale = yield* Effect.promise(() =>
+          Instance.provide({ directory: tmp.path, fn: () => Instance.current }),
+        )
+        yield* InstanceState.get(state).pipe(Effect.provideService(InstanceRef, stale))
+        yield* Effect.promise(() => Instance.reload({ directory: tmp.path }))
+
+        const exit = yield* InstanceState.get(state).pipe(
+          Effect.provideService(InstanceRef, stale),
+          Effect.exit,
+        )
+        const current = yield* Effect.promise(() => access(state, tmp.path))
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(current.n).toBe(2)
+        expect(n).toBe(2)
+      }),
+    ),
+  )
+})
+
+test("a disposing generation is tombstoned before its resource finalizer completes", async () => {
+  await using tmp = await tmpdir()
+  let finalizerStarted!: () => void
+  let finishFinalizer!: () => void
+  const started = new Promise<void>((resolve) => (finalizerStarted = resolve))
+  const blocked = new Promise<void>((resolve) => (finishFinalizer = resolve))
+
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          let n = 0
+          const state = yield* InstanceState.make(() =>
+            Effect.acquireRelease(
+              Effect.sync(() => ({ n: ++n })),
+              () =>
+                Effect.promise(async () => {
+                  finalizerStarted()
+                  await blocked
+                }),
+            ),
+          )
+          const stale = yield* Effect.promise(() =>
+            Instance.provide({ directory: tmp.path, fn: () => Instance.current }),
+          )
+          yield* InstanceState.get(state).pipe(Effect.provideService(InstanceRef, stale))
+
+          const disposal = Instance.disposeDirectory(tmp.path)
+          yield* Effect.promise(() => started)
+          const exit = yield* InstanceState.get(state).pipe(
+            Effect.provideService(InstanceRef, stale),
+            Effect.exit,
+          )
+          finishFinalizer()
+          yield* Effect.promise(() => disposal)
+
+          expect(Exit.isFailure(exit)).toBe(true)
+          expect(n).toBe(1)
+        }),
+      ),
+    )
+  } finally {
+    finishFinalizer()
+    await Instance.disposeDirectory(tmp.path)
+  }
 })
 
 test("InstanceState invalidates on disposeAll", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect"
 import { Runner } from "../../src/effect"
 import { it } from "../lib/effect"
 
@@ -26,6 +26,21 @@ describe("Runner", () => {
       const observed = yield* runner.ensureRunning(Effect.sync(() => runner.state._tag))
       expect(observed).toBe("Running")
       expect(runner.state._tag).toBe("Idle")
+    }),
+  )
+
+  it.live(
+    "ensureRunning does not start work when starts are disabled",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const started = yield* Ref.make(false)
+      const starts = { enabled: true }
+      const runner = Runner.make<string>(s, { canStart: () => starts.enabled })
+      starts.enabled = false
+      const exit = yield* runner.ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected"))).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(yield* Ref.get(started)).toBe(false)
     }),
   )
 
@@ -416,6 +431,33 @@ describe("Runner", () => {
   )
 
   it.live(
+    "shell does not start work when starts are disabled during onBusy",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const busy = yield* Deferred.make<void>()
+      const releaseBusy = yield* Deferred.make<void>()
+      const started = yield* Ref.make(false)
+      const starts = { enabled: true }
+      const runner = Runner.make<string>(s, {
+        canStart: () => starts.enabled,
+        onBusy: Deferred.succeed(busy, undefined).pipe(Effect.andThen(Deferred.await(releaseBusy))),
+      })
+      const caller = yield* runner
+        .startShell(Ref.set(started, true).pipe(Effect.as("unexpected")))
+        .pipe(Effect.forkChild)
+
+      yield* Deferred.await(busy)
+      starts.enabled = false
+      yield* Deferred.succeed(releaseBusy, undefined)
+      const exit = yield* Fiber.await(caller)
+
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(yield* Ref.get(started)).toBe(false)
+      expect(runner.state._tag).toBe("Idle")
+    }),
+  )
+
+  it.live(
     "shell rejects when run is active",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
@@ -517,6 +559,50 @@ describe("Runner", () => {
       expect(Exit.isSuccess(exit)).toBe(true)
       if (Exit.isSuccess(exit)) expect(exit.value).toBe("run-result")
       expect(runner.state._tag).toBe("Idle")
+    }),
+  )
+
+  it.live(
+    "queued callers do not start when starts are disabled before shell handoff",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const releaseShell = yield* Deferred.make<void>()
+      const reentered = yield* Deferred.make<void>()
+      const started = yield* Ref.make(false)
+      const starts = { enabled: true }
+      const runner = Runner.make<string>(s, {
+        canStart: () => starts.enabled,
+        onInterrupt: Effect.interrupt,
+        onReentryWarn: () => Deferred.succeed(reentered, undefined).pipe(Effect.asVoid),
+      })
+      const state = () => runner.state
+      const shell = yield* runner
+        .startShell(Deferred.await(releaseShell).pipe(Effect.as("shell")))
+        .pipe(Effect.forkChild)
+      while (state()._tag !== "Shell") yield* Effect.yieldNow
+
+      const first = yield* runner
+        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")))
+        .pipe(Effect.forkChild)
+      while (state()._tag !== "ShellThenRun") yield* Effect.yieldNow
+      const second = yield* runner
+        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")))
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(reentered)
+
+      starts.enabled = false
+      yield* Deferred.succeed(releaseShell, undefined)
+      const [shellExit, firstExit, secondExit] = yield* Effect.all([
+        Fiber.await(shell),
+        Fiber.await(first),
+        Fiber.await(second),
+      ])
+
+      expect(Exit.isSuccess(shellExit)).toBe(true)
+      expect(Exit.isFailure(firstExit) && Cause.hasInterruptsOnly(firstExit.cause)).toBe(true)
+      expect(Exit.isFailure(secondExit) && Cause.hasInterruptsOnly(secondExit.cause)).toBe(true)
+      expect(yield* Ref.get(started)).toBe(false)
+      expect(state()._tag).toBe("Idle")
     }),
   )
 
