@@ -138,6 +138,11 @@ guard typechecks, reads correctly in review, and does nothing.
 - Avoid mocks as much as possible
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+- `bun test -t <pattern>` matches test names as an unanchored regex, not a
+  literal string. Many test names here contain `()`, so pasting a full name
+  such as `candidate gives up (returns null) on a non-transient error part`
+  matches 0 tests and exits 1 — that is a filter miss, not a failing test.
+  Filter on a metacharacter-free substring, or escape the metacharacters.
 - For default-path validation, including upstream-sync regressions, unset ambient
   `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and
   `MIMOCODE_CODEX_MODE`. Preserve and report package-owned preload flags as the
