@@ -11335,6 +11335,29 @@
         },
         "required": ["type", "properties"]
       },
+      "Event.session.cwd": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "session.cwd"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "cwd": {
+                "type": "string"
+              }
+            },
+            "required": ["sessionID", "cwd"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
       "Event.bash.interactive.asked": {
         "type": "object",
         "properties": {
@@ -14165,6 +14188,9 @@
               },
               {
                 "$ref": "#/components/schemas/Event.question.rejected"
+              },
+              {
+                "$ref": "#/components/schemas/Event.session.cwd"
               },
               {
                 "$ref": "#/components/schemas/Event.bash.interactive.asked"
@@ -17629,6 +17655,9 @@
           },
           {
             "$ref": "#/components/schemas/Event.question.rejected"
+          },
+          {
+            "$ref": "#/components/schemas/Event.session.cwd"
           },
           {
             "$ref": "#/components/schemas/Event.bash.interactive.asked"
