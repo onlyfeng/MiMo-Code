@@ -13,6 +13,7 @@ never used as an inherited `main` or compat behavior review basis.
 | --- | --- | --- | --- | ---: | --- | --- |
 | 2026-08-24 | `060b3adb1373a802e301f5bafce225b90407ef49` | `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5` | `f6abd31d57d3066a1924042670e3f59c26f8a0ca` | 7 | 47 paths; 3,643 insertions; 226 deletions | Retained approved private WebFetch and MCP reachability plus the existing platform, per-agent MaxMode, bounded-context, actor-context, and TUI metadata adaptations as compat-owned behavior. |
 | 2026-08-24 | `fd5064df420d5c2dbe424ddaa020bb54655bef64` | `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8` | `d0d44b7df7af60fe9ef4df634d53f6c0782d0f2c` | 7 | 47 paths; 3,643 insertions; 226 deletions | Adopted the shared full IPv6 link-local classifier correction while retaining approved private WebFetch and MCP reachability plus all existing compat-owned platform, model, context, actor, and TUI adaptations. |
+| 2026-08-25 | `98f1652bcab2038989f6e522fe41a2cb35b5e90f` | `413711ced1e60c408caefb10c585a2be8c4b5f01` | `166737181cff131961b0b84977afd230c556755b` | 7 | 47 paths; 3,643 insertions; 226 deletions | Adopted shared instance-disposal, runner, actor-notification, workflow-cleanup, and owned-worktree lifecycle hardening while retaining all seven compat-owned adaptations unchanged. |
 
 ## 2026-08-24 initial ownership review
 
@@ -228,3 +229,29 @@ git diff --name-only \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
 ```
+
+## 2026-08-25 shared lifecycle hardening propagation
+
+- Accepted `origin/main` tip:
+  `98f1652bcab2038989f6e522fe41a2cb35b5e90f`.
+- Inherited main behavior:
+  `413711ced1e60c408caefb10c585a2be8c4b5f01`.
+- Pre-documentation compat behavior:
+  `166737181cff131961b0b84977afd230c556755b`.
+- Active ownership remains DC-NET-001, DC-NET-002, DC-PLATFORM-001,
+  DC-MODEL-001, DC-CONTEXT-001, DC-ACTOR-001, and DC-TUI-001.
+- PR #68 adds shared instance-disposal, runner handoff, actor-notification,
+  workflow cleanup, and owned child-worktree lifecycle hardening. It introduces
+  no new compat-only capability.
+- The only overlap with the compat delta is
+  `packages/opencode/src/session/prompt.ts` and its
+  `packages/opencode/test/session/prompt-effect.test.ts` coverage. The merged
+  tree preserves both the shared disposal propagation and the compat MaxMode,
+  bounded-context, and full-context actor paths.
+- WebFetch private-network access, RFC1918 MCP reachability,
+  restricted-network ripgrep/archive fallbacks, per-agent MaxMode, bounded
+  request content, actor context, and TUI metadata contracts remain unchanged.
+- The predicted and actual merge tree is
+  `c325dadb34b0bf3be95accbaaf5dd5bd96022e91`; the compat delta remains 47
+  paths, 3,643 insertions, and 226 deletions after excluding the five registry
+  and history files.
