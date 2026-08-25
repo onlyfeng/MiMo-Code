@@ -15,10 +15,10 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-08-25
-- Upstream: `5e32992a97ed7f8d2d00e4c312133716292dab9e`
-- Prior reviewed upstream: `c23eeaed1983197f1c45ac3ec14c6b99784b7d27`
-- Main behavior: `1cfe7efc8f13da6157f30324c4eeac0111e99115`
-- Prior fork `main` tip: `98f1652bcab2038989f6e522fe41a2cb35b5e90f`
+- Upstream: `fa6fdf176cef7f82659705b555333d6302725748`
+- Prior reviewed upstream: `5e32992a97ed7f8d2d00e4c312133716292dab9e`
+- Main behavior: `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`
+- Prior fork `main` tip: `e65c86f341f2a5f15d375cc087e33b17037e36ca`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -29,11 +29,11 @@ registry or history commit does not advance either behavior reference.
 | ID | Watch surfaces | Upstream relationship | Required decision |
 | --- | --- | --- | --- |
 | FD-001 | yolo, permission, Bash delete | Rejects shared mutable delete approval | Preserve request/instance isolation |
-| FD-002 | instruction loading and model requests | Rejects default-off delivery | Preserve UI-to-request parity |
+| FD-002 | instruction loading, model requests, and retry | Rejects default-off delivery | Preserve UI-to-request parity across attempts |
 | FD-004 | instance server, `/v1`, SDK/OpenAPI | Rejects implicit listener/capability surface | Keep ordinary instances opt-in only |
-| FD-005 | model identity, prompt, discovery, tools | Adapts inconsistent upstream classification | Preserve one resolved identity |
+| FD-005 | model identity, prompt, discovery, tools, retry | Adapts inconsistent upstream classification | Preserve one resolved identity |
 | FD-006 | direct tools, nested `exec`, timeout and normalization | Selectively adopts compatibility normalization | Preserve authority and size/unit boundaries |
-| FD-009 | actor/checkpoint context capture | Rejects live-context fallback | Fail before child execution |
+| FD-009 | actor/checkpoint context capture, retry, resume | Rejects live-context fallback | Fail before child execution and reuse frozen membership |
 
 ## FD-001 — `--yolo` must not mutate delete approval state
 
@@ -56,8 +56,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/bash.test.ts`, and
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
-- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
-  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
+- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
+  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -70,6 +70,8 @@ registry or history commit does not advance either behavior reference.
   instruction file reported by `TuiEvent.InstructionsLoaded` are included in
   the corresponding normal and MaxMode model requests. A default-off dynamic
   system-prompt flag cannot make the UI report content that the request omits.
+  Request, live-step, and MaxMode retries reuse the same resolved instruction
+  set; retry configuration cannot suppress or replace it between attempts.
 - Upstream relationship: rejects the default-off gate anchored at
   `ada544a352337a1c0ce796234fc86e7438e2f7e9` and merged by `8fa7e8d4` while
   retaining compatible request-prefix improvements.
@@ -86,8 +88,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/max-mode.test.ts`, and
   `packages/opencode/test/session/prompt-effect.test.ts` bind the reported file
   set to normal and MaxMode request payloads.
-- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
-  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
+- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
+  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
 - Retirement condition: one immutable per-request decision controls both the UI
   signal and model payload, with regressions proving identical instruction sets.
 
@@ -112,9 +114,11 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: instance-server, capability/token, middleware, shutdown, and
   generated-artifact checks at the reviewed main behavior; the JavaScript SDK
   is regenerated with `./packages/sdk/js/script/build.ts` rather than copied
-  from upstream.
-- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
-  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
+  from upstream. `packages/opencode/test/server/openapi-refs.test.ts` checks both
+  runtime and published OpenAPI recovery/resume operations remain main-only and
+  omit their upstream agent/task selectors.
+- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
+  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -128,7 +132,8 @@ registry or history commit does not advance either behavior reference.
   from the complete resolved `(model.id, model.api.id, model.family)` identity
   with the same harness precedence. Exact MiMo v2.5 identities win over generic
   aliases; unrelated GPT-4 families do not gain Codex tools through API/family
-  aliases.
+  aliases. Request, live-step, and MaxMode retry policy reuse that same resolved
+  identity instead of independently reclassifying the model between attempts.
 - Upstream relationship: adapts the classification introduced at
   `866a5b8a2eff3970a0becb0d27f8f055e4624e19` and merged by
   `b15b0971846861a4b25576d340ce1a4207f87712`; upstream's separate fallbacks are
@@ -144,8 +149,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: system-prompt, GPT helper, request-prefix, tool-registry,
   agent-generation, and `packages/opencode/test/tool/tool-script.test.ts`
   regressions cover alias conflicts and explicit harness overrides.
-- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
-  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
+- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
+  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
 - Retirement condition: the provider layer exposes one immutable model-mode
   value consumed unchanged by every prompt, discovery, registry, capture, and
   dispatch surface, with alias-conflict and GPT-4 regressions.
@@ -182,8 +187,15 @@ registry or history commit does not advance either behavior reference.
   actor, and TUI visibility tests cover the outer authority surface;
   `packages/opencode/test/cli/tui/exec-expanded.test.tsx` covers bounded
   ANSI-free outer output with and without nested parts.
-- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
-  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
+- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
+  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- 2026-08-25 fixed-cwd review: adopted removal of mutable session cwd and the
+  `change_directory` tool. Direct and nested tools now use absolute paths or an
+  explicit `workdir`; this does not broaden nested actor, shell,
+  `exec_command`, or control-tool authority. FC-007 owns the positive fixed
+  instance-cwd contract. The inert `SessionCwd.Event.Changed` declaration is
+  retained only for SDK compatibility; no setter, clear path, or event
+  publisher restores mutable cwd authority.
 - 2026-08-25 review: adopted replayable nested parts and live child lifecycle
   updates while retaining the nested actor/shell/control exclusions. Early
   termination now closes admission, aborts running calls, rejects queued calls,
@@ -206,6 +218,8 @@ registry or history commit does not advance either behavior reference.
   mode-specific agent metadata before child creation or watermark advancement.
   The captured system, tools, MCP membership, permissions, watermark, and model
   identity remain frozen; a qualifying child cannot fall back to live context.
+  Retry, detached continuation, recovery, and resume reuse that admitted frozen
+  membership and cannot recapture a later live context.
 - Upstream relationship: rejects the log-and-spawn fallback anchored at
   `8e5cc8a84b91af38eefde2d2bf054216d880d82f`; fork behavior is anchored at
   `3a4a244c8af1cd455518e0226c4df12d50b9b5e9` and refined through
@@ -221,8 +235,8 @@ registry or history commit does not advance either behavior reference.
   child-session/fork-mode/main-slice/prefix-capture/watermark tests, and
   `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
-- Review basis: upstream `5e32992a97ed7f8d2d00e4c312133716292dab9e`;
-  main behavior `1cfe7efc8f13da6157f30324c4eeac0111e99115`.
+- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
+  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
 - Retirement condition: upstream provides an atomic capture-and-spawn protocol
   with equivalent mode-specific validation, frozen authority/membership,
   deterministic failure settlement, and proof that live-context fallback is
