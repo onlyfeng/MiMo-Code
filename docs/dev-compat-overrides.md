@@ -335,7 +335,9 @@ it changes or extends. Neither field names this documentation commit.
 - Overrides: `dev/compat` adds a repo-file managed Cloud Agent environment at
   `.cursor/environment.json`. It selects Cursor's default base image and an
   idempotent `install` that installs the `package.json`-pinned Bun
-  (`bun-v1.3.14`) when absent and then runs `bun ci` (frozen lockfile).
+  (`bun-v1.3.14`) when absent, symlinks it into `/usr/local/bin` so
+  non-interactive agent shells find `bun` without a profile edit, and then runs
+  `bun ci` (frozen lockfile).
 - Delta: Cloud Agents started from `dev/compat` (or its pull requests) bootstrap
   with Bun plus frozen-lockfile dependencies automatically. Because a committed
   `.cursor/environment.json` is the highest-precedence environment source, it
