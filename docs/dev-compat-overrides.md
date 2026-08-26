@@ -34,7 +34,6 @@ it changes or extends. Neither field names this documentation commit.
 | DC-CONTEXT-001 | Model-visible text, request preflight, fixed cwd | Bounded-content hardening over shared retry/cwd | Preserve caps, safe serialization, recovery routing, and inherited cwd |
 | DC-ACTOR-001 | Actor context, fixed cwd, static-prefix overflow | Full-context extension beyond shared capture | Preserve frozen membership/cwd and fail unrecoverable prefixes |
 | DC-TUI-001 | Prompt/footer model metadata | Request-metadata display override | Preserve provider/model/variant truth and known-limit disclosure |
-| DC-INFRA-001 | `.cursor/environment.json` Cloud Agent config | Tooling addition absent from inherited `main` | Keep dev/compat-only; never propagate to `main`/upstream |
 
 ## DC-NET-001 — approved private-network WebFetch
 
@@ -323,35 +322,3 @@ it changes or extends. Neither field names this documentation commit.
 - Exit condition: retire when the server exposes authoritative pending-request
   provider/model/variant metadata, or shared `main` renders equivalent truth
   without client-side default-model guessing and covers both known limits.
-
-## DC-INFRA-001 — dev/compat-only Cloud Agent environment.json
-
-- Status: active
-- Canonical owner: `dev/compat` Cloud Agent environment configuration
-- Base: inherited `main` carries no `.cursor/environment.json`, and upstream
-  defines none either. There is no inherited runtime behavior to override — this
-  entry tracks a tooling-only file addition, not product behavior, so it does
-  not advance the behavior references in the review record above.
-- Overrides: `dev/compat` adds a repo-file managed Cloud Agent environment at
-  `.cursor/environment.json`. It selects Cursor's default base image and an
-  idempotent `install` that installs the `package.json`-pinned Bun
-  (`bun-v1.3.14`) when absent, symlinks it into `/usr/local/bin` so
-  non-interactive agent shells find `bun` without a profile edit, and then runs
-  `bun ci` (frozen lockfile).
-- Delta: Cloud Agents started from `dev/compat` (or its pull requests) bootstrap
-  with Bun plus frozen-lockfile dependencies automatically. Because a committed
-  `.cursor/environment.json` is the highest-precedence environment source, it
-  also overrides any personal or team dashboard environment for those revisions.
-- Source surfaces: `.cursor/environment.json`.
-- Test surfaces: none (infra/tooling). Validated by triggering a Cloud Agent
-  environment build off the branch and confirming Bun install + `bun ci`,
-  typecheck, and a live engine action.
-- Propagation rule: keep this file on `dev/compat` only. Do not merge or
-  cherry-pick it onto fork `main`, and never send it to `upstream`. Because
-  propagation is one-way `upstream/main → main → dev/compat`, a file that exists
-  only on `dev/compat` is not carried upward by a normal sync.
-- Exit / conflict condition: if `upstream` or fork `main` ever introduces its
-  own `.cursor/environment.json`, a `main → dev/compat` merge surfaces it here;
-  re-review and reconcile so the dev/compat-owned config (or a reviewed
-  replacement) wins rather than silently adopting the inherited file. Keep the
-  `bun-v<version>` in `install` aligned with `packageManager` in `package.json`.
