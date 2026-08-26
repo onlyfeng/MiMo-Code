@@ -416,18 +416,21 @@ registry or history commit does not advance either behavior reference.
 - Canonical owner: fork `main` repository infrastructure; inherited unchanged by
   `dev/compat`
 - Observable contract: `.cursor/environment.json` defines the Cursor Cloud Agent
-  development environment for the fork. On Cursor's default base image its
-  idempotent `install` (re)installs the pinned Bun (`bun-v1.3.14`) into
-  `$HOME/.bun` whenever the resolved `bun --version` is not exactly that pinned
-  version — so an absent, stale, or image-provided Bun is replaced and the
-  `/usr/local/bin/bun` symlink target always exists at the pinned version — then
-  symlinks it into `/usr/local/bin` so non-interactive agent shells resolve `bun`
-  without a profile edit. It ensures a read-only `upstream` remote whose fetch
-  URL is normalized to the canonical `https://github.com/XiaomiMiMo/MiMo-Code.git`
-  even when the remote already exists, with its push URL disabled, then runs
-  `bun ci` (frozen lockfile). There is no `start`; the dev server and TUI are
-  launched on demand. This is tooling/infra, not product runtime behavior, so it
-  does not advance the behavior references in the review record.
+  development environment for the fork. The `install` script runs under
+  `set -eo pipefail` so a failed download (e.g. `curl … | bash`) aborts the build
+  instead of silently succeeding. On Cursor's default base image it (re)installs
+  the pinned Bun (`bun-v1.3.14`) into `$HOME/.bun` whenever the resolved
+  `bun --version` is not exactly that pinned version — so an absent, stale, or
+  image-provided Bun is replaced — then asserts the pinned version is present
+  (failing the build otherwise) and symlinks it into `/usr/local/bin` so
+  non-interactive agent shells resolve `bun` without a profile edit. It then
+  re-creates a read-only `upstream` remote (`git remote remove` + `add`, which
+  clears any pre-existing single- or multi-valued URLs) pointing its fetch URL at
+  the canonical `https://github.com/XiaomiMiMo/MiMo-Code.git` with its push URL
+  disabled, and runs `bun ci` (frozen lockfile). There is no `start`; the dev
+  server and TUI are launched on demand. This is tooling/infra, not product
+  runtime behavior, so it does not advance the behavior references in the review
+  record.
 - Upstream relationship: fork-only infrastructure that upstream does not define.
   It must never be pushed to the read-only upstream (see FC-012). Because the
   file lives on `main`, promotable Cloud Agent builds (which build each repo's
