@@ -42,6 +42,7 @@ registry or history commit does not advance either behavior reference.
 | FC-011 | model prompts, path guidance, and bundled skills | Fork-facing guidance | Preserve factual shared guidance |
 | FC-012 | publication, contribution, security | Fork-specific process | Preserve fork routing |
 | FC-013 | MaxMode final step and bounded retry | Shared retry plus fork hardening | Preserve tool-free terminal step and status isolation |
+| FC-014 | `.cursor/environment.json` Cloud Agent dev environment | Fork-only infra absent from upstream | Preserve Bun bootstrap and read-only `upstream` remote; never send to upstream |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -408,3 +409,47 @@ registry or history commit does not advance either behavior reference.
 - Retirement condition: MaxMode itself consumes and enforces the final-step
   tool choice, bounded candidate/judge retry, and main-only status publication
   with equivalent regressions.
+
+## FC-014 — fork Cloud Agent development environment
+
+- Status: active process contract
+- Canonical owner: fork `main` repository infrastructure; inherited unchanged by
+  `dev/compat`
+- Observable contract: `.cursor/environment.json` defines the Cursor Cloud Agent
+  development environment for the fork. The `install` script runs under
+  `set -eo pipefail` so a failed download (e.g. `curl … | bash`) aborts the build
+  instead of silently succeeding. On Cursor's default base image it (re)installs
+  the pinned Bun (`bun-v1.3.14`) into `$HOME/.bun` whenever the resolved
+  `bun --version` is not exactly that pinned version — so an absent, stale, or
+  image-provided Bun is replaced — then asserts the pinned version is present
+  (failing the build otherwise) and symlinks it into `/usr/local/bin` so
+  non-interactive agent shells resolve `bun` without a profile edit. It then
+  re-creates a read-only `upstream` remote (`git remote remove` + `add`, which
+  clears any pre-existing single- or multi-valued URLs) pointing its fetch URL at
+  the canonical `https://github.com/XiaomiMiMo/MiMo-Code.git` with its push URL
+  disabled, and runs `bun ci` (frozen lockfile). There is no `start`; the dev
+  server and TUI are launched on demand. This is tooling/infra, not product
+  runtime behavior, so it does not advance the behavior references in the review
+  record.
+- Upstream relationship: fork-only infrastructure that upstream does not define.
+  It must never be pushed to the read-only upstream (see FC-012). Because the
+  file lives on `main`, promotable Cloud Agent builds (which build each repo's
+  default branch) include it, and `dev/compat` inherits it through the normal
+  `main → dev/compat` propagation.
+- Watch surfaces: `.cursor/environment.json` and any `.cursor/` build assets it
+  references.
+- Tests/evidence: validated by triggering a Cloud Agent environment build off a
+  branch and confirming, on a freshly booted agent, `bun --version` on the
+  default PATH, `git remote get-url upstream`, install idempotence, `bun ci`,
+  repository `typecheck`, and a live engine action. These are process/infra
+  checks rather than runtime tests.
+- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
+  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Retirement condition: retire or replace when the base image ships the pinned
+  Bun and preconfigures the read-only `upstream` remote, or when fork
+  environment management moves out of the repository by an explicit governance
+  decision. If upstream ever introduces its own `.cursor/environment.json`, a
+  sync merge surfaces the conflict here; reconcile so the fork-owned config (or a
+  reviewed replacement) wins rather than silently adopting the inherited file.
+  Keep the `bun-v<version>` in `install` aligned with `packageManager` in
+  `package.json`.
