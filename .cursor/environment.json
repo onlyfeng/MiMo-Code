@@ -1,0 +1,4 @@
+{
+  "name": "MiMoCode",
+  "install": "export BUN_INSTALL=\"$HOME/.bun\"\nexport PATH=\"$BUN_INSTALL/bin:$PATH\"\ncommand -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash -s bun-v1.3.14\nsudo ln -sf \"$BUN_INSTALL/bin/bun\" /usr/local/bin/bun || ln -sf \"$BUN_INSTALL/bin/bun\" /usr/local/bin/bun || true\ngit remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/XiaomiMiMo/MiMo-Code.git\ngit remote set-url --push upstream DISABLE\nbun ci"
+}
