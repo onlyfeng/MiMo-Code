@@ -418,8 +418,11 @@ registry or history commit does not advance either behavior reference.
 - Observable contract: `.cursor/environment.json` defines the Cursor Cloud Agent
   development environment for the fork. On Cursor's default base image its
   idempotent `install` installs the `package.json`-pinned Bun (`bun-v1.3.14`)
-  when absent, symlinks it into `/usr/local/bin` so non-interactive agent shells
-  resolve `bun` without a profile edit, adds a read-only `upstream` remote
+  into `$HOME/.bun` whenever that pinned binary is absent (gated on the binary
+  itself, not `command -v bun`, so a Bun shipped elsewhere by the base image
+  cannot leave a dangling link), symlinks it into `/usr/local/bin` so
+  non-interactive agent shells resolve `bun` without a profile edit, adds a
+  read-only `upstream` remote
   (`https://github.com/XiaomiMiMo/MiMo-Code.git`) with its push URL disabled, and
   then runs `bun ci` (frozen lockfile). There is no `start`; the dev server and
   TUI are launched on demand. This is tooling/infra, not product runtime
