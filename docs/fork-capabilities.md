@@ -15,11 +15,11 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-08-25
-- Upstream: `fa6fdf176cef7f82659705b555333d6302725748`
-- Prior reviewed upstream: `5e32992a97ed7f8d2d00e4c312133716292dab9e`
-- Main behavior: `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`
-- Prior fork `main` tip: `e65c86f341f2a5f15d375cc087e33b17037e36ca`
+- Last reviewed: 2026-08-27
+- Upstream: `1fc2daac07b5936f4dcba75143bc7d9af971caa1`
+- Prior reviewed upstream: `fa6fdf176cef7f82659705b555333d6302725748`
+- Main behavior: `07d16a5f757377b816a1979297ec1cce80b7c9bd`
+- Prior fork `main` tip: `a308ca96782a12e1c8df80059562b16ee456794e`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -43,6 +43,7 @@ registry or history commit does not advance either behavior reference.
 | FC-012 | publication, contribution, security | Fork-specific process | Preserve fork routing |
 | FC-013 | MaxMode final step and bounded retry | Shared retry plus fork hardening | Preserve tool-free terminal step and status isolation |
 | FC-014 | `.cursor/environment.json` Cloud Agent dev environment | Fork-only infra absent from upstream | Preserve Bun bootstrap and read-only `upstream` remote; never send to upstream |
+| FC-015 | compaction context budget and trigger ratio | Upstream controls plus fork safety adaptation | Preserve reserve headroom and config precedence |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -58,7 +59,8 @@ registry or history commit does not advance either behavior reference.
   typed `Session.BusyError`. Recovery and resume remain main-only, accept no
   agent/task selector, and have no detached `resumeBackground` path. Unknown or
   ambiguous lifecycle callers fail closed. Frozen-context admission is owned
-  separately by FD-009.
+  separately by FD-009. Title locale propagation through prompt, command, and
+  main-only resume paths does not broaden recovery/resume beyond the main agent.
 - Upstream relationship: selectively adopts upstream typed Runner admission and
   busy failures while retaining the stronger fork generation, cancellation,
   disposal, persistent-peer, and main-only recovery/resume protocol.
@@ -75,8 +77,8 @@ registry or history commit does not advance either behavior reference.
   and resume admission tests, session run-state tuple/disposal tests,
   main-only OpenAPI regressions, and actor/session tool tests at the reviewed
   main behavior.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: upstream provides equivalent generation ownership,
   typed atomic main prompt/command/init/shell/summarize/recovery/resume
   admission, main-only recovery/resume identity, cancellation settlement,
@@ -88,26 +90,33 @@ registry or history commit does not advance either behavior reference.
 - Status: active
 - Canonical owner: fork `main` checkpoint/session runtime
 - Observable contract: checkpoint generation uses one canonical writer tool and
-  an isolated child session. Forked mode uses the parent agent's frozen prefix;
-  default mode uses the checkpoint writer's own frozen system, tools, MCP
-  membership, and permission with the aligned message delta. Disabling
-  checkpoint generation removes checkpoint-only clauses while retaining durable
-  project/global memory and notes guidance. FD-009 exclusively owns the
-  fail-closed capture admission decision.
+  an isolated child session. Forked mode is the default and uses the parent
+  agent's frozen prefix; explicit `checkpoint.fork: false` uses the checkpoint
+  writer's own frozen system, tools, MCP membership, and permission with the
+  aligned message delta. Stable per-session memory instructions retain the
+  literal `{current_session_id}` placeholder in frozen history and resolve it
+  only at filesystem-tool boundaries. Disabling checkpoint generation removes
+  checkpoint-only clauses while retaining durable project/global memory and
+  notes guidance. FD-009 exclusively owns the fail-closed capture admission
+  decision.
 - Upstream relationship: fork extension plus adapted request construction.
 - Watch surfaces: `packages/opencode/src/session/checkpoint.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
+  `packages/opencode/src/session/memory-path-template.ts`,
   `packages/opencode/src/session/prefix-capture-ref.ts`,
   `packages/opencode/src/session/llm.ts`, and
-  `packages/opencode/src/session/prompt.ts`.
+  `packages/opencode/src/session/prompt.ts`; Read/Write/Edit/Glob/Grep and
+  `apply_patch` filesystem boundaries.
 - Tests/evidence: checkpoint child-session, fork-mode, main-slice,
   prefix-capture, rebuild, watermark, writer-timeout, memory-write, and
-  system-prompt suites at the reviewed main behavior.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+  system-prompt suites plus `memory-path-template.test.ts` at the reviewed main
+  behavior.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: upstream exposes the same canonical writer, isolated
-  child, mode-specific prefix ownership, aligned delta, and disabled-checkpoint
-  guidance behavior; FD-009 remains separately satisfied or retired.
+  child, mode-specific prefix ownership, aligned delta, disabled-checkpoint
+  guidance behavior, and stable placeholder resolution only at filesystem-tool
+  boundaries; FD-009 remains separately satisfied or retired.
 
 ## FC-003 — actor- and instance-scoped read-before-edit state
 
@@ -124,8 +133,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: `packages/opencode/test/tool/read-state.test.ts`,
   `packages/opencode/test/tool/edit.test.ts`, and instance-disposal regressions
   at the reviewed main behavior.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: upstream provides equivalent session/actor/instance
   scoping, consumption, and disposal behavior with cross-actor/project tests.
 
@@ -144,8 +153,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: `packages/opencode/test/mcp/lifecycle.test.ts` and frozen
   prefix/tool-search regressions prove URL rejection, pending imports, and
   request isolation at the reviewed main behavior.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: upstream matches URL validation, pending-import
   lifecycle, request isolation, and frozen membership; model identity and tool
   authority still satisfy FD-005 and FD-006.
@@ -157,22 +166,30 @@ registry or history commit does not advance either behavior reference.
 - Observable contract: skill listing, reminders, search, and loading use the
   same effective permission, agent allowlist, and user tool toggles. Stable
   global discovery runs in a scoped producer that one caller cannot cancel;
-  failures remain retryable and reload invalidates the generation.
+  failures remain retryable and reload invalidates the generation. The model
+  history contains immutable, hash-versioned full catalog snapshots; an
+  unchanged catalog is not duplicated, while a changed catalog appends a new
+  snapshot without rewriting prior turns or weakening permission/tool filters.
 - Upstream relationship: upstream discovery is retained with stronger shared
   permission and producer-lifetime gates.
 - Watch surfaces: `packages/opencode/src/skill/index.ts`,
   `packages/opencode/src/skill/search-access.ts`,
+  `packages/opencode/src/session/skill-catalog.ts`,
+  `packages/opencode/src/session/message-v2.ts`,
   `packages/opencode/src/tool/skill.ts`,
   `packages/opencode/src/tool/skill-search.ts`,
   `packages/opencode/src/session/system.ts`, and
   `packages/opencode/src/session/prompt.ts`.
 - Tests/evidence: skill search/description/discovery suites, tool skill/search
-  suites, and prompt skill-command tests at the reviewed main behavior.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+  suites, and versioned prompt skill-command snapshot tests at the reviewed main
+  behavior.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: upstream uses one effective permission/tool decision
   across discovery and invocation and provides equivalent retryable,
-  generation-aware producer behavior; FD-006 remains the tool-authority owner.
+  generation-aware producer behavior plus immutable hash-versioned snapshots
+  that append on catalog change without rewriting history; FD-006 remains the
+  tool-authority owner.
 
 ## FC-006 — instance-local plugin memory-write decision
 
@@ -191,8 +208,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence:
   `packages/opencode/test/plugin/subagent-progress-checker.test.ts` exercises
   enabled, disabled, absent, and instance-local configuration paths.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: the progress-checker hook no longer writes memory or
   upstream supplies an equivalent instance-local decision without HTTP/cwd
   coupling.
@@ -206,7 +223,9 @@ registry or history commit does not advance either behavior reference.
   `SessionCwd.Event.Changed` declaration and generated `EventSessionCwd` schema
   remain solely for SDK compatibility; no source path publishes the event or
   changes the fixed cwd. No `change_directory` tool or TUI session-cwd override
-  exists. Callers address other directories with absolute paths or an explicit
+  exists. File tools accept relative paths only by resolving them against that
+  immutable instance cwd; MultiEdit applies the same normalization to every
+  entry. Callers address other directories with absolute paths or an explicit
   `workdir`. Filesystem root and protected system directories cannot become
   project instances. A deletion target containing, equaling, or lying inside the active
   project/worktree cannot receive the temporary-file no-confirmation exemption.
@@ -218,22 +237,31 @@ registry or history commit does not advance either behavior reference.
 - Watch surfaces: `packages/opencode/src/project/instance.ts`,
   `packages/opencode/src/util/local-context.ts`,
   `packages/opencode/src/tool/bash.ts`,
+  `packages/opencode/src/tool/read.ts`,
+  `packages/opencode/src/tool/write.ts`,
+  `packages/opencode/src/tool/edit.ts`,
+  `packages/opencode/src/tool/multiedit.ts`,
+  `packages/opencode/src/tool/glob.ts`,
+  `packages/opencode/src/tool/grep.ts`,
+  `packages/opencode/src/tool/apply_patch.ts`,
   `packages/opencode/src/tool/session-cwd.ts`, and
   `packages/opencode/src/tool/registry.ts`; TUI cwd context/sidebar/plugin API;
   and generated SDK/OpenAPI event surfaces.
 - Tests/evidence: project path/worktree/instance-disposal suites,
   `packages/opencode/test/installation/no-instance.test.ts`, and
   `packages/opencode/test/tool/bash.test.ts` cover exact-path, prefix, and
-  missing-context behavior. Registry/agent/tool-script fixtures plus source and
+  missing-context behavior; Edit/MultiEdit regressions cover relative resolution
+  against the fixed cwd. Registry/agent/tool-script fixtures plus source and
   generated-artifact review cover removal of the mutable cwd surface and prove
   the compatibility event is declared but never published; the removed
   upstream `session-cwd.test.ts` is not claimed as runtime evidence.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: upstream retains fixed instance cwd and supplies
   equivalent inert compatibility schema, protected-root, project/worktree
-  containment, deletion, and optional-context semantics without forbidding
-  legitimate temporary projects.
+  containment, fixed-cwd relative file-tool resolution, MultiEdit normalization,
+  deletion, and optional-context semantics without forbidding legitimate
+  temporary projects.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
@@ -246,6 +274,9 @@ registry or history commit does not advance either behavior reference.
   retains its instance-scoped services. Default-path validation, including
   upstream-sync regressions, clears ambient `MIMOCODE_EXPERIMENTAL`,
   `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and `MIMOCODE_CODEX_MODE`.
+  Compaction/default-path tests additionally clear
+  `MIMOCODE_COMPACTION_MAX_CONTEXT`, `MIMOCODE_COMPACTION_TRIGGER_RATIO`, and
+  `MIMOCODE_DISABLE_CHECKPOINT`.
   Package-owned preload flags are preserved and reported as the harness
   baseline; opt-in tests add only their target selector beyond that baseline
   and report the full non-default environment. Default-off assertions for a
@@ -267,8 +298,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: hard-timeout, runner, workflow runtime/worktree suites and
   exact-SHA CI for the reviewed behavior tree when published; local tests do not
   substitute for that remote evidence.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - 2026-08-25 publication companion: the `AGENTS.md` default-environment rule is
   a process-only registry companion and does not advance the frozen main
   behavior or its changed-path calculation.
@@ -286,7 +317,10 @@ registry or history commit does not advance either behavior reference.
   persist or remove text parts consistently while keeping `stepPartIds` aligned.
   Retry cleanup may remove attempt-local parts only before the attempt crosses a
   tool side-effect boundary. Once a tool call is persisted or completed, a
-  retryable stream failure cannot replay the whole model step.
+  retryable stream failure cannot replay the whole model step. Ephemeral helper
+  requests, including automatic title generation, may retry locally but cannot
+  publish session-global retry status or `RetryAttempt` events; only durable
+  main-agent requests may publish them.
 - Upstream relationship: upstream text-part deferral and centralized retry are
   adapted to fork hook, skill-activation, and side-effect-boundary rules.
 - Watch surfaces: `packages/opencode/src/session/message-v2.ts`,
@@ -298,12 +332,14 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/trajectory.test.ts`, prompt regressions, and
   generated SDK/OpenAPI `source` fields at the reviewed main behavior. Processor
   characterizations cover both an in-band retryable 503 and a raw stream fault
-  after one completed tool side effect without a second model/tool execution.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+  after one completed tool side effect without a second model/tool execution,
+  plus retry isolation for ephemeral title requests.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: upstream provides equivalent provenance and complete
-  hook/retry text-part lifecycle and no-side-effect-replay behavior, and
-  regenerated artifacts preserve the same source discriminator.
+  hook/retry text-part lifecycle, no-side-effect-replay behavior, and local-only
+  retry publication for ephemeral or non-main requests, and regenerated
+  artifacts preserve the same source discriminator.
 
 ## FC-010 — WebFetch and SSRF destination classification, authorization, and resource bounds
 
@@ -331,8 +367,8 @@ registry or history commit does not advance either behavior reference.
   family-6 `febf::1` target. Source review at main behavior confirms HTTP(S)
   scheme enforcement, the 10-hop cap, timeout, and 5 MB bound; that test file
   has no focused scheme or resource-bound regression for those source contracts.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: upstream preserves equivalent numeric and DNS-resolved
   destination classification, including IPv6 `fe80::/10`, with the same HTTP(S),
   per-hop permission, manual-redirect, timeout, and response-size contract and
@@ -356,8 +392,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: session system, actor-shell, skill-description,
   `packages/opencode/test/skill/mimocode-docs.test.ts`, and bundled-content
   reviews at the main behavior SHA.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: the corresponding prompts/content cease to ship or
   upstream guidance is factually equivalent for fork branch names, keys,
   runtime support, and user-facing errors.
@@ -377,8 +413,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: repository remote/branch policy, generated contribution and
   security links, and exact repository scoping in release/PR operations; these
   are process checks rather than runtime tests.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: fork ownership or publication topology changes through
   an explicit governance decision and every repository-facing route is updated.
 
@@ -404,8 +440,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/max-mode.test.ts`, and candidate/judge
   EConnReset coverage in `packages/opencode/test/session/max-mode-econnreset.test.ts`
   at main behavior.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: MaxMode itself consumes and enforces the final-step
   tool choice, bounded candidate/judge retry, and main-only status publication
   with equivalent regressions.
@@ -443,8 +479,8 @@ registry or history commit does not advance either behavior reference.
   default PATH, `git remote get-url upstream`, install idempotence, `bun ci`,
   repository `typecheck`, and a live engine action. These are process/infra
   checks rather than runtime tests.
-- Review basis: upstream `fa6fdf176cef7f82659705b555333d6302725748`;
-  main behavior `6ae30e66ab0ecbb526f85009d300e7c2533fe72c`.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
 - Retirement condition: retire or replace when the base image ships the pinned
   Bun and preconfigures the read-only `upstream` remote, or when fork
   environment management moves out of the repository by an explicit governance
@@ -453,3 +489,32 @@ registry or history commit does not advance either behavior reference.
   reviewed replacement) wins rather than silently adopting the inherited file.
   Keep the `bun-v<version>` in `install` aligned with `packageManager` in
   `package.json`.
+
+## FC-015 — bounded compaction context and reserve-safe trigger
+
+- Status: active
+- Canonical owner: shared `main` overflow and compaction boundary
+- Observable contract: `compaction.max_context` has precedence over
+  `MIMOCODE_COMPACTION_MAX_CONTEXT`; valid absolute, shorthand, percentage, and
+  per-model wildcard values may lower the effective context window but cannot
+  exceed the provider cap or consume required reserve/output headroom. A zero
+  per-model value restores the provider window. The trigger ratio accepts a
+  decimal or percentage in `(0, 1]`, defaults to `0.9`, and may trigger only
+  earlier: `usable` is the minimum of the ratio boundary and the non-negative
+  existing reserve boundary.
+- Upstream relationship: adopts upstream's max-context and ratio controls while
+  adapting the flat ratio so it cannot replace the reserve safety contract.
+- Watch surfaces: `packages/opencode/src/config/config.ts`,
+  `packages/opencode/src/flag/flag.ts`,
+  `packages/opencode/src/session/overflow.ts`, and bundled configuration
+  guidance in `mimocode-docs/reference/config.md`.
+- Tests/evidence: `packages/opencode/test/session/overflow.test.ts` covers value
+  grammar, invalid values, config/environment precedence, provider/input caps,
+  reserve invariants, zero restoration, and ratio parsing/composition at the
+  reviewed main behavior.
+- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
+  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
+- Retirement condition: upstream preserves equivalent configuration precedence,
+  value grammar, provider caps, zero restoration, and the invariant that a
+  ratio can only move compaction earlier without consuming reserve/output
+  headroom, with behavior-focused regressions.

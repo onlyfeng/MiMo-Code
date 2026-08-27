@@ -17,6 +17,7 @@ they are never used as an `upstream` or `main behavior` review basis.
 | 2026-08-24 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8` | 6 | 13 | 213 paths; 19,110 insertions; 8,473 deletions | Correction: upstream still blocks only textual `fe80:` link-local addresses; fork main now blocks the complete numeric and DNS-resolved IPv6 `fe80::/10` range through FC-010 without adding a duplicate owner. |
 | 2026-08-25 | `5e32992a97ed7f8d2d00e4c312133716292dab9e` | `1cfe7efc8f13da6157f30324c4eeac0111e99115` | 6 | 13 | 234 paths; 22,785 insertions; 8,955 deletions | Adopted upstream recovery, turn-context, replayable nested-exec, bundled-skill, Desktop notification-card, and auto-worktree changes; hardened main run admission/cancellation, recovery mutation, nested-exec terminal settlement, TUI rendering, and GitLab workflow context without weakening the six FD or thirteen FC contracts. |
 | 2026-08-25 | `fa6fdf176cef7f82659705b555333d6302725748` | `6ae30e66ab0ecbb526f85009d300e7c2533fe72c` | 6 | 13 | 240 paths; 23,405 insertions; 9,188 deletions | Adopted fixed instance cwd with an inert SDK-compatibility event schema, centralized retry configuration/classification/request/live-step/status coordination, bounded MaxMode retry, and typed busy admission; corrected four retry boundary/configuration seams and published main-only recovery/resume while retaining all six FD and thirteen FC contracts. |
+| 2026-08-27 | `1fc2daac07b5936f4dcba75143bc7d9af971caa1` | `07d16a5f757377b816a1979297ec1cce80b7c9bd` | 6 | 15 | 251 paths; 24,431 insertions; 10,181 deletions | Classified 12 incoming capabilities; adopted reliable localized titles, relative paths, versioned skill snapshots, checkpoint fork default, actor isolation, and compaction controls; adapted model identity, stable memory paths, retry publication, and reserve-safe compaction while retaining all six FD contracts and adding FC-015 as the sole compaction-boundary owner. |
 
 ## 2026-08-23 review details
 
@@ -431,6 +432,114 @@ git diff --shortstat \
 git diff --name-only \
   fa6fdf176cef7f82659705b555333d6302725748 \
   6ae30e66ab0ecbb526f85009d300e7c2533fe72c -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-08-27 title, stable-prefix, and compaction synchronization
+
+- Prior reviewed upstream: `fa6fdf176cef7f82659705b555333d6302725748`.
+- Freshly reviewed upstream: `1fc2daac07b5936f4dcba75143bc7d9af971caa1`.
+- Prior fork `main` tip: `a308ca96782a12e1c8df80059562b16ee456794e`.
+- Main merge and behavior: `07d16a5f757377b816a1979297ec1cce80b7c9bd`;
+  its parents are the prior fork `main` tip and freshly reviewed upstream.
+- Incoming range: 17 commits including 9 first-parent commits, 70 paths,
+  1,895 insertions, and 458 deletions. It contains no workflow,
+  dependency/lockfile, migration, or package-version change.
+- Main transition: one merge commit, 68 paths, 2,557 insertions, and 1,105
+  deletions from the prior fork tip. `bun.lock` has the same blob before the
+  merge and at the reviewed upstream.
+- Main validation completed seven focused groups with 229, 106, 136, 12, 21,
+  33, and 5 passing tests respectively, zero final failures, five documented
+  skips, and one existing todo. One test first exceeded its five-second local
+  timeout under concurrent load and passed alone in 3.308 seconds. The three
+  affected packages passed typecheck; lint completed with 0 errors; JavaScript
+  SDK regeneration was idempotent; OpenAPI references resolved.
+- Active ownership is FD=6 and FC=15. FC-015 is the sole new active owner; the
+  other incoming behavior is adopted exactly or routed through existing FD/FC
+  contracts without duplicate ownership.
+
+### Decision notes
+
+- MiMo Responses transport now requires a resolved PTC identity, but transport
+  does not select the Codex harness or toolset. FD-005's complete identity and
+  MiMo v2.5 precedence remain authoritative; FD-006's direct-tool and nested
+  authority boundary is unchanged.
+- Adopted the SYSTEM role for replace-agent context while retaining one
+  provider-system value across provider payloads, workflow telemetry, and
+  frozen-prefix capture.
+- Adopted checkpoint fork mode as the default. Explicit `fork: false` retains
+  the writer-owned frozen prefix and all FC-002/FD-009 fail-closed checks.
+- Relative file paths resolve against immutable `Instance.directory`, including
+  every MultiEdit entry. This does not restore mutable session cwd.
+- Adopted reliable multimodal structured title generation, the source-derived
+  `/experimental/title` SDK surface, and end-to-end `titleLocale`. Automatic
+  title retries are ephemeral and cannot publish global retry status/events;
+  recovery and resume remain main-only.
+- Adopted hash-versioned full skill-catalog snapshots without weakening
+  permission/tool visibility or rewriting prior history.
+- Rejected upstream's final literal `current_session_id` simplification because
+  it targets the wrong directory. Frozen instructions retain
+  `{current_session_id}` and filesystem tools resolve it at execution time.
+- Upstream actor context isolation is already satisfied by the fork's stronger
+  session/actor generation and lifecycle implementation.
+- Adopted `MIMOCODE_COMPACTION_MAX_CONTEXT` and trigger-ratio configuration.
+  The ratio is an earlier-trigger ceiling layered over the reserve boundary,
+  never a replacement for reserved response/summary headroom.
+
+### Capability inventory (12/12)
+
+`AR-20260827` is the audit range used by every row:
+`old_upstream=fa6fdf176cef7f82659705b555333d6302725748`,
+`new_upstream=1fc2daac07b5936f4dcba75143bc7d9af971caa1`, and
+`main_merge=main_behavior=07d16a5f757377b816a1979297ec1cce80b7c9bd`.
+`MAIN-VERIFIED` means the row's affected tests are included in the focused
+groups above and the final typecheck/lint/generated-artifact gates passed.
+Compatibility counterpart text names the overlay contract that must survive
+normal `main` to `dev/compat` propagation; it does not claim a compat SHA.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | MiMo transport, harness, and toolset identity | `AR-20260827` | `26684027`, `fe113efb`; `usesMimoResponsesApi`, `usesGPTToolset`, provider identity, registry | FD-005 complete identity; FD-006 tool authority | Inherit FD-005/FD-006; DC-MODEL-001 only changes per-agent MaxMode | conflicting | behavior, identity, tools, tests | shared main | Adapt: PTC selects transport only; preserve v2.5 and explicit harness precedence | Provider/system/GPT/registry/tool-script matrix; `MAIN-VERIFIED` |
+| 2 | Replace-agent SYSTEM role | `AR-20260827` | `fe113efb`; `turnContextMessages`, `buildSystemArray`, `providerSystem` | FD-002 instruction parity and frozen request prefix | DC-CONTEXT-001 preflights the same replacement context | partial duplicate | message role, frozen prefix, tests | shared main | Adopt SYSTEM role; keep provider payload, workflow telemetry, and frozen capture on one provider system | LLM system/prompt/turn-context tests; `MAIN-VERIFIED` |
+| 3 | Checkpoint writer defaults to fork mode | `AR-20260827` | `9085bc54`; `checkpoint.fork`, `forkMode`, bundled config docs | FC-002 mode semantics; FD-009 capture admission | DC-CONTEXT-001 and DC-ACTOR-001 retain bounded frozen capture | conflicting | default, frozen context, docs, tests | shared main | Adopt default true; retain explicit false and fail-closed mode-specific prefixes | Checkpoint fork/message/system tests; `MAIN-VERIFIED` |
+| 4 | Relative workspace paths | `AR-20260827` | `689a9890`; MultiEdit and file-tool schemas, Gemini/Compose guidance | FC-007 immutable instance cwd and path safety | DC-PLATFORM-001 remains independent | partial duplicate | path behavior, docs, tests | shared main | Adopt relative resolution against fixed cwd; preserve absolute path/workdir cross-directory rule | Edit/MultiEdit regressions; `MAIN-VERIFIED` |
+| 5 | Reliable multimodal title generation | `AR-20260827` | `1844a2f8`; `genTitle`, `titleInputText`, `setTitleIfDefault`, ephemeral LLM | FC-001 lifecycle and FC-009 retry publication | DC-CONTEXT-001 bounds title request context | partial duplicate | behavior, concurrency, retry, tests | shared main | Adopt structured/multimodal/fallback behavior; retain stable root title and ephemeral retry isolation | Prompt/LLM/title tests; `MAIN-VERIFIED` |
+| 6 | `/experimental/title` and JavaScript SDK | `AR-20260827` | `1844a2f8`; `experimental.title.generate`, `genTitle`, generated SDK/OpenAPI | FD-004 source-derived API artifacts | Inherit source-generated surface | no overlap | API, schema, generated code | shared main | Adopt from resolved source and regenerate; do not copy generated upstream files | OpenAPI refs, SDK typecheck/idempotence; `MAIN-VERIFIED` |
+| 7 | End-to-end `titleLocale` | `AR-20260827` | `1844a2f8`; prompt/command/resume inputs, TUI/App submission, SDK | FC-001 main-only recovery/resume | Inherit locale while preserving compat preflight | complementary | API, UI, lifecycle, tests | shared main | Adopt locale propagation; reject any reintroduction of agent/task resume selectors | Prompt, recovery, App submit tests; `MAIN-VERIFIED` |
+| 8 | Versioned skill-catalog snapshots | `AR-20260827` | `8ff4012f`; `skill-catalog.ts`, `insertReminders`, model-message conversion | FC-005 permission-consistent skill catalog; FD-009 frozen capture | DC-CONTEXT-001 counts retained snapshots | complementary | persistence, cache prefix, permissions, tests | shared main | Adapt immutable v2 hash snapshots on top of permission/tool gates | Prompt skill-command/message tests; `MAIN-VERIFIED` |
+| 9 | Stable per-session memory paths | `AR-20260827` | `c9c4ff43`, `576b5c12`; memory-path template and filesystem tools | FC-002 stable frozen memory instructions | DC-CONTEXT-001 counts instructions without rewriting history | conflicting | path semantics, prompt cache, tool boundary, tests | shared main | Reject final literal simplification; retain placeholder and execution-boundary resolution | Memory-path and tool regressions; `MAIN-VERIFIED` |
+| 10 | Session/actor-scoped fork context | `AR-20260827` | `6c24713d`; actor spawn fork-context key/get/cancel | FC-001 generation/lifecycle; FD-009 frozen admission | DC-ACTOR-001 full-context capture remains stronger | equivalent duplicate | identity, lifecycle, tests | shared main | Retain stronger existing session/actor generation implementation | Actor/fork-context residual audit and sentinel tests; `MAIN-VERIFIED` |
+| 11 | `MIMOCODE_COMPACTION_MAX_CONTEXT` | `AR-20260827` | `c9ad1186`; flag getter and overflow `budget` | FC-015 context budget | DC-CONTEXT-001 consumes the same effective window in preflight | no overlap | config grammar, precedence, tests | shared main | Adopt with provider cap, reserve validation, wildcard, and zero-restore behavior | Overflow 64-test matrix segment; `MAIN-VERIFIED` |
+| 12 | Configurable compaction trigger ratio | `AR-20260827` | `957bc463`, `9f8852f3`; `contextWindow`, `usable`, ratio parser | FC-015 reserve-safe trigger | DC-CONTEXT-001 preflight must use the inherited effective trigger | conflicting | formula, reserve contract, docs, tests | shared main | Adapt: `min(floor(effective * ratio), max(0, effective - reserved))`; ratio may only move earlier | Overflow/default-environment regressions; `MAIN-VERIFIED` |
+
+Inventory count is 12 and result-row count is 12. Every row records the audit
+range, commit/path/symbol evidence, both branch counterparts, relationship,
+drift, canonical owner, disposition, and status evidence; no incoming
+capability remains unclassified.
+
+### Changed-path calculation
+
+The 251-path, 24,431-insertion, 10,181-deletion total compares the freshly
+reviewed upstream tree with the frozen pre-documentation main behavior and
+excludes all five shared/compat registry tracking paths:
+
+```bash
+git diff --shortstat \
+  1fc2daac07b5936f4dcba75143bc7d9af971caa1 \
+  07d16a5f757377b816a1979297ec1cce80b7c9bd -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  1fc2daac07b5936f4dcba75143bc7d9af971caa1 \
+  07d16a5f757377b816a1979297ec1cce80b7c9bd -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
