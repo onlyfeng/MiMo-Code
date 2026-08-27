@@ -357,26 +357,29 @@ const live: Layer.Layer<
       agentID?: string
       ephemeral?: boolean
     }) {
-      // "Is this a main/peer actor" — the single judgement two sections below key
-      // on (replace-agent base override + memory instructions). Injected only for
-      // actors whose context the checkpoint flow serves — main + peer. Subagents
-      // (explore/general/…) run in the SHARED sessionID (F37 slices) but are NOT
-      // main/peer; system-spawned actors (checkpoint-writer et al.) and ephemeral
-      // one-shots (title gen) likewise are not. Shares the exact `servesCheckpoint`
-      // judgement with SessionPrune.fireCheckpoints so the "who owns a checkpoint"
-      // and "who is taught about it" (and now "who applies the session base") sets
-      // can never drift apart.
+      // Checkpoint ownership intentionally fails open for an unregistered actor so
+      // main/peer work never silently loses durable memory. Keep that judgement for
+      // memory instructions, but do not reuse its fail-open result for identity
+      // replacement below.
       const servesCheckpoint =
         !input.ephemeral && (yield* actorReg.servesCheckpoint(SessionID.make(input.sessionID), input.agentID))
 
       // replace-agent replaces the PRIMARY line's base prompt with a session-level
-      // system (desktop execution-profile base). It is a main/peer concern: a
-      // subagent shares the sessionID and therefore inherits `systemMode` on the
-      // resolved session prompt, but must keep its OWN `agent.prompt` — else
-      // explore/general/title/… get their identity clobbered by the parent base.
-      // So the base override only fires when this actor `servesCheckpoint`; every
-      // other actor falls back to SystemPrompt.agent(self).
-      const replaceAgent = input.user.systemMode === "replace-agent" && servesCheckpoint
+      // system (desktop execution-profile base). It is a main/known-peer concern:
+      // subagents share the sessionID and inherit `systemMode`, but must keep their
+      // own `agent.prompt`. Unknown actors also fail closed here because identity
+      // replacement requires positive ownership evidence; ephemeral and
+      // system-spawned actors retain their own prompt as well.
+      const actor =
+        input.ephemeral || !input.agentID || input.agentID === "main"
+          ? undefined
+          : yield* actorReg.get(SessionID.make(input.sessionID), input.agentID)
+      const replaceAgent =
+        input.user.systemMode === "replace-agent" &&
+        !input.ephemeral &&
+        (!input.agentID ||
+          input.agentID === "main" ||
+          (actor?.mode === "peer" && !SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)))
 
       const system: string[] = []
       system.push(

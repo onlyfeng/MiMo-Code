@@ -291,4 +291,96 @@ describe("session.llm replace-agent — actor scope [TP-R1-08]", () => {
       },
     })
   })
+
+  test("only main and known peers receive the session replacement base", async () => {
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "mimocode.json"), tmpConfig(providerID, "http://127.0.0.1:1/v1"))
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await getModel(ProviderID.make(providerID), ModelID.make(fixture.model.id))
+        const sessionRt = ManagedRuntime.make(SessionNs.defaultLayer)
+        const session = await sessionRt.runPromise(SessionNs.Service.use((svc) => svc.create({})))
+        await sessionRt.dispose()
+
+        const regRt = ManagedRuntime.make(ActorRegistry.defaultLayer)
+        await regRt.runPromise(
+          ActorRegistry.Service.use((svc) =>
+            Effect.all([
+              svc.register({
+                sessionID: session.id,
+                actorID: "peer-1",
+                mode: "peer",
+                agent: "build",
+                description: "known peer",
+                contextMode: "full",
+                background: true,
+                lifecycle: "persistent",
+              }),
+              svc.register({
+                sessionID: session.id,
+                actorID: "writer-1",
+                mode: "peer",
+                agent: "checkpoint-writer",
+                description: "system writer",
+                contextMode: "full",
+                background: true,
+                lifecycle: "ephemeral",
+              }),
+            ]),
+          ),
+        )
+        await regRt.dispose()
+
+        const rt = ManagedRuntime.make(LLM.defaultLayer)
+        const render = (input: { agentID?: string; ephemeral?: boolean; system?: string[] }) =>
+          rt.runPromise(
+            LLM.Service.use((svc) =>
+              svc
+                .buildSystemArray({
+                  user: makeUser(session.id, providerID, resolved.id),
+                  sessionID: session.id,
+                  model: resolved,
+                  agent: makeAgent(SUBAGENT_PROMPT_MARKER),
+                  system: input.system ?? [],
+                  agentID: input.agentID,
+                  ephemeral: input.ephemeral,
+                })
+                .pipe(Effect.map((system) => system.join("\n"))),
+            ),
+          )
+
+        try {
+          const peer = await render({ agentID: "peer-1" })
+          expect(peer).toContain(PARENT_BASE_MARKER)
+          expect(peer).not.toContain(SUBAGENT_PROMPT_MARKER)
+
+          for (const own of [
+            await render({ agentID: "writer-1" }),
+            await render({ ephemeral: true }),
+            await render({ agentID: "unknown-actor" }),
+          ]) {
+            expect(own).toContain(SUBAGENT_PROMPT_MARKER)
+            expect(own).not.toContain(PARENT_BASE_MARKER)
+          }
+
+          const prebuilt = await render({ system: ["FROZEN_PREBUILT_SYSTEM_MARKER"] })
+          expect(prebuilt).toContain(PARENT_BASE_MARKER)
+          expect(prebuilt).toContain("FROZEN_PREBUILT_SYSTEM_MARKER")
+          expect(prebuilt.match(/FROZEN_PREBUILT_SYSTEM_MARKER/g)).toHaveLength(1)
+          expect(prebuilt).not.toContain(SUBAGENT_PROMPT_MARKER)
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
 })
