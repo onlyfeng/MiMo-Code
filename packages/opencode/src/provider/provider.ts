@@ -27,7 +27,7 @@ import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { isRecord } from "@/util/record"
 import { withStatics } from "@/util/schema"
 import { isFreeApiModel, isFreeApiSunset } from "@/util/free-api-sunset"
-import { usesMimoCodexMode } from "../tool/gpt"
+import { usesMimoResponsesApi } from "../tool/gpt"
 
 import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
@@ -260,12 +260,7 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
   "venice-ai-sdk-provider": () => import("venice-ai-sdk-provider").then((m) => m.createVenice),
 }
 
-type CustomModelLoader = (
-  sdk: any,
-  modelID: string,
-  options?: Record<string, any>,
-  model?: Model,
-) => Promise<any>
+type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>, model?: Model) => Promise<any>
 type CustomVarsLoader = (options: Record<string, any>) => Record<string, string>
 type CustomDiscoverModels = () => Promise<Record<string, Model>>
 type CustomLoader = (provider: Info) => Effect.Effect<{
@@ -334,7 +329,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       Effect.succeed({
         autoload: false,
         async getModel(sdk: any, modelID: string, _options?: Record<string, any>, model?: Model) {
-          return usesMimoCodexMode(model?.id, model?.api.id ?? modelID, model?.family)
+          return usesMimoResponsesApi(model?.id, model?.api.id ?? modelID, model?.family)
             ? sdk.responses(modelID)
             : sdk.languageModel(modelID)
         },
@@ -1096,7 +1091,7 @@ export interface Interface {
     query: string[],
   ) => Effect.Effect<{ providerID: ProviderID; modelID: string } | undefined>
   readonly getSmallModel: (providerID: ProviderID) => Effect.Effect<Model | undefined>
-  readonly getVisionModel: () => Effect.Effect<Model | undefined>
+  readonly getVisionModel: (providerID?: ProviderID) => Effect.Effect<Model | undefined>
   readonly resolveModelRef: (ref: string, contextProviderID?: ProviderID) => Effect.Effect<Model>
   readonly defaultModel: () => Effect.Effect<{ providerID: ProviderID; modelID: ModelID }>
 }
@@ -1664,7 +1659,7 @@ const layer: Layer.Layer<
         const headerTimeout = options["headerTimeout"]
         const chunkTimeout =
           typeof userChunkTimeout === "number"
-            ? userChunkTimeout  // user-set value (incl. 0 / negative to disable)
+            ? userChunkTimeout // user-set value (incl. 0 / negative to disable)
             : DEFAULT_CHUNK_TIMEOUT
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
@@ -1798,10 +1793,15 @@ const layer: Layer.Layer<
 
         try {
           const language = s.modelLoaders[model.providerID]
-              ? await s.modelLoaders[model.providerID](sdk, model.api.id, {
+            ? await s.modelLoaders[model.providerID](
+                sdk,
+                model.api.id,
+                {
                   ...provider.options,
                   ...model.options,
-                }, model)
+                },
+                model,
+              )
             : sdk.languageModel(model.api.id)
           s.models.set(key, language)
           return language
@@ -1886,7 +1886,7 @@ const layer: Layer.Layer<
       return yield* resolveModelRef("lite", providerID)
     })
 
-    const getVisionModel = Effect.fn("Provider.getVisionModel")(function* () {
+    const getVisionModel = Effect.fn("Provider.getVisionModel")(function* (providerID?: ProviderID) {
       const cfg = yield* config.get()
       // Explicit vision_model literal wins. getModel raises ModelNotFoundError as
       // a defect, so a misconfigured vision_model must not propagate — catch it and
@@ -1896,11 +1896,12 @@ const layer: Layer.Layer<
         const explicit = yield* getModel(parsed.providerID, parsed.modelID).pipe(
           Effect.catchDefect(() => Effect.succeed(undefined)),
         )
-        if (explicit) return explicit
+        if (explicit && (!providerID || explicit.providerID === providerID)) return explicit
       }
       // Smart default: in-house preferred, then cheapest vision-capable model.
       const providers = yield* list()
       const vision = Object.values(providers)
+        .filter((info) => !providerID || info.id === providerID)
         .flatMap((info) => Object.values(info.models))
         .filter((m) => m.capabilities.input.image === true)
       return sortVisionModels(vision)[0]
@@ -1945,7 +1946,17 @@ const layer: Layer.Layer<
       }
     })
 
-    return Service.of({ list, getProvider, getModel, getLanguage, closest, getSmallModel, getVisionModel, defaultModel, resolveModelRef })
+    return Service.of({
+      list,
+      getProvider,
+      getModel,
+      getLanguage,
+      closest,
+      getSmallModel,
+      getVisionModel,
+      defaultModel,
+      resolveModelRef,
+    })
   }),
 )
 

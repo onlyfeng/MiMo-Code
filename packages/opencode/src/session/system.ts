@@ -40,7 +40,8 @@ export function provider(model: Provider.Model, harness?: HarnessMode) {
       modelFamily: model.family,
       harness,
     }) === "codex"
-  ) return [PROMPT_GPT]
+  )
+    return [PROMPT_GPT]
   const prompt = (id: string) => {
     if (id.includes("gpt-4") || id.includes("o1") || id.includes("o3")) return PROMPT_BEAST
     if (id.includes("gpt")) return PROMPT_GPT

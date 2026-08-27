@@ -1,4 +1,5 @@
 import type { Config } from "@/config"
+import { Flag } from "@/flag/flag"
 import type { Provider } from "@/provider"
 import { ProviderTransform } from "@/provider"
 import { Log, Token, Wildcard } from "@/util"
@@ -11,6 +12,10 @@ const COMPACTION_BUFFER = 33_000
 // summary outputs based on production telemetry of summary token counts.
 const OUTPUT_CAP = 20_000
 
+// The ratio is an optional earlier trigger layered on top of the existing
+// reserve boundary. It may compact sooner, but can never consume headroom that
+// is reserved for the next response and summary generation.
+
 const log = Log.create({ service: "session.overflow" })
 const warned = new Set<string>()
 
@@ -19,7 +24,7 @@ export type Window = {
   hard: number
   /** Working window after the user's `compaction.max_context` budget is applied. */
   effective: number
-  /** Token count at which compaction fires (effective minus reserves). */
+  /** Token count at which compaction fires (the earlier of ratio and reserve boundaries). */
   usable: number
   source: "model" | "config"
 }
@@ -34,7 +39,7 @@ function reserves(input: { cfg: Config.Info; model: Provider.Model }) {
 }
 
 function budget(input: { cfg: Config.Info; model: Provider.Model }, hard: number, reserved: number) {
-  const configured = input.cfg.compaction?.max_context
+  const configured = input.cfg.compaction?.max_context ?? Flag.MIMOCODE_COMPACTION_MAX_CONTEXT
   if (configured === undefined) return undefined
   const key = `${input.model.providerID}/${input.model.id}`
   const raw =
@@ -80,7 +85,7 @@ export function contextWindow(input: { cfg: Config.Info; model: Provider.Model }
   return {
     hard,
     effective,
-    usable: Math.max(0, effective - reserved),
+    usable: Math.min(Math.floor(effective * Flag.MIMOCODE_COMPACTION_TRIGGER_RATIO), Math.max(0, effective - reserved)),
     source: configured === undefined ? "model" : "config",
   }
 }
@@ -123,8 +128,8 @@ export function contextPressureLevel(input: {
   if (limit === 0) return 0
 
   const ratio = count / limit
-  if (ratio < 0.50) return 0
-  if (ratio < 0.70) return 1
+  if (ratio < 0.5) return 0
+  if (ratio < 0.7) return 1
   if (ratio < 0.85) return 2
   return 3
 }

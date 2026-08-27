@@ -223,10 +223,12 @@ export const layer = Layer.effect(
           const mod = yield* Effect.tryPromise({
             try: () => import(`${pathToFileURL(match).href}?v=${Date.now()}`),
             catch: (err) => err,
-          }).pipe(Effect.catch((err) => {
-            log.error("failed to load file tool, skipping", { path: match, error: errorMessage(err) })
-            return Effect.succeed(undefined)
-          }))
+          }).pipe(
+            Effect.catch((err) => {
+              log.error("failed to load file tool, skipping", { path: match, error: errorMessage(err) })
+              return Effect.succeed(undefined)
+            }),
+          )
           if (!mod) continue
           for (const [id, def] of Object.entries<ToolDefinition>(mod)) {
             custom.push(fromPlugin(id === "default" ? namespace : `${namespace}_${id}`, def))
@@ -339,9 +341,7 @@ export const layer = Layer.effect(
     })
 
     const describeTask = Effect.fn("ToolRegistry.describeTask")(function* (agent: Agent.Info) {
-      const items = (yield* agents.list()).filter(
-        (item) => item.mode !== "primary" && !item.hidden,
-      )
+      const items = (yield* agents.list()).filter((item) => item.mode !== "primary" && !item.hidden)
       const filtered = items.filter(
         (item) => Permission.evaluate("task", item.name, agent.permission).action !== "deny",
       )
@@ -365,21 +365,18 @@ export const layer = Layer.effect(
       preserveMembership?: boolean
       harness?: HarnessMode
     }) {
-      const useGPTTools = resolveHarnessMode({
-        modelID: input.modelID,
-        modelAPIID: input.modelAPIID,
-        modelFamily: input.modelFamily,
-        harness: input.harness,
-      }) === "codex"
+      const useGPTTools =
+        resolveHarnessMode({
+          modelID: input.modelID,
+          modelAPIID: input.modelAPIID,
+          modelFamily: input.modelFamily,
+          harness: input.harness,
+        }) === "codex"
       let filtered = (yield* all()).filter((tool) => {
         if (tool.id === ToolScriptTool.id) return useGPTTools || Flag.MIMOCODE_ENABLE_EXEC_TOOL
         if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
           if (tool.id === WebSearchTool.id) {
-            return (
-              input.providerID === ProviderID.opencode ||
-              input.providerID === "xiaomi" ||
-              Flag.MIMOCODE_ENABLE_EXA
-            )
+            return input.providerID === ProviderID.opencode || input.providerID === "xiaomi" || Flag.MIMOCODE_ENABLE_EXA
           }
           return input.providerID === ProviderID.opencode || Flag.MIMOCODE_ENABLE_EXA
         }
@@ -467,7 +464,8 @@ export const layer = Layer.effect(
         Effect.fnUntraced(function* (tool: Tool.Def) {
           using _ = log.time(tool.id)
           const output = {
-            description: tool.id === BashTool.id && availableTools.useGPTTools ? bashDescription(true) : tool.description,
+            description:
+              tool.id === BashTool.id && availableTools.useGPTTools ? bashDescription(true) : tool.description,
             parameters: tool.parameters,
           }
           yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)

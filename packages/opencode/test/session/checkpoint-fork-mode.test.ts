@@ -255,7 +255,7 @@ const expectWriterNotStarted = Effect.fn("expectWriterNotStarted")(function* (se
 
 describe("checkpoint writer forkContext shape per mode", () => {
   it.live(
-    "T6: fork:true preserves prefix-cache parent-fork shape (parent agent + slice up to watermark)",
+    "T6: fork unset defaults to prefix-cache parent-fork shape (parent agent + slice up to watermark)",
     provideTmpdirInstance(
       () =>
         Effect.gen(function* () {
@@ -293,7 +293,7 @@ describe("checkpoint writer forkContext shape per mode", () => {
           expect(fc?.system).toEqual(["sys-canned"])
           expect(fc?.watermarkMsgID).toBe(u2.id)
         }),
-      { config: { checkpoint: { fork: true } } },
+      { config: {} },
     ),
   )
 
@@ -527,7 +527,7 @@ describe("checkpoint writer forkContext shape per mode", () => {
           expect(fc).toBeDefined()
           expect(fc?.watermarkMsgID).toBe(u2.id)
         }),
-      // Default config (fork unset) → fork: false. Explicitly setting for clarity.
+      // Explicit fork:false keeps the cold-start delta-only path available.
       { config: { checkpoint: { fork: false } } },
     ),
   )

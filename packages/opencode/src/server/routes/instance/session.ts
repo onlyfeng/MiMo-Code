@@ -447,13 +447,13 @@ export const SessionRoutes = lazy(() =>
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
           const svc = yield* SessionPrompt.Service
-          yield* (yield* svc.startCommand({
+          yield* yield* svc.startCommand({
             sessionID,
             messageID: body.messageID,
             model: body.providerID + "/" + body.modelID,
             command: Command.Default.INIT,
             arguments: "",
-          }))
+          })
           return true
         }),
     )
@@ -663,7 +663,7 @@ export const SessionRoutes = lazy(() =>
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
           const svc = yield* SessionPrompt.Service
-          yield* (yield* svc.startSummarize({ sessionID, ...body }))
+          yield* yield* svc.startSummarize({ sessionID, ...body })
           return true
         }),
     )
@@ -771,13 +771,10 @@ export const SessionRoutes = lazy(() =>
                 },
                 { message: "Invalid cursor" },
               ),
-            agent_id: z
-              .string()
-              .optional()
-              .meta({
-                description:
-                  "Filter by message slice. Omitted = main-agent slice only (default). Pass a subagent's actor id to fetch its slice. Pass `*` to return every message regardless of slice.",
-              }),
+            agent_id: z.string().optional().meta({
+              description:
+                "Filter by message slice. Omitted = main-agent slice only (default). Pass a subagent's actor id to fetch its slice. Pass `*` to return every message regardless of slice.",
+            }),
           })
           .refine((value) => !value.before || value.limit !== undefined, {
             message: "before requires limit",
@@ -988,11 +985,15 @@ export const SessionRoutes = lazy(() =>
             description: "Recovery candidates",
             content: {
               "application/json": {
-                schema: resolver(z.object({
-                  assistantMessageID: MessageID.zod,
-                  parentMessageID: MessageID.zod,
-                  created: z.number(),
-                }).array()),
+                schema: resolver(
+                  z
+                    .object({
+                      assistantMessageID: MessageID.zod,
+                      parentMessageID: MessageID.zod,
+                      created: z.number(),
+                    })
+                    .array(),
+                ),
               },
             },
           },
@@ -1019,16 +1020,24 @@ export const SessionRoutes = lazy(() =>
           ...errors(400, 404, 409),
         },
       }),
-      validator("param", z.object({
-        sessionID: SessionID.zod,
-        assistantMessageID: MessageID.zod,
-      })),
-      validator("query", z.object({
-        directory: z.string().optional(),
-        workspace: z.string().optional(),
-      })),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+          assistantMessageID: MessageID.zod,
+        }),
+      ),
+      validator(
+        "query",
+        z.object({
+          directory: z.string().optional(),
+          workspace: z.string().optional(),
+          titleLocale: z.string().optional(),
+        }),
+      ),
       async (c) => {
         const params = c.req.valid("param")
+        const query = c.req.valid("query")
         const completion = await runRequest(
           "SessionRoutes.resume.start",
           c,
@@ -1036,14 +1045,11 @@ export const SessionRoutes = lazy(() =>
             svc.startResume({
               sessionID: params.sessionID,
               assistantMessageID: params.assistantMessageID,
+              titleLocale: query.titleLocale,
             }),
           ),
         )
-        void runRequest(
-          "SessionRoutes.resume",
-          c,
-          completion,
-        ).catch((error) => {
+        void runRequest("SessionRoutes.resume", c, completion).catch((error) => {
           log.error("session resume failed", { sessionID: params.sessionID, error })
           const failure =
             error instanceof Session.BusyError
@@ -1132,11 +1138,7 @@ export const SessionRoutes = lazy(() =>
             void stream.write(" ")
           }, promptHeartbeatIntervalMs())
           try {
-            const msg = await runRequest(
-              "SessionRoutes.prompt",
-              c,
-              completion,
-            )
+            const msg = await runRequest("SessionRoutes.prompt", c, completion)
             // Safety invariant: no await/yield between this write and the
             // clearInterval below (reached synchronously via finally) — else the
             // interval could fire and append a stray space AFTER the JSON,
@@ -1180,11 +1182,7 @@ export const SessionRoutes = lazy(() =>
           c,
           SessionPrompt.Service.use((svc) => svc.startPrompt({ ...body, sessionID })),
         )
-        void runRequest(
-          "SessionRoutes.prompt_async",
-          c,
-          completion,
-        ).catch((err) => {
+        void runRequest("SessionRoutes.prompt_async", c, completion).catch((err) => {
           log.error("prompt_async failed", { sessionID, error: err })
           void Bus.publish(Session.Event.Error, {
             sessionID,
@@ -1230,7 +1228,7 @@ export const SessionRoutes = lazy(() =>
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
           const svc = yield* SessionPrompt.Service
-          return yield* (yield* svc.startCommand({ ...body, sessionID }))
+          return yield* yield* svc.startCommand({ ...body, sessionID })
         }),
     )
     .post(

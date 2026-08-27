@@ -165,7 +165,7 @@ const Parameters = z.object({
   workdir: z
     .string()
     .describe(
-      `Absolute working directory when provided.`,
+      `Working directory for the command.`,
     )
     .optional(),
   interactive: z

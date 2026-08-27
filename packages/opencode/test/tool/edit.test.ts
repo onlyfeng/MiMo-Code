@@ -3,6 +3,7 @@ import path from "path"
 import fs from "fs/promises"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { EditTool } from "../../src/tool/edit"
+import { MultiEditTool } from "../../src/tool/multiedit"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import { LSP } from "../../src/lsp"
@@ -93,6 +94,14 @@ const resolve = () =>
     }),
   )
 
+const resolveMulti = () =>
+  runtime.runPromise(
+    Effect.gen(function* () {
+      const info = yield* MultiEditTool
+      return yield* info.init()
+    }),
+  )
+
 const subscribeBus = <D extends BusEvent.Definition>(def: D, callback: () => unknown) =>
   runtime.runPromise(Bus.Service.use((bus) => bus.subscribeCallback(def, callback)))
 
@@ -111,6 +120,34 @@ async function onceBus<D extends BusEvent.Definition>(def: D) {
 }
 
 describe("tool.edit", () => {
+  test("resolves the stable current-session placeholder before read-state validation", async () => {
+    await using tmp = await tmpdir()
+    const template = path.join(tmp.path, "{current_session_id}", "memory.txt")
+    const filepath = path.join(tmp.path, ctx.sessionID, "memory.txt")
+    await fs.mkdir(path.dirname(filepath), { recursive: true })
+    await fs.writeFile(filepath, "before", "utf-8")
+    markRead(filepath)
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const edit = await resolve()
+        await Effect.runPromise(
+          edit.execute(
+            {
+              file_path: template,
+              old_string: "before",
+              new_string: "after",
+            },
+            ctx,
+          ),
+        )
+
+        expect(await fs.readFile(filepath, "utf-8")).toBe("after")
+      },
+    })
+  })
+
   describe("creating new files", () => {
     test("creates new file when oldString is empty", async () => {
       await using tmp = await tmpdir()
@@ -742,6 +779,38 @@ describe("tool.edit", () => {
           expect(await fs.readFile(filepath, "utf-8")).toBe("top = 1\nmiddle = keep\nbottom = 2\n")
         },
       })
+    })
+  })
+})
+
+describe("tool.multiedit", () => {
+  test("resolves relative paths against the fixed instance directory", async () => {
+    await using tmp = await tmpdir()
+    const filepath = path.join(tmp.path, "nested", "file.txt")
+    await fs.mkdir(path.dirname(filepath), { recursive: true })
+    await fs.writeFile(filepath, "alpha beta", "utf-8")
+    markRead(filepath)
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const edit = await resolveMulti()
+        const result = await Effect.runPromise(
+          edit.execute(
+            {
+              file_path: path.join("nested", "file.txt"),
+              edits: [
+                { old_string: "alpha", new_string: "one" },
+                { old_string: "beta", new_string: "two" },
+              ],
+            },
+            ctx,
+          ),
+        )
+
+        expect(result.title.endsWith(path.join("nested", "file.txt"))).toBe(true)
+        expect(await fs.readFile(filepath, "utf-8")).toBe("one two")
+      },
     })
   })
 })

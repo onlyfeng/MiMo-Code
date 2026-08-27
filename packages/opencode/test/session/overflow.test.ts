@@ -1,8 +1,13 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { contextPressureLevel, contextWindow, isOverflow, pressureLevel, usable } from "../../src/session/overflow"
 import { Token } from "../../src/util"
 import { Session as SessionNs } from "../../src/session"
 import type { Provider } from "../../src/provider"
+
+afterEach(() => {
+  delete process.env.MIMOCODE_COMPACTION_MAX_CONTEXT
+  delete process.env.MIMOCODE_COMPACTION_TRIGGER_RATIO
+})
 
 function mockCfg(opts?: { reserved?: number; auto?: boolean; max_context?: number | string | Record<string, string> }) {
   return {
@@ -87,8 +92,7 @@ describe("pressureLevel", () => {
     const model = createModel({ context: 200_000 })
     const cfg = mockCfg({ auto: false })
     const limit = usable({ cfg, model })
-    const tokens = (ratio: number) =>
-      ({ input: limit * ratio, output: 0, cache: { read: 0, write: 0 } }) as any
+    const tokens = (ratio: number) => ({ input: limit * ratio, output: 0, cache: { read: 0, write: 0 } }) as any
 
     expect(contextPressureLevel({ cfg, tokens: tokens(0.5), model })).toBe(1)
     expect(contextPressureLevel({ cfg, tokens: tokens(0.7), model })).toBe(2)
@@ -597,17 +601,39 @@ describe("usable", () => {
   })
 })
 
+describe("MIMOCODE_COMPACTION_TRIGGER_RATIO", () => {
+  test("can move compaction earlier without crossing the reserve boundary", () => {
+    const model = createModel({ context: 200_000, input: 200_000, output: 32_000 })
+    process.env.MIMOCODE_COMPACTION_TRIGGER_RATIO = "0.75"
+    expect(usable({ cfg: mockCfg(), model })).toBe(150_000)
+    process.env.MIMOCODE_COMPACTION_TRIGGER_RATIO = "75%"
+    expect(usable({ cfg: mockCfg(), model })).toBe(150_000)
+  })
+
+  test("cannot remove configured response and summary headroom", () => {
+    const model = createModel({ context: 200_000, output: 32_000 })
+    process.env.MIMOCODE_COMPACTION_TRIGGER_RATIO = "1"
+    expect(usable({ cfg: mockCfg(), model })).toBe(148_000)
+    expect(usable({ cfg: mockCfg({ reserved: 5_000 }), model })).toBe(175_000)
+  })
+
+  test.each(["0", "-0.5", "1.5", "150%", "abc", ""])("ignores %p and keeps the safe default", (value) => {
+    process.env.MIMOCODE_COMPACTION_TRIGGER_RATIO = value
+    expect(usable({ cfg: mockCfg(), model: createModel({ context: 200_000, input: 200_000 }) })).toBe(168_000)
+  })
+})
+
 describe("compaction.max_context", () => {
   // 1M-class GPT shape: models.dev publishes both context and a smaller input cap.
   const large = () => createModel({ context: 1_050_000, input: 922_000, output: 128_000, id: "gpt-5.6" })
 
-  test("no budget configured leaves the model window untouched", () => {
+  test("no budget configured keeps the hard model window and applies the default trigger ratio", () => {
     const model = large()
-    expect(usable({ cfg: mockCfg(), model })).toBe(889_000)
+    expect(usable({ cfg: mockCfg(), model })).toBe(829_800)
     expect(contextWindow({ cfg: mockCfg(), model })).toEqual({
       hard: 922_000,
       effective: 922_000,
-      usable: 889_000,
+      usable: 829_800,
       source: "model",
     })
   })
@@ -629,8 +655,8 @@ describe("compaction.max_context", () => {
 
   test("accepts a plain token count and a percentage", () => {
     const model = large()
-    expect(usable({ cfg: mockCfg({ max_context: 500_000 }), model })).toBe(467_000)
-    expect(usable({ cfg: mockCfg({ max_context: "50%" }), model })).toBe(428_000)
+    expect(usable({ cfg: mockCfg({ max_context: 500_000 }), model })).toBe(450_000)
+    expect(usable({ cfg: mockCfg({ max_context: "50%" }), model })).toBe(414_900)
   })
 
   test("never raises the window above the provider cap", () => {
@@ -652,13 +678,13 @@ describe("compaction.max_context", () => {
 
   test("ignores keys that match no model", () => {
     const cfg = mockCfg({ max_context: { "openai/gpt-4o": "100K" } })
-    expect(usable({ cfg, model: large() })).toBe(889_000)
+    expect(usable({ cfg, model: large() })).toBe(829_800)
   })
 
   test("ignores a budget that leaves no room for the reserves", () => {
     const model = large()
-    expect(usable({ cfg: mockCfg({ max_context: 20_000 }), model })).toBe(889_000)
-    expect(usable({ cfg: mockCfg({ max_context: "not-a-budget" }), model })).toBe(889_000)
+    expect(usable({ cfg: mockCfg({ max_context: 20_000 }), model })).toBe(829_800)
+    expect(usable({ cfg: mockCfg({ max_context: "not-a-budget" }), model })).toBe(829_800)
   })
 
   test("keeps overflow handling disabled when the model reports no window", () => {
@@ -675,6 +701,40 @@ describe("compaction.max_context", () => {
     const tokens = { input: 250_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } as any
     expect(pressureLevel({ cfg, tokens, model })).toBe(3)
     expect(pressureLevel({ cfg: mockCfg(), tokens, model })).toBe(0)
+  })
+})
+
+describe("MIMOCODE_COMPACTION_MAX_CONTEXT", () => {
+  const large = () => createModel({ context: 1_050_000, input: 922_000, output: 128_000, id: "gpt-5.6" })
+
+  test("provides an environment default through the config parser boundary", () => {
+    process.env.MIMOCODE_COMPACTION_MAX_CONTEXT = "300K"
+    expect(contextWindow({ cfg: mockCfg(), model: large() })).toEqual({
+      hard: 922_000,
+      effective: 300_000,
+      usable: 267_000,
+      source: "config",
+    })
+  })
+
+  test("keeps explicit config authoritative over the environment", () => {
+    process.env.MIMOCODE_COMPACTION_MAX_CONTEXT = "300K"
+    expect(contextWindow({ cfg: mockCfg({ max_context: "200K" }), model: large() })).toEqual({
+      hard: 922_000,
+      effective: 200_000,
+      usable: 167_000,
+      source: "config",
+    })
+  })
+
+  test.each(["0", "not-a-budget", ""])("ignores %p and keeps the model window", (value) => {
+    process.env.MIMOCODE_COMPACTION_MAX_CONTEXT = value
+    expect(contextWindow({ cfg: mockCfg(), model: large() })).toEqual({
+      hard: 922_000,
+      effective: 922_000,
+      usable: 829_800,
+      source: "model",
+    })
   })
 })
 
@@ -701,11 +761,11 @@ describe("util.token.parseQuantity", () => {
 describe("compaction.max_context reset sentinel", () => {
   test("0 restores the model window without a warning path", () => {
     const model = createModel({ context: 1_050_000, input: 922_000, id: "gpt-5.6" })
-    expect(usable({ cfg: mockCfg({ max_context: { "test/gpt-5.6": 0 } as any }), model })).toBe(889_000)
+    expect(usable({ cfg: mockCfg({ max_context: { "test/gpt-5.6": 0 } as any }), model })).toBe(829_800)
     expect(contextWindow({ cfg: mockCfg({ max_context: 0 }), model }).source).toBe("model")
     // The picker writes a number, but a hand-edited config may carry the string form.
-    expect(usable({ cfg: mockCfg({ max_context: { "test/gpt-5.6": "0" } }), model })).toBe(889_000)
-    expect(usable({ cfg: mockCfg({ max_context: "" }), model })).toBe(889_000)
+    expect(usable({ cfg: mockCfg({ max_context: { "test/gpt-5.6": "0" } }), model })).toBe(829_800)
+    expect(usable({ cfg: mockCfg({ max_context: "" }), model })).toBe(829_800)
   })
 })
 

@@ -18,14 +18,17 @@ const optimistic: Array<{
 const optimisticSeeded: boolean[] = []
 const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
+const sentCommands: unknown[] = []
 const sentShell: string[] = []
+const sentPrompts: unknown[] = []
 const syncedDirectories: string[] = []
+const availableCommands: Array<{ name: string }> = []
 
 let params: { id?: string } = {}
 let selected = "/repo/worktree-a"
 let variant: string | undefined
 
-const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
+let promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 
 const clientFor = (directory: string) => {
   createdClients.push(directory)
@@ -45,8 +48,14 @@ const clientFor = (directory: string) => {
         return { data: undefined }
       },
       prompt: async () => ({ data: undefined }),
-      promptAsync: async () => ({ data: undefined }),
-      command: async () => ({ data: undefined }),
+      promptAsync: async (input: unknown) => {
+        sentPrompts.push(input)
+        return { data: undefined }
+      },
+      command: async (input: unknown) => {
+        sentCommands.push(input)
+        return { data: undefined }
+      },
       abort: async () => ({ data: undefined }),
     },
     worktree: {
@@ -140,7 +149,7 @@ beforeAll(async () => {
 
   mock.module("@/context/sync", () => ({
     useSync: () => ({
-      data: { command: [] },
+      data: { command: availableCommands },
       session: {
         optimistic: {
           add: (value: {
@@ -194,6 +203,7 @@ beforeAll(async () => {
   mock.module("@/context/language", () => ({
     useLanguage: () => ({
       t: (key: string) => key,
+      intl: () => "zh-CN",
     }),
   }))
 
@@ -208,11 +218,15 @@ beforeEach(() => {
   optimistic.length = 0
   optimisticSeeded.length = 0
   promoted.length = 0
+  sentCommands.length = 0
   params = {}
   sentShell.length = 0
+  sentPrompts.length = 0
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
   variant = undefined
+  availableCommands.length = 0
+  promptValue = [{ type: "text", content: "ls", start: 0, end: 2 }]
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
@@ -305,6 +319,7 @@ describe("prompt submit worktree selection", () => {
     const event = { preventDefault: () => undefined } as unknown as Event
 
     await submit.handleSubmit(event)
+    await Bun.sleep(0)
 
     expect(optimistic).toHaveLength(1)
     expect(optimistic[0]).toMatchObject({
@@ -313,6 +328,33 @@ describe("prompt submit worktree selection", () => {
         model: { providerID: "provider", modelID: "model", variant: "high" },
       },
     })
+    expect(sentPrompts[0]).toMatchObject({ titleLocale: "zh-CN" })
+  })
+
+  test("passes the current locale to custom commands", async () => {
+    params = { id: "session-1" }
+    promptValue = [{ type: "text", content: "/deploy", start: 0, end: 7 }]
+    availableCommands.push({ name: "deploy" })
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(sentCommands[0]).toMatchObject({ command: "deploy", titleLocale: "zh-CN" })
   })
 
   test("seeds new sessions before optimistic prompts are added", async () => {
