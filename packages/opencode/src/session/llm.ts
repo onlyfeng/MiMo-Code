@@ -357,16 +357,35 @@ const live: Layer.Layer<
       agentID?: string
       ephemeral?: boolean
     }) {
+      // "Is this a main/peer actor" — the single judgement two sections below key
+      // on (replace-agent base override + memory instructions). Injected only for
+      // actors whose context the checkpoint flow serves — main + peer. Subagents
+      // (explore/general/…) run in the SHARED sessionID (F37 slices) but are NOT
+      // main/peer; system-spawned actors (checkpoint-writer et al.) and ephemeral
+      // one-shots (title gen) likewise are not. Shares the exact `servesCheckpoint`
+      // judgement with SessionPrune.fireCheckpoints so the "who owns a checkpoint"
+      // and "who is taught about it" (and now "who applies the session base") sets
+      // can never drift apart.
+      const servesCheckpoint =
+        !input.ephemeral && (yield* actorReg.servesCheckpoint(SessionID.make(input.sessionID), input.agentID))
+
+      // replace-agent replaces the PRIMARY line's base prompt with a session-level
+      // system (desktop execution-profile base). It is a main/peer concern: a
+      // subagent shares the sessionID and therefore inherits `systemMode` on the
+      // resolved session prompt, but must keep its OWN `agent.prompt` — else
+      // explore/general/title/… get their identity clobbered by the parent base.
+      // So the base override only fires when this actor `servesCheckpoint`; every
+      // other actor falls back to SystemPrompt.agent(self).
+      const replaceAgent = input.user.systemMode === "replace-agent" && servesCheckpoint
+
       const system: string[] = []
       system.push(
         [
-          ...(input.user.systemMode === "replace-agent"
-            ? []
-            : SystemPrompt.agent(input.agent, input.model, input.user.harness)),
+          ...(replaceAgent ? [] : SystemPrompt.agent(input.agent, input.model, input.user.harness)),
           // any custom prompt passed into this call
           ...input.system,
           // replace-agent is a session system prompt, not per-turn user context
-          ...(input.user.systemMode === "replace-agent" && input.user.system ? [input.user.system] : []),
+          ...(replaceAgent && input.user.system ? [input.user.system] : []),
         ]
           .filter((x) => x)
           .join("\n"),
@@ -377,15 +396,9 @@ const live: Layer.Layer<
       // Project ID is resolved from the ALS-bound Instance with a safe fallback
       // to `ProjectID.global` (mirrors the pattern in session/checkpoint.ts so the
       // path the prompt advertises matches the path the writer actually writes).
-      // Injected only for actors whose context the checkpoint flow serves —
-      // main + peer. Subagents (explore/general/compose) use per-actor compaction
-      // and have no checkpoint duty; system-spawned actors (checkpoint-writer et al.)
-      // are the writers themselves. Shares the exact `servesCheckpoint` judgement
-      // with SessionPrune.fireCheckpoints so the "who owns a checkpoint" and "who is
-      // taught about it" sets can never drift apart. Disabling checkpoints removes
-      // only checkpoint-specific clauses; durable project/global memory remains usable.
-      const servesCheckpoint =
-        !input.ephemeral && (yield* actorReg.servesCheckpoint(SessionID.make(input.sessionID), input.agentID))
+      // Gated on the shared `servesCheckpoint` judgement above. Disabling
+      // checkpoints removes only checkpoint-specific clauses; durable
+      // project/global memory remains usable.
       if (servesCheckpoint) {
         const projectID =
           (yield* Effect.try({
