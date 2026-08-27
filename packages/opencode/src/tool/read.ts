@@ -12,6 +12,7 @@ import { assertExternalDirectoryEffect } from "./external-directory"
 import { SessionCwd } from "./session-cwd"
 import { Instruction } from "../session/instruction"
 import { Provider } from "@/provider"
+import { resolveCurrentSessionPath } from "@/session/memory-path-template"
 import { isImageAttachment, isPdfAttachment, sniffAttachmentMime } from "@/util/media"
 import { markFileRead } from "./read-state"
 
@@ -23,7 +24,7 @@ const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
 const SAMPLE_BYTES = 4096
 
 const parameters = z.object({
-  file_path: z.string().describe("The absolute path to the file or directory to read"),
+  file_path: z.string().describe("Path to the file or directory"),
   offset: z.coerce.number().describe("The line number to start reading from (1-indexed)").optional(),
   limit: z.coerce.number().describe("The maximum number of lines to read (defaults to 2000)").optional(),
 })
@@ -149,7 +150,7 @@ export const ReadTool = Tool.define(
         return yield* Effect.fail(new Error("offset must be greater than or equal to 1"))
       }
 
-      let filepath = params.file_path
+      let filepath = resolveCurrentSessionPath(params.file_path, ctx.sessionID)
       if (!path.isAbsolute(filepath)) {
         filepath = path.resolve(SessionCwd.get(ctx.sessionID), filepath)
       }

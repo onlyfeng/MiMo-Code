@@ -25,14 +25,14 @@ export function isGPTModel(...values: Array<string | undefined>) {
 export function resolveHarnessMode(input: HarnessResolutionInput): ResolvedHarnessMode {
   const ids = [input.modelID, input.modelAPIID, input.modelFamily]
   const override = codexHarnessOverride(input.harness)
-  if (isMimoV25Model(...ids)) {
+  if (isMimoModel(...ids)) {
     if (override !== undefined) return override ? "codex" : "default"
     return Flag.MIMOCODE_CODEX_MODE ? "codex" : "default"
   }
   const modelID = input.modelID.toLowerCase()
   if (modelID.includes("gpt-") && !modelID.includes("oss") && !modelID.includes("gpt-4")) return "codex"
   if (override !== undefined) return override ? "codex" : "default"
-  if (Flag.MIMOCODE_CODEX_MODE || usesMimoCodexMode(...ids)) return "codex"
+  if (Flag.MIMOCODE_CODEX_MODE) return "codex"
   return "default"
 }
 
@@ -50,7 +50,7 @@ export function isMcpToolSearchEnabled(
   })
   if (harness === "codex" || harness === "default") return mode === "codex"
   if (mode === "codex") return true
-  if (isMimoV25Model(...modelIDs)) return false
+  if (isMimoModel(...modelIDs)) return false
   return isGPTModel(...modelIDs)
 }
 
@@ -58,21 +58,23 @@ export function isMimoV25Model(...values: Array<string | undefined>) {
   return values.some((value) => value && /(?:^|[/_-])mimo-v2\.5(?:-pro)?$/.test(value.toLowerCase()))
 }
 
-export function usesMimoCodexMode(...values: Array<string | undefined>) {
-  const ids = values.flatMap((value) => (value ? [value.toLowerCase()] : []))
-  if (isMimoV25Model(...ids)) return false
-  return ids.some((id) => /(?:^|[/_-])mimo(?:$|[/_.-])/.test(id))
+export function isMimoModel(...values: Array<string | undefined>) {
+  return values.some((value) => value && /(?:^|[/_-])mimo(?:$|[/_.-])/i.test(value))
 }
 
-export function usesGPTToolset(
-  modelID: string,
-  harness?: HarnessMode,
-  ...aliases: Array<string | undefined>
-) {
-  return resolveHarnessMode({
-    modelID,
-    modelAPIID: aliases[0],
-    modelFamily: aliases[1],
-    harness,
-  }) === "codex"
+export function usesMimoResponsesApi(...values: Array<string | undefined>) {
+  if (isMimoV25Model(...values)) return false
+  const ids = values.flatMap((value) => (value ? [value.toLowerCase()] : []))
+  return isMimoModel(...ids) && ids.some((id) => /(?:^|[/_.-])ptc(?:$|[/_.-])/.test(id))
+}
+
+export function usesGPTToolset(modelID: string, harness?: HarnessMode, ...aliases: Array<string | undefined>) {
+  return (
+    resolveHarnessMode({
+      modelID,
+      modelAPIID: aliases[0],
+      modelFamily: aliases[1],
+      harness,
+    }) === "codex"
+  )
 }

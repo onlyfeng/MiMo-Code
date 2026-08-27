@@ -51,7 +51,7 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
           expect.arrayContaining(["bash", "apply_patch", "skill_search", "skill", "task", "exec"]),
         )
         expect(yield* ids("anthropic/claude-sonnet-4-6")).not.toContain("exec")
-        expect(yield* ids("mimo-v2")).toContain("exec")
+        expect(yield* ids("mimo-v2")).not.toContain("exec")
       }),
     ),
     30000,
@@ -82,27 +82,41 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
     30000,
   )
 
-  it.live("keeps MiMo v2.5 aliases on the normal toolset", () =>
+  it.live("keeps MiMo transport separate from the explicit harness toolset", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const reg = yield* ToolRegistry.Service
         const agents = yield* Agent.Service
         const general = yield* agents.get("general")
         if (!general) throw new Error("no general agent")
-        const tools = yield* reg.tools({
+        const normal = yield* reg.tools({
           providerID: ProviderID.opencode,
           modelID: ModelID.make("mimo"),
-          modelAPIID: "mimo-v2.5",
+          modelAPIID: "mimo-v2.6-ptc",
           modelFamily: "mimo-v2.6",
           agent: general,
         })
-        const ids = tools.map((tool) => tool.id)
+        const codex = yield* reg.tools({
+          providerID: ProviderID.opencode,
+          modelID: ModelID.make("mimo"),
+          modelAPIID: "mimo-v2.6-ptc",
+          modelFamily: "mimo-v2.6",
+          agent: general,
+          harness: "codex",
+        })
+        const ids = normal.map((tool) => tool.id)
+        const codexIDs = codex.map((tool) => tool.id)
 
         expect(ids).not.toContain("exec")
         expect(ids).not.toContain("apply_patch")
         expect(ids).toContain("edit")
         expect(ids).toContain("write")
         expect(ids).toContain("read")
+        expect(codexIDs).toContain("exec")
+        expect(codexIDs).toContain("apply_patch")
+        expect(codexIDs).not.toContain("edit")
+        expect(codexIDs).not.toContain("write")
+        expect(codexIDs).not.toContain("read")
       }),
     ),
     30000,

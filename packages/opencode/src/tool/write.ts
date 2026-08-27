@@ -14,6 +14,7 @@ import { Instance } from "../project/instance"
 import { SessionCwd } from "./session-cwd"
 import { trimDiff } from "./edit"
 import { assertWriteAllowed, askEditUnlessMemory } from "./external-directory"
+import { resolveCurrentSessionPath } from "@/session/memory-path-template"
 
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
 
@@ -29,13 +30,12 @@ export const WriteTool = Tool.define(
       description: DESCRIPTION,
       parameters: z.object({
         content: z.string().describe("The content to write to the file"),
-        file_path: z.string().describe("The absolute path to the file to write (must be absolute, not relative)"),
+        file_path: z.string().describe("Path to the file to write"),
       }),
       execute: (params: { content: string; file_path: string }, ctx: Tool.Context) =>
         Effect.gen(function* () {
-          const filepath = path.isAbsolute(params.file_path)
-            ? params.file_path
-            : path.join(SessionCwd.get(ctx.sessionID), params.file_path)
+          const inputPath = resolveCurrentSessionPath(params.file_path, ctx.sessionID)
+          const filepath = path.isAbsolute(inputPath) ? inputPath : path.join(SessionCwd.get(ctx.sessionID), inputPath)
           yield* assertWriteAllowed(ctx, filepath)
 
           const exists = yield* fs.existsSafe(filepath)

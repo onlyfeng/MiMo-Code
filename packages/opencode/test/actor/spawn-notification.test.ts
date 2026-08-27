@@ -353,6 +353,10 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
       }),
       { git: true, config: providerCfg },
     ),
+    // This full integration fixture can exceed Bun's five-second default while
+    // unwinding its Effect scope and temporary instance; the prior compat tip
+    // also crossed that boundary. Preserve headroom without weakening assertions.
+    15_000,
   )
 
   it.live("foreground spawn does not write inbox notification", () =>

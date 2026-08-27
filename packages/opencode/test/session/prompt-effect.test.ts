@@ -5,6 +5,7 @@ import { afterEach, expect } from "bun:test"
 import { dynamicTool, jsonSchema, type Tool as AITool } from "ai"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import * as Stream from "effect/Stream"
 import path from "path"
 import { mkdir } from "fs/promises"
 import { Agent as AgentSvc } from "../../src/agent/agent"
@@ -272,9 +273,7 @@ const run = Layer.effect(
             onInterrupt,
             work.pipe(
               Effect.ensuring(
-                Deferred.succeed(gate.ownerExit, undefined).pipe(
-                  Effect.andThen(Deferred.await(gate.releaseOwner)),
-                ),
+                Deferred.succeed(gate.ownerExit, undefined).pipe(Effect.andThen(Deferred.await(gate.releaseOwner))),
               ),
             ),
           )
@@ -933,6 +932,11 @@ it.live("locks system and harness to the first user query", () =>
       const toolNames = (input.tools as Array<Record<string, unknown>>).map(wireToolName)
       expect(request).not.toContain("You are Codex")
       expect(request).toContain("first system prompt")
+      expect(
+        (input.messages as Array<{ role: string; content: unknown }>)
+          .filter((message) => JSON.stringify(message.content).includes("first system prompt"))
+          .map((message) => message.role),
+      ).toEqual(["system"])
       expect(toolNames).toEqual(expect.arrayContaining(["exec", "apply_patch", "bash"]))
       expect(toolNames.length).toBeGreaterThan(1)
 
@@ -1082,8 +1086,16 @@ it.live("does not pin an empty parent while creating a child", () =>
         parts: [{ type: "text", text: "child first query" }],
       })
 
-      expect((yield* sessions.get(parent.id)).prompt).toEqual({ system: "parent system", systemMode: "append", harness: "default" })
-      expect((yield* sessions.get(child.id)).prompt).toEqual({ system: "child system", systemMode: "append", harness: "codex" })
+      expect((yield* sessions.get(parent.id)).prompt).toEqual({
+        system: "parent system",
+        systemMode: "append",
+        harness: "default",
+      })
+      expect((yield* sessions.get(child.id)).prompt).toEqual({
+        system: "child system",
+        systemMode: "append",
+        harness: "codex",
+      })
     }),
     { git: true, config: providerCfg },
   ),
@@ -1239,7 +1251,6 @@ it.live("resume continues an incomplete assistant without creating or rewriting 
       const prompt = yield* SessionPrompt.Service
       const sessions = yield* Session.Service
       const chat = yield* sessions.create({
-        title: "Pinned",
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
       const seeded = yield* seed(chat.id)
@@ -1247,11 +1258,21 @@ it.live("resume continues an incomplete assistant without creating or rewriting 
       yield* llm.text("world")
 
       const candidate = yield* prompt.recovery({ sessionID: chat.id })
-      expect(candidate).toEqual([{ assistantMessageID: seeded.assistant.id, parentMessageID: seeded.user.id, created: expect.any(Number) }])
+      expect(candidate).toEqual([
+        { assistantMessageID: seeded.assistant.id, parentMessageID: seeded.user.id, created: expect.any(Number) },
+      ])
       const result = yield* prompt.resume({
         sessionID: chat.id,
         assistantMessageID: seeded.assistant.id,
+        titleLocale: "fr-FR",
       })
+      yield* llm.wait(2)
+      const titleRequest = (yield* llm.inputs).find((input) =>
+        JSON.stringify(input).includes("Generate a title for this conversation"),
+      )
+      expect(titleRequest).toBeDefined()
+      expect(JSON.stringify(titleRequest)).toContain("Write the title using locale")
+      expect(JSON.stringify(titleRequest)).toContain("fr-FR")
 
       const after = yield* sessions.messages({ sessionID: chat.id })
       expect(after.filter((message) => message.info.role === "user")).toHaveLength(1)
@@ -1261,7 +1282,10 @@ it.live("resume continues an incomplete assistant without creating or rewriting 
       expect(result.info.id).not.toBe(seeded.assistant.id)
       expect(result.parts.some((part) => part.type === "text" && part.text === "world")).toBe(true)
     }),
-    { git: true, config: providerCfg },
+    {
+      git: true,
+      config: (url) => ({ ...providerCfg(url), model_groups: { lite: "test/test-model" } }),
+    },
   ),
 )
 
@@ -1362,6 +1386,71 @@ it.live("reported instruction files reach every MaxMode candidate request", () =
   ),
 )
 
+it.live("title generation retries do not publish durable session retry state", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const bus = yield* Bus.Service
+      const runtimeLlm = yield* LLM.Service
+      const provider = yield* ProviderSvc.Service
+      const agents = yield* AgentSvc.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Title retry isolation" })
+      const agent = yield* agents.get("build")
+      if (!agent) return yield* Effect.die("missing build agent")
+      const model = yield* provider.getModel(ref.providerID, ref.modelID)
+      const user: MessageV2.User = {
+        id: MessageID.ascending(),
+        sessionID: chat.id,
+        role: "user",
+        time: { created: Date.now() },
+        agent: agent.name,
+        model: ref,
+      }
+      const statuses: number[] = []
+      const attempts: number[] = []
+      const offStatus = yield* bus.subscribeCallback(SessionStatus.Event.Status, (event) => {
+        if (event.properties.sessionID !== chat.id || event.properties.status.type !== "retry") return
+        statuses.push(event.properties.status.attempt)
+      })
+      const offAttempt = yield* bus.subscribeCallback(Session.Event.RetryAttempt, (event) => {
+        if (event.properties.sessionID !== chat.id) return
+        attempts.push(event.properties.attempt)
+      })
+
+      yield* llm.error(503, { error: "title unavailable one" })
+      yield* llm.text("recovered ephemeral request")
+      yield* runtimeLlm
+        .stream({
+          user,
+          sessionID: chat.id,
+          model,
+          agent,
+          system: [],
+          messages: [{ role: "user", content: "retry ephemeral request" }],
+          tools: {},
+          retries: 0,
+          ephemeral: true,
+        })
+        .pipe(Stream.runDrain)
+      offStatus()
+      offAttempt()
+
+      expect(yield* llm.calls).toBe(2)
+      expect({ statuses, attempts }).toEqual({ statuses: [], attempts: [] })
+    }),
+    {
+      git: true,
+      config: (url) => ({
+        ...providerCfg(url),
+        retry: {
+          request: { maxRetries: 1, initialDelayMs: 1, maxDelayMs: 1 },
+          jitterRatio: 0,
+        },
+      }),
+    },
+  ),
+)
+
 it.live("MaxMode candidate retries publish global attempts and retry status", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
@@ -1434,104 +1523,108 @@ it.live("MaxMode candidate retries publish global attempts and retry status", ()
   ),
 )
 
-it.live("office attachment reminder respects effective skill permission", () =>
-  provideTmpdirServer(
-    Effect.fnUntraced(function* ({ llm }) {
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const session = yield* sessions.create({
-        title: "Denied office skill",
-        permission: [{ permission: "skill", pattern: "xlsx-official", action: "deny" }],
-      })
+it.live(
+  "office attachment reminder respects effective skill permission",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({
+          title: "Denied office skill",
+          permission: [{ permission: "skill", pattern: "xlsx-official", action: "deny" }],
+        })
 
-      yield* prompt.prompt({
-        sessionID: session.id,
-        agent: "build",
-        model: ref,
-        noReply: true,
-        parts: [
-          { type: "text", text: "summarize the attachment" },
-          {
-            type: "file",
-            mime: "text/plain",
-            filename: "denied.csv",
-            url: "data:text/plain;base64,YQ==",
-          },
-        ],
-      })
-      yield* llm.text("done")
-      yield* prompt.loop({ sessionID: session.id })
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [
+            { type: "text", text: "summarize the attachment" },
+            {
+              type: "file",
+              mime: "text/plain",
+              filename: "denied.csv",
+              url: "data:text/plain;base64,YQ==",
+            },
+          ],
+        })
+        yield* llm.text("done")
+        yield* prompt.loop({ sessionID: session.id })
 
-      const requests = yield* llm.inputs
-      expect(JSON.stringify(requests[0].messages)).not.toContain("Skill search trigger:")
-      expect(JSON.stringify(requests[0].messages)).not.toContain(
-        "The user's message attaches office document file(s).",
-      )
-      expect(JSON.stringify(requests[0].messages)).not.toContain("xlsx-official/SKILL.md")
-    }),
-    { git: true, config: providerCfg },
-  ),
+        const requests = yield* llm.inputs
+        expect(JSON.stringify(requests[0].messages)).not.toContain("Skill search trigger:")
+        expect(JSON.stringify(requests[0].messages)).not.toContain(
+          "The user's message attaches office document file(s).",
+        )
+        expect(JSON.stringify(requests[0].messages)).not.toContain("xlsx-official/SKILL.md")
+      }),
+      { git: true, config: providerCfg },
+    ),
   20_000,
 )
 
-it.live("hook messages do not trigger autonomous skill injection", () =>
-  provideTmpdirServer(
-    Effect.fnUntraced(function* ({ dir, llm }) {
-      yield* Effect.promise(() =>
-        Bun.write(
-          path.join(dir, ".mimocode", "skill", "restricted-hook", "SKILL.md"),
-          `---
+it.live(
+  "hook messages do not trigger autonomous skill injection",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ dir, llm }) {
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(dir, ".mimocode", "skill", "restricted-hook", "SKILL.md"),
+            `---
 name: restricted-hook
 description: Instructions that scheduled hooks must not auto-load.
 ---
 
 # Restricted Hook
 `,
-        ),
-      )
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const session = yield* sessions.create({
-        title: "Hook skill boundary",
-        permission: [{ permission: "skill", pattern: "restricted-hook", action: "deny" }],
-      })
+          ),
+        )
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({
+          title: "Hook skill boundary",
+          permission: [{ permission: "skill", pattern: "restricted-hook", action: "deny" }],
+        })
 
-      const created = yield* prompt.prompt({
-        sessionID: session.id,
-        agent: "build",
-        source: "hook",
-        provenance: {
-          hookPhase: "pre",
-          hookIteration: 1,
-          pluginNames: ["legacy-hook"],
-          hookIDs: ["legacy-hook-1"],
-        },
-        model: ref,
-        noReply: true,
-        parts: [
-          { type: "text", text: "Run /restricted-hook on this file." },
-          {
-            type: "file",
-            mime: "text/plain",
-            filename: "hook.csv",
-            url: "data:text/plain;base64,YQ==",
+        const created = yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          source: "hook",
+          provenance: {
+            hookPhase: "pre",
+            hookIteration: 1,
+            pluginNames: ["legacy-hook"],
+            hookIDs: ["legacy-hook-1"],
           },
-        ],
-      })
-      expect((created.info as unknown as { source?: string }).source).toBe("hook")
-      if (created.info.role !== "user") throw new Error("expected hook user message")
-      yield* sessions.updateMessage({ ...created.info, source: undefined })
+          model: ref,
+          noReply: true,
+          parts: [
+            { type: "text", text: "Run /restricted-hook on this file." },
+            {
+              type: "file",
+              mime: "text/plain",
+              filename: "hook.csv",
+              url: "data:text/plain;base64,YQ==",
+            },
+          ],
+        })
+        expect((created.info as unknown as { source?: string }).source).toBe("hook")
+        if (created.info.role !== "user") throw new Error("expected hook user message")
+        yield* sessions.updateMessage({ ...created.info, source: undefined })
 
-      yield* llm.text("done")
-      yield* prompt.loop({ sessionID: session.id })
+        yield* llm.text("done")
+        yield* prompt.loop({ sessionID: session.id })
 
-      const request = JSON.stringify((yield* llm.inputs)[0].messages)
-      expect(request).not.toContain("# Restricted Hook")
-      expect(request).not.toContain("The user's message attaches office document file(s).")
-      expect(request).not.toContain("Skill search trigger:")
-    }),
-    { git: true, config: providerCfg },
-  ),
+        const request = JSON.stringify((yield* llm.inputs)[0].messages)
+        expect(request).not.toContain("# Restricted Hook")
+        expect(request).not.toContain("The user's message attaches office document file(s).")
+        expect(request).not.toContain("Skill search trigger:")
+      }),
+      { git: true, config: providerCfg },
+    ),
   20_000,
 )
 
@@ -2193,9 +2286,7 @@ mcpIt.live("MCP structuredContent is persisted and reaches the model alongside t
       expect(tool).toBeDefined()
       if (!tool) return
 
-      expect(tool.state.output).toBe(
-        'Window updated\n\nStructured content:\n{"changed":true,"windowID":42}',
-      )
+      expect(tool.state.output).toBe('Window updated\n\nStructured content:\n{"changed":true,"windowID":42}')
       expect(tool.state.metadata.mcp).toEqual({
         structuredContent: mcpSuccessResult.structuredContent,
         isError: false,
@@ -2568,10 +2659,7 @@ mcpIt.live(
         expect(
           (yield* MessageV2.filterCompactedEffect(session.id))
             .flatMap((message) => message.parts)
-            .some(
-              (part) =>
-                part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed",
-            ),
+            .some((part) => part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed"),
         ).toBe(true)
       }),
       { git: true, config: providerCfg },
@@ -2605,9 +2693,7 @@ mcpIt.live("rejects direct MCP calls disabled for the request", () =>
       expect(
         (yield* MessageV2.filterCompactedEffect(session.id))
           .flatMap((message) => message.parts)
-          .some(
-            (part) => part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed",
-          ),
+          .some((part) => part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed"),
       ).toBe(false)
     }),
     { git: true, config: providerCfg },
@@ -2639,9 +2725,7 @@ mcpIt.live("rejects direct MCP calls hidden by the agent allowlist", () =>
       expect(
         (yield* MessageV2.filterCompactedEffect(session.id))
           .flatMap((message) => message.parts)
-          .some(
-            (part) => part.type === "tool" && part.tool === "mcp_result" && part.state.status === "error",
-          ),
+          .some((part) => part.type === "tool" && part.tool === "mcp_result" && part.state.status === "error"),
       ).toBe(true)
     }),
     { git: true, config: restrictedAgentProviderCfg },
@@ -3534,10 +3618,9 @@ itActor.live(
         expect(yield* inbox.has("late-main-row")).toBe(true)
 
         yield* Deferred.succeed(releaseOwner, undefined)
-        const reachedSecond = yield* llm.wait(2).pipe(
-          Effect.as(true),
-          Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.succeed(false) }),
-        )
+        const reachedSecond = yield* llm
+          .wait(2)
+          .pipe(Effect.as(true), Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.succeed(false) }))
         yield* Fiber.join(owner).pipe(Effect.timeout("5 seconds"))
         yield* Fiber.join(follower).pipe(Effect.timeout("5 seconds"))
 

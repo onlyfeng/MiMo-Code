@@ -39,6 +39,7 @@ import { MCP_TOOL_SEARCH_ID } from "@/tool/mcp-tool-search"
 import { deriveLiveness } from "@/actor/schema"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 import { Flag } from "@/flag/flag"
+import { CURRENT_SESSION_ID_PLACEHOLDER } from "./memory-path-template"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
@@ -130,9 +131,9 @@ export function isTransientCapacityError(error: unknown): boolean {
  * `memoryRoot` is the same absolute root returned by Memory.root(), so these
  * paths match the files used by checkpoint restore and memory/task detection.
  */
-function buildMemoryInstructions(sessionID: SessionID, projectID: ProjectID, memoryRoot: string): string {
+function buildMemoryInstructions(projectID: ProjectID, memoryRoot: string): string {
   const memoryFile = path.join(memoryRoot, "projects", projectID, "MEMORY.md")
-  const sessionMemoryDir = path.join(memoryRoot, "sessions", sessionID)
+  const sessionMemoryDir = path.join(memoryRoot, "sessions", CURRENT_SESSION_ID_PLACEHOLDER)
   const globalMemoryFile = path.join(memoryRoot, "global", "MEMORY.md")
   const notesFile = path.join(sessionMemoryDir, "notes.md")
   const checkpointEnabled = !Flag.MIMOCODE_DISABLE_CHECKPOINT
@@ -154,6 +155,11 @@ function buildMemoryInstructions(sessionID: SessionID, projectID: ProjectID, mem
 You have a persistent file-based memory system. ${checkpointEnabled ? "Four" : "Two"} file types:
 
 ${files.join("\n")}`,
+    ...(checkpointEnabled
+      ? [
+          `The path segment \`${CURRENT_SESSION_ID_PLACEHOLDER}\` is a stable placeholder for the current session. Keep it verbatim when calling Read, Write, Edit, Glob, Grep, or apply_patch; the runtime resolves it from the tool context.`,
+        ]
+      : []),
     ...(checkpointEnabled
       ? [
           "The checkpoint writer is the sole curator of the structured files. You don't maintain them mid-task — the writer extracts everything from the conversation at checkpoint events.",
@@ -251,6 +257,8 @@ export type StreamInput = {
   toolChoice?: "auto" | "required" | "none"
   agentID?: string
   mergeTurnContextIntoLastUser?: boolean
+  ephemeral?: boolean
+  requestID?: string
 }
 
 export type StreamRequest = StreamInput & {
@@ -279,15 +287,17 @@ export function protectRequestReplayBoundary<E, R>(source: Stream.Stream<Event, 
   )
 }
 
-
 /** Convert per-turn context into the final model-visible user segment. */
 export function turnContextMessages(user: MessageV2.User): ModelMessage[] {
+  if (user.systemMode === "replace-agent") return []
   const context = user.system?.trim()
   if (!context) return []
-  return [{
+  return [
+    {
       role: "user",
       content: `<system-reminder>\n${context}\n</system-reminder>`,
-  }]
+    },
+  ]
 }
 
 export function appendTurnContext(messages: ModelMessage[], user: MessageV2.User, mergeWithLastUser = false) {
@@ -309,6 +319,7 @@ export interface Interface {
     user: MessageV2.User
     sessionID: string
     agentID?: string
+    ephemeral?: boolean
   }) => Effect.Effect<string[]>
 }
 
@@ -344,15 +355,40 @@ const live: Layer.Layer<
       user: MessageV2.User
       sessionID: string
       agentID?: string
+      ephemeral?: boolean
     }) {
+      // Checkpoint ownership intentionally fails open for an unregistered actor so
+      // main/peer work never silently loses durable memory. Keep that judgement for
+      // memory instructions, but do not reuse its fail-open result for identity
+      // replacement below.
+      const servesCheckpoint =
+        !input.ephemeral && (yield* actorReg.servesCheckpoint(SessionID.make(input.sessionID), input.agentID))
+
+      // replace-agent replaces the PRIMARY line's base prompt with a session-level
+      // system (desktop execution-profile base). It is a main/known-peer concern:
+      // subagents share the sessionID and inherit `systemMode`, but must keep their
+      // own `agent.prompt`. Unknown actors also fail closed here because identity
+      // replacement requires positive ownership evidence; ephemeral and
+      // system-spawned actors retain their own prompt as well.
+      const actor =
+        input.ephemeral || !input.agentID || input.agentID === "main"
+          ? undefined
+          : yield* actorReg.get(SessionID.make(input.sessionID), input.agentID)
+      const replaceAgent =
+        input.user.systemMode === "replace-agent" &&
+        !input.ephemeral &&
+        (!input.agentID ||
+          input.agentID === "main" ||
+          (actor?.mode === "peer" && !SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)))
+
       const system: string[] = []
       system.push(
         [
-          ...(input.user.systemMode === "replace-agent"
-            ? []
-            : SystemPrompt.agent(input.agent, input.model, input.user.harness)),
+          ...(replaceAgent ? [] : SystemPrompt.agent(input.agent, input.model, input.user.harness)),
           // any custom prompt passed into this call
           ...input.system,
+          // replace-agent is a session system prompt, not per-turn user context
+          ...(replaceAgent && input.user.system ? [input.user.system] : []),
         ]
           .filter((x) => x)
           .join("\n"),
@@ -363,14 +399,9 @@ const live: Layer.Layer<
       // Project ID is resolved from the ALS-bound Instance with a safe fallback
       // to `ProjectID.global` (mirrors the pattern in session/checkpoint.ts so the
       // path the prompt advertises matches the path the writer actually writes).
-      // Injected only for actors whose context the checkpoint flow serves —
-      // main + peer. Subagents (explore/general/compose) use per-actor compaction
-      // and have no checkpoint duty; system-spawned actors (checkpoint-writer et al.)
-      // are the writers themselves. Shares the exact `servesCheckpoint` judgement
-      // with SessionPrune.fireCheckpoints so the "who owns a checkpoint" and "who is
-      // taught about it" sets can never drift apart. Disabling checkpoints removes
-      // only checkpoint-specific clauses; durable project/global memory remains usable.
-      const servesCheckpoint = yield* actorReg.servesCheckpoint(SessionID.make(input.sessionID), input.agentID)
+      // Gated on the shared `servesCheckpoint` judgement above. Disabling
+      // checkpoints removes only checkpoint-specific clauses; durable
+      // project/global memory remains usable.
       if (servesCheckpoint) {
         const projectID =
           (yield* Effect.try({
@@ -384,7 +415,7 @@ const live: Layer.Layer<
         // checkpoint-flow call sites cover the writer/rebuild paths; this covers
         // the "agent edits MEMORY.md before any checkpoint" path. Idempotent.
         yield* Effect.promise(() => migrateProjectMemory(projectID)).pipe(Effect.ignore)
-        system.push(buildMemoryInstructions(SessionID.make(input.sessionID), projectID, yield* memory.root()))
+        system.push(buildMemoryInstructions(projectID, yield* memory.root()))
       }
 
       // Orchestrator fleet roster: inject a compact one-line-per-session
@@ -394,7 +425,7 @@ const live: Layer.Layer<
       // AGENT (build/plan/compose) — the routing signal the model needs — not its
       // actor mode, which is always "peer" here and therefore carries no signal.
       // AI needs details on demand → session status/ask.
-      if (input.agent.name === "orchestrator") {
+      if (!input.ephemeral && input.agent.name === "orchestrator") {
         // listPeerChildren joins through the Session row's parent_id, because a
         // peer child registers its actor row under its OWN session id — a
         // session_id-keyed lookup (listByParent) never matches a peer.
@@ -449,11 +480,12 @@ const live: Layer.Layer<
     })
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
+      const correlationID = input.requestID ?? input.sessionID
       const l = log
         .clone()
         .tag("providerID", input.model.providerID)
         .tag("modelID", input.model.id)
-        .tag("session.id", input.sessionID)
+        .tag(input.requestID ? "request.id" : "session.id", correlationID)
         .tag("small", (input.small ?? false).toString())
         .tag("agent", input.agent.name)
         .tag("mode", input.agent.mode)
@@ -484,6 +516,7 @@ const live: Layer.Layer<
           user: input.user,
           sessionID: input.sessionID,
           agentID: input.agentID,
+          ephemeral: input.ephemeral,
         }))
 
       const variant =
@@ -505,7 +538,9 @@ const live: Layer.Layer<
       )
       const isWorkflow = language instanceof GitLabWorkflowLanguageModel
       const providerSystem =
-        (isOpenaiOauth || isWorkflow) && input.user.system?.trim() ? [...system, input.user.system] : system
+        input.user.systemMode !== "replace-agent" && (isOpenaiOauth || isWorkflow) && input.user.system?.trim()
+          ? [...system, input.user.system]
+          : system
       if (isOpenaiOauth) options.instructions = providerSystem.join("\n")
       // Reactive prefill-rejection backstop. The PRIMARY mechanism is the
       // proactive guard in ProviderTransform.message()
@@ -520,7 +555,11 @@ const live: Layer.Layer<
       const requestMessages = input.dropAssistantPrefill
         ? ProviderTransform.dropTrailingAssistantPrefill(input.messages)
         : input.messages
-      const requestMessagesWithContext = appendTurnContext(requestMessages, input.user, input.mergeTurnContextIntoLastUser)
+      const requestMessagesWithContext = appendTurnContext(
+        requestMessages,
+        input.user,
+        input.mergeTurnContextIntoLastUser,
+      )
       const messages = isOpenaiOauth
         ? requestMessages
         : isWorkflow
@@ -705,7 +744,7 @@ const live: Layer.Layer<
               if (prop !== "startSpan") return Reflect.get(target, prop, receiver)
               return (...args: Parameters<typeof target.startSpan>) => {
                 const span = target.startSpan(...args)
-                span.setAttribute("session.id", input.sessionID)
+                span.setAttribute(input.requestID ? "request.id" : "session.id", correlationID)
                 return span
               }
             },
@@ -719,22 +758,23 @@ const live: Layer.Layer<
         registeredToolCount: Object.keys(tools).length,
         activeToolCount: activeTools.length,
       })
-      yield* plugin
-        .trigger(
-          "session.llm.request",
-          {
-            sessionID: input.sessionID,
-            providerID: input.model.providerID,
-            modelID: input.model.id,
-            trajectory: [
-              ...providerSystem.map((content) => ({ role: "system", content })),
-              ...(isOpenaiOauth || isWorkflow ? requestMessages : requestMessagesWithContext),
-            ],
-            systemPrompt: providerSystem,
-          },
-          {},
-        )
-        .pipe(Effect.ignore)
+      if (!input.ephemeral)
+        yield* plugin
+          .trigger(
+            "session.llm.request",
+            {
+              sessionID: input.sessionID,
+              providerID: input.model.providerID,
+              modelID: input.model.id,
+              trajectory: [
+                ...providerSystem.map((content) => ({ role: "system", content })),
+                ...(isOpenaiOauth || isWorkflow ? requestMessages : requestMessagesWithContext),
+              ],
+              systemPrompt: providerSystem,
+            },
+            {},
+          )
+          .pipe(Effect.ignore)
 
       return streamText({
         onError(error) {
@@ -784,8 +824,8 @@ const live: Layer.Layer<
         maxOutputTokens: params.maxOutputTokens,
         abortSignal: input.abort,
         headers: {
-          "x-session-affinity": input.sessionID,
-          ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
+          ...(!input.ephemeral ? { "x-session-affinity": input.sessionID } : {}),
+          ...(!input.ephemeral && input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
           ...input.model.headers,
           ...headers,
           "User-Agent": `mimocode/${InstallationVersion}`,
@@ -816,11 +856,11 @@ const live: Layer.Layer<
         }),
         experimental_telemetry: {
           isEnabled: cfg.experimental?.openTelemetry,
-          functionId: "session.llm",
+          functionId: input.ephemeral ? "title.llm" : "session.llm",
           tracer: telemetryTracer,
           metadata: {
             userId: cfg.username ?? "unknown",
-            sessionId: input.sessionID,
+            ...(input.requestID ? { requestId: correlationID } : { sessionId: input.sessionID }),
           },
         },
       })
@@ -850,24 +890,24 @@ const live: Layer.Layer<
               let hasProviderOutput = false
               return protectRequestReplayBoundary(
                 rawStream.pipe(
-                Stream.mapEffect((event) =>
-                  Effect.gen(function* () {
+                  Stream.mapEffect((event) =>
+                    Effect.gen(function* () {
                       if (event.type === "error" && !hasProviderOutput && allowRequestRetry) {
                         if (ProviderTransform.isAssistantPrefillRejection(event.error))
                           return yield* Effect.fail(event.error)
-                      const normalized = MessageV2.fromError(event.error, {
-                        providerID: input.model.providerID,
-                        aborted: ctrl.signal.aborted,
-                        allow404Retry: ProviderError.allowsModelNotFoundRetry(input.model),
-                      })
-                      if (SessionRetry.decide(normalized, "request").retryable) return yield* Effect.fail(event.error)
-                    }
-                    if (event.type !== "start" && event.type !== "error") hasProviderOutput = true
-                    return event
-                  }),
+                        const normalized = MessageV2.fromError(event.error, {
+                          providerID: input.model.providerID,
+                          aborted: ctrl.signal.aborted,
+                          allow404Retry: ProviderError.allowsModelNotFoundRetry(input.model),
+                        })
+                        if (SessionRetry.decide(normalized, "request").retryable) return yield* Effect.fail(event.error)
+                      }
+                      if (event.type !== "start" && event.type !== "error") hasProviderOutput = true
+                      return event
+                    }),
+                  ),
                 ),
-          ),
-        )
+              )
             }),
           ),
         )
@@ -898,7 +938,10 @@ const live: Layer.Layer<
                   if (prefillRepaired) return Stream.failCause(primaryCause)
                   return retryRequest(attempt(true, true), retryCount, startedAt, true)
                 }
-                const normalized = MessageV2.fromError(primaryError, { providerID: input.model.providerID, allow404Retry: ProviderError.allowsModelNotFoundRetry(input.model) })
+                const normalized = MessageV2.fromError(primaryError, {
+                  providerID: input.model.providerID,
+                  allow404Retry: ProviderError.allowsModelNotFoundRetry(input.model),
+                })
                 const decision = SessionRetry.decide(normalized, "request")
                 if (!decision.retryable) return Stream.failCause(primaryCause)
                 const budget = SessionRetry.budgetFor(retryConfig, decision)
@@ -921,32 +964,33 @@ const live: Layer.Layer<
                   return Stream.failCause(primaryCause)
                 return Stream.unwrap(
                   Effect.gen(function* () {
-                    const globalAttempt =
-                      (input.agentID ?? "main") === "main"
-                        ? yield* status.setRetry(SessionID.make(input.sessionID), {
-                            type: "retry",
-                            attempt: nextAttempt,
-                            phaseAttempt: nextAttempt,
-                            message: decision.message,
-                            next: Date.now() + wait,
-                            phase: decision.phase,
-                            scope: decision.scope,
-                          })
-                        : nextAttempt
-                    yield* Effect.promise(() =>
-                      Bus.publish(Session.Event.RetryAttempt, {
-                        sessionID: SessionID.make(input.sessionID),
-                        messageID: input.user.id,
-                        attempt: globalAttempt,
-                        phaseAttempt: nextAttempt,
-                        maxAttempts: budget.maxRetries ?? 0,
-                        phase: decision.phase,
-                        kind: decision.kind,
-                        scope: decision.scope,
-                        reason: decision.message,
-                        nextDelayMs: wait,
-                      }),
-                    )
+                    const publishesRetry = !input.ephemeral && (input.agentID ?? "main") === "main"
+                    const globalAttempt = publishesRetry
+                      ? yield* status.setRetry(SessionID.make(input.sessionID), {
+                          type: "retry",
+                          attempt: nextAttempt,
+                          phaseAttempt: nextAttempt,
+                          message: decision.message,
+                          next: Date.now() + wait,
+                          phase: decision.phase,
+                          scope: decision.scope,
+                        })
+                      : nextAttempt
+                    if (publishesRetry)
+                      yield* Effect.promise(() =>
+                        Bus.publish(Session.Event.RetryAttempt, {
+                          sessionID: SessionID.make(input.sessionID),
+                          messageID: input.user.id,
+                          attempt: globalAttempt,
+                          phaseAttempt: nextAttempt,
+                          maxAttempts: budget.maxRetries ?? 0,
+                          phase: decision.phase,
+                          kind: decision.kind,
+                          scope: decision.scope,
+                          reason: decision.message,
+                          nextDelayMs: wait,
+                        }),
+                      )
                     yield* Effect.sleep(Duration.millis(wait))
                     return retryRequest(attempt(false, true), nextAttempt, deadlineStart)
                   }),
@@ -976,9 +1020,7 @@ export const defaultLayer = Layer.suspend(() =>
   ),
 )
 
-export function resolveTools(
-  input: Pick<StreamInput, "tools" | "activeTools" | "agent" | "permission" | "user">,
-) {
+export function resolveTools(input: Pick<StreamInput, "tools" | "activeTools" | "agent" | "permission" | "user">) {
   const permission = Agent.runtimePermission(input.agent, input.permission)
   const disabled = Permission.disabled(Object.keys(input.tools), permission)
   return Record.filter(

@@ -13,6 +13,8 @@
  */
 
 export interface LLMCapture {
+  /** Model identifier sent to the OpenAI-compatible endpoint */
+  model: string
   /** Raw messages array from the OpenAI-compatible request body */
   messages: Array<{ role: string; content: unknown }>
   /** Raw client tool declarations from the OpenAI-compatible request body. */
@@ -45,12 +47,7 @@ function sseChunk(delta: Record<string, unknown>, finishReason?: string): string
 
 /** Build SSE lines for a plain text stop response */
 export function textStopResponse(text: string): string[] {
-  return [
-    sseChunk({ role: "assistant" }),
-    sseChunk({ content: text }),
-    sseChunk({}, "stop"),
-    "data: [DONE]\n\n",
-  ]
+  return [sseChunk({ role: "assistant" }), sseChunk({ content: text }), sseChunk({}, "stop"), "data: [DONE]\n\n"]
 }
 
 /**
@@ -111,20 +108,11 @@ export function otherFinishResponse(text: string, finishReason = "guardrail"): s
 
 /** Build SSE lines for a plain text response that hits the output token limit */
 export function textLengthResponse(text: string): string[] {
-  return [
-    sseChunk({ role: "assistant" }),
-    sseChunk({ content: text }),
-    sseChunk({}, "length"),
-    "data: [DONE]\n\n",
-  ]
+  return [sseChunk({ role: "assistant" }), sseChunk({ content: text }), sseChunk({}, "length"), "data: [DONE]\n\n"]
 }
 
 /** Build SSE lines for a tool-call response (finish_reason: tool_calls) */
-export function toolCallResponse(params: {
-  id: string
-  name: string
-  args: string
-}): string[] {
+export function toolCallResponse(params: { id: string; name: string; args: string }): string[] {
   return [
     sseChunk({ role: "assistant" }),
     sseChunk({
@@ -229,7 +217,7 @@ export function startScriptedLLMServer(responses: ScriptedResponse[]): ScriptedL
       }
 
       const body = (await req.json()) as LLMCapture
-      captures.push({ messages: body.messages, tools: body.tools })
+      captures.push({ model: body.model, messages: body.messages, tools: body.tools })
 
       const response = responses[Math.min(callIdx, responses.length - 1)]
       callIdx++

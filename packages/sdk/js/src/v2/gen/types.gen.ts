@@ -2600,7 +2600,7 @@ export type Config = {
      */
     reserved?: number
     /**
-     * Whether to fork the parent agent's message prefix into the writer session for prefix-cache reuse. Requires provider cache-breakpoint support. Default: false.
+     * Whether to fork the parent agent's message prefix into the writer session for prefix-cache reuse. Requires provider cache-breakpoint support. Default: true.
      */
     fork?: boolean
     /**
@@ -4470,6 +4470,53 @@ export type WorktreeAutoResponses = {
 
 export type WorktreeAutoResponse = WorktreeAutoResponses[keyof WorktreeAutoResponses]
 
+export type ExperimentalTitleGenerateData = {
+  body: {
+    text?: string
+    parts?: Array<
+      | {
+          type: "text"
+          text: string
+        }
+      | {
+          type: "image"
+          data: string
+          mime: "image/jpeg" | "image/png" | "image/webp" | "image/gif"
+          filename?: string
+        }
+    >
+    locale?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/title"
+}
+
+export type ExperimentalTitleGenerateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ExperimentalTitleGenerateError = ExperimentalTitleGenerateErrors[keyof ExperimentalTitleGenerateErrors]
+
+export type ExperimentalTitleGenerateResponses = {
+  /**
+   * Generated conversation title
+   */
+  200: {
+    title: string
+    status: "generated" | "fallback" | "untitled"
+  }
+}
+
+export type ExperimentalTitleGenerateResponse =
+  ExperimentalTitleGenerateResponses[keyof ExperimentalTitleGenerateResponses]
+
 export type ExperimentalSessionListData = {
   body?: never
   path?: never
@@ -5211,6 +5258,10 @@ export type SessionPromptData = {
     }
     format?: OutputFormat
     /**
+     * BCP 47 locale used for automatic title generation.
+     */
+    titleLocale?: string
+    /**
      * Additional system prompt selected by the session's first user query. Later values are ignored.
      */
     system?: string
@@ -5456,6 +5507,7 @@ export type SessionResumeData = {
   query?: {
     directory?: string
     workspace?: string
+    titleLocale?: string
   }
   url: "/session/{sessionID}/turn/{assistantMessageID}/resume"
 }
@@ -5511,6 +5563,10 @@ export type SessionPromptAsyncData = {
       [key: string]: boolean
     }
     format?: OutputFormat
+    /**
+     * BCP 47 locale used for automatic title generation.
+     */
+    titleLocale?: string
     /**
      * Additional system prompt selected by the session's first user query. Later values are ignored.
      */
@@ -5569,6 +5625,10 @@ export type SessionCommandData = {
     model?: string
     arguments: string
     command: string
+    /**
+     * BCP 47 locale used for automatic title generation.
+     */
+    titleLocale?: string
     variant?: string
     /**
      * Additional system prompt selected by the session's first user command. Later values are ignored.
