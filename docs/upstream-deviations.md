@@ -15,10 +15,10 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-08-27
-- Upstream: `1fc2daac07b5936f4dcba75143bc7d9af971caa1`
-- Prior reviewed upstream: `fa6fdf176cef7f82659705b555333d6302725748`
-- Main behavior: `07d16a5f757377b816a1979297ec1cce80b7c9bd`
-- Prior fork `main` tip: `a308ca96782a12e1c8df80059562b16ee456794e`
+- Upstream: `6da12e0c98d9e2c4838896eac642c65179501f8e`
+- Prior reviewed upstream: `1fc2daac07b5936f4dcba75143bc7d9af971caa1`
+- Main behavior: `d0acb856f1ec0edae6cce29ca44178af14d94293`
+- Prior fork `main` tip: `8ddf3a2c9d97bf1239d8a0ba80eb67318b74bc8c`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -56,8 +56,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/bash.test.ts`, and
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
-- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
-  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
+- Review basis: upstream `6da12e0c98d9e2c4838896eac642c65179501f8e`;
+  main behavior `d0acb856f1ec0edae6cce29ca44178af14d94293`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -71,10 +71,15 @@ registry or history commit does not advance either behavior reference.
   the corresponding normal and MaxMode model requests. A default-off dynamic
   system-prompt flag cannot make the UI report content that the request omits.
   Request, live-step, and MaxMode retries reuse the same resolved instruction
-  set; retry configuration cannot suppress or replace it between attempts.
+  set; retry configuration cannot suppress or replace it between attempts. A
+  session-level `replace-agent` base applies only to main and positively
+  identified peer actors. Subagents, system-spawned actors, ephemeral requests,
+  and unknown actor identities retain their own agent prompt; identity override
+  fails closed even though checkpoint responsibility separately fails open.
 - Upstream relationship: rejects the default-off gate anchored at
   `ada544a352337a1c0ce796234fc86e7438e2f7e9` and merged by `8fa7e8d4` while
-  retaining compatible request-prefix improvements.
+  retaining compatible request-prefix improvements and adapting upstream's
+  actor-scoped `replace-agent` correction to fail closed for unknown identity.
 - Watch surfaces: `packages/opencode/src/cli/cmd/tui/app.tsx`,
   `packages/opencode/src/session/instruction.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
@@ -85,13 +90,18 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: `packages/opencode/test/session/instruction.test.ts`,
   `packages/opencode/test/session/llm-request-prefix.test.ts`,
   `packages/opencode/test/session/llm-system-prompt.test.ts`,
+  `packages/opencode/test/session/replace-agent-subagent.test.ts`,
   `packages/opencode/test/session/max-mode.test.ts`, and
   `packages/opencode/test/session/prompt-effect.test.ts` bind the reported file
   set to normal and MaxMode request payloads.
-- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
-  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
+- Review basis: upstream `6da12e0c98d9e2c4838896eac642c65179501f8e`;
+  main behavior `d0acb856f1ec0edae6cce29ca44178af14d94293`.
+- 2026-08-27 follow-up: adopted the main/peer scope but separated identity
+  replacement from checkpoint responsibility. The former requires positive
+  main/registered-peer evidence; the latter retains its deliberate fail-open.
 - Retirement condition: one immutable per-request decision controls both the UI
-  signal and model payload, with regressions proving identical instruction sets.
+  signal and model payload, with regressions proving identical instruction sets
+  and positive main/peer evidence before a session base replaces actor identity.
 
 ## FD-004 — ordinary instances expose no implicit OpenAI-compatible listener
 
@@ -117,8 +127,8 @@ registry or history commit does not advance either behavior reference.
   from upstream. `packages/opencode/test/server/openapi-refs.test.ts` checks both
   runtime and published OpenAPI recovery/resume operations remain main-only and
   omit their upstream agent/task selectors.
-- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
-  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
+- Review basis: upstream `6da12e0c98d9e2c4838896eac642c65179501f8e`;
+  main behavior `d0acb856f1ec0edae6cce29ca44178af14d94293`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -154,8 +164,8 @@ registry or history commit does not advance either behavior reference.
   agent-generation, `packages/opencode/test/provider/provider.test.ts`, and
   `packages/opencode/test/tool/tool-script.test.ts` regressions cover alias
   conflicts, complete resolved identity, and explicit harness overrides.
-- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
-  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
+- Review basis: upstream `6da12e0c98d9e2c4838896eac642c65179501f8e`;
+  main behavior `d0acb856f1ec0edae6cce29ca44178af14d94293`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
   complete resolved identity while keeping transport and harness/toolset as
   separate decisions. MiMo v2.5 precedence remains authoritative even when an
@@ -196,8 +206,8 @@ registry or history commit does not advance either behavior reference.
   actor, and TUI visibility tests cover the outer authority surface;
   `packages/opencode/test/cli/tui/exec-expanded.test.tsx` covers bounded
   ANSI-free outer output with and without nested parts.
-- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
-  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
+- Review basis: upstream `6da12e0c98d9e2c4838896eac642c65179501f8e`;
+  main behavior `d0acb856f1ec0edae6cce29ca44178af14d94293`.
 - 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
   resolved identity. The compact single-exec authority model remains rejected;
   direct permission-visible tools and nested actor/shell/control exclusions are
@@ -249,8 +259,8 @@ registry or history commit does not advance either behavior reference.
   child-session/fork-mode/main-slice/prefix-capture/watermark tests, and
   `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
-- Review basis: upstream `1fc2daac07b5936f4dcba75143bc7d9af971caa1`;
-  main behavior `07d16a5f757377b816a1979297ec1cce80b7c9bd`.
+- Review basis: upstream `6da12e0c98d9e2c4838896eac642c65179501f8e`;
+  main behavior `d0acb856f1ec0edae6cce29ca44178af14d94293`.
 - 2026-08-27 review: upstream session/actor-scoped fork context is an
   equivalent duplicate. The fork retains its stronger generation, cancellation,
   frozen-membership, and lifecycle implementation rather than adding a second

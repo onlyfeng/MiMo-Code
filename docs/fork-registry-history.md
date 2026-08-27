@@ -18,6 +18,7 @@ they are never used as an `upstream` or `main behavior` review basis.
 | 2026-08-25 | `5e32992a97ed7f8d2d00e4c312133716292dab9e` | `1cfe7efc8f13da6157f30324c4eeac0111e99115` | 6 | 13 | 234 paths; 22,785 insertions; 8,955 deletions | Adopted upstream recovery, turn-context, replayable nested-exec, bundled-skill, Desktop notification-card, and auto-worktree changes; hardened main run admission/cancellation, recovery mutation, nested-exec terminal settlement, TUI rendering, and GitLab workflow context without weakening the six FD or thirteen FC contracts. |
 | 2026-08-25 | `fa6fdf176cef7f82659705b555333d6302725748` | `6ae30e66ab0ecbb526f85009d300e7c2533fe72c` | 6 | 13 | 240 paths; 23,405 insertions; 9,188 deletions | Adopted fixed instance cwd with an inert SDK-compatibility event schema, centralized retry configuration/classification/request/live-step/status coordination, bounded MaxMode retry, and typed busy admission; corrected four retry boundary/configuration seams and published main-only recovery/resume while retaining all six FD and thirteen FC contracts. |
 | 2026-08-27 | `1fc2daac07b5936f4dcba75143bc7d9af971caa1` | `07d16a5f757377b816a1979297ec1cce80b7c9bd` | 6 | 15 | 251 paths; 24,431 insertions; 10,181 deletions | Classified 12 incoming capabilities; adopted reliable localized titles, relative paths, versioned skill snapshots, checkpoint fork default, actor isolation, and compaction controls; adapted model identity, stable memory paths, retry publication, and reserve-safe compaction while retaining all six FD contracts and adding FC-015 as the sole compaction-boundary owner. |
+| 2026-08-27 | `6da12e0c98d9e2c4838896eac642c65179501f8e` | `d0acb856f1ec0edae6cce29ca44178af14d94293` | 6 | 15 | 252 paths; 24,541 insertions; 10,196 deletions | Adopted actor-scoped `replace-agent` for main/peer, but separated identity replacement from checkpoint's unknown-actor fail-open: only main and positively registered non-system peers inherit the session base; subagent, system, ephemeral, and unknown actors retain their own prompt. |
 
 ## 2026-08-23 review details
 
@@ -540,6 +541,85 @@ git diff --shortstat \
 git diff --name-only \
   1fc2daac07b5936f4dcba75143bc7d9af971caa1 \
   07d16a5f757377b816a1979297ec1cce80b7c9bd -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-08-27 replace-agent actor-scope follow-up synchronization
+
+- Prior reviewed upstream: `1fc2daac07b5936f4dcba75143bc7d9af971caa1`.
+- Freshly reviewed upstream: `6da12e0c98d9e2c4838896eac642c65179501f8e`.
+- Prior fork `main` tip: `8ddf3a2c9d97bf1239d8a0ba80eb67318b74bc8c`.
+- Upstream range: 2 commits including 1 first-parent merge, 2 files, 319
+  insertions, and 12 deletions. It contains no dependency/lockfile, workflow,
+  migration, generated-artifact, documentation, or configuration change.
+- Main merge: `6a7b454598d3a34c9bf63557a845a8e766fa47f1`;
+  its parents are the prior fork tip and freshly reviewed upstream. Final main
+  behavior: `d0acb856f1ec0edae6cce29ca44178af14d94293`, which adds the fail-closed
+  identity correction and its missing actor-scope regressions.
+- Main transition: 2 files, 415 insertions, and 13 deletions from the prior fork
+  tip. The focused actor-registry, replace-agent, and durable-memory matrix
+  completed 37 tests with 0 failures. The expanded prompt/retry/MaxMode/context
+  matrix completed 94 tests with 2 documented skips and 0 failures; all three
+  affected packages passed typecheck.
+- Active ownership remains FD=6 and FC=15; the new behavior is routed through
+  FD-002 and FC-001, with no new or duplicate owner.
+
+### Decision notes
+
+- Adopted upstream's core rule that a session `replace-agent` base applies to
+  main/peer, while subagents, system-spawned actors, and ephemeral helpers retain
+  their own agent identity prompt.
+- Rejected direct reuse of `ActorRegistry.servesCheckpoint` for identity
+  replacement. That checkpoint-duty predicate intentionally fails open for an
+  unregistered actor; an identity override must fail closed. Main is recognized
+  explicitly, and a peer requires a registered non-system `mode: "peer"` row.
+- Retained the fork contract that disabling checkpoint generation removes only
+  checkpoint-specific clauses while durable project/global memory guidance
+  remains available.
+- Added coverage for main, registered subagent, registered peer,
+  system-spawned peer, ephemeral request, unknown actor, and frozen custom
+  system preservation.
+
+### Capability inventory (1/1)
+
+`AR-20260827-R2` is the audit range used by the result row:
+`old_upstream=1fc2daac07b5936f4dcba75143bc7d9af971caa1`,
+`new_upstream=6da12e0c98d9e2c4838896eac642c65179501f8e`,
+`main_merge=6a7b454598d3a34c9bf63557a845a8e766fa47f1`, and
+`main_behavior=d0acb856f1ec0edae6cce29ca44178af14d94293`.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Actor-scoped `replace-agent` base | `AR-20260827-R2` | `edf689e0`; `session/llm.ts` `buildSystemArray`; `replace-agent-subagent.test.ts` | FD-002 instruction identity and FC-001 actor registration | DC-CONTEXT-001 preflight, DC-ACTOR-001 frozen system, and DC-MODEL-001 retry reuse | complementary with unsafe predicate reuse | identity, actor scope, retry/frozen context, tests | shared main | Adapt: main or known non-system peer may inherit; subagent/system/ephemeral/unknown fail closed to own prompt | Focused matrix 37/0; expanded matrix 94 pass, 2 documented skips, 0 failures; three package typechecks; final compat propagation required |
+
+Inventory count is 1 and result-row count is 1. The row records the audit
+range, commit/path/symbol evidence, both branch counterparts, relationship,
+drift, canonical owner, disposition, and status evidence; no incoming
+capability remains unclassified.
+
+### Changed-path calculation
+
+The 252-path, 24,541-insertion, 10,196-deletion total compares the freshly
+reviewed upstream tree with the frozen pre-documentation main behavior and
+excludes all five shared/compat registry tracking paths:
+
+```bash
+git diff --shortstat \
+  6da12e0c98d9e2c4838896eac642c65179501f8e \
+  d0acb856f1ec0edae6cce29ca44178af14d94293 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  6da12e0c98d9e2c4838896eac642c65179501f8e \
+  d0acb856f1ec0edae6cce29ca44178af14d94293 -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
