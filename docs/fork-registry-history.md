@@ -563,8 +563,8 @@ git diff --name-only \
 - Main transition: 2 files, 415 insertions, and 13 deletions from the prior fork
   tip. The focused actor-registry, replace-agent, and durable-memory matrix
   completed 37 tests with 0 failures. The expanded prompt/retry/MaxMode/context
-  matrix completed 94 tests with 2 documented skips and 0 failures; all three
-  affected packages passed typecheck.
+  matrix completed 96 tests: 94 passed, 2 documented skips, and 0 failed; all
+  three selected package typechecks passed.
 - Active ownership remains FD=6 and FC=15; the new behavior is routed through
   FD-002 and FC-001, with no new or duplicate owner.
 
