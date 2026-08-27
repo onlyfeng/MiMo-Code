@@ -16,6 +16,7 @@ never used as an inherited `main` or compat behavior review basis.
 | 2026-08-25 | `98f1652bcab2038989f6e522fe41a2cb35b5e90f` | `413711ced1e60c408caefb10c585a2be8c4b5f01` | `166737181cff131961b0b84977afd230c556755b` | 7 | 47 paths; 3,643 insertions; 226 deletions | Adopted shared instance-disposal, runner, actor-notification, workflow-cleanup, and owned-worktree lifecycle hardening while retaining all seven compat-owned adaptations unchanged. |
 | 2026-08-25 | `e65c86f341f2a5f15d375cc087e33b17037e36ca` | `1cfe7efc8f13da6157f30324c4eeac0111e99115` | `ca446d40348b62fe4174e34fe0cf5a311fa12c06` | 7 | 59 paths; 3,737 insertions; 228 deletions | Adopted the audited upstream recovery, turn-context, replayable nested-exec, bundled-skill, Desktop notification-card, and auto-worktree changes plus shared lifecycle corrections while preserving all seven compat-owned network, platform, model, context, actor, and TUI adaptations. |
 | 2026-08-25 | `12b4bacedd3d0cb961578b29bfa7f613f6ac443f` | `6ae30e66ab0ecbb526f85009d300e7c2533fe72c` | `bcbd16fc237a5b2c6f2800afe834830ad739aa01` | 7 | 58 paths; 3,593 insertions; 233 deletions | Inherited fixed instance cwd with inert SDK compatibility, centralized bounded retry, typed admission, and main-only recovery/resume publication while preserving all seven compat-owned network, platform, per-agent MaxMode, bounded-context, actor-context, and TUI adaptations. |
+| 2026-08-27 | `45554bedf7fb7d041d16bbd6b8362ed2f54c56b7` | `d0acb856f1ec0edae6cce29ca44178af14d94293` | `268d5be1cd79e7da7c9f9cb6de5a65fed3c76e96` | 7 | 58 paths; 3,621 insertions; 257 deletions | Inherited the complete 13/13 shared transport, replace-agent, checkpoint, relative-path, title, skill, stable-memory, actor-context, and compaction audit while preserving all seven compat-owned adaptations and adding only evidence-backed fixture timeout headroom. |
 
 ## 2026-08-24 initial ownership review
 
@@ -426,6 +427,123 @@ git diff --shortstat \
 git diff --name-only \
   6ae30e66ab0ecbb526f85009d300e7c2533fe72c \
   bcbd16fc237a5b2c6f2800afe834830ad739aa01 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-08-27 title, stable-prefix, compaction, and actor-scope synchronization propagation
+
+- Reviewed upstream: `6da12e0c98d9e2c4838896eac642c65179501f8e`.
+- Accepted fork `main` audit tip:
+  `45554bedf7fb7d041d16bbd6b8362ed2f54c56b7`.
+- Inherited main behavior:
+  `d0acb856f1ec0edae6cce29ca44178af14d94293`.
+- Prior compat tip: `15415d9fad6041716b130baa849c80b0c62a33d1`.
+- Compat behavior merge: `268d5be1cd79e7da7c9f9cb6de5a65fed3c76e96`,
+  whose parents are the prior compat tip and main audit tree `4422d2bc`.
+- Main-audit inheritance merge:
+  `ee7442b8df4ca8017e9f288d9938f3581581cbfc`, whose parents are the compat
+  behavior and accepted main audit tip. It carries documentation evidence only
+  and does not advance either behavior reference.
+- Active ownership remains DC-NET-001, DC-NET-002, DC-PLATFORM-001,
+  DC-MODEL-001, DC-CONTEXT-001, DC-ACTOR-001, and DC-TUI-001. No eighth
+  compat-only owner was added.
+- The inherited shared audit is complete at 13/13: the initial
+  `AR-20260827` inventory contributes 12/12 rows and the
+  `AR-20260827-R2` replace-agent actor-scope follow-up contributes 1/1. Every
+  row retains `canonical_owner=shared main`; compat records only the reviewed
+  counterpart and preserves its seven explicit overlays.
+
+### Complete shared-capability disposition (13/13)
+
+| # | Inherited capability | Compat overlap and disposition | Canonical owner | Status |
+| ---: | --- | --- | --- | --- |
+| 1 | MiMo transport, harness, and toolset identity | Inherit FD-005/FD-006 exactly; DC-MODEL-001 changes only per-agent MaxMode and does not let transport select harness/tools | shared main | adopted |
+| 2 | Replace-agent SYSTEM role | Preserve DC-CONTEXT-001 preflight and DC-ACTOR-001 frozen system while using the shared provider-system role | shared main | adopted with compat bounds |
+| 3 | Checkpoint writer defaults to fork mode | Preserve DC-ACTOR-001 full-context capture and the explicit `fork: false` writer-owned prefix | shared main | adopted with compat capture |
+| 4 | Relative workspace paths | Resolve against fixed `Instance.directory`; DC-PLATFORM-001 remains an independent no-rg/archive fallback and DC-CONTEXT-001 adds no cwd mutator | shared main | adopted |
+| 5 | Reliable multimodal title generation | Keep shared structured/fallback title behavior and ephemeral retry; DC-CONTEXT-001 bounds request content without giving the call session-global status | shared main | adopted with compat bounds |
+| 6 | `/experimental/title` and JavaScript SDK | Regenerate from resolved source while retaining the independent compat `maxMode` schema fields | shared main | adopted |
+| 7 | End-to-end `titleLocale` | Preserve locale through prompt/App submission; DC-TUI-001 continues to own provider/model/variant presentation only | shared main | adopted |
+| 8 | Versioned skill-catalog snapshots | Retain immutable v2 hash snapshots and count/bound them under DC-CONTEXT-001 without rewriting prior history | shared main | adopted with compat bounds |
+| 9 | Stable per-session memory paths | Retain `{current_session_id}` in frozen instructions and resolve only at filesystem-tool execution; DC-CONTEXT-001 counts the stable text | shared main | adapted exactly |
+| 10 | Session/actor-scoped fork context | Retain the stronger shared generation/lifecycle implementation and layer DC-ACTOR-001 frozen full-context membership on it | shared main | adopted |
+| 11 | `MIMOCODE_COMPACTION_MAX_CONTEXT` | Use the inherited effective window for DC-CONTEXT-001 request preflight and DC-ACTOR-001 static-prefix classification | shared main | adopted |
+| 12 | Configurable compaction trigger ratio | Preserve `min(floor(effective * ratio), max(0, effective - reserved))`; compat preflight cannot consume reserved headroom | shared main | adapted exactly |
+| 13 | Actor-scoped `replace-agent` base | Main/known non-system peer may inherit; subagent, system, ephemeral, and unknown actors fail closed while DC-ACTOR-001 preserves frozen custom systems | shared main | adapted exactly |
+
+Inventory count is 13 and result-row count is 13. Each inherited capability
+has a compat counterpart, canonical owner, disposition, and status; no incoming
+capability remains unclassified and all seven active DC entries were reviewed.
+
+### Compat validation evidence
+
+Validation used the package-owned
+`MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true` preload baseline while clearing
+ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and
+`MIMOCODE_CODEX_MODE` for default-path invocations. The final behavior tree
+completed:
+
+- core title, prompt, skill, memory, compaction, checkpoint, retry, and
+  replace-agent groups: 280 passed, 2 existing skips, 0 failures;
+- network and platform sentinels: 138 passed, 0 failures;
+- the initial content, actor, and TUI matrix: 215 passed, 1 existing todo, and
+  1 timed-out failure when a `spawn-notification` integration fixture exceeded
+  Bun's five-second outer timeout after its assertion completed;
+- the exact timed fixture passed with evidence-accurate 15-second headroom, and
+  the complete `spawn-notification` file then passed all 10 tests;
+- supplemental provider, tool, cron, recovery, context, and system regressions,
+  including generated-SDK resume serialization: 159 passed, 0 failures; App
+  submission: 5 passed, 0 failures;
+- all three selected package typechecks passed; targeted lint completed with
+  0 errors and 90 warnings; JavaScript SDK regeneration was idempotent.
+
+The timeout adjustment is a compat test-only adaptation in
+`packages/opencode/test/actor/spawn-notification.test.ts`; it changes no runtime
+behavior or assertion. The exact same fixture at prior compat tip `15415d9f`
+also completed its assertions but took 6.215 seconds and therefore crossed
+Bun's five-second default. The 15-second outer limit records measured fixture
+headroom rather than reclassifying a product failure.
+
+### Shared inheritance and changed-path calculation
+
+At documentation merge `ee7442b8`, `docs/upstream-deviations.md`,
+`docs/fork-capabilities.md`, and `docs/fork-registry-history.md` are
+byte-identical to accepted main tip `45554bed`; `AGENTS.md` and `bun.lock` are
+also unchanged. The two compat registries remain branch-specific overlays.
+
+The propagation from prior compat tip to final compat behavior, excluding all
+five registry/history paths, changes 72 paths with 2,981 insertions and 1,118
+deletions. The current compat delta compares inherited main behavior directly
+with compat behavior: 58 paths, 3,621 insertions, and 257 deletions, with every
+path continuing to map to the same seven active owners or recorded supporting
+history.
+
+```bash
+git diff --shortstat \
+  15415d9fad6041716b130baa849c80b0c62a33d1 \
+  268d5be1cd79e7da7c9f9cb6de5a65fed3c76e96 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --shortstat \
+  d0acb856f1ec0edae6cce29ca44178af14d94293 \
+  268d5be1cd79e7da7c9f9cb6de5a65fed3c76e96 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  d0acb856f1ec0edae6cce29ca44178af14d94293 \
+  268d5be1cd79e7da7c9f9cb6de5a65fed3c76e96 -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
