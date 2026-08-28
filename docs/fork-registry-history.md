@@ -19,6 +19,7 @@ they are never used as an `upstream` or `main behavior` review basis.
 | 2026-08-25 | `fa6fdf176cef7f82659705b555333d6302725748` | `6ae30e66ab0ecbb526f85009d300e7c2533fe72c` | 6 | 13 | 240 paths; 23,405 insertions; 9,188 deletions | Adopted fixed instance cwd with an inert SDK-compatibility event schema, centralized retry configuration/classification/request/live-step/status coordination, bounded MaxMode retry, and typed busy admission; corrected four retry boundary/configuration seams and published main-only recovery/resume while retaining all six FD and thirteen FC contracts. |
 | 2026-08-27 | `1fc2daac07b5936f4dcba75143bc7d9af971caa1` | `07d16a5f757377b816a1979297ec1cce80b7c9bd` | 6 | 15 | 251 paths; 24,431 insertions; 10,181 deletions | Classified 12 incoming capabilities; adopted reliable localized titles, relative paths, versioned skill snapshots, checkpoint fork default, actor isolation, and compaction controls; adapted model identity, stable memory paths, retry publication, and reserve-safe compaction while retaining all six FD contracts and adding FC-015 as the sole compaction-boundary owner. |
 | 2026-08-27 | `6da12e0c98d9e2c4838896eac642c65179501f8e` | `d0acb856f1ec0edae6cce29ca44178af14d94293` | 6 | 15 | 252 paths; 24,541 insertions; 10,196 deletions | Adopted actor-scoped `replace-agent` for main/peer, but separated identity replacement from checkpoint's unknown-actor fail-open: only main and positively registered non-system peers inherit the session base; subagent, system, ephemeral, and unknown actors retain their own prompt. |
+| 2026-08-28 | `35bb2636a99b457940f1c12f2c8f5ec554369c57` | `64b4bdda6829ca697cecf4cf79eeec6a35ec2e57` | 6 | 15 | 256 paths; 24,605 insertions; 10,234 deletions | Classified all three incoming capabilities: removed the unimplemented actor spawn/run resume argument while preserving lifecycle and frozen-context failure boundaries; adapted PPTX sourcing to actual tool/WebFetch behavior; isolated the auto-overflow fixture while retaining its reserve-safe 25K sentinel. |
 
 ## 2026-08-23 review details
 
@@ -620,6 +621,90 @@ git diff --shortstat \
 git diff --name-only \
   6da12e0c98d9e2c4838896eac642c65179501f8e \
   d0acb856f1ec0edae6cce29ca44178af14d94293 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-08-28 actor follow-up, PPTX sourcing, and overflow-fixture synchronization
+
+- Prior reviewed upstream: `6da12e0c98d9e2c4838896eac642c65179501f8e`.
+- Freshly reviewed upstream: `35bb2636a99b457940f1c12f2c8f5ec554369c57`.
+- Prior fork `main` tip: `45554bedf7fb7d041d16bbd6b8362ed2f54c56b7`.
+- Upstream range: 3 commits, 8 paths, 259 insertions, and 98 deletions.
+  It contains no workflow, dependency/lockfile, migration, SDK/OpenAPI input,
+  package-version, or generated-artifact change.
+- Main merge: `a2ecc8a4323ceed2f1b68d59355fd8b189df257c`;
+  its parents are the prior fork tip and freshly reviewed upstream. Final main
+  behavior: `64b4bdda6829ca697cecf4cf79eeec6a35ec2e57`.
+- Main transition: 9 paths, 284 insertions, and 97 deletions from the prior fork
+  tip. The final affected matrix completed 252 passing tests with zero failures;
+  package typecheck passed, targeted lint completed with zero errors, diff
+  whitespace checks passed, and `bun.lock` remained unchanged. SDK regeneration
+  was not applicable because neither source schema nor generated input changed.
+- Active ownership remains FD=6 and FC=15. All 6 active FD and 15 active FC
+  records were reviewed; no owner was retired or added.
+
+### Decision notes
+
+- Adopted upstream's removal of the unimplemented actor `spawn`/`run`
+  `actor_id` argument and preserved strict rejection through shell recovery and
+  JSON schemas. Existing actors receive follow-up through `send` only while
+  reusable; completed ephemeral full-context actors still fail closed once
+  their frozen context has been released.
+- Adapted the bundled PPTX image-sourcing guidance to runtime facts. WebFetch
+  may return an image attachment but does not persist a local path for
+  `python-pptx`; image generation is conditional on a currently listed tool;
+  local downloads create parent directories, fail on HTTP errors, and remain
+  time-bounded; shape and text remain a valid fallback.
+- Adopted an explicit empty proactive-checkpoint ladder in the overflow fixture
+  so its writer assertion measures auto-overflow alone. Retained 25K usage and
+  the reserve-safe `min(ratio boundary, reserve boundary)` explanation because
+  19.9K < 25K < 36K detects a regression to upstream's flat 90% formula; the
+  proposed 50K fixture would not.
+
+### Capability inventory (3/3)
+
+`AR-20260828` is the audit range used by every result row:
+`old_upstream=6da12e0c98d9e2c4838896eac642c65179501f8e`,
+`new_upstream=35bb2636a99b457940f1c12f2c8f5ec554369c57`,
+`main_merge=a2ecc8a4323ceed2f1b68d59355fd8b189df257c`, and
+`main_behavior=64b4bdda6829ca697cecf4cf79eeec6a35ec2e57`.
+`MAIN-VERIFIED` means the row's affected tests are included in the final matrix
+and the typecheck, lint, whitespace, and lockfile gates above passed.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Actor follow-up contract | `AR-20260828` | `5d1fc2a0`; `tool/actor.ts` schemas, recovery and shell mapping; actor prompt/help and tests | FD-009 frozen admission; FC-001 lifecycle; FC-011 guidance | DC-ACTOR-001 full-context overlay and DC-CONTEXT-001 bounded state | conflicting and complementary | schema, lifecycle wording, recovery, tests | shared main | Adapt: remove fake spawn/run resume, retain strict rejection, persistent wake, caller resolution, and ephemeral frozen-context failure | Actor/inbox/checkpoint matrix; `MAIN-VERIFIED` |
+| 2 | PPTX image sourcing | `AR-20260828` | `da93ed21`; bundled `pptx-official/SKILL.md`; shipped-content regression | FC-011 factual bundled guidance; FC-010 distinguishes WebFetch from Bash download policy | Inherited unchanged; no compat-only owner | content extension with factual conflicts | model-visible content, tool availability, download failure semantics | shared main | Adapt to actual WebFetch attachments and conditional image generation; add fail-closed local download and shape/text fallback | Skill/WebFetch matrix; `MAIN-VERIFIED` |
+| 3 | Auto-overflow fixture isolation | `AR-20260828` | `35bb2636`; `auto-overflow-writer-first.test.ts` thresholds, usage, and boundary comments | FC-002 writer semantics and FC-015 reserve-safe trigger | DC-CONTEXT-001 and DC-ACTOR-001 deterministic full-context fixture | conflicting | test contract and trigger explanation | shared main | Adopt empty checkpoint ladder; retain 25K reserve-boundary sentinel and composed `min()` formula | Overflow/actor matrix; `MAIN-VERIFIED` |
+
+Inventory count is 3 and result-row count is 3. Every row records the audit
+range, commit/path/symbol evidence, both branch counterparts, relationship,
+drift, canonical owner, disposition, and status evidence; no incoming
+capability remains unclassified.
+
+### Changed-path calculation
+
+The 256-path, 24,605-insertion, 10,234-deletion total compares the freshly
+reviewed upstream tree with the frozen pre-documentation main behavior and
+excludes all five shared/compat registry tracking paths:
+
+```bash
+git diff --shortstat \
+  35bb2636a99b457940f1c12f2c8f5ec554369c57 \
+  64b4bdda6829ca697cecf4cf79eeec6a35ec2e57 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  35bb2636a99b457940f1c12f2c8f5ec554369c57 \
+  64b4bdda6829ca697cecf4cf79eeec6a35ec2e57 -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \

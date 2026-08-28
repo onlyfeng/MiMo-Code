@@ -34,6 +34,17 @@ describe("builtin skills", () => {
     expect(metadata).toContain("allow_implicit_invocation: false")
   })
 
+  test("keeps PPTX image guidance aligned with available tools and WebFetch", async () => {
+    const skill = await Bun.file(
+      path.join(import.meta.dir, "../../src/skill/builtin/.bundle/pptx-official/SKILL.md"),
+    ).text()
+
+    expect(skill).toContain("Generate with `image_gen` when available")
+    expect(skill).toContain("`webfetch` can return an image attachment")
+    expect(skill).toContain("curl --fail")
+    expect(skill).not.toContain("`webfetch` returns text")
+  })
+
   test("does not gate unrelated builtin skills", () => {
     expect(isBuiltinSkillInstalled("pdf-official", () => null)).toBe(true)
   })
