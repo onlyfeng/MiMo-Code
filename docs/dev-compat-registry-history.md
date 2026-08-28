@@ -17,6 +17,7 @@ never used as an inherited `main` or compat behavior review basis.
 | 2026-08-25 | `e65c86f341f2a5f15d375cc087e33b17037e36ca` | `1cfe7efc8f13da6157f30324c4eeac0111e99115` | `ca446d40348b62fe4174e34fe0cf5a311fa12c06` | 7 | 59 paths; 3,737 insertions; 228 deletions | Adopted the audited upstream recovery, turn-context, replayable nested-exec, bundled-skill, Desktop notification-card, and auto-worktree changes plus shared lifecycle corrections while preserving all seven compat-owned network, platform, model, context, actor, and TUI adaptations. |
 | 2026-08-25 | `12b4bacedd3d0cb961578b29bfa7f613f6ac443f` | `6ae30e66ab0ecbb526f85009d300e7c2533fe72c` | `bcbd16fc237a5b2c6f2800afe834830ad739aa01` | 7 | 58 paths; 3,593 insertions; 233 deletions | Inherited fixed instance cwd with inert SDK compatibility, centralized bounded retry, typed admission, and main-only recovery/resume publication while preserving all seven compat-owned network, platform, per-agent MaxMode, bounded-context, actor-context, and TUI adaptations. |
 | 2026-08-27 | `45554bedf7fb7d041d16bbd6b8362ed2f54c56b7` | `d0acb856f1ec0edae6cce29ca44178af14d94293` | `268d5be1cd79e7da7c9f9cb6de5a65fed3c76e96` | 7 | 58 paths; 3,621 insertions; 257 deletions | Inherited the complete 13/13 shared transport, replace-agent, checkpoint, relative-path, title, skill, stable-memory, actor-context, and compaction audit while preserving all seven compat-owned adaptations and adding only evidence-backed fixture timeout headroom. |
+| 2026-08-28 | `cce5b8383ce812d608254dc4deecf672e2795773` | `64b4bdda6829ca697cecf4cf79eeec6a35ec2e57` | `710a5ffb8aa9b7dedc63789759b4d995d587f5d1` | 7 | 58 paths; 3,621 insertions; 257 deletions | Inherited the complete 3/3 actor-follow-up, PPTX-sourcing, and overflow-fixture audit; preserved all seven compat owners, including bounded actor state/turn context and deterministic reserve-safe overflow evidence on the two overlapping owners. |
 
 ## 2026-08-24 initial ownership review
 
@@ -544,6 +545,111 @@ git diff --shortstat \
 git diff --name-only \
   d0acb856f1ec0edae6cce29ca44178af14d94293 \
   268d5be1cd79e7da7c9f9cb6de5a65fed3c76e96 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-08-28 actor follow-up, PPTX sourcing, and overflow-fixture propagation
+
+- Reviewed upstream: `35bb2636a99b457940f1c12f2c8f5ec554369c57`.
+- Accepted fork `main` audit tip:
+  `cce5b8383ce812d608254dc4deecf672e2795773`.
+- Inherited main behavior:
+  `64b4bdda6829ca697cecf4cf79eeec6a35ec2e57`.
+- Prior compat tip: `a0b90a4cbf995d6457b8bf0e8ce5cd18275cfbef`.
+- Compat behavior and main-audit inheritance merge:
+  `710a5ffb8aa9b7dedc63789759b4d995d587f5d1`, whose parents are the prior
+  compat tip and accepted main audit tip. This single merge carries both the
+  shared behavior and its audit documentation.
+- Propagation excluding all five registry/history paths changes 9 paths with
+  284 insertions and 97 deletions. The current compat delta remains 58 paths,
+  3,621 insertions, and 257 deletions relative to inherited main behavior.
+- Active ownership remains DC-NET-001, DC-NET-002, DC-PLATFORM-001,
+  DC-MODEL-001, DC-CONTEXT-001, DC-ACTOR-001, and DC-TUI-001. No owner was
+  added, retired, or silently transferred to compat.
+
+### Complete shared-capability disposition (3/3)
+
+| # | Inherited capability | Compat overlap and disposition | Canonical owner | Status |
+| ---: | --- | --- | --- | --- |
+| 1 | Actor follow-up contract | Adopt shared spawn/run `actor_id` rejection and `send` follow-up; preserve DC-ACTOR-001 frozen full-context/turn context and DC-CONTEXT-001 UTF-8-safe state cap; completed ephemeral full-context actors still fail closed | shared main | adapted with compat bounds |
+| 2 | PPTX image sourcing | Inherit the corrected bundled guidance and shipped-content regression byte-for-byte; no active DC owns or alters the bundled skill | shared main | adopted exactly |
+| 3 | Auto-overflow fixture isolation | Preserve the inherited empty checkpoint ladder, 25K reserve sentinel, and composed trigger formula while retaining compat's deterministic prompt, empty tool allowlist, and first-call assertion | shared main | adapted with compat fixture hardening |
+
+Inventory count is 3 and result-row count is 3. Every shared capability keeps
+`canonical_owner=shared main`, has a reviewed compat counterpart and disposition,
+and is covered by final behavior-tree evidence.
+
+### Active compat-owner review (7/7)
+
+| Owner | Incoming relationship | Reviewed disposition | Final evidence |
+| --- | --- | --- | --- |
+| DC-NET-001 | no overlap | Preserve approved private WebFetch call-seam override; do not claim shared SSRF policy for Bash/curl | WebFetch/SSRF sentinels passed |
+| DC-NET-002 | no overlap | Preserve test-backed RFC1918 remote MCP reachability without forking MCP lifecycle production code | MCP lifecycle sentinels passed |
+| DC-PLATFORM-001 | no overlap | Preserve fail-closed no-rg and Windows archive adaptations under fixed cwd | ripgrep/archive sentinels passed |
+| DC-MODEL-001 | no overlap | Preserve per-agent MaxMode, structured/final-step exclusions, and subagent status isolation | MaxMode and prompt-effect matrix passed |
+| DC-CONTEXT-001 | direct semantic overlap | Compose the shared reserve-safe fixture with compat request preflight, bounded actor state, deterministic prompt/tool set, and first-call assertion | overflow/message/prompt matrix passed |
+| DC-ACTOR-001 | direct path and contract overlap | Remove fake spawn/run resume while retaining frozen system/tools/MCP/permissions/turn context, bounded state, and static-prefix fail-closed behavior | actor/inbox/checkpoint matrix passed |
+| DC-TUI-001 | no overlap | Preserve provider/model/variant truth and locale-adjacent presentation without taking ownership of shared title behavior | TUI model sentinels passed |
+
+Owner count is 7 and result-row count is 7. The only incoming path overlap was
+routed through DC-CONTEXT-001 and DC-ACTOR-001; clean merges on the other five
+owners were still reviewed against their active registry contracts.
+
+### Compat validation evidence
+
+Validation used the package-owned
+`MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true` preload baseline while clearing
+ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`,
+`MIMOCODE_CODEX_MODE`, compaction selector variables, and the checkpoint-disable
+selector from default-path invocations. The final behavior tree completed:
+
+- actor, inbox, lifecycle, overflow, and auto-overflow: 223 passed, 0 failed;
+- request preflight, MaxMode, message replay, checkpoint, and replace-agent:
+  169 passed, 2 existing explicit skips, 0 failed;
+- WebFetch, SSRF, MCP, platform, and TUI owner sentinels: 110 passed, 0 failed;
+- bundled PPTX and skill contracts: 18 passed, 0 failed.
+
+The final total is 520 passed, 2 existing explicit skips, and 0 failures.
+`packages/opencode` and `packages/sdk/js` typechecks passed. Targeted lint on
+all six changed TypeScript files completed with 0 errors and 37 warnings;
+whitespace checks passed. `bun ci` completed from the frozen lockfile,
+`bun.lock` and tracked manifests remain byte-identical to accepted main, and
+SDK regeneration was not applicable because no source schema or generator input
+changed.
+
+### Shared inheritance and changed-path calculation
+
+At behavior merge `710a5ffb`, the three shared registries, bundled PPTX skill,
+its shipped-content regression, `AGENTS.md`, and `bun.lock` are byte-identical
+to accepted main tip `cce5b838`. The two compat registries remain the only
+branch-specific audit overlays.
+
+```bash
+git diff --shortstat \
+  a0b90a4cbf995d6457b8bf0e8ce5cd18275cfbef \
+  710a5ffb8aa9b7dedc63789759b4d995d587f5d1 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --shortstat \
+  64b4bdda6829ca697cecf4cf79eeec6a35ec2e57 \
+  710a5ffb8aa9b7dedc63789759b4d995d587f5d1 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  64b4bdda6829ca697cecf4cf79eeec6a35ec2e57 \
+  710a5ffb8aa9b7dedc63789759b4d995d587f5d1 -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
