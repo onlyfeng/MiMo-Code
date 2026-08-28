@@ -283,13 +283,17 @@ named person's photo), use `websearch` with a targeted query (e.g.
 `"Acme Inc" logo site:acme.com`, or `<product name> screenshot`) instead of
 a stock-library query, then download the bytes the same way as L2. Never
 call `image_gen` here — a generated logo will not look like the real logo.
-Note: `webfetch` returns text/markdown/html only and cannot deliver binary
-image bytes — use `bash` + `curl` or python `urllib` to download.
+Note: MiMoCode `webfetch` can return an image attachment, but it does not
+persist that attachment as a local path or file-like object for python-pptx.
+When `add_picture` needs one, use `bash` + `curl` or python `urllib` to
+download the bytes explicitly.
 
-**L4 · Generate with `image_gen`.** Only for **stylized visuals** — cover
-art, hero backgrounds, illustration-style concept images, brand-mood
-imagery. Budget: **at most 1–2 `image_gen` calls per deck**, typically for
-cover or section dividers. Not for every content slide.
+**L4 · Generate with `image_gen` when available.** `image_gen` is not built
+into every runtime, so use this channel only when the current toolset exposes
+it. It is only for **stylized visuals** — cover art, hero backgrounds,
+illustration-style concept images, brand-mood imagery. Budget: **at most 1–2
+`image_gen` calls per deck**, typically for cover or section dividers. If the
+tool is unavailable, use a shape + text fallback. Not for every content slide.
 
 ### Downloading a URL for `add_picture`
 
@@ -324,11 +328,13 @@ with urlopen(req, timeout=15) as r:
 Or from a bash step:
 
 ```bash
-curl -sSL -A "Mozilla/5.0" -o assets/hero.jpg "$URL"
+curl --fail --show-error --silent --location --max-time 15 \
+  -A "Mozilla/5.0" -o assets/hero.jpg "$URL"
 ```
 
-Wrap any download in a try/except: on failure fall through to the next
-channel (L3 → L4) or a shape+text fallback — never leave a slide blank.
+Treat a Python exception or nonzero `curl` exit as a download failure. Fall
+through to the next available channel (L3 → L4) or a shape + text fallback —
+never leave a slide blank.
 
 ### Decision (run per slide)
 
@@ -340,9 +346,9 @@ channel (L3 → L4) or a shape+text fallback — never leave a slide blank.
    - Data / concept / flow / icon → **L1** (draw in code)
    - Generic real photo → **L2** (stock library search + download)
    - Specific brand / logo / product / person → **L3** (targeted web search + download)
-   - Stylized cover / hero / illustration → **L4** (`image_gen`)
-3. If a fetch fails: L2 → L3 → L4 → shape + text fallback. Never leave a
-   slide blank because an image failed to load.
+   - Stylized cover / hero / illustration → **L4** (`image_gen`, when available)
+3. If a fetch fails: L2 → L3 → L4 (when available) → shape + text fallback.
+   Never leave a slide blank because an image failed to load.
 
 ### Anti-patterns
 
@@ -351,8 +357,10 @@ channel (L3 → L4) or a shape+text fallback — never leave a slide blank.
   images is a red flag, not a success.
 - **Passing an HTTP URL to `add_picture`.** python-pptx will raise
   `FileNotFoundError` — always download the bytes first (see *Downloading*).
-- **Using `webfetch` to grab image bytes.** `webfetch` returns text only.
-  Use `bash` + `curl` or python `urllib` for binaries.
+- **Using a `webfetch` image attachment as if it were a local file.** MiMoCode
+  may return the image as a data-URL attachment, but `add_picture` still needs
+  a local path or file-like object. Use `bash` + `curl` or python `urllib` when
+  the deck code needs one.
 - **Making up a stock-library URL from memory.** Unsplash / Pexels CDN
   paths are opaque hashes — you cannot reliably recall a URL that both
   exists AND matches the described content. Always search first, then
@@ -377,7 +385,7 @@ compared to L4, still not free. L1 remains the default.
 | Strategy / proposal    | L1 + L2  | ~60% L1, ~30% L2 (searched stock), ~10% L4 cover. |
 | Sales / pitch / BP     | L2 + L3  | Customer logos and product shots (L3) matter. 1 L4 cover max. |
 | Training / education   | L1 (~80%) | Diagrams and flowcharts win.                   |
-| Launch / brand         | L4-heavy | Visuals are the point. Still limit style drift and reuse assets. |
+| Launch / brand         | L4-heavy when available | Visuals are the point. Still limit style drift and reuse assets. |
 | Competitive analysis   | L3-heavy | Logos and screenshots are irreplaceable.        |
 
 ## Typography defaults (safe starting point)

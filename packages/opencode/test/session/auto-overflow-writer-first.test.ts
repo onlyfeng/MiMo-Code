@@ -206,8 +206,9 @@ function writerThatFails(): SpawnImpl {
 // (default 0.9) and reserves() is compaction.reserved (100) plus a 20_000 output
 // reservation (this model publishes no limit.input). max_context must exceed
 // those reserves or budget() ignores it and the model's million-token window
-// applies. 40_000 therefore puts the trigger at min(36_000, 19_900) = 19_900,
-// well under the 50_000 tokens every overflow turn below reports.
+// applies. 40_000 therefore puts the trigger at min(36_000, 19_900) = 19_900.
+// The 25_000-token sentinel below sits above that reserve boundary but below
+// the ratio boundary, so the test proves the reserve-safe minimum is retained.
 //
 // The empty checkpoint ladder is declared rather than inferred: SessionPrune
 // only consults defaultThresholdsFor when `thresholds` is absent, so passing []
@@ -370,7 +371,7 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
     async () => {
       const llm = startUsageLLM([
         { text: "initialized", promptTokens: 1_000 },
-        { text: "high-usage reply", promptTokens: 50_000 },
+        { text: "high-usage reply", promptTokens: 25_000 },
         { text: "reply after rebuild", promptTokens: 1_000 },
       ])
       let writerCalls = 0
