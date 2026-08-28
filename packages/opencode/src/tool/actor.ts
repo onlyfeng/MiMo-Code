@@ -954,7 +954,7 @@ export const ActorTool = Tool.define(
           metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, model } as Record<string, any>,
           output: [
             ...(taskNotice ? [taskNotice, ""] : []),
-            `actor_id: ${spawnResult.actorID} (to give this subagent more work, \`send\` it another message)`,
+            `actor_id: ${spawnResult.actorID} (use \`send\` for follow-up while reusable; a completed ephemeral \`context: "full"\` actor needs a fresh spawn)`,
             "",
             `<actor_result status="${statusAttr}"${summaryAttr}>`,
             resultText,

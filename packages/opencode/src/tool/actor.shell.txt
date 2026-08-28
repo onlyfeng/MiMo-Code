@@ -40,9 +40,10 @@ appends them at request time per-agent).
     actor status <actor_id>     # current state without blocking
     actor cancel <actor_id>     # graceful stop
 
-# deliver a message to another actor's inbox, waking it for another turn. This is how you
-# give follow-up work to a subagent you already have. Returns once queued, not when the
-# woken turn ends; that turn's result arrives as a completion notification:
+# deliver a message to another actor's inbox, waking it when it remains reusable. A
+# completed ephemeral context=full actor needs a fresh spawn after its frozen context is
+# released. Returns once queued, not when the woken turn ends; that turn's result arrives
+# as a completion notification:
     actor send <to_actor_id> "<content>" [--session <id>] [--type <t>]
     # to_actor_id: 'main' for a session's main agent, or a subagent id like 'explore-1'
     # --session: target session id (defaults to current); --type: 'text' (default) or 'actor_notification'

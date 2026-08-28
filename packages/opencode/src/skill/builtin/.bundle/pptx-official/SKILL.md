@@ -301,13 +301,14 @@ Two working patterns. Both keep the file local so `add_picture` can read
 the bytes:
 
 ```python
-# Pattern A: download to a temp file, then pass the path
+# Pattern A: download to a local file, then pass the path
 from urllib.request import Request, urlopen
 from pathlib import Path
 
 def download_image(url: str, dest: Path) -> Path:
     req = Request(url, headers={"User-Agent": "Mozilla/5.0"})  # some CDNs 403 an empty UA
     with urlopen(req, timeout=15) as r:
+        dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(r.read())
     return dest
 
@@ -328,7 +329,7 @@ with urlopen(req, timeout=15) as r:
 Or from a bash step:
 
 ```bash
-curl --fail --show-error --silent --location --max-time 15 \
+mkdir -p assets && curl --fail --show-error --silent --location --max-time 15 \
   -A "Mozilla/5.0" -o assets/hero.jpg "$URL"
 ```
 
