@@ -34,10 +34,100 @@ jobs:
           git config --global user.email "ci@mimo.ai"
           git config --global user.name "mimo-ci"
 
+      # stdio-exit-observe.test.ts excluded from shards: it needs the real
+      # ObservingStdioTransport. lifecycle.test.ts mock.module's that path
+      # process-wide, so sharing a bun test process with it always breaks
+      # these tests. It runs in the dedicated job below.
+      #
+      # Sharding is path-hash, NOT list position: `NR % n` on the sorted file
+      # list reassigns every later file when one is added/removed, which
+      # reshuffles process-wide mocks and breaks order-sensitive tests
+      # (e.g. mcp/sampling-e2e). hash(path) % n keeps each file's shard
+      # independent of its neighbors.
+      #
+      # Scope: this stabilizes shard membership and isolates the file that
+      # actually broke. It is NOT a general mock.module isolation scheme —
+      # other files that mock.module still share a bun test process with their
+      # shard neighbors. If a new mock lands on the same hash bucket as a test
+      # that needs the real implementation, isolate that file the same way as
+      # stdio-exit-observe rather than assuming hash-sharding alone is enough.
       - name: Run unit tests (shard ${{ matrix.shard }})
         timeout-minutes: 8
+        shell: bash
         working-directory: packages/opencode
-        run: bun run test:ci --shard ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          shard='${{ matrix.shard }}'
+          idx="${shard%/*}"
+          n="${shard#*/}"
+
+          mapfile -d '' discovered < <(
+            find test -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -print0 | sort -z
+          )
+          zero_case_files=(
+            test/config/plugin.test.ts
+            test/provider/gitlab-duo.test.ts
+            test/pty/pty-shell.test.ts
+          )
+
+          has_tsx=0
+          has_runtime=0
+          has_stdio=0
+          files=()
+          reported_files=()
+
+          for f in "${zero_case_files[@]}"; do
+            if ! printf '%s\n' "${discovered[@]}" | grep -Fqx -- "$f"; then
+              echo "::error::zero-case allowlist entry is not discoverable: $f"
+              exit 1
+            fi
+          done
+
+          for f in "${discovered[@]}"; do
+            [[ "$f" == *.test.tsx ]] && has_tsx=1
+            [[ "$f" == test/workflow/runtime-worktree.test.ts ]] && has_runtime=1
+
+            if [[ "$f" == test/mcp/stdio-exit-observe.test.ts ]]; then
+              has_stdio=1
+              continue
+            fi
+
+            h="$(printf '%s' "$f" | cksum | awk '{print $1}')"
+            if (( h % n == idx - 1 )); then
+              files+=("$f")
+              case "$f" in
+                test/config/plugin.test.ts | \
+                test/provider/gitlab-duo.test.ts | \
+                test/pty/pty-shell.test.ts) ;;
+                *) reported_files+=("$f") ;;
+              esac
+            fi
+          done
+
+          if (( !has_tsx || !has_runtime || !has_stdio )); then
+            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio"
+            exit 1
+          fi
+
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::shard $shard received zero files"
+            exit 1
+          fi
+          if (( ${#reported_files[@]} == 0 )); then
+            echo "::error::shard $shard expects zero JUnit suites"
+            exit 1
+          fi
+
+          mkdir -p .artifacts/unit
+          report=.artifacts/unit/junit.xml
+          rm -f -- "$report"
+          bun test "${files[@]}" \
+            --timeout 120000 \
+            --reporter=junit \
+            --reporter-outfile="$report"
+          test -s "$report"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" \
+            "$report" "${reported_files[@]}"
 
       - name: Upload JUnit
         if: always()
@@ -45,3 +135,36 @@ jobs:
         with:
           name: junit-shard-${{ strategy.job-index }}
           path: packages/opencode/.artifacts/unit/junit.xml
+          if-no-files-found: error
+
+  stdio-exit-observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Run stdio exit observer tests
+        shell: bash
+        working-directory: packages/opencode
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/unit
+          report=.artifacts/unit/junit.xml
+          rm -f -- "$report"
+          bun test test/mcp/stdio-exit-observe.test.ts --timeout 120000 \
+            --reporter=junit --reporter-outfile="$report"
+          test -s "$report"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" \
+            "$report" test/mcp/stdio-exit-observe.test.ts
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-stdio-exit-observe
+          path: packages/opencode/.artifacts/unit/junit.xml
+          if-no-files-found: error

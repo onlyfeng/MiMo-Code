@@ -478,7 +478,7 @@ describe("session.llm system prompt — memory-instructions guard", () => {
         expect(allSys).not.toContain(path.join(Global.Path.data, "memory", "sessions", sessionID))
         expect(allSys).toContain("the runtime resolves it from the tool context")
         // Global memory is taught (read-side) and points at the canonical path.
-        expect(allSys).toContain("## Global memory")
+        expect(allSys).toContain("# Global memory")
         expect(allSys).toContain(path.join(Global.Path.data, "memory", "global", "MEMORY.md"))
         expect(allSys).not.toContain("<data>/memory/projects")
         expect(allSys).not.toContain("<data>/memory/sessions")

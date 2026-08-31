@@ -109,6 +109,51 @@ describe("sweepOrphanAssistants", () => {
     ),
   )
 
+  it.live("keeps an errored assistant recoverable until a new user admission abandons it", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const svc = yield* SessionPrompt.Service
+        const session = yield* sessions.create({})
+        const userMsg = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "default",
+          model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+          time: { created: Date.now() - 7_300_000 },
+        })
+        const assistant = {
+          ...makeAssistant(session.id, userMsg.id, dir, { created: Date.now() - 7_200_000 }),
+          error: new MessageV2.APIError({
+            message: "terminal provider failure",
+            statusCode: 400,
+            isRetryable: false,
+          }).toObject(),
+        }
+        yield* sessions.updateMessage(assistant)
+
+        expect(yield* svc.recovery({ sessionID: session.id })).toEqual([
+          {
+            assistantMessageID: assistant.id,
+            parentMessageID: userMsg.id,
+            created: assistant.time.created,
+          },
+        ])
+        yield* svc.sweepOrphanAssistants(session.id)
+        expect((yield* svc.recovery({ sessionID: session.id })).map((item) => item.assistantMessageID)).toEqual([
+          assistant.id,
+        ])
+
+        yield* svc.sweepOrphanAssistants(session.id, true)
+        expect(yield* svc.recovery({ sessionID: session.id })).toEqual([])
+        const stored = MessageV2.get({ sessionID: session.id, messageID: assistant.id })
+        expect(stored.info.role).toBe("assistant")
+        if (stored.info.role === "assistant") expect(stored.info.time.completed).toBeDefined()
+      }),
+    ),
+  )
+
   it.live("sweeps a recent (under 60s) incomplete assistant when immediate (idle session)", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {

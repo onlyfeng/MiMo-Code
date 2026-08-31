@@ -119,6 +119,10 @@ const InfoSchema = Schema.Struct({
     description:
       "Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.",
   }),
+  auto_worktree: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Enable the once-per-session Auto-Worktree Notice when a primary root session mutates a git main worktree. Defaults to false (notice is off). When true, inject the existing soft-hint system-reminder; when false or omitted, inject nothing. Scope is the notice only — conflict detection and experimental worktree auto-create are not gated by this flag.",
+  }),
   // User-facing plugin config is stored as Specs; provenance gets attached later while configs are merged.
   plugin: Schema.optional(Schema.mutable(Schema.Array(ConfigPlugin.Spec))),
   share: Schema.optional(Schema.Literals(["manual", "auto", "disabled"])).annotate({
@@ -252,10 +256,11 @@ const InfoSchema = Schema.Struct({
       }),
       tail_turns: Schema.optional(NonNegativeInt).annotate({
         description:
-          "Number of recent user turns, including their following assistant/tool responses, to keep verbatim during compaction (default: 2)",
+          "Deprecated compatibility setting. Projected compaction now keeps only whole API rounds that arrive while compaction is running.",
       }),
       preserve_recent_tokens: Schema.optional(NonNegativeInt).annotate({
-        description: "Maximum number of tokens from recent turns to preserve verbatim after compaction",
+        description:
+          "Deprecated compatibility setting. Compression-time API rounds use at most 40000 tokens, capped by the reserve-safe effective window after frozen prefix and projection overhead.",
       }),
       reserved: Schema.optional(NonNegativeInt).annotate({
         description:
@@ -422,6 +427,19 @@ const InfoSchema = Schema.Struct({
           }),
         }),
       ).annotate({ description: "Try-best loop detector thresholds." }),
+      loop_streak_recovery: Schema.optional(
+        Schema.Struct({
+          enabled: Schema.optional(Schema.Boolean).annotate({
+            description: "Crop repeated thinking/tool streaks from the next request and inject a recovery note.",
+          }),
+          trigger_count: Schema.optional(PositiveInt).annotate({
+            description: "Consecutive identical streak keys required to trigger (default 3).",
+          }),
+          max_span: Schema.optional(PositiveInt).annotate({
+            description: "Max assistant messages cropped from the trailing streak (default 64).",
+          }),
+        }),
+      ).annotate({ description: "Loop-streak request-layer recovery (experimental)." }),
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),

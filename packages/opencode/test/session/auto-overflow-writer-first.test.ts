@@ -635,38 +635,62 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
           init: (dir) => Bun.write(path.join(dir, "mimocode.json"), mimocodeConfig(llm.origin)),
         })
 
-        await withSpawnRef(writer, () =>
-          Instance.provide({
-            directory: tmp.path,
-            fn: () =>
-              run(
-                Effect.gen(function* () {
-                  const prompt = yield* SessionPrompt.Service
-                  const sessions = yield* Session.Service
-                  const info = yield* sessions.create({ title: "auto-overflow-compaction" })
+        await Instance.provide({
+          directory: tmp.path,
+          fn: () =>
+            run(
+              Effect.gen(function* () {
+                const prompt = yield* SessionPrompt.Service
+                const sessions = yield* Session.Service
+                const info = yield* sessions.create({ title: "auto-overflow-compaction" })
 
-                  const first = yield* Effect.promise(() => seedUserMessage(info.id, "earlier question"))
-                  yield* Effect.promise(() => seedFinishedAssistant(info.id, first.id, 50_000))
+                yield* prompt.prompt({
+                  sessionID: info.id,
+                  parts: [{ type: "text", text: "initialize the actor layer" }],
+                  agent: "build",
+                })
 
-                  yield* prompt.prompt({
+                const first = yield* Effect.promise(() => seedUserMessage(info.id, "earlier question"))
+                yield* Effect.promise(() => seedFinishedAssistant(info.id, first.id, 50_000))
+
+                // SessionPrompt layer initialization installs the real actor
+                // implementation, so bind the failing writer only after the
+                // service has resolved. This keeps the test independent of
+                // earlier tests having initialized the shared spawn ref.
+                const previous = spawnRef.current
+                spawnRef.current = writer
+                yield* prompt
+                  .prompt({
                     sessionID: info.id,
                     parts: [{ type: "text", text: "next question that overflows" }],
                     agent: "build",
                   })
+                  .pipe(
+                    Effect.ensuring(
+                      Effect.sync(() => {
+                        spawnRef.current = previous
+                      }),
+                    ),
+                  )
 
-                  const after = yield* sessions.messages({ sessionID: info.id })
+                const after = yield* sessions.messages({ sessionID: info.id })
 
-                  // Writer failed and no checkpoint existed → degrade.
-                  const compactions = after.filter((m) => m.parts.some((p) => p.type === "compaction"))
-                  expect(compactions.length).toBe(1)
+                // Writer failed and no checkpoint existed → degrade.
+                const compactions = after.filter((m) => m.parts.some((p) => p.type === "compaction"))
+                expect(compactions.length).toBe(1)
+                const boundary = compactions[0].parts.find(
+                  (part): part is MessageV2.CompactionPart => part.type === "compaction",
+                )
+                expect(boundary?.projection?.version).toBe(1)
+                expect(boundary?.projection?.summary).toContain("<conversation-summary")
+                expect(boundary?.projection?.trigger).toBe("automatic")
 
-                  // No checkpoint boundary, because no checkpoint was written.
-                  const checkpoints = after.filter((m) => m.parts.some((p) => p.type === "checkpoint"))
-                  expect(checkpoints.length).toBe(0)
-                }),
-              ),
-          }),
-        )
+                // No checkpoint boundary, because no checkpoint was written.
+                const checkpoints = after.filter((m) => m.parts.some((p) => p.type === "checkpoint"))
+                expect(checkpoints.length).toBe(0)
+              }),
+            ),
+        })
       } finally {
         await llm.stop()
       }

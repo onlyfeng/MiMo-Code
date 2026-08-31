@@ -13277,6 +13277,10 @@
           "coveredUpTo": {
             "type": "string",
             "pattern": "^msg.*"
+          },
+          "digestUpTo": {
+            "type": "string",
+            "pattern": "^msg.*"
           }
         },
         "required": ["id", "sessionID", "messageID", "type", "checkpointDir", "checkpointNumber", "coveredUpTo"]
@@ -15486,6 +15490,10 @@
             "description": "Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.",
             "type": "boolean"
           },
+          "auto_worktree": {
+            "description": "Enable the once-per-session Auto-Worktree Notice when a primary root session mutates a git main worktree. Defaults to false (notice is off). When true, inject the existing soft-hint system-reminder; when false or omitted, inject nothing. Scope is the notice only — conflict detection and experimental worktree auto-create are not gated by this flag.",
+            "type": "boolean"
+          },
           "plugin": {
             "type": "array",
             "items": {
@@ -16483,6 +16491,28 @@
                   },
                   "action_streak": {
                     "description": "Consecutive edit or verify actions without progress before pausing (default 4).",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                }
+              },
+              "loop_streak_recovery": {
+                "description": "Loop-streak request-layer recovery (experimental).",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "description": "Crop repeated thinking/tool streaks from the next request and inject a recovery note.",
+                    "type": "boolean"
+                  },
+                  "trigger_count": {
+                    "description": "Consecutive identical streak keys required to trigger (default 3).",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_span": {
+                    "description": "Max assistant messages cropped from the trailing streak (default 64).",
                     "type": "integer",
                     "exclusiveMinimum": 0,
                     "maximum": 9007199254740991

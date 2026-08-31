@@ -36,6 +36,7 @@ let lastCreatedClientName: string | undefined
 let connectShouldFail = false
 let connectShouldHang = false
 let connectError = "Mock transport cannot connect"
+let transportStderr = ""
 // Tracks how many Client instances were created (detects leaks)
 let clientCreateCount = 0
 const clientOptions: unknown[] = []
@@ -78,6 +79,8 @@ function getOrCreateClientState(name?: string): MockClientState {
 class MockStdioTransport {
   stderr: null = null
   pid = 12345
+  onerror?: unknown
+  onStderr?: unknown
   // oxlint-disable-next-line no-useless-constructor
   constructor(_opts: any) {}
   async start() {
@@ -86,6 +89,12 @@ class MockStdioTransport {
   }
   async close() {
     transportCloseCount++
+  }
+  exitSnapshot() {
+    return { pid: 12345, exitCode: null, signalCode: null, hostShutdown: false }
+  }
+  stderrSnapshot() {
+    return transportStderr
   }
 }
 
@@ -114,8 +123,9 @@ class MockSSE {
   }
 }
 
-void mock.module("@modelcontextprotocol/sdk/client/stdio.js", () => ({
-  StdioClientTransport: MockStdioTransport,
+// connectLocal uses the host-owned stdio transport, not the SDK client transport.
+void mock.module("../../src/mcp/stdio-transport", () => ({
+  ObservingStdioTransport: MockStdioTransport,
 }))
 
 void mock.module("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
@@ -244,6 +254,7 @@ beforeEach(() => {
   connectShouldFail = false
   connectShouldHang = false
   connectError = "Mock transport cannot connect"
+  transportStderr = ""
   clientCreateCount = 0
   clientOptions.length = 0
   transportCloseCount = 0
@@ -1221,6 +1232,7 @@ test(
         getOrCreateClientState("fail-connect")
         connectShouldFail = true
         connectError = "Connection refused"
+        transportStderr = "token=super-secret-value"
 
         yield* mcp.add("fail-connect", {
           type: "local",
@@ -1231,6 +1243,8 @@ test(
         expect(status["fail-connect"]?.status).toBe("failed")
         if (status["fail-connect"]?.status === "failed") {
           expect(status["fail-connect"].error).toContain("Connection refused")
+          expect(status["fail-connect"].error).toContain("token=****")
+          expect(status["fail-connect"].error).not.toContain("super-secret-value")
         }
 
         // No tools should be available

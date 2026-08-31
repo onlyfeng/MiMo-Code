@@ -24,10 +24,22 @@ import type { PromptConfig } from "./session"
  * (modulo plugin trigger determinism, which is the only external non-determinism
  * source).
  *
- * The parent runLoop uses this for its prebuilt system/messages; prefix capture
- * also consumes the returned schema-only tools to freeze a ForkContext. Callers
- * provide the current MCP tool set explicitly so this helper stays outside the
- * MCP layer cycle while applying the same provider transform as the live path.
+ * Used by:
+ *   - parent runLoop, to construct its own request
+ *   - tryStartCheckpointWriter, to capture a frozen ForkContext at spawn time
+ *
+ * Both call sites must use this same function — the byte-equal invariant
+ * across parent and fork is a structural consequence, not a separate assertion.
+ * Exception: the parent runLoop sets `collapseCheckpointTail: true` so the model
+ * sees a rebuild-tail activity log instead of hollow tool pairs; the checkpoint
+ * writer leaves it off so it still writes from full-fidelity history. When a
+ * prior checkpoint exists, parent/writer inheritedMessages therefore diverge by
+ * design (checkpoint quality beats prefix-cache parity on the rebuild path).
+ *
+ * Prefix capture also consumes the returned schema-only tools to freeze a
+ * ForkContext. Callers provide the current MCP tool set explicitly so this
+ * helper stays outside the MCP layer cycle while applying the same provider
+ * transform as the live path.
  *
  * Slicing (e.g. for fork capture at a watermark) is a caller concern; callers
  * pass the already-sliced msgs. ForkContext.watermarkMsgID is a boundary marker
@@ -42,12 +54,19 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   mcpTools?: Record<string, AITool>
   useMcpToolSearch?: boolean
   /**
-   * Caller-built system parts to splice into the system array (after agent.prompt
-   * and before memory instructions). Currently env, skills, instructions in that
-   * order. Caller is responsible for the ordering and content.
+   * Caller-built system-tail parts. Currently environment/format, skill reminder,
+   * then instruction files. Caller is responsible for the ordering and content.
    */
   additions: string[]
+  /** Frozen Session/Fork system; bypasses all system regeneration when present. */
+  prebuiltSystem?: string[]
   prompt?: PromptConfig
+  /**
+   * Collapse post-checkpoint rebuild tails into an activity log. Enable for the
+   * main-agent runLoop; leave off for checkpoint-writer fork capture so the
+   * writer still sees full-fidelity recent history.
+   */
+  collapseCheckpointTail?: boolean
 }) {
   const llm = yield* LLM.Service
   const toolRegistry = yield* ToolRegistry.Service
@@ -55,7 +74,9 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   // Always use full msgs — slicing is a fork-capture concern that lives at the
   // caller (ForkContext.watermarkMsgID is a boundary marker, not a slice arg).
   // See spec changelog at docs/superpowers/specs/2026-05-26-fork-agent-prefix-cache-design.md
-  const inheritedMessages = yield* MessageV2.toModelMessagesEffect(input.msgs, input.model)
+  const inheritedMessages = yield* MessageV2.toModelMessagesEffect(input.msgs, input.model, {
+    collapseCheckpointTail: input.collapseCheckpointTail,
+  })
 
   // Find the last user message; required for system "user.system" pass-through
   const lastUserMsg = input.msgs.findLast((m) => m.info.role === "user")
@@ -71,14 +92,16 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     : (lastUserMsg.info as MessageV2.User)
 
   // Build system using LLM.buildSystemArray (single source of truth shared with stream())
-  const system = yield* llm.buildSystemArray({
-    agent: input.agent,
-    model: input.model,
-    system: input.additions,
-    user: lastUser,
-    sessionID: input.sessionID as string,
-    agentID: lastUser.agentID,
-  })
+  const system =
+    input.prebuiltSystem ??
+    (yield* llm.buildSystemArray({
+      agent: input.agent,
+      model: input.model,
+      system: input.additions,
+      user: lastUser,
+      sessionID: input.sessionID as string,
+      agentID: lastUser.agentID,
+    }))
 
   // Resolve tools using parent agent's permission and toolAllowlist
   const toolDefs = yield* toolRegistry.tools({

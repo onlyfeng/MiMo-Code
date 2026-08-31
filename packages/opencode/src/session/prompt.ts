@@ -32,7 +32,8 @@ import { contextPressureLevel, usable, isOverflow as overflowCheck } from "./ove
 import { Config } from "@/config"
 import { isMemoryWriteEnabled } from "@/memory/write-gate"
 import { Global } from "@/global"
-import { NotFoundError } from "@/storage"
+import { NotFoundError, Database, eq } from "@/storage"
+import { SessionTable } from "./session.sql"
 import { Bus } from "../bus"
 import { ProviderTransform } from "../provider"
 import { SystemPrompt } from "./system"
@@ -51,6 +52,16 @@ import {
   normalizeForLoopDetection,
   detectTextLoop,
 } from "../session/prompt/text-loop-recovery"
+import {
+  LOOP_STREAK_MAX_SPAN,
+  LOOP_STREAK_TRIGGER_COUNT,
+  applyPersistedCrops,
+  cropMetadata,
+  cropMessagesForStreak,
+  detectStreak,
+  extractAllCrops,
+  streakKey,
+} from "../session/prompt/loop-streak"
 import {
   TEXT_NGRAM_MAX_RECOVERY,
   TEXT_NGRAM_RECOVERY_REMIND,
@@ -74,7 +85,13 @@ import { SessionSummary } from "./summary"
 import { NamedError } from "@mimo-ai/shared/util/error"
 import { SessionProcessor } from "./processor"
 import { buildLLMRequestPrefix } from "./llm-request-prefix"
-import { checkConflict, type ConflictResult } from "@/tool/conflict-detection"
+import {
+  buildAutoWorktreeNotice,
+  firstMutatedMainWorktree,
+  isAutoWorktreeHintSent,
+  markAutoWorktreeHintSent,
+  sessionHasAutoWorktreeNotice,
+} from "@/tool/auto-worktree-hint"
 import {
   serializeTrajectoryMessages,
   withAssistantParts,
@@ -130,6 +147,7 @@ import {
 } from "@/tool/mcp-tool-search"
 import { isMcpToolSearchEnabled } from "@/tool/gpt"
 import { canonicalSkillCatalog, isSkillCatalogSnapshot, skillCatalogSnapshotVersion } from "./skill-catalog"
+import { SessionPrefixSnapshot } from "./prefix-snapshot"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -340,6 +358,49 @@ const PREDICT_SYSTEM = `You predict the single most likely next message a user w
 
 const PREDICT_NUDGE = `Based on the conversation above, write the user's most likely next message:`
 
+const isSyntheticPart = (part: MessageV2.Part) => "synthetic" in part && part.synthetic === true
+
+/**
+ * Builds the context `predict` feeds the model, or `undefined` when the session
+ * is not in a predictable state.
+ *
+ * Up to 3 most recent real user queries (chronological) plus the assistant turn
+ * that answered the newest one — that turn carries the tool outputs and final
+ * text. Earlier assistant turns are dropped to keep the prompt small.
+ *
+ * Synthetic parts are stripped from the user queries. `insertReminders` persists
+ * the authoritative skills catalog snapshot and auto-loaded SKILL.md bodies onto
+ * the user message, and `toModelMessages` replays every non-ignored part, so
+ * keeping them here would dwarf the real queries and pull a small model toward
+ * echoing harness instructions instead of predicting what the user would type.
+ */
+export function predictContext(history: readonly MessageV2.WithParts[]) {
+  const real = (m: MessageV2.WithParts) => m.info.role === "user" && !m.parts.every(isSyntheticPart)
+  const userIdx = history.findLastIndex(real)
+  if (userIdx === -1) return
+
+  // Only the assistant turn that actually answered this user message counts.
+  // Bail if that turn is still running (an incomplete assistant after it), so we
+  // never pair the newest prompt with a stale/older result.
+  const assistants = history
+    .slice(userIdx + 1)
+    .filter((m): m is MessageV2.WithParts & { info: MessageV2.Assistant } => m.info.role === "assistant")
+  if (assistants.length === 0) return
+  if (assistants.some((m) => m.info.time.completed === undefined)) return
+  const assistant = assistants[assistants.length - 1]
+
+  return {
+    assistant,
+    messages: [
+      ...history
+        .filter(real)
+        .slice(-3)
+        .map((m) => ({ ...m, parts: m.parts.filter((p) => !isSyntheticPart(p)) })),
+      assistant,
+    ],
+  }
+}
+
 const OUTPUT_LENGTH_CONTINUATION_LIMIT = Flag.MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT
 const INVALID_OUTPUT_CONTINUATION_LIMIT = Flag.MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT
 const TEXT_TOOL_CALL_RETRY_LIMIT = Flag.MIMOCODE_TEXT_TOOL_CALL_RETRY_LIMIT
@@ -492,24 +553,45 @@ export const layer = Layer.effect(
         const captureSession = yield* sessions.get(input.sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
         if (!captureSession) return empty
         const capturePrompt = yield* sessions.resolvePrompt({ sessionID: input.sessionID })
-        const captureMessages = input.msgs as Parameters<typeof buildLLMRequestPrefix>[0]["msgs"]
+        const captureMessages = input.msgs as MessageV2.WithParts[]
+        const captureUser = captureMessages.findLast((message) => message.info.role === "user")
+        if (!captureUser || captureUser.info.role !== "user") return empty
         const capturePermission = Agent.runtimePermission(ag, captureSession.permission)
-        const [env, instructions, mcpTools] = yield* Effect.all([
-          sys.environment(model, captureSession.time.created, capturePrompt.harness),
-          instruction.system().pipe(Effect.orDie),
-          mcp.tools(),
-        ])
-        // (checkpoint-writer never requests json_schema output, so STRUCTURED_OUTPUT_SYSTEM_PROMPT
-        // is not included; parent's runLoop adds it conditionally based on user.format). Skills are
-        // injected as a per-turn reminder (see insertReminders), not baked into the frozen watermark.
-        const additions = [...env, ...instructions.content]
+        const key = SessionPrefixSnapshot.profileKey({
+          providerID: model.providerID,
+          modelID: model.id,
+          modelAPIID: model.api.id ?? "",
+          modelFamily: model.family ?? "",
+          agent: ag.name,
+          agentID: captureUser.info.agentID ?? "main",
+          harness: capturePrompt.harness,
+          systemMode: capturePrompt.systemMode,
+          system: capturePrompt.system ?? "",
+          permission: capturePermission,
+        })
+        const frozen = yield* SessionPrefixSnapshot.get(input.sessionID, key)
+        const mcpTools = frozen ? undefined : yield* mcp.tools()
+        const additions = frozen
+          ? []
+          : yield* Effect.gen(function* () {
+              const [env, instructions] = yield* Effect.all([
+                Flag.MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT
+                  ? sys.environment(model, captureSession.time.created, capturePrompt.harness)
+                  : Effect.succeed([]),
+                instruction.system().pipe(Effect.orDie),
+              ])
+              return [
+                ...env,
+                ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
+              ]
+            })
         const prefix = yield* buildLLMRequestPrefix({
           sessionID: input.sessionID,
           agent: ag,
           model,
           msgs: captureMessages,
           additions,
-          permission: captureSession.permission,
+          permission: capturePermission,
           mcpTools,
           useMcpToolSearch: isMcpToolSearchEnabled(
             Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
@@ -518,13 +600,23 @@ export const layer = Layer.effect(
             model.api.id,
             model.family,
           ),
+          prebuiltSystem: frozen?.system,
           prompt: capturePrompt,
         }).pipe(
           Effect.provideService(LLM.Service, llm),
           Effect.provideService(ToolRegistry.Service, registry),
           Effect.catch(() => Effect.succeed(empty)),
         )
-        return { ...prefix, parentPermission: capturePermission }
+        return {
+          ...prefix,
+          ...(frozen
+            ? {
+                tools: SessionPrefixSnapshot.restoreTools(frozen.tools ?? []),
+                loadedMcpTools: frozen.loaded_mcp_tools ?? [],
+              }
+            : {}),
+          parentPermission: capturePermission,
+        }
       })
     prefixCaptureRef.current = capture
     yield* Effect.addFinalizer(() =>
@@ -581,6 +673,10 @@ export const layer = Layer.effect(
           sessionID: input.sessionID,
           boundary,
           lastMessageInfo: computeLastMessageInfo(input.msgs.map((m) => m.info)),
+          // Freeze the digest range at insert time: only this tail is eligible
+          // for activity-log collapse. Auto rebuild mid-tool-loop keeps later
+          // tool rounds live; manual rebuild digests the whole idle tail.
+          digestUpTo: input.msgs.at(-1)?.info.id,
           agentID: input.agentID,
           agent: input.agent,
           model: { providerID: input.model.providerID, modelID: input.model.id },
@@ -1136,46 +1232,24 @@ export const layer = Layer.effect(
       const cfg = yield* config.get()
       if (cfg.experimental?.predict_next_prompt === false) return ""
 
-      const history = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
-      const real = (m: MessageV2.WithParts) =>
-        m.info.role === "user" && !m.parts.every((p) => "synthetic" in p && p.synthetic)
-      const userIdx = history.findLastIndex(real)
-      if (userIdx === -1) return ""
-      const lastUser = history[userIdx]
-      if (lastUser.info.role !== "user") return ""
-
-      // Only the assistant turn that actually answered this user message counts.
-      // Bail if that turn is still running (an incomplete assistant after it),
-      // so we never pair the newest prompt with a stale/older result.
-      const assistants = history
-        .slice(userIdx + 1)
-        .filter((m): m is MessageV2.WithParts & { info: MessageV2.Assistant } => m.info.role === "assistant")
-      if (assistants.length === 0) return ""
-      if (assistants.some((m) => m.info.time.completed === undefined)) return ""
-      const lastAssistant = assistants[assistants.length - 1]
-
-      // Context fed to the prediction: up to 3 most recent user queries
-      // (chronological) plus the latest assistant turn (which carries tool
-      // outputs + final assistant text). Earlier assistant turns are dropped
-      // to keep the prompt small.
-      const recentUsers = history.filter(real).slice(-3)
-      const contextMsgs = [...recentUsers, lastAssistant]
+      const context = predictContext(yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" }))
+      if (!context) return ""
 
       const base = yield* agents.get("title")
       if (!base) return ""
       const mdl = base.modelRef
-        ? yield* provider.resolveModelRef(base.modelRef, lastAssistant.info.providerID)
+        ? yield* provider.resolveModelRef(base.modelRef, context.assistant.info.providerID)
         : base.model
           ? yield* provider.getModel(base.model.providerID, base.model.modelID)
-          : ((yield* provider.getSmallModel(lastAssistant.info.providerID)) ??
-            (yield* provider.getModel(lastAssistant.info.providerID, lastAssistant.info.modelID)))
+          : ((yield* provider.getSmallModel(context.assistant.info.providerID)) ??
+            (yield* provider.getModel(context.assistant.info.providerID, context.assistant.info.modelID)))
 
       // Side-channel call: bypass llm.stream so prediction stays out of the
       // session trajectory and never triggers session-coupled plugin hooks
       // (chat.params, chat.headers, system.transform, memory instructions,
       // x-session-affinity). Still publishes Metrics.ModelCall so the
       // prediction cost shows up in analytics.
-      const msgs = yield* MessageV2.toModelMessagesEffect(contextMsgs, mdl, { stripMedia: true })
+      const msgs = yield* MessageV2.toModelMessagesEffect(context.messages, mdl, { stripMedia: true })
       const language = yield* provider.getLanguage(mdl)
       const wrapped = wrapLanguageModel({
         model: language,
@@ -1298,10 +1372,13 @@ export const layer = Layer.effect(
         }
       }
 
-      const composeModeMsg = input.messages.find((msg) => msg.info.role === "user" && msg.info.agent === "compose")
+      const composeModeMsg = input.messages.find(
+        (msg) => msg.info.role === "user" && msg.info.agent === "compose",
+      )
+      const cfg = yield* config.get()
       if (composeModeMsg) {
         const ctx = yield* InstanceState.context
-        const composeCfg = (yield* config.get()).compose
+        const composeCfg = cfg.compose
         const docsDir = ConfigCompose.resolveDocsDir(ctx.worktree, composeCfg)
         const text = PROMPT_COMPOSE.replace(
           "{{compose_docs_dir}}",
@@ -1315,6 +1392,42 @@ export const layer = Layer.effect(
           text,
           synthetic: true,
         })
+      }
+
+      // Auto-worktree notice: once per session, after a completed write or git
+      // mutation landed in some git MAIN worktree. Names that path and carries a
+      // standing rule for any later repo. Path-based on purpose — a session bound
+      // to a non-git scratch dir that `cd`s into another project's main checkout
+      // still hits. Injected as a user-side system-reminder and persisted via
+      // auto_worktree_hint_sent so compaction/rebuild cannot re-inject. Never
+      // touches the system prompt. Gated by config.auto_worktree (default false).
+      // Nested branch: insertReminders cannot early-return without skipping the
+      // skill/plan reminders that follow.
+      if (
+        input.agent.mode === "primary" &&
+        !input.session.parentID &&
+        cfg.auto_worktree === true
+      ) {
+        const alreadySent = yield* Effect.sync(() => isAutoWorktreeHintSent(input.session.id))
+        if (!alreadySent) {
+          if (sessionHasAutoWorktreeNotice(input.messages)) {
+            yield* Effect.sync(() => markAutoWorktreeHintSent(input.session.id))
+          } else {
+            const hit = firstMutatedMainWorktree(input.messages)
+            if (hit) {
+              const part = yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: userMessage.info.id,
+                sessionID: userMessage.info.sessionID,
+                type: "text",
+                text: buildAutoWorktreeNotice(hit),
+                synthetic: true,
+              })
+              userMessage.parts.push(part)
+              yield* Effect.sync(() => markAutoWorktreeHintSent(input.session.id))
+            }
+          }
+        }
       }
 
       const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
@@ -1656,6 +1769,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
           : undefined,
         sessionParentID: input.session.parentID,
+        sessionID: input.session.id,
         agentName: input.agent.name,
         orchestratorEnabled: Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR,
       })
@@ -2110,6 +2224,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return {
         tools,
         activeTools: [...activeTools].filter((name) => tools[name]),
+        loadedMcpTools: [...loadedMcpTools],
       }
     })
 
@@ -2977,6 +3092,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       for (const m of msgs) {
         if (m.info.role !== "assistant") continue
         if (m.info.time?.completed) continue
+        // Errored assistants are intentionally left without time.completed so
+        // /recovery can find them. Keep them recoverable on the background
+        // path (age-guarded). But when immediate=true the user is actively
+        // sending a new message — that act abandons the old turn, so finalize
+        // it like any other orphan. This prevents the TUI pending memo from
+        // locking onto a stale errored assistant and rendering every later
+        // message as stuck QUEUED.
+        if (m.info.error && !immediate) continue
         const created = m.info.time?.created ?? 0
         if (!immediate && now - created < ORPHAN_AGE_MS) continue
         m.info.time = { ...m.info.time, completed: now }
@@ -3322,6 +3445,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const textLoopBuffer: string[] = []
         let textLoopRecoveryAttempts = 0
         let textNgramRecoveryAttempts = 0
+        let loopStreakCropped = false
 
         // Contract (T05): on finish="length", inject a continuation nudge ONLY for
         // plain text. If any non-providerExecuted client tool part exists we bail
@@ -3760,6 +3884,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
 
         while (true) {
+          // Per-iteration: a streak crop on this turn must suppress a duplicate
+          // text-loop recovery user, but must not block a later re-crop if the
+          // model loops again after recovery.
+          loopStreakCropped = false
           // F55: only main agent sets session status to busy; subagent runners
           // must not touch session-level status (Runner.onBusy is Effect.void
           // for non-main actors per F47).
@@ -4186,6 +4314,89 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
           const maxSteps = agent.steps ?? Infinity
           const isLastStep = step >= maxSteps
+
+          // Request-layer loop-streak crop, aligned with turn recovery
+          // (resume()): no new user, lastUser/parentID unchanged, span stored
+          // as an ignored synthetic part on the existing parent user. Wire
+          // trailing-assistant repair stays in transform.ts. Spans re-apply
+          // on every later request until the feature is off; user speech does
+          // not clear them.
+          const streakCfg = (yield* config.get()).experimental?.loop_streak_recovery
+          if (streakCfg?.enabled) {
+            const existingCrops = extractAllCrops(msgs)
+            if (existingCrops.length > 0) {
+              const reapplied = applyPersistedCrops(msgs, existingCrops)
+              if (reapplied.omitted.length > 0) {
+                // Do NOT set loopStreakCropped here. That flag means "a NEW
+                // crop just fired this iteration" and suppresses the text-loop
+                // fallback. Re-applying an old span must leave text-loop free
+                // to catch a different kind of loop later in the turn.
+                msgs = reapplied.kept as typeof msgs
+                yield* slog.info("loop streak: reapplied persisted crop", {
+                  spans: existingCrops.length,
+                  omitted: reapplied.omitted.length,
+                  spanFrom: existingCrops[existingCrops.length - 1].fromId,
+                  spanTo: existingCrops[existingCrops.length - 1].toId,
+                })
+              }
+            }
+            // New streaks are still detectable on the cropped view (e.g. the
+            // model loops again after recovery). User-speech guard only skips
+            // *new* detection, not re-application of existing spans.
+            if (lastFinished && lastUser.id < lastFinished.id) {
+              const triggerCount = streakCfg.trigger_count ?? LOOP_STREAK_TRIGGER_COUNT
+              const maxSpan = streakCfg.max_span ?? LOOP_STREAK_MAX_SPAN
+              const entries = msgs.flatMap((message) => {
+                if (message.info.role !== "assistant" || !message.info.finish) return []
+                const key = streakKey(message.parts)
+                if (!key) return []
+                return [{ id: message.info.id, key }]
+              })
+              const span = detectStreak(entries, triggerCount, maxSpan)
+              // Not dead: detectStreak.toId is the last *keyed* finished
+              // assistant, while lastFinished is the last finished assistant
+              // even when its streakKey is "". Empty-key tail (text-only
+              // recovery) means the streak already broke — skip a new crop
+              // and leave the historical span to re-apply.
+              if (span && span.toId === lastFinished.id) {
+                const crop = cropMessagesForStreak(msgs, span)
+                if (crop.omitted.length > 0) {
+                  msgs = crop.kept as typeof msgs
+                  // Persist span on the EXISTING parent user (turn-recovery
+                  // shape). ignored+synthetic: not sent to the model, not a
+                  // user-visible bubble, but extractAllCrops still reads it.
+                  const spanPart: MessageV2.TextPart = {
+                    id: PartID.ascending(),
+                    messageID: lastUser.id,
+                    sessionID,
+                    type: "text",
+                    synthetic: true,
+                    ignored: true,
+                    text: "",
+                    metadata: cropMetadata(span),
+                  }
+                  yield* sessions.updatePart(spanPart)
+                  const parentMsg = msgs.findLast((message) => message.info.id === lastUser.id)
+                  if (parentMsg) parentMsg.parts.push(spanPart)
+                  loopStreakCropped = true
+                  yield* slog.info("loop streak: cropped from request", {
+                    spanFrom: span.fromId,
+                    spanTo: span.toId,
+                    anchorId: span.anchorId,
+                    parentUserId: lastUser.id,
+                    nMessages: crop.omittedMessages,
+                    nParts: crop.omittedParts,
+                    omittedBlocks: crop.omittedBlocks,
+                    keptBlocks: crop.keptBlocks,
+                    remainingSimilar: crop.remainingSimilar,
+                    cacheRisk: crop.cacheRisk,
+                    truncatedByCeiling: span.truncated,
+                  })
+                }
+              }
+            }
+          }
+
           msgs = yield* insertReminders({ messages: msgs, agent, model, session })
 
           const msg: MessageV2.Assistant = {
@@ -4481,49 +4692,45 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return "continue" as const
             }
 
-            const [env, instructions] = yield* Effect.all([
-              sys.environment(model, session.time.created, sessionPrompt.harness),
-              instruction.system().pipe(Effect.orDie),
-            ])
-            // Surface which instruction files (CLAUDE.md, AGENTS.md, ...) were loaded.
-            // Only for primary sessions (subagents would be noisy) and once per session.
-            if (!session.parentID && !instructionsNotified.has(sessionID)) {
-              instructionsNotified.add(sessionID)
-              const worktree = (yield* InstanceState.context).worktree
-              const files = Array.from(instructions.paths, (p) => Instruction.display(p, worktree))
-              if (files.length > 0) {
-                yield* bus.publish(TuiEvent.InstructionsLoaded, { files }).pipe(Effect.ignore)
-              }
-            }
-            const additions = [
-              ...env,
-              ...instructions.content,
-              ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
-            ]
-            // Auto-worktree: inject hint on first assistant-less turn if conflict detected.
-            // Checks for no assistant messages (survives compaction/rebuild) + in main worktree.
-            const isGitProject = ctx.project.vcs === "git"
-            const isMainWorktree = ctx.worktree === ctx.project.worktree
-            if (isGitProject && isMainWorktree) {
-              const isFirstAssistantTurn = !msgs.some((m) => m.info.role === "assistant")
-              if (isFirstAssistantTurn) {
-                const conflict = (yield* Effect.promise(() =>
-                  checkConflict(ctx.directory, sessionID),
-                )) as ConflictResult
-                if (conflict.hasConflict) {
-                  additions.push(`
-⚠️ Auto-Worktree Notice
-
-This session is running in the main worktree. If you need to write or edit files, consider creating an isolated worktree first:
-
-- Create an isolated worktree: \`git worktree add <path> -b <branch>\` with a path outside the project directory
-
-Conflict detected: ${conflict.reason}${conflict.activeSessionId ? ` (session: ${conflict.activeSessionId})` : ""}
-
-If this task is a simple fix, Q&A, or read-only operation, you can skip this notice and continue.`)
+            const runtimePermission = Agent.runtimePermission(agent, session.permission)
+            const prefixProfileKey = SessionPrefixSnapshot.profileKey({
+              providerID: model.providerID,
+              modelID: model.id,
+              modelAPIID: model.api.id ?? "",
+              modelFamily: model.family ?? "",
+              agent: agent.name,
+              agentID: lastUser.agentID ?? "main",
+              harness: sessionPrompt.harness,
+              systemMode: sessionPrompt.systemMode,
+              system: sessionPrompt.system ?? "",
+              permission: runtimePermission,
+            })
+            const frozen = yield* SessionPrefixSnapshot.get(sessionID, prefixProfileKey)
+            const currentAdditions = Effect.fnUntraced(function* () {
+              const [env, instructions] = yield* Effect.all([
+                Flag.MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT
+                  ? sys.environment(model, session.time.created, sessionPrompt.harness)
+                  : Effect.succeed([]),
+                instruction.system().pipe(Effect.orDie),
+              ])
+              if (
+                !Flag.MIMOCODE_DISABLE_INSTRUCTIONS &&
+                !session.parentID &&
+                !instructionsNotified.has(sessionID)
+              ) {
+                instructionsNotified.add(sessionID)
+                const worktree = (yield* InstanceState.context).worktree
+                const files = Array.from(instructions.paths, (path) => Instruction.display(path, worktree))
+                if (files.length > 0) {
+                  yield* bus.publish(TuiEvent.InstructionsLoaded, { files }).pipe(Effect.ignore)
                 }
               }
-            }
+              return [
+                ...env,
+                ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
+                ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
+              ]
+            })
             // Note: `buildLLMRequestPrefix` also returns a `tools` field, but we
             // intentionally don't use it here — the `tools` variable from `resolveTools`
             // (set earlier via `handle.process({tools: ...})`) carries `execute` closures
@@ -4533,17 +4740,66 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
             // Main runLoop: no watermark — LLM must see the full msgs list,
             // including this turn's intermediate assistant turns (tool reads,
             // task creates, etc.) so each step doesn't replay from the bare
-            // user prompt. The watermark is for fork capture only (frozen
-            // snapshot of parent-view at spawn time).
-            const { system: prebuiltSystem, inheritedMessages: modelMsgs } = yield* buildLLMRequestPrefix({
+            // user prompt. Snapshot watermarks are boundary metadata, never a
+            // reason to slice the main request history.
+            const initialPrefix = yield* buildLLMRequestPrefix({
               sessionID,
               agent,
               model,
               msgs,
-              additions,
               permission: session.permission,
+              additions: frozen ? [] : yield* currentAdditions(),
+              prebuiltSystem: frozen?.system,
               prompt: sessionPrompt,
-            }).pipe(Effect.provideService(LLM.Service, llm), Effect.provideService(ToolRegistry.Service, registry))
+              // Rebuild tails collapse into an activity log so hollow
+              // tool_results never look like a live transcript (anti-hallucination).
+              collapseCheckpointTail: true,
+            }).pipe(
+              Effect.provideService(LLM.Service, llm),
+              Effect.provideService(ToolRegistry.Service, registry),
+            )
+            const currentToolsHash = SessionPrefixSnapshot.toolsHash(tools, activeTools)
+            const currentTools = yield* Effect.promise(() => SessionPrefixSnapshot.snapshotTools(tools, activeTools))
+            const resolvedPrefix = yield* Effect.gen(function* () {
+              if (!frozen) {
+                const snapshot = yield* SessionPrefixSnapshot.pin({
+                  sessionID,
+                  profileKey: prefixProfileKey,
+                  system: initialPrefix.system,
+                  toolsHash: currentToolsHash,
+                  tools: currentTools,
+                  loadedMcpTools: resolvedTools.loadedMcpTools,
+                  watermarkMessageID: lastUser.id,
+                })
+                return { prefix: initialPrefix, snapshot }
+              }
+              if (frozen.tools && frozen.tools_hash === currentToolsHash) return { prefix: initialPrefix, snapshot: frozen }
+              const prefix = yield* buildLLMRequestPrefix({
+                sessionID,
+                agent,
+                model,
+                msgs,
+                additions: yield* currentAdditions(),
+                permission: session.permission,
+                prompt: sessionPrompt,
+                collapseCheckpointTail: true,
+              }).pipe(
+                Effect.provideService(LLM.Service, llm),
+                Effect.provideService(ToolRegistry.Service, registry),
+              )
+              const snapshot = yield* SessionPrefixSnapshot.rotate({
+                sessionID,
+                profileKey: prefixProfileKey,
+                system: prefix.system,
+                toolsHash: currentToolsHash,
+                tools: currentTools,
+                loadedMcpTools: resolvedTools.loadedMcpTools,
+                watermarkMessageID: lastUser.id,
+              })
+              return { prefix, snapshot }
+            })
+            const prebuiltSystem = resolvedPrefix.prefix.system
+            const modelMsgs = resolvedPrefix.prefix.inheritedMessages
             lastSystemPrompt = prebuiltSystem
             const cfg = yield* config.get()
             const maxModeCfg = cfg.experimental?.maxMode
@@ -4556,9 +4812,7 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
               permission: session.permission,
               sessionID,
               parentSessionID: session.parentID,
-              // system: additions is preserved for non-LLM consumers of StreamInput (e.g.,
-              // MessageV2.User.system for logging/replay); llm.stream itself uses prebuiltSystem.
-              system: additions,
+              system: [],
               prebuiltSystem,
               messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
               mergeTurnContextIntoLastUser: true,
@@ -4681,7 +4935,19 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
               ),
             )
 
-            if (result === "continue" && (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))) {
+            if (handle.message.time.completed && !handle.message.error) {
+              yield* SessionPrefixSnapshot.advance({
+                sessionID,
+                profileKey: prefixProfileKey,
+                revision: resolvedPrefix.snapshot.revision,
+                watermarkMessageID: handle.message.id,
+              })
+            }
+
+            if (
+              result === "continue" &&
+              (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))
+            ) {
               return "continue" as const
             }
 
@@ -4818,8 +5084,11 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
 
             if (textLoopBuffer.length >= TEXT_LOOP_TRIGGER_COUNT) {
               const isTextLoop = detectTextLoop(textLoopBuffer, TEXT_LOOP_TRIGGER_COUNT)
-
-              if (isTextLoop) {
+              // Prefer streak crop (request-layer) over a second recovery user
+              // when this turn already cropped a thinking streak. Re-deriving
+              // detectStreak on the cropped msgs is a false negative — the
+              // streak assistants are gone — so gate on the crop flag.
+              if (isTextLoop && !loopStreakCropped) {
                 if (textLoopRecoveryAttempts >= TEXT_LOOP_MAX_RECOVERY) {
                   yield* slog.info("text loop: max recovery exceeded, terminating")
                   yield* bus.publish(Session.Event.Error, {

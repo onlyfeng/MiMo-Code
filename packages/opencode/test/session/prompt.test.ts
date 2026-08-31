@@ -7,7 +7,7 @@ import { Instance } from "../../src/project/instance"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
-import { SessionPrompt, sanitizeGeneratedTitle, titleContext, titleInputText, titlePromptText, truncateTitle } from "../../src/session/prompt"
+import { SessionPrompt, predictContext, sanitizeGeneratedTitle, titleContext, titleInputText, titlePromptText, truncateTitle } from "../../src/session/prompt"
 import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
 import { startScriptedLLMServer, toolCallResponse } from "../lib/scripted-llm-server"
@@ -61,6 +61,87 @@ describe("title helpers", () => {
     expect(sanitizeGeneratedTitle("<think>内部推理，不应成为标题</think>\n修复会话标题生成")).toBe("修复会话标题生成")
     expect(sanitizeGeneratedTitle("<think>我可以调用 <tool_call>read</tool_call>，但最终直接生成标题</think>\n重构认证流程")).toBe("重构认证流程")
     expect(sanitizeGeneratedTitle("<think>只有推理，没有最终标题</think>")).toBeUndefined()
+  })
+})
+
+describe("predictContext", () => {
+  const user = (parts: MessageV2.Part[]) => ({ info: { role: "user" }, parts }) as unknown as MessageV2.WithParts
+  const assistant = (completed: number | undefined) =>
+    ({
+      info: { role: "assistant", providerID: "p", modelID: "m", time: { completed } },
+      parts: [{ type: "text", text: "done" }],
+    }) as unknown as MessageV2.WithParts
+
+  test("strips the skills catalog and auto-loaded SKILL.md bodies from user queries", () => {
+    const context = predictContext([
+      user([
+        {
+          type: "text",
+          text: "<system-reminder>\nAuthoritative skills catalog snapshot v2:\n…\n</system-reminder>",
+          synthetic: true,
+        },
+        { type: "text", text: "重构 predict 的上下文构建" },
+        {
+          type: "text",
+          text: '<system-reminder>\n<skill_content name="dataviz">\n…\n</skill_content>\n</system-reminder>',
+          synthetic: true,
+        },
+      ] as MessageV2.Part[]),
+      assistant(1),
+    ])
+    expect(context?.messages[0].parts.map((p) => (p.type === "text" ? p.text : p.type))).toEqual([
+      "重构 predict 的上下文构建",
+    ])
+    expect(JSON.stringify(context?.messages)).not.toContain("system-reminder")
+  })
+
+  test("keeps non-synthetic parts that are not plain text", () => {
+    const context = predictContext([
+      user([
+        { type: "text", text: "看这张图", synthetic: false },
+        { type: "file", mime: "image/png", url: "data:image/png;base64,AA==", filename: "diagram.png" },
+      ] as MessageV2.Part[]),
+      assistant(1),
+    ])
+    expect(context?.messages[0].parts).toHaveLength(2)
+  })
+
+  test("caps at the 3 most recent user queries plus the answering assistant turn", () => {
+    const context = predictContext([
+      user([{ type: "text", text: "one" }] as MessageV2.Part[]),
+      user([{ type: "text", text: "two" }] as MessageV2.Part[]),
+      user([{ type: "text", text: "three" }] as MessageV2.Part[]),
+      user([{ type: "text", text: "four" }] as MessageV2.Part[]),
+      assistant(1),
+    ])
+    expect(context?.messages).toHaveLength(4)
+    expect(context?.messages.slice(0, 3).map((m) => m.parts.map((p) => (p.type === "text" ? p.text : "")))).toEqual([
+      ["two"],
+      ["three"],
+      ["four"],
+    ])
+  })
+
+  test("bails when the answering assistant turn is still running", () => {
+    expect(
+      predictContext([user([{ type: "text", text: "hi" }] as MessageV2.Part[]), assistant(undefined)]),
+    ).toBeUndefined()
+  })
+
+  test("bails with no user query, and when the newest user message is synthetic-only", () => {
+    expect(predictContext([assistant(1)])).toBeUndefined()
+    expect(
+      predictContext([user([{ type: "text", text: "sys", synthetic: true }] as MessageV2.Part[]), assistant(1)]),
+    ).toBeUndefined()
+  })
+
+  test("does not mutate the stored parts", () => {
+    const parts = [
+      { type: "text", text: "real" },
+      { type: "text", text: "reminder", synthetic: true },
+    ] as MessageV2.Part[]
+    predictContext([user(parts), assistant(1)])
+    expect(parts).toHaveLength(2)
   })
 })
 

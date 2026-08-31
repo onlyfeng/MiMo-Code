@@ -1334,6 +1334,7 @@ export type CheckpointPart = {
   checkpointDir: string
   checkpointNumber: number
   coveredUpTo: string
+  digestUpTo?: string
 }
 
 export type CompactionPart = {
@@ -1344,6 +1345,19 @@ export type CompactionPart = {
   auto: boolean
   overflow?: boolean
   tail_start_id?: string
+  projection?: {
+    version: 1
+    summary_message_id: string
+    summary: string
+    manifest?: string
+    trigger: "manual" | "automatic" | "provider-overflow"
+    tail_start_id?: string
+    tail_end_id?: string
+    compacted_tool_calls?: Array<{
+      call_id: string
+      tokens: number
+    }>
+  }
 }
 
 export type Part =
@@ -2222,6 +2236,10 @@ export type Config = {
    * Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.
    */
   snapshot?: boolean
+  /**
+   * Enable the once-per-session Auto-Worktree Notice when a primary root session mutates a git main worktree. Defaults to false (notice is off). When true, inject the existing soft-hint system-reminder; when false or omitted, inject nothing. Scope is the notice only — conflict detection and experimental worktree auto-create are not gated by this flag.
+   */
+  auto_worktree?: boolean
   plugin?: Array<
     | string
     | [
@@ -2565,11 +2583,11 @@ export type Config = {
      */
     prune?: boolean
     /**
-     * Number of recent user turns, including their following assistant/tool responses, to keep verbatim during compaction (default: 2)
+     * Deprecated compatibility setting. Projected compaction now keeps only whole API rounds that arrive while compaction is running.
      */
     tail_turns?: number
     /**
-     * Maximum number of tokens from recent turns to preserve verbatim after compaction
+     * Deprecated compatibility setting. Compression-time API rounds use at most 40000 tokens, capped by the reserve-safe effective window after frozen prefix and projection overhead.
      */
     preserve_recent_tokens?: number
     /**
@@ -2759,6 +2777,23 @@ export type Config = {
        * Consecutive edit or verify actions without progress before pausing (default 4).
        */
       action_streak?: number
+    }
+    /**
+     * Loop-streak request-layer recovery (experimental).
+     */
+    loop_streak_recovery?: {
+      /**
+       * Crop repeated thinking/tool streaks from the next request and inject a recovery note.
+       */
+      enabled?: boolean
+      /**
+       * Consecutive identical streak keys required to trigger (default 3).
+       */
+      trigger_count?: number
+      /**
+       * Max assistant messages cropped from the trailing streak (default 64).
+       */
+      max_span?: number
     }
     /**
      * Timeout in milliseconds for model context protocol (MCP) requests
