@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { classifyAssistantStep } from "../../src/session/classify"
+import { classifyAssistantStep, REQUEST_OVERFLOW_RECOVERY_MESSAGE } from "../../src/session/classify"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID, PartID } from "../../src/session/schema"
 import { ProviderID, ModelID } from "../../src/provider/schema"
@@ -304,12 +304,42 @@ describe("classifyAssistantStep", () => {
         lastUser: userInfo("m-1"),
         assistant: assistantInfo("m-2", {
           finish: "cancelled",
-          error: new MessageV2.AbortedError({ message: "Request overflow triggered context recovery" }).toObject(),
+          error: new MessageV2.AbortedError({ message: REQUEST_OVERFLOW_RECOVERY_MESSAGE }).toObject(),
         }),
         parts: [],
         recoverOverflowPlaceholder: true,
       }),
     ).toEqual({ type: "continue" })
+  })
+
+  test("existing-assistant phase + unrelated empty cancellation stays failed even with recovery intent", () => {
+    expect(
+      classifyAssistantStep({
+        phase: "existing-assistant",
+        lastUser: userInfo("m-1"),
+        assistant: assistantInfo("m-2", {
+          finish: "cancelled",
+          error: new MessageV2.AbortedError({ message: "user cancelled" }).toObject(),
+        }),
+        parts: [],
+        recoverOverflowPlaceholder: true,
+      }),
+    ).toEqual({ type: "failed", reason: "MessageAbortedError" })
+  })
+
+  test("existing-assistant phase + near-match overflow placeholder stays failed", () => {
+    expect(
+      classifyAssistantStep({
+        phase: "existing-assistant",
+        lastUser: userInfo("m-1"),
+        assistant: assistantInfo("m-2", {
+          finish: "cancelled",
+          error: new MessageV2.AbortedError({ message: `${REQUEST_OVERFLOW_RECOVERY_MESSAGE}.` }).toObject(),
+        }),
+        parts: [],
+        recoverOverflowPlaceholder: true,
+      }),
+    ).toEqual({ type: "failed", reason: "MessageAbortedError" })
   })
 
   test("existing-assistant phase + empty cancelled placeholder without recovery intent => failed", () => {

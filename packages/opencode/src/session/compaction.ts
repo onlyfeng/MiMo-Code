@@ -18,6 +18,8 @@ import { InstanceState } from "@/effect"
 import { isOverflow as overflow, usable } from "./overflow"
 import { makeRuntime } from "@/effect/run-service"
 import { fn } from "@/util/fn"
+import path from "path"
+import { SessionPrefixSnapshot } from "./prefix-snapshot"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -38,38 +40,224 @@ export const Event = {
 export const PRUNE_MINIMUM = 20_000
 export const PRUNE_PROTECT = 40_000
 const PRUNE_PROTECTED_TOOLS = ["skill"]
-const DEFAULT_TAIL_TURNS = 2
-const MIN_PRESERVE_RECENT_TOKENS = 2_000
-const MAX_PRESERVE_RECENT_TOKENS = 8_000
-type Turn = {
-  start: number
-  end: number
-  id: MessageID
+export const COMPACTION_TAIL_BUDGET = 40_000
+export const COMPACTION_TOOL_RESULT_LIMIT = 8_000
+const FILE_MANIFEST_LIMIT = 5
+const TAIL_SHRINK_METADATA = "compaction_tail_shrunk_tokens"
+
+type CompactionTrigger = "manual" | "automatic" | "provider-overflow"
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return
+  return value as Record<string, unknown>
 }
 
-function preserveRecentBudget(input: { cfg: Config.Info; model: Provider.Model }) {
-  return (
-    input.cfg.compaction?.preserve_recent_tokens ??
-    Math.min(MAX_PRESERVE_RECENT_TOKENS, Math.max(MIN_PRESERVE_RECENT_TOKENS, Math.floor(usable(input) * 0.25)))
+function string(value: unknown) {
+  return typeof value === "string" ? value : undefined
+}
+
+function number(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function relativeFile(file: string, worktree: string) {
+  return (path.isAbsolute(file) ? path.relative(worktree, file) : file).replaceAll("\\", "/")
+}
+
+function xmlText(value: string) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+}
+
+function readLabel(part: MessageV2.ToolPart) {
+  if (part.state.status !== "completed") return "read"
+  const offset = number(part.state.input.offset) ?? 1
+  const range = part.state.output.match(/Showing lines (\d+)-(\d+)/)
+  const contentEnd = Array.from(part.state.output.matchAll(/(?:^|\n)(\d+):/g)).at(-1)?.[1]
+  const end = range?.[2] ?? contentEnd
+  if (offset === 1 && part.state.metadata.truncated !== true && (part.state.output.includes("(End of file") || !end))
+    return "read: full"
+  return end ? `read: lines ${offset}-${end}` : `read: from line ${offset}`
+}
+
+export function buildFileManifest(messages: MessageV2.WithParts[], env: { worktree: string }) {
+  const touched = new Map<string, { path: string; events: string[] }>()
+  const add = (file: string | undefined, event: string) => {
+    if (!file) return undefined
+    const normalized = relativeFile(file, env.worktree)
+    if (!normalized) return undefined
+    const current = touched.get(normalized) ?? { path: normalized, events: [] }
+    if (current.events.at(-1) !== event) current.events.push(event)
+    touched.delete(normalized)
+    touched.set(normalized, current)
+    return normalized
+  }
+
+  for (const message of messages) {
+    const mutatedFiles = new Set<string>()
+    for (const part of message.parts) {
+      if (part.type === "patch") {
+        for (const file of part.files) {
+          if (mutatedFiles.has(relativeFile(file, env.worktree))) continue
+          add(file, "edited")
+        }
+        continue
+      }
+      if (part.type !== "tool" || part.state.status !== "completed") continue
+      const inputPath =
+        string(part.state.input.file_path) ?? string(part.state.input.path) ?? string(part.state.input.notebook_path)
+      if (part.tool === "read") {
+        add(inputPath, readLabel(part))
+        continue
+      }
+      if (part.tool === "apply_patch" && Array.isArray(part.state.metadata.files)) {
+        for (const item of part.state.metadata.files) {
+          const file = record(item)
+          if (!file) continue
+          const normalized = add(
+            string(file.relativePath) ?? string(file.filePath),
+            file.type === "add" ? "written" : "edited",
+          )
+          if (normalized) mutatedFiles.add(normalized)
+        }
+        continue
+      }
+      if (!["write", "edit", "multiedit", "notebook_edit", "str_replace"].includes(part.tool)) continue
+      const metadataPath = string(part.state.metadata.filepath) ?? string(record(part.state.metadata.filediff)?.file)
+      const written =
+        (part.tool === "write" && part.state.metadata.exists === false) ||
+        (part.tool === "edit" && part.state.input.old_string === "")
+      const file = add(inputPath ?? metadataPath, written ? "written" : "edited")
+      if (file) mutatedFiles.add(file)
+    }
+  }
+
+  const files = Array.from(touched.values()).slice(-FILE_MANIFEST_LIMIT)
+  if (!files.length) return
+  return [
+    "## Attachments",
+    "",
+    "<files-touched>",
+    "These files were read or edited earlier in this session. Their contents have been",
+    "removed from context — re-read any file you need before editing it.",
+    "",
+    ...files.map((file) => `- ${xmlText(file.path)} (${file.events.slice(-3).join(", then ")})`),
+    "</files-touched>",
+  ].join("\n")
+}
+
+export function groupByApiRound(messages: MessageV2.WithParts[]) {
+  return messages.reduce<MessageV2.WithParts[][]>((rounds, message) => {
+    if (message.info.role === "user" || rounds.length === 0) {
+      rounds.push([message])
+      return rounds
+    }
+    rounds.at(-1)!.push(message)
+    return rounds
+  }, [])
+}
+
+export function shrinkLargeToolResults(messages: MessageV2.WithParts[]) {
+  return messages.map(
+    (message): MessageV2.WithParts => ({
+      info: message.info,
+      parts: message.parts.map((part) => {
+        if (part.type !== "tool" || part.state.status !== "completed") return part
+        const tokens = Token.estimate(part.state.output)
+        if (tokens <= COMPACTION_TOOL_RESULT_LIMIT) return part
+        return {
+          ...part,
+          state: {
+            ...part.state,
+            output: `[Tool result omitted during compaction: ${tokens} tokens. Re-run "${part.tool}" if this result is needed.]`,
+            providerOutput: undefined,
+            attachments: undefined,
+            metadata: { ...part.state.metadata, [TAIL_SHRINK_METADATA]: tokens },
+          },
+        }
+      }),
+    }),
   )
 }
 
-function turns(messages: MessageV2.WithParts[]) {
-  const result: Turn[] = []
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]
-    if (msg.info.role !== "user") continue
-    if (msg.parts.some((part) => part.type === "compaction")) continue
-    result.push({
-      start: i,
-      end: messages.length,
-      id: msg.info.id,
-    })
+export const buildTail = Effect.fn("SessionCompaction.buildTail")(function* (input: {
+  messages: MessageV2.WithParts[]
+  model: Provider.Model
+  budget?: number
+}) {
+  const rounds = groupByApiRound(input.messages)
+  const kept: MessageV2.WithParts[][] = []
+  let used = 0
+  for (let i = rounds.length - 1; i >= 0; i--) {
+    const round = shrinkLargeToolResults(rounds[i])
+    const cost = Token.estimate(
+      JSON.stringify(yield* Effect.promise(() => MessageV2.toModelMessages(round, input.model))),
+    )
+    if (used + cost > (input.budget ?? COMPACTION_TAIL_BUDGET)) break
+    kept.unshift(round)
+    used += cost
   }
-  for (let i = 0; i < result.length - 1; i++) {
-    result[i].end = result[i + 1].start
-  }
-  return result
+  return kept.flat()
+})
+
+export const buildProjectionTail = Effect.fn("SessionCompaction.buildProjectionTail")(function* (input: {
+  messages: MessageV2.WithParts[]
+  model: Provider.Model
+  budget?: number
+}) {
+  const requiredIdx = input.messages.findIndex(MessageV2.isExternalUserMessage)
+  if (requiredIdx < 0) return yield* buildTail(input)
+
+  // A request that arrived after compaction started was never visible to the
+  // summarizer. Keep that user and everything after it even when the optional
+  // tail budget is exhausted; the next request preflight will fail closed if
+  // the new request itself cannot fit. Silently projecting it away would lose
+  // user work. Older complete rounds may use only the remaining budget.
+  const required = shrinkLargeToolResults(input.messages.slice(requiredIdx))
+  const requiredCost = Token.estimate(
+    JSON.stringify(yield* Effect.promise(() => MessageV2.toModelMessages(required, input.model))),
+  )
+  return [
+    ...(yield* buildTail({
+      messages: input.messages.slice(0, requiredIdx),
+      model: input.model,
+      budget: Math.max(0, (input.budget ?? COMPACTION_TAIL_BUDGET) - requiredCost),
+    })),
+    ...required,
+  ]
+})
+
+function compactedToolCalls(messages: MessageV2.WithParts[]) {
+  return messages.flatMap((message) =>
+    message.parts.flatMap((part) => {
+      if (part.type !== "tool" || part.state.status !== "completed") return []
+      const tokens = number(part.state.metadata[TAIL_SHRINK_METADATA])
+      return tokens === undefined ? [] : [{ call_id: part.callID, tokens }]
+    }),
+  )
+}
+
+export function buildSummaryMessage(summary: string, trigger: CompactionTrigger, hasTail: boolean) {
+  return [
+    `<conversation-summary trigger="${trigger}">`,
+    "The earlier conversation has been compacted into the summary below.",
+    hasTail
+      ? "Complete API rounds that arrived while compaction was running follow this summary."
+      : "No additional API rounds arrived while compaction was running.",
+    "",
+    summary.trim(),
+    "</conversation-summary>",
+  ].join("\n")
+}
+
+export function projectionTailBudget(input: {
+  cfg: Config.Info
+  model: Provider.Model
+  fixed: { system: string[]; tools: unknown[]; summary: string; manifest?: string }
+}) {
+  return Math.min(
+    COMPACTION_TAIL_BUDGET,
+    Math.max(0, usable({ cfg: input.cfg, model: input.model }) - Token.estimate(JSON.stringify(input.fixed))),
+  )
 }
 
 export interface Interface {
@@ -85,6 +273,7 @@ export interface Interface {
     auto: boolean
     overflow?: boolean
     agentID?: string
+    hasPendingExternalRequest?: () => boolean
   }) => Effect.Effect<"continue" | "stop" | "text-repeat">
   readonly create: (input: {
     sessionID: SessionID
@@ -126,63 +315,11 @@ export const layer: Layer.Layer<
       return overflow({ cfg: yield* config.get(), tokens: input.tokens, model: input.model })
     })
 
-    const estimate = Effect.fn("SessionCompaction.estimate")(function* (input: {
-      messages: MessageV2.WithParts[]
-      model: Provider.Model
-    }) {
-      const msgs = yield* MessageV2.toModelMessagesEffect(input.messages, input.model)
-      return Token.estimate(JSON.stringify(msgs))
-    })
-
-    const select = Effect.fn("SessionCompaction.select")(function* (input: {
-      messages: MessageV2.WithParts[]
-      cfg: Config.Info
-      model: Provider.Model
-    }) {
-      const limit = input.cfg.compaction?.tail_turns ?? DEFAULT_TAIL_TURNS
-      if (limit <= 0) return { head: input.messages, tail_start_id: undefined }
-      const budget = preserveRecentBudget({ cfg: input.cfg, model: input.model })
-      const all = turns(input.messages)
-      if (!all.length) return { head: input.messages, tail_start_id: undefined }
-      const recent = all.slice(-limit)
-      const sizes = yield* Effect.forEach(
-        recent,
-        (turn) =>
-          estimate({
-            messages: input.messages.slice(turn.start, turn.end),
-            model: input.model,
-          }),
-        { concurrency: 1 },
-      )
-      if (sizes.at(-1)! > budget) {
-        log.info("tail fallback", { budget, size: sizes.at(-1) })
-        return { head: input.messages, tail_start_id: undefined }
-      }
-
-      let total = 0
-      let keep: Turn | undefined
-      for (let i = recent.length - 1; i >= 0; i--) {
-        const size = sizes[i]
-        if (total + size > budget) break
-        total += size
-        keep = recent[i]
-      }
-
-      if (!keep || keep.start === 0) return { head: input.messages, tail_start_id: undefined }
-      return {
-        head: input.messages.slice(0, keep.start),
-        tail_start_id: keep.id,
-      }
-    })
-
     // goes backwards through parts until there are PRUNE_PROTECT tokens worth of tool
     // calls, then erases output of older tool calls to free context space.
     // Scoped to (sessionID, agentID): only inspects messages belonging to the
     // given actor — main-agent messages stay untouched when agentID is set.
-    const prune = Effect.fn("SessionCompaction.prune")(function* (input: {
-      sessionID: SessionID
-      agentID?: string
-    }) {
+    const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID; agentID?: string }) {
       const cfg = yield* config.get()
       if (!cfg.compaction?.prune) return
       log.info("pruning", { agentID: input.agentID ?? "main" })
@@ -237,7 +374,9 @@ export const layer: Layer.Layer<
       auto: boolean
       overflow?: boolean
       agentID?: string
+      hasPendingExternalRequest?: () => boolean
     }) {
+      const snapshotLen = input.messages.length
       const parentIdx = input.messages.findLastIndex((m) => m.info.id === input.parentID)
       const parent = parentIdx >= 0 ? input.messages[parentIdx] : undefined
       if (!parent || parent.info.role !== "user") {
@@ -255,19 +394,11 @@ export const layer: Layer.Layer<
       }
       const compactionPart = parent.parts.find((part): part is MessageV2.CompactionPart => part.type === "compaction")
 
-      // Truncate history at the previous compaction boundary so a repeat
-      // compaction summarizes [previous summary + messages since], not the full raw
-      // history (which would grow unboundedly and overflow the compaction model).
-      // Only compaction boundaries are used — checkpoint boundaries inject a
-      // lossy rebuild and compaction benefits from seeing the full window since
-      // the last compaction (including any checkpoint rebuild text in between).
-      const boundaryIdx = input.messages.findLastIndex(
-        (m, i) =>
-          i < parentIdx &&
-          m.info.role === "user" &&
-          m.parts.some((p) => p.type === "compaction"),
-      )
-      const scoped = boundaryIdx >= 0 ? input.messages.slice(boundaryIdx) : input.messages
+      // Reuse the effective conversation before this synthetic boundary without
+      // restoring raw history removed by an earlier compaction or checkpoint.
+      const scoped = compactionPart
+        ? [...MessageV2.filterCompacted([...input.messages.slice(0, parentIdx)].reverse()), parent]
+        : input.messages
 
       let messages = scoped
       let replay:
@@ -289,7 +420,9 @@ export const layer: Layer.Layer<
         const hasContent =
           replay &&
           messages.some(
-            (m) => m.info.role === "user" && !m.parts.some((p) => p.type === "compaction" || p.type === "checkpoint"),
+            (m) =>
+              (m.info.role === "user" && !m.parts.some((p) => p.type === "compaction" || p.type === "checkpoint")) ||
+              (m.info.role === "assistant" && m.info.summary === true),
           )
         if (!hasContent) {
           replay = undefined
@@ -298,50 +431,59 @@ export const layer: Layer.Layer<
       }
 
       const agent = yield* agents.get("compaction")
-      const model = agent.model
-        ? yield* provider.getModel(agent.model.providerID, agent.model.modelID)
-        : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID)
-      const cfg = yield* config.get()
       const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
-      const selected = yield* select({
-        messages: history,
-        cfg,
-        model,
+      const requestUser = history.findLast(
+        (message): message is MessageV2.WithParts & { info: MessageV2.User } => message.info.role === "user",
+      )
+      if (!requestUser) {
+        log.warn("compaction history has no user message", { sessionID: input.sessionID })
+        yield* session.removeMessage({ sessionID: input.sessionID, messageID: input.parentID })
+        return "stop" as const
+      }
+      const parentAgent = yield* agents.get(requestUser.info.agent)
+      const parentModel = yield* provider.getModel(requestUser.info.model.providerID, requestUser.info.model.modelID)
+      const parentSession = yield* session.get(input.sessionID)
+      const profileKey = SessionPrefixSnapshot.profileKey({
+        providerID: parentModel.providerID,
+        modelID: parentModel.id,
+        modelAPIID: parentModel.api.id ?? "",
+        modelFamily: parentModel.family ?? "",
+        agent: parentAgent.name,
+        agentID: requestUser.info.agentID ?? "main",
+        harness: promptConfig.harness,
+        systemMode: promptConfig.systemMode,
+        system: promptConfig.system ?? "",
+        permission: Agent.runtimePermission(parentAgent, parentSession.permission),
       })
+      const frozen = yield* SessionPrefixSnapshot.get(input.sessionID, profileKey)
+      if (!frozen) {
+        log.warn("compaction prefix snapshot missing", { sessionID: input.sessionID, profileKey })
+      }
+      if (frozen && !frozen.tools) {
+        log.warn("compaction prefix snapshot missing advertised tools", {
+          sessionID: input.sessionID,
+          profileKey,
+        })
+      }
+      const model =
+        input.overflow && agent.model
+          ? yield* provider.getModel(agent.model.providerID, agent.model.modelID)
+          : parentModel
       // Allow plugins to inject context or replace compaction prompt.
       const compacting = yield* plugin.trigger(
         "experimental.session.compacting",
         { sessionID: input.sessionID },
         { context: [], prompt: undefined },
       )
-      const defaultPrompt = `When constructing the summary, try to stick to this template:
----
-## Goal
-
-[What goal(s) is the user trying to accomplish?]
-
-## Instructions
-
-- [What important instructions did the user give you that are relevant]
-- [If there is a plan or spec, include information about it so next agent can continue using it]
-
-## Discoveries
-
-[What notable things were learned during this conversation that would be useful for the next agent to know when continuing the work]
-
-## Accomplished
-
-[What work has been completed, what work is still in progress, and what work is left?]
-
-## Relevant files / directories
-
-[Construct a structured list of relevant files that have been read, edited, or created that pertain to the task at hand. If all the files in a directory are relevant, include the path to the directory.]
----`
-
-      const prompt = compacting.prompt ?? [defaultPrompt, ...compacting.context].join("\n\n")
-      const msgs = structuredClone(selected.head)
+      const prompt =
+        compacting.prompt ?? [agent.prompt, ...compacting.context].filter((item): item is string => !!item).join("\n\n")
+      const msgs = structuredClone(history)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-      const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, { stripMedia: true })
+      const modelMessages = yield* MessageV2.toModelMessagesEffect(
+        msgs,
+        model,
+        input.overflow ? { stripMedia: true } : { collapseCheckpointTail: true },
+      )
       const ctx = yield* InstanceState.context
       const msg: MessageV2.Assistant = {
         id: MessageID.ascending(),
@@ -351,7 +493,7 @@ export const layer: Layer.Layer<
         agentID: input.agentID ?? undefined,
         mode: "compaction",
         agent: "compaction",
-        variant: userMessage.model.variant,
+        variant: requestUser.info.model.variant,
         summary: true,
         path: {
           cwd: ctx.directory,
@@ -376,19 +518,27 @@ export const layer: Layer.Layer<
         sessionID: input.sessionID,
         model,
       })
+      const summaryRequest = {
+        role: "user" as const,
+        content: [{ type: "text" as const, text: prompt }],
+      }
       const result = yield* processor.process({
-        user: userMessage,
-        agent,
+        user: {
+          ...requestUser.info,
+          system: promptConfig.system,
+          systemMode: promptConfig.systemMode,
+          harness: promptConfig.harness,
+        },
+        agent: parentAgent,
+        permission: parentSession.permission,
         sessionID: input.sessionID,
-        tools: {},
+        tools: frozen?.tools ? SessionPrefixSnapshot.restoreTools(frozen.tools, frozen.active_tools ?? undefined) : {},
+        activeTools: frozen?.active_tools ?? frozen?.tools?.map((item) => item.name),
+        toolChoice: "none",
         system: [],
-        messages: [
-          ...modelMessages,
-          {
-            role: "user",
-            content: [{ type: "text", text: prompt }],
-          },
-        ],
+        prebuiltSystem: frozen?.system,
+        messages: [...modelMessages, summaryRequest],
+        mergeTurnContextBeforeLastMessage: true,
         model,
       })
 
@@ -406,7 +556,9 @@ export const layer: Layer.Layer<
         processor.message.error = new MessageV2.ContextOverflowError({
           message: replay
             ? "Conversation history too large to compact - exceeds model context limit"
-            : "Session too large to compact - context exceeds model limit even after stripping media",
+            : input.overflow
+              ? "Session too large to compact - context exceeds model limit even after stripping media"
+              : "Session too large to compact - context exceeds model limit at the message boundary",
         }).toObject()
         processor.message.finish = "error"
         yield* session.updateMessage(processor.message)
@@ -415,19 +567,65 @@ export const layer: Layer.Layer<
 
       if (result === "text-repeat") return yield* rollback("Compaction produced repeated text")
       if (result === "stop") return yield* rollback("Compaction failed before producing a summary")
-      if (
-        !MessageV2.parts(msg.id).some((part) => part.type === "text" && part.text.trim().length > 0)
-      )
+      if (!MessageV2.parts(msg.id).some((part) => part.type === "text" && part.text.trim().length > 0))
         return yield* rollback("Compaction produced no usable summary")
 
-      if (compactionPart && selected.tail_start_id && compactionPart.tail_start_id !== selected.tail_start_id) {
+      if (compactionPart) {
+        const current = yield* session.messages({
+          sessionID: input.sessionID,
+          agentID: input.agentID ?? "main",
+        })
+        const arrived = current.slice(snapshotLen).filter((message) => message.info.id !== msg.id)
+        const summary = MessageV2.parts(msg.id)
+          .filter((part): part is MessageV2.TextPart => part.type === "text")
+          .map((part) => part.text)
+          .join("\n")
+        const trigger: CompactionTrigger = input.overflow ? "provider-overflow" : input.auto ? "automatic" : "manual"
+        const manifest = buildFileManifest(history, { worktree: ctx.worktree })
+        const tail = yield* buildProjectionTail({
+          messages: arrived,
+          model: parentModel,
+          // A missing frozen prefix cannot be sized safely. Keep the summary
+          // but omit compression-time rounds until the normal request path
+          // pins a complete prefix snapshot.
+          budget: frozen
+            ? projectionTailBudget({
+                cfg: yield* config.get(),
+                model: parentModel,
+                fixed: {
+                  system: frozen.system,
+                  tools: frozen.tools ?? [],
+                  summary: buildSummaryMessage(summary, trigger, true),
+                  manifest,
+                },
+              })
+            : 0,
+        })
         yield* session.updatePart({
           ...compactionPart,
-          tail_start_id: selected.tail_start_id,
+          projection: {
+            version: 1,
+            summary_message_id: msg.id,
+            summary: buildSummaryMessage(summary, trigger, tail.length > 0),
+            manifest,
+            trigger,
+            tail_start_id: tail.at(0)?.info.id,
+            tail_end_id: arrived.at(-1)?.info.id,
+            compacted_tool_calls: compactedToolCalls(tail),
+          },
         })
       }
 
-      if (result === "continue" && input.auto) {
+      const externalRequestArrived = Effect.fn("SessionCompaction.externalRequestArrived")(function* () {
+        if (!compactionPart) return false
+        if (input.hasPendingExternalRequest?.()) return true
+        return (yield* session.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" }))
+          .slice(snapshotLen)
+          .some((message) => message.info.id !== msg.id && MessageV2.isExternalUserMessage(message))
+      })
+
+      if (result === "continue" && input.auto && !(yield* externalRequestArrived())) {
+        let continuationMessageID: MessageID | undefined
         if (replay) {
           const original = replay.info
           const replayMsg = yield* session.updateMessage({
@@ -445,6 +643,7 @@ export const layer: Layer.Layer<
             harness: promptConfig.harness,
             source: "hook",
           })
+          continuationMessageID = replayMsg.id
           for (const part of replay.parts) {
             if (part.type === "compaction") continue
             const replayPart =
@@ -490,6 +689,7 @@ export const layer: Layer.Layer<
               model: userMessage.model,
               source: "hook",
             })
+            continuationMessageID = continueMsg.id
             const text =
               (input.overflow
                 ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
@@ -513,6 +713,13 @@ export const layer: Layer.Layer<
             })
           }
         }
+
+        // Close the check/insert race: if an external request landed after the
+        // pre-insert check, remove our now-stale replay/continue user. Requests
+        // arriving after this check sort after the hook and naturally win.
+        if (continuationMessageID && (yield* externalRequestArrived())) {
+          yield* session.removeMessage({ sessionID: input.sessionID, messageID: continuationMessageID })
+        }
       }
 
       if (processor.message.error) return "stop"
@@ -521,6 +728,11 @@ export const layer: Layer.Layer<
           sessionID: input.sessionID,
           ...(input.agentID ? { agentID: input.agentID } : {}),
         })
+      // A direct request can be admitted before its MCP/file/plugin expansion
+      // is durable. Yield the current runner so that request starts or joins a
+      // fresh loop after it is persisted instead of re-processing this same
+      // compaction boundary while the admission is still in flight.
+      if (result === "continue" && input.hasPendingExternalRequest?.()) return "stop"
       return result
     })
 

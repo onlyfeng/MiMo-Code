@@ -14,7 +14,8 @@ import { Token } from "../../src/util"
 import { Session as SessionNs } from "../../src/session"
 import type { Provider } from "../../src/provider"
 import { Instance } from "../../src/project/instance"
-import type { ModelMessage } from "ai"
+import { jsonSchema, tool, type ModelMessage } from "ai"
+import type { JSONSchema7 } from "@ai-sdk/provider"
 
 afterEach(() => {
   delete process.env.MIMOCODE_COMPACTION_MAX_CONTEXT
@@ -717,7 +718,11 @@ describe("request preflight overflow tool filtering", () => {
   test("permission-denied tool is excluded from the estimate", () => {
     const filtered = LLM.resolveTools({
       tools: { bigTool: bigTool(), keep: keepTool() },
-      agent: { name: "test", permission: [{ permission: "bigTool", pattern: "*", action: "deny" }], hardPermission: [] },
+      agent: {
+        name: "test",
+        permission: [{ permission: "bigTool", pattern: "*", action: "deny" }],
+        hardPermission: [],
+      },
       permission: undefined,
       user: {},
     } as any)
@@ -742,13 +747,40 @@ describe("request preflight overflow tool filtering", () => {
     const requestTokens = estimateRequestTokens({ messages, tools: filtered })
     expect(isRequestOverflow({ cfg, model, requestTokens })).toBe(false)
   })
+
+  test("materializes the provider-visible schema without execute callbacks", async () => {
+    const schema = {
+      type: "object",
+      properties: { path: { type: "string", description: "d".repeat(20_000) } },
+    } satisfies JSONSchema7
+    const descriptors = await LLM.materializeWireToolDescriptors({
+      bigTool: tool({
+        description: "large provider schema",
+        inputSchema: jsonSchema(schema),
+        execute: async () => "execute must not be estimated",
+      }),
+    })
+
+    expect(descriptors).toEqual([
+      {
+        type: "function",
+        name: "bigTool",
+        description: "large provider schema",
+        inputSchema: schema,
+        providerOptions: undefined,
+      },
+    ])
+    expect("execute" in descriptors[0]).toBe(false)
+    expect(
+      isRequestOverflow({ cfg, model, requestTokens: estimateRequestTokens({ messages, tools: descriptors }) }),
+    ).toBe(true)
+  })
 })
 
-// Regression for the unrecoverable-loop case flagged on PR #36: when the fixed
-// request prefix (system + tool schemas) overflows on its own, compaction can
-// never bring the estimate down — the loop must terminate, not recover. The
-// preflight tells the two apart by re-estimating with messages cleared.
-describe("request preflight overflow static prefix", () => {
+// The recovery floor retains the fixed prefix plus every message the selected
+// recovery cannot remove. Only history proven to precede the active-turn
+// boundary may be omitted when deciding whether compaction can make progress.
+describe("request preflight overflow recovery floor", () => {
   // context 12K, input 8K, output 4K → usable 4K, trip threshold ~3.6K.
   const model = createModel({ context: 12_000, input: 8_000, output: 4_000 })
   const cfg = mockCfg()
@@ -776,36 +808,53 @@ describe("request preflight overflow static prefix", () => {
         model,
         prebuiltSystem: ["ok"],
         messages: [textMessage("hello")],
+        recoveryFloorMessages: [textMessage("hello")],
       }),
     ).toEqual({ type: "ok" })
   })
 
-  test("classifies an oversized message as recoverable overflow", () => {
+  test("classifies oversized discardable history as recoverable overflow", () => {
+    const currentTurn = textMessage("current turn")
     const result = classifyRequestOverflow({
       cfg,
       model,
       prebuiltSystem: ["ok"],
-      messages: [textMessage("m".repeat(20_000))],
+      messages: [textMessage("m".repeat(20_000)), currentTurn],
+      recoveryFloorMessages: [currentTurn],
     })
 
     expect(result.type).toBe("overflow")
     if (result.type !== "overflow") return
-    expect(result.requestTokens).toBeGreaterThan(result.staticTokens)
-    expect(result.staticTokens).toBeGreaterThan(0)
+    expect(result.requestTokens).toBeGreaterThan(result.recoveryFloorTokens)
+    expect(result.recoveryFloorTokens).toBeGreaterThan(0)
   })
 
-  test("classifies an oversized static prefix as unrecoverable overflow", () => {
+  test("classifies an oversized active turn as unrecoverable overflow", () => {
+    const currentTurn = textMessage("m".repeat(20_000))
+    const result = classifyRequestOverflow({
+      cfg,
+      model,
+      prebuiltSystem: ["ok"],
+      messages: [textMessage("old history"), currentTurn],
+      recoveryFloorMessages: [currentTurn],
+    })
+
+    expect(result.type).toBe("overflow-static")
+    if (result.type !== "overflow-static") return
+    expect(result.requestTokens).toBeGreaterThanOrEqual(result.recoveryFloorTokens)
+    expect(result.recoveryFloorTokens).toBeGreaterThan(0)
+  })
+
+  test("classifies an oversized fixed prefix as unrecoverable overflow", () => {
     const result = classifyRequestOverflow({
       cfg,
       model,
       prebuiltSystem: ["s".repeat(20_000)],
       messages: [textMessage("hello")],
+      recoveryFloorMessages: [textMessage("hello")],
     })
 
     expect(result.type).toBe("overflow-static")
-    if (result.type !== "overflow-static") return
-    expect(result.requestTokens).toBeGreaterThanOrEqual(result.staticTokens)
-    expect(result.staticTokens).toBeGreaterThan(0)
   })
 })
 

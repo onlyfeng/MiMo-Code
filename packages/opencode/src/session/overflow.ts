@@ -29,15 +29,14 @@ type RequestEstimateInput = {
   prebuiltSystem?: string[]
   system?: string[]
   messages: ModelMessage[]
-  unshrinkableMessages?: ModelMessage[]
-  tools?: Record<string, unknown>
+  tools?: unknown
   toolChoice?: unknown
 }
 
 export type RequestOverflowClassification =
   | { type: "ok" }
-  | { type: "overflow"; requestTokens: number; staticTokens: number }
-  | { type: "overflow-static"; requestTokens: number; staticTokens: number }
+  | { type: "overflow"; requestTokens: number; recoveryFloorTokens: number }
+  | { type: "overflow-static"; requestTokens: number; recoveryFloorTokens: number }
 
 // The ratio is an optional earlier trigger layered on top of the existing
 // reserve boundary. It may compact sooner, but can never consume headroom that
@@ -143,11 +142,7 @@ export function estimateRequestTokens(input: RequestEstimateInput) {
   return Math.max(charEstimate, byteEstimate)
 }
 
-export function isRequestOverflow(input: {
-  cfg: Config.Info
-  model: Provider.Model
-  requestTokens: number
-}) {
+export function isRequestOverflow(input: { cfg: Config.Info; model: Provider.Model; requestTokens: number }) {
   if (input.cfg.compaction?.auto === false) return false
   if (input.model.limit.context === 0) return false
   const limit = usable(input)
@@ -160,14 +155,15 @@ export function classifyRequestOverflow(
   input: RequestEstimateInput & {
     cfg: Config.Info
     model: Provider.Model
+    recoveryFloorMessages: ModelMessage[]
   },
 ): RequestOverflowClassification {
   const requestTokens = estimateRequestTokens(input)
   if (!isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens })) return { type: "ok" }
-  const staticTokens = estimateRequestTokens({ ...input, messages: input.unshrinkableMessages ?? [] })
-  return isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens: staticTokens })
-    ? { type: "overflow-static", requestTokens, staticTokens }
-    : { type: "overflow", requestTokens, staticTokens }
+  const recoveryFloorTokens = estimateRequestTokens({ ...input, messages: input.recoveryFloorMessages })
+  return isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens: recoveryFloorTokens })
+    ? { type: "overflow-static", requestTokens, recoveryFloorTokens }
+    : { type: "overflow", requestTokens, recoveryFloorTokens }
 }
 
 export function pressureLevel(input: {

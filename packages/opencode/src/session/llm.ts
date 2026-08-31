@@ -146,7 +146,7 @@ function buildMemoryInstructions(projectID: ProjectID, memoryRoot: string): stri
           `- Per-task progress at \`${path.join(sessionMemoryDir, "tasks", "<id>", "progress.md")}\` — writer-derived splitover from session-level progress.md (not LLM-written). When you spawn a subagent on a task, the subagent may be handed this path for reading; you do not maintain it.`,
         ]
       : []),
-    `- Global memory at \`${globalMemoryFile}\` — user-level preferences and cross-project feedback that persist across all projects.${checkpointEnabled ? ` Auto-injected into rebuild context under the "## Global memory" header when present.` : ""}`,
+    `- Global memory at \`${globalMemoryFile}\` — user-level preferences and cross-project feedback that persist across all projects.${checkpointEnabled ? ` Auto-injected into rebuild context under the "# Global memory" header when present.` : ""}`,
   ]
 
   const sections = [
@@ -257,6 +257,8 @@ export type StreamInput = {
   toolChoice?: "auto" | "required" | "none"
   agentID?: string
   mergeTurnContextIntoLastUser?: boolean
+  /** Keep an appended control prompt last while applying provider-specific turn context to the conversation before it. */
+  mergeTurnContextBeforeLastMessage?: boolean
   ephemeral?: boolean
   requestID?: string
 }
@@ -308,6 +310,15 @@ export function appendTurnContext(messages: ModelMessage[], user: MessageV2.User
     return [...messages, ...context]
   }
   return [...messages.slice(0, -1), { ...last, content: last.content + "\n\n" + context[0].content }]
+}
+
+function appendTurnContextBeforeLastMessage(messages: ModelMessage[], user: MessageV2.User) {
+  const tail = messages.at(-1)
+  if (!tail) return appendTurnContext(messages, user, true)
+  const head = messages.slice(0, -1)
+  const userIndex = head.findLastIndex((message) => message.role === "user")
+  if (userIndex < 0) return appendTurnContext(messages, user, true)
+  return [...appendTurnContext(head.slice(0, userIndex + 1), user, true), ...head.slice(userIndex + 1), tail]
 }
 
 export interface Interface {
@@ -384,11 +395,11 @@ const live: Layer.Layer<
       const system: string[] = []
       system.push(
         [
-          ...(replaceAgent ? [] : SystemPrompt.agent(input.agent, input.model, input.user.harness)),
-          // any custom prompt passed into this call
-          ...input.system,
-          // replace-agent is a session system prompt, not per-turn user context
-          ...(replaceAgent && input.user.system ? [input.user.system] : []),
+          // replace-agent is the session's base system prompt, so it must occupy
+          // the same leading position as the agent prompt it replaces.
+          ...(replaceAgent && input.user.system
+            ? [input.user.system]
+            : SystemPrompt.agent(input.agent, input.model, input.user.harness)),
         ]
           .filter((x) => x)
           .join("\n"),
@@ -460,13 +471,15 @@ const live: Layer.Layer<
         if (lines.length > 0) system.push(`${ROSTER_HEADER}\n${lines.join("\n")}`)
       }
 
-      // Plugins still see the multi-part array (base prompt as [0], memory as a
-      // trailing element) so hooks that index or append parts keep working.
+      // Plugins transform the stable base before the caller-controlled tail.
       yield* plugin.trigger(
         "experimental.chat.system.transform",
         { sessionID: input.sessionID, model: input.model },
         { system },
       )
+
+      // Keep skill reminders at the tail and instruction files after them.
+      system.push(...input.system)
 
       // Collapse to a single system message. The historical 2-part split existed
       // only to keep a byte-stable cache prefix separate from the memory block's
@@ -555,11 +568,9 @@ const live: Layer.Layer<
       const requestMessages = input.dropAssistantPrefill
         ? ProviderTransform.dropTrailingAssistantPrefill(input.messages)
         : input.messages
-      const requestMessagesWithContext = appendTurnContext(
-        requestMessages,
-        input.user,
-        input.mergeTurnContextIntoLastUser,
-      )
+      const requestMessagesWithContext = input.mergeTurnContextBeforeLastMessage
+        ? appendTurnContextBeforeLastMessage(requestMessages, input.user)
+        : appendTurnContext(requestMessages, input.user, input.mergeTurnContextIntoLastUser)
       const messages = isOpenaiOauth
         ? requestMessages
         : isWorkflow
@@ -1036,6 +1047,37 @@ export function resolveTools(input: Pick<StreamInput, "tools" | "activeTools" | 
 export function filterActiveTools(tools: Record<string, Tool>, activeTools?: string[]) {
   const requested = new Set(activeTools ?? Object.keys(tools))
   return Record.filter(tools, (_, name) => name !== "invalid" && requested.has(name))
+}
+
+/**
+ * Resolve the exact provider-facing descriptor shape for an already-selected
+ * wire tool set. The AI SDK's schema wrapper may expose its JSON schema through
+ * a getter, while execute/lifecycle callbacks must never contribute to request
+ * sizing. Keep that trusted getter boundary here beside the real dispatch
+ * filter so preflight and streamText observe the same membership and schemas.
+ */
+export async function materializeWireToolDescriptors(tools: Record<string, Tool>) {
+  return Promise.all(
+    Object.entries(tools).map(async ([name, item]) => {
+      if (item.type === "provider") {
+        return {
+          type: "provider" as const,
+          name,
+          id: item.id,
+          args: item.args,
+        }
+      }
+      return {
+        type: "function" as const,
+        name,
+        description: item.description,
+        inputSchema: await Promise.resolve(asSchema(item.inputSchema).jsonSchema),
+        ...(item.inputExamples === undefined ? {} : { inputExamples: item.inputExamples }),
+        providerOptions: item.providerOptions,
+        ...(item.strict === undefined ? {} : { strict: item.strict }),
+      }
+    }),
+  )
 }
 
 // Check if messages contain any tool-call content

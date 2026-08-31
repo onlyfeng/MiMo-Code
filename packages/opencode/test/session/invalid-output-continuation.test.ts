@@ -74,7 +74,11 @@ function writeGPTConfig(dir: string, origin: string) {
               temperature: false,
               tool_call: true,
               release_date: "2026-01-01",
-              limit: { context: 100_000, output: 10_000 },
+              // Match the real GPT large-window shape. Declaring a 100K context
+              // beside GPT's provider-default 128K max output makes the fixture
+              // internally impossible and turns these continuation tests into
+              // accidental request-overflow tests once the full tool set is active.
+              limit: { context: 400_000, input: 272_000, output: 128_000 },
               cost: { input: 0, output: 0 },
               options: {},
             },
@@ -207,7 +211,9 @@ describe("invalid-output continuation — integration", () => {
               expect(retry).toContain("checkpoint writer")
               expect(retry).toContain("CHECKPOINT_COMPLETE")
               expect(retry).not.toContain("final answer to the user")
-              expect(result.parts.some((part) => part.type === "text" && part.text === "CHECKPOINT_COMPLETE")).toBe(true)
+              expect(result.parts.some((part) => part.type === "text" && part.text === "CHECKPOINT_COMPLETE")).toBe(
+                true,
+              )
             }),
           ),
       })

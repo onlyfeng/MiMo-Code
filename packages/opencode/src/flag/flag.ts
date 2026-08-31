@@ -217,6 +217,23 @@ export const Flag = {
   // enable try-best loop detection, automatic turn pausing, and handoff UI.
   MIMOCODE_ENABLE_TRY_BEST_HANDOFF: truthy("MIMOCODE_ENABLE_TRY_BEST_HANDOFF"),
 
+  // Defaults to false. Opt in to append the runtime-derived environment block
+  // (working directory, platform, shell, git status/branch/commits) to the model's
+  // system prompt. Instruction files (AGENTS.md / CLAUDE.md) are appended
+  // regardless — suppress the whole block with MIMOCODE_DISABLE_INSTRUCTIONS, or
+  // individual sources with MIMOCODE_DISABLE_PROJECT_CONFIG /
+  // MIMOCODE_DISABLE_CLAUDE_CODE_PROMPT.
+  get MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT() {
+    return truthy("MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT")
+  },
+
+  // Defaults to false (enabled): instruction-file content (AGENTS.md / CLAUDE.md)
+  // is appended to the model's system prompt. Set MIMOCODE_DISABLE_INSTRUCTIONS=true
+  // to drop the whole instruction block regardless of which files resolve.
+  get MIMOCODE_DISABLE_INSTRUCTIONS() {
+    return truthy("MIMOCODE_DISABLE_INSTRUCTIONS")
+  },
+
   // Defaults to false. The edit tool does pure exact-string matching with
   // explicit error signals. Set MIMOCODE_ENABLE_FUZZY_EDIT=true to opt into the
   // legacy multi-stage fuzzy fallback chain (line-trimmed / block-anchor /

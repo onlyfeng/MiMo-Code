@@ -31,6 +31,8 @@ import {
   toolAttachmentPlaceholder,
 } from "./tool-attachment"
 import { isLegacySkillCatalogReminder, isSkillCatalogSnapshot } from "./skill-catalog"
+import { collapseCheckpointTail } from "./tail-digest"
+import { isDeepStrictEqual } from "node:util"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -109,7 +111,13 @@ function isAuthenticationFailure(error: APIError): boolean {
   const body = error.data.responseBody?.toLowerCase() ?? ""
   const message = error.data.message.toLowerCase()
   const text = `${message} ${body}`
-  return /(?:invalid|expired|missing|malformed)\s*(?:api[ _-]?key|token|credential)|(?:api[ _-]?key|token|credential)\s*(?:invalid|expired|missing|malformed)|\b(?:authentication|authorization)\s+(?:failed|required|invalid|missing)|\binvalid credentials?\b|\baccess denied\b/.test(text) || message.trim() === "unauthorized" || body.trim() === "unauthorized"
+  return (
+    /(?:invalid|expired|missing|malformed)\s*(?:api[ _-]?key|token|credential)|(?:api[ _-]?key|token|credential)\s*(?:invalid|expired|missing|malformed)|\b(?:authentication|authorization)\s+(?:failed|required|invalid|missing)|\binvalid credentials?\b|\baccess denied\b/.test(
+      text,
+    ) ||
+    message.trim() === "unauthorized" ||
+    body.trim() === "unauthorized"
+  )
 }
 
 export function isAuthError(error: unknown): boolean {
@@ -272,6 +280,14 @@ export const CheckpointPart = PartBase.extend({
   checkpointDir: z.string(),
   checkpointNumber: z.number(),
   coveredUpTo: MessageID.zod,
+  /**
+   * Last message that already existed when this rebuild boundary was inserted.
+   * Post-rebuild activity-log collapse digests only messages after the
+   * checkpoint up to (and including) this id; anything newer stays live so a
+   * mid-turn tool loop is not folded into the log on the next request.
+   * Optional: older boundaries predate the field and skip collapse.
+   */
+  digestUpTo: MessageID.zod.optional(),
 }).meta({
   ref: "CheckpointPart",
 })
@@ -298,10 +314,32 @@ export const CompactionPart = PartBase.extend({
   type: z.literal("compaction"),
   auto: z.boolean(),
   overflow: z.boolean().optional(),
-  // ID of the user message marking the start of the preserved-tail (verbatim
-  // recent-turns kept after summarization). Optional: when undefined, no tail
-  // was preserved (entire history was summarized).
+  // Legacy pre-compaction tail marker. New projections keep only messages that
+  // arrive while the summary is being generated; see `projection` below.
   tail_start_id: MessageID.zod.optional(),
+  projection: z
+    .object({
+      version: z.literal(1),
+      summary_message_id: MessageID.zod,
+      summary: z.string(),
+      manifest: z.string().optional(),
+      trigger: z.enum(["manual", "automatic", "provider-overflow"]),
+      // The observed compression-time range. `tail_start_id` is the first
+      // whole API round retained inside that range; when omitted, the range was
+      // over budget and is dropped. Messages newer than `tail_end_id` are normal
+      // post-compaction traffic and always stay live.
+      tail_start_id: MessageID.zod.optional(),
+      tail_end_id: MessageID.zod.optional(),
+      compacted_tool_calls: z
+        .array(
+          z.object({
+            call_id: z.string(),
+            tokens: z.number().int().nonnegative(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
 }).meta({
   ref: "CompactionPart",
 })
@@ -630,6 +668,81 @@ export const WithParts = z.object({
 })
 export type WithParts = z.infer<typeof WithParts>
 
+export function isExternalUserMessage(message: WithParts) {
+  if (message.info.role !== "user") return false
+  if (message.info.source === "user" || message.info.source === "spawn") return true
+  if (message.info.source !== undefined) return false
+  // Legacy rows predate the source discriminator. Only real user text/files
+  // count; recovery boundaries and synthetic continuation users do not start a
+  // new external request episode.
+  return message.parts.some((part) => {
+    if ("synthetic" in part && part.synthetic) return false
+    if (part.type === "text") return !part.ignored && part.text.trim().length > 0
+    return part.type === "file"
+  })
+}
+
+// Apply the newest v1 compaction boundary as a context projection while keeping
+// its persisted assistant summary in the internal message stream. API
+// conversion below re-roles that summary as user context; runLoop still sees
+// the real assistant row for terminal-step control flow.
+function compactionProjection(messages: WithParts[]) {
+  const boundaryIdx = messages.findLastIndex(
+    (message) =>
+      message.info.role === "user" &&
+      message.parts.some((part) => part.type === "compaction" && part.projection?.version === 1),
+  )
+  if (boundaryIdx < 0) return messages
+
+  const boundary = messages[boundaryIdx]
+  const projection = boundary.parts.find(
+    (part): part is CompactionPart => part.type === "compaction" && part.projection?.version === 1,
+  )?.projection
+  if (!projection) return messages
+
+  const after = messages.slice(boundaryIdx + 1)
+  if (!projection.tail_end_id) return messages.slice(boundaryIdx)
+
+  const tailEndIdx = after.findIndex((message) => message.info.id === projection.tail_end_id)
+  if (tailEndIdx < 0) return messages.slice(boundaryIdx)
+
+  const observed = after.slice(0, tailEndIdx + 1)
+  const summary = after.find((message) => message.info.id === projection.summary_message_id)
+  const tailStartIdx = projection.tail_start_id
+    ? observed.findIndex((message) => message.info.id === projection.tail_start_id)
+    : -1
+  const compacted = new Map((projection.compacted_tool_calls ?? []).map((item) => [item.call_id, item.tokens]))
+  const shrink = (message: WithParts): WithParts => ({
+    info: message.info,
+    parts: message.parts.map((part) => {
+      if (part.type !== "tool" || part.state.status !== "completed") return part
+      const tokens = compacted.get(part.callID)
+      if (tokens === undefined) return part
+      return {
+        ...part,
+        state: {
+          ...part.state,
+          output: `[Tool result omitted during compaction: ${tokens} tokens. Re-run "${part.tool}" if this result is needed.]`,
+          providerOutput: undefined,
+          attachments: undefined,
+        },
+      }
+    }),
+  })
+
+  return [
+    boundary,
+    ...(summary ? [summary] : []),
+    ...(tailStartIdx < 0
+      ? []
+      : observed
+          .slice(tailStartIdx)
+          .filter((message) => message.info.id !== projection.summary_message_id)
+          .map(shrink)),
+    ...after.slice(tailEndIdx + 1).filter((message) => message.info.id !== projection.summary_message_id),
+  ]
+}
+
 const Cursor = z.object({
   id: MessageID.zod,
   time: z.number(),
@@ -696,13 +809,30 @@ function providerMeta(metadata: Record<string, any> | undefined) {
   return Object.keys(rest).length > 0 ? rest : undefined
 }
 
-export const toModelMessagesEffect = Effect.fnUntraced(function* (
+const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function* (
   input: WithParts[],
   model: Provider.Model,
-  options?: { stripMedia?: boolean },
+  currentUserID: MessageID | undefined,
+  /**
+   * When true, messages after the latest rebuild checkpoint are collapsed into
+   * a single activity-log user message (see tail-digest.ts). Off by default so
+   * checkpoint writers / compaction / title generation keep full fidelity.
+   */
+  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean },
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
+  const source = compactionProjection(options?.collapseCheckpointTail ? collapseCheckpointTail(input) : input)
+  const projection = source
+    .flatMap((message) =>
+      message.info.role === "user"
+        ? message.parts.flatMap((part) =>
+            part.type === "compaction" && part.projection?.version === 1 ? [part.projection] : [],
+          )
+        : [],
+    )
+    .at(-1)
+  let currentTurnUIIndex: number | undefined
   let legacySkillCatalogSeen = false
 
   const toModelOutput = (options: { toolCallId: string; input: unknown; output: unknown }) => {
@@ -753,8 +883,45 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
     return { type: "json", value: output as never }
   }
 
-  for (const msg of input) {
+  for (const msg of source) {
+    if (currentUserID !== undefined && currentTurnUIIndex === undefined && msg.info.id === currentUserID) {
+      currentTurnUIIndex = result.length
+    }
     if (msg.parts.length === 0) continue
+
+    if (projection && msg.info.id === projection.summary_message_id) {
+      result.push({
+        id: msg.info.id,
+        role: "user",
+        parts: [
+          {
+            type: "text",
+            text: capUtf8TextByBytes(
+              projection.summary,
+              MODEL_VISIBLE_TEXT_CAP_BYTES,
+              "compaction summary",
+              "before model replay",
+              "head+tail",
+            ),
+          },
+          ...(projection.manifest
+            ? [
+                {
+                  type: "text" as const,
+                  text: capUtf8TextByBytes(
+                    projection.manifest,
+                    MODEL_VISIBLE_TEXT_CAP_BYTES,
+                    "compaction manifest",
+                    "before model replay",
+                    "head+tail",
+                  ),
+                },
+              ]
+            : []),
+        ],
+      })
+      continue
+    }
 
     if (msg.info.role === "user") {
       const userMessage: UIMessage = {
@@ -806,7 +973,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             text: "Summary of previous conversation from checkpoint files:",
           })
         }
-        if (part.type === "compaction") {
+        if (part.type === "compaction" && !part.projection) {
           userMessage.parts.push({
             type: "text" as const,
             text: "Summary of previous conversation:",
@@ -915,15 +1082,14 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               Buffer.byteLength(safeStringify(part.state.providerOutput, { bigint: true }).serialized, "utf8") <=
                 MODEL_VISIBLE_TEXT_CAP_BYTES
 
-            const output =
-              useProviderOutput
-                ? part.state.providerOutput
-                : finalAttachments.length > 0
-                  ? {
-                      text: outputText,
-                      attachments: finalAttachments,
-                    }
-                  : outputText
+            const output = useProviderOutput
+              ? part.state.providerOutput
+              : finalAttachments.length > 0
+                ? {
+                    text: outputText,
+                    attachments: finalAttachments,
+                  }
+                : outputText
 
             assistantMessage.parts.push({
               type: ("tool-" + part.tool) as `tool-${string}`,
@@ -1015,24 +1181,61 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
   }
 
   const tools = Object.fromEntries(Array.from(toolNames).map((toolName) => [toolName, { toModelOutput }]))
-
-  return yield* Effect.promise(() =>
-    convertToModelMessages(
-      result.filter((msg) => msg.parts.some((part) => part.type !== "step-start")),
-      {
+  const visible = (messages: UIMessage[]) =>
+    messages.filter((message) => message.parts.some((part) => part.type !== "step-start"))
+  const convert = (messages: UIMessage[]) =>
+    Effect.promise(() =>
+      convertToModelMessages(messages, {
         //@ts-expect-error (convertToModelMessages expects a ToolSet but only actually needs tools[name]?.toModelOutput)
         tools,
-      },
-    ),
-  )
+      }),
+    )
+  const messages = yield* convert(visible(result))
+  if (currentUserID === undefined || currentTurnUIIndex === undefined) {
+    return { messages, currentTurnMessages: messages }
+  }
+
+  const prefixMessages = yield* convert(visible(result.slice(0, currentTurnUIIndex)))
+  if (!isDeepStrictEqual(messages.slice(0, prefixMessages.length), prefixMessages)) {
+    return { messages, currentTurnMessages: messages }
+  }
+  return { messages, currentTurnMessages: messages.slice(prefixMessages.length) }
+})
+
+export const toModelMessagesEffect = Effect.fnUntraced(function* (
+  input: WithParts[],
+  model: Provider.Model,
+  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean },
+) {
+  return (yield* toModelMessagesWithCurrentTurnInternalEffect(input, model, undefined, options)).messages
+})
+
+export const toModelMessagesWithCurrentTurnEffect = Effect.fnUntraced(function* (
+  input: WithParts[],
+  model: Provider.Model,
+  currentUserID: MessageID,
+  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean },
+) {
+  return yield* toModelMessagesWithCurrentTurnInternalEffect(input, model, currentUserID, options)
 })
 
 export function toModelMessages(
   input: WithParts[],
   model: Provider.Model,
-  options?: { stripMedia?: boolean },
+  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean },
 ): Promise<ModelMessage[]> {
   return Effect.runPromise(toModelMessagesEffect(input, model, options).pipe(Effect.provide(EffectLogger.layer)))
+}
+
+export function toModelMessagesWithCurrentTurn(
+  input: WithParts[],
+  model: Provider.Model,
+  currentUserID: MessageID,
+  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean },
+) {
+  return Effect.runPromise(
+    toModelMessagesWithCurrentTurnEffect(input, model, currentUserID, options).pipe(Effect.provide(EffectLogger.layer)),
+  )
 }
 
 export function page(input: { sessionID: SessionID; limit: number; before?: string; agentID?: string }) {
@@ -1137,7 +1340,7 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
     if (msg.info.role === "user" && msg.parts.some((p) => p.type === "checkpoint" || p.type === "compaction")) break
   }
   result.reverse()
-  return result
+  return compactionProjection(result)
 }
 
 export const filterCompactedEffect = Effect.fnUntraced(function* (
@@ -1189,7 +1392,7 @@ function fromParsedStreamError(
 }
 
 export function fromError(
- e: unknown,
+  e: unknown,
   ctx: { providerID: ProviderID; aborted?: boolean; allow404Retry?: boolean },
 ): NonNullable<Assistant["error"]> {
   switch (true) {

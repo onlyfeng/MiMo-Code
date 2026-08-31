@@ -577,6 +577,10 @@ describe("classifier routing — integration", () => {
                       additionalProperties: false,
                     }),
                   }),
+                  missing_frozen: tool({
+                    description: "captured tool whose live implementation disappeared",
+                    inputSchema: jsonSchema({ type: "object", properties: {} }),
+                  }),
                 },
                 inheritedMessages: [],
                 parentPermission: [],
@@ -600,11 +604,14 @@ describe("classifier routing — integration", () => {
               releaseActor?.()
 
               const read = stub.captures[0]?.tools?.find((item) => item.function.name === "read")
-              expect(stub.captures[0]?.tools?.map((item) => item.function.name)).toEqual([
+              const names = stub.captures[0]?.tools?.map((item) => item.function.name)
+              expect(names).toEqual([
                 "session",
                 "grep",
                 "read",
               ])
+              expect(names).not.toContain("missing_frozen")
+              expect(names).not.toContain("bash")
               expect(read?.function.description).toBe("frozen parent read description")
               expect(JSON.stringify(read?.function.parameters)).toContain("frozen_arg")
               expect(stub.captures).toHaveLength(3)

@@ -1528,6 +1528,191 @@ describe("session.message-v2.toModelMessage", () => {
   })
 })
 
+describe("session.message-v2.toModelMessagesWithCurrentTurn", () => {
+  test("splits at the exact source message ID and preserves current-turn files", async () => {
+    const currentUserID = "m-current-user"
+    const mediaModel = withInputCapabilities({ image: true })
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("m-old-user"),
+        parts: [{ ...basePart("m-old-user", "old-u1"), type: "text", text: "old question" }],
+      },
+      {
+        info: assistantInfo("m-old-assistant", "m-old-user"),
+        parts: [{ ...basePart("m-old-assistant", "old-a1"), type: "text", text: "old answer" }],
+      },
+      {
+        info: userInfo(currentUserID),
+        parts: [
+          { ...basePart(currentUserID, "current-u1"), type: "text", text: "current question" },
+          {
+            ...basePart(currentUserID, "current-u2"),
+            type: "file",
+            mime: "image/png",
+            filename: "current.png",
+            url: "https://example.com/current.png",
+          },
+        ],
+      },
+      {
+        info: assistantInfo("m-current-assistant", currentUserID),
+        parts: [{ ...basePart("m-current-assistant", "current-a1"), type: "text", text: "current answer" }],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessagesWithCurrentTurn(input, mediaModel, MessageID.make(currentUserID))
+
+    expect(result.messages).toStrictEqual(await MessageV2.toModelMessages(input, mediaModel))
+    expect(result.messages.map((message) => message.role)).toStrictEqual(["user", "assistant", "user", "assistant"])
+    expect(result.currentTurnMessages).toStrictEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "current question" },
+          {
+            type: "file",
+            mediaType: "image/png",
+            filename: "current.png",
+            data: "https://example.com/current.png",
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "current answer" }],
+      },
+    ])
+  })
+
+  test("keeps synthetic tool-attachment envelopes inside the current turn", async () => {
+    const currentUserID = "m-current-user"
+    const currentAssistantID = "m-current-assistant"
+    const mediaModel = withInputCapabilities({ image: true }, openAICompatibleModel)
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("m-old-user"),
+        parts: [{ ...basePart("m-old-user", "old-u1"), type: "text", text: "old question" }],
+      },
+      {
+        info: assistantInfo("m-old-assistant", "m-old-user"),
+        parts: [{ ...basePart("m-old-assistant", "old-a1"), type: "text", text: "old answer" }],
+      },
+      {
+        info: userInfo(currentUserID),
+        parts: [{ ...basePart(currentUserID, "current-u1"), type: "text", text: "run current tool" }],
+      },
+      {
+        info: assistantInfo(currentAssistantID, currentUserID),
+        parts: [
+          {
+            ...basePart(currentAssistantID, "current-a1"),
+            type: "tool",
+            callID: "call-current",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { cmd: "pwd" },
+              output: "ok",
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+              attachments: [
+                {
+                  ...basePart(currentAssistantID, "current-file-1"),
+                  type: "file",
+                  mime: "image/png",
+                  filename: "attachment.png",
+                  url: `data:image/png;base64,${pngBase64}`,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessagesWithCurrentTurn(input, mediaModel, MessageID.make(currentUserID))
+
+    expect(result.currentTurnMessages.map((message) => message.role)).toStrictEqual([
+      "user",
+      "assistant",
+      "tool",
+      "user",
+    ])
+    expect(result.currentTurnMessages[0]).toStrictEqual({
+      role: "user",
+      content: [{ type: "text", text: "run current tool" }],
+    })
+    expect(result.currentTurnMessages.at(-1)).toStrictEqual({
+      role: "user",
+      content: [
+        { type: "text", text: MessageV2.SYNTHETIC_ATTACHMENT_PROMPT },
+        { type: "text", text: 'Tool "bash" call call-current completed:' },
+        {
+          type: "file",
+          mediaType: "image/png",
+          filename: "attachment.png",
+          data: `data:image/png;base64,${pngBase64}`,
+        },
+      ],
+    })
+  })
+
+  test("fails closed to the full conversion when the source message ID is absent", async () => {
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("m-old-user"),
+        parts: [{ ...basePart("m-old-user", "old-u1"), type: "text", text: "old question" }],
+      },
+      {
+        info: assistantInfo("m-old-assistant", "m-old-user"),
+        parts: [{ ...basePart("m-old-assistant", "old-a1"), type: "text", text: "old answer" }],
+      },
+      {
+        info: userInfo("m-new-user"),
+        parts: [{ ...basePart("m-new-user", "new-u1"), type: "text", text: "new question" }],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessagesWithCurrentTurn(input, model, MessageID.make("m-missing-user"))
+
+    expect(result.messages.map((message) => message.role)).toStrictEqual(["user", "assistant", "user"])
+    expect(result.currentTurnMessages).toStrictEqual(result.messages)
+  })
+
+  test("records the source boundary before dropping an empty current user message", async () => {
+    const currentUserID = "m-current-user"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("m-old-user"),
+        parts: [{ ...basePart("m-old-user", "old-u1"), type: "text", text: "old question" }],
+      },
+      {
+        info: assistantInfo("m-old-assistant", "m-old-user"),
+        parts: [{ ...basePart("m-old-assistant", "old-a1"), type: "text", text: "old answer" }],
+      },
+      {
+        info: userInfo(currentUserID),
+        parts: [],
+      },
+      {
+        info: assistantInfo("m-current-assistant", currentUserID),
+        parts: [{ ...basePart("m-current-assistant", "current-a1"), type: "text", text: "current answer" }],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessagesWithCurrentTurn(input, model, MessageID.make(currentUserID))
+
+    expect(result.messages.map((message) => message.role)).toStrictEqual(["user", "assistant", "assistant"])
+    expect(result.currentTurnMessages).toStrictEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "current answer" }],
+      },
+    ])
+  })
+})
+
 describe("session.message-v2.fromError", () => {
   test("normalizes stream_read_error as a retryable APIError", () => {
     const input = {
@@ -1720,16 +1905,16 @@ describe("session.message-v2.fromError", () => {
     expect((result as MessageV2.APIError).data.isRetryable).toBe(true)
   })
 
- test("abort cause wins over a retryable network cause", () => {
-   const cause = Object.assign(new Error("socket reset"), { code: "ECONNRESET" })
-   const error = Object.assign(new DOMException("user aborted", "AbortError"), { cause })
-   const result = MessageV2.fromError(error, { providerID })
-   expect(result.name).toBe("MessageAbortedError")
- })
+  test("abort cause wins over a retryable network cause", () => {
+    const cause = Object.assign(new Error("socket reset"), { code: "ECONNRESET" })
+    const error = Object.assign(new DOMException("user aborted", "AbortError"), { cause })
+    const result = MessageV2.fromError(error, { providerID })
+    expect(result.name).toBe("MessageAbortedError")
+  })
 
- test("recognizes normalized credential rejection as an auth error", () => {
+  test("recognizes normalized credential rejection as an auth error", () => {
     const error = new MessageV2.APIError({ message: "Unauthorized", statusCode: 401, isRetryable: false }).toObject()
-   expect(MessageV2.isAuthError(error)).toBe(true)
+    expect(MessageV2.isAuthError(error)).toBe(true)
   })
 
   test("does not treat a generic 403 permission failure as authentication", () => {
@@ -1748,7 +1933,11 @@ describe("session.message-v2.fromError", () => {
   })
 
   test("does not treat an unrelated unauthorized word as authentication", () => {
-    const error = new MessageV2.APIError({ message: "CORS unauthorized origin", statusCode: 403, isRetryable: false }).toObject()
+    const error = new MessageV2.APIError({
+      message: "CORS unauthorized origin",
+      statusCode: 403,
+      isRetryable: false,
+    }).toObject()
     expect(MessageV2.isAuthError(error)).toBe(false)
   })
 

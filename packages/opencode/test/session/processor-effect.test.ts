@@ -734,6 +734,9 @@ it.live("session.processor effect tests do not retry unknown json errors", () =>
         expect(value).toBe("stop")
         expect(yield* llm.calls).toBe(1)
         expect(handle.message.error?.name).toBe("APIError")
+        const stored = MessageV2.get({ sessionID: chat.id, messageID: msg.id })
+        expect(stored.info.role).toBe("assistant")
+        if (stored.info.role === "assistant") expect(stored.info.time.completed).toBeUndefined()
       }),
     { git: true, config: (url) => providerCfg(url) },
   ),

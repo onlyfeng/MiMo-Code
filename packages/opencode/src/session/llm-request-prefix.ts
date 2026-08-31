@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import { asSchema, tool, jsonSchema, type Tool as AITool } from "ai"
 import z from "zod"
 import { MessageV2 } from "./message-v2"
-import type { SessionID } from "./schema"
+import type { MessageID, SessionID } from "./schema"
 import type { Agent } from "../agent/agent"
 import type { Provider } from "../provider"
 import { LLM } from "./llm"
@@ -24,10 +24,22 @@ import type { PromptConfig } from "./session"
  * (modulo plugin trigger determinism, which is the only external non-determinism
  * source).
  *
- * The parent runLoop uses this for its prebuilt system/messages; prefix capture
- * also consumes the returned schema-only tools to freeze a ForkContext. Callers
- * provide the current MCP tool set explicitly so this helper stays outside the
- * MCP layer cycle while applying the same provider transform as the live path.
+ * Used by:
+ *   - parent runLoop, to construct its own request
+ *   - tryStartCheckpointWriter, to capture a frozen ForkContext at spawn time
+ *
+ * Both call sites must use this same function — the byte-equal invariant
+ * across parent and fork is a structural consequence, not a separate assertion.
+ * Exception: the parent runLoop sets `collapseCheckpointTail: true` so the model
+ * sees a rebuild-tail activity log instead of hollow tool pairs; the checkpoint
+ * writer leaves it off so it still writes from full-fidelity history. When a
+ * prior checkpoint exists, parent/writer inheritedMessages therefore diverge by
+ * design (checkpoint quality beats prefix-cache parity on the rebuild path).
+ *
+ * Prefix capture also consumes the returned schema-only tools to freeze a
+ * ForkContext. Callers provide the current MCP tool set explicitly so this
+ * helper stays outside the MCP layer cycle while applying the same provider
+ * transform as the live path.
  *
  * Slicing (e.g. for fork capture at a watermark) is a caller concern; callers
  * pass the already-sliced msgs. ForkContext.watermarkMsgID is a boundary marker
@@ -38,29 +50,43 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   agent: Agent.Info
   model: Provider.Model
   msgs: MessageV2.WithParts[]
+  /** Exact source user boundary for the active model-visible turn. */
+  currentUserID?: MessageID
   permission?: Permission.Ruleset
   mcpTools?: Record<string, AITool>
   useMcpToolSearch?: boolean
   /**
-   * Caller-built system parts to splice into the system array (after agent.prompt
-   * and before memory instructions). Currently env, skills, instructions in that
-   * order. Caller is responsible for the ordering and content.
+   * Caller-built system-tail parts. Currently environment/format, then instruction
+   * files. Caller is responsible for the ordering and content.
    */
   additions: string[]
+  /** Frozen Session/Fork system; bypasses all system regeneration when present. */
+  prebuiltSystem?: string[]
   prompt?: PromptConfig
+  /**
+   * Collapse post-checkpoint rebuild tails into an activity log. Enable for the
+   * main-agent runLoop; leave off for checkpoint-writer fork capture so the
+   * writer still sees full-fidelity recent history.
+   */
+  collapseCheckpointTail?: boolean
 }) {
   const llm = yield* LLM.Service
   const toolRegistry = yield* ToolRegistry.Service
 
-  // Always use full msgs — slicing is a fork-capture concern that lives at the
-  // caller (ForkContext.watermarkMsgID is a boundary marker, not a slice arg).
-  // See spec changelog at docs/superpowers/specs/2026-05-26-fork-agent-prefix-cache-design.md
-  const inheritedMessages = yield* MessageV2.toModelMessagesEffect(input.msgs, input.model)
-
   // Find the last user message; required for system "user.system" pass-through
   const lastUserMsg = input.msgs.findLast((m) => m.info.role === "user")
-  if (!lastUserMsg)
-    return yield* Effect.die(new Error("buildLLMRequestPrefix: no user message in msgs"))
+  if (!lastUserMsg) return yield* Effect.die(new Error("buildLLMRequestPrefix: no user message in msgs"))
+  // Always use full msgs — slicing is a fork-capture concern that lives at the
+  // caller (ForkContext.watermarkMsgID is a boundary marker, not a slice arg).
+  // Convert once through the source-ID-aware boundary helper so preflight can
+  // retain the complete active turn while omitting only proven older history.
+  const converted = yield* MessageV2.toModelMessagesWithCurrentTurnEffect(
+    input.msgs,
+    input.model,
+    input.currentUserID ?? lastUserMsg.info.id,
+    { collapseCheckpointTail: input.collapseCheckpointTail },
+  )
+  const inheritedMessages = converted.messages
   const lastUser = input.prompt
     ? {
         ...(lastUserMsg.info as MessageV2.User),
@@ -71,14 +97,16 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     : (lastUserMsg.info as MessageV2.User)
 
   // Build system using LLM.buildSystemArray (single source of truth shared with stream())
-  const system = yield* llm.buildSystemArray({
-    agent: input.agent,
-    model: input.model,
-    system: input.additions,
-    user: lastUser,
-    sessionID: input.sessionID as string,
-    agentID: lastUser.agentID,
-  })
+  const system =
+    input.prebuiltSystem ??
+    (yield* llm.buildSystemArray({
+      agent: input.agent,
+      model: input.model,
+      system: input.additions,
+      user: lastUser,
+      sessionID: input.sessionID as string,
+      agentID: lastUser.agentID,
+    }))
 
   // Resolve tools using parent agent's permission and toolAllowlist
   const toolDefs = yield* toolRegistry.tools({
@@ -123,34 +151,38 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     user: lastUser,
   })
   if (!input.useMcpToolSearch) {
-    return { system, tools: resolved, inheritedMessages, loadedMcpTools: [] }
+    return {
+      system,
+      tools: resolved,
+      inheritedMessages,
+      currentTurnMessages: converted.currentTurnMessages,
+      loadedMcpTools: [],
+    }
   }
 
   const catalog = createMcpToolSearchCatalog(
-    mcpSearchEntries
-      .filter((entry) => resolved[entry.name])
-      .toSorted((a, b) => a.name.localeCompare(b.name)),
+    mcpSearchEntries.filter((entry) => resolved[entry.name]).toSorted((a, b) => a.name.localeCompare(b.name)),
   )
   const loadedMcpTools = restoreMcpToolSearchMatches(
     catalog,
     input.msgs.flatMap((message) => {
       if (message.info.role !== "assistant" || message.info.parentID !== lastUser.id) return []
       return message.parts.flatMap((part) =>
-        part.type === "tool" &&
-        part.tool === MCP_TOOL_SEARCH_ID &&
-        part.state.status === "completed"
+        part.type === "tool" && part.tool === MCP_TOOL_SEARCH_ID && part.state.status === "completed"
           ? [part.state.metadata]
           : [],
       )
     }),
   )
   const searchActive =
-    input.model.capabilities.toolcall &&
-    catalog.entries.length > 0 &&
-    resolved[MCP_TOOL_SEARCH_ID] !== undefined
-  const tools = Object.fromEntries(
-    Object.entries(resolved).filter(([id]) => id !== MCP_TOOL_SEARCH_ID || searchActive),
-  )
+    input.model.capabilities.toolcall && catalog.entries.length > 0 && resolved[MCP_TOOL_SEARCH_ID] !== undefined
+  const tools = Object.fromEntries(Object.entries(resolved).filter(([id]) => id !== MCP_TOOL_SEARCH_ID || searchActive))
 
-  return { system, tools, inheritedMessages, loadedMcpTools: [...loadedMcpTools] }
+  return {
+    system,
+    tools,
+    inheritedMessages,
+    currentTurnMessages: converted.currentTurnMessages,
+    loadedMcpTools: [...loadedMcpTools],
+  }
 })

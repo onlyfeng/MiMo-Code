@@ -4,7 +4,7 @@ import { createHash } from "node:crypto"
 import z from "zod"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
-import { classifyAssistantStep } from "./classify"
+import { classifyAssistantStep, REQUEST_OVERFLOW_RECOVERY_MESSAGE } from "./classify"
 import { Log, Token } from "../util"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
@@ -32,7 +32,8 @@ import { classifyRequestOverflow, contextPressureLevel, usable, isOverflow as ov
 import { Config } from "@/config"
 import { isMemoryWriteEnabled } from "@/memory/write-gate"
 import { Global } from "@/global"
-import { NotFoundError } from "@/storage"
+import { NotFoundError, Database, eq } from "@/storage"
+import { SessionTable } from "./session.sql"
 import { Bus } from "../bus"
 import { ProviderTransform } from "../provider"
 import { SystemPrompt } from "./system"
@@ -51,6 +52,16 @@ import {
   normalizeForLoopDetection,
   detectTextLoop,
 } from "../session/prompt/text-loop-recovery"
+import {
+  LOOP_STREAK_MAX_SPAN,
+  LOOP_STREAK_TRIGGER_COUNT,
+  applyPersistedCrops,
+  cropMetadata,
+  cropMessagesForStreak,
+  detectStreak,
+  extractAllCrops,
+  streakKey,
+} from "../session/prompt/loop-streak"
 import {
   TEXT_NGRAM_MAX_RECOVERY,
   TEXT_NGRAM_RECOVERY_REMIND,
@@ -74,7 +85,13 @@ import { SessionSummary } from "./summary"
 import { NamedError } from "@mimo-ai/shared/util/error"
 import { SessionProcessor } from "./processor"
 import { buildLLMRequestPrefix } from "./llm-request-prefix"
-import { checkConflict, type ConflictResult } from "@/tool/conflict-detection"
+import {
+  buildAutoWorktreeNotice,
+  firstMutatedMainWorktree,
+  isAutoWorktreeHintSent,
+  markAutoWorktreeHintSent,
+  sessionHasAutoWorktreeNotice,
+} from "@/tool/auto-worktree-hint"
 import {
   serializeTrajectoryMessages,
   withAssistantParts,
@@ -131,6 +148,7 @@ import {
 } from "@/tool/mcp-tool-search"
 import { isMcpToolSearchEnabled } from "@/tool/gpt"
 import { canonicalSkillCatalog, isSkillCatalogSnapshot, skillCatalogSnapshotVersion } from "./skill-catalog"
+import { SessionPrefixSnapshot } from "./prefix-snapshot"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -349,9 +367,53 @@ const PREDICT_SYSTEM = `You predict the single most likely next message a user w
 
 const PREDICT_NUDGE = `Based on the conversation above, write the user's most likely next message:`
 
+const isSyntheticPart = (part: MessageV2.Part) => "synthetic" in part && part.synthetic === true
+
+/**
+ * Builds the context `predict` feeds the model, or `undefined` when the session
+ * is not in a predictable state.
+ *
+ * Up to 3 most recent real user queries (chronological) plus the assistant turn
+ * that answered the newest one — that turn carries the tool outputs and final
+ * text. Earlier assistant turns are dropped to keep the prompt small.
+ *
+ * Synthetic parts are stripped from the user queries. `insertReminders` persists
+ * the authoritative skills catalog snapshot and auto-loaded SKILL.md bodies onto
+ * the user message, and `toModelMessages` replays every non-ignored part, so
+ * keeping them here would dwarf the real queries and pull a small model toward
+ * echoing harness instructions instead of predicting what the user would type.
+ */
+export function predictContext(history: readonly MessageV2.WithParts[]) {
+  const real = (m: MessageV2.WithParts) => m.info.role === "user" && !m.parts.every(isSyntheticPart)
+  const userIdx = history.findLastIndex(real)
+  if (userIdx === -1) return
+
+  // Only the assistant turn that actually answered this user message counts.
+  // Bail if that turn is still running (an incomplete assistant after it), so we
+  // never pair the newest prompt with a stale/older result.
+  const assistants = history
+    .slice(userIdx + 1)
+    .filter((m): m is MessageV2.WithParts & { info: MessageV2.Assistant } => m.info.role === "assistant")
+  if (assistants.length === 0) return
+  if (assistants.some((m) => m.info.time.completed === undefined)) return
+  const assistant = assistants[assistants.length - 1]
+
+  return {
+    assistant,
+    messages: [
+      ...history
+        .filter(real)
+        .slice(-3)
+        .map((m) => ({ ...m, parts: m.parts.filter((p) => !isSyntheticPart(p)) })),
+      assistant,
+    ],
+  }
+}
+
 const OUTPUT_LENGTH_CONTINUATION_LIMIT = Flag.MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT
 const INVALID_OUTPUT_CONTINUATION_LIMIT = Flag.MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT
 const TEXT_TOOL_CALL_RETRY_LIMIT = Flag.MIMOCODE_TEXT_TOOL_CALL_RETRY_LIMIT
+const REQUEST_PREFLIGHT_RECOVERY_LIMIT = 2
 
 const log = Log.create({ service: "session.prompt" })
 
@@ -370,6 +432,32 @@ function isDirectUserMessage(message: MessageV2.WithParts | undefined) {
   if (message.parts.some((part) => part.type === "text" && part.metadata?.origin?.kind === "cron")) return false
   if (message.info.source) return message.info.source === "user"
   return message.parts.some((part) => part.type === "file" || (part.type === "text" && !part.synthetic))
+}
+
+function recoverySourceID(messages: readonly MessageV2.WithParts[]) {
+  return messages.findLast(MessageV2.isExternalUserMessage)?.info.id
+}
+
+type PreflightRecoveryDomain = {
+  providerID: string
+  modelID: string
+  usableTokens: number
+  isLastStep: boolean
+  recoveryFloorTokens: number
+}
+
+export function samePreflightRecoveryDomain(
+  previous: PreflightRecoveryDomain | undefined,
+  current: PreflightRecoveryDomain,
+) {
+  if (!previous) return false
+  return (
+    previous.providerID === current.providerID &&
+    previous.modelID === current.modelID &&
+    previous.usableTokens === current.usableTokens &&
+    previous.isLastStep === current.isLastStep &&
+    previous.recoveryFloorTokens === current.recoveryFloorTokens
+  )
 }
 
 export interface Interface {
@@ -473,6 +561,11 @@ export const layer = Layer.effect(
     // Track sessions that have already shown the "loaded instructions" toast so we
     // surface it once per primary session rather than on every run-loop turn.
     const instructionsNotified = new Set<SessionID>()
+    const pendingExternalAdmissions = new Map<string, number>()
+    const externalAdmissionKey = (sessionID: SessionID, agentID: string | undefined) =>
+      `${sessionID}\u0000${agentID ?? "main"}`
+    const hasPendingExternalAdmission = (sessionID: SessionID, agentID: string | undefined) =>
+      (pendingExternalAdmissions.get(externalAdmissionKey(sessionID, agentID)) ?? 0) > 0
 
     // Late-bind prefix-capture helper so SessionCheckpoint.tryStartCheckpointWriter
     // can call buildLLMRequestPrefix without forming a layer cycle
@@ -502,24 +595,43 @@ export const layer = Layer.effect(
         const captureSession = yield* sessions.get(input.sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
         if (!captureSession) return empty
         const capturePrompt = yield* sessions.resolvePrompt({ sessionID: input.sessionID })
-        const captureMessages = input.msgs as Parameters<typeof buildLLMRequestPrefix>[0]["msgs"]
+        const captureMessages = input.msgs as MessageV2.WithParts[]
+        const captureUser = captureMessages.findLast((message) => message.info.role === "user")
+        if (!captureUser || captureUser.info.role !== "user") return empty
         const capturePermission = Agent.runtimePermission(ag, captureSession.permission)
-        const [env, instructions, mcpTools] = yield* Effect.all([
-          sys.environment(model, captureSession.time.created, capturePrompt.harness),
-          instruction.system().pipe(Effect.orDie),
-          mcp.tools(),
-        ])
-        // (checkpoint-writer never requests json_schema output, so STRUCTURED_OUTPUT_SYSTEM_PROMPT
-        // is not included; parent's runLoop adds it conditionally based on user.format). Skills are
-        // injected as a per-turn reminder (see insertReminders), not baked into the frozen watermark.
-        const additions = [...env, ...instructions.content]
+        const key = SessionPrefixSnapshot.profileKey({
+          providerID: model.providerID,
+          modelID: model.id,
+          modelAPIID: model.api.id ?? "",
+          modelFamily: model.family ?? "",
+          agent: ag.name,
+          agentID: captureUser.info.agentID ?? "main",
+          harness: capturePrompt.harness,
+          systemMode: capturePrompt.systemMode,
+          system: capturePrompt.system ?? "",
+          permission: capturePermission,
+        })
+        const frozen = yield* SessionPrefixSnapshot.get(input.sessionID, key)
+        const mcpTools = frozen ? undefined : yield* mcp.tools()
+        const additions = frozen
+          ? []
+          : yield* Effect.gen(function* () {
+              const [env, instructions] = yield* Effect.all([
+                Flag.MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT
+                  ? sys.environment(model, captureSession.time.created, capturePrompt.harness)
+                  : Effect.succeed([]),
+                instruction.system().pipe(Effect.orDie),
+              ])
+              return [...env, ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content)]
+            })
         const prefix = yield* buildLLMRequestPrefix({
           sessionID: input.sessionID,
           agent: ag,
           model,
           msgs: captureMessages,
+          currentUserID: captureUser.info.id,
           additions,
-          permission: captureSession.permission,
+          permission: capturePermission,
           mcpTools,
           useMcpToolSearch: isMcpToolSearchEnabled(
             Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
@@ -528,13 +640,24 @@ export const layer = Layer.effect(
             model.api.id,
             model.family,
           ),
+          prebuiltSystem: frozen?.system,
           prompt: capturePrompt,
         }).pipe(
           Effect.provideService(LLM.Service, llm),
           Effect.provideService(ToolRegistry.Service, registry),
           Effect.catch(() => Effect.succeed(empty)),
         )
-        return { ...prefix, turnContext: capturePrompt.system, parentPermission: capturePermission }
+        return {
+          ...prefix,
+          ...(frozen
+            ? {
+                tools: SessionPrefixSnapshot.restoreTools(frozen.tools ?? []),
+                loadedMcpTools: frozen.loaded_mcp_tools ?? [],
+              }
+            : {}),
+          turnContext: capturePrompt.system,
+          parentPermission: capturePermission,
+        }
       })
     prefixCaptureRef.current = capture
     yield* Effect.addFinalizer(() =>
@@ -591,6 +714,10 @@ export const layer = Layer.effect(
           sessionID: input.sessionID,
           boundary,
           lastMessageInfo: computeLastMessageInfo(input.msgs.map((m) => m.info)),
+          // Freeze the digest range at insert time: only this tail is eligible
+          // for activity-log collapse. Auto rebuild mid-tool-loop keeps later
+          // tool rounds live; manual rebuild digests the whole idle tail.
+          digestUpTo: input.msgs.at(-1)?.info.id,
           agentID: input.agentID,
           agent: input.agent,
           model: { providerID: input.model.providerID, modelID: input.model.id },
@@ -1146,46 +1273,24 @@ export const layer = Layer.effect(
       const cfg = yield* config.get()
       if (cfg.experimental?.predict_next_prompt === false) return ""
 
-      const history = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
-      const real = (m: MessageV2.WithParts) =>
-        m.info.role === "user" && !m.parts.every((p) => "synthetic" in p && p.synthetic)
-      const userIdx = history.findLastIndex(real)
-      if (userIdx === -1) return ""
-      const lastUser = history[userIdx]
-      if (lastUser.info.role !== "user") return ""
-
-      // Only the assistant turn that actually answered this user message counts.
-      // Bail if that turn is still running (an incomplete assistant after it),
-      // so we never pair the newest prompt with a stale/older result.
-      const assistants = history
-        .slice(userIdx + 1)
-        .filter((m): m is MessageV2.WithParts & { info: MessageV2.Assistant } => m.info.role === "assistant")
-      if (assistants.length === 0) return ""
-      if (assistants.some((m) => m.info.time.completed === undefined)) return ""
-      const lastAssistant = assistants[assistants.length - 1]
-
-      // Context fed to the prediction: up to 3 most recent user queries
-      // (chronological) plus the latest assistant turn (which carries tool
-      // outputs + final assistant text). Earlier assistant turns are dropped
-      // to keep the prompt small.
-      const recentUsers = history.filter(real).slice(-3)
-      const contextMsgs = [...recentUsers, lastAssistant]
+      const context = predictContext(yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" }))
+      if (!context) return ""
 
       const base = yield* agents.get("title")
       if (!base) return ""
       const mdl = base.modelRef
-        ? yield* provider.resolveModelRef(base.modelRef, lastAssistant.info.providerID)
+        ? yield* provider.resolveModelRef(base.modelRef, context.assistant.info.providerID)
         : base.model
           ? yield* provider.getModel(base.model.providerID, base.model.modelID)
-          : ((yield* provider.getSmallModel(lastAssistant.info.providerID)) ??
-            (yield* provider.getModel(lastAssistant.info.providerID, lastAssistant.info.modelID)))
+          : ((yield* provider.getSmallModel(context.assistant.info.providerID)) ??
+            (yield* provider.getModel(context.assistant.info.providerID, context.assistant.info.modelID)))
 
       // Side-channel call: bypass llm.stream so prediction stays out of the
       // session trajectory and never triggers session-coupled plugin hooks
       // (chat.params, chat.headers, system.transform, memory instructions,
       // x-session-affinity). Still publishes Metrics.ModelCall so the
       // prediction cost shows up in analytics.
-      const msgs = yield* MessageV2.toModelMessagesEffect(contextMsgs, mdl, { stripMedia: true })
+      const msgs = yield* MessageV2.toModelMessagesEffect(context.messages, mdl, { stripMedia: true })
       const language = yield* provider.getLanguage(mdl)
       const wrapped = wrapLanguageModel({
         model: language,
@@ -1309,9 +1414,10 @@ export const layer = Layer.effect(
       }
 
       const composeModeMsg = input.messages.find((msg) => msg.info.role === "user" && msg.info.agent === "compose")
+      const cfg = yield* config.get()
       if (composeModeMsg) {
         const ctx = yield* InstanceState.context
-        const composeCfg = (yield* config.get()).compose
+        const composeCfg = cfg.compose
         const docsDir = ConfigCompose.resolveDocsDir(ctx.worktree, composeCfg)
         const text = PROMPT_COMPOSE.replace(
           "{{compose_docs_dir}}",
@@ -1325,6 +1431,38 @@ export const layer = Layer.effect(
           text,
           synthetic: true,
         })
+      }
+
+      // Auto-worktree notice: once per session, after a completed write or git
+      // mutation landed in some git MAIN worktree. Names that path and carries a
+      // standing rule for any later repo. Path-based on purpose — a session bound
+      // to a non-git scratch dir that `cd`s into another project's main checkout
+      // still hits. Injected as a user-side system-reminder and persisted via
+      // auto_worktree_hint_sent so compaction/rebuild cannot re-inject. Never
+      // touches the system prompt. Gated by config.auto_worktree (default false).
+      // Nested branch: insertReminders cannot early-return without skipping the
+      // skill/plan reminders that follow.
+      if (input.agent.mode === "primary" && !input.session.parentID && cfg.auto_worktree === true) {
+        const alreadySent = yield* Effect.sync(() => isAutoWorktreeHintSent(input.session.id))
+        if (!alreadySent) {
+          if (sessionHasAutoWorktreeNotice(input.messages)) {
+            yield* Effect.sync(() => markAutoWorktreeHintSent(input.session.id))
+          } else {
+            const hit = firstMutatedMainWorktree(input.messages)
+            if (hit) {
+              const part = yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: userMessage.info.id,
+                sessionID: userMessage.info.sessionID,
+                type: "text",
+                text: buildAutoWorktreeNotice(hit),
+                synthetic: true,
+              })
+              userMessage.parts.push(part)
+              yield* Effect.sync(() => markAutoWorktreeHintSent(input.session.id))
+            }
+          }
+        }
       }
 
       const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
@@ -1666,6 +1804,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
           : undefined,
         sessionParentID: input.session.parentID,
+        sessionID: input.session.id,
         agentName: input.agent.name,
         orchestratorEnabled: Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR,
       })
@@ -2117,9 +2256,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // metrics, normalization, and truncation pipeline above.
       execMcp.current = execMcpTools
 
+      const snapshotToolNames = new Set(activeTools)
+      if (useMcpToolSearch && input.model.capabilities.toolcall) {
+        mcpCatalog.current.entries.forEach((entry) => snapshotToolNames.add(entry.name))
+      }
+
       return {
         tools,
         activeTools: [...activeTools].filter((name) => tools[name]),
+        snapshotToolNames: [...snapshotToolNames].filter((name) => tools[name]),
+        loadedMcpTools: [...loadedMcpTools],
       }
     })
 
@@ -2566,6 +2712,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     })
 
     const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
+      const admissionKey =
+        input.source === undefined || input.source === "user" || input.source === "spawn"
+          ? externalAdmissionKey(input.sessionID, input.agentID)
+          : undefined
+      if (admissionKey) {
+        yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            pendingExternalAdmissions.set(admissionKey, (pendingExternalAdmissions.get(admissionKey) ?? 0) + 1),
+          ),
+          () =>
+            Effect.sync(() => {
+              const remaining = (pendingExternalAdmissions.get(admissionKey) ?? 1) - 1
+              if (remaining > 0) pendingExternalAdmissions.set(admissionKey, remaining)
+              else pendingExternalAdmissions.delete(admissionKey)
+            }),
+        )
+      }
       const agentName = input.agent || (yield* agents.defaultAgent())
       const ag = yield* agents.get(agentName)
       if (!ag) {
@@ -2933,6 +3096,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         { message, parts },
       )
 
+      // ID allocation happens before asynchronous MCP/file/plugin expansion.
+      // Persist with the actual commit time so an admission that starts after a
+      // compaction hook can never sort before that hook if it crosses the final
+      // pending-admission check.
+      message.time.created = Date.now()
+
       const parsed = MessageV2.Info.safeParse(message)
       if (!parsed.success) {
         log.error("invalid user message before save", {
@@ -2987,6 +3156,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       for (const m of msgs) {
         if (m.info.role !== "assistant") continue
         if (m.info.time?.completed) continue
+        // Errored assistants are intentionally left without time.completed so
+        // /recovery can find them. Keep them recoverable on the background
+        // path (age-guarded). But when immediate=true the user is actively
+        // sending a new message — that act abandons the old turn, so finalize
+        // it like any other orphan. This prevents the TUI pending memo from
+        // locking onto a stale errored assistant and rendering every later
+        // message as stuck QUEUED.
+        if (m.info.error && !immediate) continue
         const created = m.info.time?.created ?? 0
         if (!immediate && now - created < ORPHAN_AGE_MS) continue
         m.info.time = { ...m.info.time, completed: now }
@@ -3328,10 +3505,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // Skip one overflow check so the model can respond on the trimmed context;
         // its new assistant message will carry accurate tokens for the next check.
         let skipOverflowCheck = false
+        // A correct recovery-floor classification should make unrecoverable
+        // requests terminal on their first preflight. Keep a bounded progress
+        // guard as defense-in-depth for failed/stale recovery boundaries. The
+        // attempt count spans synthetic compaction/checkpoint users; those users
+        // get fresh IDs and must not buy an unbounded new recovery budget. The
+        // model/floor fields only decide whether request-token progress is
+        // directly comparable between two attempts.
+        let preflightOverflowRecovery:
+          | {
+              providerID: string
+              modelID: string
+              usableTokens: number
+              isLastStep: boolean
+              recoveryFloorTokens: number
+              requestTokens: number
+              attempts: number
+            }
+          | undefined
+        let preflightOverflowSourceID: MessageID | undefined
 
         const textLoopBuffer: string[] = []
         let textLoopRecoveryAttempts = 0
         let textNgramRecoveryAttempts = 0
+        let loopStreakCropped = false
 
         // Contract (T05): on finish="length", inject a continuation nudge ONLY for
         // plain text. If any non-providerExecuted client tool part exists we bail
@@ -3770,6 +3967,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
 
         while (true) {
+          // Per-iteration: a streak crop on this turn must suppress a duplicate
+          // text-loop recovery user, but must not block a later re-crop if the
+          // model loops again after recovery.
+          loopStreakCropped = false
           // F55: only main agent sets session status to busy; subagent runners
           // must not touch session-level status (Runner.onBusy is Effect.void
           // for non-main actors per F47).
@@ -3788,6 +3989,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             contextWatermark: session.contextWatermark,
             agentID: agentID ?? "main",
           })
+          // During recovery, compaction can project a newly-arrived direct
+          // request into a source="hook" replay before the next filtered read.
+          // Consult the full actor slice while an episode is active so the
+          // original source=user/spawn row still establishes the new episode.
+          const currentPreflightOverflowSourceID = recoverySourceID(
+            preflightOverflowRecovery ? yield* sessions.messages({ sessionID, agentID: agentID ?? "main" }) : msgs,
+          )
+          // Direct prompts can join an already-running loop, while inbox rows
+          // are drained by that same loop. Both are new external requests and
+          // must not inherit the prior request's exhausted recovery budget.
+          // Recovery hook users are excluded by recoverySourceID; if compaction
+          // temporarily projects every source user away, keep the prior episode.
+          if (
+            currentPreflightOverflowSourceID !== undefined &&
+            currentPreflightOverflowSourceID !== preflightOverflowSourceID
+          ) {
+            preflightOverflowSourceID = currentPreflightOverflowSourceID
+            preflightOverflowRecovery = undefined
+          }
 
           let lastUser: MessageV2.User | undefined
           let lastAssistant: MessageV2.Assistant | undefined
@@ -3885,7 +4105,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               lastUser,
               assistant: lastAssistant,
               parts: lastAssistantMsg?.parts ?? [],
-              recoverOverflowPlaceholder: isBoundedComputation,
+              // A checkpoint boundary is timestamped beside its old watermark,
+              // so the cancelled overflow placeholder can still sort after the
+              // active user. usageRecovered is the durable proof that recovery
+              // happened and this empty placeholder is safe to pass through.
+              recoverOverflowPlaceholder: usageRecovered || isBoundedComputation,
             })
             if (classification.type === "filtered") {
               yield* writeContentFilterError({ assistant: lastAssistant })
@@ -4018,6 +4242,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               auto: compactionPart?.auto ?? false,
               overflow: compactionPart?.overflow,
               agentID: lastUser.agentID,
+              hasPendingExternalRequest: () => hasPendingExternalAdmission(sessionID, lastUser.agentID ?? "main"),
             })
             // cron-sentinel cache is invalidated via a SessionCompaction.Event
             // .Compacted bus subscription inside cron-bridge — see
@@ -4201,6 +4426,89 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
           const maxSteps = agent.steps ?? Infinity
           const isLastStep = step >= maxSteps
+
+          // Request-layer loop-streak crop, aligned with turn recovery
+          // (resume()): no new user, lastUser/parentID unchanged, span stored
+          // as an ignored synthetic part on the existing parent user. Wire
+          // trailing-assistant repair stays in transform.ts. Spans re-apply
+          // on every later request until the feature is off; user speech does
+          // not clear them.
+          const streakCfg = (yield* config.get()).experimental?.loop_streak_recovery
+          if (streakCfg?.enabled) {
+            const existingCrops = extractAllCrops(msgs)
+            if (existingCrops.length > 0) {
+              const reapplied = applyPersistedCrops(msgs, existingCrops)
+              if (reapplied.omitted.length > 0) {
+                // Do NOT set loopStreakCropped here. That flag means "a NEW
+                // crop just fired this iteration" and suppresses the text-loop
+                // fallback. Re-applying an old span must leave text-loop free
+                // to catch a different kind of loop later in the turn.
+                msgs = reapplied.kept as typeof msgs
+                yield* slog.info("loop streak: reapplied persisted crop", {
+                  spans: existingCrops.length,
+                  omitted: reapplied.omitted.length,
+                  spanFrom: existingCrops[existingCrops.length - 1].fromId,
+                  spanTo: existingCrops[existingCrops.length - 1].toId,
+                })
+              }
+            }
+            // New streaks are still detectable on the cropped view (e.g. the
+            // model loops again after recovery). User-speech guard only skips
+            // *new* detection, not re-application of existing spans.
+            if (lastFinished && lastUser.id < lastFinished.id) {
+              const triggerCount = streakCfg.trigger_count ?? LOOP_STREAK_TRIGGER_COUNT
+              const maxSpan = streakCfg.max_span ?? LOOP_STREAK_MAX_SPAN
+              const entries = msgs.flatMap((message) => {
+                if (message.info.role !== "assistant" || !message.info.finish) return []
+                const key = streakKey(message.parts)
+                if (!key) return []
+                return [{ id: message.info.id, key }]
+              })
+              const span = detectStreak(entries, triggerCount, maxSpan)
+              // Not dead: detectStreak.toId is the last *keyed* finished
+              // assistant, while lastFinished is the last finished assistant
+              // even when its streakKey is "". Empty-key tail (text-only
+              // recovery) means the streak already broke — skip a new crop
+              // and leave the historical span to re-apply.
+              if (span && span.toId === lastFinished.id) {
+                const crop = cropMessagesForStreak(msgs, span)
+                if (crop.omitted.length > 0) {
+                  msgs = crop.kept as typeof msgs
+                  // Persist span on the EXISTING parent user (turn-recovery
+                  // shape). ignored+synthetic: not sent to the model, not a
+                  // user-visible bubble, but extractAllCrops still reads it.
+                  const spanPart: MessageV2.TextPart = {
+                    id: PartID.ascending(),
+                    messageID: lastUser.id,
+                    sessionID,
+                    type: "text",
+                    synthetic: true,
+                    ignored: true,
+                    text: "",
+                    metadata: cropMetadata(span),
+                  }
+                  yield* sessions.updatePart(spanPart)
+                  const parentMsg = msgs.findLast((message) => message.info.id === lastUser.id)
+                  if (parentMsg) parentMsg.parts.push(spanPart)
+                  loopStreakCropped = true
+                  yield* slog.info("loop streak: cropped from request", {
+                    spanFrom: span.fromId,
+                    spanTo: span.toId,
+                    anchorId: span.anchorId,
+                    parentUserId: lastUser.id,
+                    nMessages: crop.omittedMessages,
+                    nParts: crop.omittedParts,
+                    omittedBlocks: crop.omittedBlocks,
+                    keptBlocks: crop.keptBlocks,
+                    remainingSimilar: crop.remainingSimilar,
+                    cacheRisk: crop.cacheRisk,
+                    truncatedByCeiling: span.truncated,
+                  })
+                }
+              }
+            }
+          }
+
           msgs = yield* insertReminders({ messages: msgs, agent, model, session })
 
           const msg: MessageV2.Assistant = {
@@ -4268,6 +4576,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             const tools = resolvedTools.tools
             const activeTools = resolvedTools.activeTools
+            const snapshotToolNames = resolvedTools.snapshotToolNames
 
             if (lastUser.format?.type === "json_schema") {
               tools["StructuredOutput"] = createStructuredOutputTool({
@@ -4277,6 +4586,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 },
               })
               activeTools.push("StructuredOutput")
+              snapshotToolNames.push("StructuredOutput")
             }
 
             if (step === 1)
@@ -4326,31 +4636,28 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const finalizeOverflowAssistant = Effect.fn("SessionPrompt.finalizeOverflowAssistant")(function* () {
               if (handle.message.finish || handle.message.error || MessageV2.parts(handle.message.id).length > 0) return
               handle.message.error = new MessageV2.AbortedError({
-                message: "Request overflow triggered context recovery",
+                message: REQUEST_OVERFLOW_RECOVERY_MESSAGE,
               }).toObject()
               handle.message.finish = "cancelled"
               handle.message.time.completed = Date.now()
               yield* sessions.updateMessage(handle.message)
             })
-            // Static-prefix overflow is unrecoverable: compaction and checkpoint rebuild
-            // only shrink conversation messages, never the system prompt or tool schemas.
-            // Finalize a clear error (not a cancelled recovery placeholder) so the loop
-            // terminates instead of recomputing the same over-limit estimate forever.
-            const finalizeUnrecoverableOverflow = Effect.fn("SessionPrompt.finalizeUnrecoverableOverflow")(
-              function* () {
-                if (handle.message.finish || handle.message.error || MessageV2.parts(handle.message.id).length > 0)
-                  return
-                handle.message.error = new MessageV2.ModelError({
-                  message:
-                    "Request exceeds the model's usable context before any conversation history: the system prompt and tool schemas alone overflow the window, which compaction cannot recover. Reduce instructions (e.g. AGENTS.md), disable unused tools, or use a larger-context model.",
-                }).toObject()
-                handle.message.finish = "error"
-                handle.message.time.completed = Date.now()
-                yield* sessions.updateMessage(handle.message)
-                yield* bus.publish(Session.Event.Error, { sessionID, error: handle.message.error })
-              },
-            )
-            const runStep = (processArgs: LLM.StreamInput) =>
+            // Recovery-floor overflow is unrecoverable: compaction and checkpoint
+            // rebuild can remove old history, but not the fixed prefix, active turn,
+            // frozen fork prefix, or request-local synthetic messages.
+            const finalizeUnrecoverableOverflow = Effect.fn("SessionPrompt.finalizeUnrecoverableOverflow")(function* (
+              message: string,
+            ) {
+              if (handle.message.finish || handle.message.error || MessageV2.parts(handle.message.id).length > 0) return
+              handle.message.error = new MessageV2.ModelError({
+                message,
+              }).toObject()
+              handle.message.finish = "error"
+              handle.message.time.completed = Date.now()
+              yield* sessions.updateMessage(handle.message)
+              yield* bus.publish(Session.Event.Error, { sessionID, error: handle.message.error })
+            })
+            const runStep = (processArgs: LLM.StreamInput, recoveryFloorMessages: ModelMessage[]) =>
               Effect.gen(function* () {
                 if (!isBoundedComputation) {
                   // Estimate only the tool schemas the request will actually carry.
@@ -4359,38 +4666,87 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   // Counting inactive MCP schemas would false-trip preflight even
                   // though the provider never receives them.
                   const wireTools = LLM.filterActiveTools(LLM.resolveTools(processArgs), processArgs.activeTools)
-                  const turnContext = LLM.turnContextMessages(processArgs.user)
+                  const messages = LLM.appendTurnContext(
+                    processArgs.messages,
+                    processArgs.user,
+                    processArgs.mergeTurnContextIntoLastUser,
+                  )
                   const overflow = classifyRequestOverflow({
                     ...processArgs,
                     cfg,
-                    messages: LLM.appendTurnContext(
-                      processArgs.messages,
+                    messages,
+                    recoveryFloorMessages: LLM.appendTurnContext(
+                      recoveryFloorMessages,
                       processArgs.user,
                       processArgs.mergeTurnContextIntoLastUser,
                     ),
-                    // Compaction can shrink historical messages, but it cannot
-                    // remove the current turn context. Keep it in the static
-                    // re-estimate so an oversized reminder terminates instead
-                    // of entering a recovery loop that can never make progress.
-                    unshrinkableMessages: turnContext,
-                    tools: wireTools,
+                    tools: yield* Effect.promise(() => LLM.materializeWireToolDescriptors(wireTools)),
                     model: processArgs.model,
                   })
-                  if (overflow.type !== "ok") {
+                  if (overflow.type === "ok") {
+                    preflightOverflowRecovery = undefined
+                  } else {
                     if (overflow.type === "overflow-static") {
-                      yield* slog.warn("request preflight overflow: static prefix exceeds usable context", {
+                      yield* slog.warn("request preflight overflow: recovery floor exceeds usable context", {
                         sessionID,
                         agentID: processArgs.agentID ?? "main",
                         requestTokens: overflow.requestTokens,
-                        staticTokens: overflow.staticTokens,
+                        recoveryFloorTokens: overflow.recoveryFloorTokens,
                       })
-                      yield* finalizeUnrecoverableOverflow()
+                      yield* finalizeUnrecoverableOverflow(
+                        "Request exceeds the model's usable context after discardable history is removed: the fixed request prefix and active turn still do not fit. Reduce the current request or instructions, disable unused tools, or use a larger-context model.",
+                      )
                       return "overflow-static" as const
+                    }
+                    // Only compare token progress when the immutable floor and
+                    // model/window/last-step mode are unchanged. The explicit
+                    // last-step bit avoids a token-count collision when MAX_STEPS
+                    // and toolChoice:none replace equally-sized content. The
+                    // episode-wide attempt cap below remains in force when a
+                    // synthetic recovery user changes the floor, so changing IDs
+                    // cannot evade the bound.
+                    const usableTokens = usable({ cfg, model: processArgs.model })
+                    const sameRecoveryRequestTokens = samePreflightRecoveryDomain(preflightOverflowRecovery, {
+                      providerID: processArgs.model.providerID,
+                      modelID: processArgs.model.id,
+                      usableTokens,
+                      isLastStep,
+                      recoveryFloorTokens: overflow.recoveryFloorTokens,
+                    })
+                      ? preflightOverflowRecovery?.requestTokens
+                      : undefined
+                    if (
+                      (sameRecoveryRequestTokens !== undefined &&
+                        overflow.requestTokens >= sameRecoveryRequestTokens) ||
+                      (preflightOverflowRecovery?.attempts ?? 0) >= REQUEST_PREFLIGHT_RECOVERY_LIMIT
+                    ) {
+                      yield* slog.warn("request preflight overflow: context recovery made no sufficient progress", {
+                        sessionID,
+                        agentID: processArgs.agentID ?? "main",
+                        requestTokens: overflow.requestTokens,
+                        previousRequestTokens: preflightOverflowRecovery?.requestTokens,
+                        recoveryAttempts: preflightOverflowRecovery?.attempts ?? 0,
+                      })
+                      yield* finalizeUnrecoverableOverflow(
+                        "Request still exceeds the model's usable context because context recovery made no sufficient progress. Reduce the current request or instructions, disable unused tools, or use a larger-context model.",
+                      )
+                      return "overflow-static" as const
+                    }
+                    preflightOverflowRecovery = {
+                      providerID: processArgs.model.providerID,
+                      modelID: processArgs.model.id,
+                      usableTokens,
+                      isLastStep,
+                      recoveryFloorTokens: overflow.recoveryFloorTokens,
+                      requestTokens: overflow.requestTokens,
+                      attempts: (preflightOverflowRecovery?.attempts ?? 0) + 1,
                     }
                     yield* slog.warn("request preflight overflow; routing to context recovery", {
                       sessionID,
                       agentID: processArgs.agentID ?? "main",
                       requestTokens: overflow.requestTokens,
+                      recoveryFloorTokens: overflow.recoveryFloorTokens,
+                      recoveryAttempt: preflightOverflowRecovery.attempts,
                     })
                     yield* finalizeOverflowAssistant()
                     return "overflow" as const
@@ -4440,6 +4796,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 return result
               })
 
+            const dispatchSyntheticMessages: ModelMessage[] = isLastStep ? [{ role: "user", content: MAX_STEPS }] : []
+
             // Full-context actors use the frozen parent request prefix resolved above.
             // Main also has contextMode="full", but has no forkCtx and stays on the
             // normal path because only spawned subagent/peer records qualify.
@@ -4447,10 +4805,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               const ownNew = msgs.filter(
                 (m) => m.info.id > forkCtx.watermarkMsgID && m.info.agentID === lastUser.agentID,
               )
-              const ownNewModelMsgs = yield* MessageV2.toModelMessagesEffect(ownNew, model)
+              const ownNewModelMsgs = yield* MessageV2.toModelMessagesWithCurrentTurnEffect(ownNew, model, lastUser.id)
               const prebuiltSystem = forkCtx.system
               lastSystemPrompt = prebuiltSystem
-              const modelMsgs: ModelMessage[] = [...forkCtx.inheritedMessages, ...ownNewModelMsgs]
+              const modelMsgs: ModelMessage[] = [...forkCtx.inheritedMessages, ...ownNewModelMsgs.messages]
               // additions is empty for fork agents: system is taken verbatim from
               // forkCtx.system. Passed as `system` to handle.process for logging/replay.
               const additions: string[] = []
@@ -4505,34 +4863,37 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 )
                 return "break" as const
               }
-              const result = yield* runStep({
-                user: { ...lastUser, system: forkCtx.turnContext },
-                // LLM.resolveTools must not apply the child allowlist a
-                // second time: forkTools already carries the exact frozen
-                // parent membership. Live closures still enforce that
-                // allowlist before dispatch in resolveTools above.
-                agent: { ...agent, toolAllowlist: undefined },
-                // Fork inherits the parent's effective permission (agent + session +
-                // hardPermission), captured at spawn into ForkContext. Together with
-                // forkTools above, this keeps the frozen system, tool schemas, and live
-                // execute closures aligned with the parent's visibility boundary. The
-                // `?? session.permission` is defense-in-depth only:
-                // parentPermission is a required field (empty `[]` on a missed capture,
-                // which `??` does NOT override), so the fallback fires solely if a future
-                // refactor makes the field optional.
-                permission: forkCtx.parentPermission ?? session.permission,
-                sessionID,
-                parentSessionID: session.parentID,
-                system: additions,
-                prebuiltSystem,
-                messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
-                mergeTurnContextIntoLastUser: true,
-                tools: forkTools,
-                activeTools: activeTools.filter((id) => forkTools[id]),
-                model,
-                toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
-                agentID: lastUser.agentID,
-              }).pipe(
+              const result = yield* runStep(
+                {
+                  user: { ...lastUser, system: forkCtx.turnContext },
+                  // LLM.resolveTools must not apply the child allowlist a
+                  // second time: forkTools already carries the exact frozen
+                  // parent membership. Live closures still enforce that
+                  // allowlist before dispatch in resolveTools above.
+                  agent: { ...agent, toolAllowlist: undefined },
+                  // Fork inherits the parent's effective permission (agent + session +
+                  // hardPermission), captured at spawn into ForkContext. Together with
+                  // forkTools above, this keeps the frozen system, tool schemas, and live
+                  // execute closures aligned with the parent's visibility boundary. The
+                  // `?? session.permission` is defense-in-depth only:
+                  // parentPermission is a required field (empty `[]` on a missed capture,
+                  // which `??` does NOT override), so the fallback fires solely if a future
+                  // refactor makes the field optional.
+                  permission: forkCtx.parentPermission ?? session.permission,
+                  sessionID,
+                  parentSessionID: session.parentID,
+                  system: additions,
+                  prebuiltSystem,
+                  messages: [...modelMsgs, ...dispatchSyntheticMessages],
+                  mergeTurnContextIntoLastUser: true,
+                  tools: forkTools,
+                  activeTools: activeTools.filter((id) => forkTools[id]),
+                  model,
+                  toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
+                  agentID: lastUser.agentID,
+                },
+                [...forkCtx.inheritedMessages, ...ownNewModelMsgs.currentTurnMessages, ...dispatchSyntheticMessages],
+              ).pipe(
                 Effect.onExit((exit) =>
                   plugin
                     .trigger(
@@ -4635,49 +4996,41 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return "continue" as const
             }
 
-            const [env, instructions] = yield* Effect.all([
-              sys.environment(model, session.time.created, sessionPrompt.harness),
-              instruction.system().pipe(Effect.orDie),
-            ])
-            // Surface which instruction files (CLAUDE.md, AGENTS.md, ...) were loaded.
-            // Only for primary sessions (subagents would be noisy) and once per session.
-            if (!session.parentID && !instructionsNotified.has(sessionID)) {
-              instructionsNotified.add(sessionID)
-              const worktree = (yield* InstanceState.context).worktree
-              const files = Array.from(instructions.paths, (p) => Instruction.display(p, worktree))
-              if (files.length > 0) {
-                yield* bus.publish(TuiEvent.InstructionsLoaded, { files }).pipe(Effect.ignore)
-              }
-            }
-            const additions = [
-              ...env,
-              ...instructions.content,
-              ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
-            ]
-            // Auto-worktree: inject hint on first assistant-less turn if conflict detected.
-            // Checks for no assistant messages (survives compaction/rebuild) + in main worktree.
-            const isGitProject = ctx.project.vcs === "git"
-            const isMainWorktree = ctx.worktree === ctx.project.worktree
-            if (isGitProject && isMainWorktree) {
-              const isFirstAssistantTurn = !msgs.some((m) => m.info.role === "assistant")
-              if (isFirstAssistantTurn) {
-                const conflict = (yield* Effect.promise(() =>
-                  checkConflict(ctx.directory, sessionID),
-                )) as ConflictResult
-                if (conflict.hasConflict) {
-                  additions.push(`
-⚠️ Auto-Worktree Notice
-
-This session is running in the main worktree. If you need to write or edit files, consider creating an isolated worktree first:
-
-- Create an isolated worktree: \`git worktree add <path> -b <branch>\` with a path outside the project directory
-
-Conflict detected: ${conflict.reason}${conflict.activeSessionId ? ` (session: ${conflict.activeSessionId})` : ""}
-
-If this task is a simple fix, Q&A, or read-only operation, you can skip this notice and continue.`)
+            const runtimePermission = Agent.runtimePermission(agent, session.permission)
+            const prefixProfileKey = SessionPrefixSnapshot.profileKey({
+              providerID: model.providerID,
+              modelID: model.id,
+              modelAPIID: model.api.id ?? "",
+              modelFamily: model.family ?? "",
+              agent: agent.name,
+              agentID: lastUser.agentID ?? "main",
+              harness: sessionPrompt.harness,
+              systemMode: sessionPrompt.systemMode,
+              system: sessionPrompt.system ?? "",
+              permission: runtimePermission,
+            })
+            const frozen = yield* SessionPrefixSnapshot.get(sessionID, prefixProfileKey)
+            const currentAdditions = Effect.fnUntraced(function* () {
+              const [env, instructions] = yield* Effect.all([
+                Flag.MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT
+                  ? sys.environment(model, session.time.created, sessionPrompt.harness)
+                  : Effect.succeed([]),
+                instruction.system().pipe(Effect.orDie),
+              ])
+              if (!Flag.MIMOCODE_DISABLE_INSTRUCTIONS && !session.parentID && !instructionsNotified.has(sessionID)) {
+                instructionsNotified.add(sessionID)
+                const worktree = (yield* InstanceState.context).worktree
+                const files = Array.from(instructions.paths, (path) => Instruction.display(path, worktree))
+                if (files.length > 0) {
+                  yield* bus.publish(TuiEvent.InstructionsLoaded, { files }).pipe(Effect.ignore)
                 }
               }
-            }
+              return [
+                ...env,
+                ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
+                ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
+              ]
+            })
             // Note: `buildLLMRequestPrefix` also returns a `tools` field, but we
             // intentionally don't use it here — the `tools` variable from `resolveTools`
             // (set earlier via `handle.process({tools: ...})`) carries `execute` closures
@@ -4687,17 +5040,72 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
             // Main runLoop: no watermark — LLM must see the full msgs list,
             // including this turn's intermediate assistant turns (tool reads,
             // task creates, etc.) so each step doesn't replay from the bare
-            // user prompt. The watermark is for fork capture only (frozen
-            // snapshot of parent-view at spawn time).
-            const { system: prebuiltSystem, inheritedMessages: modelMsgs } = yield* buildLLMRequestPrefix({
+            // user prompt. Snapshot watermarks are boundary metadata, never a
+            // reason to slice the main request history.
+            const initialPrefix = yield* buildLLMRequestPrefix({
               sessionID,
               agent,
               model,
               msgs,
-              additions,
+              currentUserID: lastUser.id,
               permission: session.permission,
+              additions: frozen ? [] : yield* currentAdditions(),
+              prebuiltSystem: frozen?.system,
               prompt: sessionPrompt,
+              // Rebuild tails collapse into an activity log so hollow
+              // tool_results never look like a live transcript (anti-hallucination).
+              collapseCheckpointTail: true,
             }).pipe(Effect.provideService(LLM.Service, llm), Effect.provideService(ToolRegistry.Service, registry))
+            const currentToolsHash = SessionPrefixSnapshot.toolsHash(
+              tools,
+              snapshotToolNames,
+              activeTools,
+              resolvedTools.loadedMcpTools,
+            )
+            const currentTools = yield* Effect.promise(() =>
+              SessionPrefixSnapshot.snapshotTools(tools, snapshotToolNames),
+            )
+            const resolvedPrefix = yield* Effect.gen(function* () {
+              if (!frozen) {
+                const snapshot = yield* SessionPrefixSnapshot.pin({
+                  sessionID,
+                  profileKey: prefixProfileKey,
+                  system: initialPrefix.system,
+                  toolsHash: currentToolsHash,
+                  tools: currentTools,
+                  activeTools,
+                  loadedMcpTools: resolvedTools.loadedMcpTools,
+                  watermarkMessageID: lastUser.id,
+                })
+                return { prefix: initialPrefix, snapshot }
+              }
+              if (frozen.tools && frozen.tools_hash === currentToolsHash)
+                return { prefix: initialPrefix, snapshot: frozen }
+              const prefix = yield* buildLLMRequestPrefix({
+                sessionID,
+                agent,
+                model,
+                msgs,
+                currentUserID: lastUser.id,
+                additions: yield* currentAdditions(),
+                permission: session.permission,
+                prompt: sessionPrompt,
+                collapseCheckpointTail: true,
+              }).pipe(Effect.provideService(LLM.Service, llm), Effect.provideService(ToolRegistry.Service, registry))
+              const snapshot = yield* SessionPrefixSnapshot.rotate({
+                sessionID,
+                profileKey: prefixProfileKey,
+                system: prefix.system,
+                toolsHash: currentToolsHash,
+                tools: currentTools,
+                activeTools,
+                loadedMcpTools: resolvedTools.loadedMcpTools,
+                watermarkMessageID: lastUser.id,
+              })
+              return { prefix, snapshot }
+            })
+            const prebuiltSystem = resolvedPrefix.prefix.system
+            const modelMsgs = resolvedPrefix.prefix.inheritedMessages
             lastSystemPrompt = prebuiltSystem
             const processArgs = {
               user: lastUser,
@@ -4705,11 +5113,9 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
               permission: session.permission,
               sessionID,
               parentSessionID: session.parentID,
-              // system: additions is preserved for non-LLM consumers of StreamInput (e.g.,
-              // MessageV2.User.system for logging/replay); llm.stream itself uses prebuiltSystem.
-              system: additions,
+              system: [],
               prebuiltSystem,
-              messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
+              messages: [...modelMsgs, ...dispatchSyntheticMessages],
               mergeTurnContextIntoLastUser: true,
               tools,
               activeTools,
@@ -4760,7 +5166,10 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
               return "break" as const
             }
 
-            const stepEffect = runStep(processArgs)
+            const stepEffect = runStep(processArgs, [
+              ...resolvedPrefix.prefix.currentTurnMessages,
+              ...dispatchSyntheticMessages,
+            ])
 
             const result = yield* stepEffect.pipe(
               Effect.onExit((exit) =>
@@ -4785,6 +5194,15 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
                   .pipe(Effect.ignore),
               ),
             )
+
+            if (handle.message.time.completed && !handle.message.error) {
+              yield* SessionPrefixSnapshot.advance({
+                sessionID,
+                profileKey: prefixProfileKey,
+                revision: resolvedPrefix.snapshot.revision,
+                watermarkMessageID: handle.message.id,
+              })
+            }
 
             if (result === "continue" && (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))) {
               return "continue" as const
@@ -4932,8 +5350,11 @@ If this task is a simple fix, Q&A, or read-only operation, you can skip this not
 
             if (textLoopBuffer.length >= TEXT_LOOP_TRIGGER_COUNT) {
               const isTextLoop = detectTextLoop(textLoopBuffer, TEXT_LOOP_TRIGGER_COUNT)
-
-              if (isTextLoop) {
+              // Prefer streak crop (request-layer) over a second recovery user
+              // when this turn already cropped a thinking streak. Re-deriving
+              // detectStreak on the cropped msgs is a false negative — the
+              // streak assistants are gone — so gate on the crop flag.
+              if (isTextLoop && !loopStreakCropped) {
                 if (textLoopRecoveryAttempts >= TEXT_LOOP_MAX_RECOVERY) {
                   yield* slog.info("text loop: max recovery exceeded, terminating")
                   yield* bus.publish(Session.Event.Error, {

@@ -7,12 +7,65 @@ import { Instance } from "../../src/project/instance"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
-import { SessionPrompt, sanitizeGeneratedTitle, titleContext, titleInputText, titlePromptText, truncateTitle } from "../../src/session/prompt"
+import {
+  SessionPrompt,
+  predictContext,
+  samePreflightRecoveryDomain,
+  sanitizeGeneratedTitle,
+  titleContext,
+  titleInputText,
+  titlePromptText,
+  truncateTitle,
+} from "../../src/session/prompt"
 import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
 import { startScriptedLLMServer, toolCallResponse } from "../lib/scripted-llm-server"
 
 void Log.init({ print: false })
+
+describe("samePreflightRecoveryDomain", () => {
+  test("accepts an unchanged recovery domain", () => {
+    expect(
+      samePreflightRecoveryDomain(
+        {
+          providerID: "test",
+          modelID: "test-model",
+          usableTokens: 18_000,
+          isLastStep: false,
+          recoveryFloorTokens: 405,
+        },
+        {
+          providerID: "test",
+          modelID: "test-model",
+          usableTokens: 18_000,
+          isLastStep: false,
+          recoveryFloorTokens: 405,
+        },
+      ),
+    ).toBe(true)
+  })
+
+  test("rejects a recovery domain when only isLastStep changes", () => {
+    expect(
+      samePreflightRecoveryDomain(
+        {
+          providerID: "test",
+          modelID: "test-model",
+          usableTokens: 18_000,
+          isLastStep: false,
+          recoveryFloorTokens: 405,
+        },
+        {
+          providerID: "test",
+          modelID: "test-model",
+          usableTokens: 18_000,
+          isLastStep: true,
+          recoveryFloorTokens: 405,
+        },
+      ),
+    ).toBe(false)
+  })
+})
 
 describe("title helpers", () => {
   test("keeps text, subtask prompts, and attachment labels while ignoring synthetic text", () => {
@@ -25,13 +78,23 @@ describe("title helpers", () => {
   })
 
   test("truncates long Latin titles at a word boundary", () => {
-    expect(truncateTitle("Fix ThreadPoolExecutor concurrency issue in production")).toBe("Fix ThreadPoolExecutor concurrency issue in…")
-    expect(truncateTitle("请修复 title 生成协议中的图片输入校验与模型选择逻辑。并补充更多回归测试覆盖多模态场景并保证兼容旧客户端")).toBe("请修复 title 生成协议中的图片输入校验与模型选择逻辑。…")
+    expect(truncateTitle("Fix ThreadPoolExecutor concurrency issue in production")).toBe(
+      "Fix ThreadPoolExecutor concurrency issue in…",
+    )
+    expect(
+      truncateTitle(
+        "请修复 title 生成协议中的图片输入校验与模型选择逻辑。并补充更多回归测试覆盖多模态场景并保证兼容旧客户端",
+      ),
+    ).toBe("请修复 title 生成协议中的图片输入校验与模型选择逻辑。…")
   })
 
   test("builds fallback context for image-only and mixed multimodal requests", () => {
-    expect(titleInputText(undefined, [{ type: "image", data: "AA==", mime: "image/png", filename: "screen.png" }])).toBe("Attachment: screen.png")
-    expect(titleInputText("What is wrong?", [{ type: "image", data: "AA==", mime: "image/png" }])).toBe("What is wrong?\nAttachment: image/png")
+    expect(
+      titleInputText(undefined, [{ type: "image", data: "AA==", mime: "image/png", filename: "screen.png" }]),
+    ).toBe("Attachment: screen.png")
+    expect(titleInputText("What is wrong?", [{ type: "image", data: "AA==", mime: "image/png" }])).toBe(
+      "What is wrong?\nAttachment: image/png",
+    )
   })
 
   test("wraps conversation data after the title instruction", () => {
@@ -45,12 +108,12 @@ describe("title helpers", () => {
   })
 
   test("includes a canonical locale in the title prompt", () => {
-    expect(titlePromptText("Diagnose the upload flow", "zh-cn")).toContain("Write the title using locale \"zh-CN\".")
+    expect(titlePromptText("Diagnose the upload flow", "zh-cn")).toContain('Write the title using locale "zh-CN".')
     expect(titlePromptText("Diagnose the upload flow", "not a locale")).not.toContain("Write the title using locale")
   })
 
   test("rejects tool-call shaped generated titles", () => {
-    expect(sanitizeGeneratedTitle("<tool_call>\n{\"name\":\"read\",\"arguments\":{}}\n</tool_call>")).toBeUndefined()
+    expect(sanitizeGeneratedTitle('<tool_call>\n{"name":"read","arguments":{}}\n</tool_call>')).toBeUndefined()
     expect(sanitizeGeneratedTitle("好的，我来先理解这个问题：点击项目会改变顺序。<tool_call>")).toBeUndefined()
     expect(sanitizeGeneratedTitle("tool_call: read {path: /tmp/a}")).toBeUndefined()
     expect(sanitizeGeneratedTitle("<function_call>read({path: '/tmp/a'})</function_call>")).toBeUndefined()
@@ -59,8 +122,91 @@ describe("title helpers", () => {
 
   test("removes thinking blocks before accepting a title", () => {
     expect(sanitizeGeneratedTitle("<think>内部推理，不应成为标题</think>\n修复会话标题生成")).toBe("修复会话标题生成")
-    expect(sanitizeGeneratedTitle("<think>我可以调用 <tool_call>read</tool_call>，但最终直接生成标题</think>\n重构认证流程")).toBe("重构认证流程")
+    expect(
+      sanitizeGeneratedTitle("<think>我可以调用 <tool_call>read</tool_call>，但最终直接生成标题</think>\n重构认证流程"),
+    ).toBe("重构认证流程")
     expect(sanitizeGeneratedTitle("<think>只有推理，没有最终标题</think>")).toBeUndefined()
+  })
+})
+
+describe("predictContext", () => {
+  const user = (parts: MessageV2.Part[]) => ({ info: { role: "user" }, parts }) as unknown as MessageV2.WithParts
+  const assistant = (completed: number | undefined) =>
+    ({
+      info: { role: "assistant", providerID: "p", modelID: "m", time: { completed } },
+      parts: [{ type: "text", text: "done" }],
+    }) as unknown as MessageV2.WithParts
+
+  test("strips the skills catalog and auto-loaded SKILL.md bodies from user queries", () => {
+    const context = predictContext([
+      user([
+        {
+          type: "text",
+          text: "<system-reminder>\nAuthoritative skills catalog snapshot v2:\n…\n</system-reminder>",
+          synthetic: true,
+        },
+        { type: "text", text: "重构 predict 的上下文构建" },
+        {
+          type: "text",
+          text: '<system-reminder>\n<skill_content name="dataviz">\n…\n</skill_content>\n</system-reminder>',
+          synthetic: true,
+        },
+      ] as MessageV2.Part[]),
+      assistant(1),
+    ])
+    expect(context?.messages[0].parts.map((p) => (p.type === "text" ? p.text : p.type))).toEqual([
+      "重构 predict 的上下文构建",
+    ])
+    expect(JSON.stringify(context?.messages)).not.toContain("system-reminder")
+  })
+
+  test("keeps non-synthetic parts that are not plain text", () => {
+    const context = predictContext([
+      user([
+        { type: "text", text: "看这张图", synthetic: false },
+        { type: "file", mime: "image/png", url: "data:image/png;base64,AA==", filename: "diagram.png" },
+      ] as MessageV2.Part[]),
+      assistant(1),
+    ])
+    expect(context?.messages[0].parts).toHaveLength(2)
+  })
+
+  test("caps at the 3 most recent user queries plus the answering assistant turn", () => {
+    const context = predictContext([
+      user([{ type: "text", text: "one" }] as MessageV2.Part[]),
+      user([{ type: "text", text: "two" }] as MessageV2.Part[]),
+      user([{ type: "text", text: "three" }] as MessageV2.Part[]),
+      user([{ type: "text", text: "four" }] as MessageV2.Part[]),
+      assistant(1),
+    ])
+    expect(context?.messages).toHaveLength(4)
+    expect(context?.messages.slice(0, 3).map((m) => m.parts.map((p) => (p.type === "text" ? p.text : "")))).toEqual([
+      ["two"],
+      ["three"],
+      ["four"],
+    ])
+  })
+
+  test("bails when the answering assistant turn is still running", () => {
+    expect(
+      predictContext([user([{ type: "text", text: "hi" }] as MessageV2.Part[]), assistant(undefined)]),
+    ).toBeUndefined()
+  })
+
+  test("bails with no user query, and when the newest user message is synthetic-only", () => {
+    expect(predictContext([assistant(1)])).toBeUndefined()
+    expect(
+      predictContext([user([{ type: "text", text: "sys", synthetic: true }] as MessageV2.Part[]), assistant(1)]),
+    ).toBeUndefined()
+  })
+
+  test("does not mutate the stored parts", () => {
+    const parts = [
+      { type: "text", text: "real" },
+      { type: "text", text: "reminder", synthetic: true },
+    ] as MessageV2.Part[]
+    predictContext([user(parts), assistant(1)])
+    expect(parts).toHaveLength(2)
   })
 })
 
@@ -128,16 +274,18 @@ describe("SessionPrompt.genTitle multimodal request", () => {
                 context: [
                   {
                     info: { role: "user", id: "context-user" },
-                    parts: [{ type: "file", mime: "image/jpeg", url: "data:image/jpeg;base64,AQ==", filename: "context.jpg" }],
+                    parts: [
+                      { type: "file", mime: "image/jpeg", url: "data:image/jpeg;base64,AQ==", filename: "context.jpg" },
+                    ],
                   },
                 ] as unknown as MessageV2.WithParts[],
                 providerID: ProviderID.make("title-test"),
                 modelID: ModelID.make("text-lite"),
               })
 
-             expect(result).toEqual({ title: "分析 Chrome 商店截图", status: "generated" })
-             expect(stub.captures).toHaveLength(1)
-             const messages = stub.captures[0]?.messages ?? []
+              expect(result).toEqual({ title: "分析 Chrome 商店截图", status: "generated" })
+              expect(stub.captures).toHaveLength(1)
+              const messages = stub.captures[0]?.messages ?? []
               expect(stub.captures[0]?.model).toBe("vision")
               const userMessages = messages.filter((message) => message.role === "user")
               expect(userMessages).toHaveLength(1)
@@ -146,7 +294,7 @@ describe("SessionPrompt.genTitle multimodal request", () => {
               const content = userMessages[0]?.content as Array<Record<string, unknown>>
               const textPart = content.find((part) => part.type === "text")
               expect(textPart?.text).toContain("Generate a title for this conversation.")
-              expect(textPart?.text).toContain("Write the title using locale \"zh-CN\".")
+              expect(textPart?.text).toContain('Write the title using locale "zh-CN".')
               expect(textPart?.text).toContain("<conversation>")
               expect(textPart?.text).toContain("请分析 Chrome 商店截图")
 
@@ -765,9 +913,7 @@ describe("session.prompt regression", () => {
               expect(calls).toBe(2)
               // Final answer is the recovered text, not the discarded markup.
               expect(result.info.role).toBe("assistant")
-              expect(
-                result.parts.some((part) => part.type === "text" && part.text.includes("recovered")),
-              ).toBe(true)
+              expect(result.parts.some((part) => part.type === "text" && part.text.includes("recovered"))).toBe(true)
 
               // The discarded degraded turn carries the TextToolCallError marker.
               const msgs = yield* sessions.messages({ sessionID: session.id })

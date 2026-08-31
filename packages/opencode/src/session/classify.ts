@@ -1,5 +1,7 @@
 import { MessageV2 } from "./message-v2"
 
+export const REQUEST_OVERFLOW_RECOVERY_MESSAGE = "Request overflow triggered context recovery"
+
 /**
  * Outcome of classifying a single assistant step. Pure data — `runLoop` decides
  * what side effect (nudge / retry / error / break) each category triggers.
@@ -49,10 +51,7 @@ export function classifyAssistantStep(input: {
   // from the in-flight tool that won't ever resolve. See Spec ③.
   if (
     input.parts.some(
-      (part) =>
-        part.type === "tool" &&
-        !part.metadata?.providerExecuted &&
-        part.state.status !== "error",
+      (part) => part.type === "tool" && !part.metadata?.providerExecuted && part.state.status !== "error",
     )
   )
     return { type: "continue" }
@@ -70,6 +69,7 @@ export function classifyAssistantStep(input: {
     input.recoverOverflowPlaceholder &&
     assistant.finish === "cancelled" &&
     assistant.error?.name === "MessageAbortedError" &&
+    assistant.error.data.message === REQUEST_OVERFLOW_RECOVERY_MESSAGE &&
     input.parts.length === 0
   )
     return { type: "continue" }
@@ -102,8 +102,7 @@ export function classifyAssistantStep(input: {
   if (assistant.finish === "tool-calls") return { type: "continue" }
 
   // 4. Stale assistant predating the current user turn — don't terminate on it.
-  if (input.phase === "existing-assistant" && !(input.lastUser.id < assistant.id))
-    return { type: "continue" }
+  if (input.phase === "existing-assistant" && !(input.lastUser.id < assistant.id)) return { type: "continue" }
 
   // 5. Errored step — checked before content so an errored message that also
   // carries text isn't misjudged `final`.
@@ -121,9 +120,7 @@ export function classifyAssistantStep(input: {
   // still produced usable text is a usable-but-abnormal completion: surface it as
   // `degraded` so runLoop can record it instead of silently treating it as clean.
   if (
-    input.parts.some(
-      (part) => part.type === "text" && !part.synthetic && !part.ignored && part.text.trim().length > 0,
-    )
+    input.parts.some((part) => part.type === "text" && !part.synthetic && !part.ignored && part.text.trim().length > 0)
   )
     return assistant.finish === "other" ? { type: "final", degraded: true } : { type: "final" }
   if (input.parts.some((part) => part.type === "reasoning" && part.text.trim().length > 0)) {

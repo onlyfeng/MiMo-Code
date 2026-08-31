@@ -711,3 +711,141 @@ git diff --name-only \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
 ```
+
+## 2026-09-01 prefix snapshots, compaction projection, recovery, and CI synchronization
+
+- Prior reviewed upstream:
+  `35bb2636a99b457940f1c12f2c8f5ec554369c57`.
+- Freshly reviewed upstream:
+  `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`.
+- Prior fork `main` tip:
+  `cce5b8383ce812d608254dc4deecf672e2795773`.
+- Main behavior merge:
+  `e7f40fb3a5a81f5a9efd36aa494caac3849d7896`, whose parents are the prior
+  fork tip and freshly reviewed upstream.
+- Final main behavior:
+  `2b4c6569ac308fa6a6662c2c044059893748e0ad`. After the first exact-SHA
+  workflow correctly failed closed, it replaced a pipe under `pipefail` in
+  zero-case allowlist discovery with an explicit array scan. The test inputs,
+  hash buckets, and report expectations are unchanged.
+- The upstream range contains 21 commits, including 16 non-merge commits and
+  13 first-parent commits, across 68 paths with 6,296 insertions and 1,019
+  deletions. It changes no tracked lockfile or package manifest.
+- The main transition contains 65 paths with 6,609 insertions and 500
+  deletions. All 6 active FD and 15 active FC records were reviewed; no owner
+  was added, retired, or transferred.
+
+### Decision notes
+
+- Adopted local MCP stdio-exit diagnostics, ask-timeout isolation,
+  default-off Auto-Worktree notices, same-session subagent grant inheritance,
+  checkpoint tail digests, explicit errored-turn recovery, opt-in loop-streak
+  cropping, prediction context, persistent request-prefix snapshots, Bun path
+  pinning, compaction projection, frozen-prefix summary requests, and Node
+  build version injection.
+- Adapted request-prefix persistence to the complete resolved model identity,
+  frozen schema-only tool order, loaded MCP membership, and live-executor
+  rebinding. Missing frozen tools and newly live tools both fail closed.
+- Kept instruction files enabled by default while independently gating the
+  dynamic environment block. The explicit disable flag suppresses both model
+  content and the `InstructionsLoaded` event.
+- Rejected upstream's system-tail skill-catalog placement, compaction tool
+  execution, and implicit LLM-server listener advertisement. Versioned,
+  permission-filtered user-part catalog snapshots, `toolChoice: "none"`, and
+  FD-004's explicit-listener boundary remain authoritative.
+- Adapted projection tail budgeting to
+  `min(40K, usable - frozen system/tools/summary/manifest)`, preserving the
+  reserve-safe FC-015 boundary and the 25K regression sentinel.
+- Replaced positional CI sharding with stable path-hash shards, kept TSX and
+  runtime-worktree coverage, isolated the real stdio observer process, and
+  added strict XML/count/file-completeness verification. The verifier accepts
+  only fresh, parseable, non-empty reports whose top-level suites exactly
+  match the shard's expected runnable files; known missing-file, truncated,
+  zero-execution, zero-suite, and error-mismatch reports are rejected.
+
+### Capability inventory (18/18)
+
+`AR-20260901` is the audit range used by every result row:
+`old_upstream=35bb2636a99b457940f1c12f2c8f5ec554369c57`,
+`new_upstream=2c5cd4972c3f3cb8947a5117c7910d485e6f6179`, and
+`main_merge=e7f40fb3a5a81f5a9efd36aa494caac3849d7896`,
+`main_behavior=2b4c6569ac308fa6a6662c2c044059893748e0ad`.
+
+`MAIN-VERIFIED` means the final four shards executed 5,517 tests with 41
+skipped/todo and zero failures, and the OpenCode/SDK typechecks, root lint,
+migration checks, two-pass SDK generation, build-node/build smoke tests, and
+focused matrices passed. Compatibility counterpart text names the overlay
+contract that must survive normal `main` to `dev/compat` propagation; it
+does not claim a compat SHA.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Local MCP startup-exit diagnostics | `AR-20260901` | `50c7c368`; `mcp/stdio-transport.ts` `ObservingStdioTransport`, `exitSnapshot`, `stderrSnapshot`; `mcp/index.ts` `connectLocal` | FC-004 MCP configuration and connection lifecycle | DC-NET-002 continues to own only remote RFC1918 MCP reachability | complementary | runtime, failure contract, logging, process lifecycle, tests | shared main | Adopt and adapt: use the public child-process API, retain `childProcessEnv`, bound the stderr tail to 4 KiB, redact log/status details, and distinguish natural exit from host shutdown | Dedicated `stdio-exit-observe.test.ts` process and `mcp/lifecycle.test.ts`; `MAIN-VERIFIED` |
+| 2 | Ask-timeout test-environment isolation | `AR-20260901` | `50c7c368`; per-test environment acquire/release in `permission/skip-all-timeout.test.ts` | FC-008 bounded CI isolation and the existing skip-all forced-ask timeout contract | Inherits shared test policy; no compatibility-only owner | complementary | tests, environment isolation, CI ordering | shared main | Adopt: remove module-level environment leakage without changing runtime permission semantics | `skip-all-timeout` and MCP sampling shard regressions; `MAIN-VERIFIED` |
+| 3 | Post-mutation Auto-Worktree notice and default-off toggle | `AR-20260901` | `f02ee661`, `75190e25`; `auto-worktree-hint.ts` `walkGitLayout`, `sessionMutatedMainWorktrees`, `buildAutoWorktreeNotice`; `Config.Info.auto_worktree`; `auto_worktree_hint_sent` migration | FC-007 fixed cwd, protected roots, and path boundaries | Inherits shared behavior; DC-PLATFORM-001 platform fallbacks remain independent | conflicting and complementary | runtime, config, migration, tool detection, SDK, docs, tests | shared main | Adopt and adapt: inject only after a successful write or Git mutation, only for a primary root session, and only once per session; omitted/false configuration emits no notice and true explicitly enables it | Auto-worktree config/notice/bash-write/scan matrices and SDK generation; `MAIN-VERIFIED` |
+| 4 | Same-session subagent permission inheritance | `AR-20260901` | `35065860`; `agent/config.ts` `decideAskRouting`; `prompt.ts` session ID propagation; ask-routing and inheritance tests | FC-001 actor generation/lifecycle and FD-009 fail-closed admission | DC-ACTOR-001 full-context actor overlay | complementary | permission, actor identity, lifecycle, tests | shared main | Adopt and adapt: only `mode=subagent` may fall back to the current `sessionID`; peers cannot self-inherit, and explicit deny, non-interactive, and skip-all boundaries remain intact | `ask-routing.test.ts` and `permission/inherit.test.ts`; `MAIN-VERIFIED` |
+| 5 | Stable test sharding and MCP process isolation | `AR-20260901` | `35065860`; `.github/workflows/test.yml` path-hash sharding, TS/TSX discovery, dedicated stdio job, and `verify-junit.py` | FC-008 bounded workflow cleanup and targeted isolation | Workflow continues to cover `main`, `dev`, and `dev/compat` | conflicting | workflow, discovery, isolation, JUnit contract | shared main | Adapt: reject position-based sharding and whole-file runtime exclusion; retain TSX and runtime-worktree discovery, assign files by stable path hash, isolate the stdio test polluted by `mock.module`, and fail closed on malformed, incomplete, or zero-execution JUnit | Four shards with 5,517 executed, 41 skipped/todo, and zero failures, plus the dedicated JUnit job; `MAIN-VERIFIED` |
+| 6 | Checkpoint rebuild-tail activity digest | `AR-20260901` | `d2386a22`; `tail-digest.ts` `renderTailDigest`, `collapseCheckpointTail`; `CheckpointPart.digestUpTo`; checkpoint rendering | FC-002 canonical checkpoint writer and FC-015 context boundary | DC-CONTEXT-001 preflight and DC-ACTOR-001 frozen actor context | complementary | runtime, persisted schema, model projection, SDK, tests | shared main | Adopt and adapt: retain physical history, collapse the summarized assistant tail only in the model request, persist `digestUpTo` only when activity was emitted, and leave legacy boundaries unchanged | Rebuild-tail-digest, checkpoint-render, and prune matrices plus SDK generation; `MAIN-VERIFIED` |
+| 7 | Errored-assistant recovery candidates | `AR-20260901` | `d1a50729`; `processor.ts` error-completion policy; `prompt.ts` `recoveryCandidates`, `sweepOrphanAssistants` | FC-001 recovery and admission lifecycle | DC-ACTOR-001 and DC-CONTEXT-001 retain actor/context boundaries | partial duplicate with lifecycle conflict | recovery, lifecycle, TUI pending state, tests | shared main | Adopt and adapt: keep errored assistants recoverable during background sweeps; when a new user explicitly abandons the old turn in an idle session, immediately complete that orphan so subsequent messages do not remain permanently QUEUED | Errored-candidate and immediate-sweep regressions; `MAIN-VERIFIED` |
+| 8 | Opt-in loop-streak request recovery | `AR-20260901` | `9d096aaa`; `prompt/loop-streak.ts` `streakKey`, `detectStreak`, `cropMessagesForStreak`, `applyPersistedCrops`; `experimental.loop_streak_recovery` | FC-009 synthetic provenance and FC-015 bounded context | DC-CONTEXT-001 request preflight and DC-ACTOR-001 actor context | complementary | behavior, config, persisted metadata, cache, tests, docs | shared main | Adopt and adapt: default off; crop whole assistant messages only in the request layer, retain DB history, create no new user, persist the span as an ignored synthetic part on the existing parent user, reapply it on later requests, and retain the text-loop fallback | `loop-streak.test.ts` and prompt request-boundary integration; `MAIN-VERIFIED` |
+| 9 | Instruction-file injection decoupled from the dynamic environment | `AR-20260901` | `03fcb66a`; `Flag.MIMOCODE_DISABLE_INSTRUCTIONS`; `prompt.ts` `instruction.system`, `InstructionsLoaded` | FD-002 reported instructions must reach the model and FD-005 resolved identity | DC-MODEL-001 MaxMode, DC-CONTEXT-001, and DC-ACTOR-001 | conflicting and complementary | model-visible content, environment flags, event contract, frozen prefix, tests | shared main | Adopt and adapt: inject instructions by default through normal, MaxMode, and capture paths; keep the runtime environment controlled by the dynamic flag; when disabled, suppress both instruction content and the `InstructionsLoaded` event | Normal, disabled, and MaxMode instruction regressions; `MAIN-VERIFIED` |
+| 10 | Prediction-context extraction | `AR-20260901` | `03fcb66a`; exported `predictContext`; prediction-side `stripMedia` | FC-009 synthetic-message provenance and FC-011 fork-facing prompt behavior | DC-CONTEXT-001 keeps side-channel input bounded | complementary | prediction context, provenance, media handling, tests | shared main | Adopt: use only the three most recent real user queries and the last assistant, exclude synthetic catalog/skill bodies, and keep the prediction call outside the session trajectory | `prompt.test.ts` `predictContext` matrix; `MAIN-VERIFIED` |
+| 11 | Skill-catalog model placement and version semantics | `AR-20260901` | `8b9b5fec`; upstream moves the catalog to the system tail; main `prompt.ts` `insertReminders`, `canonicalSkillCatalog`, `skillCatalogSnapshotVersion` | FC-005 permission-consistent versioned catalog and FD-009 frozen capture | DC-CONTEXT-001 accounts for retained snapshots | conflicting | model-visible placement, persistence, cache, permissions, tests | shared main | Reject upstream placement: retain hash-versioned, permission-filtered, complete user-part snapshots; append a new snapshot when the catalog changes without rewriting history or freezing the old catalog indefinitely | Multi-turn skill-command, permission, and checkpoint regressions; `MAIN-VERIFIED` |
+| 12 | Persistent session-prefix snapshot | `AR-20260901` | `4bd85803`; `prefix-snapshot.ts` `profileKey`, `pin`, `rotate`, `advance`, `toolsHash`, `snapshotTools`, `restoreTools`; prefix/tool/loaded-MCP migrations | FD-002, FD-005, FD-006, FD-009, FC-005, and FC-015 | DC-MODEL-001, DC-CONTEXT-001, and DC-ACTOR-001 | conflicting and complementary | runtime, cache prefix, schema, migrations, tool membership, capture, tests | shared main | Adopt and adapt: key profiles by model, agent, harness, system, and permission; freeze the system, schema-only tools, and loaded MCP membership; rotate explicitly when tools change; checkpoint capture reads frozen membership before a live rotation | Prefix-snapshot, frozen MCP capture, and migration matrices; `MAIN-VERIFIED` |
+| 13 | Build-time Bun path pinning | `AR-20260901` | `0abee120`; `script/build.ts` package Bun-version guard and `process.execPath install`; `local-install.sh` | FC-012 fork publication and FC-014 Cloud Agent environment | Inherits shared build contract | complementary | build, runtime selection, installer | shared main | Adopt: prevent an ancestor `node_modules/.bin/bun` from hijacking the build and install build dependencies through the already-validated Bun executable | Build smoke and root lockfile/lint gates; `MAIN-VERIFIED` |
+| 14 | Compaction summary plus compression-time tail projection | `AR-20260901` | `f551822a`; `buildFileManifest`, `buildTail`, `shrinkLargeToolResults`, `buildSummaryMessage`, `projectionTailBudget`; `CompactionPart.projection` | FC-002 checkpoint semantics and FC-015 reserve-safe compaction | DC-CONTEXT-001 effective-window preflight and DC-ACTOR-001 static-prefix overflow | conflicting and complementary | runtime, context budget, schema, generated SDK/OpenAPI, config, tests | shared main | Adopt and adapt: retain the summary, file manifest, and complete API rounds; cap the tail at `min(40K, usable-fixed)` under the fork effective-window/reserve contract; preserve the 25K reserve sentinel and regenerate SDK/OpenAPI from source | Compaction-projection, rebuild-boundary, auto-overflow, and two-pass generation checks; `MAIN-VERIFIED` |
+| 15 | Compaction reuses the frozen system/tools prefix | `AR-20260901` | `893d7e83`; `compaction.ts` `SessionPrefixSnapshot.get`; frozen `system`, restored tools, and `activeTools`; prompt-effect frozen-prefix test | FD-002, FD-005, FD-006, and FC-015 | DC-MODEL-001 and DC-CONTEXT-001 retain the same frozen/effective context | complementary | cache prefix, system identity, tool schema, migrations, tests | shared main | Adopt and adapt: continue the parent turn's frozen system and exact tool-schema bytes for the summary request rather than rebuilding the current registry prefix; a legacy missing snapshot warns and follows the compatibility fallback | Exact-wire frozen system/tools regression; `MAIN-VERIFIED` |
+| 16 | Compaction tool-use policy | `AR-20260901` | `6080a114`; upstream `toolChoice: "auto"`; main `compaction.ts` `toolChoice: "none"`; `processor.ts` summary tool-call guard | FD-006 tool authority and FC-015 compaction boundary | Inherits shared policy; no compatibility-only owner | conflicting | runtime, tool contract, cache prefix, tests | shared main | Reject tool execution: retain frozen tools and `activeTools` to preserve the schema prefix and cache, but send `toolChoice=none`; restored schema-only tools have no execute closure and the summary processor also rejects tool calls | Prompt-effect regression asserts both exact frozen-tool equality and `tool_choice=none`; `MAIN-VERIFIED` |
+| 17 | Implicit LLM-server listener advertisement | `AR-20260901` | `ceaf172b`; upstream `Server.listen` advertisement and base-URL publication surfaces | FD-004 ordinary instances expose no implicit OpenAI-compatible listener | Compatibility inherits FD-004; no separate override | conflicting | network, listener lifecycle, security, API contract | shared main | Reject: do not restore the removed llm-server capability; ordinary serve/TUI instances publish no implicit `/v1` listener address, while explicit user-authentication metadata remains unaffected | LLM-server residual audit and FD-004/API/build matrix; `MAIN-VERIFIED` |
+| 18 | MiMoCode version injected into the Node target | `AR-20260901` | `8a2626cf`; `script/build-node.ts` defines `MIMOCODE_VERSION: Script.version` | FC-012 fork build/publication and FC-014 environment | Inherits the shared build-node surface | complementary | build-node, compile-time define, runtime version | shared main | Adopt: make Node and Bun builds consume the same source-derived MiMoCode version without introducing a manually maintained version value | Build-node typecheck/smoke and build smoke; `MAIN-VERIFIED` |
+
+Inventory count is 18 and result-row count is 18. Every incoming substantive
+capability records the audit range, commit/path/symbol evidence, both branch
+counterparts, relationship, drift, canonical owner, disposition, and status
+evidence; no incoming capability remains unclassified.
+
+### Validation evidence
+
+- The final four hash shards produced strict JUnit evidence for 5,517 executed
+  tests, 41 skipped/todo tests, and zero failures. Their expected top-level
+  suite counts were 138, 133, 112, and 106. The isolated stdio observer process
+  passed 6 tests and the same verifier contract. After the CI-only discovery
+  correction, Bash 3.2 re-executed the exact allowlist scan and revalidated all
+  four saved fresh reports against the unchanged current file buckets.
+- Focused MCP, permission, Auto-Worktree, checkpoint/digest, recovery,
+  loop/prefix, skills, compaction, overflow, and request-layer matrices passed.
+  Known-good reports were accepted; missing-file, truncated-XML,
+  zero-execution, zero-suite, and error-count mismatch reports were rejected.
+- `packages/opencode` and `packages/sdk/js` typechecks passed. Migration
+  verification reported the schema up to date. Root lint completed with zero
+  errors and 4,269 repository-wide warnings.
+- JavaScript SDK generation completed twice with identical output. The
+  build-node command and the single-platform build/smoke command both passed
+  with source-derived local version metadata. `bun ci` completed from the
+  frozen lockfile and no tracked lockfile or package manifest changed.
+
+### Changed-path calculation
+
+The 273-path, 25,268-insertion, 10,065-deletion total compares the freshly
+reviewed upstream tree with the frozen pre-documentation main behavior and
+excludes all five shared/compat registry tracking paths:
+
+```bash
+git diff --shortstat \
+  2c5cd4972c3f3cb8947a5117c7910d485e6f6179 \
+  2b4c6569ac308fa6a6662c2c044059893748e0ad -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  2c5cd4972c3f3cb8947a5117c7910d485e6f6179 \
+  2b4c6569ac308fa6a6662c2c044059893748e0ad -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
