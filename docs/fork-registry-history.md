@@ -723,10 +723,15 @@ git diff --name-only \
 - Main behavior merge:
   `e7f40fb3a5a81f5a9efd36aa494caac3849d7896`, whose parents are the prior
   fork tip and freshly reviewed upstream.
+- Final main behavior:
+  `2b4c6569ac308fa6a6662c2c044059893748e0ad`. After the first exact-SHA
+  workflow correctly failed closed, it replaced a pipe under `pipefail` in
+  zero-case allowlist discovery with an explicit array scan. The test inputs,
+  hash buckets, and report expectations are unchanged.
 - The upstream range contains 21 commits, including 16 non-merge commits and
   13 first-parent commits, across 68 paths with 6,296 insertions and 1,019
   deletions. It changes no tracked lockfile or package manifest.
-- The main transition contains 65 paths with 6,602 insertions and 500
+- The main transition contains 65 paths with 6,609 insertions and 500
   deletions. All 6 active FD and 15 active FC records were reviewed; no owner
   was added, retired, or transferred.
 
@@ -763,7 +768,8 @@ git diff --name-only \
 `AR-20260901` is the audit range used by every result row:
 `old_upstream=35bb2636a99b457940f1c12f2c8f5ec554369c57`,
 `new_upstream=2c5cd4972c3f3cb8947a5117c7910d485e6f6179`, and
-`main_merge=main_behavior=e7f40fb3a5a81f5a9efd36aa494caac3849d7896`.
+`main_merge=e7f40fb3a5a81f5a9efd36aa494caac3849d7896`,
+`main_behavior=2b4c6569ac308fa6a6662c2c044059893748e0ad`.
 
 `MAIN-VERIFIED` means the final four shards executed 5,517 tests with 41
 skipped/todo and zero failures, and the OpenCode/SDK typechecks, root lint,
@@ -803,7 +809,9 @@ evidence; no incoming capability remains unclassified.
 - The final four hash shards produced strict JUnit evidence for 5,517 executed
   tests, 41 skipped/todo tests, and zero failures. Their expected top-level
   suite counts were 138, 133, 112, and 106. The isolated stdio observer process
-  passed 6 tests and the same verifier contract.
+  passed 6 tests and the same verifier contract. After the CI-only discovery
+  correction, Bash 3.2 re-executed the exact allowlist scan and revalidated all
+  four saved fresh reports against the unchanged current file buckets.
 - Focused MCP, permission, Auto-Worktree, checkpoint/digest, recovery,
   loop/prefix, skills, compaction, overflow, and request-layer matrices passed.
   Known-good reports were accepted; missing-file, truncated-XML,
@@ -818,14 +826,14 @@ evidence; no incoming capability remains unclassified.
 
 ### Changed-path calculation
 
-The 273-path, 25,261-insertion, 10,065-deletion total compares the freshly
+The 273-path, 25,268-insertion, 10,065-deletion total compares the freshly
 reviewed upstream tree with the frozen pre-documentation main behavior and
 excludes all five shared/compat registry tracking paths:
 
 ```bash
 git diff --shortstat \
   2c5cd4972c3f3cb8947a5117c7910d485e6f6179 \
-  e7f40fb3a5a81f5a9efd36aa494caac3849d7896 -- . \
+  2b4c6569ac308fa6a6662c2c044059893748e0ad -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
@@ -834,7 +842,7 @@ git diff --shortstat \
 
 git diff --name-only \
   2c5cd4972c3f3cb8947a5117c7910d485e6f6179 \
-  e7f40fb3a5a81f5a9efd36aa494caac3849d7896 -- . \
+  2b4c6569ac308fa6a6662c2c044059893748e0ad -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
