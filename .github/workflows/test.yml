@@ -77,7 +77,14 @@ jobs:
           reported_files=()
 
           for f in "${zero_case_files[@]}"; do
-            if ! printf '%s\n' "${discovered[@]}" | grep -Fqx -- "$f"; then
+            found=0
+            for candidate in "${discovered[@]}"; do
+              if [[ "$candidate" == "$f" ]]; then
+                found=1
+                break
+              fi
+            done
+            if (( !found )); then
               echo "::error::zero-case allowlist entry is not discoverable: $f"
               exit 1
             fi
