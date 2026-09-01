@@ -18,6 +18,7 @@ never used as an inherited `main` or compat behavior review basis.
 | 2026-08-25 | `12b4bacedd3d0cb961578b29bfa7f613f6ac443f` | `6ae30e66ab0ecbb526f85009d300e7c2533fe72c` | `bcbd16fc237a5b2c6f2800afe834830ad739aa01` | 7 | 58 paths; 3,593 insertions; 233 deletions | Inherited fixed instance cwd with inert SDK compatibility, centralized bounded retry, typed admission, and main-only recovery/resume publication while preserving all seven compat-owned network, platform, per-agent MaxMode, bounded-context, actor-context, and TUI adaptations. |
 | 2026-08-27 | `45554bedf7fb7d041d16bbd6b8362ed2f54c56b7` | `d0acb856f1ec0edae6cce29ca44178af14d94293` | `268d5be1cd79e7da7c9f9cb6de5a65fed3c76e96` | 7 | 58 paths; 3,621 insertions; 257 deletions | Inherited the complete 13/13 shared transport, replace-agent, checkpoint, relative-path, title, skill, stable-memory, actor-context, and compaction audit while preserving all seven compat-owned adaptations and adding only evidence-backed fixture timeout headroom. |
 | 2026-08-28 | `cce5b8383ce812d608254dc4deecf672e2795773` | `64b4bdda6829ca697cecf4cf79eeec6a35ec2e57` | `710a5ffb8aa9b7dedc63789759b4d995d587f5d1` | 7 | 58 paths; 3,621 insertions; 257 deletions | Inherited the complete 3/3 actor-follow-up, PPTX-sourcing, and overflow-fixture audit; preserved all seven compat owners, including bounded actor state/turn context and deterministic reserve-safe overflow evidence on the two overlapping owners. |
+| 2026-09-01 | `ed33097a961c9d915b00b2bbb2ebaf23e7ad2288` | `2b4c6569ac308fa6a6662c2c044059893748e0ad` | `2c8e74968322005cec4d9a3e3dcccc634ca711c9` | 7 | 87 paths; 9,411 insertions; 1,498 deletions | Inherited the complete 18/18 shared audit, retained all seven compat owners, and corrected shared lifecycle, chronology, checkpoint-coverage, compaction-admission, and TUI projection behavior at compat seams without creating a new compat capability owner. |
 
 ## 2026-08-24 initial ownership review
 
@@ -650,6 +651,186 @@ git diff --shortstat \
 git diff --name-only \
   64b4bdda6829ca697cecf4cf79eeec6a35ec2e57 \
   710a5ffb8aa9b7dedc63789759b4d995d587f5d1 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-09-01 prefix, projection, recovery, and CI synchronization propagation
+
+- Reviewed upstream:
+  `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`.
+- Accepted fork `main` audit tip:
+  `ed33097a961c9d915b00b2bbb2ebaf23e7ad2288`.
+- Inherited main behavior:
+  `2b4c6569ac308fa6a6662c2c044059893748e0ad`.
+- Prior compat tip: `d3ef2e08c5a5317d264631a929025f3f69af75c7`.
+- Initial compat integration merge:
+  `2d9d8e755ccf5c53c5883257070b83667ec1462d`, whose parents are prior compat
+  `d3ef2e08c5a5317d264631a929025f3f69af75c7` and accepted main
+  `ed33097a961c9d915b00b2bbb2ebaf23e7ad2288`.
+- Final compat behavior follow-up:
+  `2c8e74968322005cec4d9a3e3dcccc634ca711c9`, based on the integration merge.
+- Main-audit inheritance merge remains
+  `2d9d8e755ccf5c53c5883257070b83667ec1462d`. It carries the accepted shared
+  audit and the initial reconciled compat behavior; the final behavior is the
+  follow-up above.
+- Active ownership remains DC-NET-001, DC-NET-002, DC-PLATFORM-001,
+  DC-MODEL-001, DC-CONTEXT-001, DC-ACTOR-001, and DC-TUI-001. No owner was
+  added, retired, or transferred away from compat.
+- The `2c8e7496` follow-up corrects shared FC-001, FC-002, and FC-015 at compat
+  context, actor, server, and TUI seams. Atomic admission, global revert, and
+  checkpoint-coverage projection therefore remain shared-contract corrections,
+  not new persistent `dev/compat` capability owners.
+
+### Complete shared-capability disposition (18/18)
+
+| # | Inherited capability | Compat overlap and disposition | Canonical owner | Status |
+| ---: | --- | --- | --- | --- |
+| 1 | Local MCP stdio-exit diagnostics | Adopt bounded/redacted natural-exit diagnostics; DC-NET-002 remains limited to remote RFC1918 reachability | shared main | adopted with compat sentinel |
+| 2 | Ask-timeout test isolation | Adopt per-test environment acquire/release without changing permission semantics | shared main | adopted exactly |
+| 3 | Default-off Auto-Worktree notices | Adopt post-mutation, primary-root, once-per-session notices; keep DC-PLATFORM-001 fallbacks independent | shared main | adopted with platform bounds |
+| 4 | Same-session subagent permission inheritance | Adopt only for admitted subagents; preserve peer fail-closed behavior and DC-ACTOR-001 lifecycle scope | shared main | adapted with actor bounds |
+| 5 | Stable path-hash test sharding | Adopt TS/TSX discovery, dedicated stdio isolation, and strict fresh JUnit completeness for `main`, `dev`, and `dev/compat` | shared main | adapted exactly |
+| 6 | Checkpoint tail digest | Adopt request-only tail collapse and persisted `digestUpTo`; use exact chronological intervals, expose authoritative checkpoint coverage independently of the newest-100 page, retain physical history, cap final model-visible digest text at 50 KiB, and preserve DC context/actor boundaries | shared main | adopted with compat bounds |
+| 7 | Errored-assistant recovery | Adopt recoverable errored candidates plus explicit abandonment cleanup; preserve actor-slice isolation | shared main | adapted with lifecycle bounds |
+| 8 | Opt-in loop-streak recovery | Adopt default-off whole-assistant request cropping, persisted provenance, and later-request replay | shared main | adopted with context bounds |
+| 9 | Instruction files independent of dynamic environment | Keep instructions on by default across normal, MaxMode, and capture paths; disabling them also suppresses `InstructionsLoaded` | shared main | adapted exactly |
+| 10 | Prediction-context extraction | Adopt recent-real-user plus last-assistant context, exclude synthetic catalog/skill bodies, strip media, and retain DC-CONTEXT-001 caps | shared main | adopted with compat bounds |
+| 11 | Versioned skill-catalog semantics | Reject system-tail placement; retain complete permission-filtered, hash-versioned user-part snapshots without rewriting history | shared main | upstream placement rejected; fork contract retained |
+| 12 | Persistent request-prefix snapshots | Store the authorized searchable tool/MCP pool separately from wire-active and loaded-MCP membership; hash the complete snapshot, restore the full pool for capture, and restore only active tools for compaction | shared main | adopted and adapted |
+| 13 | Build-time Bun path pinning | Adopt the validated Bun executable for dependency installation and reject ancestor-bin hijacking | shared main | adopted exactly |
+| 14 | Compaction summary and projection | Keep summary, manifest, complete arrived rounds, and `min(40K, usable-fixed)` optional-tail budget; external user/spawn arrivals remain mandatory beyond that optional budget, and admission handoff suppresses a stale continuation only after the replacement request commits successfully | shared main | adopted with reserve-safe bounds |
+| 15 | Compaction reuses frozen prefix | Adopt exact frozen system/tool-schema bytes and active membership; preserve compat model/context accounting | shared main | adopted with compat bounds |
+| 16 | Compaction tool-use policy | Reject upstream automatic tool execution; retain frozen schemas for prefix stability while enforcing `toolChoice: "none"` | shared main | upstream behavior rejected |
+| 17 | Implicit LLM-server advertisement | Reject implicit listener/base-URL publication; FD-004's explicit-listener boundary remains authoritative | shared main | upstream behavior rejected |
+| 18 | Node-target MiMoCode version | Adopt the source-derived version define and verify the built module under plain Node | shared main | adopted exactly |
+
+Inventory count is 18 and result-row count is 18. Every shared capability has
+a reviewed compat counterpart, canonical owner, disposition, and final status
+evidence; no incoming capability remains unclassified.
+
+### Active compat-owner review (7/7)
+
+| Owner | Incoming relationship | Reviewed disposition | Final evidence |
+| --- | --- | --- | --- |
+| DC-NET-001 | no direct overlap | Preserve approved private WebFetch after-permission call seam; shared SSRF utilities remain inherited | WebFetch and SSRF sentinels passed |
+| DC-NET-002 | complementary MCP overlap | Adopt local stdio diagnostics while preserving mocked RFC1918 remote client creation and avoiding a private-address production fork | lifecycle plus isolated stdio regressions passed |
+| DC-PLATFORM-001 | complementary Auto-Worktree/build overlap | Preserve fail-closed no-rg and Windows archive fallbacks under fixed cwd; shared mutation detection does not broaden fallback authority | ripgrep, archive, and Auto-Worktree matrices passed |
+| DC-MODEL-001 | direct prefix/instruction/compaction overlap | Preserve per-agent MaxMode, structured/final-step exclusions, per-agent status isolation, and final `toolChoice: "none"` | MaxMode and prompt-effect matrices passed |
+| DC-CONTEXT-001 | direct semantic overlap | Compose caps and preflight with versioned user-side skills, frozen prefix membership, reserve-safe projection, atomic external admission, exact chronology, positional checkpoint coverage, global revert/redo, recovery episodes, and mandatory arrived-user projection | context, coverage, projection, revert, recovery, and mutation sentinels passed |
+| DC-ACTOR-001 | direct permission/prefix overlap | Preserve frozen system, tools, searchable MCP pool, active/loaded subsets, permissions, turn context, bounded state, actor-scope admission and handoff, and unrecoverable-prefix failure | actor, permission, prefix-capture, admission, fork, and compaction matrices passed |
+| DC-TUI-001 | adjacent TUI runtime overlap | Preserve provider/model/variant truth, locale submission, and known-limit disclosure; checkpoint-context and global revert/redo changes do not transfer metadata presentation ownership | TUI metadata and adjacent context/revert sentinels passed |
+
+Owner count is 7 and result-row count is 7. Cleanly merging owners were reviewed
+alongside direct overlaps; no compat-only invariant was silently replaced by
+the inherited tree.
+
+### Race, projection, and overflow evidence
+
+- DC-CONTEXT-001 closes the pre-persistence admission race. A deterministic
+  regression admits a direct `noReply` request, holds it inside MCP
+  `readResource` before its message is durable, completes the held compaction
+  summary, and proves no stale continuation hook remains. The persisted request
+  is the final user after release. Removing the pending-admission guard makes
+  this regression RED by leaving one stale continuation hook.
+- External user admission now commits the user message and all parts in one
+  immediate transaction, validates ownership, preserves canonical exact retry,
+  rejects ID collisions, and assigns actor-local monotonic creation time.
+  Compaction waits on each same-actor admission token: a successful replacement
+  suppresses the stale continuation, while a failed admission resumes the
+  original request.
+- Every affected history consumer uses `(time.created, id)` with the ID ordered
+  by SQLite BINARY/UTF-8 bytes. U+E000 and U+10000 regressions bind the result
+  against JavaScript's opposite UTF-16 ordering. Forking, classification,
+  checkpoint activity, tail collapse, and revert cleanup use exact positions;
+  missing or reversed tail endpoints fail closed.
+- TUI undo/redo resolves the global chronological suffix, paginates until its
+  boundary is found or the source is exhausted, and blocks when the boundary is
+  absent. Event upsert/removal, part cleanup, and the 100-message cap share the
+  same canonical ordering.
+- Checkpoint context uses a separate authoritative coverage projection rather
+  than pinning a backdated marker in the newest-100 message window. Cold sync,
+  live provisional coverage, response sequencing, unresolved-watermark
+  fail-closed state, session/part deletion, and directory switching are covered
+  independently.
+- Projection treats newly arrived `source=user` and `source=spawn` requests as
+  mandatory even when the optional tail budget is zero; synthetic
+  `source=hook` continuation is not mandatory. This preserves external work
+  before the next request preflight can make a fail-closed size decision.
+- The oversized-arrival regression retains both the beginning and ending
+  markers of an approximately 400 KiB external request. It remains in the
+  recovery floor and terminates as `overflow-static` without projecting the
+  request away or starting an unbounded additional recovery cycle.
+- Prefix regressions bind the full authorized searchable MCP catalog, the
+  wire-active subset, and the loaded subset independently. Full-context capture
+  can search a previously unloaded authorized MCP tool, while compaction sends
+  only the frozen wire-active subset with `toolChoice: "none"`.
+- A plain-Node HTTP boundary smoke on Node v24.16.0 and
+  `node:sqlite MAX_VARIABLE_NUMBER=32766` reproduced the old unbounded `IN`
+  limit: 32,764 IDs / 32,766 parameters prepared, while 32,765 IDs / 32,767
+  parameters failed with `too many SQL variables`. The final fixed-parameter
+  watermark self-join resolved 32,765 checkpoints and 32,765 distinct
+  watermarks across 65,530 messages with HTTP 200, 32,765 returned/all resolved,
+  exact first/last assertions, and 1,125 ms request-plus-parse time. Ordering is
+  performed afterward with `compareUtf8Bytes`, avoiding the Node planner's
+  quadratic joined-row `ORDER BY` path.
+
+### Compat validation evidence
+
+- The final four stable hash shards produced strict JUnit evidence for 5,701
+  executed tests, 41 skipped/todo tests, and zero failures. The isolated stdio
+  process independently passed all 6 tests under the same report contract, for
+  a combined 5,707 executed tests.
+- All selected package typechecks and migration verification passed. Root lint
+  completed with 0 errors and 4,315 warnings.
+- The fresh OpenAPI input hash was
+  `11702c3c1632b02471f8d8be6bf60a660dec9b1a518546fc886c6f2f651f8db2`.
+  JavaScript SDK generation completed twice with identical output hashes:
+  `sdk.gen.ts=809d4cf45dd3d4afe2c15d2daa50adfa269ddd90a6d6e1ffbe8cae2025c08491`
+  and `types.gen.ts=6f68358e140afbfab5cd38e9a505d2981e95db353d0d2da072d37400c065edf8`.
+  `bun ci` used the frozen lockfile and changed no tracked lockfile, manifest,
+  or generated output.
+- The build-node artifact imported successfully under plain Node and contained
+  source-derived version
+  `0.0.0-codex/sync-upstream-20260901-compat-2c8e7496`; its bundle SHA-256 is
+  `513dc9013e172180172ae722e7ad740a47f660ca0cadfc4a66a6b4babf3ad0fc`.
+  The current-platform native build passed its smoke test with version `local`.
+- Focused stdio, permission, Auto-Worktree, checkpoint/digest, recovery,
+  loop-streak, instruction, prediction, skill, prefix, compaction, overflow,
+  MaxMode, actor, chronology, admission, revert, checkpoint-coverage, platform,
+  network, and TUI matrices passed. Admission, positional-range, Unicode-order,
+  stale-response, unresolved-watermark, live-provisional, and actual-part guard
+  mutations produced the expected RED before restored production guards
+  returned their regressions to green.
+
+### Shared inheritance and changed-path calculation
+
+Propagation from prior compat to final behavior, excluding all five
+registry/history paths, changes 92 paths with 11,994 insertions and 1,336
+deletions. The final compat delta relative to inherited main behavior is 87
+paths with 9,411 insertions and 1,498 deletions. The post-integration behavior
+follow-up alone changes 32 paths with 3,074 insertions and 283 deletions.
+
+`AGENTS.md`, `docs/upstream-deviations.md`, `docs/fork-capabilities.md`,
+`docs/fork-registry-history.md`, and `bun.lock` are byte-identical between the
+accepted `main` tip and final compat behavior.
+
+```bash
+git diff --shortstat \
+  d3ef2e08c5a5317d264631a929025f3f69af75c7 \
+  2c8e74968322005cec4d9a3e3dcccc634ca711c9 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --shortstat \
+  2b4c6569ac308fa6a6662c2c044059893748e0ad \
+  2c8e74968322005cec4d9a3e3dcccc634ca711c9 -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
