@@ -130,10 +130,13 @@ export const Flag = {
     return ratio("MIMOCODE_COMPACTION_TRIGGER_RATIO") ?? 0.9
   },
   MIMOCODE_DISABLE_MODELS_FETCH: truthy("MIMOCODE_DISABLE_MODELS_FETCH"),
-  // Defaults to false. When enabled, every model uses the GPT system prompt
-  // and Codex toolset regardless of its model ID.
+  // Defaults to automatic model inference. Explicit true forces every model to
+  // use the GPT system prompt and Codex toolset; explicit false forces even GPT
+  // models onto their native, non-Codex prompt and toolset.
   get MIMOCODE_CODEX_MODE() {
-    return truthy("MIMOCODE_CODEX_MODE")
+    if (truthy("MIMOCODE_CODEX_MODE")) return true
+    if (falsy("MIMOCODE_CODEX_MODE")) return false
+    return undefined
   },
   MIMOCODE_DISABLE_MOUSE: truthy("MIMOCODE_DISABLE_MOUSE"),
   MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT: number("MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT") ?? 3,
@@ -283,9 +286,9 @@ export const Flag = {
   // Defaults to OFF: exec (tool_script orchestration) is registered only for
   // GPT-toolset models. Opt in here to expose it to every model.
   MIMOCODE_ENABLE_EXEC_TOOL: truthy("MIMOCODE_ENABLE_EXEC_TOOL"),
-  // Defaults to OFF for non-GPT models. GPT models enable MCP Tool Search in
-  // SessionPrompt regardless of this flag. Opt in here to enable it for every
-  // function-calling model.
+  // Independent MCP-search selector. When enabled it applies to every
+  // function-calling model regardless of harness; when disabled, only the
+  // resolved Codex harness enables MCP Tool Search automatically.
   MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH:
     MIMOCODE_EXPERIMENTAL || truthy("MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH"),
   // Defaults to OFF (opt-in): the Orchestrator primary mode — a general
