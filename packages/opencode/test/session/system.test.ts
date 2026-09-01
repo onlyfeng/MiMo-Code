@@ -277,6 +277,17 @@ describe("session.system", () => {
     expect(SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("mimo-v2.5") }))[0]).toBe(gpt)
   })
 
+  test("default prompt gives actionable task and actor guidance", () => {
+    const prompt = SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("model-default") }))[0]
+
+    expect(prompt).toContain("# Using your tools")
+    expect(prompt).toContain("Use the `task` tool for any work of roughly 3+ steps")
+    expect(prompt).toContain("Delegate with the `actor` tool")
+    expect(prompt).toContain("`spawn` is the default (background, parallel")
+    expect(prompt).toContain("`run` blocks the whole turn")
+    expect(prompt).not.toContain("The tool registry lives in `packages/opencode/src/tool/`")
+  })
+
   test("allows the resolved session mode to override the process harness mode", () => {
     const model = ProviderTest.model({
       id: ModelID.make("claude-sonnet-4-6"),

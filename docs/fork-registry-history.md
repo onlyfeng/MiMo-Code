@@ -1060,3 +1060,171 @@ git diff --check c3fd051a27585a3e2a04124e00ce0439b27130e6 \
 Inventory count is 2 and result-row count is 2. The selected tri-state behavior
 was adapted through the fork resolver rather than copied wholesale; no active
 FD was retired, added, renumbered, or transferred.
+
+## 2026-09-01 live tool-guidance and Codex-mode convergence synchronization
+
+- Prior reviewed upstream:
+  `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`.
+- Freshly reviewed upstream:
+  `d17e176ba179ea2568cdf5020bb65011aaf86493`.
+- Prior fork `main` tip:
+  `c6a2f5f3c8cd0851b36049da5176e2ee7fb81d05`.
+- Main behavior merge:
+  `4866d01f754429e3782f60983311c24468a9949a`, whose parents are the prior
+  fork tip and freshly reviewed upstream.
+- The incoming range contains 4 commits, including 2 first-parent merges and
+  2 substantive commits, across 8 paths with 63 insertions and 28 deletions.
+  It changes no dependency manifest, lockfile, migration, workflow, version,
+  or final generated SDK/OpenAPI surface.
+- All 6 active FD and 15 active FC records were reviewed. No owner was added,
+  retired, or transferred.
+
+### Decision notes
+
+- Adopted the action-oriented default native tool guidance from `eb6766d5`,
+  removed its trailing whitespace, and bound the `task`, `actor`, and
+  independent-call claims to the shipped runtime with a focused system-prompt
+  regression. This model-visible content does not widen tool authority.
+- Classified `cce93356` as a partial duplicate with a conflicting precedence
+  contract. The fork already implements its tri-state intent through
+  `resolveHarnessMode`, but additionally preserves explicit session precedence,
+  complete identity resolution, MiMo precedence, native prompt-family
+  selection, independent MCP-search opt-in, and transport separation.
+- Resolved all four production conflicts per those invariants. Two opposite
+  assertions that would otherwise have merged cleanly were rejected; the final
+  Codex-mode production, schema-description, and generated trees remain
+  unchanged from the prior fork behavior.
+
+### Capability inventory (2/2)
+
+`AR-20260901-D17` is the audit range used by every result row:
+`old_upstream=2ce93f4188275aff0dc0353d36ec5f7538bcb32b`,
+`new_upstream=d17e176ba179ea2568cdf5020bb65011aaf86493`,
+`main_merge=4866d01f754429e3782f60983311c24468a9949a`, and
+`main_behavior=4866d01f754429e3782f60983311c24468a9949a`.
+
+`MAIN-VERIFIED` means 217 default-path tests passed with zero failures and one
+pre-existing remote-instruction TODO; both package typechecks, root lint with
+zero errors, frozen-lockfile installation, source facts, and diff checks passed.
+Compatibility counterpart text names the overlay review required during
+propagation; it does not claim a compat SHA.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Action-oriented default tool guidance | `AR-20260901-D17` | `eb6766d5`; `session/prompt/default.txt` `# Using your tools`; `system.test.ts` guidance regression | FC-011 factual prompt guidance; FD-006 remains the authority boundary; FC-001 owns actor lifecycle | The prior compat blob was identical; DC-CONTEXT-001 accounts for the prompt and DC-ACTOR-001 freezes it without owning the text | complementary | model-visible content, docs, naming-style, tests | shared main | Adopt with incoming whitespace removed: prefer listed tools, track multi-step work with `task`, use background `actor spawn` by default and blocking `run` exceptionally, and parallelize only independent calls | Runtime source facts, direct prompt assertions, request/prefix matrices, and `MAIN-VERIFIED` |
+| 2 | Tri-state Codex-mode upstream convergence | `AR-20260901-D17` | `cce93356`; `flag.ts` `MIMOCODE_CODEX_MODE`; `tool/gpt.ts` `resolveHarnessMode`; `system.ts` `provider`; prompt schema descriptions and focused tests | FD-005 resolved identity/harness decision; FD-006 and FC-005 are downstream tool/discovery boundaries | DC-MODEL-001, DC-CONTEXT-001, and DC-ACTOR-001 overlap prompt/system paths but define no alternate harness precedence | partial duplicate and conflicting | behavior, contract, schema-config, tests, docs, generated artifacts | shared main | Preserve/adapt: explicit session mode wins, then explicit process true/false, then complete-identity model inference with MiMo precedence; retain native prompt families, independent MCP-search opt-in, and transport separation | Positive/negative resolver, system, request, MaxMode, retry, prefix, and nested-dispatch matrices; no final SDK/OpenAPI input drift; `MAIN-VERIFIED` |
+
+Inventory count is 2 and result-row count is 2. Every incoming substantive
+capability records both branch counterparts, relationship, drift, canonical
+owner, disposition, and status evidence; no incoming capability remains
+unclassified.
+
+### Validation evidence
+
+- The stable behavior commit passed 93 flag/resolver/system/prefix/agent tests,
+  8 request-construction tests, 97 MaxMode/retry/prefix/nested-exec tests, and
+  19 instruction/system/actor-scope tests, with one pre-existing TODO and zero
+  failures.
+- `packages/opencode` and `packages/sdk/js` typechecks passed. Root lint
+  completed with 4,274 warnings and zero errors.
+- `bun ci` installed from the frozen lockfile. `bun.lock` and tracked package
+  manifests remained unchanged.
+- SDK generation was not required: conflict resolution retained the prior
+  source schema descriptions, and the final SDK/OpenAPI input and generated
+  trees have no behavior delta.
+- The upstream range's sole `git diff --check` failure was removed from the
+  adopted prompt content; the final merge range is whitespace-clean.
+
+### Reproduction
+
+Run from a clean checkout of the behavior commit. The package preload then
+adds only its owned test baseline; the command removes every ambient selector
+that could change the default path.
+
+```bash
+(
+  set -e
+  set -o pipefail
+  test "$(git rev-parse HEAD)" = \
+    4866d01f754429e3782f60983311c24468a9949a
+
+  bun ci
+  git diff --exit-code -- bun.lock ':(glob)**/package.json'
+
+  run_default() {
+    env -u MIMOCODE_EXPERIMENTAL \
+      -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+      -u MIMOCODE_CODEX_MODE \
+      -u MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL \
+      -u MIMOCODE_COMPACTION_MAX_CONTEXT \
+      -u MIMOCODE_COMPACTION_TRIGGER_RATIO \
+      -u MIMOCODE_DISABLE_CHECKPOINT "$@"
+  }
+  selectors="$(run_default env | LC_ALL=C sort | \
+    rg '^MIMOCODE_(EXPERIMENTAL|EXPERIMENTAL_MCP_TOOL_SEARCH|CODEX_MODE|EXPERIMENTAL_WORKFLOW_TOOL|COMPACTION_MAX_CONTEXT|COMPACTION_TRIGGER_RATIO|DISABLE_CHECKPOINT)=' || true)"
+  test -z "$selectors"
+
+  reports_dir="$(mktemp -d)"
+  trap 'rm -rf "$reports_dir"' EXIT
+  report_index=0
+  run_counted() {
+    expected_pass="$1"
+    expected_todo="$2"
+    shift 2
+    report_index=$((report_index + 1))
+    report="$reports_dir/$report_index.log"
+    run_default bun test "$@" 2>&1 | tee "$report"
+    test "$(awk '$2 == "pass" { value = $1 } END { print value + 0 }' "$report")" \
+      -eq "$expected_pass"
+    test "$(awk '$2 == "todo" { value = $1 } END { print value + 0 }' "$report")" \
+      -eq "$expected_todo"
+    test "$(awk '$2 == "fail" { value = $1 } END { print value + 0 }' "$report")" \
+      -eq 0
+  }
+
+  cd packages/opencode
+  run_counted 93 0 \
+    test/flag/codex-mode-flag.test.ts \
+    test/tool/gpt.test.ts \
+    test/session/system.test.ts \
+    test/session/llm-request-prefix.test.ts \
+    test/agent/agent.test.ts --timeout 120000
+  run_counted 8 0 test/session/prompt-effect.test.ts \
+    -t 'native tool schema|process-disabled auto GPT requests|locks system and harness|persists auto|instruction files' \
+    --timeout 120000
+  run_counted 97 0 \
+    test/session/max-mode.test.ts \
+    test/session/llm-retry.test.ts \
+    test/session/prefix-snapshot.test.ts \
+    test/tool/tool-script.test.ts --timeout 120000
+  run_counted 19 1 \
+    test/session/instruction.test.ts \
+    test/session/llm-system-prompt.test.ts \
+    test/session/replace-agent-subagent.test.ts --timeout 120000
+  bun typecheck
+  cd ../sdk/js
+  bun typecheck
+  cd ../../..
+
+  bun lint
+  git diff --exit-code -- .
+  git diff --exit-code \
+    c6a2f5f3c8cd0851b36049da5176e2ee7fb81d05 \
+    4866d01f754429e3782f60983311c24468a9949a -- \
+    packages/opencode/src/flag/flag.ts \
+    packages/opencode/src/session/prompt.ts \
+    packages/opencode/src/session/system.ts \
+    packages/opencode/src/tool/gpt.ts \
+    packages/sdk/openapi.json \
+    packages/sdk/js/src/v2/gen
+  git diff --check \
+    c6a2f5f3c8cd0851b36049da5176e2ee7fb81d05 \
+    4866d01f754429e3782f60983311c24468a9949a
+)
+```
+
+Expected result: the four test groups report `93/0`, `8/0`, `97/0`, and
+`19/1` pass/todo with zero failures; both typechecks exit zero; lint reports
+4,274 warnings and zero errors; frozen dependency files, the retained
+Codex-mode/schema/SDK surfaces, the tracked worktree, and whitespace checks are
+clean.
