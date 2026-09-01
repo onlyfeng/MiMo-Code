@@ -14,11 +14,11 @@ registry/history commit does not advance either behavior reference below.
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-01
 - Reviewed upstream: `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`
-- Accepted `main` tip: `c3fd051a27585a3e2a04124e00ce0439b27130e6`
-- Inherited main behavior: `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`
-- Compat behavior: `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`
-- Prior compat tip: `358c0bf50d20e168d8b83de7d491e0ca608061e6`
-- Main-audit inheritance merge: `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`
+- Accepted `main` tip: `c6a2f5f3c8cd0851b36049da5176e2ee7fb81d05`
+- Inherited main behavior: `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`
+- Compat behavior: `c594bb92ff5a11063c5e22936964ceae088e1d43`
+- Prior compat tip: `5d31bec1fb936806b4cfec9427f9f774b96b9ef9`
+- Main-audit inheritance merge: `c594bb92ff5a11063c5e22936964ceae088e1d43`
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -46,6 +46,15 @@ adjacent owner; its RFC1918 sentinel explicitly disables OAuth and therefore
 does not claim private-server OAuth interoperability. All seven active entries
 were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`.
 
+The 2026-09-01 Codex-mode specified-change propagation inherits FD-002's
+narrowed residual registry and FD-005's tri-state harness resolution without
+creating a compat override. DC-MODEL-001, DC-CONTEXT-001, and DC-ACTOR-001 have
+real prompt, prefix, preflight, MaxMode, or generated-contract overlap; their
+per-agent routing, bounded request, and frozen full-context behavior remains
+intact. The other four active owners have no incoming path overlap. All seven
+entries were re-reviewed against compat behavior
+`c594bb92ff5a11063c5e22936964ceae088e1d43`.
+
 ## Sync index
 
 | ID | Watch surfaces | Relationship to inherited `main` | Required decision |
@@ -63,13 +72,13 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
 - Status: active
 - Canonical owner: `dev/compat` WebFetch destination policy
 - Base: inherited main behavior
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` implements FC-010's inherited
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c` implements FC-010's inherited
   destination-classification, per-hop authorization, and resource-bound
   contract by applying `assertSafeUrl()` before the initial and redirected
   target's permission decision and request. DC-NET-001 overrides only whether
   compat WebFetch invokes that inherited classifier at its call seam.
 - Overrides: compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f` removes only the
+  `c594bb92ff5a11063c5e22936964ceae088e1d43` removes only the
   `assertSafeUrl` import and its two call sites from WebFetch. The inherited
   classifier implementation and tests, including full IPv6 link-local
   `fe80::/10` coverage, remain byte-identical to `main`; compat WebFetch does
@@ -86,8 +95,8 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
   `packages/opencode/test/util/ssrf.test.ts` continues to validate the
   classifier itself, not its use by compat WebFetch.
 - Review basis: inherited main
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`; compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`.
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`; compat behavior
+  `c594bb92ff5a11063c5e22936964ceae088e1d43`.
 - Evidence: the main-to-compat source diff is exactly the import and two
   classification-call deletions. The inherited classifier tests cover the
   complete IPv6 link-local `fe80::/10` range and DNS-resolved link-local
@@ -109,11 +118,11 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
 - Status: active
 - Canonical owner: `dev/compat` remote-MCP compatibility guarantee
 - Base: inherited main behavior
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` and FC-004 validate that remote
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c` and FC-004 validate that remote
   MCP URLs parse as HTTP(S), but deliberately make no fork-wide private-network
   promise.
 - Overrides: compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f` adds a compat-owned guarantee and
+  `c594bb92ff5a11063c5e22936964ceae088e1d43` adds a compat-owned guarantee and
   characterization test. There is no MCP production-source fork.
 - Delta: an RFC1918 endpoint such as `http://192.168.1.1/mcp` reaches mocked
   client creation and is not rejected merely because its address is private.
@@ -125,8 +134,8 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
 - Test surfaces: `packages/opencode/test/mcp/lifecycle.test.ts`, specifically
   the `compat permits an RFC1918 remote MCP endpoint` sentinel.
 - Review basis: inherited main
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`; compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`.
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`; compat behavior
+  `c594bb92ff5a11063c5e22936964ceae088e1d43`.
 - Evidence: `packages/opencode/src/mcp/index.ts` is unchanged from accepted
   `main`, while the compat behavior adds only the mocked RFC1918 lifecycle
   guarantee on this surface.
@@ -147,11 +156,11 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
 - Status: active
 - Canonical owner: `dev/compat` platform and restricted-network adaptation
 - Base: inherited main behavior
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` retains the shared
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c` retains the shared
   `ripgrep`/archive behavior without this environment-specific fallback set and
   resolves relative file-tool paths against immutable `Instance.directory`.
 - Overrides: compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f` carries the established no-rg
+  `c594bb92ff5a11063c5e22936964ceae088e1d43` carries the established no-rg
   listing boundary and Windows archive extraction adaptation instead of
   promoting them to shared `main`.
 - Delta: simple file listing remains available when `ripgrep` cannot be
@@ -165,8 +174,8 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
 - Test surfaces: `packages/opencode/test/file/ripgrep.test.ts` and
   `packages/opencode/test/util/archive.test.ts`.
 - Review basis: inherited main
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`; compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`.
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`; compat behavior
+  `c594bb92ff5a11063c5e22936964ceae088e1d43`.
 - Evidence: focused regressions distinguish simple fallback listings from
   operations that require real `ripgrep` and cover real-cwd marker scanning,
   ignore semantics, errors, abort, deep trees, and the Windows ZIP guard at the
@@ -186,14 +195,14 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
 - Status: active
 - Canonical owner: `dev/compat` agent configuration and MaxMode routing
 - Base: inherited main behavior
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` provides shared MaxMode
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c` provides shared MaxMode
   orchestration, bounded candidate/judge retry, main-only session-global retry
   status/event publication, and FC-013's tool-free final-step boundary without
   a compat-style per-agent opt-in contract. It also owns reliable multimodal
   title generation through the hidden `title` agent's `modelRef: "lite"`,
   structured output, and ephemeral retry path.
 - Overrides: compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f` adds `agent.maxMode` and generated
+  `c594bb92ff5a11063c5e22936964ceae088e1d43` adds `agent.maxMode` and generated
   SDK/OpenAPI exposure, then routes eligible non-final, non-`json_schema` steps
   through MaxMode when the experimental configuration exists.
 - Delta: any configured agent may opt in with `maxMode: true`; the dedicated
@@ -214,8 +223,8 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
   `packages/opencode/test/session/max-mode-econnreset.test.ts`, and MaxMode
   routing cases in `packages/opencode/test/session/prompt-effect.test.ts`.
 - Review basis: inherited main
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`; compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`.
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`; compat behavior
+  `c594bb92ff5a11063c5e22936964ceae088e1d43`.
 - Evidence: the agent config schema, resolved agent information, generated
   public schemas, routing predicate, structured-output exclusion, retry
   behavior, main-only session status/event gate, and final-step cases are all
@@ -236,13 +245,13 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
 - Status: active
 - Canonical owner: `dev/compat` model-request safety boundary
 - Base: inherited main behavior
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` retains FD-002 instruction
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c` retains FD-002 instruction
   delivery, shared retry/title construction, versioned skill snapshots, stable
   per-session memory-path templates, FC-007's fixed `Instance.directory`, and
   FC-015's effective compaction window without this complete compat cap,
   serialization, and preflight set.
 - Overrides: compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f` bounds model-visible content and
+  `c594bb92ff5a11063c5e22936964ceae088e1d43` bounds model-visible content and
   estimates the effective request before dispatch. DC-ACTOR-001 separately owns
   the full-context/static-prefix actor extension.
 - Delta: instruction, inbox, replayed tool input/output, synthetic error media,
@@ -313,8 +322,8 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
   `packages/opencode/test/lib/llm-server.ts` supporting request-boundary
   assertions.
 - Review basis: inherited main
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`; compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`.
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`; compat behavior
+  `c594bb92ff5a11063c5e22936964ceae088e1d43`.
 - Evidence: focused tests at the compat behavior tree cover oversized
   instructions, structured provider/tool replay, unserializable inputs,
   synthetic media, UTF-8/surrogate limits, active-tool filtering, recoverable
@@ -357,12 +366,12 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
 - Status: active
 - Canonical owner: `dev/compat` actor request/context integration
 - Base: inherited main behavior
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` provides FD-009's fail-closed
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c` provides FD-009's fail-closed
   frozen-context admission, FC-001's lifecycle linearization, FC-007's fixed
   instance cwd, default-fork checkpoint writers, and FD-002's fail-closed
   main/registered-peer `replace-agent` identity scope.
 - Overrides: compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f` extends those shared invariants
+  `c594bb92ff5a11063c5e22936964ceae088e1d43` extends those shared invariants
   with explicit full-context actor propagation, bounded actor-visible state,
   and static-prefix overflow handling; it does not replace their ownership.
 - Delta: an actor requesting full context inherits the parent's frozen request
@@ -401,8 +410,8 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
   `packages/opencode/test/session/prompt-effect.test.ts`, and actor-state cases
   in `packages/opencode/test/util/text-truncate.test.ts`.
 - Review basis: inherited main
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`; compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`.
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`; compat behavior
+  `c594bb92ff5a11063c5e22936964ceae088e1d43`.
 - Evidence: the full-context actor suite covers inherited system/tool/permission
   membership, frozen parent turn context/system/cwd, actor-scoped replacement,
   default and explicit checkpoint modes, and bounded state; overflow tests
@@ -431,12 +440,12 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
 - Canonical owner: `dev/compat` TUI request-metadata presentation
 - Legacy ID: FD-007
 - Base: inherited main behavior
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` follows upstream's condensed
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c` follows upstream's condensed
   model presentation, which may omit the provider label or an unselected
   variant, and propagates the current BCP 47 `titleLocale` through TUI prompt
   submissions and automatic title generation.
 - Overrides: compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f` displays one request-oriented
+  `c594bb92ff5a11063c5e22936964ceae088e1d43` displays one request-oriented
   `alias · providerID/modelID · variant: <value>` row in the prompt and
   subagent footer.
 - Delta: provider/model is unconditional, the persisted or explicitly selected
@@ -454,8 +463,8 @@ were re-reviewed against compat behavior `43bc1048b0bc16ff17d715ee9cb756d2c1cc31
   `packages/opencode/test/cli/tui/model-metadata.test.tsx` and
   `packages/opencode/test/cli/tui/model.test.ts`.
 - Review basis: inherited main
-  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`; compat behavior
-  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`.
+  `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`; compat behavior
+  `c594bb92ff5a11063c5e22936964ceae088e1d43`.
 - Evidence: rendering tests cover the unified label and narrow layout; model
   tests cover explicit and persisted variants, literal/group agent refs,
   mismatched models, absent variants, and unknown built-in tiers. Prompt and
