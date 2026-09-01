@@ -1339,14 +1339,57 @@ export function get(input: { sessionID: SessionID; messageID: MessageID }): With
   }
 }
 
+function contextBoundary(msg: WithParts) {
+  if (msg.info.role !== "user") return
+  return msg.parts.find((part): part is CheckpointPart | CompactionPart =>
+    part.type === "checkpoint" || part.type === "compaction",
+  )
+}
+
 export function filterCompacted(msgs: Iterable<WithParts>) {
   const result = [] as WithParts[]
+  let rebuild: { marker: WithParts; coveredUpTo: MessageID } | undefined
+  let covered = false
+  // stream() is newest-first. Checkpoint watermarks only advance; repeated
+  // rebuilds at one watermark receive ascending IDs, so the first boundary is
+  // also the latest logical generation even though its timestamp is backdated.
   for (const msg of msgs) {
+    if (rebuild) {
+      if (msg.info.id === rebuild.coveredUpTo) {
+        covered = true
+        break
+      }
+      result.push(msg)
+      continue
+    }
+
     result.push(msg)
-    if (msg.info.role === "user" && msg.parts.some((p) => p.type === "checkpoint" || p.type === "compaction")) break
+    const boundary = contextBoundary(msg)
+    if (!boundary) continue
+    // A rebuild marker is written later but deliberately backdated to the
+    // checkpoint watermark. `(created, id)` therefore cannot always place it
+    // before every already-present live-tail message (there may be no key
+    // between adjacent or equal timestamps). Reconstruct its logical window
+    // from coveredUpTo instead of trusting the marker's physical row order.
+    // coveredUpTo has defined this seam since the first persisted checkpoint
+    // format, including markers created before the source discriminator.
+    if (boundary.type !== "checkpoint") break
+    rebuild = { marker: msg, coveredUpTo: boundary.coveredUpTo }
   }
+
   result.reverse()
-  return compactionProjection(result)
+  // Missing/reversed coverage fails closed: return the untrimmed history we
+  // observed instead of guessing which user instructions the checkpoint owns.
+  if (!rebuild || !covered) return compactionProjection(result)
+
+  // The active marker supersedes older synthetic boundaries in its covered
+  // tail. Move it to the logical seam and preserve canonical order everywhere
+  // else; collapseCheckpointTail then digests only its exact assistant range
+  // while user turns and post-insert messages remain live.
+  return compactionProjection([
+    rebuild.marker,
+    ...result.filter((msg) => msg.info.id !== rebuild.marker.info.id && !contextBoundary(msg)),
+  ])
 }
 
 export const filterCompactedEffect = Effect.fnUntraced(function* (

@@ -10,6 +10,8 @@ import { Session as SessionNs } from "../../src/session"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { checkpointPath } from "../../src/session/checkpoint-paths"
 import { SessionCompaction } from "../../src/session/compaction"
+import { MessageV2 } from "../../src/session/message-v2"
+import { collapseCheckpointTail } from "../../src/session/tail-digest"
 import { TaskRegistry } from "../../src/task/registry"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorRegistryTable } from "../../src/actor/actor.sql"
@@ -176,6 +178,115 @@ describe("SessionCheckpoint.insertRebuildBoundary", () => {
           expect(boundary.parts.some((p) => p.type === "checkpoint")).toBe(true)
         }),
       { outsideGit: true },
+    ),
+  )
+
+  it.live(
+    "keeps the same-timestamp live tail after a synthetic rebuild boundary",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const cp = yield* SessionCheckpoint.Service
+        const info = yield* ssn.create({})
+        const boundaryTime = 1_700_000_000_000
+
+        const boundary = yield* ssn.updateMessage({
+          id: MessageID.make("msg_01_boundary"),
+          role: "user",
+          sessionID: info.id,
+          agent: "build",
+          model: ref,
+          time: { created: boundaryTime },
+        })
+        const tail = yield* ssn.updateMessage({
+          id: MessageID.make("msg_02_tail"),
+          role: "assistant",
+          sessionID: info.id,
+          parentID: boundary.id,
+          agent: "build",
+          mode: "build",
+          providerID: ref.providerID,
+          modelID: ref.modelID,
+          path: { cwd: "/", root: "/" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: boundaryTime + 1 },
+        })
+        yield* ssn.updatePart({
+          id: PartID.make("prt_02_tail"),
+          messageID: tail.id,
+          sessionID: info.id,
+          type: "text",
+          text: "assistant work that is captured in Recent activity",
+        })
+        const active = yield* ssn.updateMessage({
+          id: MessageID.make("msg_03_active"),
+          role: "user",
+          sessionID: info.id,
+          agent: "build",
+          model: ref,
+          time: { created: boundaryTime + 1 },
+        })
+        yield* ssn.updatePart({
+          id: PartID.make("prt_03_active"),
+          messageID: active.id,
+          sessionID: info.id,
+          type: "text",
+          text: "ACTIVE_TURN_AFTER_CHECKPOINT",
+        })
+
+        yield* Effect.promise(async () => {
+          await fs.mkdir(path.dirname(checkpointPath(info.id)), { recursive: true })
+          await fs.writeFile(checkpointPath(info.id), "# Session checkpoint\n\n## §1 Active intent\nKeep the live turn.\n")
+        })
+        expect(
+          yield* cp.insertRebuildBoundary({
+            sessionID: info.id,
+            boundary: boundary.id,
+            digestUpTo: active.id,
+            agent: "build",
+            model: { providerID: "anthropic", modelID: "claude" },
+            boundaryCreatedAt: boundaryTime,
+          }),
+        ).toBe(true)
+
+        const future = yield* ssn.updateMessage({
+          id: MessageID.make("msg_04_future"),
+          role: "assistant",
+          sessionID: info.id,
+          parentID: active.id,
+          agent: "build",
+          mode: "build",
+          providerID: ref.providerID,
+          modelID: ref.modelID,
+          path: { cwd: "/", root: "/" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: boundaryTime + 2 },
+        })
+        yield* ssn.updatePart({
+          id: PartID.make("prt_04_future"),
+          messageID: future.id,
+          sessionID: info.id,
+          type: "text",
+          text: "POST_INSERT_ASSISTANT",
+        })
+        const stored = yield* ssn.messages({ sessionID: info.id })
+        const marker = stored.find((message) => message.parts.some((part) => part.type === "checkpoint"))
+        expect(marker).toBeDefined()
+        expect(marker?.info.time.created).toBe(boundaryTime + 1)
+        // Guard the mutation: the physical stream encounters the newer marker
+        // before this same-time live user, which made the old stop-at-marker
+        // implementation drop both tail messages.
+        expect(MessageV2.compareOrder(active, marker!.info)).toBeLessThan(0)
+        const filtered = yield* MessageV2.filterCompactedEffect(info.id)
+        expect(filtered.map((message) => message.info.id)).toEqual([marker!.info.id, tail.id, active.id, future.id])
+        expect(collapseCheckpointTail(filtered).map((message) => message.info.id)).toEqual([
+          marker!.info.id,
+          active.id,
+          future.id,
+        ])
+      }),
     ),
   )
 })
