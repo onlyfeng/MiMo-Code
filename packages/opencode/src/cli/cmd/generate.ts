@@ -2,6 +2,17 @@ import { Server } from "../../server/server"
 import type { CommandModule } from "yargs"
 import { UI } from "../ui"
 
+export function codeSample(operationID: string) {
+  return [
+    `import { createOpencodeClient } from "@mimo-ai/sdk/v2"`,
+    ``,
+    `const client = createOpencodeClient()`,
+    `await client.${operationID.replaceAll(/_([a-z])/g, (_, letter) => letter.toUpperCase())}({`,
+    `  ...`,
+    `})`,
+  ].join("\n")
+}
+
 export const GenerateCommand = {
   command: "generate",
   handler: async () => {
@@ -14,14 +25,7 @@ export const GenerateCommand = {
         operation["x-codeSamples"] = [
           {
             lang: "js",
-            source: [
-              `import { createOpencodeClient } from "@mimo-ai/sdk"`,
-              ``,
-              `const client = createOpencodeClient()`,
-              `await client.${operation.operationId}({`,
-              `  ...`,
-              `})`,
-            ].join("\n"),
+            source: codeSample(operation.operationId),
           },
         ]
       }

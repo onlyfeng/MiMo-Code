@@ -1,4 +1,6 @@
 import { test, expect } from "bun:test"
+import { createOpencodeClient } from "@mimo-ai/sdk/v2"
+import { codeSample } from "../../src/cli/cmd/generate"
 import { Server } from "../../src/server/server"
 
 const generatedOpenapi = Server.openapi()
@@ -28,6 +30,22 @@ function property(value: Record<string, unknown> | undefined, name: string) {
   if (!isRecord(value?.properties)) return undefined
   const result = value.properties[name]
   return isRecord(result) ? result : undefined
+}
+
+function documentOperations(doc: unknown) {
+  if (!isRecord(doc) || !isRecord(doc.paths)) return []
+  return Object.values(doc.paths).flatMap((path) => {
+    if (!isRecord(path)) return []
+    return ["get", "post", "put", "delete", "patch"].flatMap((method) => {
+      const value = path[method]
+      if (!isRecord(value) || typeof value.operationId !== "string") return []
+      return [{ id: value.operationId, value }]
+    })
+  })
+}
+
+function member(value: unknown, path: string) {
+  return path.split(".").reduce<unknown>((current, key) => (isRecord(current) ? current[key] : undefined), value)
 }
 
 // zod-openapi rewrites every local `#/$defs/<name>` reference to
@@ -99,4 +117,25 @@ test("published OpenAPI includes the checkpoint coverage contract", async () => 
     expect(schema(doc, "CheckpointCoverage")).toBeDefined()
     expect(property(schema(doc, "CompactionPart"), "projection")).toBeDefined()
   }
+})
+
+test("published OpenAPI code samples target callable v2 SDK methods", async () => {
+  const generated = documentOperations(await generatedOpenapi)
+  const published = documentOperations(
+    await Bun.file(new URL("../../../sdk/openapi.json", import.meta.url)).json(),
+  )
+  expect(published.map((item) => item.id).sort()).toEqual(generated.map((item) => item.id).sort())
+
+  const client = createOpencodeClient({ baseUrl: "http://127.0.0.1:1" })
+  const invalid = published.flatMap((item) => {
+    const samples = item.value["x-codeSamples"]
+    const sample = Array.isArray(samples) ? samples[0] : undefined
+    const source = isRecord(sample) && typeof sample.source === "string" ? sample.source : undefined
+    if (source !== codeSample(item.id)) return [`${item.id}: stale or missing sample`]
+    const target = source.match(/await client\.([^({]+)\(\{/u)?.[1]
+    if (!target || typeof member(client, target) !== "function") return [`${item.id}: ${target ?? "missing target"}`]
+    return []
+  })
+  expect(published.length).toBeGreaterThan(0)
+  expect(invalid).toEqual([])
 })
