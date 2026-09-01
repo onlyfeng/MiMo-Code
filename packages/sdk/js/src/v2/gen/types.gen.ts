@@ -5300,7 +5300,7 @@ export type SessionPromptData = {
      */
     systemMode?: "append" | "replace-agent"
     /**
-     * Harness mode selected by the session's first user query. Later values are ignored. Models already classified for the Codex toolset, such as GPT-5, stay Codex. For other models, auto preserves model/process inference, explicit codex forces Codex, and explicit default forces the native tool schema.
+     * Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.
      */
     harness?: "auto" | "codex" | "default"
     variant?: string
@@ -5606,7 +5606,7 @@ export type SessionPromptAsyncData = {
      */
     systemMode?: "append" | "replace-agent"
     /**
-     * Harness mode selected by the session's first user query. Later values are ignored. Models already classified for the Codex toolset, such as GPT-5, stay Codex. For other models, auto preserves model/process inference, explicit codex forces Codex, and explicit default forces the native tool schema.
+     * Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.
      */
     harness?: "auto" | "codex" | "default"
     variant?: string
@@ -5669,7 +5669,7 @@ export type SessionCommandData = {
      */
     systemMode?: "append" | "replace-agent"
     /**
-     * Harness mode selected by the session's first user command. Later values are ignored. Models already classified for the Codex toolset, such as GPT-5, stay Codex. For other models, auto preserves model/process inference, explicit codex forces Codex, and explicit default forces the native tool schema.
+     * Harness mode selected by the session's first user command. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.
      */
     harness?: "auto" | "codex" | "default"
     parts?: Array<{

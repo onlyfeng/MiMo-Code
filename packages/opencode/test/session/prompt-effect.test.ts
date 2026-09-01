@@ -134,6 +134,22 @@ function dynamicSystemPrompt<A, E, R>(value: string | undefined, fx: () => Effec
 const withoutDynamicSystemPrompt = <A, E, R>(fx: () => Effect.Effect<A, E, R>) => dynamicSystemPrompt(undefined, fx)
 const withDynamicSystemPrompt = <A, E, R>(fx: () => Effect.Effect<A, E, R>) => dynamicSystemPrompt("true", fx)
 
+function withCodexMode<A, E, R>(value: string, fx: () => Effect.Effect<A, E, R>) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.env.MIMOCODE_CODEX_MODE
+      process.env.MIMOCODE_CODEX_MODE = value
+      return previous
+    }),
+    () => fx(),
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env.MIMOCODE_CODEX_MODE
+        else process.env.MIMOCODE_CODEX_MODE = previous
+      }),
+  )
+}
+
 function withInstructionsDisabled<A, E, R>(fx: () => Effect.Effect<A, E, R>) {
   return Effect.acquireUseRelease(
     Effect.sync(() => {
@@ -2824,13 +2840,13 @@ mcpIt.live("degrades the MCP catalog to names at high context pressure", () =>
 )
 
 mcpIt.live(
-  "keeps the Codex prompt and tool schema for GPT models with the default harness",
+  "keeps the default prompt and native tool schema for GPT models with the default harness",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         const prompt = yield* SessionPrompt.Service
         const sessions = yield* Session.Service
-        const session = yield* sessions.create({ title: "GPT Codex tools" })
+        const session = yield* sessions.create({ title: "GPT native tools" })
 
         yield* prompt.prompt({
           sessionID: session.id,
@@ -2838,19 +2854,56 @@ mcpIt.live(
           model: { providerID: ProviderID.openai, modelID: ModelID.make("gpt-5.2") },
           harness: "default",
           noReply: true,
-          parts: [{ type: "text", text: "inspect the Codex tools" }],
+          parts: [{ type: "text", text: "inspect the native tools" }],
         })
         yield* llm.text("done")
         yield* prompt.loop({ sessionID: session.id })
 
         const request = (yield* llm.inputs)[0]
         const toolNames = (request.tools as Array<Record<string, unknown>>).map(wireToolName)
-        expect(toolNames).toEqual(expect.arrayContaining(["exec", "apply_patch", "bash"]))
+        expect(toolNames).toEqual(expect.arrayContaining(["edit", "write", "read", "bash"]))
+        expect(toolNames).not.toEqual(expect.arrayContaining(["exec", "apply_patch", "view_image"]))
+        expect(toolNames).not.toContain("mcp_tool_search")
         expect(toolNames.length).toBeGreaterThan(1)
-        expect(JSON.stringify(request)).toContain("You are Codex")
-        expect(JSON.stringify(request)).toContain("tools.apply_patch")
+        expect(JSON.stringify(request)).not.toContain("You are Codex")
+        expect(JSON.stringify(request)).not.toContain("tools.apply_patch")
       }),
       { git: true, config: gptProviderCfg },
+    ),
+  30_000,
+)
+
+mcpIt.live(
+  "keeps process-disabled auto GPT requests on the native prompt and native tool schema",
+  () =>
+    withCodexMode("false", () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const prompt = yield* SessionPrompt.Service
+          const sessions = yield* Session.Service
+          const session = yield* sessions.create({ title: "Process-disabled GPT native tools" })
+
+          yield* prompt.prompt({
+            sessionID: session.id,
+            agent: "build",
+            model: { providerID: ProviderID.openai, modelID: ModelID.make("gpt-5.2") },
+            harness: "auto",
+            noReply: true,
+            parts: [{ type: "text", text: "inspect the native tools" }],
+          })
+          yield* llm.text("done")
+          yield* prompt.loop({ sessionID: session.id })
+
+          const request = (yield* llm.inputs)[0]
+          const toolNames = (request.tools as Array<Record<string, unknown>>).map(wireToolName)
+          expect(toolNames).toEqual(expect.arrayContaining(["edit", "write", "read", "bash"]))
+          expect(toolNames).not.toEqual(expect.arrayContaining(["exec", "apply_patch", "view_image"]))
+          expect(toolNames).not.toContain("mcp_tool_search")
+          expect(JSON.stringify(request)).not.toContain("You are Codex")
+          expect(JSON.stringify(request)).not.toContain("tools.apply_patch")
+        }),
+        { git: true, config: gptProviderCfg },
+      ),
     ),
   30_000,
 )

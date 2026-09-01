@@ -18,14 +18,19 @@ function read(value?: string) {
 }
 
 describe("MIMOCODE_CODEX_MODE", () => {
-  test("is disabled by default and accepts explicit truthy values", () => {
-    expect(read()).toBe("false")
+  test("uses automatic model inference by default and accepts explicit truthy values", () => {
+    expect(read()).toBe("undefined")
     expect(read("true")).toBe("true")
     expect(read("1")).toBe("true")
   })
 
-  test("false and zero keep Codex mode disabled", () => {
+  test("false and zero explicitly disable Codex mode", () => {
     expect(read("false")).toBe("false")
     expect(read("0")).toBe("false")
+  })
+
+  test("ignores non-canonical Boolean values", () => {
+    expect(read("yes")).toBe("undefined")
+    expect(read("on")).toBe("undefined")
   })
 })

@@ -71,8 +71,15 @@ describe("isMcpToolSearchEnabled", () => {
     expect(isMcpToolSearchEnabled(false, "auto", "claude-opus-4-6")).toBe(true)
     expect(isMcpToolSearchEnabled(false, "default", "claude-opus-4-6")).toBe(false)
     expect(isMcpToolSearchEnabled(false, "default", "mimo-v2.6")).toBe(false)
-    expect(isMcpToolSearchEnabled(false, "default", "gpt-5.2")).toBe(true)
+    expect(isMcpToolSearchEnabled(false, "default", "gpt-5.2")).toBe(false)
     expect(isMcpToolSearchEnabled(true, "default", "mimo-v2.6")).toBe(true)
+  })
+
+  test("honors an explicit process disable before automatic GPT inference", () => {
+    process.env.MIMOCODE_CODEX_MODE = "false"
+    expect(isMcpToolSearchEnabled(false, "auto", "gpt-5.2")).toBe(false)
+    expect(isMcpToolSearchEnabled(false, undefined, "deployment-primary", "gpt-5.2", "gpt")).toBe(false)
+    expect(isMcpToolSearchEnabled(true, "auto", "gpt-5.2")).toBe(true)
   })
 })
 
@@ -85,12 +92,25 @@ describe("resolveHarnessMode", () => {
     expect(resolveHarnessMode({ modelID: "mimo-v2.6-ptc", harness: "codex" })).toBe("codex")
   })
 
-  test("keeps explicit session selection separate from process inference", () => {
+  test("resolves session, process, and automatic inference in precedence order", () => {
     process.env.MIMOCODE_CODEX_MODE = "true"
     expect(resolveHarnessMode({ modelID: "claude-opus-4-6", harness: "default" })).toBe("default")
     expect(resolveHarnessMode({ modelID: "claude-opus-4-6", harness: "auto" })).toBe("codex")
-    expect(resolveHarnessMode({ modelID: "gpt-5.2", harness: "default" })).toBe("codex")
+    expect(resolveHarnessMode({ modelID: "gpt-5.2", harness: "default" })).toBe("default")
     expect(resolveHarnessMode({ modelID: "gpt-4o-mini", harness: "default" })).toBe("default")
+
+    process.env.MIMOCODE_CODEX_MODE = "false"
+    expect(resolveHarnessMode({ modelID: "gpt-5.2", harness: "auto" })).toBe("default")
+    expect(resolveHarnessMode({ modelID: "claude-opus-4-6", harness: "codex" })).toBe("codex")
+    expect(resolveHarnessMode({ modelID: "mimo-v2.6-ptc", harness: "codex" })).toBe("codex")
+
+    delete process.env.MIMOCODE_CODEX_MODE
+    expect(resolveHarnessMode({ modelID: "gpt-5.2", harness: "auto" })).toBe("codex")
+    expect(resolveHarnessMode({ modelID: "gpt-4o-mini", harness: "auto" })).toBe("default")
+    expect(resolveHarnessMode({ modelID: "gpt-oss-120b", harness: "auto" })).toBe("default")
+    expect(
+      resolveHarnessMode({ modelID: "deployment-primary", modelAPIID: "gpt-5.2", modelFamily: "gpt" }),
+    ).toBe("default")
   })
 })
 
@@ -144,8 +164,15 @@ describe("usesGPTToolset", () => {
     expect(usesGPTToolset("mimo-v2.6-ptc", "auto")).toBe(true)
     expect(usesGPTToolset("claude-opus-4-6", "default")).toBe(false)
     expect(usesGPTToolset("mimo-v2.6", "default")).toBe(false)
-    expect(usesGPTToolset("gpt-5.2", "default")).toBe(true)
+    expect(usesGPTToolset("gpt-5.2", "default")).toBe(false)
     expect(usesGPTToolset("gpt-4o-mini", "default")).toBe(false)
     expect(isMcpToolSearchEnabled(false, "default", "gpt-4o-mini")).toBe(false)
+  })
+
+  test("honors an explicit process disable for GPT and alias identities", () => {
+    process.env.MIMOCODE_CODEX_MODE = "false"
+    expect(usesGPTToolset("gpt-5.2", "auto")).toBe(false)
+    expect(usesGPTToolset("deployment-primary", undefined, "gpt-5.2", "gpt")).toBe(false)
+    expect(usesGPTToolset("claude-opus-4-6", "codex")).toBe(true)
   })
 })

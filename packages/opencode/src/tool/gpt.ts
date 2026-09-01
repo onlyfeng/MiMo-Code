@@ -23,16 +23,13 @@ export function isGPTModel(...values: Array<string | undefined>) {
 }
 
 export function resolveHarnessMode(input: HarnessResolutionInput): ResolvedHarnessMode {
-  const ids = [input.modelID, input.modelAPIID, input.modelFamily]
   const override = codexHarnessOverride(input.harness)
-  if (isMimoModel(...ids)) {
-    if (override !== undefined) return override ? "codex" : "default"
-    return Flag.MIMOCODE_CODEX_MODE ? "codex" : "default"
-  }
+  if (override !== undefined) return override ? "codex" : "default"
+  const processMode = Flag.MIMOCODE_CODEX_MODE
+  if (processMode !== undefined) return processMode ? "codex" : "default"
+  if (isMimoModel(input.modelID, input.modelAPIID, input.modelFamily)) return "default"
   const modelID = input.modelID.toLowerCase()
   if (modelID.includes("gpt-") && !modelID.includes("oss") && !modelID.includes("gpt-4")) return "codex"
-  if (override !== undefined) return override ? "codex" : "default"
-  if (Flag.MIMOCODE_CODEX_MODE) return "codex"
   return "default"
 }
 
@@ -41,17 +38,16 @@ export function isMcpToolSearchEnabled(
   harness: HarnessMode | undefined,
   ...modelIDs: Array<string | undefined>
 ) {
+  // The dedicated MCP selector is independent of prompt/toolset selection.
   if (enabled) return true
-  const mode = resolveHarnessMode({
-    modelID: modelIDs[0] ?? "",
-    modelAPIID: modelIDs[1],
-    modelFamily: modelIDs[2],
-    harness,
-  })
-  if (harness === "codex" || harness === "default") return mode === "codex"
-  if (mode === "codex") return true
-  if (isMimoModel(...modelIDs)) return false
-  return isGPTModel(...modelIDs)
+  return (
+    resolveHarnessMode({
+      modelID: modelIDs[0] ?? "",
+      modelAPIID: modelIDs[1],
+      modelFamily: modelIDs[2],
+      harness,
+    }) === "codex"
+  )
 }
 
 export function isMimoV25Model(...values: Array<string | undefined>) {
