@@ -11,6 +11,7 @@ never used as an inherited `main` or compat behavior review basis.
 
 | Date | Accepted `main` tip | Main behavior | Compat behavior | Active DC | Changed-path total | Decision summary |
 | --- | --- | --- | --- | ---: | --- | --- |
+| 2026-09-01 | `c3fd051a27585a3e2a04124e00ce0439b27130e6` | `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` | `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Inherited the complete 1/1 OAuth-branding audit, adopted the shared MiMoCode callback and dynamic-registration identity unchanged, and re-reviewed all seven compat owners; only DC-NET-002 had subsystem adjacency, without a production fork or an OAuth-interoperability claim. |
 | 2026-08-24 | `060b3adb1373a802e301f5bafce225b90407ef49` | `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5` | `f6abd31d57d3066a1924042670e3f59c26f8a0ca` | 7 | 47 paths; 3,643 insertions; 226 deletions | Retained approved private WebFetch and MCP reachability plus the existing platform, per-agent MaxMode, bounded-context, actor-context, and TUI metadata adaptations as compat-owned behavior. |
 | 2026-08-24 | `fd5064df420d5c2dbe424ddaa020bb54655bef64` | `e0389a146ad09a439bbb1009b5f01fc3cc63d7d8` | `d0d44b7df7af60fe9ef4df634d53f6c0782d0f2c` | 7 | 47 paths; 3,643 insertions; 226 deletions | Adopted the shared full IPv6 link-local classifier correction while retaining approved private WebFetch and MCP reachability plus all existing compat-owned platform, model, context, actor, and TUI adaptations. |
 | 2026-08-25 | `98f1652bcab2038989f6e522fe41a2cb35b5e90f` | `413711ced1e60c408caefb10c585a2be8c4b5f01` | `166737181cff131961b0b84977afd230c556755b` | 7 | 47 paths; 3,643 insertions; 226 deletions | Adopted shared instance-disposal, runner, actor-notification, workflow-cleanup, and owned-worktree lifecycle hardening while retaining all seven compat-owned adaptations unchanged. |
@@ -1001,6 +1002,116 @@ git diff --shortstat \
 git diff --shortstat \
   2d9d8e755ccf5c53c5883257070b83667ec1462d \
   f1175ce9d6a7f82045b3910e0f1db5eb686924d0 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-09-01 OAuth branding propagation
+
+- Reviewed upstream:
+  `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`.
+- Accepted fork `main` audit tip:
+  `c3fd051a27585a3e2a04124e00ce0439b27130e6`.
+- Inherited main behavior:
+  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`.
+- Prior compat tip:
+  `358c0bf50d20e168d8b83de7d491e0ca608061e6`.
+- Compat integration merge and final pre-documentation behavior:
+  `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`, whose parents are the prior
+  compat tip and accepted fork `main` audit tip.
+- The actual compat merge tree equals the pre-merge prediction
+  `939a1cc5f564cf44eb3e6e85651a1cd95f129ca4`; no conflict resolution or
+  compat behavior follow-up was required.
+- Active ownership remains DC-NET-001, DC-NET-002, DC-PLATFORM-001,
+  DC-MODEL-001, DC-CONTEXT-001, DC-ACTOR-001, and DC-TUI-001. No owner was
+  added, retired, or transferred.
+
+### Complete shared-capability disposition (1/1)
+
+`AR-20260901-OAUTH-COMPAT` is the complete audit range:
+`old_upstream=2c5cd4972c3f3cb8947a5117c7910d485e6f6179`,
+`new_upstream=2ce93f4188275aff0dc0353d36ec5f7538bcb32b`,
+`main_merge=c63ae51911f8455fd1cc8defcc4a0a2e827889e2`,
+`main_tip=c3fd051a27585a3e2a04124e00ce0439b27130e6`,
+`compat_merge=43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`, and
+`compat_behavior=43bc1048b0bc16ff17d715ee9cb756d2c1cc319f`.
+
+| # | Inherited capability | `audit_range` | Main and compat counterparts | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | OAuth-facing MiMoCode branding consistency | `AR-20260901-OAUTH-COMPAT` | Main FC-004 carries MCP OAuth lifecycle; compat has no prior delta in the three incoming paths, while DC-NET-002 remains an adjacent `oauth: false` remote-MCP sentinel | complementary | behavior, contract, naming-style | shared main | Inherit the eight upstream literals exactly; preserve all shared OAuth control flow and every compat owner | Three blobs equal accepted main, exact 8-new/0-old gate, runtime metadata/callback assertion, 60-test final matrix, typecheck, lint, lock parity; `COMPAT-VERIFIED` |
+
+Inventory count is 1 and result-row count is 1. The row records every SHA in
+the audit range, both branch counterparts, relationship, drift, canonical
+owner, disposition, and final status evidence.
+
+### Active compat-owner review (7/7)
+
+| Owner | Incoming relationship | Reviewed disposition | Final evidence |
+| --- | --- | --- | --- |
+| DC-NET-001 | no path or symbol overlap | Preserve the approved private WebFetch call seam and inherited SSRF utilities | Owner paths are unchanged from prior compat; exact-SHA CI remains the full sentinel gate |
+| DC-NET-002 | MCP subsystem adjacency only | Inherit OAuth branding without a production fork; retain RFC1918 client creation and its explicit lack of authentication-interoperability coverage | Full lifecycle matrix passed 34/34, including `compat permits an RFC1918 remote MCP endpoint` with `oauth: false` |
+| DC-PLATFORM-001 | no path or symbol overlap | Preserve restricted-network ripgrep and Windows archive fallbacks | Owner paths are unchanged from prior compat; exact-SHA CI remains the full sentinel gate |
+| DC-MODEL-001 | `plugin/codex.ts` module adjacency only | Preserve per-agent MaxMode, final-step, title, retry-status, and generated-schema behavior; incoming changes only private HTML literals | Codex plugin matrix passed 15/15; owner source/generated paths are unchanged |
+| DC-CONTEXT-001 | no path or symbol overlap | Preserve all caps, preflight, checkpoint, chronology, and published-contract behavior | Owner paths and generated artifacts are unchanged; no SDK/OpenAPI input changed |
+| DC-ACTOR-001 | no path or symbol overlap | Preserve frozen membership, actor identity, bounded state, and static-prefix failure | Owner paths are unchanged from prior compat; exact-SHA CI remains the full sentinel gate |
+| DC-TUI-001 | user-visible topic adjacency only | Keep provider/model/variant truth and `titleLocale`; browser callback HTML shares no TUI component or state | Owner paths are unchanged from prior compat; exact-SHA CI remains the full sentinel gate |
+
+Owner count is 7 and result-row count is 7. Cleanly merging and zero-overlap
+owners were reviewed alongside the single subsystem-adjacent owner; no
+compat-only invariant was silently replaced.
+
+### Compat validation evidence
+
+- The three incoming source blobs are byte-identical to accepted `main`.
+  Static assertions found exactly 8 new MiMoCode literals and 0 superseded
+  OpenCode literals; a runtime assertion verified the dynamic-registration
+  metadata and successful MCP callback response.
+- The final serial affected matrix passed 60 tests with 0 failures: 4 MCP
+  callback, 4 MCP auto-connect, 3 MCP browser, 34 MCP lifecycle, and 15 Codex
+  plugin tests. It cleared all unrelated experimental, harness, compaction, and
+  checkpoint selectors while preserving the package preload baseline.
+- An earlier parallel run placed lint, typecheck, and all focused
+  tests under shared CPU pressure; two unchanged 5-second MCP browser tests
+  timed out while the third browser test and every other focused test passed.
+  The single evidence-supported same-SHA serial rerun passed that file 3/3 in
+  9.34 seconds and the complete affected matrix 60/60, so no production or test
+  timeout change was made.
+- `packages/opencode` typecheck passed. Root lint completed with 0 errors and
+  4,320 pre-existing repository-wide warnings.
+- `bun ci` used the frozen lockfile. `bun.lock` and dependency manifests remain
+  byte-identical to accepted `main`; compat generated artifacts remain unchanged
+  from the prior compat tip. SDK generation was not required because no
+  SDK/OpenAPI input changed.
+- Both the intended propagation range and final main-to-compat delta pass
+  `git diff --check`.
+
+### Shared inheritance and changed-path calculation
+
+Propagation from prior compat to final behavior, excluding all five registry
+and history paths, changes 3 paths with 8 insertions and 8 deletions. The final
+compat delta relative to inherited main behavior remains 92 paths with 10,085
+insertions and 1,664 deletions.
+
+`AGENTS.md`, `docs/upstream-deviations.md`, `docs/fork-capabilities.md`,
+`docs/fork-registry-history.md`, `bun.lock`, and every dependency manifest are
+byte-identical between the accepted `main` tip and compat behavior.
+
+```bash
+git diff --shortstat \
+  358c0bf50d20e168d8b83de7d491e0ca608061e6 \
+  43bc1048b0bc16ff17d715ee9cb756d2c1cc319f -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --shortstat \
+  c63ae51911f8455fd1cc8defcc4a0a2e827889e2 \
+  43bc1048b0bc16ff17d715ee9cb756d2c1cc319f -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
