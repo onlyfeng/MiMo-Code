@@ -11,6 +11,7 @@ never used as an inherited `main` or compat behavior review basis.
 
 | Date | Accepted `main` tip | Main behavior | Compat behavior | Active DC | Changed-path total | Decision summary |
 | --- | --- | --- | --- | ---: | --- | --- |
+| 2026-09-01 | `c9bdea878aa289f427c4bfbe798411d4907df600` | `4866d01f754429e3782f60983311c24468a9949a` | `17f24827b310d8e9b64d495370ca6ec63f28242c` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Propagated the complete 2/2 freshly fetched upstream range, adopted action-oriented prompt guidance, subsumed the weaker upstream Codex result into FD-005's stronger resolver, and preserved all seven compat owners with 71 named overlap sentinels. |
 | 2026-09-01 | `c6a2f5f3c8cd0851b36049da5176e2ee7fb81d05` | `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c` | `c594bb92ff5a11063c5e22936964ceae088e1d43` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Inherited the complete 2/2 Codex-mode specified change, retained all seven compat owners, and revalidated per-agent MaxMode, bounded preflight, frozen full-context actors, and compat-generated contracts without selecting the unrelated upstream prompt guidance. |
 | 2026-09-01 | `c3fd051a27585a3e2a04124e00ce0439b27130e6` | `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` | `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Inherited the complete 1/1 OAuth-branding audit, adopted the shared MiMoCode callback and dynamic-registration identity unchanged, and re-reviewed all seven compat owners; only DC-NET-002 had subsystem adjacency, without a production fork or an OAuth-interoperability claim. |
 | 2026-08-24 | `060b3adb1373a802e301f5bafce225b90407ef49` | `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5` | `f6abd31d57d3066a1924042670e3f59c26f8a0ca` | 7 | 47 paths; 3,643 insertions; 226 deletions | Retained approved private WebFetch and MCP reachability plus the existing platform, per-agent MaxMode, bounded-context, actor-context, and TUI metadata adaptations as compat-owned behavior. |
@@ -1352,4 +1353,271 @@ git diff --shortstat \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-09-01 full upstream tool-guidance and Codex-convergence sync
+
+- This is the complete propagation of freshly fetched upstream range
+  `2ce93f4188275aff0dc0353d36ec5f7538bcb32b..d17e176ba179ea2568cdf5020bb65011aaf86493`,
+  not a named subset. The range contains four commits: two substantive changes
+  and two first-parent merge carriers, across eight paths with 63 insertions and
+  28 deletions.
+- Accepted fork `main` behavior:
+  `4866d01f754429e3782f60983311c24468a9949a`; accepted main audit tip:
+  `c9bdea878aa289f427c4bfbe798411d4907df600`.
+- Prior compat tip:
+  `d2016a7a84adff5cafff14cad54c4d8a6e11ceb2`.
+- Compat integration merge and final pre-documentation behavior:
+  `17f24827b310d8e9b64d495370ca6ec63f28242c`, whose parents are the prior
+  compat tip and accepted main audit tip.
+- The actual merge tree and a fresh `git merge-tree --write-tree` prediction
+  are both `88b79af45838efaa546501dd43f825a099fe575a`; no compat conflict resolution
+  or behavior follow-up was required.
+- All six shared FD, all fifteen shared FC, and all seven compat DC entries
+  remain active. No owner was added, retired, renumbered, or transferred.
+
+### Complete shared-capability disposition (2/2)
+
+`AR-20260901-UPSTREAM-COMPAT` is the complete audit range:
+`old_upstream=2ce93f4188275aff0dc0353d36ec5f7538bcb32b`,
+`new_upstream=d17e176ba179ea2568cdf5020bb65011aaf86493`,
+`main_merge=4866d01f754429e3782f60983311c24468a9949a`,
+`main_tip=c9bdea878aa289f427c4bfbe798411d4907df600`,
+`prior_compat=d2016a7a84adff5cafff14cad54c4d8a6e11ceb2`,
+`compat_merge=17f24827b310d8e9b64d495370ca6ec63f28242c`, and
+`compat_behavior=17f24827b310d8e9b64d495370ca6ec63f28242c`.
+
+| # | Incoming capability and commit/path evidence | `audit_range` | Main counterpart | Compat counterpart | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Action-oriented default-prompt tool guidance; `eb6766d5c9daf035c979d98db84ec80c6cf99967` via merge carrier `dcb15e2f706aaf546a76129eed980b91dc5024a3`, changing `packages/opencode/src/session/prompt/default.txt` | `AR-20260901-UPSTREAM-COMPAT` | FC-011 owns prompt/tool-schema truth and direct system-prompt regression coverage | DC-MODEL-001, DC-CONTEXT-001, and DC-ACTOR-001 are semantically adjacent to prompt routing, request construction, and actor spawning; none owns this shared guidance | complementary | prompt guidance, task/actor claims, whitespace | shared main | Inherit the adapted guidance and its direct regression; retain the fork's tool names and remove upstream trailing whitespace | Final default-path matrix 226 pass, 1 pre-existing TODO, 0 fail; 71 compat-owner sentinels passed; final behavior matches accepted main on both changed paths |
+| 2 | Explicit false Codex-mode result; `cce933568906ae670decf9a081618ebf25aa8afe`, changing `flag.ts`, `prompt.ts`, `system.ts`, `gpt.ts`, and three tests | `AR-20260901-UPSTREAM-COMPAT` | FD-005 owns the stronger session explicit > process true/false > complete-identity inference contract, MiMo precedence, independent MCP-search selector, and transport separation | DC-MODEL-001 preserves per-agent MaxMode; DC-CONTEXT-001 and DC-ACTOR-001 preserve bounded/frozen request seams around the shared resolved harness | partial duplicate with conflicting priority/tests | harness selection, prompt, toolset, aliases, request seams | shared main | Subsumed rather than copied: reject the upstream assertions that let process-level false override an explicit session `codex` result, while retaining process false over model inference when no explicit session mode exists | Codex flag/tool/system/request matrix included in 93 + 8 passing tests; DC-MODEL/DC-CONTEXT/DC-ACTOR sentinels passed 20/43/8 |
+
+Inventory count is 2 and result-row count is 2. Every row records old/new
+upstream through the named audit range, the accepted main and compat SHAs,
+commit/path evidence, both branch counterparts, relationship, drift,
+canonical owner, disposition, and final status evidence.
+
+### Active compat-owner review (7/7)
+
+| Owner | Incoming relationship | Reviewed disposition | Final evidence |
+| --- | --- | --- | --- |
+| DC-NET-001 | no path or symbol overlap | Preserve the approved private WebFetch call seam and inherited SSRF utilities | Incoming range and final propagation delta do not touch owner paths or symbols; blobs remain unchanged |
+| DC-NET-002 | no MCP transport/config path or symbol overlap | Preserve RFC1918 client creation and its deliberately bounded interoperability claim | Owner paths and RFC1918 guarantee are unchanged |
+| DC-PLATFORM-001 | no path or symbol overlap | Preserve restricted-network ripgrep and Windows archive fallbacks | Owner paths are unchanged |
+| DC-MODEL-001 | audited upstream/main prompt, system, and harness semantic adjacency; no compat production delta | Inherit action guidance and the stronger shared tri-state resolver while preserving per-agent opt-in, final-step, title, generated-schema, and retry-status bounds | 20 MaxMode predicate/live-wire sentinels passed |
+| DC-CONTEXT-001 | model-visible default/system-prompt semantic adjacency | Preserve model-visible caps, effective-window preflight, recovery floors, checkpoint coverage, chronology, and generated contracts | 43 overflow/preflight sentinels passed; SDK/OpenAPI inputs and outputs are unchanged |
+| DC-ACTOR-001 | task/actor guidance and prompt-routing semantic adjacency | Preserve frozen system/tools/context/permissions, active child requests, searchable captured MCP membership, and static-prefix fail-closed behavior | 8 full-context actor/request-prefix sentinels passed |
+| DC-TUI-001 | no TUI component, request-metadata, or locale overlap | Preserve provider/model/variant truth and `titleLocale` submission | Owner paths are unchanged |
+
+Owner count is 7 and result-row count is 7. The three semantically adjacent
+owners were validated with named sentinels; the four no-overlap owners were
+still reviewed and remain unchanged.
+
+### Compat validation evidence
+
+- `bun ci` installed 4,542 packages from the frozen lockfile. `bun.lock` and
+  every dependency manifest are byte-identical to both the prior compat tip and
+  accepted `main`.
+- Every default-path test process removed seven experimental, harness,
+  compaction, and checkpoint selectors. The four final groups passed 93, 8,
+  105, and 20 tests: 226 pass, 1 pre-existing remote-instruction TODO, 0 fail.
+- The compat-owner groups separately passed 20 DC-MODEL-001, 43
+  DC-CONTEXT-001, and 8 DC-ACTOR-001 sentinels: 71 pass, 0 fail. They are
+  reported separately because some intentionally overlap final-matrix files.
+- `packages/opencode` and `packages/sdk/js` typechecks passed. Root lint
+  completed with 4,323 pre-existing repository-wide warnings and 0 errors.
+- Relative to the prior compat tip, excluding the five registry/history paths,
+  final behavior changes exactly two paths with 22 insertions and 11 deletions:
+  `packages/opencode/src/session/prompt/default.txt` and its direct
+  `packages/opencode/test/session/system.test.ts` regression. Both blobs are
+  byte-identical to inherited main behavior.
+- `packages/opencode/src/session/prompt.ts`, OpenAPI generation code, tracked
+  `packages/sdk/openapi.json`, and both JavaScript SDK generated trees are
+  unchanged from the prior compat tip. SDK generation was therefore not
+  applicable; this conclusion is guarded by explicit zero-diff assertions.
+- Both propagation ranges pass `git diff --check`. At this local behavior
+  record, exact remote-tip CI for the forthcoming compat documentation commit
+  is pending publication; this paragraph is not remote-completion evidence.
+
+### Shared inheritance and changed-path calculation
+
+The final compat delta relative to inherited main behavior remains 92 paths
+with 10,085 insertions and 1,664 deletions after excluding the five registry
+and history paths. `AGENTS.md`, the three shared registry/history documents,
+`bun.lock`, and every dependency manifest are byte-identical between accepted
+`main` and compat behavior.
+
+```bash
+git diff --shortstat \
+  d2016a7a84adff5cafff14cad54c4d8a6e11ceb2 \
+  17f24827b310d8e9b64d495370ca6ec63f28242c -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --shortstat \
+  4866d01f754429e3782f60983311c24468a9949a \
+  17f24827b310d8e9b64d495370ca6ec63f28242c -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+### Exact behavior reproduction
+
+Run this block from a clean disposable checkout of exact compat behavior
+`17f24827b310d8e9b64d495370ca6ec63f28242c`. It installs only the frozen lock,
+removes all seven non-default selectors before each test process, verifies the
+ambient selector set is empty, and asserts every pass/TODO/fail count.
+Package-owned `test/preload.ts` still installs its isolated-test baseline after
+the process starts: `MIMOCODE_TEST_TMPDIR_ROOT=<fixture>`,
+`MIMOCODE_MODELS_PATH=<fixture>`,
+`MIMOCODE_TEST_MANAGED_CONFIG_DIR=<fixture>`,
+`MIMOCODE_DISABLE_DEFAULT_PLUGINS=true`, `MIMOCODE_DB=:memory:`, and
+`MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`.
+
+```bash
+(
+  set -e
+  set -o pipefail
+  test "$(git rev-parse HEAD)" = \
+    17f24827b310d8e9b64d495370ca6ec63f28242c
+  bun ci
+
+  cd packages/opencode
+  run_default() {
+    env -u MIMOCODE_EXPERIMENTAL \
+      -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+      -u MIMOCODE_CODEX_MODE \
+      -u MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL \
+      -u MIMOCODE_COMPACTION_MAX_CONTEXT \
+      -u MIMOCODE_COMPACTION_TRIGGER_RATIO \
+      -u MIMOCODE_DISABLE_CHECKPOINT "$@"
+  }
+  ambient="$(run_default env | LC_ALL=C sort | rg '^MIMOCODE_' || true)"
+  printf '%s\n' "$ambient"
+  test -z "$ambient"
+
+  run_counted() {
+    expected_pass="$1"
+    expected_todo="$2"
+    shift 2
+    if ! output="$(run_default bun test "$@" 2>&1)"; then
+      printf '%s\n' "$output"
+      return 1
+    fi
+    printf '%s\n' "$output"
+    actual_pass="$(printf '%s\n' "$output" | awk '$2 == "pass" { value = $1 } END { print value + 0 }')"
+    actual_todo="$(printf '%s\n' "$output" | awk '$2 == "todo" { value = $1 } END { print value + 0 }')"
+    actual_fail="$(printf '%s\n' "$output" | awk '$2 == "fail" { value = $1 } END { print value + 0 }')"
+    test "$actual_pass" -eq "$expected_pass"
+    test "$actual_todo" -eq "$expected_todo"
+    test "$actual_fail" -eq 0
+  }
+
+  run_counted 93 0 \
+    test/flag/codex-mode-flag.test.ts \
+    test/tool/gpt.test.ts \
+    test/session/system.test.ts \
+    test/session/llm-request-prefix.test.ts \
+    test/agent/agent.test.ts --timeout 120000
+  run_counted 8 0 test/session/prompt-effect.test.ts \
+    -t 'native tool schema|process-disabled auto GPT requests|locks system and harness|persists auto|instruction files' \
+    --timeout 120000
+  run_counted 105 0 \
+    test/session/max-mode.test.ts \
+    test/session/llm-retry.test.ts \
+    test/session/prefix-snapshot.test.ts \
+    test/tool/tool-script.test.ts --timeout 120000
+  run_counted 20 1 \
+    test/session/instruction.test.ts \
+    test/session/llm-system-prompt.test.ts \
+    test/session/replace-agent-subagent.test.ts --timeout 120000
+
+  run_counted 15 0 test/session/max-mode.test.ts --timeout 120000
+  run_counted 5 0 test/session/prompt-effect.test.ts \
+    -t 'MaxMode candidate retries|MaxMode final step|subagent maxMode retries|last-step maxMode|json_schema output' \
+    --timeout 120000
+  run_counted 39 0 test/session/overflow.test.ts \
+    -t 'request preflight overflow|compaction.max_context|MIMOCODE_COMPACTION_MAX_CONTEXT|MIMOCODE_COMPACTION_TRIGGER_RATIO' \
+    --timeout 120000
+  run_counted 4 0 test/session/prompt-effect.test.ts \
+    -t 'request preflight recovers old history|oversized current user text|unrecoverable static prefix|current turn context as unrecoverable' \
+    --timeout 120000
+  run_counted 3 0 test/tool/actor.test.ts \
+    -t 'captures the caller-visible prefix|fails before spawning' \
+    --timeout 120000
+  run_counted 2 0 test/session/llm-request-prefix.test.ts \
+    -t 'frozen full-context tools' --timeout 120000
+  run_counted 3 0 test/session/prompt-effect.test.ts \
+    -t 'full-context fork includes a newly committed request|pinned full-context fork can search an MCP tool|frozen fork preflight fails closed' \
+    --timeout 120000
+
+  bun typecheck
+  (cd ../sdk/js && bun typecheck)
+  cd ../..
+  lint_summary="$(bun lint 2>&1 | tee /dev/stderr | tail -n 2)"
+  printf '%s\n' "$lint_summary" | \
+    rg -q '^Found 4323 warnings and 0 errors\.$'
+
+  test "$(git diff --name-only \
+    d2016a7a84adff5cafff14cad54c4d8a6e11ceb2..17f24827b310d8e9b64d495370ca6ec63f28242c \
+    -- . \
+    ':(exclude)docs/upstream-deviations.md' \
+    ':(exclude)docs/fork-capabilities.md' \
+    ':(exclude)docs/dev-compat-overrides.md' \
+    ':(exclude)docs/fork-registry-history.md' \
+    ':(exclude)docs/dev-compat-registry-history.md')" = \
+    "$(printf '%s\n' \
+      packages/opencode/src/session/prompt/default.txt \
+      packages/opencode/test/session/system.test.ts)"
+  test "$(git diff --shortstat \
+    d2016a7a84adff5cafff14cad54c4d8a6e11ceb2..17f24827b310d8e9b64d495370ca6ec63f28242c \
+    -- . \
+    ':(exclude)docs/upstream-deviations.md' \
+    ':(exclude)docs/fork-capabilities.md' \
+    ':(exclude)docs/dev-compat-overrides.md' \
+    ':(exclude)docs/fork-registry-history.md' \
+    ':(exclude)docs/dev-compat-registry-history.md')" = \
+    " 2 files changed, 22 insertions(+), 11 deletions(-)"
+  test "$(git diff --shortstat \
+    4866d01f754429e3782f60983311c24468a9949a..17f24827b310d8e9b64d495370ca6ec63f28242c \
+    -- . \
+    ':(exclude)docs/upstream-deviations.md' \
+    ':(exclude)docs/fork-capabilities.md' \
+    ':(exclude)docs/dev-compat-overrides.md' \
+    ':(exclude)docs/fork-registry-history.md' \
+    ':(exclude)docs/dev-compat-registry-history.md')" = \
+    " 92 files changed, 10085 insertions(+), 1664 deletions(-)"
+
+  git diff --exit-code \
+    d2016a7a84adff5cafff14cad54c4d8a6e11ceb2..17f24827b310d8e9b64d495370ca6ec63f28242c \
+    -- bun.lock ':(glob)**/package.json'
+  git diff --exit-code \
+    c9bdea878aa289f427c4bfbe798411d4907df600..17f24827b310d8e9b64d495370ca6ec63f28242c \
+    -- bun.lock ':(glob)**/package.json'
+  git diff --exit-code \
+    4866d01f754429e3782f60983311c24468a9949a..17f24827b310d8e9b64d495370ca6ec63f28242c \
+    -- packages/opencode/src/session/prompt/default.txt \
+    packages/opencode/test/session/system.test.ts
+  git diff --exit-code \
+    d2016a7a84adff5cafff14cad54c4d8a6e11ceb2..17f24827b310d8e9b64d495370ca6ec63f28242c \
+    -- packages/opencode/src/session/prompt.ts \
+    packages/opencode/src/cli/cmd/generate.ts \
+    packages/sdk/openapi.json \
+    packages/sdk/js/src/gen \
+    packages/sdk/js/src/v2/gen
+  git diff --check \
+    d2016a7a84adff5cafff14cad54c4d8a6e11ceb2..17f24827b310d8e9b64d495370ca6ec63f28242c
+  git diff --check \
+    4866d01f754429e3782f60983311c24468a9949a..17f24827b310d8e9b64d495370ca6ec63f28242c
+  git diff --exit-code -- .
+)
+# expected: 226 pass, 1 TODO, 0 fail in the four final groups;
+# 71 pass, 0 fail in owner sentinels; both typechecks and all static gates
+# exit 0; lint reports 4,323 warnings and 0 errors.
 ```
