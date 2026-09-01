@@ -950,3 +950,32 @@ git diff --name-only \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
 ```
+
+## 2026-09-01 Codex-mode specified-change follow-up
+
+- This is a named specified-change propagation, not a full upstream sync. The
+  registry-wide review record remains anchored at upstream `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`.
+- Selected upstream behavior: `cce933568906ae670decf9a081618ebf25aa8afe`,
+  merged at upstream tip `d17e176ba179ea2568cdf5020bb65011aaf86493`.
+- Fork behavior: `59fa0dffd7d84a3486cb42e565cecc4add16f067`.
+- The unrelated incoming prompt-guidance commit `eb6766d5` and its merge
+  `dcb15e2f` are not included by this specified change.
+
+### Capability inventory (2/2)
+
+`AR-20260901-CODEX-MODE` records the focused decision below. `MAIN-VERIFIED`
+means 213 default-path tests passed with zero failures and one pre-existing
+remote-instruction TODO across flag, resolver, system, instruction/event parity,
+actor scope, prefix, registry/agent, actual request wire, MaxMode, retry,
+snapshot, and nested dispatch surfaces; OpenCode and JavaScript SDK typechecks
+passed; and generated description drift was limited to the three OpenAPI and
+three SDK occurrences owned by the two source schema descriptions.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | FD-002 registry narrowing after default-on instruction alignment | `AR-20260901-CODEX-MODE` | `03fcb66a`, `6a2cb49c`; `Flag.MIMOCODE_DISABLE_INSTRUCTIONS`; `prompt.ts` `currentAdditions`, `InstructionsLoaded`; `llm.ts` `buildSystemArray` | FD-002 residual parity, immutable retry set, and known-actor replacement | DC-MODEL-001 retry reuse; DC-CONTEXT-001 and DC-ACTOR-001 preserve frozen/actor boundaries | partial duplicate with residual conflict | event, request payload, retry, actor identity, tests | shared main | Narrow: upstream now supplies default-on instruction delivery; retain only disable event/payload parity, retry-immutable resolved sets, and unknown-identity fail-closed replacement | Existing normal/disabled/MaxMode/retry/actor-scope matrix remains authoritative; `MAIN-VERIFIED` |
+| 2 | Tri-state Codex-mode resolution | `AR-20260901-CODEX-MODE` | `cce93356`; `flag.ts` `MIMOCODE_CODEX_MODE`; `tool/gpt.ts` `resolveHarnessMode`; `session/system.ts` `provider`; behavior `59fa0dff` | FD-005 one resolved identity/harness decision | DC-MODEL-001 retry reuse; compat preserves its system/prompt overlays | complementary with fork classification precedence | flag semantics, prompt, toolset, aliases, retry, generated schema | shared main | Adapt: session explicit wins; under auto, true forces Codex, false forces default even for GPT, and unset model-infers; transport remains separate | 213 focused tests, one pre-existing TODO, two typechecks, six generated-description assertions, and `git diff --check`; `MAIN-VERIFIED` |
+
+Inventory count is 2 and result-row count is 2. The selected tri-state behavior
+was adapted through the fork resolver rather than copied wholesale; no active
+FD was retired, added, renumbered, or transferred.

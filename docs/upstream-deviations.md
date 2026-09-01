@@ -29,7 +29,7 @@ registry or history commit does not advance either behavior reference.
 | ID | Watch surfaces | Upstream relationship | Required decision |
 | --- | --- | --- | --- |
 | FD-001 | yolo, permission, Bash delete | Rejects shared mutable delete approval | Preserve request/instance isolation |
-| FD-002 | instruction loading, model requests, and retry | Rejects default-off delivery | Preserve UI-to-request parity across attempts |
+| FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
 | FD-004 | instance server, `/v1`, SDK/OpenAPI | Rejects implicit listener/capability surface | Keep ordinary instances opt-in only |
 | FD-005 | model identity, prompt, discovery, tools, retry | Adapts inconsistent upstream classification | Preserve one resolved identity |
 | FD-006 | direct tools, nested `exec`, timeout and normalization | Selectively adopts compatibility normalization | Preserve authority and size/unit boundaries |
@@ -66,23 +66,24 @@ registry or history commit does not advance either behavior reference.
 
 - Status: active
 - Canonical owner: fork `main` instruction and request-construction pipeline
-- Observable contract: runtime-environment additions and every non-empty
-  instruction file reported by `TuiEvent.InstructionsLoaded` are included in
-  the corresponding normal and MaxMode model requests. A default-off dynamic
-  system-prompt flag cannot make the UI report content that the request omits.
-  Request, live-step, and MaxMode retries reuse the same resolved instruction
-  set; retry configuration cannot suppress or replace it between attempts. A
-  deliberate instruction-disable flag suppresses both model-visible instruction
-  content and the corresponding `InstructionsLoaded` event, while the dynamic
-  environment block remains independently opt-in. A
-  session-level `replace-agent` base applies only to main and positively
-  identified peer actors. Subagents, system-spawned actors, ephemeral requests,
-  and unknown actor identities retain their own agent prompt; identity override
-  fails closed even though checkpoint responsibility separately fails open.
-- Upstream relationship: rejects the default-off gate anchored at
-  `ada544a352337a1c0ce796234fc86e7438e2f7e9` and merged by `8fa7e8d4` while
-  retaining compatible request-prefix improvements and adapting upstream's
-  actor-scoped `replace-agent` correction to fail closed for unknown identity.
+- Observable contract: a deliberate instruction-disable flag suppresses both
+  model-visible instruction content and the corresponding
+  `TuiEvent.InstructionsLoaded` event. Once a normal or MaxMode request resolves
+  its instruction set, request, live-step, and MaxMode retries reuse that same
+  immutable set; retry configuration cannot suppress, replace, or reload it
+  between attempts. A session-level `replace-agent` base applies only to main
+  and positively identified peer actors. Subagents, system-spawned actors,
+  ephemeral requests, and unknown actor identities retain their own agent
+  prompt; identity override fails closed even though checkpoint responsibility
+  separately fails open.
+- Upstream relationship: `03fcb66a7ae9e2ec944214ccda3b17fc2a83139a`,
+  merged by `6a2cb49cb682881843df48ed4220943bb0d7a1fb`, aligns the default:
+  instruction files reach model requests without requiring
+  `MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT`, while the runtime-environment block
+  remains independently opt-in. The fork retains the residual disable
+  event/payload parity, immutable retry-set, and unknown-identity fail-closed
+  boundaries; upstream's actor-scoped `replace-agent` correction is adapted
+  rather than copied because checkpoint ownership intentionally fails open.
 - Watch surfaces: `packages/opencode/src/cli/cmd/tui/app.tsx`,
   `packages/opencode/src/session/instruction.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
@@ -95,16 +96,23 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/llm-system-prompt.test.ts`,
   `packages/opencode/test/session/replace-agent-subagent.test.ts`,
   `packages/opencode/test/session/max-mode.test.ts`, and
-  `packages/opencode/test/session/prompt-effect.test.ts` bind the reported file
-  set to normal and MaxMode request payloads.
+  `packages/opencode/test/session/prompt-effect.test.ts` prove default-on normal
+  and MaxMode delivery, disable event/payload parity, unchanged resolved
+  instruction bytes across request/live-step/MaxMode retries, and positive
+  main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`;
   main behavior `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
-- Retirement condition: one immutable per-request decision controls both the UI
-  signal and model payload, with regressions proving identical instruction sets
-  and positive main/peer evidence before a session base replaces actor identity.
+- 2026-09-01 registry narrowing: default-on instruction delivery is now an
+  adopted shared capability. FD-002 remains active only for disable UI/payload
+  parity, immutable retry sets, and fail-closed replacement of unknown actors.
+- Retirement condition: upstream proves all three residuals together: one
+  immutable per-request instruction decision controls the disable UI signal and
+  model payload, every request/live-step/MaxMode retry reuses that same resolved
+  set, and a session base replaces actor identity only with positive main or
+  registered-peer evidence.
 
 ## FD-004 — ordinary instances expose no implicit OpenAI-compatible listener
 
@@ -143,18 +151,21 @@ registry or history commit does not advance either behavior reference.
 - Observable contract: prompt selection, MCP discovery, registry filtering,
   frozen prefix capture, agent generation, and `exec` dispatch classify MiMo
   from the complete resolved `(model.id, model.api.id, model.family)` identity
-  with the same harness precedence. Exact MiMo v2.5 identities win over generic
-  aliases. MiMo Responses transport is selected only by a resolved PTC identity;
-  transport never selects the Codex harness/toolset, and an explicit session or
-  process harness remains authoritative. Unrelated GPT-4 families do not gain
-  Codex tools through API/family aliases. Request, live-step, and MaxMode retry
-  policy reuse that same resolved identity instead of independently
-  reclassifying the model between attempts.
+  with the same harness precedence. An explicit session `codex` or `default`
+  selection wins first. For `auto`, an explicit process true/false forces Codex
+  or default respectively; an unset process value preserves model inference.
+  Exact MiMo v2.5 identities win over generic aliases. MiMo Responses transport
+  is selected only by a resolved PTC identity; transport never selects the Codex
+  harness/toolset. Unrelated GPT-4 families do not gain Codex tools through
+  API/family aliases. Request, live-step, and MaxMode retry policy reuse that
+  same resolved identity instead of independently reclassifying the model
+  between attempts.
 - Upstream relationship: adapts the classification introduced at
   `866a5b8a2eff3970a0becb0d27f8f055e4624e19` and merged by
   `b15b0971846861a4b25576d340ce1a4207f87712`; upstream's separate fallbacks are
   not authoritative for fork request behavior.
-- Watch surfaces: `packages/opencode/src/tool/gpt.ts`,
+- Watch surfaces: `packages/opencode/src/flag/flag.ts`,
+  `packages/opencode/src/tool/gpt.ts`,
   `packages/opencode/src/provider/provider.ts`,
   `packages/opencode/src/session/system.ts`,
   `packages/opencode/src/session/prompt.ts`,
@@ -163,16 +174,24 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/src/tool/tool-script.ts`,
   `packages/opencode/src/agent/agent.ts`, and
   `packages/opencode/src/server/routes/instance/experimental.ts`.
-- Tests/evidence: system-prompt, GPT helper, request-prefix, tool-registry,
-  agent-generation, `packages/opencode/test/provider/provider.test.ts`, and
-  `packages/opencode/test/tool/tool-script.test.ts` regressions cover alias
-  conflicts, complete resolved identity, and explicit harness overrides.
+- Tests/evidence: `packages/opencode/test/flag/codex-mode-flag.test.ts`,
+  system-prompt, GPT helper, request-prefix, tool-registry, agent-generation,
+  `packages/opencode/test/provider/provider.test.ts`, and
+  `packages/opencode/test/tool/tool-script.test.ts` regressions cover explicit
+  unset/true/false behavior, direct GPT IDs, API/family aliases, MiMo conflicts,
+  explicit session precedence, and retry reuse.
 - Review basis: upstream `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`;
   main behavior `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
   complete resolved identity while keeping transport and harness/toolset as
   separate decisions. MiMo v2.5 precedence remains authoritative even when an
   alias looks PTC-like.
+- 2026-09-01 tri-state follow-up: adapted `MIMOCODE_CODEX_MODE` from a Boolean
+  force-on switch to a tri-state resolved mode: unset preserves model inference,
+  explicit true forces the Codex prompt/toolset, and explicit false forces the
+  default prompt/toolset even for GPT identities. Session-explicit mode remains
+  authoritative, and transport selection does not infer or override the
+  harness/toolset. Main behavior: `59fa0dffd7d84a3486cb42e565cecc4add16f067`.
 - Retirement condition: the provider layer exposes one immutable model-mode
   value consumed unchanged by every prompt, discovery, registry, capture, and
   dispatch surface, with alias-conflict and GPT-4 regressions.
