@@ -956,25 +956,98 @@ git diff --name-only \
 - This is a named specified-change propagation, not a full upstream sync. The
   registry-wide review record remains anchored at upstream `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`.
 - Selected upstream behavior: `cce933568906ae670decf9a081618ebf25aa8afe`,
-  merged at upstream tip `d17e176ba179ea2568cdf5020bb65011aaf86493`.
-- Fork behavior: `59fa0dffd7d84a3486cb42e565cecc4add16f067`.
+  contained in upstream tip `d17e176ba179ea2568cdf5020bb65011aaf86493`;
+  the fork adapts only its tri-state intent rather than mechanically copying it.
+- Fork behavior: `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`.
 - The unrelated incoming prompt-guidance commit `eb6766d5` and its merge
-  `dcb15e2f` are not included by this specified change.
+  `dcb15e2f` were not selected or adapted by this specified change.
 
 ### Capability inventory (2/2)
 
 `AR-20260901-CODEX-MODE` records the focused decision below. `MAIN-VERIFIED`
-means 213 default-path tests passed with zero failures and one pre-existing
+means 214 default-path tests passed with zero failures and one pre-existing
 remote-instruction TODO across flag, resolver, system, instruction/event parity,
 actor scope, prefix, registry/agent, actual request wire, MaxMode, retry,
 snapshot, and nested dispatch surfaces; OpenCode and JavaScript SDK typechecks
 passed; and generated description drift was limited to the three OpenAPI and
 three SDK occurrences owned by the two source schema descriptions.
 
+### Validation evidence
+
+The test matrix ran from `packages/opencode` at exact behavior commit
+`0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`, with all three ambient selectors
+removed from every default-path process:
+
+```bash
+env -u MIMOCODE_EXPERIMENTAL \
+  -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+  -u MIMOCODE_CODEX_MODE \
+  bun test \
+  test/flag/codex-mode-flag.test.ts \
+  test/tool/gpt.test.ts \
+  test/session/system.test.ts \
+  test/session/llm-request-prefix.test.ts \
+  test/agent/agent.test.ts \
+  --timeout 120000
+# expected: 92 pass, 0 fail
+
+env -u MIMOCODE_EXPERIMENTAL \
+  -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+  -u MIMOCODE_CODEX_MODE \
+  bun test test/session/prompt-effect.test.ts \
+  -t 'native tool schema|instruction files' \
+  --timeout 120000
+# expected: 6 pass, 0 fail
+
+env -u MIMOCODE_EXPERIMENTAL \
+  -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+  -u MIMOCODE_CODEX_MODE \
+  bun test \
+  test/session/max-mode.test.ts \
+  test/session/llm-retry.test.ts \
+  test/session/prefix-snapshot.test.ts \
+  test/tool/tool-script.test.ts \
+  --timeout 120000
+# expected: 97 pass, 0 fail
+
+env -u MIMOCODE_EXPERIMENTAL \
+  -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+  -u MIMOCODE_CODEX_MODE \
+  bun test \
+  test/session/instruction.test.ts \
+  test/session/llm-system-prompt.test.ts \
+  test/session/replace-agent-subagent.test.ts \
+  --timeout 120000
+# expected: 19 pass, 1 pre-existing TODO, 0 fail
+```
+
+Typechecks ran independently from their package directories:
+
+```bash
+(cd packages/opencode && bun typecheck)
+(cd packages/sdk/js && bun typecheck)
+# expected: both exit 0
+```
+
+The two source descriptions project to exactly two source, three OpenAPI, and
+three JavaScript SDK occurrences; the selected range is whitespace-clean:
+
+```bash
+test "$(rg -F -c 'Explicit codex or default is authoritative.' \
+  packages/opencode/src/session/prompt.ts)" -eq 2
+test "$(rg -F -c 'Explicit codex or default is authoritative.' \
+  packages/sdk/openapi.json)" -eq 3
+test "$(rg -F -c 'Explicit codex or default is authoritative.' \
+  packages/sdk/js/src/v2/gen/types.gen.ts)" -eq 3
+git diff --check c3fd051a27585a3e2a04124e00ce0439b27130e6 \
+  0899a4802dd65c1ca98e68722a7ee0c017e5cb7c
+# expected: all exit 0
+```
+
 | # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | FD-002 registry narrowing after default-on instruction alignment | `AR-20260901-CODEX-MODE` | `03fcb66a`, `6a2cb49c`; `Flag.MIMOCODE_DISABLE_INSTRUCTIONS`; `prompt.ts` `currentAdditions`, `InstructionsLoaded`; `llm.ts` `buildSystemArray` | FD-002 residual parity, immutable retry set, and known-actor replacement | DC-MODEL-001 retry reuse; DC-CONTEXT-001 and DC-ACTOR-001 preserve frozen/actor boundaries | partial duplicate with residual conflict | event, request payload, retry, actor identity, tests | shared main | Narrow: upstream now supplies default-on instruction delivery; retain only disable event/payload parity, retry-immutable resolved sets, and unknown-identity fail-closed replacement | Existing normal/disabled/MaxMode/retry/actor-scope matrix remains authoritative; `MAIN-VERIFIED` |
-| 2 | Tri-state Codex-mode resolution | `AR-20260901-CODEX-MODE` | `cce93356`; `flag.ts` `MIMOCODE_CODEX_MODE`; `tool/gpt.ts` `resolveHarnessMode`; `session/system.ts` `provider`; behavior `59fa0dff` | FD-005 one resolved identity/harness decision | DC-MODEL-001 retry reuse; compat preserves its system/prompt overlays | complementary with fork classification precedence | flag semantics, prompt, toolset, aliases, retry, generated schema | shared main | Adapt: session explicit wins; under auto, true forces Codex, false forces default even for GPT, and unset model-infers; transport remains separate | 213 focused tests, one pre-existing TODO, two typechecks, six generated-description assertions, and `git diff --check`; `MAIN-VERIFIED` |
+| 2 | Tri-state Codex-mode resolution | `AR-20260901-CODEX-MODE` | `cce93356`; `flag.ts` `MIMOCODE_CODEX_MODE`; `tool/gpt.ts` `resolveHarnessMode`; `session/system.ts` `provider`; behavior `0899a480` | FD-005 one resolved identity/harness decision | DC-MODEL-001 retry reuse; compat preserves its system/prompt overlays | complementary with fork classification precedence | flag semantics, prompt, toolset, aliases, retry, generated schema | shared main | Adapt: session explicit wins; under auto, true forces Codex, false selects the native non-Codex harness even for GPT, and unset model-infers; transport stays separate while the dedicated MCP-search selector remains an independent opt-in | 214 focused tests, one pre-existing TODO, two typechecks, six generated-description assertions, and `git diff --check`; `MAIN-VERIFIED` |
 
 Inventory count is 2 and result-row count is 2. The selected tri-state behavior
 was adapted through the fork resolver rather than copied wholesale; no active

@@ -153,7 +153,11 @@ registry or history commit does not advance either behavior reference.
   from the complete resolved `(model.id, model.api.id, model.family)` identity
   with the same harness precedence. An explicit session `codex` or `default`
   selection wins first. For `auto`, an explicit process true/false forces Codex
-  or default respectively; an unset process value preserves model inference.
+  or the resolved default harness respectively; an unset process value preserves
+  model inference. The default harness selects the model's native non-Codex
+  prompt/toolset, which is not necessarily one literal prompt family.
+  `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH=true` remains an independent discovery
+  opt-in and may enable MCP Tool Search regardless of the resolved harness.
   Exact MiMo v2.5 identities win over generic aliases. MiMo Responses transport
   is selected only by a resolved PTC identity; transport never selects the Codex
   harness/toolset. Unrelated GPT-4 families do not gain Codex tools through
@@ -189,9 +193,10 @@ registry or history commit does not advance either behavior reference.
 - 2026-09-01 tri-state follow-up: adapted `MIMOCODE_CODEX_MODE` from a Boolean
   force-on switch to a tri-state resolved mode: unset preserves model inference,
   explicit true forces the Codex prompt/toolset, and explicit false forces the
-  default prompt/toolset even for GPT identities. Session-explicit mode remains
-  authoritative, and transport selection does not infer or override the
-  harness/toolset. Main behavior: `59fa0dffd7d84a3486cb42e565cecc4add16f067`.
+  default harness and native non-Codex prompt/toolset even for GPT identities.
+  Session-explicit mode remains authoritative. Transport selection and the
+  independent MCP-search opt-in do not infer or override the harness/toolset.
+  Main behavior: `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`.
 - Retirement condition: the provider layer exposes one immutable model-mode
   value consumed unchanged by every prompt, discovery, registry, capture, and
   dispatch surface, with alias-conflict and GPT-4 regressions.
