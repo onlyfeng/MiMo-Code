@@ -11,6 +11,7 @@ they are never used as an `upstream` or `main behavior` review basis.
 
 | Date | Upstream | Main behavior | Active FD | Active FC | Changed-path total | Decision summary |
 | --- | --- | --- | ---: | ---: | --- | --- |
+| 2026-09-01 | `2ce93f4188275aff0dc0353d36ec5f7538bcb32b` | `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` | 6 | 15 | 273 paths; 25,268 insertions; 10,065 deletions | Classified the single incoming OAuth-branding capability and adopted MiMoCode callback-page and dynamic-registration identity literals exactly; FC-004 remains the only clean carrier overlap, with URL validation, pending imports, request isolation, bounded diagnostics, and redaction unchanged. |
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `7c52b1412e9e39685b6975bdc4a4847fe2352647` | 6 | 13 | 211 paths; 19,057 insertions; 8,460 deletions | Retained the six shared rejection contracts and thirteen non-duplicating shared capability/process owners; adopted upstream custom-exec wrapper normalization while keeping the nested-authority and raw-size boundaries; restored the shared WebFetch target-classification baseline and scoped FC-010 to redirect permission/resource bounds; removed bounded upstream-format and loop-form drift. |
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39` | 6 | 13 | 211 paths; 19,073 insertions; 8,461 deletions | Correction: narrowed custom-exec leading-angle normalization to malformed variable-declaration assignments, preserving valid TypeScript const assertions and generic arrows while retaining the wrapper, raw-size, nested-authority, and timeout boundaries. |
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `edc2d123cbebfadc8fb7a8a18c4974def0fc2be5` | 6 | 13 | 211 paths; 19,096 insertions; 8,469 deletions | Correction: use actual async-body TypeScript diagnostics for leading-angle repair; preserve already-valid const assertions and generic arrows, including default generics, and repair only an invalid source when removing the angle yields zero diagnostics. |
@@ -843,6 +844,106 @@ git diff --shortstat \
 git diff --name-only \
   2c5cd4972c3f3cb8947a5117c7910d485e6f6179 \
   2b4c6569ac308fa6a6662c2c044059893748e0ad -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-09-01 OAuth branding synchronization
+
+- Prior reviewed upstream:
+  `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`.
+- Freshly reviewed upstream:
+  `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`.
+- Prior fork `main` tip:
+  `ed33097a961c9d915b00b2bbb2ebaf23e7ad2288`.
+- Main behavior merge:
+  `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`, whose parents are the prior
+  fork tip and freshly reviewed upstream.
+- The incoming range contains 2 commits, including 1 first-parent merge and
+  1 substantive non-merge commit, across 3 production paths with 8 insertions
+  and 8 deletions. It changes no test, fixture, dependency manifest, lockfile,
+  migration, workflow, generated SDK/OpenAPI surface, or SDK/OpenAPI input.
+- All 6 active FD and 15 active FC records were reviewed. No owner was added,
+  retired, or transferred.
+
+### Decision notes
+
+- Adopted MiMoCode branding in the MCP OAuth success/error pages, MCP dynamic
+  client-registration name and URI, and Codex browser OAuth success/error pages.
+- FC-004 is the only clean carrier overlap because `mcp/index.ts` constructs
+  the provider and callback. Its URL validation, Claude-import pending state,
+  request/frozen-fork isolation, bounded stdio diagnostics, and secret redaction
+  remain unchanged.
+- Retained the unrelated Codex protocol literals such as `originator=opencode`
+  and the OpenCode-compatible user agent; they are outside the incoming commit
+  and are not presentation branding.
+- Existing stored MCP OAuth client registrations are reused by the runtime, so
+  the new dynamic-registration metadata applies when a client is newly
+  registered or re-registered; this review does not claim an immediate update
+  to every existing authorization-server consent record.
+
+### Capability inventory (1/1)
+
+`AR-20260901-OAUTH` is the audit range used by the result row:
+`old_upstream=2c5cd4972c3f3cb8947a5117c7910d485e6f6179`,
+`new_upstream=2ce93f4188275aff0dc0353d36ec5f7538bcb32b`,
+`main_merge=c63ae51911f8455fd1cc8defcc4a0a2e827889e2`, and
+`main_behavior=c63ae51911f8455fd1cc8defcc4a0a2e827889e2`.
+
+`MAIN-VERIFIED` means the exact eight new literals and zero superseded literals
+were asserted, the MCP metadata and success callback were exercised through the
+runtime, 59 focused OAuth/MCP/Codex tests passed, OpenCode typecheck passed, and
+root lint completed with zero errors. Compatibility counterpart text identifies
+the overlay review required during propagation; it does not claim a compat SHA.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | OAuth-facing MiMoCode branding consistency | `AR-20260901-OAUTH` | `b2007fe8`; `mcp/oauth-callback.ts` `HTML_SUCCESS`/`HTML_ERROR`; `mcp/oauth-provider.ts` `McpOAuthProvider.clientMetadata`; `plugin/codex.ts` `HTML_SUCCESS`/`HTML_ERROR` | FC-004 carries MCP OAuth connection lifecycle; the prior fork tree retained the upstream OpenCode literals without a fork-specific override | The three paths had no prior compat delta; DC-NET-002 is adjacent to remote MCP creation but owns no OAuth interoperability or branding override | complementary | behavior, contract, naming-style | shared main | Adopt upstream exactly; preserve OAuth state, callback, token, registration-reuse, and unrelated Codex protocol fields | Exact 8-new/0-old source gate, runtime metadata/callback assertion, focused tests, typecheck, lint, and diff checks; `MAIN-VERIFIED` |
+
+Inventory count is 1 and result-row count is 1. The row records the audit
+range, both branch counterparts, relationship, drift, canonical owner,
+disposition, and status evidence; no incoming capability remains unclassified.
+
+### Validation evidence
+
+- The exact source gate was RED before merge (`0` new and `8` superseded
+  literals) and GREEN afterward (`8` new and `0` superseded literals).
+  A runtime assertion verified `client_name="MiMoCode"`,
+  `client_uri="https://mimo.xiaomi.com/mimocode"`, and the successful MCP
+  callback response and returned authorization code.
+- Focused default-path runs passed 4 MCP callback, 4 MCP auto-connect, 3 MCP
+  browser, 33 MCP lifecycle, and 15 Codex plugin tests: 59 passed and 0 failed.
+- `packages/opencode` typecheck passed. Root lint completed with 0 errors and
+  4,271 pre-existing repository-wide warnings.
+- `bun ci` used the frozen lockfile. `bun.lock` and the checked dependency
+  manifests remained unchanged. No SDK generation was required because no
+  SDK/OpenAPI input or generated surface changed.
+- The actual merge tree equals the pre-merge `merge-tree` prediction
+  `d6953991f08ca27ec91c12a07b6558e2295abc6a`; both merge parents and the
+  intended range pass `git diff --check`.
+
+### Changed-path calculation
+
+The 273-path, 25,268-insertion, 10,065-deletion total compares the freshly
+reviewed upstream tree with the pre-documentation main behavior and excludes
+all five shared/compat registry tracking paths:
+
+```bash
+git diff --shortstat \
+  2ce93f4188275aff0dc0353d36ec5f7538bcb32b \
+  c63ae51911f8455fd1cc8defcc4a0a2e827889e2 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --name-only \
+  2ce93f4188275aff0dc0353d36ec5f7538bcb32b \
+  c63ae51911f8455fd1cc8defcc4a0a2e827889e2 -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \
