@@ -1,6 +1,8 @@
 import { test, expect } from "bun:test"
 import { Server } from "../../src/server/server"
 
+const generatedOpenapi = Server.openapi()
+
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 function operation(doc: unknown, route: string, method: string) {
@@ -16,6 +18,18 @@ function parameterNames(value: Record<string, unknown> | undefined) {
   )
 }
 
+function schema(doc: unknown, name: string) {
+  if (!isRecord(doc) || !isRecord(doc.components) || !isRecord(doc.components.schemas)) return undefined
+  const value = doc.components.schemas[name]
+  return isRecord(value) ? value : undefined
+}
+
+function property(value: Record<string, unknown> | undefined, name: string) {
+  if (!isRecord(value?.properties)) return undefined
+  const result = value.properties[name]
+  return isRecord(result) ? result : undefined
+}
+
 // zod-openapi rewrites every local `#/$defs/<name>` reference to
 // `#/components/schemas/<name>` but only hoists the definitions it knows by
 // name, so a recursive zod schema — `z.json()`, `z.lazy()`, any self-reference —
@@ -25,7 +39,7 @@ function parameterNames(value: Record<string, unknown> | undefined) {
 // broken for four days after `fc74c539` shipped `providerOutput: z.json()`.
 // Resolving every pointer here turns that into a test failure instead.
 test("every $ref in the generated OpenAPI document resolves", async () => {
-  const doc = await Server.openapi()
+  const doc = await generatedOpenapi
 
   const refs = new Set<string>()
   const collect = (node: unknown) => {
@@ -54,7 +68,7 @@ test("every $ref in the generated OpenAPI document resolves", async () => {
 
 test("published OpenAPI keeps recovery and resume main-only", async () => {
   const docs = [
-    await Server.openapi(),
+    await generatedOpenapi,
     await Bun.file(new URL("../../../sdk/openapi.json", import.meta.url)).json(),
   ]
 
@@ -68,5 +82,21 @@ test("published OpenAPI keeps recovery and resume main-only", async () => {
     expect(parameterNames(resume)).not.toContain("task_id")
     expect(recovery?.description).toContain("main-agent")
     expect(resume?.description).toContain("main-agent")
+  }
+})
+
+test("published OpenAPI includes the checkpoint coverage contract", async () => {
+  const published = new URL("../../../sdk/openapi.json", import.meta.url)
+  const docs = [
+    await generatedOpenapi,
+    await Bun.file(published).json(),
+  ]
+
+  for (const doc of docs) {
+    const coverage = operation(doc, "/session/{sessionID}/checkpoint-coverage", "get")
+    expect(coverage?.operationId).toBe("session.checkpointCoverage")
+    expect(parameterNames(coverage)).toContain("sessionID")
+    expect(schema(doc, "CheckpointCoverage")).toBeDefined()
+    expect(property(schema(doc, "CompactionPart"), "projection")).toBeDefined()
   }
 })
