@@ -4269,6 +4269,80 @@
         ]
       }
     },
+    "/session/{sessionID}/checkpoint-coverage": {
+      "get": {
+        "operationId": "session.checkpointCoverage",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Get checkpoint coverage",
+        "description": "List authoritative checkpoint markers in the main session slice and resolve each effective watermark by exact message ID.",
+        "tags": ["Session"],
+        "responses": {
+          "200": {
+            "description": "Checkpoint coverage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CheckpointCoverage"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.checkpointCoverage({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/session/{sessionID}/message/{messageID}": {
       "get": {
         "operationId": "session.message",
@@ -13313,6 +13387,55 @@
           "tail_start_id": {
             "type": "string",
             "pattern": "^msg.*"
+          },
+          "projection": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "number",
+                "const": 1
+              },
+              "summary_message_id": {
+                "type": "string",
+                "pattern": "^msg.*"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "manifest": {
+                "type": "string"
+              },
+              "trigger": {
+                "type": "string",
+                "enum": ["manual", "automatic", "provider-overflow"]
+              },
+              "tail_start_id": {
+                "type": "string",
+                "pattern": "^msg.*"
+              },
+              "tail_end_id": {
+                "type": "string",
+                "pattern": "^msg.*"
+              },
+              "compacted_tool_calls": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "call_id": {
+                      "type": "string"
+                    },
+                    "tokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["call_id", "tokens"]
+                }
+              }
+            },
+            "required": ["version", "summary_message_id", "summary", "trigger"]
           }
         },
         "required": ["id", "sessionID", "messageID", "type", "auto"]
@@ -16203,13 +16326,13 @@
                 "type": "boolean"
               },
               "tail_turns": {
-                "description": "Number of recent user turns, including their following assistant/tool responses, to keep verbatim during compaction (default: 2)",
+                "description": "Deprecated compatibility setting. Projected compaction now keeps only whole API rounds that arrive while compaction is running.",
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
               },
               "preserve_recent_tokens": {
-                "description": "Maximum number of tokens from recent turns to preserve verbatim after compaction",
+                "description": "Deprecated compatibility setting. Compression-time API rounds use at most 40000 tokens, capped by the reserve-safe effective window after frozen prefix and projection overhead.",
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
@@ -17286,6 +17409,76 @@
           }
         },
         "required": ["name", "data"]
+      },
+      "CheckpointCoverage": {
+        "type": "object",
+        "properties": {
+          "partID": {
+            "type": "string",
+            "pattern": "^prt.*"
+          },
+          "marker": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^msg.*"
+              },
+              "time": {
+                "type": "object",
+                "properties": {
+                  "created": {
+                    "type": "number"
+                  }
+                },
+                "required": ["created"]
+              }
+            },
+            "required": ["id", "time"]
+          },
+          "watermark": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^msg.*"
+                  },
+                  "time": {
+                    "type": "object",
+                    "properties": {
+                      "created": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["created"]
+                  },
+                  "status": {
+                    "type": "string",
+                    "const": "resolved"
+                  }
+                },
+                "required": ["id", "time", "status"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^msg.*"
+                  },
+                  "status": {
+                    "type": "string",
+                    "const": "unresolved"
+                  }
+                },
+                "required": ["id", "status"]
+              }
+            ]
+          }
+        },
+        "required": ["partID", "marker", "watermark"]
       },
       "TextPartInput": {
         "type": "object",
