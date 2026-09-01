@@ -561,11 +561,25 @@ export const layer = Layer.effect(
     // Track sessions that have already shown the "loaded instructions" toast so we
     // surface it once per primary session rather than on every run-loop turn.
     const instructionsNotified = new Set<SessionID>()
-    const pendingExternalAdmissions = new Map<string, number>()
+    type ExternalAdmission = {
+      settled: Promise<void>
+      complete: () => void
+    }
+    const pendingExternalAdmissions = new Map<string, Set<ExternalAdmission>>()
     const externalAdmissionKey = (sessionID: SessionID, agentID: string | undefined) =>
       `${sessionID}\u0000${agentID ?? "main"}`
-    const hasPendingExternalAdmission = (sessionID: SessionID, agentID: string | undefined) =>
-      (pendingExternalAdmissions.get(externalAdmissionKey(sessionID, agentID)) ?? 0) > 0
+    const waitForPendingExternalAdmission = Effect.fn("SessionPrompt.waitForPendingExternalAdmission")(function* (
+      sessionID: SessionID,
+      agentID: string | undefined,
+    ) {
+      const admissions = [...(pendingExternalAdmissions.get(externalAdmissionKey(sessionID, agentID)) ?? [])]
+      yield* Effect.all(
+        admissions.map((admission) => Effect.promise(() => admission.settled)),
+        {
+          concurrency: "unbounded",
+        },
+      )
+    })
 
     // Late-bind prefix-capture helper so SessionCheckpoint.tryStartCheckpointWriter
     // can call buildLLMRequestPrefix without forming a layer cycle
@@ -2282,7 +2296,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const promptOps = yield* ops()
       const { actor: actorTool } = yield* registry.named()
       const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
-      const assistantMessage: MessageV2.Assistant = yield* sessions.updateMessage({
+      const assistantMessage: MessageV2.Assistant = yield* sessions.createMessage({
         id: MessageID.ascending(),
         role: "assistant",
         parentID: lastUser.id,
@@ -2452,7 +2466,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         model: lastUser.model,
         source: "hook",
       }
-      yield* sessions.updateMessage(summaryUserMsg)
+      yield* sessions.createMessage(summaryUserMsg)
       yield* sessions.updatePart({
         id: PartID.ascending(),
         messageID: summaryUserMsg.id,
@@ -2498,7 +2512,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         model: { providerID: model.providerID, modelID: model.modelID },
         source: "user",
       }
-      yield* sessions.updateMessage(userMsg)
+      yield* sessions.createMessage(userMsg)
       const userPart: MessageV2.Part = {
         type: "text",
         id: PartID.ascending(),
@@ -2509,7 +2523,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
       yield* sessions.updatePart(userPart)
 
-      const msg: MessageV2.Assistant = {
+      const msg: MessageV2.Assistant = yield* sessions.createMessage({
         id: MessageID.ascending(),
         sessionID: input.sessionID,
         parentID: userMsg.id,
@@ -2523,8 +2537,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         modelID: model.modelID,
         providerID: model.providerID,
-      }
-      yield* sessions.updateMessage(msg)
+      })
       const part: MessageV2.ToolPart = {
         type: "tool",
         id: PartID.ascending(),
@@ -2677,7 +2690,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         if (terminalUser) {
           const ctx = yield* InstanceState.context
           const now = Date.now()
-          yield* sessions.updateMessage({
+          yield* sessions.createMessage({
             id: MessageID.ascending(),
             sessionID,
             parentID: terminalUser.id,
@@ -2712,20 +2725,34 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     })
 
     const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
+      const messageID = input.messageID ?? MessageID.ascending()
       const admissionKey =
         input.source === undefined || input.source === "user" || input.source === "spawn"
           ? externalAdmissionKey(input.sessionID, input.agentID)
           : undefined
-      if (admissionKey) {
+      const admission: ExternalAdmission | undefined = admissionKey
+        ? (() => {
+            let complete!: ExternalAdmission["complete"]
+            const settled = new Promise<void>((resolve) => {
+              complete = resolve
+            })
+            return { settled, complete }
+          })()
+        : undefined
+      if (admissionKey && admission) {
         yield* Effect.acquireRelease(
-          Effect.sync(() =>
-            pendingExternalAdmissions.set(admissionKey, (pendingExternalAdmissions.get(admissionKey) ?? 0) + 1),
-          ),
+          Effect.sync(() => {
+            const current = pendingExternalAdmissions.get(admissionKey) ?? new Set()
+            current.add(admission)
+            pendingExternalAdmissions.set(admissionKey, current)
+          }),
           () =>
             Effect.sync(() => {
-              const remaining = (pendingExternalAdmissions.get(admissionKey) ?? 1) - 1
-              if (remaining > 0) pendingExternalAdmissions.set(admissionKey, remaining)
-              else pendingExternalAdmissions.delete(admissionKey)
+              admission.complete()
+              const current = pendingExternalAdmissions.get(admissionKey)
+              if (!current) return
+              current.delete(admission)
+              if (current.size === 0) pendingExternalAdmissions.delete(admissionKey)
             }),
         )
       }
@@ -2758,7 +2785,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const variant = input.variant ?? (ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined)
 
       const info: MessageV2.User = {
-        id: input.messageID ?? MessageID.ascending(),
+        id: messageID,
         role: "user",
         sessionID: input.sessionID,
         agentID: input.agentID,
@@ -3096,12 +3123,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         { message, parts },
       )
 
-      // ID allocation happens before asynchronous MCP/file/plugin expansion.
-      // Persist with the actual commit time so an admission that starts after a
-      // compaction hook can never sort before that hook if it crosses the final
-      // pending-admission check.
-      message.time.created = Date.now()
-
       const parsed = MessageV2.Info.safeParse(message)
       if (!parsed.success) {
         log.error("invalid user message before save", {
@@ -3126,10 +3147,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
       })
 
-      yield* sessions.updateMessage(message)
-      for (const part of parts) yield* sessions.updatePart(part)
+      const committed = yield* sessions.commitUserMessage(message, parts)
 
-      return { info: message, parts }
+      return { info: committed, parts }
     }, Effect.scoped)
 
     const sweepOrphanAssistants = Effect.fn("SessionPrompt.sweepOrphanAssistants")(function* (
@@ -3558,7 +3578,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           outputLengthContinuations++
           yield* slog.info("auto-continuing output length", { attempt: outputLengthContinuations })
-          const msg = yield* sessions.updateMessage({
+          const msg = yield* sessions.createMessage({
             id: MessageID.ascending(),
             role: "user" as const,
             sessionID: input.lastUser.sessionID,
@@ -3668,7 +3688,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             goal: { condition: active.condition },
             lastVerdict: { ...verdict, attempt: count, messageID: judgedMessageID },
           })
-          const reentry = yield* sessions.updateMessage({
+          const reentry = yield* sessions.createMessage({
             id: MessageID.ascending(),
             role: "user" as const,
             sessionID,
@@ -3743,7 +3763,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     "Provide a final answer to the user now, or call a valid tool to make progress on the task.",
                     "Do not respond with only reasoning/thinking.",
                   ]
-          const msg = yield* sessions.updateMessage({
+          const msg = yield* sessions.createMessage({
             id: MessageID.ascending(),
             role: "user" as const,
             sessionID: input.lastUser.sessionID,
@@ -3801,7 +3821,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // (classify staleness guard) AND the loop reaches generation — mirrors
           // autoRetryStructuredOutput. Without this the loop re-enters, re-detects
           // the same turn, and burns retries with zero model calls.
-          const msg = yield* sessions.updateMessage({
+          const msg = yield* sessions.createMessage({
             id: MessageID.ascending(),
             role: "user" as const,
             sessionID: input.lastUser.sessionID,
@@ -3857,7 +3877,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           structuredRetries++
           yield* slog.info("retrying structured output", { attempt: structuredRetries })
-          const msg = yield* sessions.updateMessage({
+          const msg = yield* sessions.createMessage({
             id: MessageID.ascending(),
             role: "user" as const,
             sessionID: input.lastUser.sessionID,
@@ -3905,7 +3925,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             return false
           }
           const recoveryText = textNgramRecoveryAttempts === 0 ? TEXT_NGRAM_RECOVERY_REMIND : TEXT_NGRAM_RECOVERY_REPLAN
-          const reentry = yield* sessions.updateMessage({
+          const reentry = yield* sessions.createMessage({
             id: MessageID.ascending(),
             role: "user" as const,
             sessionID,
@@ -4088,7 +4108,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           if (
             lastAssistant?.finish === "length" &&
             !hasToolCalls &&
-            lastUser.id < lastAssistant.id &&
+            MessageV2.compareOrder(lastUser, lastAssistant) < 0 &&
             (yield* autoContinueOutputLength({ lastUser, assistant: lastAssistant }))
           ) {
             continue
@@ -4242,7 +4262,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               auto: compactionPart?.auto ?? false,
               overflow: compactionPart?.overflow,
               agentID: lastUser.agentID,
-              hasPendingExternalRequest: () => hasPendingExternalAdmission(sessionID, lastUser.agentID ?? "main"),
+              waitForPendingExternalRequest: () =>
+                waitForPendingExternalAdmission(sessionID, lastUser.agentID ?? "main"),
             })
             // cron-sentinel cache is invalidated via a SessionCompaction.Event
             // .Compacted bus subscription inside cron-bridge — see
@@ -4455,7 +4476,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // New streaks are still detectable on the cropped view (e.g. the
             // model loops again after recovery). User-speech guard only skips
             // *new* detection, not re-application of existing spans.
-            if (lastFinished && lastUser.id < lastFinished.id) {
+            if (lastFinished && MessageV2.compareOrder(lastUser, lastFinished) < 0) {
               const triggerCount = streakCfg.trigger_count ?? LOOP_STREAK_TRIGGER_COUNT
               const maxSpan = streakCfg.max_span ?? LOOP_STREAK_MAX_SPAN
               const entries = msgs.flatMap((message) => {
@@ -4511,7 +4532,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           msgs = yield* insertReminders({ messages: msgs, agent, model, session })
 
-          const msg: MessageV2.Assistant = {
+          const msg: MessageV2.Assistant = yield* sessions.createMessage({
             id: MessageID.ascending(),
             parentID: lastUser.id,
             role: "assistant",
@@ -4526,8 +4547,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             providerID: model.providerID,
             time: { created: Date.now() },
             sessionID,
-          }
-          yield* sessions.updateMessage(msg)
+          })
           const handle = yield* processor.create({
             assistantMessage: msg,
             sessionID,
@@ -4594,7 +4614,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             if (step > 1 && lastFinished) {
               for (const m of msgs) {
-                if (m.info.role !== "user" || m.info.id <= lastFinished.id) continue
+                if (m.info.role !== "user" || MessageV2.compareOrder(m.info, lastFinished) <= 0) continue
                 for (const p of m.parts) {
                   if (p.type !== "text" || p.ignored || p.synthetic) continue
                   if (!p.text.trim()) continue
@@ -4802,9 +4822,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // Main also has contextMode="full", but has no forkCtx and stays on the
             // normal path because only spawned subagent/peer records qualify.
             if (forkCtx) {
-              const ownNew = msgs.filter(
-                (m) => m.info.id > forkCtx.watermarkMsgID && m.info.agentID === lastUser.agentID,
-              )
+              // The watermark belongs to the parent snapshot, while fork messages
+              // live in the child session. Actor ownership is therefore the durable
+              // boundary; comparing caller-supplied child IDs to the parent ID can
+              // drop a newly committed request whose ID was allocated earlier.
+              const ownNew = msgs.filter((m) => m.info.agentID === lastUser.agentID)
               const ownNewModelMsgs = yield* MessageV2.toModelMessagesWithCurrentTurnEffect(ownNew, model, lastUser.id)
               const prebuiltSystem = forkCtx.system
               lastSystemPrompt = prebuiltSystem
@@ -5367,7 +5389,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 }
                 const recoveryText = textLoopRecoveryAttempts === 0 ? RECOVERY_PROMPT_MILD : RECOVERY_PROMPT_STRONG
                 // Create a NEW user message at the end of conversation (not append to original)
-                const reentry = yield* sessions.updateMessage({
+                const reentry = yield* sessions.createMessage({
                   id: MessageID.ascending(),
                   role: "user" as const,
                   sessionID,

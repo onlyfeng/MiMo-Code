@@ -1,13 +1,41 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
+import fs from "node:fs/promises"
+import path from "node:path"
+import { Effect, Layer } from "effect"
+import { ActorRegistry } from "../../src/actor/registry"
+import { Bus } from "../../src/bus"
+import { Config } from "../../src/config"
+import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
+import { Memory } from "../../src/memory"
+import { Instance } from "../../src/project/instance"
+import { Session } from "../../src/session"
+import { SessionCheckpoint } from "../../src/session/checkpoint"
+import { checkpointPath } from "../../src/session/checkpoint-paths"
 import { MessageV2 } from "../../src/session/message-v2"
 import { collapseCheckpointTail, renderTailDigest } from "../../src/session/tail-digest"
 import { MODEL_VISIBLE_TEXT_CAP_BYTES } from "../../src/util/text-truncate"
 import type { Provider } from "../../src/provider"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { SessionID, MessageID, PartID } from "../../src/session/schema"
+import { TaskRegistry } from "../../src/task/registry"
+import { provideTmpdirInstance } from "../fixture/fixture"
+import { testEffect } from "../lib/effect"
 
 const sessionID = SessionID.make("session")
 const providerID = ProviderID.make("test")
+
+const itEffect = testEffect(
+  Layer.mergeAll(
+    CrossSpawnSpawner.defaultLayer,
+    Bus.defaultLayer,
+    Config.defaultLayer,
+    Memory.defaultLayer,
+    Session.defaultLayer,
+    TaskRegistry.defaultLayer,
+    ActorRegistry.defaultLayer,
+    SessionCheckpoint.defaultLayer,
+  ),
+)
 
 const model: Provider.Model = {
   id: ModelID.make("test-model"),
@@ -220,11 +248,11 @@ describe("renderTailDigest", () => {
 describe("collapseCheckpointTail", () => {
   test("drops the pre-insert tail; boundary already carries the activity section", () => {
     const collapsed = collapseCheckpointTail([
+      boundaryUser("msg_cp", "msg_02", ['- read(path="x.ts")']),
       {
         info: assistantInfo("msg_02", "msg_u1", 10),
         parts: [completedTool("msg_02", "p1", "grep", { pattern: "rebuild" }, "MATCHES")],
       },
-      boundaryUser("msg_cp", "msg_02", ['- read(path="x.ts")']),
     ])
 
     expect(collapsed).toHaveLength(1)
@@ -236,11 +264,11 @@ describe("collapseCheckpointTail", () => {
 
   test("keeps post-insert messages live", () => {
     const collapsed = collapseCheckpointTail([
+      boundaryUser("msg_cp", "msg_02", ['- read(path="a.ts")']),
       {
         info: assistantInfo("msg_02", "msg_u1", 10),
         parts: [completedTool("msg_02", "p1", "read", { path: "a.ts" }, "PRE_REBUILD_BODY")],
       },
-      boundaryUser("msg_cp", "msg_02", ['- read(path="a.ts")']),
       {
         info: assistantInfo("msg_03", "msg_u1", 20),
         parts: [completedTool("msg_03", "p2", "read", { path: "b.ts" }, "POST_REBUILD_BODY")],
@@ -255,17 +283,50 @@ describe("collapseCheckpointTail", () => {
 
   test("collapses a same-ms tail message that sorts before the boundary's synthetic time", () => {
     // Production stamps the boundary at watermark+1ms, so a tail message
-    // sharing the watermark's millisecond sorts BEFORE the boundary. ID-range
-    // collapse must still drop it.
+    // sharing the watermark's millisecond sorts BEFORE the boundary. A full
+    // history still carries the exact covered row, which anchors the range.
     const collapsed = collapseCheckpointTail([
+      { info: userInfo("msg_01", 9), parts: [textPart("msg_01", "u1", "covered")] },
       {
         info: assistantInfo("msg_02", "msg_u1", 10),
         parts: [completedTool("msg_02", "p1", "read", { path: "same-ms.ts" }, "SAME_MS_BODY")],
       },
       boundaryUser("msg_cp", "msg_02", ['- read(path="same-ms.ts")']),
     ])
-    expect(collapsed).toHaveLength(1)
-    expect(digestTextOf(collapsed[0]!)).not.toContain("SAME_MS_BODY")
+    expect(collapsed).toHaveLength(2)
+    expect(collapsed.map((message) => String(message.info.id))).toEqual(["msg_01", "msg_cp"])
+    expect(collapsed.map(digestTextOf).join("\n")).not.toContain("SAME_MS_BODY")
+  })
+
+  test("collapses an assistant before a late old-ID digest user by position", () => {
+    const collapsed = collapseCheckpointTail([
+      boundaryUser("msg_cp", "msg_old_user", ["- assistant: compact me"]),
+      {
+        info: assistantInfo("msg_zz_tail", "msg_u1", 10),
+        parts: [textPart("msg_zz_tail", "p1", "COMPACTED_ASSISTANT")],
+      },
+      { info: userInfo("msg_old_user", 20), parts: [textPart("msg_old_user", "u1", "late caller request")] },
+      {
+        info: assistantInfo("msg_post", "msg_old_user", 30),
+        parts: [textPart("msg_post", "p2", "POST_DIGEST_ASSISTANT")],
+      },
+    ])
+
+    expect(collapsed.map((message) => String(message.info.id))).toEqual(["msg_cp", "msg_old_user", "msg_post"])
+    expect(collapsed.map(digestTextOf).join("\n")).not.toContain("COMPACTED_ASSISTANT")
+    expect(collapsed.map(digestTextOf).join("\n")).toContain("POST_DIGEST_ASSISTANT")
+  })
+
+  test("fails closed when the digest endpoint is absent", () => {
+    const msgs: MessageV2.WithParts[] = [
+      boundaryUser("msg_cp", "msg_missing"),
+      {
+        info: assistantInfo("msg_live", "msg_u1", 10),
+        parts: [textPart("msg_live", "p1", "LIVE_BODY")],
+      },
+    ]
+
+    expect(collapseCheckpointTail(msgs)).toBe(msgs)
   })
 
   test("never drops a user-role message, even without real prose", () => {
@@ -322,11 +383,11 @@ describe("toModelMessages with collapseCheckpointTail", () => {
   test("one user turn holds checkpoint + activity; no hollow tool pairs from the tail", async () => {
     const messages = await MessageV2.toModelMessages(
       [
+        boundaryUser("msg_cp", "msg_02", ['- read(path="src/session/prompt.ts")']),
         {
           info: assistantInfo("msg_02", "msg_u0", 10),
           parts: [completedTool("msg_02", "p1", "read", { path: "src/session/prompt.ts" }, "HUGE_FILE_BODY")],
         },
-        boundaryUser("msg_cp", "msg_02", ['- read(path="src/session/prompt.ts")']),
       ],
       model,
       { collapseCheckpointTail: true },
@@ -344,11 +405,11 @@ describe("toModelMessages with collapseCheckpointTail", () => {
   test("post-insert tools stay live next to the collapsed boundary", async () => {
     const messages = await MessageV2.toModelMessages(
       [
+        boundaryUser("msg_cp", "msg_02", ['- read(path="pre.ts")']),
         {
           info: assistantInfo("msg_02", "msg_u0", 10),
           parts: [completedTool("msg_02", "p1", "read", { path: "pre.ts" }, "PRE_BODY")],
         },
-        boundaryUser("msg_cp", "msg_02", ['- read(path="pre.ts")']),
         {
           info: assistantInfo("msg_03", "msg_u0", 20),
           parts: [completedTool("msg_03", "p2", "read", { path: "post.ts" }, "POST_BODY")],
@@ -378,4 +439,66 @@ describe("toModelMessages with collapseCheckpointTail", () => {
     expect(rendered).toContain("tool-call")
     expect(rendered).toContain("HUGE_FILE_BODY")
   })
+})
+
+describe("SessionCheckpoint.renderRebuildContext", () => {
+  afterEach(async () => {
+    await Instance.disposeAll()
+  })
+
+  itEffect.live(
+    "slices recent activity by chronological positions when the boundary ID is older than prior history",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const session = yield* Session.Service
+          const checkpoint = yield* SessionCheckpoint.Service
+          const info = yield* session.create({ title: "chronological recent activity" })
+
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.dirname(checkpointPath(info.id)), { recursive: true })
+            await Bun.write(checkpointPath(info.id), "# Session checkpoint\n\nChronological range fixture.\n")
+          })
+
+          const boundaryID = MessageID.make("msg_000_boundary")
+          yield* Effect.forEach(
+            Array.from({ length: 201 }, (_, index) => index),
+            (index) =>
+              Effect.gen(function* () {
+                const id = MessageID.make(`msg_z_prior_${index.toString().padStart(3, "0")}`)
+                yield* session.updateMessage({ ...assistantInfo(id, "msg_parent", index + 1), sessionID: info.id })
+                yield* session.updatePart({
+                  ...textPart(id, PartID.ascending(), `PRIOR_SHOULD_NOT_APPEAR_${index.toString().padStart(3, "0")}`),
+                  sessionID: info.id,
+                })
+              }),
+            { concurrency: 1 },
+          )
+
+          yield* session.updateMessage({ ...userInfo(boundaryID, 1_000), sessionID: info.id })
+
+          const tailID = MessageID.make("msg_zz_tail_sentinel")
+          yield* session.updateMessage({ ...assistantInfo(tailID, boundaryID, 1_001), sessionID: info.id })
+          yield* session.updatePart({
+            ...textPart(tailID, PartID.ascending(), "TAIL_SENTINEL"),
+            sessionID: info.id,
+          })
+
+          const all = yield* session.messages({ sessionID: info.id })
+          expect(all).toHaveLength(203)
+          expect(all.at(-2)?.info.id).toBe(boundaryID)
+          expect(all.at(-1)?.info.id).toBe(tailID)
+
+          const rendered = yield* checkpoint.renderRebuildContext(info.id, {
+            boundary: boundaryID,
+            digestUpTo: tailID,
+          })
+
+          expect(rendered.hasActivity).toBe(true)
+          expect(rendered.text).toContain("TAIL_SENTINEL")
+          expect(rendered.text).not.toContain("PRIOR_SHOULD_NOT_APPEAR")
+        }),
+      { outsideGit: true, config: { checkpoint: { push_caps: { recent_user: 0 } } } },
+    ),
+  )
 })

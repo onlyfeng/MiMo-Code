@@ -61,7 +61,7 @@ function toolPart(messageID: string, opts?: { providerExecuted?: boolean }) {
   } as unknown as MessageV2.Part
 }
 
-// User "m-1" precedes assistant "m-2" so the stale guard (lastUser.id < assistant.id) is satisfied.
+// Equal timestamps fall back to ID order, so user "m-1" precedes assistant "m-2".
 const lastUser = userInfo("m-1")
 
 describe("classifyAssistantStep", () => {
@@ -274,7 +274,7 @@ describe("classifyAssistantStep", () => {
     ).toBe("invalid")
   })
 
-  test("existing-assistant phase + stale assistant (lastUser.id >= assistant.id) => continue", () => {
+  test("existing-assistant phase + stale assistant by equal-time ID order => continue", () => {
     // user "m-2" comes after assistant "m-1": assistant predates the current turn.
     expect(
       classifyAssistantStep({
@@ -282,6 +282,48 @@ describe("classifyAssistantStep", () => {
         lastUser: userInfo("m-2"),
         assistant: assistantInfo("m-1", { finish: "stop" }),
         parts: [textPart("m-1", "old answer")],
+      }),
+    ).toEqual({ type: "continue" })
+  })
+
+  test("equal-time ID order matches SQLite binary collation", () => {
+    // SQLite's default BINARY order puts uppercase A before lowercase a.
+    // localeCompare does the opposite in this runtime and would treat the
+    // stale assistant as a fresh answer to the current user.
+    expect(
+      classifyAssistantStep({
+        phase: "existing-assistant",
+        lastUser: userInfo("m-a"),
+        assistant: assistantInfo("m-A", { finish: "stop" }),
+        parts: [textPart("m-A", "old answer")],
+      }),
+    ).toEqual({ type: "continue" })
+  })
+
+  test("equal-time supplementary-plane IDs follow SQLite UTF-8 byte order", () => {
+    // JavaScript compares UTF-16 code units and puts U+10000 before U+E000;
+    // SQLite's UTF-8 BINARY collation puts U+E000 before U+10000.
+    expect(
+      classifyAssistantStep({
+        phase: "existing-assistant",
+        lastUser: userInfo("msg_\u{10000}"),
+        assistant: assistantInfo("msg_\uE000", { finish: "stop" }),
+        parts: [textPart("msg_\uE000", "old answer")],
+      }),
+    ).toEqual({ type: "continue" })
+  })
+
+  test("existing-assistant phase uses created time before ID for a late committed user", () => {
+    const user = userInfo("m-1")
+    const assistant = assistantInfo("m-2", { finish: "stop" })
+    user.time.created = 2
+    assistant.time.created = 1
+    expect(
+      classifyAssistantStep({
+        phase: "existing-assistant",
+        lastUser: user,
+        assistant,
+        parts: [textPart("m-2", "old answer")],
       }),
     ).toEqual({ type: "continue" })
   })

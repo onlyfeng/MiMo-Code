@@ -150,6 +150,11 @@ describe("rebuild microcompact", () => {
         expect(inserted).toBe(true)
 
         const all = yield* ssn.messages({ sessionID: info.id })
+        const marker = all.find((message) => message.parts.some((part) => part.type === "checkpoint"))
+        expect(marker?.info.time.created).toBe(boundaryTime + 1)
+        expect(all.findIndex((message) => message.info.id === marker?.info.id)).toBeLessThan(
+          all.findIndex((message) => message.info.id === postRead.msg.id),
+        )
         const findPart = (msgID: typeof pre.msg.id) =>
           all.find((m) => m.info.id === msgID)?.parts.find((p) => p.type === "tool")
 

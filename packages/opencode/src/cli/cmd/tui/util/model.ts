@@ -1,4 +1,5 @@
-import type { AssistantMessage, Config, Message, Model, Provider } from "@mimo-ai/sdk/v2"
+import type { AssistantMessage, CheckpointCoverage, Config, Message, Model, Provider } from "@mimo-ai/sdk/v2"
+import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 import { contextWindow as overflowWindow } from "@/session/overflow"
 import { Locale, Token } from "@/util"
 
@@ -153,6 +154,13 @@ export function contextWindow(config: Config | undefined, model: Model | undefin
 /** Window shape from `contextWindow` / the server's overflow arithmetic. */
 export type ContextWindow = ReturnType<typeof overflowWindow>
 
+export type CheckpointCoverageProjection = CheckpointCoverage
+
+function compareMessageOrder(left: Pick<Message, "id" | "time">, right: Pick<Message, "id" | "time">) {
+  if (left.time.created !== right.time.created) return left.time.created - right.time.created
+  return compareUtf8Bytes(left.id, right.id)
+}
+
 /**
  * Compute the footer's context-fill readout and cumulative cost from the main
  * message list. Pure and render-free so it can be unit-tested below the SolidJS
@@ -174,17 +182,15 @@ export type ContextWindow = ReturnType<typeof overflowWindow>
  * a cumulative sum over all assistant turns and is unaffected by the boundary —
  * the whole point of /rebuild is to drop context, not cost.
  *
- * Staleness is decided from each rebuild's `coveredUpTo` (the watermark message
- * id it collapsed up to), NOT from the boundary marker's own id or its array
- * position. This matters: the boundary marker message is created with a fresh
- * ascending id but a deliberately backdated `time.created` (checkpoint.ts, so it
- * renders next to the region it summarizes), so its id and time disagree by
- * design. Comparing the marker's own id — or trusting `findLast` to return the
- * newest boundary in array order — would silently reintroduce the stale-figure
- * bug the moment the caller ordered messages by time, or ran a second rebuild.
- * `coveredUpTo` is an ordinary watermark message id (a real prior turn), so
- * `coveredUpTo >= last.id` is an honest "was this measured turn collapsed?" test
- * that holds under any caller ordering and any number of rebuilds.
+ * Staleness is decided from the server's independent checkpoint-coverage
+ * projection, not from checkpoint markers in the bounded transcript cache. The
+ * projection carries the effective tail watermark (digestUpTo when Recent
+ * activity was folded, otherwise coveredUpTo) with its canonical committed time,
+ * so marker and watermark messages may both be outside the latest 100 without
+ * reviving a stale figure. IDs can be allocated before admission and committed
+ * later, so resolved watermarks and the measured turn are compared by
+ * `(time.created, id BINARY)`. An unresolved watermark fails closed until a
+ * future authoritative refresh can resolve it.
  *
  * `context` is the final display string in every case: the pure function is the
  * sole owner of the pending placeholder (it is where the "figure is stale"
@@ -195,16 +201,16 @@ export function computeContextUsage(input: {
   messages: Message[]
   window: ContextWindow | undefined
   /**
-   * For a message carrying a `checkpoint` (rebuild) part, the `coveredUpTo`
-   * watermark id that rebuild collapsed up to; `undefined` for any other
-   * message. Ordering-independent: the readout never inspects message order.
+   * Authoritative checkpoint coverage for the session. This is deliberately
+   * independent of `messages`, whose latest-100 cap can omit backdated markers.
    */
-  checkpointCoverage: (messageID: string) => string | undefined
+  checkpointCoverage: readonly CheckpointCoverageProjection[]
 }): { context: string; cost: number; pending: boolean } | undefined {
   const { messages, window: win, checkpointCoverage } = input
-  const last = messages.findLast(
-    (m): m is AssistantMessage => m.role === "assistant" && m.tokens.output > 0,
-  )
+  const last = messages
+    .filter((m): m is AssistantMessage => m.role === "assistant" && m.tokens.output > 0)
+    .toSorted(compareMessageOrder)
+    .at(-1)
   if (!last) return undefined
 
   const tokens =
@@ -219,12 +225,13 @@ export function computeContextUsage(input: {
   const frame = win ? `${Token.format(win.usable)}${win.source === "config" ? "↓" : ""}` : undefined
 
   // The measured turn is stale if ANY rebuild collapsed a region reaching it or
-  // past it — i.e. some checkpoint's coveredUpTo id is >= the last measured turn's
-  // id. `some` (not `findLast`) so the result never depends on message order.
-  const pending = messages.some((m) => {
-    const coveredUpTo = checkpointCoverage(m.id)
-    return coveredUpTo !== undefined && coveredUpTo >= last.id
-  })
+  // past it. The endpoint already resolved the exact watermark message and its
+  // committed time, so this remains correct even when the bounded transcript
+  // contains neither the marker nor the watermark. Missing resolution is not
+  // evidence of freshness: fail closed instead of leaking a stale measurement.
+  const pending = checkpointCoverage.some(
+    (coverage) => coverage.watermark.status === "unresolved" || compareMessageOrder(coverage.watermark, last) >= 0,
+  )
   if (pending) {
     // Blank only the unmeasured numerator; keep the frame when we have one so the
     // footer reads as deliberately-unknown (`—/960K`) rather than broken. With no
@@ -233,6 +240,8 @@ export function computeContextUsage(input: {
     return { context: frame ? `—/${frame}` : "—", cost, pending: true }
   }
 
-  const context = frame ? `${Locale.number(tokens)}/${frame} (${Math.round((tokens / win!.usable) * 100)}%)` : Locale.number(tokens)
+  const context = frame
+    ? `${Locale.number(tokens)}/${frame} (${Math.round((tokens / win!.usable) * 100)}%)`
+    : Locale.number(tokens)
   return { context, cost, pending: false }
 }

@@ -3077,6 +3077,28 @@ export type ConflictError = {
   }
 }
 
+export type CheckpointCoverage = {
+  partID: string
+  marker: {
+    id: string
+    time: {
+      created: number
+    }
+  }
+  watermark:
+    | {
+        id: string
+        time: {
+          created: number
+        }
+        status: "resolved"
+      }
+    | {
+        id: string
+        status: "unresolved"
+      }
+}
+
 export type TextPartInput = {
   id?: string
   type: "text"
@@ -5349,6 +5371,41 @@ export type SessionPromptResponses = {
 }
 
 export type SessionPromptResponse = SessionPromptResponses[keyof SessionPromptResponses]
+
+export type SessionCheckpointCoverageData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/checkpoint-coverage"
+}
+
+export type SessionCheckpointCoverageErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionCheckpointCoverageError = SessionCheckpointCoverageErrors[keyof SessionCheckpointCoverageErrors]
+
+export type SessionCheckpointCoverageResponses = {
+  /**
+   * Checkpoint coverage
+   */
+  200: Array<CheckpointCoverage>
+}
+
+export type SessionCheckpointCoverageResponse =
+  SessionCheckpointCoverageResponses[keyof SessionCheckpointCoverageResponses]
 
 export type SessionDeleteMessageData = {
   body?: never

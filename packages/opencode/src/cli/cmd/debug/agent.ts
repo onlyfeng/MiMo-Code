@@ -169,7 +169,7 @@ async function createToolContext(agent: Agent.Info) {
           },
         },
       }
-      yield* session.updateMessage(message)
+      yield* session.createMessage(message)
       return { session: result, messageID }
     }),
   )

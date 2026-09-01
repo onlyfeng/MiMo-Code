@@ -428,6 +428,119 @@ describe("revert + compact workflow", () => {
   )
 
   it.live(
+    "cleanup uses chronological position when the revert message has an older caller ID",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const session = yield* Session.Service
+          const revert = yield* SessionRevert.Service
+          const snapshot = yield* Snapshot.Service
+          const info = yield* session.create({})
+          const targetID = MessageID.ascending()
+
+          yield* write(path.join(dir, "earlier.txt"), "base")
+          yield* write(path.join(dir, "target.txt"), "base")
+          const base = yield* snapshot.track()
+          if (!base) throw new Error("expected base snapshot")
+
+          const beforeUser = yield* user(info.id)
+          yield* text(info.id, beforeUser.id, "keep earlier user")
+          const beforeAssistant = yield* assistant(info.id, beforeUser.id, dir)
+          yield* text(info.id, beforeAssistant.id, "keep earlier assistant")
+          yield* session.updatePart({
+            id: PartID.ascending(),
+            messageID: beforeAssistant.id,
+            sessionID: info.id,
+            type: "step-start",
+            snapshot: base,
+          })
+          yield* write(path.join(dir, "earlier.txt"), "changed earlier")
+          const afterEarlier = yield* snapshot.track()
+          if (!afterEarlier) throw new Error("expected earlier snapshot")
+          yield* session.updatePart({
+            id: PartID.ascending(),
+            messageID: beforeAssistant.id,
+            sessionID: info.id,
+            type: "step-finish",
+            reason: "stop",
+            snapshot: afterEarlier,
+            cost: 0,
+            tokens,
+          })
+          expect(targetID < beforeUser.id).toBe(true)
+
+          yield* session.commitUserMessage(
+            {
+              id: targetID,
+              sessionID: info.id,
+              role: "user",
+              agent: "default",
+              model: { providerID: ProviderID.make("openai"), modelID: ModelID.make("gpt-4") },
+              time: { created: 0 },
+            },
+            [
+              {
+                id: PartID.ascending(),
+                messageID: targetID,
+                sessionID: info.id,
+                type: "text",
+                text: "remove target user",
+              },
+            ],
+          )
+          const afterAssistant = yield* session.createMessage({
+            id: MessageID.ascending(),
+            role: "assistant" as const,
+            sessionID: info.id,
+            mode: "default",
+            agent: "default",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens,
+            modelID: ModelID.make("gpt-4"),
+            providerID: ProviderID.make("openai"),
+            parentID: targetID,
+            time: { created: 0 },
+            finish: "end_turn",
+          })
+          yield* text(info.id, afterAssistant.id, "remove later assistant")
+          yield* session.updatePart({
+            id: PartID.ascending(),
+            messageID: afterAssistant.id,
+            sessionID: info.id,
+            type: "step-start",
+            snapshot: afterEarlier,
+          })
+          yield* write(path.join(dir, "target.txt"), "changed target")
+          const afterTarget = yield* snapshot.track()
+          if (!afterTarget) throw new Error("expected target snapshot")
+          yield* session.updatePart({
+            id: PartID.ascending(),
+            messageID: afterAssistant.id,
+            sessionID: info.id,
+            type: "step-finish",
+            reason: "stop",
+            snapshot: afterTarget,
+            cost: 0,
+            tokens,
+          })
+
+          yield* revert.revert({ sessionID: info.id, messageID: targetID })
+          expect((yield* session.diff(info.id)).map((item) => item.file)).toEqual(["target.txt"])
+          yield* revert.cleanup(yield* session.get(info.id))
+
+          const messages = yield* session.messages({ sessionID: info.id })
+          expect(messages.map((message) => message.info.id)).toEqual([beforeUser.id, beforeAssistant.id])
+          expect(JSON.stringify(messages)).toContain("keep earlier user")
+          expect(JSON.stringify(messages)).toContain("keep earlier assistant")
+          expect(JSON.stringify(messages)).not.toContain("remove target user")
+          expect(JSON.stringify(messages)).not.toContain("remove later assistant")
+        }),
+      { git: true },
+    ),
+  )
+
+  it.live(
     "cleanup is a no-op when session has no revert state",
     provideTmpdirInstance(
       () =>

@@ -104,11 +104,12 @@ export interface ForkContext {
   readonly parentPermission: Permission.Ruleset
   readonly inheritedMessages: ModelMessage[]
   /**
-   * Boundary marker — the last main-slice message id at spawn. Used by fork's
-   * runLoop to filter ownNew messages (belt-and-braces alongside the agent_id
-   * check; agent_id is sufficient on its own, watermark is the documentary
-   * anchor). NEVER use this for slicing inheritedMessages — inheritedMessages
-   * is captured as a complete snapshot at spawn time.
+   * Boundary marker — the last main-slice message id at spawn. This is a
+   * documentary anchor for the frozen parent snapshot; fork messages live in a
+   * separate child session and are selected by agent_id, never by comparing
+   * their caller-supplied IDs to this parent ID. NEVER use this for slicing
+   * inheritedMessages — inheritedMessages is captured as a complete snapshot
+   * at spawn time.
    * See docs/superpowers/specs/2026-05-26-fork-agent-prefix-cache-design.md
    */
   readonly watermarkMsgID: MessageID

@@ -15,7 +15,7 @@ import { Dynamic } from "solid-js/web"
 import path from "path"
 import { useCurrentAgentID, useRoute, useRouteData } from "@tui/context/route"
 import { useProject } from "@tui/context/project"
-import { selectMessages, useSync } from "@tui/context/sync"
+import { compareMessageOrder, revertRedoAction, revertView, selectMessages, useSync } from "@tui/context/sync"
 import { useEvent } from "@tui/context/event"
 import { SplitBorder } from "@tui/component/border"
 import { Spinner } from "@tui/component/spinner"
@@ -24,6 +24,7 @@ import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, 
 import { Prompt, type PromptRef } from "@tui/component/prompt"
 import type {
   AssistantMessage,
+  Message,
   Part,
   Provider,
   ToolPart,
@@ -180,6 +181,9 @@ export function Session() {
   const messages = createMemo(() =>
     selectMessages(sync.data.message[route.sessionID], currentAgentID(), route.sessionID),
   )
+  const activeRevertView = createMemo(() =>
+    revertView(sync.data.message[route.sessionID], messages(), session()?.revert?.messageID),
+  )
   const permissions = createMemo(() => sync.data.permission[route.sessionID] ?? [])
   const questions = createMemo(() => sync.data.question[route.sessionID] ?? [])
   const visible = createMemo(
@@ -191,7 +195,7 @@ export function Session() {
   const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
 
   const pending = createMemo(() => {
-    return messages().findLast((x) => x.role === "assistant" && !x.time.completed)?.id
+    return messages().findLast((x) => x.role === "assistant" && !x.time.completed)
   })
 
   const lastAssistant = createMemo(() => {
@@ -798,8 +802,7 @@ export function Session() {
       onSelect: async (dialog) => {
         const status = sync.data.session_status?.[route.sessionID]
         if (status?.type !== "idle") await sdk.client.session.abort({ sessionID: route.sessionID }).catch(() => {})
-        const revert = session()?.revert?.messageID
-        const message = messages().findLast((x) => (!revert || x.id < revert) && x.role === "user")
+        const message = activeRevertView().before.findLast((item) => item.role === "user")
         if (!message) return
         void sdk.client.session
           .revert({
@@ -838,8 +841,15 @@ export function Session() {
         dialog.clear()
         const messageID = session()?.revert?.messageID
         if (!messageID) return
-        const message = messages().find((x) => x.role === "user" && x.id > messageID)
-        if (!message) {
+        const action = revertRedoAction(activeRevertView())
+        if (action.type === "blocked") {
+          toast.show({
+            message: "Undo boundary is unavailable. Redo is blocked to avoid restoring the wrong messages.",
+            variant: "error",
+          })
+          return
+        }
+        if (action.type === "unrevert") {
           void sdk.client.session.unrevert({
             sessionID: route.sessionID,
           })
@@ -848,7 +858,7 @@ export function Session() {
         }
         void sdk.client.session.revert({
           sessionID: route.sessionID,
-          messageID: message.id,
+          messageID: action.messageID,
         })
       },
     },
@@ -1084,10 +1094,7 @@ export function Session() {
       keybind: "messages_copy",
       category: "session",
       onSelect: (dialog) => {
-        const revertID = session()?.revert?.messageID
-        const lastAssistantMessage = messages().findLast(
-          (msg) => msg.role === "assistant" && (!revertID || msg.id < revertID),
-        )
+        const lastAssistantMessage = activeRevertView().before.findLast((message) => message.role === "assistant")
         if (!lastAssistantMessage) {
           toast.show({ message: "No assistant messages found", variant: "error" })
           dialog.clear()
@@ -1289,10 +1296,11 @@ export function Session() {
   const revertDiffFiles = createMemo(() => getRevertDiffFiles(revertInfo()?.diff ?? ""))
 
   const revertRevertedMessages = createMemo(() => {
-    const messageID = revertMessageID()
-    if (!messageID) return []
-    return messages().filter((x) => x.id >= messageID && x.role === "user")
+    if (!revertMessageID()) return []
+    return activeRevertView().from.filter((message) => message.role === "user")
   })
+
+  const revertedMessageIDs = createMemo(() => new Set(activeRevertView().from.map((message) => message.id)))
 
   const revert = createMemo(() => {
     const info = revertInfo()
@@ -1407,6 +1415,19 @@ export function Session() {
               scrollAcceleration={scrollAcceleration()}
             >
               <box height={1} />
+              <Show when={revertMessageID() && !activeRevertView().found}>
+                <box
+                  paddingLeft={2}
+                  paddingRight={2}
+                  paddingTop={1}
+                  paddingBottom={1}
+                  backgroundColor={theme.backgroundPanel}
+                >
+                  <text fg={theme.textMuted}>
+                    Undo boundary is unavailable. History is hidden and redo is blocked to prevent an unsafe restore.
+                  </text>
+                </box>
+              </Show>
               <For each={messages()}>
                 {(message, index) => (
                   <Switch>
@@ -1471,7 +1492,7 @@ export function Session() {
                         )
                       })()}
                     </Match>
-                    <Match when={revert()?.messageID && message.id >= revert()!.messageID}>
+                    <Match when={revertedMessageIDs().has(message.id)}>
                       <></>
                     </Match>
                     <Match when={message.role === "user"}>
@@ -1593,7 +1614,7 @@ function UserMessage(props: {
   parts: Part[]
   onMouseUp: () => void
   index: number
-  pending?: string
+  pending?: Message
 }) {
   const ctx = use()
   const local = useLocal()
@@ -1644,7 +1665,7 @@ function UserMessage(props: {
   const { theme } = useTheme()
   const t = useLanguage().t
   const [hover, setHover] = createSignal(false)
-  const queued = createMemo(() => props.pending && props.message.id > props.pending)
+  const queued = createMemo(() => props.pending && compareMessageOrder(props.message, props.pending) > 0)
   const color = createMemo(() => local.agent.color(props.message.agent))
   const queuedFg = createMemo(() => selectedForeground(theme, color()))
   const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())

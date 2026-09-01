@@ -86,7 +86,7 @@ export function classifyAssistantStep(input: {
   if (
     assistant.finish === "tool-calls" &&
     !assistant.error &&
-    input.lastUser.id < assistant.id &&
+    MessageV2.compareOrder(input.lastUser, assistant) < 0 &&
     !input.parts.some((part) => part.type === "tool") &&
     input.parts.some(
       (part) =>
@@ -102,7 +102,8 @@ export function classifyAssistantStep(input: {
   if (assistant.finish === "tool-calls") return { type: "continue" }
 
   // 4. Stale assistant predating the current user turn — don't terminate on it.
-  if (input.phase === "existing-assistant" && !(input.lastUser.id < assistant.id)) return { type: "continue" }
+  if (input.phase === "existing-assistant" && MessageV2.compareOrder(input.lastUser, assistant) >= 0)
+    return { type: "continue" }
 
   // 5. Errored step — checked before content so an errored message that also
   // carries text isn't misjudged `final`.

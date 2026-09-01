@@ -273,7 +273,7 @@ export interface Interface {
     auto: boolean
     overflow?: boolean
     agentID?: string
-    hasPendingExternalRequest?: () => boolean
+    waitForPendingExternalRequest?: () => Effect.Effect<void>
   }) => Effect.Effect<"continue" | "stop" | "text-repeat">
   readonly create: (input: {
     sessionID: SessionID
@@ -374,7 +374,7 @@ export const layer: Layer.Layer<
       auto: boolean
       overflow?: boolean
       agentID?: string
-      hasPendingExternalRequest?: () => boolean
+      waitForPendingExternalRequest?: () => Effect.Effect<void>
     }) {
       const snapshotLen = input.messages.length
       const parentIdx = input.messages.findLastIndex((m) => m.info.id === input.parentID)
@@ -485,7 +485,7 @@ export const layer: Layer.Layer<
         input.overflow ? { stripMedia: true } : { collapseCheckpointTail: true },
       )
       const ctx = yield* InstanceState.context
-      const msg: MessageV2.Assistant = {
+      const msg: MessageV2.Assistant = yield* session.createMessage({
         id: MessageID.ascending(),
         role: "assistant",
         parentID: input.parentID,
@@ -511,8 +511,7 @@ export const layer: Layer.Layer<
         time: {
           created: Date.now(),
         },
-      }
-      yield* session.updateMessage(msg)
+      })
       const processor = yield* processors.create({
         assistantMessage: msg,
         sessionID: input.sessionID,
@@ -618,7 +617,7 @@ export const layer: Layer.Layer<
 
       const externalRequestArrived = Effect.fn("SessionCompaction.externalRequestArrived")(function* () {
         if (!compactionPart) return false
-        if (input.hasPendingExternalRequest?.()) return true
+        if (input.waitForPendingExternalRequest) yield* input.waitForPendingExternalRequest()
         return (yield* session.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" }))
           .slice(snapshotLen)
           .some((message) => message.info.id !== msg.id && MessageV2.isExternalUserMessage(message))
@@ -628,7 +627,7 @@ export const layer: Layer.Layer<
         let continuationMessageID: MessageID | undefined
         if (replay) {
           const original = replay.info
-          const replayMsg = yield* session.updateMessage({
+          const replayMsg = yield* session.createMessage({
             id: MessageID.ascending(),
             role: "user",
             sessionID: input.sessionID,
@@ -679,7 +678,7 @@ export const layer: Layer.Layer<
               { enabled: true },
             )).enabled
           ) {
-            const continueMsg = yield* session.updateMessage({
+            const continueMsg = yield* session.createMessage({
               id: MessageID.ascending(),
               role: "user",
               sessionID: input.sessionID,
@@ -728,11 +727,6 @@ export const layer: Layer.Layer<
           sessionID: input.sessionID,
           ...(input.agentID ? { agentID: input.agentID } : {}),
         })
-      // A direct request can be admitted before its MCP/file/plugin expansion
-      // is durable. Yield the current runner so that request starts or joins a
-      // fresh loop after it is persisted instead of re-processing this same
-      // compaction boundary while the admission is still in flight.
-      if (result === "continue" && input.hasPendingExternalRequest?.()) return "stop"
       return result
     })
 
@@ -747,7 +741,7 @@ export const layer: Layer.Layer<
       // Tag the synthetic boundary message with agent_id so per-actor
       // filterCompactedEffect lookups stop at this row when scoping by the
       // same agent_id (subagent compaction stays inside its own scope).
-      const msg = yield* session.updateMessage({
+      const msg = yield* session.createMessage({
         id: MessageID.ascending(),
         role: "user",
         model: input.model,

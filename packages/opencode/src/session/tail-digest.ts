@@ -104,14 +104,16 @@ function checkpointPart(msg: WithParts): CheckpointPart | undefined {
 }
 
 /**
- * Drop assistant messages in (coveredUpTo, digestUpTo] after the latest
- * rebuild boundary. The activity list itself is already in the boundary's
- * rebuild context (written at insert time), so this only removes the
- * now-redundant verbatim tool/assistant tail. Post-insert messages stay live.
+ * Drop assistant messages in the exact chronological interval ending at
+ * digestUpTo. The activity list itself is already in the boundary's rebuild
+ * context (written at insert time), so this only removes the now-redundant
+ * verbatim tool/assistant tail. Post-insert messages stay live.
  *
- * Filtering by message-id range — not by the boundary's position in the
- * array — so a same-millisecond tail message cannot escape collapse by
- * sorting before the boundary's synthetic time (watermark+1).
+ * A full history contains coveredUpTo, which is the authoritative start. A
+ * filterCompacted history begins at the checkpoint marker, so the marker is
+ * the fallback start. IDs can be allocated before admission and committed
+ * later; only exact positions describe the interval. Missing or reversed
+ * endpoints fail closed without dropping anything.
  *
  * User-role messages are never dropped: the last user is where insertReminders
  * persists skill-catalog / auto-worktree gates, and a file-only or
@@ -120,17 +122,20 @@ function checkpointPart(msg: WithParts): CheckpointPart | undefined {
  * never receives it.
  */
 export function collapseCheckpointTail(msgs: readonly WithParts[]): WithParts[] {
-  const boundary = msgs.findLast((m) => m.info.role === "user" && m.parts.some((p) => p.type === "checkpoint"))
-  if (!boundary) return msgs as WithParts[]
+  const boundary = msgs.findLastIndex(
+    (m) => m.info.role === "user" && m.parts.some((p) => p.type === "checkpoint"),
+  )
+  if (boundary < 0) return msgs as WithParts[]
 
-  const part = checkpointPart(boundary)
+  const part = checkpointPart(msgs[boundary])
   if (!part?.digestUpTo) return msgs as WithParts[]
 
-  const digestUpTo = part.digestUpTo
-  const coveredUpTo = part.coveredUpTo
-  const live = msgs.filter(
-    (m) => m.info.id <= coveredUpTo || m.info.id > digestUpTo || m.info.role === "user",
-  )
+  const digest = msgs.findIndex((m) => m.info.id === part.digestUpTo)
+  const covered = msgs.findIndex((m) => m.info.id === part.coveredUpTo)
+  const start = covered < 0 ? boundary + 1 : covered + 1
+  if (digest < start) return msgs as WithParts[]
+
+  const live = msgs.filter((m, index) => index < start || index > digest || m.info.role === "user")
   if (live.length === msgs.length) return msgs as WithParts[]
   return live as WithParts[]
 }

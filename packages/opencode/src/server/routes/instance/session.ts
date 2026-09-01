@@ -11,6 +11,7 @@ import { SessionRevert } from "@/session/revert"
 import { SessionShare } from "@/share"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
+import { SessionCheckpoint } from "@/session/checkpoint"
 import { Todo } from "@/session/todo"
 import { Effect } from "effect"
 import { Snapshot } from "@/snapshot"
@@ -818,6 +819,38 @@ export const SessionRoutes = lazy(() =>
         }
         return c.json(page.items)
       },
+    )
+    .get(
+      "/:sessionID/checkpoint-coverage",
+      describeRoute({
+        summary: "Get checkpoint coverage",
+        description:
+          "List authoritative checkpoint markers in the main session slice and resolve each effective watermark by exact message ID.",
+        tags: ["Session"],
+        operationId: "session.checkpointCoverage",
+        responses: {
+          200: {
+            description: "Checkpoint coverage",
+            content: {
+              "application/json": {
+                schema: resolver(SessionCheckpoint.Coverage.array()),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) =>
+        jsonRequest("SessionRoutes.checkpointCoverage", c, function* () {
+          const checkpoint = yield* SessionCheckpoint.Service
+          return yield* checkpoint.coverage(c.req.valid("param").sessionID)
+        }),
     )
     .get(
       "/:sessionID/message/:messageID",

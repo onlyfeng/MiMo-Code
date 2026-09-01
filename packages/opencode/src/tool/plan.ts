@@ -85,7 +85,7 @@ export const PlanExitTool = Tool.define(
             model,
             source: "hook",
           }
-          yield* session.updateMessage(msg)
+          yield* session.createMessage(msg)
           yield* session.updatePart({
             id: PartID.ascending(),
             messageID: msg.id,

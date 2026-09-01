@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { AssistantMessage, Message, UserMessage } from "@mimo-ai/sdk/v2"
-import { computeContextUsage } from "../../../src/cli/cmd/tui/util/model"
+import { computeContextUsage, type CheckpointCoverageProjection } from "../../../src/cli/cmd/tui/util/model"
 
 // The footer's context readout (prompt/index.tsx `usage` memo) reads the LAST
 // completed assistant turn's usage record. A manual /rebuild inserts only a
@@ -12,8 +12,9 @@ import { computeContextUsage } from "../../../src/cli/cmd/tui/util/model"
 // to, one level below the SolidJS render (there is no render harness for this
 // component). The window is passed in already-resolved so the test does not
 // depend on model/config plumbing. Staleness is driven by each checkpoint's
-// `coveredUpTo` (the watermark id it collapsed up to) via `checkpointCoverage`,
-// which is why these fixtures pass a coverage map rather than a boolean.
+// effective tail watermark (`digestUpTo ?? coveredUpTo`) via an independent
+// `checkpointCoverage` projection, so a latest-100 transcript may omit the
+// marker without losing the pending state.
 
 const WINDOW = { hard: 1_000_000, effective: 980_000, usable: 960_000, source: "model" as const }
 
@@ -43,20 +44,48 @@ function boundary(id: string, opts?: { created?: number }): Message {
   return { id, role: "user", time: { created: opts?.created ?? 0 } } as UserMessage
 }
 
-/** Build the `checkpointCoverage` lookup from an id -> coveredUpTo map. */
-function coverage(map: Record<string, string>) {
-  return (id: string) => map[id]
+function coverage(messages: Message[], map: Record<string, string>): CheckpointCoverageProjection[] {
+  return Object.entries(map).map(([markerID, watermarkID], index) => {
+    const marker = messages.find((message) => message.id === markerID)
+    if (!marker) throw new Error(`missing marker fixture: ${markerID}`)
+    const watermark = messages.find((message) => message.id === watermarkID)
+    return {
+      partID: `prt_checkpoint_${index}`,
+      marker: { id: marker.id, time: { created: marker.time.created } },
+      watermark: watermark
+        ? { id: watermark.id, status: "resolved", time: { created: watermark.time.created } }
+        : { id: watermarkID, status: "unresolved" },
+    }
+  })
 }
 
 describe("computeContextUsage", () => {
   test("measured: reports the last assistant turn's context fill and cumulative cost", () => {
     // 578900 + 100 output = 579000 tokens over a 960K usable window → 579.0K/960K (60%).
     const messages = [user("msg_01"), assistant("msg_02", 578_900, { cost: 13.1 })]
-    const out = computeContextUsage({ messages, window: WINDOW, checkpointCoverage: () => undefined })
+    const out = computeContextUsage({ messages, window: WINDOW, checkpointCoverage: [] })
     expect(out).toBeDefined()
     expect(out!.pending).toBe(false)
     expect(out!.context).toBe("579.0K/960K (60%)")
     expect(out!.cost).toBe(13.1)
+  })
+
+  test("checkpoint coverage stays pending when its marker is outside the bounded transcript", () => {
+    const measured = assistant("msg_measured", 300_000, { created: 200 })
+    const out = computeContextUsage({
+      messages: [measured],
+      window: WINDOW,
+      checkpointCoverage: [
+        {
+          partID: "prt_checkpoint",
+          marker: { id: "msg_marker_not_loaded", time: { created: 101 } },
+          watermark: { id: measured.id, status: "resolved", time: { created: 200 } },
+        },
+      ],
+    })
+    expect(out).toBeDefined()
+    expect(out!.pending).toBe(true)
+    expect(out!.context).toBe("—/960K")
   })
 
   test("after a manual /rebuild the stale pre-rebuild figure is NOT shown", () => {
@@ -67,7 +96,7 @@ describe("computeContextUsage", () => {
     const out = computeContextUsage({
       messages,
       window: WINDOW,
-      checkpointCoverage: coverage({ msg_03: "msg_02" }),
+      checkpointCoverage: coverage(messages, { msg_03: "msg_02" }),
     })
     expect(out).toBeDefined()
     expect(out!.pending).toBe(true)
@@ -89,7 +118,7 @@ describe("computeContextUsage", () => {
     const out = computeContextUsage({
       messages,
       window: undefined,
-      checkpointCoverage: coverage({ msg_03: "msg_02" }),
+      checkpointCoverage: coverage(messages, { msg_03: "msg_02" }),
     })
     expect(out).toBeDefined()
     expect(out!.pending).toBe(true)
@@ -106,7 +135,7 @@ describe("computeContextUsage", () => {
     const out = computeContextUsage({
       messages,
       window: { hard: 1_000_000, effective: 980_000, usable: 960_000, source: "config" as const },
-      checkpointCoverage: coverage({ msg_03: "msg_02" }),
+      checkpointCoverage: coverage(messages, { msg_03: "msg_02" }),
     })
     expect(out).toBeDefined()
     expect(out!.pending).toBe(true)
@@ -126,7 +155,7 @@ describe("computeContextUsage", () => {
     const out = computeContextUsage({
       messages,
       window: WINDOW,
-      checkpointCoverage: coverage({ msg_03: "msg_02" }),
+      checkpointCoverage: coverage(messages, { msg_03: "msg_02" }),
     })
     expect(out).toBeDefined()
     expect(out!.pending).toBe(false)
@@ -134,6 +163,113 @@ describe("computeContextUsage", () => {
     expect(out!.context).toBe("190.1K/960K (20%)")
     // Cost is cumulative across all assistant turns (13.1 + 14.0), never reset.
     expect(out!.cost).toBeCloseTo(27.1, 5)
+  })
+
+  test("a late old-ID watermark still covers a newer-ID measured turn", () => {
+    // IDs can be allocated before admission and committed later. The watermark
+    // sorts before the measured turn by id but after it by committed time, so an
+    // id-only comparison would leak the stale 300.1K figure.
+    const measured = assistant("msg_z_measured", 300_000, { created: 200 })
+    const watermark = user("msg_a_watermark", { created: 300 })
+    const marker = boundary("msg_y_marker", { created: 101 })
+    const messages = [marker, measured, watermark]
+    const out = computeContextUsage({
+      messages,
+      window: WINDOW,
+      checkpointCoverage: coverage(messages, { [marker.id]: watermark.id }),
+    })
+    expect(out).toBeDefined()
+    expect(out!.pending).toBe(true)
+    expect(out!.context).toBe("—/960K")
+  })
+
+  test("equal timestamps use SQLite BINARY id order", () => {
+    // SQLite's BINARY collation orders ASCII uppercase before lowercase. The
+    // watermark therefore covers the measured turn; localeCompare reverses this
+    // pair on the supported runtime and would incorrectly show a measured value.
+    const measured = assistant("msg_A_measured", 300_000, { created: 200 })
+    const watermark = user("msg_a_watermark", { created: 200 })
+    const marker = boundary("msg_marker", { created: 101 })
+    const messages = [watermark, marker, measured]
+    const out = computeContextUsage({
+      messages,
+      window: WINDOW,
+      checkpointCoverage: coverage(messages, { [marker.id]: watermark.id }),
+    })
+    expect(out).toBeDefined()
+    expect(out!.pending).toBe(true)
+  })
+
+  test("equal timestamps compare supplementary-plane IDs by UTF-8 bytes", () => {
+    const measured = assistant("msg_\uE000", 300_000, { created: 200 })
+    const watermark = user("msg_\u{10000}", { created: 200 })
+    const marker = boundary("msg_marker", { created: 101 })
+    const messages = [watermark, marker, measured]
+    const out = computeContextUsage({
+      messages,
+      window: WINDOW,
+      checkpointCoverage: coverage(messages, { [marker.id]: watermark.id }),
+    })
+    expect(out).toBeDefined()
+    expect(out!.pending).toBe(true)
+  })
+
+  test("digestUpTo covering the measured turn wins over an older coveredUpTo", () => {
+    // The marker is placed beside the writer boundary, but Recent activity is
+    // folded through digestUpTo. Returning only coveredUpTo would treat this
+    // measured turn as live even though it was folded into the rebuild context.
+    const coveredUpTo = user("msg_z_covered", { created: 100 })
+    const measured = assistant("msg_m_measured", 300_000, { created: 200 })
+    const digestUpTo = user("msg_a_digest", { created: 300 })
+    const marker = boundary("msg_marker", { created: 101 })
+    const messages = [digestUpTo, marker, coveredUpTo, measured]
+
+    const coveredOnly = computeContextUsage({
+      messages,
+      window: WINDOW,
+      checkpointCoverage: coverage(messages, { [marker.id]: coveredUpTo.id }),
+    })
+    const digested = computeContextUsage({
+      messages,
+      window: WINDOW,
+      checkpointCoverage: coverage(messages, { [marker.id]: digestUpTo.id }),
+    })
+    expect(coveredOnly).toBeDefined()
+    expect(coveredOnly!.pending).toBe(false)
+    expect(digested).toBeDefined()
+    expect(digested!.pending).toBe(true)
+    expect(digested!.context).toBe("—/960K")
+  })
+
+  test("an unresolved watermark fails closed", () => {
+    const measured = assistant("msg_z_measured", 300_000, { created: 200 })
+    const marker = boundary("msg_a_marker", { created: 201 })
+    const messages = [marker, measured]
+    const out = computeContextUsage({
+      messages,
+      window: WINDOW,
+      checkpointCoverage: coverage(messages, { [marker.id]: "msg_0_not_loaded" }),
+    })
+    expect(out).toBeDefined()
+    expect(out!.pending).toBe(true)
+    expect(out!.context).toBe("—/960K")
+  })
+
+  test("an unresolved watermark remains pending after a later assistant", () => {
+    // A marker timestamp is not authoritative coverage. Until the endpoint can
+    // resolve the effective watermark, showing a measured value would be a
+    // false-fresh result, even when an assistant sorts after the marker.
+    const marker = boundary("msg_z_marker", { created: 201 })
+    const live = assistant("msg_a_live", 190_000, { created: 300 })
+    const messages = [live, marker]
+    const out = computeContextUsage({
+      messages,
+      window: WINDOW,
+      checkpointCoverage: coverage(messages, { [marker.id]: "msg_0_not_loaded" }),
+    })
+    expect(out).toBeDefined()
+    expect(out!.pending).toBe(true)
+    expect(out!.context).toBe("—/960K")
   })
 
   // Shared multi-rebuild fixture, engineered so id order and time order DISAGREE
@@ -152,8 +288,8 @@ describe("computeContextUsage", () => {
   const bOld = boundary("msg_01_bOld", { created: 9 }) // covers u0 only; late-ish time, small id
   const a2 = assistant("msg_04_a2", 300_000, { cost: 5.0, created: 101 })
   const bCover = boundary("msg_05_bCover", { created: 2 }) // covers a2; backdated, large id
-  const multiCoverage = coverage({ msg_01_bOld: "msg_00_u0", msg_05_bCover: "msg_04_a2" })
   const idOrder = [u0, bOld, a2, bCover]
+  const multiCoverage = coverage(idOrder, { msg_01_bOld: "msg_00_u0", msg_05_bCover: "msg_04_a2" })
 
   test("two rebuilds in one session: still pending after the second, with backdated boundary times", () => {
     const out = computeContextUsage({ messages: idOrder, window: WINDOW, checkpointCoverage: multiCoverage })

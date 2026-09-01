@@ -1,5 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
+import z from "zod"
 import { Global } from "@/global"
 import { Bus } from "@/bus"
 import { Config } from "@/config"
@@ -7,15 +8,17 @@ import { Flag } from "@/flag/flag"
 import { Memory } from "@/memory"
 import { isMemoryWriteEnabled } from "@/memory/write-gate"
 import { MemoryFtsTable } from "@/memory/fts.sql"
+import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 import { TaskRegistry } from "@/task/registry"
 import { ActorRegistry } from "@/actor/registry"
 import type { AgentOutcome, FailureInfo, ForkContext } from "@/actor/spawn"
 import { spawnRef } from "@/actor/spawn-ref"
 import { prefixCaptureRef } from "./prefix-capture-ref"
-import { Database, and, eq, or } from "@/storage"
+import { Database, NotFoundError, and, eq, or, sql } from "@/storage"
+import { alias } from "drizzle-orm/sqlite-core"
 import { Instance } from "@/project/instance"
 import { ProjectID } from "@/project/schema"
-import { SessionTable } from "./session.sql"
+import { MessageTable, PartTable, SessionTable } from "./session.sql"
 import * as Session from "./session"
 import { SessionStatus } from "./status"
 import { MessageV2 } from "./message-v2"
@@ -467,6 +470,28 @@ export type TryStartCheckpointWriterInput = {
  */
 export type TryStartCheckpointWriterResult = "started" | "queued" | "skipped"
 
+const CoveragePoint = z.object({
+  id: MessageID.zod,
+  time: z.object({ created: z.number() }),
+})
+
+export const Coverage = z
+  .object({
+    partID: PartID.zod,
+    marker: CoveragePoint,
+    watermark: z.discriminatedUnion("status", [
+      CoveragePoint.extend({ status: z.literal("resolved") }),
+      z.object({
+        id: MessageID.zod,
+        status: z.literal("unresolved"),
+      }),
+    ]),
+  })
+  .meta({ ref: "CheckpointCoverage" })
+export type Coverage = z.infer<typeof Coverage>
+
+const CheckpointWatermarkTable = alias(MessageTable, "checkpoint_watermark")
+
 export interface Interface {
   readonly tryStartCheckpointWriter: (
     input: TryStartCheckpointWriterInput,
@@ -555,6 +580,8 @@ export interface Interface {
   ) => Effect.Effect<{ text: string; hasActivity: boolean }>
 
   readonly lastBoundary: (sessionID: SessionID) => Effect.Effect<MessageID | undefined>
+
+  readonly coverage: (sessionID: SessionID) => Effect.Effect<Coverage[]>
 
   readonly isWriterRunning: (sessionID: SessionID) => Effect.Effect<boolean>
 
@@ -1567,7 +1594,9 @@ export const layer: Layer.Layer<
           // Main slice only — the runLoop collapse is main-scoped; subagent
           // activity must not appear as if the main agent performed it.
           const all = yield* session.messages({ sessionID })
-          const tail = all.filter((m) => m.info.id > boundaryID && m.info.id <= digestUpTo)
+          const from = all.findIndex((m) => m.info.id === boundaryID)
+          const to = all.findIndex((m) => m.info.id === digestUpTo)
+          const tail = from < 0 || to <= from ? [] : all.slice(from + 1, to + 1)
           const activity = renderTailDigest(tail)
           if (activity) {
             hasActivity = true
@@ -1652,6 +1681,86 @@ export const layer: Layer.Layer<
       // compile error instead of a silent lie.
       const boundary: MessageID | undefined = row?.last_checkpoint_message_id ?? undefined
       return boundary
+    })
+
+    const coverage = Effect.fn("SessionCheckpoint.coverage")(function* (sessionID: SessionID) {
+      return yield* Effect.sync(() =>
+        Database.transaction((tx) => {
+          const owner = tx
+            .select({ id: SessionTable.id })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, sessionID))
+            .get()
+          if (!owner) throw new NotFoundError({ message: `Session not found: ${sessionID}` })
+
+          const markers = tx
+            .select({
+              partID: PartTable.id,
+              messageID: MessageTable.id,
+              time_created: MessageTable.time_created,
+              data: PartTable.data,
+              watermark_time_created: CheckpointWatermarkTable.time_created,
+            })
+            .from(PartTable)
+            .innerJoin(
+              MessageTable,
+              and(eq(PartTable.message_id, MessageTable.id), eq(PartTable.session_id, MessageTable.session_id)),
+            )
+            // Resolve each effective watermark in the marker query itself.
+            // Collecting them into one IN list can exceed node:sqlite's bind
+            // limit on long sessions; this join keeps parameter count fixed.
+            .leftJoin(
+              CheckpointWatermarkTable,
+              and(
+                eq(CheckpointWatermarkTable.session_id, sessionID),
+                eq(CheckpointWatermarkTable.agent_id, "main"),
+                eq(
+                  CheckpointWatermarkTable.id,
+                  sql<MessageID>`coalesce(json_extract(${PartTable.data}, '$.digestUpTo'), json_extract(${PartTable.data}, '$.coveredUpTo'))`,
+                ),
+              ),
+            )
+            .where(
+              and(
+                eq(PartTable.session_id, sessionID),
+                eq(MessageTable.session_id, sessionID),
+                eq(MessageTable.agent_id, "main"),
+                eq(sql<string>`json_extract(${PartTable.data}, '$.type')`, "checkpoint"),
+              ),
+            )
+            .all()
+          // Keep ordering out of the joined SQL. On node:sqlite an ORDER BY
+          // makes the planner scan messages before checkpoint parts, turning a
+          // long-session lookup into a quadratic nested loop. This comparator
+          // is the same UTF-8 byte order as SQLite BINARY.
+          const checkpoints = markers
+            .map((marker) => ({
+              ...marker,
+              part: MessageV2.CheckpointPart.parse({
+                ...marker.data,
+                id: marker.partID,
+                sessionID,
+                messageID: marker.messageID,
+              }),
+            }))
+            .sort(
+              (left, right) =>
+                left.time_created - right.time_created ||
+                compareUtf8Bytes(left.messageID, right.messageID) ||
+                compareUtf8Bytes(left.partID, right.partID),
+            )
+          return checkpoints.map((marker): Coverage => {
+            const id = marker.part.digestUpTo ?? marker.part.coveredUpTo
+            const created = marker.watermark_time_created
+            return {
+              partID: marker.partID,
+              marker: { id: marker.messageID, time: { created: marker.time_created } },
+              watermark:
+                created == null ? { id, status: "unresolved" } : { id, status: "resolved", time: { created } },
+            }
+          })
+        }),
+      )
     })
 
     const isWriterRunning = Effect.fn("SessionCheckpoint.isWriterRunning")(function* (sessionID: SessionID) {
@@ -1804,6 +1913,7 @@ export const layer: Layer.Layer<
       renderIndex,
       renderRebuildContext,
       lastBoundary,
+      coverage,
       isWriterRunning,
       insertRebuildBoundary,
     })

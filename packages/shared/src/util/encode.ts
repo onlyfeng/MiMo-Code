@@ -1,5 +1,18 @@
+const encoder = new TextEncoder()
+
+/** Compare strings by their UTF-8 bytes, matching SQLite BINARY in the UTF-8 database. */
+export function compareUtf8Bytes(left: string, right: string) {
+  const leftBytes = encoder.encode(left)
+  const rightBytes = encoder.encode(right)
+  const length = Math.min(leftBytes.length, rightBytes.length)
+  for (let index = 0; index < length; index++) {
+    if (leftBytes[index] !== rightBytes[index]) return leftBytes[index] - rightBytes[index]
+  }
+  return leftBytes.length - rightBytes.length
+}
+
 export function base64Encode(value: string) {
-  const bytes = new TextEncoder().encode(value)
+  const bytes = encoder.encode(value)
   const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("")
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
 }

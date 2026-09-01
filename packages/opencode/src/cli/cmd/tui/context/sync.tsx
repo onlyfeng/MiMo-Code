@@ -19,12 +19,14 @@ import type {
   ProviderAuthMethod,
   SessionRecoveryResponse,
   VcsInfo,
+  CheckpointCoverage,
 } from "@mimo-ai/sdk/v2"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useProject } from "@tui/context/project"
 import { useEvent } from "@tui/context/event"
 import { useSDK } from "@tui/context/sdk"
 import { Binary } from "@mimo-ai/shared/util/binary"
+import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 import { createSimpleContext } from "./helper"
 import type { Snapshot } from "@/snapshot"
 import { useExit } from "./exit"
@@ -134,6 +136,129 @@ export type ActorEntry = {
   last_turn_time: number | null
 }
 
+type OrderedMessage = Pick<Message, "id" | "time">
+
+type CheckpointCoverageCandidate = OrderedMessage & { sessionID: string }
+
+type MessagePage<M> = {
+  data: M[] | undefined
+  response: {
+    headers: {
+      get(name: string): string | null
+    }
+  }
+}
+
+type BoundaryMessage = { id: string } | { info: { id: string } }
+
+type RevertView<M> = {
+  found: boolean
+  before: M[]
+  from: M[]
+  after: M[]
+  globalAfter: M[]
+}
+
+export function compareMessageOrder(left: OrderedMessage, right: OrderedMessage) {
+  if (left.time.created !== right.time.created) return left.time.created - right.time.created
+  return compareUtf8Bytes(left.id, right.id)
+}
+
+export function messageIndex(messages: readonly Pick<Message, "id">[], id: string) {
+  return messages.findIndex((message) => message.id === id)
+}
+
+export function messageInsertIndex(messages: readonly OrderedMessage[], message: OrderedMessage) {
+  const index = messages.findIndex((current) => compareMessageOrder(message, current) < 0)
+  return index < 0 ? messages.length : index
+}
+
+export function upsertChronologicalMessage<M extends OrderedMessage>(
+  messages: readonly M[],
+  message: M,
+  limit = 100,
+) {
+  const next = messages.filter((current) => current.id !== message.id)
+  next.splice(messageInsertIndex(next, message), 0, message)
+  const removed = next.length > limit ? next.shift() : undefined
+  return { messages: next, removed }
+}
+
+export function removeMessageByID<M extends { id: string }>(messages: readonly M[], id: string) {
+  const index = messageIndex(messages, id)
+  if (index < 0) return { messages: [...messages], removed: undefined }
+  return {
+    messages: [...messages.slice(0, index), ...messages.slice(index + 1)],
+    removed: messages[index],
+  }
+}
+
+export function messagesBefore<M extends { id: string }>(messages: readonly M[], id: string) {
+  const index = messageIndex(messages, id)
+  return index < 0 ? [] : messages.slice(0, index)
+}
+
+export function messagesAfter<M extends { id: string }>(messages: readonly M[], id: string) {
+  const index = messageIndex(messages, id)
+  return index < 0 ? [] : messages.slice(index + 1)
+}
+
+export function messagesFrom<M extends { id: string }>(messages: readonly M[], id: string) {
+  const index = messageIndex(messages, id)
+  return index < 0 ? [] : messages.slice(index)
+}
+
+export function revertView<M extends OrderedMessage>(
+  buckets: Record<string, M[]> | undefined,
+  current: readonly M[],
+  boundaryID?: string,
+): RevertView<M> {
+  if (!boundaryID) return { found: true, before: [...current], from: [], after: [], globalAfter: [] }
+  const ordered = Object.values(buckets ?? {})
+    .flat()
+    .toSorted(compareMessageOrder)
+  const boundary = messageIndex(ordered, boundaryID)
+  if (boundary < 0) return { found: false, before: [], from: [...current], after: [], globalAfter: [] }
+  const ids = new Set(current.map((message) => message.id))
+  const project = (messages: M[]) => messages.filter((message) => ids.has(message.id))
+  return {
+    found: true,
+    before: project(ordered.slice(0, boundary)),
+    from: project(ordered.slice(boundary)),
+    after: project(ordered.slice(boundary + 1)),
+    globalAfter: ordered.slice(boundary + 1),
+  }
+}
+
+export function revertRedoAction<M extends OrderedMessage & { role: string }>(view: RevertView<M>) {
+  if (!view.found) return { type: "blocked" } as const
+  const message = view.globalAfter.find((item) => item.role === "user")
+  if (!message) return { type: "unrevert" } as const
+  return { type: "revert", messageID: message.id } as const
+}
+
+export async function loadMessagesThroughRevertBoundary<M extends BoundaryMessage>(
+  initial: MessagePage<M>,
+  boundaryID: string | undefined,
+  loadOlder: (cursor: string) => Promise<MessagePage<M>>,
+) {
+  const pages = [initial.data ?? []]
+  const id = (message: M) => ("info" in message ? message.info.id : message.id)
+  if (!boundaryID) return { messages: pages[0], found: true }
+  let found = pages[0].some((message) => id(message) === boundaryID)
+  let cursor = initial.response.headers.get("x-next-cursor") ?? undefined
+  const seen = new Set<string>()
+  while (!found && cursor && !seen.has(cursor)) {
+    seen.add(cursor)
+    const page = await loadOlder(cursor)
+    const messages = page.data ?? []
+    pages.unshift(messages)
+    found = messages.some((message) => id(message) === boundaryID)
+    cursor = page.response.headers.get("x-next-cursor") ?? undefined
+  }
+  return { messages: pages.flat(), found }
+}
+
 function actorStatusFromEvent(
   s: "pending" | "running" | "idle",
   outcome: "success" | "failure" | "cancelled" | undefined,
@@ -194,7 +319,7 @@ export function nextSessionStatus(status: SessionStatus) {
 // read-only local-DB snapshot and they drift — this arm's population grew
 // 1294 → 1313 across this branch's own revisions — so trust the split's shape,
 // not the absolute numbers.
-export function selectMessages<M extends { id: string }>(
+export function selectMessages<M extends { id: string; time: { created: number } }>(
   buckets: Record<string, M[]> | undefined,
   agentID: string,
   sessionID: string,
@@ -203,7 +328,7 @@ export function selectMessages<M extends { id: string }>(
   if (buckets?.[sessionID]?.length) return buckets[sessionID]
   const newest = Object.entries(buckets ?? {})
     .filter(([key, msgs]) => key !== "main" && msgs.length > 0)
-    .sort(([, a], [, b]) => (b.at(-1)?.id ?? "").localeCompare(a.at(-1)?.id ?? ""))
+    .sort(([, a], [, b]) => compareMessageOrder(b.at(-1)!, a.at(-1)!))
     .at(0)
   return newest?.[1] ?? []
 }
@@ -257,6 +382,9 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       part: {
         [messageID: string]: Part[]
       }
+      checkpoint_coverage: {
+        [sessionID: string]: CheckpointCoverage[]
+      }
       lsp: LspStatus[]
       mcp: {
         [key: string]: McpStatus
@@ -306,6 +434,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       task: {},
       message: {},
       part: {},
+      checkpoint_coverage: {},
       lsp: [],
       mcp: {},
       mcp_resource: {},
@@ -350,8 +479,80 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     }
 
     const fullSyncedSessions = new Set<string>()
+    const checkpointCoverageSequence = new Map<string, number>()
+    const checkpointCoverageCandidates = new Map<string, CheckpointCoverageCandidate>()
+    let checkpointCoverageRequestID = 0
     let syncedWorkspace = project.workspace.current()
     let syncedDirectory = sdk.directory
+
+    const requestCheckpointCoverage = async (sessionID: string) => {
+      const sequence = ++checkpointCoverageRequestID
+      checkpointCoverageSequence.set(sessionID, sequence)
+      const response = await sdk.client.session.checkpointCoverage({ sessionID }, { throwOnError: true })
+      return { sessionID, sequence, data: response.data ?? [] }
+    }
+
+    const applyCheckpointCoverage = (response: Awaited<ReturnType<typeof requestCheckpointCoverage>>) => {
+      if (checkpointCoverageSequence.get(response.sessionID) !== response.sequence) return false
+      setStore("checkpoint_coverage", response.sessionID, reconcile(response.data))
+      return true
+    }
+
+    const refreshCheckpointCoverage = (sessionID: string) => {
+      void requestCheckpointCoverage(sessionID)
+        .then(applyCheckpointCoverage)
+        .catch((error) =>
+          Log.Default.warn("tui checkpoint coverage refresh failed", {
+            sessionID,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        )
+    }
+
+    const cachedMessage = (sessionID: string, messageID: string) =>
+      Object.values(store.message[sessionID] ?? {})
+        .flat()
+        .find((message) => message.id === messageID)
+
+    const rememberCheckpointCoverageCandidate = (message: Message) => {
+      checkpointCoverageCandidates.delete(message.id)
+      checkpointCoverageCandidates.set(message.id, {
+        id: message.id,
+        sessionID: message.sessionID,
+        time: { created: message.time.created },
+      })
+      if (checkpointCoverageCandidates.size <= 100) return
+      const oldest = checkpointCoverageCandidates.keys().next().value
+      if (oldest) checkpointCoverageCandidates.delete(oldest)
+    }
+
+    const provisionalCheckpointCoverage = (part: Extract<Part, { type: "checkpoint" }>) => {
+      const previous = (store.checkpoint_coverage[part.sessionID] ?? []).find((item) => item.partID === part.id)
+      const marker =
+        cachedMessage(part.sessionID, part.messageID) ??
+        checkpointCoverageCandidates.get(part.messageID) ??
+        previous?.marker
+      if (!marker) return
+      const watermarkID = part.digestUpTo ?? part.coveredUpTo
+      const watermark = cachedMessage(part.sessionID, watermarkID)
+      const coverage: CheckpointCoverage = {
+        partID: part.id,
+        marker: { id: marker.id, time: { created: marker.time.created } },
+        watermark: watermark
+          ? { id: watermark.id, status: "resolved", time: { created: watermark.time.created } }
+          : { id: watermarkID, status: "unresolved" },
+      }
+      setStore(
+        "checkpoint_coverage",
+        part.sessionID,
+        reconcile(
+          [
+            ...(store.checkpoint_coverage[part.sessionID] ?? []).filter((item) => item.partID !== part.id),
+            coverage,
+          ].toSorted((left, right) => compareMessageOrder(left.marker, right.marker)),
+        ),
+      )
+    }
 
     event.subscribe((event) => {
       switch (event.type) {
@@ -484,6 +685,11 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
         case "session.deleted": {
           const sid = event.properties.info.id
+          fullSyncedSessions.delete(sid)
+          checkpointCoverageSequence.delete(sid)
+          for (const [messageID, message] of checkpointCoverageCandidates) {
+            if (message.sessionID === sid) checkpointCoverageCandidates.delete(messageID)
+          }
           const result = Binary.search(store.session, sid, (s) => s.id)
           if (result.found) {
             setStore(
@@ -507,6 +713,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
               delete s.todo[sid]
               delete s.task[sid]
               delete s.actor[sid]
+              delete s.checkpoint_coverage[sid]
               const agents = s.message[sid]
               if (agents) {
                 for (const msgs of Object.values(agents)) {
@@ -575,89 +782,86 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           // session view renders whichever bucket matches route.agentID.
           const sid = event.properties.info.sessionID
           const aid = event.properties.info.agentID ?? "main"
-          if (!store.message[sid]) {
-            setStore("message", sid, { [aid]: [event.properties.info] })
-            break
+          if (!store.message[sid]) setStore("message", sid, {})
+          const result = upsertChronologicalMessage(store.message[sid][aid] ?? [], event.properties.info)
+          const removed = result.removed
+          if (removed?.id === event.properties.info.id || (removed && !store.part[removed.id]?.length)) {
+            rememberCheckpointCoverageCandidate(removed)
           }
-          if (!store.message[sid][aid]) {
-            setStore("message", sid, aid, [event.properties.info])
-            break
-          }
-          const messages = store.message[sid][aid]
-          const result = Binary.search(messages, event.properties.info.id, (m) => m.id)
-          if (result.found) {
-            setStore("message", sid, aid, result.index, reconcile(event.properties.info))
-            break
-          }
-          setStore(
-            "message",
-            sid,
-            aid,
-            produce((draft) => {
-              draft.splice(result.index, 0, event.properties.info)
-            }),
-          )
-          const updated = store.message[sid][aid]
-          if (updated.length > 100) {
-            const oldest = updated[0]
-            batch(() => {
-              setStore(
-                "message",
-                sid,
-                aid,
-                produce((draft) => {
-                  draft.shift()
-                }),
-              )
-              setStore(
-                "part",
-                produce((draft) => {
-                  delete draft[oldest.id]
-                }),
-              )
-            })
-          }
+          batch(() => {
+            setStore("message", sid, aid, reconcile(result.messages))
+            if (!removed) return
+            setStore(
+              "part",
+              produce((draft) => {
+                delete draft[removed.id]
+              }),
+            )
+          })
           break
         }
         case "message.removed": {
           const sid = event.properties.sessionID
           const buckets = store.message[sid]
-          if (!buckets) break
-          for (const aid of Object.keys(buckets)) {
-            const messages = buckets[aid]
-            const result = Binary.search(messages, event.properties.messageID, (m) => m.id)
-            if (result.found) {
-              setStore(
-                "message",
-                sid,
-                aid,
-                produce((draft) => {
-                  draft.splice(result.index, 1)
-                }),
-              )
-              break
+          checkpointCoverageCandidates.delete(event.properties.messageID)
+          batch(() => {
+            if (buckets) {
+              for (const aid of Object.keys(buckets)) {
+                const result = removeMessageByID(buckets[aid], event.properties.messageID)
+                const removed = result.removed
+                if (!removed) continue
+                setStore("message", sid, aid, reconcile(result.messages))
+                setStore(
+                  "part",
+                  produce((draft) => {
+                    delete draft[removed.id]
+                  }),
+                )
+                break
+              }
             }
-          }
+            setStore(
+              "checkpoint_coverage",
+              sid,
+              reconcile(
+                (store.checkpoint_coverage[sid] ?? [])
+                  .filter((coverage) => coverage.marker.id !== event.properties.messageID)
+                  .map(
+                    (coverage): CheckpointCoverage =>
+                      coverage.watermark.id === event.properties.messageID
+                        ? {
+                            ...coverage,
+                            watermark: { id: coverage.watermark.id, status: "unresolved" },
+                          }
+                        : coverage,
+                  ),
+              ),
+            )
+          })
+          refreshCheckpointCoverage(sid)
           break
         }
         case "message.part.updated": {
-          const parts = store.part[event.properties.part.messageID]
-          if (!parts) {
-            setStore("part", event.properties.part.messageID, [event.properties.part])
-            break
-          }
-          const result = Binary.search(parts, event.properties.part.id, (p) => p.id)
-          if (result.found) {
-            setStore("part", event.properties.part.messageID, result.index, reconcile(event.properties.part))
-            break
-          }
-          setStore(
-            "part",
-            event.properties.part.messageID,
-            produce((draft) => {
-              draft.splice(result.index, 0, event.properties.part)
-            }),
-          )
+          const part = event.properties.part
+          const parts = store.part[part.messageID]
+          batch(() => {
+            if (!parts) setStore("part", part.messageID, [part])
+            if (parts) {
+              const result = Binary.search(parts, part.id, (item) => item.id)
+              if (result.found) setStore("part", part.messageID, result.index, reconcile(part))
+              if (!result.found)
+                setStore(
+                  "part",
+                  part.messageID,
+                  produce((draft) => {
+                    draft.splice(result.index, 0, part)
+                  }),
+                )
+            }
+            if (part.type === "checkpoint") provisionalCheckpointCoverage(part)
+          })
+          checkpointCoverageCandidates.delete(part.messageID)
+          if (part.type === "checkpoint") refreshCheckpointCoverage(part.sessionID)
           break
         }
 
@@ -681,8 +885,13 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
         case "message.part.removed": {
           const parts = store.part[event.properties.messageID]
-          const result = Binary.search(parts, event.properties.partID, (p) => p.id)
-          if (result.found)
+          const result = parts ? Binary.search(parts, event.properties.partID, (p) => p.id) : undefined
+          const checkpoint =
+            (store.checkpoint_coverage[event.properties.sessionID] ?? []).some(
+              (coverage) => coverage.partID === event.properties.partID,
+            ) ||
+            (result?.found === true && parts?.[result.index]?.type === "checkpoint")
+          if (result?.found)
             setStore(
               "part",
               event.properties.messageID,
@@ -690,6 +899,19 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
                 draft.splice(result.index, 1)
               }),
             )
+          checkpointCoverageCandidates.delete(event.properties.messageID)
+          if (checkpoint) {
+            setStore(
+              "checkpoint_coverage",
+              event.properties.sessionID,
+              reconcile(
+                (store.checkpoint_coverage[event.properties.sessionID] ?? []).filter(
+                  (coverage) => coverage.partID !== event.properties.partID,
+                ),
+              ),
+            )
+            refreshCheckpointCoverage(event.properties.sessionID)
+          }
           break
         }
 
@@ -792,6 +1014,9 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       // session. An unchanged workspace+directory still short-circuits.
       if (workspace !== syncedWorkspace || directory !== syncedDirectory) {
         fullSyncedSessions.clear()
+        checkpointCoverageSequence.clear()
+        checkpointCoverageCandidates.clear()
+        setStore("checkpoint_coverage", reconcile({}))
         syncedWorkspace = workspace
         syncedDirectory = directory
       }
@@ -987,7 +1212,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         },
         async sync(sessionID: string) {
           if (fullSyncedSessions.has(sessionID)) return
-          const [session, messages, recovery, todo, diff, actors, task, children] = await Promise.all([
+          const [session, messages, coverage, recovery, todo, diff, actors, task, children] = await Promise.all([
             sdk.client.session.get({ sessionID }, { throwOnError: true }),
             // ⚠️`limit` is ONE budget shared across every agent bucket, not a
             // per-bucket limit. A session whose real `main` history is crowded out
@@ -998,6 +1223,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             // is needed to fix it, since this endpoint already returns up to 1000
             // when `limit` is omitted.
             sdk.client.session.messages({ sessionID, limit: 100, agent_id: "*" }),
+            requestCheckpointCoverage(sessionID),
             sdk.client.session
               .recovery({ sessionID }, { throwOnError: true })
               .catch(() => ({ data: [] as SessionRecoveryResponse })),
@@ -1014,6 +1240,21 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             // subagent sessions" is not a third kind.
             sdk.client.session.children({ sessionID, visible: true }).catch(() => undefined),
           ])
+          const loadedMessages = await loadMessagesThroughRevertBoundary(
+            messages,
+            session.data!.revert?.messageID,
+            (before) =>
+              sdk.client.session.messages(
+                { sessionID, limit: 100, before, agent_id: "*" },
+                { throwOnError: true },
+              ),
+          )
+          if (!loadedMessages.found) {
+            toast?.show({
+              message: "Undo boundary could not be loaded. History is hidden to prevent an unsafe redo.",
+              variant: "error",
+            })
+          }
           setStore(
             produce((draft) => {
               const match = Binary.search(draft.session, sessionID, (s) => s.id)
@@ -1027,10 +1268,14 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
               draft.todo[sessionID] = todo.data ?? []
               draft.session_recovery[sessionID] = recovery.data ?? []
               draft.task[sessionID] = task.data ?? []
-              const flat = (messages.data ?? []).map((x) => x.info)
-              // Server returns messages id-ordered and message.updated keeps that order; the footer's post-/rebuild pending-detection deliberately does NOT depend on it (it keys off checkpoint coveredUpTo, model.ts), so reordering here won't resurface the stale-context bug.
+              if (checkpointCoverageSequence.get(sessionID) === coverage.sequence) {
+                draft.checkpoint_coverage[sessionID] = coverage.data
+              }
+              const flat = loadedMessages.messages.map((x) => x.info).toSorted(compareMessageOrder)
+              // Server and message.updated both keep each actor bucket ordered by
+              // (time.created, id); caller-supplied IDs are idempotency keys, not chronology.
               draft.message[sessionID] = bucketMessages(flat)
-              for (const message of messages.data ?? []) {
+              for (const message of loadedMessages.messages) {
                 draft.part[message.info.id] = message.parts
               }
               draft.session_diff[sessionID] = diff.data ?? []

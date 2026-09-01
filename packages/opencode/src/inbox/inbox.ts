@@ -376,7 +376,7 @@ export const layer: Layer.Layer<
         return 0
       }
 
-      // Non-transactional crash window: updateMessage + updatePart commit
+      // Non-transactional crash window: createMessage + updatePart commit
       // before the inbox DELETE. A crash between them re-renders the same
       // rows on next drain — LLM sees duplicated notifications. Tolerable;
       // a transactional fix would require threading tx through
@@ -384,7 +384,7 @@ export const layer: Layer.Layer<
       // layers.
       const msgID = MessageID.ascending()
       const now = Date.now()
-      yield* sessions.updateMessage({
+      yield* sessions.createMessage({
         id: msgID,
         role: "user" as const,
         sessionID,

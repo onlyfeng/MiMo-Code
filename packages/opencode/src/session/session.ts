@@ -1,5 +1,7 @@
 import { Slug } from "@mimo-ai/shared/util/slug"
+import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 import path from "path"
+import { isDeepStrictEqual } from "node:util"
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Decimal } from "decimal.js"
@@ -453,6 +455,8 @@ export interface Interface {
   readonly children: (parentID: SessionID, options?: { visible?: boolean }) => Effect.Effect<Info[]>
   readonly remove: (sessionID: SessionID) => Effect.Effect<void>
   readonly updateMessage: <T extends MessageV2.Info>(msg: T) => Effect.Effect<T>
+  readonly createMessage: <T extends MessageV2.Info>(msg: T) => Effect.Effect<T>
+  readonly commitUserMessage: (msg: MessageV2.User, parts: MessageV2.Part[]) => Effect.Effect<MessageV2.User>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
   readonly removePart: (input: { sessionID: SessionID; messageID: MessageID; partID: PartID }) => Effect.Effect<PartID>
   readonly getPart: (input: {
@@ -659,10 +663,185 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
     })
 
     const updateMessage = <T extends MessageV2.Info>(msg: T): Effect.Effect<T> =>
-      Effect.gen(function* () {
-        yield* Effect.sync(() => SyncEvent.run(MessageV2.Event.Updated, { sessionID: msg.sessionID, info: msg }))
-        return msg
+      Effect.sync(() => {
+        const existing = Database.use((db) =>
+          db.select({ time_created: MessageTable.time_created }).from(MessageTable).where(eq(MessageTable.id, msg.id)).get(),
+        )
+        const info: T = existing
+          ? {
+              ...msg,
+              time:
+                msg.role === "assistant" && msg.time.completed !== undefined
+                  ? {
+                      ...msg.time,
+                      created: existing.time_created,
+                      completed: Math.max(msg.time.completed, existing.time_created),
+                    }
+                  : { ...msg.time, created: existing.time_created },
+            }
+          : msg
+        SyncEvent.run(MessageV2.Event.Updated, { sessionID: info.sessionID, info })
+        return info
       }).pipe(Effect.withSpan("Session.updateMessage"))
+
+    const createMessage = <T extends MessageV2.Info>(msg: T): Effect.Effect<T> =>
+      Effect.sync(() => {
+        MessageV2.Info.parse(msg)
+        return Database.transaction(
+          (tx) => {
+            const owner = tx.select({ id: SessionTable.id }).from(SessionTable).where(eq(SessionTable.id, msg.sessionID)).get()
+            if (!owner) throw new NotFoundError({ message: `Session not found: ${msg.sessionID}` })
+            const existing = tx.select({ id: MessageTable.id }).from(MessageTable).where(eq(MessageTable.id, msg.id)).get()
+            if (existing) throw new Error(`Message ID already exists: ${msg.id}`)
+            const latest = tx
+              .select({ time_created: MessageTable.time_created })
+              .from(MessageTable)
+              .where(
+                and(eq(MessageTable.session_id, msg.sessionID), eq(MessageTable.agent_id, msg.agentID ?? "main")),
+              )
+              .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+              .get()
+            const created = Math.max(Date.now(), (latest?.time_created ?? -1) + 1)
+            const committed: T = {
+              ...msg,
+              time:
+                msg.role === "assistant" && msg.time.completed !== undefined
+                  ? { ...msg.time, created, completed: Math.max(msg.time.completed, created) }
+                  : { ...msg.time, created },
+            }
+            SyncEvent.run(MessageV2.Event.Updated, { sessionID: committed.sessionID, info: committed })
+            return { committed }
+          },
+          { behavior: "immediate" },
+        ).committed
+      }).pipe(Effect.withSpan("Session.createMessage"))
+
+    const commitUserMessage = (msg: MessageV2.User, parts: MessageV2.Part[]): Effect.Effect<MessageV2.User> =>
+      Effect.sync(() => {
+        const parsedMessage = MessageV2.User.parse(msg)
+        const parsedParts = parts.map((part) => MessageV2.Part.parse(part))
+        if (
+          parsedParts.some((part) => part.sessionID !== parsedMessage.sessionID || part.messageID !== parsedMessage.id)
+        ) {
+          throw new Error(`User message parts must belong to ${parsedMessage.sessionID}/${parsedMessage.id}`)
+        }
+        return Database.transaction(
+          (tx) => {
+            const owner = tx
+              .select({ id: SessionTable.id })
+              .from(SessionTable)
+              .where(eq(SessionTable.id, parsedMessage.sessionID))
+              .get()
+            if (!owner) throw new NotFoundError({ message: `Session not found: ${parsedMessage.sessionID}` })
+            const existing = tx
+              .select({
+                session_id: MessageTable.session_id,
+                agent_id: MessageTable.agent_id,
+                time_created: MessageTable.time_created,
+                data: MessageTable.data,
+              })
+              .from(MessageTable)
+              .where(eq(MessageTable.id, parsedMessage.id))
+              .get()
+            if (
+              existing &&
+              (existing.session_id !== parsedMessage.sessionID ||
+                existing.agent_id !== (parsedMessage.agentID ?? "main"))
+            ) {
+              throw new Error(`Message ID already belongs to another actor: ${parsedMessage.id}`)
+            }
+            if (existing) {
+              const existingMessage = MessageV2.User.safeParse({
+                ...existing.data,
+                id: parsedMessage.id,
+                sessionID: existing.session_id,
+                agentID: parsedMessage.agentID,
+                time: { ...existing.data.time, created: existing.time_created },
+              })
+              const existingParts = tx
+                .select({
+                  id: PartTable.id,
+                  message_id: PartTable.message_id,
+                  session_id: PartTable.session_id,
+                  data: PartTable.data,
+                })
+                .from(PartTable)
+                .where(eq(PartTable.message_id, parsedMessage.id))
+                .orderBy(PartTable.id)
+                .all()
+                .map((part) =>
+                  MessageV2.Part.parse(
+                    JSON.parse(
+                      JSON.stringify({
+                        ...part.data,
+                        id: part.id,
+                        messageID: part.message_id,
+                        sessionID: part.session_id,
+                      }),
+                    ),
+                  ),
+                )
+              if (!existingMessage.success) {
+                throw new Error(`Message ID already exists with different content: ${parsedMessage.id}`)
+              }
+              const expectedMessage = MessageV2.User.parse(
+                JSON.parse(JSON.stringify({ ...parsedMessage, time: existingMessage.data.time })),
+              )
+              const canonicalExistingMessage = MessageV2.User.parse(
+                JSON.parse(JSON.stringify(existingMessage.data)),
+              )
+              const expectedParts = parsedParts
+                .map((part) => MessageV2.Part.parse(JSON.parse(JSON.stringify(part))))
+                .sort((a, b) => compareUtf8Bytes(a.id, b.id))
+              if (
+                !isDeepStrictEqual(canonicalExistingMessage, expectedMessage) ||
+                !isDeepStrictEqual(existingParts, expectedParts)
+              ) {
+                throw new Error(`Message ID already exists with different content: ${parsedMessage.id}`)
+              }
+              return canonicalExistingMessage
+            }
+            const partIDs = parsedParts.map((part) => part.id)
+            if (new Set(partIDs).size !== partIDs.length) {
+              throw new Error(`User message contains duplicate part IDs: ${parsedMessage.id}`)
+            }
+            const occupiedParts = partIDs.length
+              ? tx.select({ id: PartTable.id }).from(PartTable).where(inArray(PartTable.id, partIDs)).all()
+              : []
+            if (occupiedParts.length > 0) {
+              throw new Error(`Part ID already belongs to another message: ${occupiedParts[0].id}`)
+            }
+            const latest = tx
+              .select({ time_created: MessageTable.time_created })
+              .from(MessageTable)
+              .where(
+                and(
+                  eq(MessageTable.session_id, parsedMessage.sessionID),
+                  eq(MessageTable.agent_id, parsedMessage.agentID ?? "main"),
+                ),
+              )
+              .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+              .get()
+            const committed: MessageV2.User = {
+              ...parsedMessage,
+              time: {
+                ...parsedMessage.time,
+                created: Math.max(Date.now(), (latest?.time_created ?? -1) + 1),
+              },
+            }
+            SyncEvent.run(MessageV2.Event.Updated, { sessionID: committed.sessionID, info: committed })
+            parsedParts.forEach((part) =>
+              SyncEvent.run(MessageV2.Event.PartUpdated, {
+                sessionID: part.sessionID,
+                part: structuredClone(part),
+                time: Date.now(),
+              }),
+            )
+            return committed
+          },
+          { behavior: "immediate" },
+        )
+      }).pipe(Effect.withSpan("Session.commitUserMessage"))
 
     const updatePart = <T extends MessageV2.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
@@ -733,17 +912,18 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       const directory = yield* InstanceState.directory
       const original = yield* get(input.sessionID)
       const title = getForkedTitle(original.title)
+      const msgs = yield* messages({ sessionID: input.sessionID, agentID: "*" })
+      const boundary = input.messageID ? msgs.findIndex((msg) => msg.info.id === input.messageID) : msgs.length
+      if (boundary < 0) throw new NotFoundError({ message: `Message not found: ${input.messageID}` })
       const session = yield* createNext({
         directory,
         workspaceID: original.workspaceID,
         title,
         prompt: original.prompt,
       })
-      const msgs = yield* messages({ sessionID: input.sessionID, agentID: "*" })
       const idMap = new Map<string, MessageID>()
 
-      for (const msg of msgs) {
-        if (input.messageID && msg.info.id >= input.messageID) break
+      for (const msg of msgs.slice(0, boundary)) {
         const newID = MessageID.ascending()
         idMap.set(msg.info.id, newID)
 
@@ -938,7 +1118,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           .select({ id: MessageTable.id })
           .from(MessageTable)
           .where(and(eq(MessageTable.session_id, sessionID), eq(MessageTable.agent_id, "main")))
-          .orderBy(desc(MessageTable.id))
+          .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
           .limit(1)
           .get(),
       )
@@ -965,6 +1145,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       children,
       remove,
       updateMessage,
+      createMessage,
+      commitUserMessage,
       removeMessage,
       removePart,
       updatePart,

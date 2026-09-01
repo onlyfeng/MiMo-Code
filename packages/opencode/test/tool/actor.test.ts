@@ -202,6 +202,7 @@ function checkpointStub(latest: string | undefined) {
     renderIndex: () => Effect.succeed(""),
     renderRebuildContext: () => Effect.succeed({ text: "", hasActivity: false }),
     lastBoundary: () => Effect.succeed(undefined),
+    coverage: () => Effect.succeed([]),
     isWriterRunning: () => Effect.succeed(false),
     insertRebuildBoundary: () => Effect.succeed(false),
   })
