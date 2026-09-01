@@ -44,7 +44,9 @@ export function provider(model: Provider.Model, harness?: HarnessMode) {
     return [PROMPT_GPT]
   const prompt = (id: string) => {
     if (id.includes("gpt-4") || id.includes("o1") || id.includes("o3")) return PROMPT_BEAST
-    if (id.includes("gpt")) return PROMPT_GPT
+    // A resolved default mode can route GPT here; keep the prompt aligned with
+    // the native tool schema instead of advertising Codex-only tools.
+    if (id.includes("gpt")) return PROMPT_DEFAULT
     if (id.includes("gemini-")) return PROMPT_GEMINI
     if (id.includes("claude")) return PROMPT_ANTHROPIC
     if (id.toLowerCase().includes("trinity")) return PROMPT_TRINITY

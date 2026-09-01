@@ -5740,7 +5740,7 @@ export const PromptInput = z.object({
     .enum(["auto", "codex", "default"])
     .optional()
     .describe(
-      "Harness mode selected by the session's first user query. Later values are ignored. Models already classified for the Codex toolset, such as GPT-5, stay Codex. For other models, auto preserves model/process inference, explicit codex forces Codex, and explicit default forces the native tool schema.",
+      "Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.",
     ),
   variant: z.string().optional(),
   parts: z
@@ -5846,7 +5846,7 @@ export const CommandInput = z.object({
     .enum(["auto", "codex", "default"])
     .optional()
     .describe(
-      "Harness mode selected by the session's first user command. Later values are ignored. Models already classified for the Codex toolset, such as GPT-5, stay Codex. For other models, auto preserves model/process inference, explicit codex forces Codex, and explicit default forces the native tool schema.",
+      "Harness mode selected by the session's first user command. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.",
     ),
   parts: z
     .array(

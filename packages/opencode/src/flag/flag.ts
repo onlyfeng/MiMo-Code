@@ -130,10 +130,13 @@ export const Flag = {
     return ratio("MIMOCODE_COMPACTION_TRIGGER_RATIO") ?? 0.9
   },
   MIMOCODE_DISABLE_MODELS_FETCH: truthy("MIMOCODE_DISABLE_MODELS_FETCH"),
-  // Defaults to false. When enabled, every model uses the GPT system prompt
-  // and Codex toolset regardless of its model ID.
+  // Defaults to automatic model inference. Explicit true forces every model to
+  // use the GPT system prompt and Codex toolset; explicit false forces even GPT
+  // models to use the default prompt and toolset.
   get MIMOCODE_CODEX_MODE() {
-    return truthy("MIMOCODE_CODEX_MODE")
+    if (truthy("MIMOCODE_CODEX_MODE")) return true
+    if (falsy("MIMOCODE_CODEX_MODE")) return false
+    return undefined
   },
   MIMOCODE_DISABLE_MOUSE: truthy("MIMOCODE_DISABLE_MOUSE"),
   MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT: number("MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT") ?? 3,
