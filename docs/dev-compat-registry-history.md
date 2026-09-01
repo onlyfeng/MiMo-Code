@@ -946,7 +946,7 @@ strengthen FC-002/FC-015 and the generated SDK evidence without creating a new
 - `packages/opencode` and `packages/sdk/js` typechecks passed; migration
   verification returned exactly `Migrations are up to date`.
 - Root lint completed with 0 errors and 4,319 warnings.
-- The focused coverage/projection audit passed 79 tests with 0 failures; the
+- The focused coverage/projection audit passed 76 tests with 0 failures; the
   published-contract guard independently passed 4 tests with 0 failures.
 - Fresh OpenAPI input SHA-256:
   `b8cdcb7ed5b5e0940cfdaf584ce56ce99de4304eb78cb22b55f1a2527e374286`.
