@@ -158,6 +158,8 @@ registry or history commit does not advance either behavior reference.
   prompt/toolset, which is not necessarily one literal prompt family.
   `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH=true` remains an independent discovery
   opt-in and may enable MCP Tool Search regardless of the resolved harness.
+  Process environment selectors are startup configuration; mutating them during
+  an active session is outside this contract.
   Exact MiMo v2.5 identities win over generic aliases. MiMo Responses transport
   is selected only by a resolved PTC identity; transport never selects the Codex
   harness/toolset. Unrelated GPT-4 families do not gain Codex tools through

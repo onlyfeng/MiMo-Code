@@ -974,11 +974,17 @@ three SDK occurrences owned by the two source schema descriptions.
 
 ### Validation evidence
 
-The test matrix ran from `packages/opencode` at exact behavior commit
+The test matrix ran at exact behavior commit
 `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`, with all three ambient selectors
-removed from every default-path process:
+removed from every default-path process. To reproduce, check out that commit and
+run this single block from the repository root; the first two commands fail
+closed if either prerequisite is wrong:
 
 ```bash
+test "$(git rev-parse HEAD)" = \
+  0899a4802dd65c1ca98e68722a7ee0c017e5cb7c
+cd packages/opencode
+
 env -u MIMOCODE_EXPERIMENTAL \
   -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
   -u MIMOCODE_CODEX_MODE \
@@ -1021,7 +1027,8 @@ env -u MIMOCODE_EXPERIMENTAL \
 # expected: 19 pass, 1 pre-existing TODO, 0 fail
 ```
 
-Typechecks ran independently from their package directories:
+From the repository root, typechecks ran independently from their package
+directories:
 
 ```bash
 (cd packages/opencode && bun typecheck)
@@ -1029,8 +1036,9 @@ Typechecks ran independently from their package directories:
 # expected: both exit 0
 ```
 
-The two source descriptions project to exactly two source, three OpenAPI, and
-three JavaScript SDK occurrences; the selected range is whitespace-clean:
+From the repository root, the two source descriptions project to exactly two
+source, three OpenAPI, and three JavaScript SDK occurrences; the selected range
+is whitespace-clean:
 
 ```bash
 test "$(rg -F -c 'Explicit codex or default is authoritative.' \
