@@ -38,6 +38,7 @@ export function isMcpToolSearchEnabled(
   harness: HarnessMode | undefined,
   ...modelIDs: Array<string | undefined>
 ) {
+  // The dedicated MCP selector is independent of prompt/toolset selection.
   if (enabled) return true
   return (
     resolveHarnessMode({

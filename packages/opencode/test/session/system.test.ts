@@ -55,6 +55,9 @@ describe("session.system", () => {
     const gpt = ProviderTest.model({ id: ModelID.make("gpt-5.2"), api: { id: "gpt-5.2" } as never })
     expect(SystemPrompt.provider(gpt, "default")[0]).not.toContain("You are Codex")
     expect(SystemPrompt.provider(gpt, "default")[0]).not.toContain("Use `apply_patch` for local file edits")
+    const gpt4 = ProviderTest.model({ id: ModelID.make("gpt-4o-mini"), api: { id: "gpt-4o-mini" } as never })
+    expect(SystemPrompt.provider(gpt4, "default")[0]).not.toContain("You are Codex")
+    expect(SystemPrompt.provider(gpt4, "default")[0]).not.toContain("Use `apply_patch` for local file edits")
 
     const mimo = ProviderTest.model({ id: ModelID.make("mimo-v2.6"), api: { id: "mimo-v2.6" } as never })
     expect(SystemPrompt.provider(mimo, "codex")[0]).toContain("You are Codex")
@@ -79,6 +82,9 @@ describe("session.system", () => {
         ProviderTest.model({ id: ModelID.make("deployment-primary"), api: { id: "gpt-5.4" } as never }),
       )[0],
     ).toBe(normal)
+    expect(SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("gpt-4o-mini") }))[0]).not.toContain(
+      "You are Codex",
+    )
   })
 
   test("renders machine and repository environment only for Claude models", async () => {
