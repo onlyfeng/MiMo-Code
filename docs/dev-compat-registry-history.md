@@ -19,6 +19,7 @@ never used as an inherited `main` or compat behavior review basis.
 | 2026-08-27 | `45554bedf7fb7d041d16bbd6b8362ed2f54c56b7` | `d0acb856f1ec0edae6cce29ca44178af14d94293` | `268d5be1cd79e7da7c9f9cb6de5a65fed3c76e96` | 7 | 58 paths; 3,621 insertions; 257 deletions | Inherited the complete 13/13 shared transport, replace-agent, checkpoint, relative-path, title, skill, stable-memory, actor-context, and compaction audit while preserving all seven compat-owned adaptations and adding only evidence-backed fixture timeout headroom. |
 | 2026-08-28 | `cce5b8383ce812d608254dc4deecf672e2795773` | `64b4bdda6829ca697cecf4cf79eeec6a35ec2e57` | `710a5ffb8aa9b7dedc63789759b4d995d587f5d1` | 7 | 58 paths; 3,621 insertions; 257 deletions | Inherited the complete 3/3 actor-follow-up, PPTX-sourcing, and overflow-fixture audit; preserved all seven compat owners, including bounded actor state/turn context and deterministic reserve-safe overflow evidence on the two overlapping owners. |
 | 2026-09-01 | `ed33097a961c9d915b00b2bbb2ebaf23e7ad2288` | `2b4c6569ac308fa6a6662c2c044059893748e0ad` | `2c8e74968322005cec4d9a3e3dcccc634ca711c9` | 7 | 87 paths; 9,411 insertions; 1,498 deletions | Inherited the complete 18/18 shared audit, retained all seven compat owners, and corrected shared lifecycle, chronology, checkpoint-coverage, compaction-admission, and TUI projection behavior at compat seams without creating a new compat capability owner. |
+| 2026-09-01 | `ed33097a961c9d915b00b2bbb2ebaf23e7ad2288` | `2b4c6569ac308fa6a6662c2c044059893748e0ad` | `f1175ce9d6a7f82045b3910e0f1db5eb686924d0` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Superseded the earlier same-day basis after exact-SHA CI reproduced the checkpoint coverage-seam P1 twice; reconstructed logical tails, published the checkpoint OpenAPI contract, and made all 141 published samples callable through SDK v2 without changing the 18/18 shared or 7/7 compat ownership result. |
 
 ## 2026-08-24 initial ownership review
 
@@ -831,6 +832,175 @@ git diff --shortstat \
 git diff --shortstat \
   2b4c6569ac308fa6a6662c2c044059893748e0ad \
   2c8e74968322005cec4d9a3e3dcccc634ca711c9 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+```
+
+## 2026-09-01 post-CI checkpoint coverage and published-SDK correction
+
+- Reviewed upstream:
+  `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`.
+- Accepted fork `main` audit tip:
+  `ed33097a961c9d915b00b2bbb2ebaf23e7ad2288`.
+- Inherited main behavior:
+  `2b4c6569ac308fa6a6662c2c044059893748e0ad`.
+- Prior compat tip:
+  `d3ef2e08c5a5317d264631a929025f3f69af75c7`.
+- Superseded compat behavior basis:
+  `2c8e74968322005cec4d9a3e3dcccc634ca711c9`.
+- Documentation snapshot whose exact-SHA CI exposed the regression:
+  `57c1e8a66851fe8f8058185af77988e2b1534462`.
+- Corrective behavior sequence:
+  - `26e2aac36f50afca70e1ba193624bd163a8c4b6c` reconstructs checkpoint
+    tails from persisted coverage seams.
+  - `fcfe7a4f5049e77df96dcc79977a4f04e76d561e` republishes the checkpoint
+    coverage OpenAPI route and schemas.
+  - `afc76301bcc30076525c8103275f3c80635c6079` guards the generated and
+    published checkpoint contract.
+  - `f1175ce9d6a7f82045b3910e0f1db5eb686924d0` targets every published
+    code sample at the callable v2 SDK surface.
+- Final compat behavior:
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0`.
+- Main-audit inheritance merge remains
+  `2d9d8e755ccf5c53c5883257070b83667ec1462d`.
+- The complete inherited shared-capability disposition remains 18/18. Active
+  compat ownership remains DC-NET-001, DC-NET-002, DC-PLATFORM-001,
+  DC-MODEL-001, DC-CONTEXT-001, DC-ACTOR-001, and DC-TUI-001: 7/7, with no
+  owner added, retired, or transferred.
+
+### Exact-SHA failure and coverage-seam correction
+
+The `test` workflow run `33457418977` failed at exact SHA `57c1e8a6` on both
+attempt 1 and the same-SHA rerun. Both failures were `unit (shard 1/4)`:
+job `99700245518` on attempt 1 and job `99702155504` on attempt 2. Both stopped
+at `request preflight stops when recovery makes no progress`: the regression
+expected assistant `finish: "error"` but observed `finish: "stop"`. The exact-SHA
+lint run `33457419002` and typecheck run `33457418957` were green, which did not
+override the repeated behavioral failure.
+
+The marker created by `insertRebuildBoundary` is backdated to
+`boundaryCreatedAt + 1` while receiving a new ascending ID. Under canonical
+`(time.created, id)` ordering, it can therefore sort after an already-persisted
+same-timestamp live user. The old newest-first filter encountered that marker
+first and stopped, silently removing the active turn and allowing recovery to
+terminate with the wrong outcome.
+
+The deterministic pre-fix reproduction quantized `Date.now()` while preserving
+the normal default-path environment:
+
+```bash
+env -u MIMOCODE_EXPERIMENTAL \
+  -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+  -u MIMOCODE_CODEX_MODE \
+  bun test \
+  --preload <(printf '%s\n' \
+    'const realDateNow = Date.now.bind(Date); Date.now = () => Math.floor(realDateNow() / 100) * 100') \
+  test/session/prompt-effect.test.ts \
+  -t 'recovery makes no progress' \
+  --timeout 120000
+```
+
+The correction treats `coveredUpTo` as the logical seam. It continues across
+stream pages until that exact message is found, moves the active marker to the
+logical beginning, preserves canonical order for all non-boundary tail
+messages, and removes only superseded context boundaries. Legacy checkpoint
+parts without `source` use the same seam. Missing or reversed coverage fails
+closed to the complete observed history rather than trimming user work.
+Regressions cover same-time marker ordering, exact assistant-tail collapse,
+legacy markers, repeated same-watermark rebuilds, missing/reversed seams, and a
+tail spanning the 50-message stream page.
+
+### Published OpenAPI and callable SDK evidence
+
+The runtime OpenAPI contained the checkpoint coverage route, but the checked-in
+`packages/sdk/openapi.json` omitted
+`/session/{sessionID}/checkpoint-coverage`, `CheckpointCoverage`, and
+`CompactionPart.projection`. The republished artifact now carries all three, and
+the regression compares both the generated document and checked-in artifact.
+
+The previous generator imported the legacy package root and emitted literal
+operation IDs. That produced stale targets for underscore operation IDs instead
+of the camel-cased v2 client members. The final generator imports
+`@mimo-ai/sdk/v2` and converts underscore segments before emitting the member
+path. The guard requires generated and published operation-ID sets to be
+identical, requires each published sample to equal the generator output, and
+resolves its target on a real v2 client object. The final artifact contains
+141 operations, 141 samples, 141 unique callable targets, and zero missing
+targets.
+
+These are shared checkpoint/publication corrections at compat seams. They
+strengthen FC-002/FC-015 and the generated SDK evidence without creating a new
+`dev/compat` capability owner.
+
+### Final compat validation evidence
+
+- Frozen dependency installation completed with 2,311 installs across 2,580
+  packages; tracked manifests, `bun.lock`, and generated outputs remained
+  unchanged.
+- Four stable hash shards produced 5,708 executed tests, 41 skipped/todo tests,
+  and 0 failures. Isolated stdio produced 6 executed tests, 0 skipped, and 0
+  failures, for 5,714 executed tests combined.
+- `packages/opencode` and `packages/sdk/js` typechecks passed; migration
+  verification returned exactly `Migrations are up to date`.
+- Root lint completed with 0 errors and 4,319 warnings.
+- The focused coverage/projection audit passed 79 tests with 0 failures; the
+  published-contract guard independently passed 4 tests with 0 failures.
+- Fresh OpenAPI input SHA-256:
+  `b8cdcb7ed5b5e0940cfdaf584ce56ce99de4304eb78cb22b55f1a2527e374286`.
+  It is byte-identical to the checked-in published artifact.
+- Two-pass generated output SHA-256:
+  `sdk.gen.ts=809d4cf45dd3d4afe2c15d2daa50adfa269ddd90a6d6e1ffbe8cae2025c08491`,
+  `types.gen.ts=6f68358e140afbfab5cd38e9a505d2981e95db353d0d2da072d37400c065edf8`,
+  and v2 generated tree
+  `20e03f5b5ba73d1a4f4c627670e741d2844142d502fa5d9dfcc78a9605e96d12`.
+- The build-node artifact imported under plain Node v24.16.0 with source-derived
+  version `0.0.0-codex/sync-upstream-20260901-compat-f1175ce9`; bundle SHA-256:
+  `6af88f40f006450527b2abcc1094d74c65f77952778f7bfeb6e7dfbb7cc2c07f`.
+- The current-platform `mimocode-darwin-x64` native build passed its executable
+  smoke with version `local` and package metadata `darwin` / `x64`.
+- A plain-Node checkpoint-coverage smoke populated 32,765 checkpoints, 32,765
+  distinct effective watermarks, and 65,530 messages under
+  `node:sqlite MAX_VARIABLE_NUMBER=32766`. The HTTP boundary returned 200 with
+  all 32,765 watermarks resolved and exact first/last object assertions; cleanup
+  completed explicitly.
+
+### Shared inheritance and changed-path calculation
+
+Propagation from prior compat to final behavior, excluding all five
+registry/history paths, changes 97 paths with 12,667 insertions and 1,501
+deletions. The final compat delta relative to inherited main behavior is 92
+paths with 10,085 insertions and 1,664 deletions. The post-integration behavior
+sequence changes 38 paths with 3,748 insertions and 449 deletions.
+
+`AGENTS.md`, `docs/upstream-deviations.md`, `docs/fork-capabilities.md`,
+`docs/fork-registry-history.md`, and `bun.lock` remain byte-identical between
+the accepted `main` tip and final compat behavior.
+
+```bash
+git diff --shortstat \
+  d3ef2e08c5a5317d264631a929025f3f69af75c7 \
+  f1175ce9d6a7f82045b3910e0f1db5eb686924d0 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --shortstat \
+  2b4c6569ac308fa6a6662c2c044059893748e0ad \
+  f1175ce9d6a7f82045b3910e0f1db5eb686924d0 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md'
+
+git diff --shortstat \
+  2d9d8e755ccf5c53c5883257070b83667ec1462d \
+  f1175ce9d6a7f82045b3910e0f1db5eb686924d0 -- . \
   ':(exclude)docs/upstream-deviations.md' \
   ':(exclude)docs/fork-capabilities.md' \
   ':(exclude)docs/dev-compat-overrides.md' \

@@ -16,7 +16,7 @@ registry/history commit does not advance either behavior reference below.
 - Reviewed upstream: `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`
 - Accepted `main` tip: `ed33097a961c9d915b00b2bbb2ebaf23e7ad2288`
 - Inherited main behavior: `2b4c6569ac308fa6a6662c2c044059893748e0ad`
-- Compat behavior: `2c8e74968322005cec4d9a3e3dcccc634ca711c9`
+- Compat behavior: `f1175ce9d6a7f82045b3910e0f1db5eb686924d0`
 - Prior compat tip: `d3ef2e08c5a5317d264631a929025f3f69af75c7`
 - Main-audit inheritance merge: `2d9d8e755ccf5c53c5883257070b83667ec1462d`
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
@@ -29,11 +29,14 @@ The 2026-09-01 propagation inherited the accepted shared audit and behavior
 through the recorded main-audit merge. DC-NET-001, DC-PLATFORM-001, and
 DC-TUI-001 had no incoming `main` path overlap. DC-NET-002 had stdio MCP path
 overlap; DC-MODEL-001, DC-CONTEXT-001, and DC-ACTOR-001 had request, prefix,
-compaction, or actor-path overlap. The final compat follow-up at
-`2c8e74968322005cec4d9a3e3dcccc634ca711c9` corrects inherited FC-001, FC-002,
-and FC-015 behavior at compat context, actor, server, and TUI seams; it creates
-no new persistent compat owner. All seven active entries were re-reviewed
-against the final behavior tree.
+compaction, or actor-path overlap. The final compat behavior at
+`f1175ce9d6a7f82045b3910e0f1db5eb686924d0` retains the reconciled lifecycle,
+chronology, admission, checkpoint, and TUI behavior, then corrects the
+checkpoint coverage seam and republishes the exact OpenAPI/SDK client contract.
+The runtime corrections remain shared FC-001, FC-002, and FC-015 behavior at
+compat seams; the publication corrections do not create a new persistent
+compat owner. All seven active entries were re-reviewed against the final
+behavior tree.
 
 ## Sync index
 
@@ -58,7 +61,7 @@ against the final behavior tree.
   target's permission decision and request. DC-NET-001 overrides only whether
   compat WebFetch invokes that inherited classifier at its call seam.
 - Overrides: compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9` removes only the
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0` removes only the
   `assertSafeUrl` import and its two call sites from WebFetch. The inherited
   classifier implementation and tests, including full IPv6 link-local
   `fe80::/10` coverage, remain byte-identical to `main`; compat WebFetch does
@@ -76,7 +79,7 @@ against the final behavior tree.
   classifier itself, not its use by compat WebFetch.
 - Review basis: inherited main
   `2b4c6569ac308fa6a6662c2c044059893748e0ad`; compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9`.
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0`.
 - Evidence: the main-to-compat source diff is exactly the import and two
   classification-call deletions. The inherited classifier tests cover the
   complete IPv6 link-local `fe80::/10` range and DNS-resolved link-local
@@ -100,7 +103,7 @@ against the final behavior tree.
   MCP URLs parse as HTTP(S), but deliberately make no fork-wide private-network
   promise.
 - Overrides: compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9` adds a compat-owned guarantee and
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0` adds a compat-owned guarantee and
   characterization test. There is no MCP production-source fork.
 - Delta: an RFC1918 endpoint such as `http://192.168.1.1/mcp` reaches mocked
   client creation and is not rejected merely because its address is private.
@@ -113,7 +116,7 @@ against the final behavior tree.
   the `compat permits an RFC1918 remote MCP endpoint` sentinel.
 - Review basis: inherited main
   `2b4c6569ac308fa6a6662c2c044059893748e0ad`; compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9`.
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0`.
 - Evidence: `packages/opencode/src/mcp/index.ts` is unchanged from accepted
   `main`, while the compat behavior adds only the mocked RFC1918 lifecycle
   guarantee on this surface.
@@ -134,7 +137,7 @@ against the final behavior tree.
   `ripgrep`/archive behavior without this environment-specific fallback set and
   resolves relative file-tool paths against immutable `Instance.directory`.
 - Overrides: compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9` carries the established no-rg
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0` carries the established no-rg
   listing boundary and Windows archive extraction adaptation instead of
   promoting them to shared `main`.
 - Delta: simple file listing remains available when `ripgrep` cannot be
@@ -149,7 +152,7 @@ against the final behavior tree.
   `packages/opencode/test/util/archive.test.ts`.
 - Review basis: inherited main
   `2b4c6569ac308fa6a6662c2c044059893748e0ad`; compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9`.
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0`.
 - Evidence: focused regressions distinguish simple fallback listings from
   operations that require real `ripgrep` and cover real-cwd marker scanning,
   ignore semantics, errors, abort, deep trees, and the Windows ZIP guard at the
@@ -174,7 +177,7 @@ against the final behavior tree.
   title generation through the hidden `title` agent's `modelRef: "lite"`,
   structured output, and ephemeral retry path.
 - Overrides: compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9` adds `agent.maxMode` and generated
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0` adds `agent.maxMode` and generated
   SDK/OpenAPI exposure, then routes eligible non-final, non-`json_schema` steps
   through MaxMode when the experimental configuration exists.
 - Delta: any configured agent may opt in with `maxMode: true`; the dedicated
@@ -196,7 +199,7 @@ against the final behavior tree.
   routing cases in `packages/opencode/test/session/prompt-effect.test.ts`.
 - Review basis: inherited main
   `2b4c6569ac308fa6a6662c2c044059893748e0ad`; compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9`.
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0`.
 - Evidence: the agent config schema, resolved agent information, generated
   public schemas, routing predicate, structured-output exclusion, retry
   behavior, main-only session status/event gate, and final-step cases are all
@@ -220,7 +223,7 @@ against the final behavior tree.
   FC-015's effective compaction window without this complete compat cap,
   serialization, and preflight set.
 - Overrides: compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9` bounds model-visible content and
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0` bounds model-visible content and
   estimates the effective request before dispatch. DC-ACTOR-001 separately owns
   the full-context/static-prefix actor extension.
 - Delta: instruction, inbox, replayed tool input/output, synthetic error media,
@@ -240,6 +243,16 @@ against the final behavior tree.
   ID ranges. The independent checkpoint-coverage projection survives a marker
   falling outside the newest-100 message page, resolves
   `digestUpTo ?? coveredUpTo`, and fails closed while a watermark is unresolved.
+  Checkpoint rebuild filtering reconstructs the logical tail through the
+  persisted `coveredUpTo` seam, including across stream pages and when
+  canonical `(time.created, id)` order places a synthetic marker after a
+  same-timestamp live message. The active marker moves to the logical seam,
+  superseded context boundaries are removed, and missing or reversed coverage
+  fails closed to the full observed history. The published OpenAPI exposes
+  `/session/{sessionID}/checkpoint-coverage`, `CheckpointCoverage`, and
+  `CompactionPart.projection`. Every published code sample imports
+  `@mimo-ai/sdk/v2`, camelizes underscore operation-ID segments, and targets an
+  actual callable v2 client method.
 - Source and synchronization surfaces:
   `packages/opencode/src/cli/cmd/tui/context/sync.tsx`,
   `packages/opencode/src/cli/cmd/tui/routes/session/index.tsx`,
@@ -262,19 +275,27 @@ against the final behavior tree.
   `packages/opencode/src/session/tail-digest.ts`,
   `packages/opencode/src/tool/actor.ts`,
   `packages/shared/src/util/encode.ts`,
-  `packages/opencode/src/util/safe-stringify.ts`, and
-  `packages/opencode/src/util/text-truncate.ts`.
+  `packages/opencode/src/util/safe-stringify.ts`,
+  `packages/opencode/src/util/text-truncate.ts`,
+  `packages/opencode/src/cli/cmd/generate.ts`,
+  `packages/sdk/js/src/v2/gen/sdk.gen.ts`,
+  `packages/sdk/js/src/v2/gen/types.gen.ts`, and
+  `packages/sdk/openapi.json`.
 - Test surfaces: inbox rendering, request classification, instruction, MaxMode,
   message replay, overflow, prompt-effect, actor, checkpoint coverage,
   checkpoint tail, context usage, select-messages, revert, safe-stringify, and
   text-truncation suites under `packages/opencode/test/`, including
   `packages/opencode/test/cli/tui/checkpoint-coverage-sync.test.tsx`,
-  `packages/opencode/test/server/checkpoint-coverage.test.ts`, and
+  `packages/opencode/test/server/checkpoint-coverage.test.ts`,
+  `packages/opencode/test/server/openapi-refs.test.ts`,
+  `packages/opencode/test/session/checkpoint-rebuild-unify.test.ts`,
+  `packages/opencode/test/session/messages-pagination.test.ts`,
+  `packages/opencode/test/session/prompt-rebuild-loop.test.ts`, and
   `packages/opencode/test/lib/llm-server.ts` supporting request-boundary
   assertions.
 - Review basis: inherited main
   `2b4c6569ac308fa6a6662c2c044059893748e0ad`; compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9`.
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0`.
 - Evidence: focused tests at the compat behavior tree cover oversized
   instructions, structured provider/tool replay, unserializable inputs,
   synthetic media, UTF-8/surrogate limits, active-tool filtering, recoverable
@@ -284,6 +305,14 @@ against the final behavior tree.
   cold/live projection, response sequencing, unresolved-watermark fail-closed
   state, deletion and directory-switch invalidation, and SQLite BINARY/UTF-8
   ordering, including the U+E000 versus U+10000 counterexample to UTF-16 order.
+  Coverage-seam regressions bind a same-timestamp live user behind the physical
+  marker, legacy markers without `source`, repeated markers at one watermark,
+  cross-page reconstruction, exact assistant-tail collapse, and fail-closed
+  missing/reversed seams. The published-contract guard requires the generated
+  and checked-in operation sets to match, requires the checkpoint route/schema
+  and projection field in both documents, and resolves every generated sample
+  target against a real v2 client. The final artifact contains 141 operations,
+  141 samples, 141 unique callable targets, and no missing target.
 - 2026-08-28 review: the inherited auto-overflow fixture now declares an empty
   proactive checkpoint ladder and retains the shared 25K reserve-boundary
   sentinel. Compat additionally preserves its deterministic short agent prompt,
@@ -292,8 +321,11 @@ against the final behavior tree.
   projections, 50 KiB model-visible caps, request-preflight recovery floors,
   exact overflow placeholders, external-request episode/admission boundaries,
   bounded recovery attempts, positional checkpoint coverage, and global
-  revert/redo projection. The follow-up corrects shared FC-001/FC-002/FC-015
-  seams in compat context; it does not establish a new compat-only capability.
+  revert/redo projection. Exact-SHA CI on the first documentation snapshot
+  invalidated its stop-at-marker assumption twice. The final behavior
+  reconstructs checkpoint tails from their persisted coverage seam and binds
+  the runtime, published OpenAPI, and callable v2 SDK samples without
+  establishing a new compat-only capability.
 - Exit condition: retire only when shared `main` enforces equivalent caps and
   non-throwing serialization at every model-visible boundary and performs the
   same request-aware, active-tool preflight without weakening FD-002 delivery.
@@ -308,7 +340,7 @@ against the final behavior tree.
   instance cwd, default-fork checkpoint writers, and FD-002's fail-closed
   main/registered-peer `replace-agent` identity scope.
 - Overrides: compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9` extends those shared invariants
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0` extends those shared invariants
   with explicit full-context actor propagation, bounded actor-visible state,
   and static-prefix overflow handling; it does not replace their ownership.
 - Delta: an actor requesting full context inherits the parent's frozen request
@@ -348,7 +380,7 @@ against the final behavior tree.
   in `packages/opencode/test/util/text-truncate.test.ts`.
 - Review basis: inherited main
   `2b4c6569ac308fa6a6662c2c044059893748e0ad`; compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9`.
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0`.
 - Evidence: the full-context actor suite covers inherited system/tool/permission
   membership, frozen parent turn context/system/cwd, actor-scoped replacement,
   default and explicit checkpoint modes, and bounded state; overflow tests
@@ -379,7 +411,7 @@ against the final behavior tree.
   variant, and propagates the current BCP 47 `titleLocale` through TUI prompt
   submissions and automatic title generation.
 - Overrides: compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9` displays one request-oriented
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0` displays one request-oriented
   `alias · providerID/modelID · variant: <value>` row in the prompt and
   subagent footer.
 - Delta: provider/model is unconditional, the persisted or explicitly selected
@@ -398,7 +430,7 @@ against the final behavior tree.
   `packages/opencode/test/cli/tui/model.test.ts`.
 - Review basis: inherited main
   `2b4c6569ac308fa6a6662c2c044059893748e0ad`; compat behavior
-  `2c8e74968322005cec4d9a3e3dcccc634ca711c9`.
+  `f1175ce9d6a7f82045b3910e0f1db5eb686924d0`.
 - Evidence: rendering tests cover the unified label and narrow layout; model
   tests cover explicit and persisted variants, literal/group agent refs,
   mismatched models, absent variants, and unknown built-in tiers. Prompt and
