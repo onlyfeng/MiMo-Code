@@ -15,10 +15,10 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-09-01
-- Upstream: `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`
-- Prior reviewed upstream: `35bb2636a99b457940f1c12f2c8f5ec554369c57`
-- Main behavior: `2b4c6569ac308fa6a6662c2c044059893748e0ad`
-- Prior fork `main` tip: `cce5b8383ce812d608254dc4deecf672e2795773`
+- Upstream: `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`
+- Prior reviewed upstream: `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`
+- Main behavior: `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`
+- Prior fork `main` tip: `ed33097a961c9d915b00b2bbb2ebaf23e7ad2288`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -56,8 +56,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/bash.test.ts`, and
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
-- Review basis: upstream `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`;
-  main behavior `2b4c6569ac308fa6a6662c2c044059893748e0ad`.
+- Review basis: upstream `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`;
+  main behavior `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -97,8 +97,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/max-mode.test.ts`, and
   `packages/opencode/test/session/prompt-effect.test.ts` bind the reported file
   set to normal and MaxMode request payloads.
-- Review basis: upstream `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`;
-  main behavior `2b4c6569ac308fa6a6662c2c044059893748e0ad`.
+- Review basis: upstream `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`;
+  main behavior `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
@@ -130,8 +130,8 @@ registry or history commit does not advance either behavior reference.
   from upstream. `packages/opencode/test/server/openapi-refs.test.ts` checks both
   runtime and published OpenAPI recovery/resume operations remain main-only and
   omit their upstream agent/task selectors.
-- Review basis: upstream `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`;
-  main behavior `2b4c6569ac308fa6a6662c2c044059893748e0ad`.
+- Review basis: upstream `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`;
+  main behavior `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -167,8 +167,8 @@ registry or history commit does not advance either behavior reference.
   agent-generation, `packages/opencode/test/provider/provider.test.ts`, and
   `packages/opencode/test/tool/tool-script.test.ts` regressions cover alias
   conflicts, complete resolved identity, and explicit harness overrides.
-- Review basis: upstream `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`;
-  main behavior `2b4c6569ac308fa6a6662c2c044059893748e0ad`.
+- Review basis: upstream `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`;
+  main behavior `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
   complete resolved identity while keeping transport and harness/toolset as
   separate decisions. MiMo v2.5 precedence remains authoritative even when an
@@ -209,8 +209,8 @@ registry or history commit does not advance either behavior reference.
   actor, and TUI visibility tests cover the outer authority surface;
   `packages/opencode/test/cli/tui/exec-expanded.test.tsx` covers bounded
   ANSI-free outer output with and without nested parts.
-- Review basis: upstream `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`;
-  main behavior `2b4c6569ac308fa6a6662c2c044059893748e0ad`.
+- Review basis: upstream `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`;
+  main behavior `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`.
 - 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
   resolved identity. The compact single-exec authority model remains rejected;
   direct permission-visible tools and nested actor/shell/control exclusions are
@@ -262,8 +262,8 @@ registry or history commit does not advance either behavior reference.
   child-session/fork-mode/main-slice/prefix-capture/watermark tests, and
   `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
-- Review basis: upstream `2c5cd4972c3f3cb8947a5117c7910d485e6f6179`;
-  main behavior `2b4c6569ac308fa6a6662c2c044059893748e0ad`.
+- Review basis: upstream `2ce93f4188275aff0dc0353d36ec5f7538bcb32b`;
+  main behavior `c63ae51911f8455fd1cc8defcc4a0a2e827889e2`.
 - 2026-08-28 review: adopted removal of the unimplemented `actor_id` resume
   argument from actor `spawn` and `run`. Follow-up work uses `send` only while
   the actor remains reusable. A completed ephemeral `context: "full"` actor has
