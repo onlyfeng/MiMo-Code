@@ -39,6 +39,8 @@ const DEFAULT_CONTEXT_WINDOW = 1_000_000
 const BUILTIN_TIERS = new Set(["ultra", "standard", "lite"])
 // F41: warn once per (providerID, modelID) when limit.context falls back to default
 const warnedContextDefaults = new Set<string>()
+// defaultModel() runs per cheap task; warn once per stale cfg.model, not every call
+const warnedStaleDefaultModels = new Set<string>()
 
 export const DEFAULT_OPENAI_HEADER_TIMEOUT = 300_000
 export const DEFAULT_CHUNK_TIMEOUT = 480_000 // 8 minutes — bounds single-attempt SSE stall.
@@ -1907,11 +1909,26 @@ const layer: Layer.Layer<
       return sortVisionModels(vision)[0]
     })
 
+    // Stable default chain. Product-priority substring ranking (`sort`) is for
+    // menus/listings, not for choosing a working default — Desktop's empty
+    // recent + router leftovers made that path pick unavailable models.
+    // Last-resort picks require a usable chat model (toolcall + text input +
+    // non-zero context): live openai id-asc starts at chatgpt-image-latest
+    // (tool_call false, context 0), which titles/agents cannot call.
     const defaultModel = Effect.fn("Provider.defaultModel")(function* () {
       const cfg = yield* config.get()
-      if (cfg.model) return parseModel(cfg.model)
-
       const s = yield* InstanceState.get(state)
+
+      if (cfg.model) {
+        const parsed = parseModel(cfg.model)
+        const provider = s.providers[parsed.providerID]
+        if (provider?.models[parsed.modelID]) return parsed
+        if (!warnedStaleDefaultModels.has(cfg.model)) {
+          warnedStaleDefaultModels.add(cfg.model)
+          log.warn("configured default model missing from registry, falling through", { model: cfg.model })
+        }
+      }
+
       const recent = yield* fs.readJson(path.join(Global.Path.state, "model.json")).pipe(
         Effect.map((x): { providerID: ProviderID; modelID: ModelID }[] => {
           if (!isRecord(x) || !Array.isArray(x.recent)) return []
@@ -1931,19 +1948,18 @@ const layer: Layer.Layer<
         return { providerID: entry.providerID, modelID: entry.modelID }
       }
 
-      const mimo = s.providers[ProviderID.make("mimo")]
-      if (mimo?.models[ModelID.make("mimo-auto")]) {
-        return { providerID: mimo.id, modelID: ModelID.make("mimo-auto") }
+      const allowed = Object.values(s.providers).filter((p) => !cfg.provider || Object.keys(cfg.provider).includes(p.id))
+      if (!allowed.length) throw new Error("no providers found")
+      for (const provider of allowed) {
+        const model = sortBy(
+          Object.values(provider.models).filter(
+            (m) => m.capabilities.toolcall && m.capabilities.input.text && (m.limit?.context ?? 1) > 0,
+          ),
+          [(m) => m.id, "asc"],
+        )[0]
+        if (model) return { providerID: provider.id, modelID: model.id }
       }
-
-      const provider = Object.values(s.providers).find((p) => !cfg.provider || Object.keys(cfg.provider).includes(p.id))
-      if (!provider) throw new Error("no providers found")
-      const [model] = sort(Object.values(provider.models))
-      if (!model) throw new Error("no models found")
-      return {
-        providerID: provider.id,
-        modelID: model.id,
-      }
+      throw new Error("no models found")
     })
 
     return Service.of({
