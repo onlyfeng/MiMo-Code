@@ -1501,3 +1501,146 @@ Run from a clean checkout of the stable behavior commit:
 Expected result: 197 tests pass, two existing cancellation tests skip, and no
 test fails; both typechecks exit zero; lint reports 4,285 warnings and zero
 errors; SDK generation, release metadata, and whitespace checks remain clean.
+
+## 2026-09-02 WebSearch model identity and session-ID format synchronization
+
+- Prior reviewed upstream:
+  `2a0eb706e95a77cba34a319e9f11f33f26d4450c`.
+- Freshly reviewed upstream:
+  `f82c177709019c759ce2bb06bd1b04cba488811e`.
+- Prior fork `main` tip:
+  `3a2b6c88fd50d460199d8b5b2721413d164ecba9`.
+- Main merge and stable main behavior:
+  `f1e2ba0019ee6ac13c2608474ae9237865b742f2`, whose parents are the prior
+  fork tip and freshly reviewed upstream.
+- The incoming range contains two first-parent commits / PRs (#2312 and #2195)
+  across four paths with 116 insertions and four deletions. It changes no
+  migration, database schema, OpenAPI/SDK artifact, package metadata, lockfile,
+  or workflow.
+
+### Decision notes
+
+- Adopted WebSearch's use of the resolved session model's `model.api.id` for
+  Xiaomi sidecar requests. This removes a hard-coded MiMo model without
+  changing FD-005's model-resolution, harness, prompt/tool, alias, retry, or
+  transport authority.
+- Adopted marker-free descending session IDs. New session payloads remain 26
+  characters: 16 hexadecimal time/counter characters followed by ten base62
+  characters. Message descending IDs retain their `-` marker, and legacy
+  `ses_-...` identifiers remain accepted as opaque `SessionID` values, so no
+  migration is required.
+
+### Capability inventory (2/2)
+
+`AR-20260902-F82` is the audit range used by every result row:
+`old_upstream=2a0eb706e95a77cba34a319e9f11f33f26d4450c`,
+`new_upstream=f82c177709019c759ce2bb06bd1b04cba488811e`,
+`prior_main=3a2b6c88fd50d460199d8b5b2721413d164ecba9`, and
+`main_merge=main_behavior=f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
+
+`MAIN-LOCAL-VERIFIED` means 158 targeted default-path tests passed with zero
+failures, the ID compatibility probe passed, all four incoming paths equal
+upstream byte-for-byte, the merge parents and exact four-path allowlist match,
+and the behavior range passes `git diff --check`. Compatibility counterparts
+below are propagation audit targets and do not claim a compat result.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| C05 | Session-model Xiaomi WebSearch sidecar | `AR-20260902-F82` | `24b6d018`; `websearch/index.ts` request model; new local-SSE `websearch.test.ts` | FD-005 resolved identity; FD-006 direct-tool authority; FC-010/FC-011/FC-015 are adjacent but define no alternate request model | DC-MODEL-001 must preserve selected-model flow; DC-ACTOR-001 inherits actor-selected identity; no direct compat path overlap | upstream convergence with existing identity authority | behavior, request payload, regression | shared main | Adopt `model.api.id`; preserve fork model resolution, harness/tool, transport, and authority boundaries | Local SSE regression plus FD-005 identity/harness matrix; `MAIN-LOCAL-VERIFIED` |
+| C06 | Marker-free descending session IDs | `AR-20260902-F82` | `f82c1777`; `id.ts` session branch; `id.test.ts` session/message ordering regressions | FC-001 lifecycle and opaque session ownership; FD-009 recovery/resume uses opaque IDs | DC-CONTEXT-001 and DC-ACTOR-001 consume opaque session IDs; no compat owner defines an alternate ID format or ordering; no direct compat path overlap | compatible format change | identifier format, compatibility, tests | shared main | Adopt for newly generated sessions; retain legacy input acceptance and the message-ID chronology marker | ID regression plus generated/new-message/legacy-input probe; `MAIN-LOCAL-VERIFIED` |
+
+Inventory count is 2 and result-row count is 2. Every incoming capability has
+a main and compatibility counterpart, relationship, drift, canonical owner,
+disposition, and status evidence; no incoming capability remains unclassified.
+
+### Validation evidence
+
+- The incoming ID and WebSearch suites passed 11 tests. Session lifecycle,
+  inheritance, recovery, global listing, and actor-registry neighbors passed 41;
+  session-list behavior passed five; the FD-005 flag/GPT/system/request-prefix/
+  agent matrix passed 93; and focused prompt/harness cases passed eight. The
+  total is 158 passes and zero failures with all seven ambient experimental,
+  harness, workflow, compaction, and checkpoint selectors removed.
+- A direct runtime probe generated a marker-free session ID, confirmed a new
+  descending message ID still contains `-`, and parsed a legacy `ses_-...`
+  value successfully.
+- The merge is clean and has the exact expected parents. Its four incoming
+  paths are byte-identical to upstream, and no unrelated path changed relative
+  to the prior `main` tip.
+
+### Reproduction
+
+Run from a clean checkout of the stable behavior commit:
+
+```bash
+(
+  set -e
+  test "$(git rev-parse HEAD)" = \
+    f1e2ba0019ee6ac13c2608474ae9237865b742f2
+
+  test "$(git rev-parse HEAD^1)" = \
+    3a2b6c88fd50d460199d8b5b2721413d164ecba9
+  test "$(git rev-parse HEAD^2)" = \
+    f82c177709019c759ce2bb06bd1b04cba488811e
+  git diff --check HEAD^1 HEAD
+  test "$(git diff --name-only HEAD^1 HEAD)" = "$(printf '%s\n' \
+    packages/opencode/src/id/id.ts \
+    packages/opencode/src/tool/websearch/index.ts \
+    packages/opencode/test/id/id.test.ts \
+    packages/opencode/test/tool/websearch.test.ts)"
+  git diff --exit-code HEAD^2 HEAD -- \
+    packages/opencode/src/id/id.ts \
+    packages/opencode/src/tool/websearch/index.ts \
+    packages/opencode/test/id/id.test.ts \
+    packages/opencode/test/tool/websearch.test.ts
+
+  bun -e '
+    import { Identifier } from "./packages/opencode/src/id/id.ts"
+    const session = Identifier.descending("session")
+    const message = Identifier.descending("message")
+    const legacy = "ses_-0000000000000000abcdefghi"
+    if (!/^ses_[0-9a-f]{16}[0-9A-Za-z]{10}$/.test(session)) process.exit(1)
+    if (!message.startsWith("msg_-")) process.exit(1)
+    if (Identifier.descending("session", legacy) !== legacy) process.exit(1)
+    if (Identifier.schema("session").parse(legacy) !== legacy) process.exit(1)
+  '
+
+  cd packages/opencode
+  run_default() {
+    env -u MIMOCODE_EXPERIMENTAL \
+      -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+      -u MIMOCODE_CODEX_MODE \
+      -u MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL \
+      -u MIMOCODE_COMPACTION_MAX_CONTEXT \
+      -u MIMOCODE_COMPACTION_TRIGGER_RATIO \
+      -u MIMOCODE_DISABLE_CHECKPOINT "$@"
+  }
+  run_default bun test \
+    test/id/id.test.ts \
+    test/tool/websearch.test.ts --timeout 120000
+  run_default bun test \
+    test/session/session-create-registers-main.test.ts \
+    test/session/context-inheritance.test.ts \
+    test/session/main-lifecycle.test.ts \
+    test/server/global-session-list.test.ts \
+    test/server/session-recovery.test.ts \
+    test/actor/registry.test.ts --timeout 120000
+  run_default bun test test/server/session-list.test.ts --timeout 120000
+  run_default bun test \
+    test/flag/codex-mode-flag.test.ts \
+    test/tool/gpt.test.ts \
+    test/session/system.test.ts \
+    test/session/llm-request-prefix.test.ts \
+    test/agent/agent.test.ts --timeout 120000
+  run_default bun test -t \
+    'native tool schema|process-disabled auto GPT requests|locks system and harness|persists auto|instruction files' \
+    --timeout 120000
+)
+```
+
+Expected result: the behavior SHA and both merge parents match; the incoming
+range is whitespace-clean; the exact four-path allowlist matches upstream
+byte-for-byte; the new-session, descending-message, and legacy-session probe
+passes; and the five groups pass 11, 41, 5, 93, and 8 tests, respectively, for
+158 total passes and zero failures. Exact published-SHA CI remains required by
+the synchronization completion gate.
