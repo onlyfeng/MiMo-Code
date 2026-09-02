@@ -1779,3 +1779,268 @@ Expected result: 210 tests and 557 assertions pass with zero failures; both
 package typechecks and all 12 pre-push tasks succeed; lint reports 4,334
 warnings and zero errors; shared registries, dependencies, and whitespace
 checks remain clean.
+
+## 2026-09-02 OpenAPI projection and 0.1.14 propagation
+
+- Reviewed upstream:
+  `2a0eb706e95a77cba34a319e9f11f33f26d4450c`.
+- Prior accepted `main` tip:
+  `28c1f36c8a3bc85bda7e3691960e7d0b531b8636`.
+- Accepted `main` tip:
+  `3a2b6c88fd50d460199d8b5b2721413d164ecba9`.
+- Inherited main behavior:
+  `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Prior compat tip:
+  `eff9a8cd92564b37f30b7cf20aa78401b20bef73`.
+- Compat behavior merge:
+  `6c2fe63ad3d08d3eed4d5dfc44bab3aa934e559e`, whose parents are the prior
+  compat tip and accepted `main` tip.
+- All four shared capabilities and all seven active DC owners were reviewed.
+  No compat owner was added, retired, renumbered, or transferred.
+- The only textual conflict was
+  `packages/opencode/test/server/openapi-refs.test.ts`. Semantic resolution
+  retained the compat checkpoint-coverage and callable-v2 tests and inherited
+  the shared full runtime/published `CompactionPart` equality regression.
+
+### Shared capability inheritance (4/4)
+
+| # | Capability | Shared owner | Compat overlap | Decision | Evidence |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | Published compaction projection schema | FC-015 and FD-004 | Direct DC-CONTEXT-001 published-contract overlap; DC-ACTOR-001 is semantically adjacent | Inherit the runtime/published equality regression while retaining the existing compat-generated projection and every checkpoint/MaxMode schema | OpenAPI `5/0`; compaction projection `9/0`; fresh compat runtime OpenAPI equals the published artifact |
+| 2 | Harness API-description precedence | FD-005 | DC-MODEL-001, DC-CONTEXT-001, and DC-ACTOR-001 are request-path neighbors | Retain explicit session precedence, process true/false only under `auto`, then model inference | Harness matrices `93/0` plus `8/0`; generated artifacts are byte-identical to prior compat |
+| 3 | Deprecated compaction-config descriptions | FC-015 | Direct DC-CONTEXT-001 effective-window adjacency | Retain the projected-tail deprecation and the stronger at-most-40K plus reserve-safe usable-window bound | Filtered overflow matrix `39/0`; runtime/published generation parity |
+| 4 | 0.1.14 workspace release metadata | FC-012; FD-004 watches SDK/OpenAPI publication | No compat-only dependency or version owner | Inherit all sixteen manifests and `bun.lock` byte-for-byte | Release files equal accepted `main` and exact upstream `2a0eb706`; frozen installation made no changes |
+
+Capability count is 4 and result-row count is 4. Every shared capability has a
+compat counterpart and disposition; no inherited behavior remains
+unclassified.
+
+### Compat owner review (7/7)
+
+| Owner | Incoming overlap | Preserved result | Status evidence |
+| --- | --- | --- | --- |
+| DC-NET-001 | none | Approved private WebFetch call seam and inherited bounds unchanged | WebFetch/SSRF owner paths have zero propagation diff |
+| DC-NET-002 | none | RFC1918 remote MCP reachability guarantee unchanged | MCP owner paths have zero propagation diff |
+| DC-PLATFORM-001 | none | Restricted-network ripgrep and Windows archive fallbacks unchanged | Platform owner paths have zero propagation diff |
+| DC-MODEL-001 | Generated harness/schema semantic adjacency | Per-agent MaxMode, final-step bound, hidden-title isolation, and retry-status scope unchanged | `15/0` MaxMode core plus `5/0` prompt-routing sentinels; generated artifacts unchanged |
+| DC-CONTEXT-001 | Direct projection and compaction-description overlap | Existing projection, effective-window bound, checkpoint coverage, chronology, and recovery routing retained; new equality regression inherited | OpenAPI `5/0`, projection `9/0`, filtered overflow `39/0`; fresh generation equals the published artifact |
+| DC-ACTOR-001 | Projection/harness semantic adjacency | Frozen membership, system, cwd, permissions, active-child, and static-prefix behavior unchanged | Actor/full-context sentinels `8/0`; actor and prefix owner paths unchanged |
+| DC-TUI-001 | none | Provider/model/variant truth and `titleLocale` submission unchanged | Prompt/TUI owner paths have zero propagation diff |
+
+Owner count is 7 and result-row count is 7. All owners remain active and
+unchanged.
+
+### Validation evidence
+
+- `bun ci` checked 2,311 installs across 2,580 packages without changing the
+  lockfile or manifests.
+- The final shared inheritance matrix passed 154 tests with zero failures:
+  OpenAPI `5/0`, compaction projection `9/0`, filtered overflow `39/0`, harness
+  files `93/0`, and filtered prompt/harness cases `8/0`.
+- The MaxMode owner matrix passed 20 tests with zero failures (`15/0` plus
+  `5/0`). The actor/full-context owner matrix passed 8 tests with zero failures
+  (`3/0`, `2/0`, and `3/0`). All seven ambient user selectors were removed for
+  these matrices; the package-owned preload baseline was retained.
+- An initial broad eight-file run used Bun's default 5,000 ms timeout.
+  `MaxMode candidate retries publish global attempts and retry status` timed
+  out while the other 253 tests passed, two existing cancellation tests
+  skipped, and the runner reported only that timed-out case. At the same
+  behavior SHA, that case passed alone in 3.74 seconds with
+  `--timeout 120000` and passed again in the formal five-case MaxMode matrix.
+  The two clean reproductions classify the first result as harness timing, not
+  a product-behavior failure.
+- Fresh compat OpenAPI generated before and after propagation was byte-identical
+  and matched `packages/sdk/openapi.json`. Two final JavaScript SDK generator
+  runs were idempotent. Both generated artifacts have zero diff from the prior
+  compat behavior.
+- `packages/opencode` and `packages/sdk/js` typechecks passed. The pre-push
+  Turbo typecheck reported 12 successful tasks out of 12. Root lint completed
+  with 4,334 warnings and zero errors, matching the established compat warning
+  baseline.
+- Excluding the three inherited shared registry/history documents, propagation
+  changes exactly eighteen paths: sixteen package manifests, `bun.lock`, and
+  `packages/opencode/test/server/openapi-refs.test.ts` (50 insertions and 31
+  deletions). No runtime, producer, migration, workflow, or generated path
+  changed.
+- The sixteen manifests, `bun.lock`, and three shared registry/history
+  documents are byte-identical to accepted `main`; release files also match
+  exact upstream. The propagation range passes `git diff --check`. Exact remote
+  CI for the forthcoming compat documentation tip remains pending publication.
+
+### Shared inheritance and changed-path calculation
+
+The compat source/test delta relative to inherited main behavior remains 92
+paths with 10,031 insertions and 1,662 deletions after excluding the five
+registry/history paths and the shared voice-protocol specification companion.
+The behavior propagation relative to the prior compat tip changes 21 paths
+with 253 insertions and 85 deletions; excluding the three inherited shared
+registry/history documents yields the eighteen paths and 50/31 delta described
+above.
+
+```bash
+git diff --shortstat \
+  dad492e0af72d22d3ec796f6814eda7e52ed51a8 \
+  6c2fe63ad3d08d3eed4d5dfc44bab3aa934e559e -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md' \
+  ':(exclude)docs/compose/spec/voice-control-tool-protocol.md'
+```
+
+Expected result: `92 files changed, 10031 insertions(+), 1662 deletions(-)`.
+
+### Exact behavior reproduction
+
+Run from a clean checkout of exact compat behavior
+`6c2fe63ad3d08d3eed4d5dfc44bab3aa934e559e`. Use `--timeout 120000`; Bun's
+default five-second timeout can be insufficient for the MaxMode timing case
+under broad-matrix load.
+
+```bash
+(
+  set -e
+  test "$(git rev-parse HEAD)" = \
+    6c2fe63ad3d08d3eed4d5dfc44bab3aa934e559e
+  bun ci
+  git diff --exit-code -- bun.lock ':(glob)**/package.json'
+
+  openapi_probe="$(mktemp)"
+  trap 'rm -f "$openapi_probe"' EXIT
+  bun run --cwd packages/opencode dev generate > "$openapi_probe"
+  jq empty "$openapi_probe"
+  cmp packages/sdk/openapi.json "$openapi_probe"
+  jq -e '
+    .components.schemas.Config.properties.compaction.properties as $c
+    | ([.. | objects | .harness?.description?
+        | select(type == "string")]) as $h
+    | (.components.schemas.CompactionPart.properties.projection.type == "object")
+      and (.components.schemas.AgentConfig.properties.maxMode.type == "boolean")
+      and (.paths["/session/{sessionID}/checkpoint-coverage"].get.operationId
+        == "session.checkpointCoverage")
+      and (.components.schemas.CheckpointCoverage.type == "object")
+      and ($c.tail_turns.description
+        == "Deprecated compatibility setting. Projected compaction now keeps only whole API rounds that arrive while compaction is running.")
+      and ($c.preserve_recent_tokens.description
+        == "Deprecated compatibility setting. Compression-time API rounds use at most 40000 tokens, capped by the reserve-safe effective window after frozen prefix and projection overhead.")
+      and (($h | length) == 3)
+      and ($h | all(contains(
+        "Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference."
+      )))
+  ' packages/sdk/openapi.json
+  test "$(jq '[.paths[][]
+    | select(type == "object" and has("operationId"))] | length' \
+    packages/sdk/openapi.json)" = 141
+  test "$(jq '[.paths[][]
+    | select(type == "object" and has("operationId"))
+    | .["x-codeSamples"][]?] | length' packages/sdk/openapi.json)" = 141
+  ./packages/sdk/js/script/build.ts
+  ./packages/sdk/js/script/build.ts
+  git diff --exit-code -- \
+    packages/sdk/openapi.json packages/sdk/js/src/gen \
+    packages/sdk/js/src/v2/gen
+
+  git diff --exit-code \
+    eff9a8cd92564b37f30b7cf20aa78401b20bef73 HEAD -- \
+    packages/opencode/src packages/sdk/openapi.json \
+    packages/sdk/js/src/gen packages/sdk/js/src/v2/gen
+  test "$(git diff --name-only \
+    eff9a8cd92564b37f30b7cf20aa78401b20bef73 HEAD -- \
+    packages/opencode/test)" = \
+    packages/opencode/test/server/openapi-refs.test.ts
+  git diff --exit-code \
+    2a0eb706e95a77cba34a319e9f11f33f26d4450c HEAD -- \
+    bun.lock ':(glob)**/package.json'
+  git diff --exit-code \
+    3a2b6c88fd50d460199d8b5b2721413d164ecba9 HEAD -- \
+    docs/upstream-deviations.md docs/fork-capabilities.md \
+    docs/fork-registry-history.md
+  git diff --name-only \
+    eff9a8cd92564b37f30b7cf20aa78401b20bef73 HEAD -- . \
+    ':(exclude)docs/upstream-deviations.md' \
+    ':(exclude)docs/fork-capabilities.md' \
+    ':(exclude)docs/fork-registry-history.md' | diff -u - <(
+      printf '%s\n' \
+        bun.lock \
+        packages/app/package.json \
+        packages/console/app/package.json \
+        packages/console/core/package.json \
+        packages/console/function/package.json \
+        packages/console/mail/package.json \
+        packages/desktop/package.json \
+        packages/enterprise/package.json \
+        packages/function/package.json \
+        packages/opencode/package.json \
+        packages/opencode/test/server/openapi-refs.test.ts \
+        packages/plugin/package.json \
+        packages/sdk/js/package.json \
+        packages/shared/package.json \
+        packages/slack/package.json \
+        packages/ui/package.json \
+        packages/web/package.json \
+        sdks/vscode/package.json
+    )
+  test "$(git diff --shortstat \
+    eff9a8cd92564b37f30b7cf20aa78401b20bef73 HEAD -- . \
+    ':(exclude)docs/upstream-deviations.md' \
+    ':(exclude)docs/fork-capabilities.md' \
+    ':(exclude)docs/fork-registry-history.md')" = \
+    ' 18 files changed, 50 insertions(+), 31 deletions(-)'
+
+  cd packages/opencode
+  run_default() {
+    env -u MIMOCODE_EXPERIMENTAL \
+      -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+      -u MIMOCODE_CODEX_MODE \
+      -u MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL \
+      -u MIMOCODE_COMPACTION_MAX_CONTEXT \
+      -u MIMOCODE_COMPACTION_TRIGGER_RATIO \
+      -u MIMOCODE_DISABLE_CHECKPOINT "$@"
+  }
+
+  run_default bun test test/server/openapi-refs.test.ts --timeout 120000
+  run_default bun test test/session/compaction-projection.test.ts \
+    --timeout 120000
+  run_default bun test test/session/overflow.test.ts \
+    -t 'request preflight overflow|compaction.max_context|MIMOCODE_COMPACTION_MAX_CONTEXT|MIMOCODE_COMPACTION_TRIGGER_RATIO' \
+    --timeout 120000
+  run_default bun test \
+    test/flag/codex-mode-flag.test.ts \
+    test/tool/gpt.test.ts \
+    test/session/system.test.ts \
+    test/session/llm-request-prefix.test.ts \
+    test/agent/agent.test.ts --timeout 120000
+  run_default bun test test/session/prompt-effect.test.ts \
+    -t 'native tool schema|process-disabled auto GPT requests|locks system and harness|persists auto|instruction files' \
+    --timeout 120000
+
+  run_default bun test test/session/max-mode.test.ts --timeout 120000
+  run_default bun test test/session/prompt-effect.test.ts \
+    -t 'MaxMode candidate retries|MaxMode final step|subagent maxMode retries|last-step maxMode|json_schema output' \
+    --timeout 120000
+  run_default bun test test/tool/actor.test.ts \
+    -t 'captures the caller-visible prefix|fails before spawning' \
+    --timeout 120000
+  run_default bun test test/session/llm-request-prefix.test.ts \
+    -t 'frozen full-context tools' --timeout 120000
+  run_default bun test test/session/prompt-effect.test.ts \
+    -t 'full-context fork includes a newly committed request|pinned full-context fork can search an MCP tool|frozen fork preflight fails closed' \
+    --timeout 120000
+
+  bun typecheck
+  (cd ../sdk/js && bun typecheck)
+  cd ../..
+
+  ./.husky/pre-push
+  bun lint
+  git diff --check \
+    eff9a8cd92564b37f30b7cf20aa78401b20bef73 \
+    6c2fe63ad3d08d3eed4d5dfc44bab3aa934e559e
+)
+```
+
+Expected result: the shared matrix passes `154/0`; the MaxMode and actor owner
+matrices pass `20/0` and `8/0`; both package typechecks and all 12 pre-push
+tasks succeed; lint reports 4,334 warnings and zero errors; frozen dependency,
+generated-surface, owner-path, and whitespace checks remain clean.
