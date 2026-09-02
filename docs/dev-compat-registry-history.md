@@ -11,6 +11,7 @@ never used as an inherited `main` or compat behavior review basis.
 
 | Date | Accepted `main` tip | Main behavior | Compat behavior | Active DC | Changed-path total | Decision summary |
 | --- | --- | --- | --- | ---: | --- | --- |
+| 2026-09-02 | `28c1f36c8a3bc85bda7e3691960e7d0b531b8636` | `7bfe6ac48e0db40b2b0b42c00b05a35032fcc113` | `c8b02aeb991c37e570799bdd3696e276aa35ba77` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Inherited the complete 4/4 default-model, Compose Next, and voice audit plus FC-016; semantically resolved the Prompt conflict so shared owner/drain/grapheme behavior and compat provider/model/variant metadata both survive, with all seven DC owners unchanged. |
 | 2026-09-01 | `c9bdea878aa289f427c4bfbe798411d4907df600` | `4866d01f754429e3782f60983311c24468a9949a` | `17f24827b310d8e9b64d495370ca6ec63f28242c` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Propagated the complete 2/2 freshly fetched upstream range, adopted action-oriented prompt guidance, subsumed the weaker upstream Codex result into FD-005's stronger resolver, and preserved all seven compat owners with 71 named overlap sentinels. |
 | 2026-09-01 | `c6a2f5f3c8cd0851b36049da5176e2ee7fb81d05` | `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c` | `c594bb92ff5a11063c5e22936964ceae088e1d43` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Inherited the complete 2/2 Codex-mode specified change, retained all seven compat owners, and revalidated per-agent MaxMode, bounded preflight, frozen full-context actors, and compat-generated contracts without selecting the unrelated upstream prompt guidance. |
 | 2026-09-01 | `c3fd051a27585a3e2a04124e00ce0439b27130e6` | `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` | `43bc1048b0bc16ff17d715ee9cb756d2c1cc319f` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Inherited the complete 1/1 OAuth-branding audit, adopted the shared MiMoCode callback and dynamic-registration identity unchanged, and re-reviewed all seven compat owners; only DC-NET-002 had subsystem adjacency, without a production fork or an OAuth-interoperability claim. |
@@ -1621,3 +1622,160 @@ the process starts: `MIMOCODE_TEST_TMPDIR_ROOT=<fixture>`,
 # 71 pass, 0 fail in owner sentinels; both typechecks and all static gates
 # exit 0; lint reports 4,323 warnings and 0 errors.
 ```
+
+## 2026-09-02 default-model, Compose Next, and voice propagation
+
+- Reviewed upstream: `3282b34c46281dc8cd0610433d676a5ec93baa6e`.
+- Prior accepted `main` tip:
+  `c9bdea878aa289f427c4bfbe798411d4907df600`.
+- Accepted `main` tip:
+  `28c1f36c8a3bc85bda7e3691960e7d0b531b8636`.
+- Inherited main behavior:
+  `7bfe6ac48e0db40b2b0b42c00b05a35032fcc113`.
+- Prior compat tip:
+  `a2d1a1bd97242ec602f800965b48fd963acc8068`.
+- Compat behavior merge:
+  `c8b02aeb991c37e570799bdd3696e276aa35ba77`, whose parents are the prior
+  compat tip and accepted `main` tip.
+- All four shared incoming capabilities and all seven active DC owners were
+  reviewed. No compat owner was added, retired, renumbered, or transferred;
+  FC-016 remains a shared `main` owner inherited by compat.
+
+### Shared capability inheritance (4/4)
+
+| # | Capability | Shared owner | Compat overlap | Decision | Evidence |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | Stable live-registry default-model fallback | FD-005 plus shared provider selection | DC-MODEL-001 is semantically adjacent through default/lite model use | Inherit registry validation, recent/config precedence, usable-chat filtering, stable order, and one-time warning; retain per-agent MaxMode and hidden-title isolation | Complete provider file `92/0`; DC-MODEL sentinels `20/0` |
+| 2 | Workspace-owned Compose Next specification | FC-011 | No DC path or symbol overlap | Inherit Workspace-before-Spec and conditional no-spec/finalize guidance unchanged | Shared bundle/spec blobs are byte-identical to accepted `main` |
+| 3 | Snapshot-bound `voice_input` plus FC-016 owner/grapheme hardening | FC-016 | DC-TUI-001 changes the same Prompt component; DC-CONTEXT-001 is request-semantics adjacent | Resolve semantically: retain compat metadata/title locale and inherit every voice owner, stop/drain, ASR/control, and grapheme branch | Voice/offset/model-metadata matrix `77/0`; title-locale sentinel `1/0`; TUI context matrix `20/0` |
+| 4 | Voice schema and unnamed-call interoperability | Shared voice protocol under FC-016 | No alternate DC schema or parser | Inherit object schema, single unnamed-call tolerance, and negative wrong-name/multiple-call rejection unchanged | Voice protocol regressions in the `77/0` matrix |
+
+Capability count is 4 and result-row count is 4. Every shared result has a
+compat counterpart and disposition; no incoming behavior remains unclassified.
+
+### Compat owner review (7/7)
+
+| Owner | Incoming overlap | Preserved result | Status evidence |
+| --- | --- | --- | --- |
+| DC-NET-001 | none | Approved private WebFetch call seam and inherited bounds unchanged | Owner source diff unchanged |
+| DC-NET-002 | none | RFC1918 remote MCP reachability guarantee unchanged | Owner source/test diff unchanged |
+| DC-PLATFORM-001 | none | Restricted-network ripgrep and Windows archive fallbacks unchanged | Owner source/test diff unchanged |
+| DC-MODEL-001 | provider-selection semantic adjacency | Per-agent MaxMode, final-step bound, hidden-title isolation, retry-status scope, and generated schema unchanged | `15/0` MaxMode core plus `5/0` prompt wire sentinels |
+| DC-CONTEXT-001 | provider context eligibility and same Prompt path adjacency | Content caps, effective-window preflight, recovery, checkpoint coverage, chronology, and published contracts unchanged | `20/0` TUI context/coverage sentinels; shared generated surfaces unchanged |
+| DC-ACTOR-001 | none | Frozen full-context membership, permissions, active child, and static-prefix behavior unchanged | Owner paths unchanged |
+| DC-TUI-001 | direct Prompt conflict | `ModelMetadata`, effective provider/model/variant display, narrow flex layout, and both `titleLocale` submissions retained alongside the complete shared voice flow | `20/0` model/metadata tests, `45/0` voice tests, `12/0` offset tests, and `1/0` title-locale test |
+
+Owner count is 7 and result-row count is 7. The direct conflict was resolved by
+capability rather than side selection: compat intentionally omits
+`currentProviderLabel` because `ModelMetadata` remains authoritative, while all
+FC-016 symbols and guards are inherited.
+
+### Validation evidence
+
+- `bun ci` installed 4,542 packages from the frozen lockfile without changing
+  `bun.lock` or a dependency manifest.
+- Default-path affected and owner matrices passed 210 tests with zero failures
+  and 557 assertions: provider `92/0`; voice/offset/model/metadata `77/0`;
+  title locale `1/0`; TUI context/coverage `20/0`; and MaxMode `20/0`.
+  All seven ambient selectors were removed; the package preload retained its
+  owned `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true` baseline.
+- `packages/opencode` and `packages/sdk/js` typechecks passed. The pre-push
+  Turbo typecheck reported 12 successful tasks out of 12. Root lint completed
+  with 4,334 warnings and zero errors; the 49-warning delta from shared main is
+  the established compat baseline class.
+- `AGENTS.md`, all three shared FD/FC registry/history documents, the voice
+  protocol specification, `bun.lock`, and every dependency manifest are
+  byte-identical to accepted `main`.
+  SDK/OpenAPI generation was not required because no producer or generated
+  surface changed in the selected upstream range.
+- Both propagation ranges pass `git diff --check`. At this local behavior
+  record, exact remote-tip CI for the forthcoming compat documentation commit
+  is pending publication; this is not remote-completion evidence.
+
+### Shared inheritance and changed-path calculation
+
+The compat source/test delta relative to inherited main behavior remains 92
+paths with 10,085 insertions and 1,664 deletions after excluding the five
+registry/history paths and the shared voice-protocol specification companion.
+That companion was updated only in accepted `main`'s audit-doc commit after the
+frozen main behavior and is byte-identical in compat; counting its 9 insertions
+and 5 deletions would falsely label shared documentation as a compat override.
+The raw propagation relative to the prior compat tip, excluding only the five
+registry/history paths, changes 26 paths with 1,884 insertions and 507 deletions
+and includes the newly introduced shared specification. The only inherited
+same-component conflict is Prompt; its final diff from shared main is the
+established DC-CONTEXT-001/DC-TUI-001 overlay, including 40 insertions and 43
+deletions.
+
+```bash
+git diff --shortstat \
+  7bfe6ac48e0db40b2b0b42c00b05a35032fcc113 \
+  c8b02aeb991c37e570799bdd3696e276aa35ba77 -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md' \
+  ':(exclude)docs/compose/spec/voice-control-tool-protocol.md'
+```
+
+Expected result: `92 files changed, 10085 insertions(+), 1664 deletions(-)`.
+
+### Exact behavior reproduction
+
+Run from a clean disposable checkout of exact compat behavior
+`c8b02aeb991c37e570799bdd3696e276aa35ba77`:
+
+```bash
+(
+  set -e
+  test "$(git rev-parse HEAD)" = \
+    c8b02aeb991c37e570799bdd3696e276aa35ba77
+  bun ci
+
+  cd packages/opencode
+  run_default() {
+    env -u MIMOCODE_EXPERIMENTAL \
+      -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+      -u MIMOCODE_CODEX_MODE \
+      -u MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL \
+      -u MIMOCODE_COMPACTION_MAX_CONTEXT \
+      -u MIMOCODE_COMPACTION_TRIGGER_RATIO \
+      -u MIMOCODE_DISABLE_CHECKPOINT "$@"
+  }
+  test -z "$(run_default env | LC_ALL=C sort | rg '^MIMOCODE_' || true)"
+  run_default bun test test/provider/provider.test.ts
+  run_default bun test test/cli/tui/voice.test.ts \
+    test/cli/cmd/tui/offset.test.ts \
+    test/cli/tui/model.test.ts \
+    test/cli/tui/model-metadata.test.tsx
+  run_default bun test test/session/prompt.test.ts -t titleLocale
+  run_default bun test test/cli/tui/context-usage.test.ts \
+    test/cli/tui/checkpoint-coverage-sync.test.tsx --timeout 120000
+  run_default bun test test/session/max-mode.test.ts --timeout 120000
+  run_default bun test test/session/prompt-effect.test.ts \
+    -t 'MaxMode candidate retries|MaxMode final step|subagent maxMode retries|last-step maxMode|json_schema output' \
+    --timeout 120000
+  bun typecheck
+  (cd ../sdk/js && bun typecheck)
+  cd ../..
+
+  ./.husky/pre-push
+  bun lint
+  git diff --exit-code \
+    28c1f36c8a3bc85bda7e3691960e7d0b531b8636 \
+    c8b02aeb991c37e570799bdd3696e276aa35ba77 -- \
+    AGENTS.md docs/upstream-deviations.md docs/fork-capabilities.md \
+    docs/fork-registry-history.md \
+    docs/compose/spec/voice-control-tool-protocol.md \
+    bun.lock ':(glob)**/package.json'
+  git diff --check \
+    7bfe6ac48e0db40b2b0b42c00b05a35032fcc113 \
+    c8b02aeb991c37e570799bdd3696e276aa35ba77
+)
+```
+
+Expected result: 210 tests and 557 assertions pass with zero failures; both
+package typechecks and all 12 pre-push tasks succeed; lint reports 4,334
+warnings and zero errors; shared registries, dependencies, and whitespace
+checks remain clean.
