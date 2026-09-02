@@ -22,6 +22,19 @@ describe("offset conversion", () => {
     expect(stringIndexToWidth("hello", 3)).toBe(3)
   })
 
+  test("round-trips combining and ZWJ grapheme boundaries without splitting them", () => {
+    const cases = [
+      { text: "ae\u0301b", end: 3, width: 2 },
+      { text: "a👨‍👩‍👧‍👦b", end: 12, width: 3 },
+    ]
+
+    for (const item of cases) {
+      expect(stringIndexToWidth(item.text, item.end)).toBe(item.width)
+      expect(widthToStringIndex(item.text, item.width)).toBe(item.end)
+      expect(widthToStringIndex(item.text, stringIndexToWidth(item.text, item.end))).toBe(item.end)
+    }
+  })
+
   test("the two conversions round-trip on character boundaries", () => {
     const text = "前缀@x后缀"
     for (let i = 0; i <= text.length; i++) {
@@ -67,10 +80,11 @@ describe("offset conversion", () => {
     }
   })
 
-  test("round-trips across supplementary-plane (emoji) code-point boundaries", () => {
+  test("round-trips across supplementary-plane emoji grapheme boundaries", () => {
     // 😀 is one code point but 2 UTF-16 units and display width 2. The converters
-    // are only contracted to agree on real code-point boundaries (the editor never
-    // emits an offset that splits a surrogate pair), so iterate by code point.
+    // are only contracted to agree on real grapheme boundaries (the editor never
+    // emits an offset that splits a surrogate pair); each code point here is a
+    // full grapheme, so this loop visits every contracted boundary.
     const text = "a😀好b"
     let index = 0
     for (const ch of text) {

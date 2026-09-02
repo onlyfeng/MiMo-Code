@@ -23,6 +23,45 @@ type EditorLike = {
   getSelection: () => { start: number; end: number } | null
 }
 
+/**
+ * Resolve the callbacks that still own an async voice result.
+ *
+ * `active` may be absent while stopStreaming() flushes its final segment, so
+ * absence is allowed. A different active recording, a Prompt/session rebind,
+ * or an unmounted binding invalidates the result even when both prompts have
+ * identical text.
+ */
+export function resolveVoiceBinding<T extends { alive: boolean }>(
+  active: { binding: T } | undefined,
+  recording: { binding: T },
+  captured: T,
+): T | undefined {
+  if (!captured.alive) return undefined
+  if (recording.binding !== captured) return undefined
+  if (active && active !== recording) return undefined
+  return captured
+}
+
+/**
+ * Resolve where recording-level pending state should settle. A live recording
+ * settles its current Prompt binding even when the completed request belonged
+ * to an older binding. A stopping recording keeps the UI in `finishing` until
+ * the recorder is drained and every pending request completes, then may settle
+ * only its captured owner.
+ */
+export function resolveVoiceStateBinding<T extends { alive: boolean }>(
+  active: { binding: T; pending: number; stopping: boolean; drained: boolean } | undefined,
+  recording: { binding: T; pending: number; stopping: boolean; drained: boolean },
+  captured: T,
+): T | undefined {
+  if (recording.stopping) {
+    if (!recording.drained || recording.pending > 0) return undefined
+    return resolveVoiceBinding(active, recording, captured)
+  }
+  if (active === recording) return recording.binding.alive ? recording.binding : undefined
+  return resolveVoiceBinding(active, recording, captured)
+}
+
 /** UTF-16 index range of the current selection, or a collapsed caret. */
 export function getEditorRange(editor: EditorLike): EditorRange {
   const text = editor.plainText

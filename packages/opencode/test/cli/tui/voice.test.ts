@@ -464,6 +464,64 @@ describe("voice", () => {
   })
 
   describe("voice-edit placement", () => {
+    test("async results stay with their live Prompt binding", async () => {
+      const { resolveVoiceBinding } = await import("../../../src/cli/cmd/tui/util/voice-edit")
+      const applied: string[] = []
+      const sessionA = { alive: true, value: "same text", apply: () => applied.push("A") }
+      const sessionB = { alive: true, value: "same text", apply: () => applied.push("B") }
+      const recording = { binding: sessionA }
+      const captured = sessionA
+
+      expect(resolveVoiceBinding(recording, recording, captured)).toBe(sessionA)
+
+      recording.binding = sessionB
+      resolveVoiceBinding(recording, recording, captured)?.apply()
+      expect(applied).toEqual([])
+
+      sessionA.alive = false
+      recording.binding = sessionA
+      expect(resolveVoiceBinding(recording, recording, captured)).toBeUndefined()
+    })
+
+    test("stop flush keeps the owner but a replacement recording invalidates it", async () => {
+      const { resolveVoiceBinding, resolveVoiceStateBinding } = await import(
+        "../../../src/cli/cmd/tui/util/voice-edit"
+      )
+      const binding = { alive: true }
+      const recording = { binding, pending: 0, stopping: false, drained: false }
+
+      expect(resolveVoiceBinding(undefined, recording, binding)).toBe(binding)
+      expect(resolveVoiceBinding({ binding }, recording, binding)).toBeUndefined()
+
+      const rebound = { alive: true }
+      recording.binding = rebound
+      expect(resolveVoiceStateBinding(recording, recording, binding)).toBe(rebound)
+      expect(resolveVoiceStateBinding(undefined, recording, binding)).toBeUndefined()
+
+      const stopped = { binding, pending: 0, stopping: true, drained: false }
+      expect(resolveVoiceStateBinding(undefined, stopped, binding)).toBeUndefined()
+      stopped.drained = true
+      stopped.pending = 1
+      expect(resolveVoiceStateBinding(undefined, stopped, binding)).toBeUndefined()
+      stopped.pending = 0
+      expect(resolveVoiceStateBinding(undefined, stopped, binding)).toBe(binding)
+    })
+
+    test("an old stop continuation cannot overwrite replacement recording state", async () => {
+      const { resolveVoiceBinding } = await import("../../../src/cli/cmd/tui/util/voice-edit")
+      const states: string[] = []
+      const oldBinding = { alive: true, setState: (state: string) => states.push(`old:${state}`) }
+      const oldRecording = { binding: oldBinding }
+      const nextBinding = { alive: true, setState: (state: string) => states.push(`next:${state}`) }
+      const nextRecording = { binding: nextBinding }
+
+      nextBinding.setState("listening")
+      oldBinding.alive = false
+      resolveVoiceBinding(nextRecording, oldRecording, oldBinding)?.setState("idle")
+
+      expect(states).toEqual(["next:listening"])
+    })
+
     test("toTextPlacement slices three parts", async () => {
       const { toTextPlacement } = await import("../../../src/cli/cmd/tui/util/voice-edit")
       expect(toTextPlacement("abc", { start: 1, end: 1 })).toEqual({
@@ -525,10 +583,12 @@ describe("voice", () => {
       })
     })
 
-    test("placeNaturalSelection keeps highlight and caret at end (live opentui)", async () => {
+    test("live opentui preserves natural selection and grapheme boundaries", async () => {
       const { createTestRenderer } = await import("@opentui/core/testing")
       const { TextareaRenderable } = await import("@opentui/core")
-      const { placeNaturalSelection } = await import("../../../src/cli/cmd/tui/util/voice-edit")
+      const { applyVoiceTarget, getEditorRange, placeNaturalSelection } = await import(
+        "../../../src/cli/cmd/tui/util/voice-edit"
+      )
       const { renderer, renderOnce } = await createTestRenderer({ width: 80, height: 24 })
       const ta = new TextareaRenderable(renderer as never, {
         backgroundColor: "#000000",
@@ -555,6 +615,38 @@ describe("voice", () => {
       expect(ta.hasSelection()).toBe(false)
       // string index 2 is before "a" → display-width 4 ("中文")
       expect(ta.cursorOffset).toBe(4)
+
+      const cases = [
+        { text: "ae\u0301b", selection: "e\u0301", range: { start: 1, end: 3 }, width: { start: 1, end: 2 } },
+        {
+          text: "a👨‍👩‍👧‍👦b",
+          selection: "👨‍👩‍👧‍👦",
+          range: { start: 1, end: 12 },
+          width: { start: 1, end: 3 },
+        },
+      ]
+
+      for (const item of cases) {
+        ta.clear()
+        ta.insertText(item.text)
+        ta.cursorOffset = item.width.end
+        ta.setSelection(item.width.start, item.width.end)
+        await renderOnce()
+
+        expect(ta.getSelectedText()).toBe(item.selection)
+        const range = getEditorRange(ta)
+        expect(range).toEqual(item.range)
+        expect(applyVoiceTarget(item.text, range, { kind: "insert", text: "X" }).text).toBe("aXb")
+
+        placeNaturalSelection(ta, item.text, item.range)
+        await renderOnce()
+        expect(ta.getSelection()).toEqual(item.width)
+        expect(ta.cursorOffset).toBe(item.width.end)
+        ta.insertText("X")
+        await renderOnce()
+        expect(ta.plainText).toBe("aXb")
+        expect(getEditorRange(ta)).toEqual({ start: 2, end: 2 })
+      }
     })
 
     test("width helpers handle emoji, newline, and tab", async () => {
