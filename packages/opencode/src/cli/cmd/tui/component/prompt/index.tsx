@@ -28,6 +28,7 @@ import { useRenderer, type JSX } from "@opentui/solid"
 import * as Editor from "@tui/util/editor"
 import * as Model from "@tui/util/model"
 import * as Voice from "@tui/util/voice"
+import * as VoiceEdit from "@tui/util/voice-edit"
 import { useExit } from "../../context/exit"
 import * as Clipboard from "../../util/clipboard"
 import type { AssistantMessage, FilePart, UserMessage } from "@mimo-ai/sdk/v2"
@@ -102,17 +103,27 @@ function fadeColor(color: RGBA, alpha: number) {
 
 let stashed: { prompt: PromptInfo; cursor: number } | undefined
 
+type VoiceState = "listening" | "speaking" | "processing" | "finishing" | "idle"
+
+type VoiceBinding = {
+  sessionID: string | undefined
+  alive: boolean
+  applyFromBase: (base: { value: string; range: VoiceEdit.EditorRange | null }, target: VoiceEdit.VoiceTextTarget) => void
+  getSnapshot: () => { value: string; range: VoiceEdit.EditorRange | null }
+  submit: () => Promise<unknown>
+  getState: () => VoiceState
+  setState: (type: VoiceState) => void
+  sendEnabled: () => boolean
+  showError: (msg: string) => void
+}
+
 // Module-level voice state: survives component remounts and route changes
 let activeVoice: {
   handle: Voice.StreamingHandle
   pending: number
-  appendText: (text: string) => void
-  setText: (text: string) => void
-  getPlainText: () => string
-  switchAgent: (name: string) => void
-  submit: () => Promise<unknown>
-  setState: (type: "listening" | "speaking" | "processing" | "finishing" | "idle") => void
-  showError: (msg: string) => void
+  stopping: boolean
+  drained: boolean
+  binding: VoiceBinding
 } | undefined
 
 export function Prompt(props: PromptProps) {
@@ -161,7 +172,7 @@ export function Prompt(props: PromptProps) {
         )
       : undefined
   })
-  const [voiceState, setVoiceState] = createSignal<"idle" | "listening" | "speaking" | "processing" | "finishing">(
+  const [voiceState, setVoiceState] = createSignal<VoiceState>(
     activeVoice ? (activeVoice.pending > 0 ? "processing" : "listening") : "idle",
   )
   const [voiceElapsed, setVoiceElapsed] = createSignal(0)
@@ -184,64 +195,126 @@ export function Prompt(props: PromptProps) {
     setVoiceElapsed(0)
   }
 
-  function voiceAppendText(text: string) {
+  /** Natural selection: highlight [start,end) and park the caret at end. */
+  function voicePlaceRange(value: string, range: VoiceEdit.EditorRange) {
     if (!input || input.isDestroyed) return
-    const current = store.prompt.input
-    if (current.length > 0 && /[.?!]$/.test(current) && text.length > 0 && text[0] !== " ") {
-      input.insertText(" " + text)
-      setStore("prompt", "input", current + " " + text)
+    VoiceEdit.placeNaturalSelection(input, value, range)
+  }
+
+  function voiceRewriteBuffer(text: string, caretIndex: number, selection?: VoiceEdit.EditorRange) {
+    if (!input || input.isDestroyed) return
+    // Full rewrite drops mention/paste extmarks — clear them with the buffer.
+    input.extmarks.clear()
+    setStore("extmarkToPartIndex", new Map())
+    setStore("prompt", {
+      input: text,
+      parts: [],
+    })
+    input.clear()
+    input.insertText(text)
+    if (selection && selection.start !== selection.end) {
+      voicePlaceRange(text, selection)
     } else {
-      input.insertText(text)
-      setStore("prompt", "input", current + text)
+      input.clearSelection()
+      input.cursorOffset = VoiceEdit.widthCaretFor(text, caretIndex)
     }
     setTimeout(() => {
       if (!input || input.isDestroyed) return
       input.getLayoutNode().markDirty()
-      input.gotoBufferEnd()
       renderer.requestRender()
     }, 0)
   }
 
-  function voiceSetText(text: string) {
+  /**
+   * Apply a voice target against a frozen base snapshot (value + range from
+   * request time). Insert on an unchanged buffer uses a surgical splice so
+   * paste/file extmarks survive; set/set_with_cursor (or a changed buffer)
+   * do a full rewrite.
+   */
+  function voiceApplyFromBase(
+    base: { value: string; range: VoiceEdit.EditorRange | null },
+    target: VoiceEdit.VoiceTextTarget,
+  ) {
     if (!input || input.isDestroyed) return
-    input.clear()
-    input.insertText(text)
-    setStore("prompt", "input", text)
-    setTimeout(() => {
-      if (!input || input.isDestroyed) return
-      input.getLayoutNode().markDirty()
-      input.gotoBufferEnd()
-      renderer.requestRender()
-    }, 0)
+    if (target.kind === "insert" && input.plainText === base.value) {
+      const range = base.range ?? { start: base.value.length, end: base.value.length }
+      const w = VoiceEdit.widthSelectionFor(base.value, range)
+      if (range.start === range.end) {
+        input.clearSelection()
+        input.cursorOffset = w.start
+      } else {
+        input.setSelection(w.start, w.end)
+      }
+      input.insertText(target.text)
+      setStore("prompt", "input", input.plainText)
+      setTimeout(() => {
+        if (!input || input.isDestroyed) return
+        input.getLayoutNode().markDirty()
+        renderer.requestRender()
+      }, 0)
+      return
+    }
+    const range = base.range ?? { start: base.value.length, end: base.value.length }
+    const result = VoiceEdit.applyVoiceTarget(base.value, range, target)
+    voiceRewriteBuffer(result.text, result.caret, result.selection)
   }
 
-  function voiceGetPlainText() {
-    return store.prompt.input
+  function voiceGetSnapshot(): { value: string; range: VoiceEdit.EditorRange | null } {
+    if (!input || input.isDestroyed) return { value: store.prompt.input, range: null }
+    const value = input.plainText
+    // Unfocused caret may be a stale 0 — treat as no caret and fall back to full string.
+    if (!input.focused) return { value, range: null }
+    return { value, range: VoiceEdit.getEditorRange(input) }
   }
 
-  function voiceSwitchAgent(name: string) {
-    const match = local.agent.list().find((x) => x.name.toLowerCase() === name.toLowerCase())
-    if (match) local.agent.userSwitch(match.name)
-    else toast.show({ message: t("tui.voice.error.unknown_agent", { name: name }), variant: "error", duration: 3000 })
-  }
-
-  function voiceSetState(type: "idle" | "listening" | "speaking" | "processing" | "finishing") {
+  function voiceSetState(type: VoiceState) {
     setVoiceState(type)
     if (type === "speaking") voiceTimerStart()
     if (type === "idle" || type === "listening" || type === "processing") voiceTimerStop()
   }
 
-  // Wire module-level callbacks to current component instance
-  if (activeVoice) {
-    activeVoice.appendText = voiceAppendText
-    activeVoice.setText = voiceSetText
-    activeVoice.getPlainText = voiceGetPlainText
-    activeVoice.switchAgent = voiceSwitchAgent
-    activeVoice.submit = () => submit()
-    activeVoice.setState = voiceSetState
-    activeVoice.showError = (msg) => toast.show({ message: msg, variant: "error", duration: 3000 })
+  let mountedVoiceBinding: VoiceBinding | undefined
+  function bindVoice() {
+    if (mountedVoiceBinding) mountedVoiceBinding.alive = false
+    const binding: VoiceBinding = {
+      sessionID: props.sessionID,
+      alive: true,
+      applyFromBase: voiceApplyFromBase,
+      getSnapshot: voiceGetSnapshot,
+      submit: () => submit(),
+      getState: voiceState,
+      setState: voiceSetState,
+      sendEnabled: voiceSendEnabled,
+      showError: (msg) => toast.show({ message: msg, variant: "error", duration: 3000 }),
+    }
+    mountedVoiceBinding = binding
+    if (activeVoice) {
+      activeVoice.binding = binding
+      return binding
+    }
+    binding.setState("idle")
+    return binding
   }
+
+  function settleVoice(av: NonNullable<typeof activeVoice>, captured: VoiceBinding) {
+    const binding = VoiceEdit.resolveVoiceStateBinding(activeVoice, av, captured)
+    if (!binding) return
+    if (av.stopping) {
+      binding.setState("idle")
+      return
+    }
+    if (!activeVoice) {
+      if (av.pending <= 0) binding.setState("idle")
+      return
+    }
+    if (binding.getState() === "speaking") return
+    binding.setState(av.pending > 0 ? "processing" : "listening")
+  }
+
+  bindVoice()
+  createEffect(on(() => props.sessionID, bindVoice, { defer: true }))
   onCleanup(() => {
+    if (mountedVoiceBinding) mountedVoiceBinding.alive = false
     voiceTimerStop()
   })
 
@@ -253,23 +326,26 @@ export function Prompt(props: PromptProps) {
       if (activeVoice) {
         const handle = activeVoice.handle
         const av = activeVoice
+        av.stopping = true
         activeVoice = undefined
         await Voice.stopStreaming(handle)
-        if (av.pending <= 0) setVoiceState("idle")
+        av.drained = true
+        settleVoice(av, av.binding)
       }
       return
     }
     if (state === "finishing") return
-    // Start streaming — only validate the active mode's provider
+    // Start streaming — resolve both providers so /voice-control can switch mid-recording.
     const voiceConfig = sync.data.config.voice
     const resolved = Voice.resolveVoiceConfig(voiceConfig)
-    const activeConfig = voiceControlEnabled() ? resolved.control : resolved.asr
-    const creds = Voice.resolveCredentials(sync.data.provider, activeConfig)
-    if ("error" in creds) {
-      const vars = { provider: creds.providerID, model: creds.model }
+    const asrCreds = Voice.resolveCredentials(sync.data.provider, resolved.asr)
+    const controlCreds = Voice.resolveCredentials(sync.data.provider, resolved.control)
+    const initialCreds = voiceControlEnabled() ? controlCreds : asrCreds
+    if ("error" in initialCreds) {
+      const vars = { provider: initialCreds.providerID, model: initialCreds.model }
       const msg = !voiceConfig ? t("tui.voice.error.no_auth")
-        : creds.error === "not_found" ? t("tui.voice.error.provider_not_found", vars)
-        : creds.error === "no_url" ? t("tui.voice.error.no_url", vars)
+        : initialCreds.error === "not_found" ? t("tui.voice.error.provider_not_found", vars)
+        : initialCreds.error === "no_url" ? t("tui.voice.error.no_url", vars)
         : t("tui.voice.error.no_auth_provider", vars)
       toast.show({ message: msg, variant: "error" })
       return
@@ -282,102 +358,143 @@ export function Prompt(props: PromptProps) {
     const av: NonNullable<typeof activeVoice> = {
       handle: undefined!,
       pending: 0,
-      appendText: voiceAppendText,
-      setText: voiceSetText,
-      getPlainText: voiceGetPlainText,
-      switchAgent: voiceSwitchAgent,
-      submit: () => submit(),
-      setState: voiceSetState,
-      showError: (msg) => toast.show({ message: msg, variant: "error", duration: 3000 }),
+      stopping: false,
+      drained: false,
+      binding: bindVoice(),
     }
 
     let voiceControlChain: Promise<void> = Promise.resolve()
 
     const handle = Voice.startStreaming({
+      // VAD breath window is fixed for this recording (1.2s control / 0.8s ASR).
+      // Mode switches mid-recording still apply to processing/model choice below.
+      minSilenceS: voiceControlEnabled() ? 1.2 : undefined,
       onSegment: (segment) => {
+        const captured = av.binding
+        const binding = VoiceEdit.resolveVoiceBinding(activeVoice, av, captured)
+        if (!binding) return
         av.pending++
-        av.setState("processing")
+        if (!av.stopping) binding.setState("processing")
+        const useControl = voiceControlEnabled()
+        const creds = useControl ? controlCreds : asrCreds
+        if ("error" in creds) {
+          VoiceEdit.resolveVoiceBinding(activeVoice, av, captured)?.showError(
+            t("tui.voice.error.no_auth_provider", { provider: creds.providerID, model: creds.model }),
+          )
+          av.pending--
+          settleVoice(av, captured)
+          return
+        }
 
-        if (voiceControlEnabled()) {
+        if (useControl) {
           voiceControlChain = voiceControlChain.then(async () => {
             try {
-              if (!activeVoice) return
-              av.setState("processing")
-              const currentText = av.getPlainText()
-              const currentAgent = local.agent.current()?.name ?? ""
-              const availableAgents = local.agent.list().map((x) => x.name)
+              const binding = VoiceEdit.resolveVoiceBinding(activeVoice, av, captured)
+              if (!binding) return
+              if (!av.stopping) binding.setState("processing")
+              const snap = binding.getSnapshot()
+              const contextText = VoiceEdit.controlContextText(snap.value, snap.range)
 
               const ctrl = await Voice.processVoiceControl({
                 audio: segment.audio,
                 apiKey: creds.apiKey,
                 baseUrl: creds.baseUrl,
                 model: resolved.control.model,
-                currentText,
-                currentAgent,
-                availableAgents,
-                sendEnabled: voiceSendEnabled(),
+                contextText,
+                sendEnabled: binding.sendEnabled(),
               })
 
-              if (ctrl) {
-                for (const action of ctrl.actions) {
-                  if (action.action === "edit") av.setText(action.text)
-                  else if (action.action === "send") {
-                    if (voiceSendEnabled() && av.getPlainText().trim()) await av.submit()
-                    else if (!av.getPlainText().trim()) av.showError(t("tui.voice.error.empty_send"))
-                  } else if (action.action === "agent") {
-                    av.switchAgent(action.agent)
-                  }
+              const current = VoiceEdit.resolveVoiceBinding(activeVoice, av, captured)
+              if (!current) return
+              if (!ctrl.ok) {
+                current.showError(
+                  ctrl.reason === "protocol" ? t("tui.voice.error.protocol") : t("tui.voice.error.network"),
+                )
+                return
+              }
+
+              // Text equality is only a content-staleness check inside the same
+              // Prompt binding; binding identity separately rejects remounts and
+              // session switches whose buffers happen to contain identical text.
+              if (current.getSnapshot().value !== snap.value) {
+                current.showError(t("tui.voice.error.stale"))
+                return
+              }
+              for (const action of ctrl.actions) {
+                const target = VoiceEdit.resolveVoiceBinding(activeVoice, av, captured)
+                if (!target) return
+                if (action.action === "insert") target.applyFromBase(snap, { kind: "insert", text: action.text })
+                else if (action.action === "set") target.applyFromBase(snap, { kind: "set", text: action.text })
+                else if (action.action === "set_with_cursor")
+                  target.applyFromBase(snap, { kind: "set_with_cursor", placement: action.placement })
+                else if (action.action === "send") {
+                  const after = target.getSnapshot().value
+                  if (target.sendEnabled() && after.trim()) await target.submit()
+                  else if (!after.trim()) target.showError(t("tui.voice.error.empty_send"))
                 }
-              } else {
-                av.showError(t("tui.voice.error.network"))
               }
             } finally {
               av.pending--
-              if (activeVoice === av && voiceState() !== "speaking")
-                av.setState(av.pending > 0 ? "processing" : "listening")
-              if (!activeVoice && av.pending <= 0) av.setState("idle")
+              settleVoice(av, captured)
             }
           }).catch(() => {})
         } else {
+          const binding = VoiceEdit.resolveVoiceBinding(activeVoice, av, captured)
+          if (!binding) {
+            av.pending--
+            settleVoice(av, captured)
+            return
+          }
+          const asrSnap = binding.getSnapshot()
           Voice.transcribeAudio({
             audio: segment.audio,
             apiKey: creds.apiKey,
             baseUrl: creds.baseUrl,
             model: resolved.asr.model,
           }).then((text) => {
+            const current = VoiceEdit.resolveVoiceBinding(activeVoice, av, captured)
+            if (!current) return
             if (text) {
-              if (voiceSendEnabled() && Voice.SEND_RE.test(text.replace(/[\s。.!！？?，,]+$/g, "").trim())) {
-                av.submit()
+              // ASR has no send command — always dictate, including「发送」/"send it".
+              // Unchanged buffer → apply from request snapshot (caret/selection).
+              // Buffer changed mid-transcription → dictate at the end, never a live caret.
+              const now = current.getSnapshot()
+              if (now.value === asrSnap.value) {
+                const range = asrSnap.range ?? { start: asrSnap.value.length, end: asrSnap.value.length }
+                current.applyFromBase(asrSnap, VoiceEdit.asrInsertTarget(asrSnap.value, range, text))
               } else {
-                av.appendText(text.trim())
+                const endRange = { start: now.value.length, end: now.value.length }
+                current.applyFromBase(
+                  { value: now.value, range: endRange },
+                  VoiceEdit.asrInsertTarget(now.value, endRange, text),
+                )
               }
             } else {
-              av.showError(t("tui.voice.error.network"))
+              current.showError(t("tui.voice.error.network"))
             }
+          }).catch(() => {}).finally(() => {
             av.pending--
-            if (activeVoice === av && voiceState() !== "speaking")
-              av.setState(av.pending > 0 ? "processing" : "listening")
-            if (!activeVoice && av.pending <= 0) av.setState("idle")
-          }).catch(() => {
-            av.pending--
-            if (activeVoice === av && voiceState() !== "speaking")
-              av.setState(av.pending > 0 ? "processing" : "listening")
-            if (!activeVoice && av.pending <= 0) av.setState("idle")
+            settleVoice(av, captured)
           })
         }
       },
       onActiveChange: (active) => {
-        if (active && activeVoice === av) av.setState("speaking")
+        if (active && activeVoice === av && av.binding.alive) av.binding.setState("speaking")
       },
       onError: (err) => {
+        if (activeVoice && activeVoice !== av) return
+        const binding = av.binding.alive ? av.binding : undefined
+        if (activeVoice === av) activeVoice = undefined
+        av.stopping = true
+        av.drained = true
+        if (!binding) return
         const msg = err.message || ""
         if (msg.includes("no default audio") || msg.includes("not found") || msg.includes("Cannot open") || msg.includes("ALSA")) {
-          av.showError(t("tui.voice.error.no_device"))
+          binding.showError(t("tui.voice.error.no_device"))
         } else {
-          av.showError(`${t("tui.voice.error.recorder_failed")}: ${msg}`)
+          binding.showError(`${t("tui.voice.error.recorder_failed")}: ${msg}`)
         }
-        activeVoice = undefined
-        av.setState("idle")
+        binding.setState("idle")
       },
     })
     if (!handle) {
@@ -819,7 +936,7 @@ export function Prompt(props: PromptProps) {
           toast.show({
             message: next ? t("tui.voice.control.enabled") : t("tui.voice.control.disabled"),
             variant: "info",
-            duration: 3000,
+            duration: 4500,
           })
         },
       },

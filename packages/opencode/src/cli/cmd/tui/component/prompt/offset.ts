@@ -2,27 +2,29 @@
 // offsets: a wide CJK character counts as 2 columns. The plainText we slice in
 // JS is a UTF-16 string where that same character is 1 unit. These helpers
 // translate between the two coordinate systems so the two never get mixed.
-// Inputs are assumed to sit on character (code-point) boundaries, which is all
-// the editor ever emits; an offset landing inside a wide char rounds up to the
-// next boundary.
+// Inputs are assumed to sit on grapheme boundaries, which is all the editor
+// ever emits; an offset landing inside a wide grapheme rounds up to the next
+// boundary.
 
 // The editor advances its offset by 1 for a newline and 2 for a tab, but
 // Bun.stringWidth returns 0 for both, so we special-case them to stay aligned
 // with the editor. (Pasted "\r" never reaches here — paste input is normalized
 // to "\n" and the editor itself maps "\r" to "\n".)
-function charWidth(ch: string): number {
-  if (ch === "\n") return 1
-  if (ch === "\t") return 2
-  return Bun.stringWidth(ch)
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+
+function graphemeWidth(segment: string): number {
+  if (segment === "\n") return 1
+  if (segment === "\t") return 2
+  return Bun.stringWidth(segment)
 }
 
 export function widthToStringIndex(text: string, widthOffset: number): number {
   let width = 0
   let index = 0
-  for (const ch of text) {
+  for (const { segment } of graphemes.segment(text)) {
     if (width >= widthOffset) break
-    width += charWidth(ch)
-    index += ch.length
+    width += graphemeWidth(segment)
+    index += segment.length
   }
   return index
 }
@@ -30,10 +32,10 @@ export function widthToStringIndex(text: string, widthOffset: number): number {
 export function stringIndexToWidth(text: string, stringIndex: number): number {
   let width = 0
   let index = 0
-  for (const ch of text) {
+  for (const { segment } of graphemes.segment(text)) {
     if (index >= stringIndex) break
-    width += charWidth(ch)
-    index += ch.length
+    width += graphemeWidth(segment)
+    index += segment.length
   }
   return width
 }
