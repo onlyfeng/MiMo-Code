@@ -139,3 +139,22 @@ test("published OpenAPI code samples target callable v2 SDK methods", async () =
   expect(published.length).toBeGreaterThan(0)
   expect(invalid).toEqual([])
 })
+
+test("published OpenAPI keeps the runtime compaction projection contract", async () => {
+  const runtime = await Server.openapi()
+  const published = await Bun.file(new URL("../../../sdk/openapi.json", import.meta.url)).json()
+  const projection = schema(published, "CompactionPart")?.properties
+
+  expect(schema(published, "CompactionPart")).toEqual(schema(runtime, "CompactionPart"))
+  expect(isRecord(projection) && projection.projection).toMatchObject({
+    type: "object",
+    properties: {
+      version: { type: "number", const: 1 },
+      summary_message_id: { type: "string" },
+      summary: { type: "string" },
+      trigger: { type: "string", enum: ["manual", "automatic", "provider-overflow"] },
+      compacted_tool_calls: { type: "array" },
+    },
+    required: ["version", "summary_message_id", "summary", "trigger"],
+  })
+})
