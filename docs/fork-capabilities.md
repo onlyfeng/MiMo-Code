@@ -16,10 +16,10 @@ authority.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-09-02
-- Upstream: `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
-- Prior reviewed upstream: `3282b34c46281dc8cd0610433d676a5ec93baa6e`
-- Main behavior: `dad492e0af72d22d3ec796f6814eda7e52ed51a8`
-- Prior fork `main` tip: `28c1f36c8a3bc85bda7e3691960e7d0b531b8636`
+- Upstream: `f82c177709019c759ce2bb06bd1b04cba488811e`
+- Prior reviewed upstream: `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
+- Main behavior: `f1e2ba0019ee6ac13c2608474ae9237865b742f2`
+- Prior fork `main` tip: `3a2b6c88fd50d460199d8b5b2721413d164ecba9`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -91,11 +91,16 @@ registry or history commit does not advance either behavior reference.
   and resume admission tests, session run-state tuple/disposal tests,
   main-only OpenAPI regressions, replace-agent actor-scope regressions, and
   actor/session tool tests at the reviewed main behavior.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - 2026-08-28 review: adopted strict spawn/run argument rejection and the
   existing `send` follow-up path while preserving caller-resolution,
   generation, persistent wake, and frozen-context fail-closed contracts.
+- 2026-09-02 session-ID format review: adopted marker-free descending session
+  IDs while retaining the same `ses` namespace, opaque lookup semantics, and
+  lifecycle/admission/resume ownership. Existing `ses_-...` identifiers remain
+  valid inputs; message descending IDs deliberately retain their chronology
+  marker.
 - Retirement condition: upstream provides equivalent generation ownership,
   typed atomic main prompt/command/init/shell/summarize/recovery/resume
   admission, main-only recovery/resume identity, cancellation settlement,
@@ -129,8 +134,8 @@ registry or history commit does not advance either behavior reference.
   prefix-capture, rebuild, watermark, writer-timeout, memory-write, and
   system-prompt suites plus `memory-path-template.test.ts` at the reviewed main
   behavior.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: upstream exposes the same canonical writer, isolated
   child, mode-specific prefix ownership, aligned delta, disabled-checkpoint
   guidance behavior, and stable placeholder resolution only at filesystem-tool
@@ -151,8 +156,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: `packages/opencode/test/tool/read-state.test.ts`,
   `packages/opencode/test/tool/edit.test.ts`, and instance-disposal regressions
   at the reviewed main behavior.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: upstream provides equivalent session/actor/instance
   scoping, consumption, and disposal behavior with cross-actor/project tests.
 
@@ -181,8 +186,8 @@ registry or history commit does not advance either behavior reference.
   prefix/tool-search regressions prove URL rejection, pending imports, OAuth
   callback/connection behavior, redacted exit diagnosis, and request isolation
   at the reviewed main behavior.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - 2026-09-01 OAuth branding review: adopted upstream's MiMoCode callback-page
   and dynamic-registration literals. This is a clean carrier overlap only;
   URL validation, pending-import state, request isolation, bounded diagnostics,
@@ -215,8 +220,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: skill search/description/discovery suites, tool skill/search
   suites, and versioned prompt skill-command snapshot tests at the reviewed main
   behavior.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: upstream uses one effective permission/tool decision
   across discovery and invocation and provides equivalent retryable,
   generation-aware producer behavior plus immutable hash-versioned snapshots
@@ -240,8 +245,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence:
   `packages/opencode/test/plugin/subagent-progress-checker.test.ts` exercises
   enabled, disabled, absent, and instance-local configuration paths.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: the progress-checker hook no longer writes memory or
   upstream supplies an equivalent instance-local decision without HTTP/cwd
   coupling.
@@ -295,8 +300,8 @@ registry or history commit does not advance either behavior reference.
   Auto-Worktree config, notice, Bash-write, and path-scan regressions cover the
   explicit toggle, one-shot notice, real mutations, negative cache, and
   completed apply-patch metadata.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: upstream retains fixed instance cwd and supplies
   equivalent inert compatibility schema, protected-root, project/worktree
   containment, fixed-cwd relative file-tool resolution, MultiEdit normalization,
@@ -346,11 +351,15 @@ registry or history commit does not advance either behavior reference.
   complete local hash shards, positive/negative JUnit verifier fixtures, and
   exact-SHA CI for the reviewed behavior tree when published; local tests do not
   substitute for that remote evidence.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - 2026-08-25 publication companion: the `AGENTS.md` default-environment rule is
   a process-only registry companion and does not advance the frozen main
   behavior or its changed-path calculation.
+- 2026-09-02 test-sharding review: the new WebSearch regression is an ordinary
+  `.test.ts` input and therefore enters the existing stable path-hash shard 1/4.
+  Its local pass is supporting evidence; the final published `main` SHA remains
+  subject to the strict XML/count and exact-file CI gates.
 - Retirement condition: runtime bounds may retire only with equivalent upstream
   settlement. The single test skip retires after the disposer is fixed and
   bounded exact-SHA CI proves process exit.
@@ -385,8 +394,8 @@ registry or history commit does not advance either behavior reference.
   characterizations cover both an in-band retryable 503 and a raw stream fault
   after one completed tool side effect without a second model/tool execution,
   plus retry isolation for ephemeral title requests.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: upstream provides equivalent provenance and complete
   hook/retry text-part lifecycle, no-side-effect-replay behavior, and local-only
   retry publication for ephemeral or non-main requests, and regenerated
@@ -418,8 +427,8 @@ registry or history commit does not advance either behavior reference.
   family-6 `febf::1` target. Source review at main behavior confirms HTTP(S)
   scheme enforcement, the 10-hop cap, timeout, and 5 MB bound; that test file
   has no focused scheme or resource-bound regression for those source contracts.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: upstream preserves equivalent numeric and DNS-resolved
   destination classification, including IPv6 `fe80::/10`, with the same HTTP(S),
   per-hop permission, manual-redirect, timeout, and response-size contract and
@@ -455,8 +464,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/skill/mimocode-docs.test.ts`, and bundled-content
   reviews at the main behavior SHA. `packages/opencode/test/skill/builtin.test.ts`
   binds the shipped PPTX guidance to the available-tool and WebFetch facts.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - 2026-08-28 review: adapted upstream PPTX image-sourcing guidance instead of
   shipping unconditional `image_gen`, text-only WebFetch, or unchecked curl
   claims. Actor help also distinguishes reusable actors from completed
@@ -490,8 +499,8 @@ registry or history commit does not advance either behavior reference.
 - Tests/evidence: repository remote/branch policy, generated contribution and
   security links, and exact repository scoping in release/PR operations; these
   are process checks rather than runtime tests.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - 2026-09-02 release review: adopted upstream's synchronized `0.1.14` version
   across all sixteen workspace package manifests and `bun.lock`; fork-only
   publication destinations and branch routing remain unchanged.
@@ -520,8 +529,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/max-mode.test.ts`, and candidate/judge
   EConnReset coverage in `packages/opencode/test/session/max-mode-econnreset.test.ts`
   at main behavior.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: MaxMode itself consumes and enforces the final-step
   tool choice, bounded candidate/judge retry, and main-only status publication
   with equivalent regressions.
@@ -559,8 +568,8 @@ registry or history commit does not advance either behavior reference.
   default PATH, `git remote get-url upstream`, install idempotence, `bun ci`,
   repository `typecheck`, and a live engine action. These are process/infra
   checks rather than runtime tests.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: retire or replace when the base image ships the pinned
   Bun and preconfigures the read-only `upstream` remote, or when fork
   environment management moves out of the repository by an explicit governance
@@ -603,8 +612,8 @@ registry or history commit does not advance either behavior reference.
   reserve-safe boundary has fired but a flat 90% boundary has not.
   `compaction-projection.test.ts` and prompt-effect regressions bind the
   projection budget, frozen system/tool bytes, and no-tool summary policy.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - 2026-08-28 review: adopted the explicit empty checkpoint threshold ladder
   from upstream's fixture retune, but rejected its 50K usage and flat-ratio
   explanation because both would hide removal of the reserve boundary.
@@ -652,8 +661,8 @@ registry or history commit does not advance either behavior reference.
   recording rejection, drain/pending settlement, and stale stop-continuation
   state. Independent semantic review traced every post-await control/ASR
   mutation and state branch at the reviewed main behavior.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: upstream binds asynchronous voice results to a live
   Prompt/session owner, prevents stop/drain state races, converts editor offsets
   on grapheme boundaries, and supplies equivalent real-editor and lifecycle

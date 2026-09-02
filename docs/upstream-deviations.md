@@ -15,10 +15,10 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-09-02
-- Upstream: `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
-- Prior reviewed upstream: `3282b34c46281dc8cd0610433d676a5ec93baa6e`
-- Main behavior: `dad492e0af72d22d3ec796f6814eda7e52ed51a8`
-- Prior fork `main` tip: `28c1f36c8a3bc85bda7e3691960e7d0b531b8636`
+- Upstream: `f82c177709019c759ce2bb06bd1b04cba488811e`
+- Prior reviewed upstream: `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
+- Main behavior: `f1e2ba0019ee6ac13c2608474ae9237865b742f2`
+- Prior fork `main` tip: `3a2b6c88fd50d460199d8b5b2721413d164ecba9`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -56,8 +56,8 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/bash.test.ts`, and
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -100,8 +100,8 @@ registry or history commit does not advance either behavior reference.
   and MaxMode delivery, disable event/payload parity, unchanged resolved
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
@@ -139,8 +139,8 @@ registry or history commit does not advance either behavior reference.
   runtime and published OpenAPI recovery/resume operations remain main-only,
   omit their upstream agent/task selectors, and expose the same compaction
   projection contract.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -166,7 +166,8 @@ registry or history commit does not advance either behavior reference.
   harness/toolset. Unrelated GPT-4 families do not gain Codex tools through
   API/family aliases. Request, live-step, and MaxMode retry policy reuse that
   same resolved identity instead of independently reclassifying the model
-  between attempts.
+  between attempts. Xiaomi WebSearch sidecar requests use that resolved
+  model's `model.api.id`; they do not substitute a hard-coded MiMo identity.
 - Upstream relationship: adapts the classification introduced at
   `866a5b8a2eff3970a0becb0d27f8f055e4624e19` and merged by
   `b15b0971846861a4b25576d340ce1a4207f87712`; upstream's separate fallbacks are
@@ -179,6 +180,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/src/session/llm-request-prefix.ts`,
   `packages/opencode/src/tool/registry.ts`,
   `packages/opencode/src/tool/tool-script.ts`,
+  `packages/opencode/src/tool/websearch/index.ts`,
   `packages/opencode/src/agent/agent.ts`, and
   `packages/opencode/src/server/routes/instance/experimental.ts`.
 - Tests/evidence: `packages/opencode/test/flag/codex-mode-flag.test.ts`,
@@ -186,9 +188,11 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/provider/provider.test.ts`, and
   `packages/opencode/test/tool/tool-script.test.ts` regressions cover explicit
   unset/true/false behavior, direct GPT IDs, API/family aliases, MiMo conflicts,
-  explicit session precedence, and retry reuse.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+  explicit session precedence, and retry reuse. The local-SSE
+  `packages/opencode/test/tool/websearch.test.ts` regression binds the Xiaomi
+  sidecar request to the resolved API model ID.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
   complete resolved identity while keeping transport and harness/toolset as
   separate decisions. MiMo v2.5 precedence remains authoritative even when an
@@ -216,6 +220,11 @@ registry or history commit does not advance either behavior reference.
   still omits explicit session precedence. The merge therefore regenerated from
   fork source and retained the FD-005 description in published OpenAPI and the
   JavaScript SDK instead of accepting the conflicting generated text.
+- 2026-09-02 WebSearch convergence review: adopted upstream's use of the
+  current request's `model.api.id` for Xiaomi sidecar requests instead of a
+  hard-coded MiMo identifier. This preserves FD-005's resolved model identity
+  through the sidecar without changing harness precedence, prompt/tool
+  selection, transport classification, or alias-conflict handling.
 - Retirement condition: the provider layer exposes one immutable model-mode
   value consumed unchanged by every prompt, discovery, registry, capture, and
   dispatch surface, with alias-conflict and GPT-4 regressions.
@@ -252,8 +261,8 @@ registry or history commit does not advance either behavior reference.
   actor, and TUI visibility tests cover the outer authority surface;
   `packages/opencode/test/cli/tui/exec-expanded.test.tsx` covers bounded
   ANSI-free outer output with and without nested parts.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
   resolved identity. The compact single-exec authority model remains rejected;
   direct permission-visible tools and nested actor/shell/control exclusions are
@@ -305,8 +314,8 @@ registry or history commit does not advance either behavior reference.
   child-session/fork-mode/main-slice/prefix-capture/watermark tests, and
   `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
-- Review basis: upstream `2a0eb706e95a77cba34a319e9f11f33f26d4450c`;
-  main behavior `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
+  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
 - 2026-08-28 review: adopted removal of the unimplemented `actor_id` resume
   argument from actor `spawn` and `run`. Follow-up work uses `send` only while
   the actor remains reusable. A completed ephemeral `context: "full"` actor has
