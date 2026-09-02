@@ -10,16 +10,18 @@ commits: d17e176b..HEAD
 
 ## Report
 
-**What was built** — TUI voice control now speaks the desktop `voice_input` tool-call protocol: unique function tool, three-part `{before_cursor, selection, after_cursor}` snapshot (unfocused falls back to full string), insert/set/set_with_cursor + send, protocol retry ≤2, no agent/model arms. System prompt lives in `util/voice-input.txt` (English instructions, Chinese utterance examples). ASR inserts at caret/selection with end-of-buffer space rule; control VAD uses `minSilenceS=1.2`. Insert on an unchanged buffer uses a surgical splice (keeps paste/file extmarks); set/set_with_cursor full rewrite clears parts. Models stay `xiaomi/mimo-v2.5` / `xiaomi/mimo-v2.5-asr`.
+**What was built** — TUI voice control now speaks the desktop `voice_input` tool-call protocol: unique function tool, three-part `{before_cursor, selection, after_cursor}` snapshot (unfocused falls back to full string), insert/set/set_with_cursor + send, protocol retry ≤2, no agent/model arms. System prompt lives in `util/voice-input.txt` (English instructions, Chinese utterance examples). ASR inserts at caret/selection with end-of-buffer space rule; control VAD uses `minSilenceS=1.2`. Insert on an unchanged buffer uses a surgical splice (keeps paste/file extmarks); set/set_with_cursor full rewrite clears parts. Async results are bound to the live Prompt/session owner, stopping remains `finishing` through recorder drain and pending completion, and display-width conversion never splits combining or ZWJ graphemes. Models stay `xiaomi/mimo-v2.5` / `xiaomi/mimo-v2.5-asr`.
 
-**Verification** — `bun typecheck` (packages/opencode) PASS; `bun test test/cli/tui/voice.test.ts` 42 pass, 0 fail. `bun run build:local` + smoke PASS. Independent review (3 rounds): protocol/snapshot/natural-selection solid; post-review fixes: surgical insert when buffer unchanged (keeps paste/file parts), ASR mid-flight end fallback, live mode switch, stale/protocol toasts, tool-role retry, object arguments.
+**Verification** — `bun typecheck` (packages/opencode) PASS; `bun test test/cli/tui/voice.test.ts` 45 pass, 0 fail; `bun test test/cli/cmd/tui/offset.test.ts` 12 pass, 0 fail. `bun run build:local` + smoke PASS. Independent review confirmed protocol/snapshot/natural-selection plus owner/drain/grapheme hardening; post-review fixes include surgical insert when the buffer is unchanged (keeps paste/file parts), ASR mid-flight end fallback, live mode switch, stale/protocol toasts, tool-role retry, object arguments, same-text remount rejection, and stale stop-continuation rejection.
 
 **Journey log**
 1. Desktop control is tool-call + three-part snapshot; old TUI JSON `edit/send/agent` is the drift to remove.
-2. `@opentui` caret/selection are display-width; convert via `offset.ts` before slicing UTF-16.
+2. `@opentui` caret/selection are display-width; convert complete grapheme clusters via `offset.ts` before slicing UTF-16.
 3. `input.clear()` does not clear extmarks — insert on unchanged buffer stays surgical; full rewrite must clear parts.
 4. Unfocused textarea can report caret 0; voice snapshot must fall back to append-at-end.
 5. Prompt as `.txt` import matches the rest of the package (system/tool descriptions).
+6. Buffer equality cannot prove ownership: every async request captures a live Prompt binding, and remount/session replacement invalidates it.
+7. Recorder drain and request completion are separate boundaries; keep `finishing` until both have settled.
 
 ## [S1] Problem
 
@@ -47,7 +49,7 @@ Both modes read the prompt textarea once per segment:
 }
 ```
 
-If the textarea is not focused or snapshot cannot be paired, fall back to `{ value, cursor: null }` (append-at-end semantics). Source APIs on `TextareaRenderable`: `plainText`, `cursorOffset` (display-width; convert via existing `widthToStringIndex`), `getSelection()` / `hasSelection()`, `getSelectedText()`, `insertText`, `setSelection`, `deleteSelection`, `clearSelection`.
+If the textarea is not focused or snapshot cannot be paired, fall back to `{ value, cursor: null }` (append-at-end semantics). Source APIs on `TextareaRenderable`: `plainText`, `cursorOffset` (display-width; convert via `widthToStringIndex` on complete grapheme clusters), `getSelection()` / `hasSelection()`, `getSelectedText()`, `insertText`, `setSelection`, `deleteSelection`, `clearSelection`. Newline remains one editor column and tab remains two.
 
 Context sent to control model:
 
@@ -94,7 +96,7 @@ Control mode starts streaming with `minSilenceS: 1.2`. ASR keeps VAD default `0.
 - `submit()` — gated by `voice_send_command`.
 - No agent switch.
 
-Staleness: if `plainText` differs from the request snapshot, drop the text mutation and send, and toast `tui.voice.error.stale`. ASR also snapshots before transcription; if the user typed mid-flight, dictate at the end of the current buffer.
+Ownership precedes staleness: after every model/ASR await and before every edit or submit, the captured binding must still own the live Prompt/session and recording. A remount, session switch, dead binding, or replacement recording drops the result even if both buffers contain identical text. Within one owner, if `plainText` differs from the request snapshot, drop the control mutation and send, and toast `tui.voice.error.stale`. ASR also snapshots before transcription; if the same owner typed mid-flight, dictate at the end of its current buffer. A stopped recorder may flush to the same live owner, but UI state remains `finishing` until the recorder is drained and all pending work completes.
 
 ### Config / flags
 
@@ -118,3 +120,5 @@ Unchanged keys: `voice_enabled`, `voice_send_command`, `voice_control_enabled`, 
 - [x] T4: Upgrade ASR path to caret/selection placement. Acceptance: unit tests for append vs mid-insert vs selection-replace. (covers: S2; depends: T2)
 - [x] T5: Update existing `voice.test.ts` and add protocol/placement coverage. Acceptance: `bun test` from `packages/opencode` passes. (covers: S2; depends: T1–T4)
 - [x] T6: Typecheck + focused test run + review. Acceptance: `bun typecheck` and voice tests pass in package. (covers: S2; depends: T5)
+- [x] T7: Bind control/ASR results and stop-state settlement to Prompt/session/recording ownership. Acceptance: same-text rebind, replacement recording, stopped-owner flush, drain/pending, and stale stop-continuation regressions pass. (covers: S2; depends: T3–T5)
+- [x] T8: Convert display-width and UTF-16 offsets on grapheme boundaries. Acceptance: pure and live-OpenTUI combining/ZWJ selection and insertion round trips pass without splitting. (covers: S2; depends: T2, T5)

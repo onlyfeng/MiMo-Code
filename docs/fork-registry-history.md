@@ -11,6 +11,8 @@ they are never used as an `upstream` or `main behavior` review basis.
 
 | Date | Upstream | Main behavior | Active FD | Active FC | Changed-path total | Decision summary |
 | --- | --- | --- | ---: | ---: | --- | --- |
+| 2026-09-02 | `3282b34c46281dc8cd0610433d676a5ec93baa6e` | `7bfe6ac48e0db40b2b0b42c00b05a35032fcc113` | 6 | 16 | 280 paths; 25,704 insertions; 10,208 deletions | Classified all four incoming capabilities: adopted stable live-registry default-model fallback and Workspace-before-Spec Compose Next, then adapted the snapshot-bound `voice_input` protocol with FC-016 Prompt-owner, stop/drain, and grapheme-boundary hardening while retaining the schema/unnamed-call interoperability fix. |
+| 2026-09-01 | `d17e176ba179ea2568cdf5020bb65011aaf86493` | `4866d01f754429e3782f60983311c24468a9949a` | 6 | 15 | 92 paths; 10,085 insertions; 1,664 deletions | Ledger consistency correction for the already-recorded detailed review: adopted action-oriented tool guidance and retained the fork's stronger tri-state Codex-mode resolver, complete identity precedence, independent MCP-search opt-in, and transport separation. This row advances no behavior. |
 | 2026-09-01 | `2ce93f4188275aff0dc0353d36ec5f7538bcb32b` | `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` | 6 | 15 | 273 paths; 25,268 insertions; 10,065 deletions | Classified the single incoming OAuth-branding capability and adopted MiMoCode callback-page and dynamic-registration identity literals exactly; FC-004 remains the only clean carrier overlap, with URL validation, pending imports, request isolation, bounded diagnostics, and redaction unchanged. |
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `7c52b1412e9e39685b6975bdc4a4847fe2352647` | 6 | 13 | 211 paths; 19,057 insertions; 8,460 deletions | Retained the six shared rejection contracts and thirteen non-duplicating shared capability/process owners; adopted upstream custom-exec wrapper normalization while keeping the nested-authority and raw-size boundaries; restored the shared WebFetch target-classification baseline and scoped FC-010 to redirect permission/resource bounds; removed bounded upstream-format and loop-form drift. |
 | 2026-08-23 | `c23eeaed1983197f1c45ac3ec14c6b99784b7d27` | `d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39` | 6 | 13 | 211 paths; 19,073 insertions; 8,461 deletions | Correction: narrowed custom-exec leading-angle normalization to malformed variable-declaration assignments, preserving valid TypeScript const assertions and generic arrows while retaining the wrapper, raw-size, nested-authority, and timeout boundaries. |
@@ -1228,3 +1230,137 @@ Expected result: the four test groups report `93/0`, `8/0`, `97/0`, and
 4,274 warnings and zero errors; frozen dependency files, the retained
 Codex-mode/schema/SDK surfaces, the tracked worktree, and whitespace checks are
 clean.
+
+## 2026-09-02 default-model, Compose Next, and voice-control synchronization
+
+- Prior reviewed upstream:
+  `d17e176ba179ea2568cdf5020bb65011aaf86493`.
+- Freshly reviewed upstream:
+  `3282b34c46281dc8cd0610433d676a5ec93baa6e`.
+- Prior fork `main` tip:
+  `c9bdea878aa289f427c4bfbe798411d4907df600`.
+- Main behavior merge:
+  `39ced157d4d907255475624d806693aa989b8736`, whose parents are the prior
+  fork tip and freshly reviewed upstream.
+- The incoming range contains 4 commits, all first-parent commits, across 24
+  paths with 1,618 insertions and 458 deletions. It changes no dependency
+  manifest, lockfile, migration, workflow, version, SDK/OpenAPI producer, or
+  generated SDK/OpenAPI surface.
+- All 6 active FD and the prior 15 active FC records were reviewed. FC-016 was
+  added for the durable voice Prompt-owner, stop/drain, and grapheme-boundary
+  adaptation; no owner was retired, renumbered, or transferred.
+
+### Decision notes
+
+- Adopted `4f723f99`'s stable default-model chain. A configured default is now
+  accepted only when it exists in the live registry; a valid recent model wins
+  next; the last resort walks allowed providers and selects the first ID-sorted
+  model that supports text, tool calls, and a non-zero context. The retired
+  `mimo-auto` special case and menu-priority substring sort no longer select an
+  unusable model, and a stale configured model logs only once. FD-005 remains
+  authoritative for the later resolved-identity, harness, prompt, discovery,
+  toolset, retry, and transport decisions.
+- Adopted `6972b329`'s Workspace-before-Spec Compose Next contract. The active
+  workspace is selected before a durable feature document is written there;
+  no-spec review and missing-document finalize paths remain conditional. This
+  updates FC-011's bundled guidance without widening file or worktree authority.
+- Adopted `0bf62bf4`'s forced `voice_input` protocol. Control edits apply to a
+  frozen before/selection/after snapshot through insert, set, or
+  `set_with_cursor`; stale mutations are dropped, ASR inserts without sending,
+  send remains control-only, and surgical unchanged-buffer inserts preserve
+  paste/file extmarks. Agent switching was removed from the voice protocol.
+- Adopted `3282b34c`'s interoperability correction: the nested operation schema
+  emits `type: object`, a single otherwise-valid tool call may omit its function
+  name, and protocol diagnostics retain call-name/content evidence. The two
+  voice commits are one delivered protocol plus a separately auditable schema
+  hardening capability.
+- Adapted the incoming voice editor at `7bfe6ac4`: async control and ASR results
+  are bound to the live Prompt/session owner rather than text equality, stopped
+  recordings remain `finishing` until recorder drain and pending completion,
+  stale stop continuations cannot overwrite a replacement recording, and
+  display-width conversion walks complete grapheme clusters. FC-016 owns this
+  hardening.
+
+### Capability inventory (4/4)
+
+`AR-20260902-3282` is the audit range used by every result row:
+`old_upstream=d17e176ba179ea2568cdf5020bb65011aaf86493`,
+`new_upstream=3282b34c46281dc8cd0610433d676a5ec93baa6e`,
+`main_merge=39ced157d4d907255475624d806693aa989b8736`, and
+`main_behavior=7bfe6ac48e0db40b2b0b42c00b05a35032fcc113`.
+
+`MAIN-VERIFIED` means the 149-test provider/voice/offset default-path matrix passed
+with zero failures; package-local opencode and JavaScript SDK typechecks, the
+12-task pre-push typecheck, frozen installation, root lint with zero errors,
+dependency/generated-surface checks, and `git diff --check` passed. The package
+preload retained its owned `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`; every
+ambient user selector was removed before the default-path tests.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Stable live-registry default-model fallback | `AR-20260902-3282` | `4f723f99`; `provider.ts` `defaultModel`, `warnedStaleDefaultModels`; six new fallback regressions | FD-005 watches provider identity but owns harness classification after model selection; existing recent/config chain was a weaker partial implementation | DC-MODEL-001 uses inherited lite/default resolution for hidden title calls; DC-TUI-001 records the server-default variant display limit but defines no alternate fallback | partial duplicate and complementary | behavior, config, logging, tests, docs | shared main | Adopt the upstream live-registry validation, recent-first ordering, usable-chat filter, stable ID order, and one-time warning; retain FD-005's complete-identity and harness precedence | Six new defaultModel regressions plus the complete provider file matrix; `MAIN-VERIFIED` |
+| 2 | Workspace-owned Compose Next specification | `AR-20260902-3282` | `6972b329`; bundled `compose-next/SKILL.md` Workspace/Spec order; README/spec/mimocode guide | FC-011 owns factual bundled workflow guidance; FC-005 discovery is adjacent but unchanged | No DC owner or path overlap | conflicting prior ordering, then equivalent adoption | workflow contract, docs, naming-style | shared main | Adopt Workspace-before-Spec, workspace-root feature paths, no-spec acceptance criteria, and conditional finalize semantics | Shipped bundle/source excerpts, changed-path review, and `MAIN-VERIFIED` |
+| 3 | Snapshot-bound `voice_input` caret/selection control | `AR-20260902-3282` | `0bf62bf4`; `7bfe6ac4`; `voice-edit.ts`; `offset.ts`; `voice.ts` `processVoiceControl`; Prompt owner/stop lifecycle; voice/offset/i18n/spec tests | FC-016 owns Prompt/session binding, drain-before-idle, and grapheme-safe coordinates; FC-011 owns only the changed mimocode-facing command text | DC-TUI-001 changes the same Prompt path through `ModelMetadata`, `currentModelMetadata`, provider/model/variant layout, and `titleLocale`; DC-CONTEXT-001 is request-context adjacent but has no alternate voice protocol | adapted upstream behavior plus complementary same-path compat overlay | behavior, protocol, owner lifecycle, editor coordinates, tests, docs, i18n | shared main | Adopt the protocol; harden same-text remount/session ownership, replacement/stop races, and combining/ZWJ offsets; preserve DC-TUI-001 metadata/title layout during propagation | Snapshot/extmark/VAD/ASR/send plus real-OpenTUI grapheme and owner-state regressions; `MAIN-VERIFIED` |
+| 4 | Voice tool schema and unnamed-call interoperability | `AR-20260902-3282` | `3282b34c`; `VoiceInputOperation.meta({ type: "object" })`; `parseVoiceControlResponse`; nested-schema and unnamed-call tests | Complements capability 3 and is consumed under FC-016 without changing its schema semantics | Inherited by compat; DC-TUI-001 has no direct `voice.ts` or voice-test delta | complementary | schema contract, gateway compatibility, diagnostics, tests | shared main | Adopt the Zod-owned object shape, single unnamed-call tolerance, and diagnostic evidence without accepting multiple or wrong-name calls | Positive schema/unnamed-call and negative wrong-name/multiple-call regressions; `MAIN-VERIFIED` |
+
+Inventory count is 4 and result-row count is 4. Every substantive incoming
+capability records both branch counterparts, relationship, drift, canonical
+owner, disposition, and status evidence; no incoming capability remains
+unclassified.
+
+### Validation evidence
+
+- Before the merge, the provider/voice baseline passed 123 tests with zero
+  failures. The direct upstream merge passed 134 provider/voice tests. At the
+  stable hardened behavior, provider plus voice/offset passed 149 tests with
+  zero failures and 414 assertions (`92/0` plus `57/0`). One resource-contended
+  parallel run timed out the first provider test at five seconds; the complete
+  provider file then passed serially, with that test completing in 1.12 seconds.
+- `packages/opencode` and `packages/sdk/js` package-local typechecks passed. The
+  pre-push Turbo typecheck reported 12 successful tasks out of 12.
+- Root lint completed with 4,285 warnings and zero errors. The warnings are the
+  repository baseline class; no lint error was introduced.
+- `bun ci` installed from the frozen lockfile. `bun.lock` and tracked package
+  manifests remained unchanged.
+- SDK generation was not required because no SDK/OpenAPI producer or generated
+  surface changed. The selected range and final merge are whitespace-clean.
+
+### Reproduction
+
+Run from a clean checkout of the behavior commit:
+
+```bash
+(
+  set -e
+  test "$(git rev-parse HEAD)" = \
+    7bfe6ac48e0db40b2b0b42c00b05a35032fcc113
+
+  bun ci
+  git diff --exit-code -- bun.lock ':(glob)**/package.json'
+
+  cd packages/opencode
+  env -u MIMOCODE_EXPERIMENTAL \
+    -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+    -u MIMOCODE_CODEX_MODE \
+    -u MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL \
+    -u MIMOCODE_COMPACTION_MAX_CONTEXT \
+    -u MIMOCODE_COMPACTION_TRIGGER_RATIO \
+    -u MIMOCODE_DISABLE_CHECKPOINT \
+    bun test test/provider/provider.test.ts
+    bun test test/cli/tui/voice.test.ts test/cli/cmd/tui/offset.test.ts
+  bun typecheck
+  cd ../sdk/js
+  bun typecheck
+  cd ../../..
+
+  ./.husky/pre-push
+  bun lint
+  git diff --check c9bdea878aa289f427c4bfbe798411d4907df600 \
+    7bfe6ac48e0db40b2b0b42c00b05a35032fcc113
+)
+```
+
+Expected result: 149 tests and 414 assertions pass with zero failures; both
+package typechecks and all 12 pre-push tasks succeed; lint reports 4,285
+warnings and zero errors; frozen dependency, generated-surface, and whitespace
+checks remain clean.
