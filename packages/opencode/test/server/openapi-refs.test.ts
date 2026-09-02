@@ -16,6 +16,12 @@ function parameterNames(value: Record<string, unknown> | undefined) {
   )
 }
 
+function schema(doc: unknown, name: string) {
+  if (!isRecord(doc) || !isRecord(doc.components) || !isRecord(doc.components.schemas)) return undefined
+  const value = doc.components.schemas[name]
+  return isRecord(value) ? value : undefined
+}
+
 // zod-openapi rewrites every local `#/$defs/<name>` reference to
 // `#/components/schemas/<name>` but only hoists the definitions it knows by
 // name, so a recursive zod schema — `z.json()`, `z.lazy()`, any self-reference —
@@ -53,10 +59,7 @@ test("every $ref in the generated OpenAPI document resolves", async () => {
 })
 
 test("published OpenAPI keeps recovery and resume main-only", async () => {
-  const docs = [
-    await Server.openapi(),
-    await Bun.file(new URL("../../../sdk/openapi.json", import.meta.url)).json(),
-  ]
+  const docs = [await Server.openapi(), await Bun.file(new URL("../../../sdk/openapi.json", import.meta.url)).json()]
 
   for (const doc of docs) {
     const recovery = operation(doc, "/session/{sessionID}/recovery", "get")
@@ -69,4 +72,23 @@ test("published OpenAPI keeps recovery and resume main-only", async () => {
     expect(recovery?.description).toContain("main-agent")
     expect(resume?.description).toContain("main-agent")
   }
+})
+
+test("published OpenAPI keeps the runtime compaction projection contract", async () => {
+  const runtime = await Server.openapi()
+  const published = await Bun.file(new URL("../../../sdk/openapi.json", import.meta.url)).json()
+  const projection = schema(published, "CompactionPart")?.properties
+
+  expect(schema(published, "CompactionPart")).toEqual(schema(runtime, "CompactionPart"))
+  expect(isRecord(projection) && projection.projection).toMatchObject({
+    type: "object",
+    properties: {
+      version: { type: "number", const: 1 },
+      summary_message_id: { type: "string" },
+      summary: { type: "string" },
+      trigger: { type: "string", enum: ["manual", "automatic", "provider-overflow"] },
+      compacted_tool_calls: { type: "array" },
+    },
+    required: ["version", "summary_message_id", "summary", "trigger"],
+  })
 })
