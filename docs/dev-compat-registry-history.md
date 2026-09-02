@@ -11,6 +11,8 @@ never used as an inherited `main` or compat behavior review basis.
 
 | Date | Accepted `main` tip | Main behavior | Compat behavior | Active DC | Changed-path total | Decision summary |
 | --- | --- | --- | --- | ---: | --- | --- |
+| 2026-09-02 | `3ec8a8534ad4481c73f1946c966daf3a846cc29f` | `f1e2ba0019ee6ac13c2608474ae9237865b742f2` | `4130f181f86477f91245f42e8670d0c84203bcde` | 7 | 92 paths; 10,031 insertions; 1,662 deletions | Inherited the complete 2/2 WebSearch-model and session-ID audit without a compat fork; preserved request-scoped model flow, opaque legacy/new session keys, message chronology, and all seven DC owners with 112 focused passes. |
+| 2026-09-02 | `3a2b6c88fd50d460199d8b5b2721413d164ecba9` | `dad492e0af72d22d3ec796f6814eda7e52ed51a8` | `6c2fe63ad3d08d3eed4d5dfc44bab3aa934e559e` | 7 | 92 paths; 10,031 insertions; 1,662 deletions | Inherited the complete 4/4 published projection, harness-description, compaction-description, and 0.1.14 release audit; regenerated compat artifacts, preserved all seven DC owners, and retained checkpoint/callable-SDK coverage. |
 | 2026-09-02 | `28c1f36c8a3bc85bda7e3691960e7d0b531b8636` | `7bfe6ac48e0db40b2b0b42c00b05a35032fcc113` | `c8b02aeb991c37e570799bdd3696e276aa35ba77` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Inherited the complete 4/4 default-model, Compose Next, and voice audit plus FC-016; semantically resolved the Prompt conflict so shared owner/drain/grapheme behavior and compat provider/model/variant metadata both survive, with all seven DC owners unchanged. |
 | 2026-09-01 | `c9bdea878aa289f427c4bfbe798411d4907df600` | `4866d01f754429e3782f60983311c24468a9949a` | `17f24827b310d8e9b64d495370ca6ec63f28242c` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Propagated the complete 2/2 freshly fetched upstream range, adopted action-oriented prompt guidance, subsumed the weaker upstream Codex result into FD-005's stronger resolver, and preserved all seven compat owners with 71 named overlap sentinels. |
 | 2026-09-01 | `c6a2f5f3c8cd0851b36049da5176e2ee7fb81d05` | `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c` | `c594bb92ff5a11063c5e22936964ceae088e1d43` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Inherited the complete 2/2 Codex-mode specified change, retained all seven compat owners, and revalidated per-agent MaxMode, bounded preflight, frozen full-context actors, and compat-generated contracts without selecting the unrelated upstream prompt guidance. |
@@ -2044,3 +2046,240 @@ Expected result: the shared matrix passes `154/0`; the MaxMode and actor owner
 matrices pass `20/0` and `8/0`; both package typechecks and all 12 pre-push
 tasks succeed; lint reports 4,334 warnings and zero errors; frozen dependency,
 generated-surface, owner-path, and whitespace checks remain clean.
+
+## 2026-09-02 Xiaomi WebSearch model and session-ID propagation
+
+- Reviewed upstream:
+  `f82c177709019c759ce2bb06bd1b04cba488811e`.
+- Prior accepted `main` tip:
+  `3a2b6c88fd50d460199d8b5b2721413d164ecba9`.
+- Accepted `main` tip:
+  `3ec8a8534ad4481c73f1946c966daf3a846cc29f`.
+- Inherited main behavior:
+  `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
+- Prior compat tip:
+  `bd1eba712180daf135b81146af9266875b6dc6a9`.
+- Compat behavior merge:
+  `4130f181f86477f91245f42e8670d0c84203bcde`, whose parents are the prior
+  compat tip and accepted `main` tip.
+- Both shared capabilities and all seven active DC owners were reviewed. No
+  compat owner was added, retired, renumbered, or transferred. The merge had no
+  textual conflict.
+
+### Shared capability inheritance (2/2)
+
+| # | Capability | Shared owner | Compat overlap | Decision | Evidence |
+| ---: | --- | --- | --- | --- | --- |
+| C05 | Session-model Xiaomi WebSearch sidecar | FD-005; FD-006 is authority-adjacent | DC-MODEL-001 and DC-ACTOR-001 are selected-model neighbors; no compat path fork | Inherit request-scoped `model.api.id`; never substitute a catalog/default literal; retain per-agent MaxMode and actor model flow | Incoming WebSearch regression; four incoming blobs equal main; direct ID/WebSearch suite `11/0` |
+| C06 | Marker-free descending session IDs | Shared ID generation; FC-001 and FD-009 consume opaque IDs | DC-CONTEXT-001 and DC-ACTOR-001 consume the key; no compat owner defines an alternate format | Inherit marker-free new session IDs; accept legacy IDs; keep the descending message-ID marker and all actor/checkpoint chronology | ID regression, actor/session sentinels, and new/message/legacy runtime probe |
+
+Capability count is 2 and result-row count is 2. Every shared capability has a
+compat counterpart and disposition; no inherited behavior remains
+unclassified.
+
+### Compat owner review (7/7)
+
+| Owner | Incoming overlap | Preserved result | Status evidence |
+| --- | --- | --- | --- |
+| DC-NET-001 | none; WebSearch is not the WebFetch/SSRF call seam | Approved private WebFetch policy, per-hop asks, redirects, timeout, and 5 MB bound unchanged | RFC1918 WebFetch sentinel `1/0`; owner paths have zero propagation diff |
+| DC-NET-002 | none; `MimoWebsearch` is not remote-MCP lifecycle | RFC1918 remote-MCP client-creation guarantee unchanged | RFC1918 MCP sentinel `1/0`; owner paths have zero propagation diff |
+| DC-PLATFORM-001 | none | Restricted-network ripgrep and Windows archive fallbacks unchanged | Focused ripgrep/archive sentinels `2/0`; owner paths have zero propagation diff |
+| DC-MODEL-001 | WebSearch selected-model adjacency | Request-scoped API ID inherited; per-agent MaxMode, final-step/structured-output bounds, hidden title, and retry-status isolation unchanged | MaxMode owner matrix `20/0`; incoming WebSearch regression |
+| DC-CONTEXT-001 | Opaque session-key and WebSearch-output adjacency | Legacy/new IDs coexist without migration; stable memory path, checkpoint chronology, preflight, and output truncation unchanged | Lifecycle/context/list/recovery plus memory-path matrices within late default-path `60/0`; ID probe |
+| DC-ACTOR-001 | Actor-selected WebSearch model and child session ID | `session_id === actor_id === child.id`; frozen membership/system/cwd/permissions and static-prefix bounds unchanged | Actor/full-context `8/0`; new-session/fork-context `2/0` |
+| DC-TUI-001 | no changed component path | Session IDs remain opaque round trips; provider/model/variant truth and `titleLocale` submission unchanged | TUI model/metadata matrix `20/0`; owner paths have zero propagation diff |
+
+Owner count is 7 and result-row count is 7. All owners remain active and
+unchanged.
+
+### Validation evidence
+
+- `bun ci` checked 2,311 installs across 2,580 packages without changing the
+  lockfile or manifests.
+- The late default-path matrix passed 60 tests with zero failures: direct ID
+  and WebSearch `11/0`; lifecycle/context/recovery/registry `41/0`; session
+  listing `5/0`; actor session/fork-context `2/0`; and stable memory path `1/0`.
+  Every process removed all seven ambient selectors and used a 120-second
+  timeout.
+- Compat owner matrices passed 52 additional tests with zero failures: MaxMode
+  `20/0`, actor/full-context `8/0`, TUI model/metadata `20/0`, and the four
+  network/platform sentinels `4/0`.
+- A runtime probe generated a marker-free session ID, confirmed descending
+  message IDs retain `-`, and accepted a legacy `ses_-...` value through both
+  the given-ID and session-schema paths.
+- Excluding the three inherited shared registry/history documents, propagation
+  changes exactly the four audited paths with 116 insertions and four
+  deletions. Those four blobs are byte-identical to inherited main behavior;
+  the shared registries are byte-identical to accepted `main`.
+- The inherited-main-to-compat non-registry patch remains exactly the prior
+  reviewed overlay: 92 paths, 10,031 insertions, 1,662 deletions, and binary
+  diff SHA-256 `9b4d95b61ab45e509a3f161cc0fe71c1a5b89a339d87b06bcd1f57a3173832c2`.
+- `packages/opencode` and `packages/sdk/js` typechecks passed. The pre-push
+  Turbo typecheck reported 12 successful tasks out of 12. Root lint completed
+  with 4,334 warnings and zero errors, matching the established compat warning
+  baseline.
+- The merge parentage and changed-path allowlist are exact, and the propagation
+  range passes `git diff --check`.
+
+### Shared inheritance and changed-path calculation
+
+```bash
+git diff --shortstat \
+  f1e2ba0019ee6ac13c2608474ae9237865b742f2 \
+  4130f181f86477f91245f42e8670d0c84203bcde -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md' \
+  ':(exclude)docs/compose/spec/voice-control-tool-protocol.md'
+git diff --binary \
+  f1e2ba0019ee6ac13c2608474ae9237865b742f2 \
+  4130f181f86477f91245f42e8670d0c84203bcde -- . \
+  ':(exclude)docs/upstream-deviations.md' \
+  ':(exclude)docs/fork-capabilities.md' \
+  ':(exclude)docs/dev-compat-overrides.md' \
+  ':(exclude)docs/fork-registry-history.md' \
+  ':(exclude)docs/dev-compat-registry-history.md' \
+  ':(exclude)docs/compose/spec/voice-control-tool-protocol.md' | shasum -a 256
+```
+
+Expected result: `92 files changed, 10031 insertions(+), 1662 deletions(-)` and
+SHA-256 `9b4d95b61ab45e509a3f161cc0fe71c1a5b89a339d87b06bcd1f57a3173832c2`.
+
+### Exact behavior reproduction
+
+Run from a clean checkout of exact compat behavior
+`4130f181f86477f91245f42e8670d0c84203bcde`.
+
+```bash
+(
+  set -e
+  test "$(git rev-parse HEAD)" = \
+    4130f181f86477f91245f42e8670d0c84203bcde
+  test "$(git rev-parse HEAD^1)" = \
+    bd1eba712180daf135b81146af9266875b6dc6a9
+  test "$(git rev-parse HEAD^2)" = \
+    3ec8a8534ad4481c73f1946c966daf3a846cc29f
+
+  bun ci
+  git diff --exit-code -- bun.lock ':(glob)**/package.json'
+  test "$(git diff --name-only HEAD^1 HEAD -- . \
+    ':(exclude)docs/upstream-deviations.md' \
+    ':(exclude)docs/fork-capabilities.md' \
+    ':(exclude)docs/fork-registry-history.md')" = "$(printf '%s\n' \
+      packages/opencode/src/id/id.ts \
+      packages/opencode/src/tool/websearch/index.ts \
+      packages/opencode/test/id/id.test.ts \
+      packages/opencode/test/tool/websearch.test.ts)"
+  test "$(git diff --shortstat HEAD^1 HEAD -- . \
+    ':(exclude)docs/upstream-deviations.md' \
+    ':(exclude)docs/fork-capabilities.md' \
+    ':(exclude)docs/fork-registry-history.md')" = \
+    ' 4 files changed, 116 insertions(+), 4 deletions(-)'
+  git diff --exit-code \
+    f1e2ba0019ee6ac13c2608474ae9237865b742f2 HEAD -- \
+    packages/opencode/src/id/id.ts \
+    packages/opencode/src/tool/websearch/index.ts \
+    packages/opencode/test/id/id.test.ts \
+    packages/opencode/test/tool/websearch.test.ts
+  git diff --exit-code \
+    3ec8a8534ad4481c73f1946c966daf3a846cc29f HEAD -- \
+    docs/upstream-deviations.md docs/fork-capabilities.md \
+    docs/fork-registry-history.md
+  test "$(git diff --name-only \
+    f1e2ba0019ee6ac13c2608474ae9237865b742f2 HEAD -- . \
+    ':(exclude)docs/upstream-deviations.md' \
+    ':(exclude)docs/fork-capabilities.md' \
+    ':(exclude)docs/dev-compat-overrides.md' \
+    ':(exclude)docs/fork-registry-history.md' \
+    ':(exclude)docs/dev-compat-registry-history.md' \
+    ':(exclude)docs/compose/spec/voice-control-tool-protocol.md' \
+    | wc -l | tr -d ' ')" = 92
+  test "$(git diff --binary \
+    f1e2ba0019ee6ac13c2608474ae9237865b742f2 HEAD -- . \
+    ':(exclude)docs/upstream-deviations.md' \
+    ':(exclude)docs/fork-capabilities.md' \
+    ':(exclude)docs/dev-compat-overrides.md' \
+    ':(exclude)docs/fork-registry-history.md' \
+    ':(exclude)docs/dev-compat-registry-history.md' \
+    ':(exclude)docs/compose/spec/voice-control-tool-protocol.md' \
+    | shasum -a 256 | awk '{print $1}')" = \
+    9b4d95b61ab45e509a3f161cc0fe71c1a5b89a339d87b06bcd1f57a3173832c2
+  git diff --check HEAD^1 HEAD
+
+  bun -e '
+    import { Identifier } from "./packages/opencode/src/id/id.ts"
+    const session = Identifier.descending("session")
+    const message = Identifier.descending("message")
+    const legacy = "ses_-0000000000000000abcdefghi"
+    if (!/^ses_[0-9a-f]{16}[0-9A-Za-z]{10}$/.test(session)) process.exit(1)
+    if (!message.startsWith("msg_-")) process.exit(1)
+    if (Identifier.descending("session", legacy) !== legacy) process.exit(1)
+    if (Identifier.schema("session").parse(legacy) !== legacy) process.exit(1)
+  '
+
+  cd packages/opencode
+  run_default() {
+    env -u MIMOCODE_EXPERIMENTAL \
+      -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+      -u MIMOCODE_CODEX_MODE \
+      -u MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL \
+      -u MIMOCODE_COMPACTION_MAX_CONTEXT \
+      -u MIMOCODE_COMPACTION_TRIGGER_RATIO \
+      -u MIMOCODE_DISABLE_CHECKPOINT "$@"
+  }
+
+  run_default bun test test/id/id.test.ts test/tool/websearch.test.ts \
+    --timeout 120000
+  run_default bun test \
+    test/session/session-create-registers-main.test.ts \
+    test/session/context-inheritance.test.ts \
+    test/session/main-lifecycle.test.ts \
+    test/server/global-session-list.test.ts \
+    test/server/session-recovery.test.ts \
+    test/actor/registry.test.ts --timeout 120000
+  run_default bun test test/server/session-list.test.ts --timeout 120000
+  run_default bun test test/actor/spawn.test.ts \
+    -t 'creates a new sessionID|forkContext stored under child session id' \
+    --timeout 120000
+  run_default bun test test/session/llm-system-prompt.test.ts \
+    -t 'memory instructions keep session paths stable' --timeout 120000
+
+  run_default bun test test/session/max-mode.test.ts --timeout 120000
+  run_default bun test test/session/prompt-effect.test.ts \
+    -t 'MaxMode candidate retries|MaxMode final step|subagent maxMode retries|last-step maxMode|json_schema output' \
+    --timeout 120000
+  run_default bun test test/tool/actor.test.ts \
+    -t 'captures the caller-visible prefix|fails before spawning' \
+    --timeout 120000
+  run_default bun test test/session/llm-request-prefix.test.ts \
+    -t 'frozen full-context tools' --timeout 120000
+  run_default bun test test/session/prompt-effect.test.ts \
+    -t 'full-context fork includes a newly committed request|pinned full-context fork can search an MCP tool|frozen fork preflight fails closed' \
+    --timeout 120000
+  run_default bun test \
+    test/cli/tui/model.test.ts test/cli/tui/model-metadata.test.tsx \
+    --timeout 120000
+  run_default bun test test/tool/webfetch.test.ts \
+    -t 'allows an approved RFC1918 fetch target' --timeout 120000
+  run_default bun test test/mcp/lifecycle.test.ts \
+    -t 'compat permits an RFC1918 remote MCP endpoint' --timeout 120000
+  run_default bun test test/file/ripgrep.test.ts \
+    -t 'fallback files handles only simple listings' --timeout 120000
+  run_default bun test test/util/archive.test.ts \
+    -t 'windows zip extractor uses a case-sensitive zip-slip guard' \
+    --timeout 120000
+
+  bun typecheck
+  (cd ../sdk/js && bun typecheck)
+  cd ../..
+  ./.husky/pre-push
+  bun lint
+)
+```
+
+Expected result: late default-path tests pass `60/0`; compat owner matrices pass
+`52/0`; both package typechecks and all 12 pre-push tasks succeed; lint exits
+with 4,334 warnings and zero errors; dependency, path/blob, ID compatibility,
+parentage, and whitespace checks remain clean.
