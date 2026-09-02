@@ -1364,3 +1364,140 @@ Expected result: 149 tests and 414 assertions pass with zero failures; both
 package typechecks and all 12 pre-push tasks succeed; lint reports 4,285
 warnings and zero errors; frozen dependency, generated-surface, and whitespace
 checks remain clean.
+
+## 2026-09-02 OpenAPI projection contract and 0.1.14 release synchronization
+
+- Prior reviewed upstream:
+  `3282b34c46281dc8cd0610433d676a5ec93baa6e`.
+- Freshly reviewed upstream:
+  `2a0eb706e95a77cba34a319e9f11f33f26d4450c`.
+- Prior fork `main` tip:
+  `28c1f36c8a3bc85bda7e3691960e7d0b531b8636`.
+- Main merge:
+  `a11d64c8a10032f824966ad39e5d73195e3f8642`, whose parents are the prior
+  fork tip and freshly reviewed upstream.
+- Stable main behavior:
+  `dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+- The incoming range contains two first-parent commits / PRs (#2310 and #2311)
+  across 19 paths with 88 insertions and 39 deletions. It changes no runtime
+  source, migration, workflow, or test source.
+- Merge conflicts were limited to `packages/sdk/openapi.json` and
+  `packages/sdk/js/src/v2/gen/types.gen.ts`. Both were regenerated from fork
+  source; neither upstream generated file was accepted as an authority.
+- Relative to prior `main`, all sixteen package manifests and `bun.lock` adopt
+  `0.1.14`. Published OpenAPI adds `CompactionPart.projection` and updates the
+  deprecated compaction-field descriptions. JavaScript SDK types remain
+  byte-identical to prior `main`; an OpenAPI contract regression binds the
+  runtime and published projection schemas.
+
+### Decision notes
+
+- Adopted upstream's missing published `CompactionPart.projection` carrier for
+  the already-shipped runtime projection. The regression failed on the prior
+  fork artifact and passed after regeneration.
+- Rejected upstream's generated harness wording because it omits FD-005's
+  explicit-session precedence. Fork-source regeneration keeps the stronger
+  session, process tri-state, and model-inference order in both artifacts.
+- Adopted the deprecated `tail_turns` description and adapted
+  `preserve_recent_tokens`: 40K is an upper bound, additionally capped by the
+  reserve-safe usable window after frozen-prefix and projection overhead.
+- Adopted the synchronized `0.1.14` release metadata without changing fork
+  publication routing or dependency selections.
+
+### Capability inventory (4/4)
+
+`AR-20260902-2A0` is the audit range used by every result row:
+`old_upstream=3282b34c46281dc8cd0610433d676a5ec93baa6e`,
+`new_upstream=2a0eb706e95a77cba34a319e9f11f33f26d4450c`,
+`prior_main=28c1f36c8a3bc85bda7e3691960e7d0b531b8636`,
+`main_merge=a11d64c8a10032f824966ad39e5d73195e3f8642`, and
+`main_behavior=dad492e0af72d22d3ec796f6814eda7e52ed51a8`.
+
+`MAIN-VERIFIED` means 197 default-path tests passed, two pre-existing
+  cancellation tests were skipped, and zero tests failed; both package
+  typechecks, root lint with zero errors, frozen installation, independent
+  published-OpenAPI and JavaScript-SDK generation checks, release/surface
+  assertions, and diff checks passed. Compatibility counterparts below are
+  propagation audit targets and claim no compat result.
+
+| # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
+| ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Published compaction projection schema | `AR-20260902-2A0` | `159d8479`; `packages/sdk/openapi.json`; `CompactionPart.projection`; OpenAPI contract regression | FC-015 projection and reserve-safe context boundary; FD-004 guards the published API | DC-CONTEXT-001 publishes checkpoint coverage beside the inherited projection; DC-ACTOR-001 is semantically adjacent but owns no alternate schema | generated representation gap for existing behavior | schema, generated artifact, API contract, tests | shared main | Adopt through fork-source regeneration while retaining every fork-only schema | Runtime/published literal projection comparison, generator idempotence, and `MAIN-VERIFIED` |
+| 2 | Harness API-description precedence | `AR-20260902-2A0` | `159d8479`; prompt, async-prompt, and command `harness` descriptions in OpenAPI and JS types | FD-005 resolved identity and session/process harness precedence | DC-MODEL-001, DC-CONTEXT-001, and DC-ACTOR-001 are request-path neighbors but define no alternate harness priority | partial duplicate with conflicting description | config contract, docs, generated artifact | shared main | Retain fork wording: explicit session mode wins; process true/false applies only under `auto`, then model inference | Fork-source regeneration; JS types byte-identical to prior main; Codex/system/request regressions in `MAIN-VERIFIED` |
+| 3 | Deprecated compaction-config descriptions | `AR-20260902-2A0` | `159d8479`; OpenAPI `tail_turns` and `preserve_recent_tokens` descriptions | FC-015 projection tail and usable-window/reserve boundary | DC-CONTEXT-001 preserves effective-window preflight and published checkpoint contracts; no alternate compatibility setting | partial duplicate with one conflicting bound | config docs, schema, generated artifact | shared main | Adopt the projected-tail deprecation and preserve the stronger at-most-40K plus reserve-safe effective-window bound | Overflow and compaction-projection matrices plus generated-source review in `MAIN-VERIFIED` |
+| 4 | 0.1.14 workspace release metadata | `AR-20260902-2A0` | `2a0eb706`; sixteen package manifests and `bun.lock` | FC-012 fork publication routing; FD-004 watches SDK publication | No compat-only dependency or version owner; every changed file must be inherited byte-for-byte | no overlap | release metadata, lockfile | shared main | Adopt the complete synchronized version set without changing dependencies or publication destinations | `bun ci` made no changes; changed manifests and lockfile equal upstream; `MAIN-VERIFIED` |
+
+Inventory count is 4 and result-row count is 4. Every incoming capability has
+a main and compatibility counterpart, relationship, drift, canonical owner,
+disposition, and status evidence; no incoming capability remains unclassified.
+
+### Validation evidence
+
+- Before resolution, the new projection regression passed for runtime OpenAPI
+  but failed for the published artifact. After regeneration, all three OpenAPI
+  contract tests passed.
+- The final default-path matrix ran eight files: 197 passed, two skipped, and
+  zero failed. The skips are existing cancellation cases, not this sync's
+  generated or release surfaces.
+- `packages/opencode` and `packages/sdk/js` typechecks passed. Root lint
+  completed with 4,285 warnings and zero errors.
+- `bun ci` completed without changing the frozen lockfile or manifests. A fresh
+  runtime OpenAPI document was byte-identical to the published artifact, and the
+  JavaScript SDK generator was idempotent after resolution.
+- All changed manifests and `bun.lock` equal upstream; JavaScript SDK types
+  equal prior `main`; no runtime, migration, or workflow path changed. The
+  stable behavior range and current documentation edits pass `git diff --check`.
+
+### Reproduction
+
+Run from a clean checkout of the stable behavior commit:
+
+```bash
+(
+  set -e
+  test "$(git rev-parse HEAD)" = \
+    dad492e0af72d22d3ec796f6814eda7e52ed51a8
+
+  bun ci
+  openapi_probe="$(mktemp)"
+  trap 'rm -f "$openapi_probe"' EXIT
+  bun run --cwd packages/opencode dev generate > "$openapi_probe"
+  cmp "$openapi_probe" packages/sdk/openapi.json
+  ./packages/sdk/js/script/build.ts
+  git diff --exit-code -- packages/sdk/js/src/v2/gen
+  git diff --exit-code \
+    2a0eb706e95a77cba34a319e9f11f33f26d4450c..HEAD -- \
+    bun.lock ':(glob)**/package.json'
+
+  cd packages/opencode
+  env -u MIMOCODE_EXPERIMENTAL \
+    -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH \
+    -u MIMOCODE_CODEX_MODE \
+    -u MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL \
+    -u MIMOCODE_COMPACTION_MAX_CONTEXT \
+    -u MIMOCODE_COMPACTION_TRIGGER_RATIO \
+    -u MIMOCODE_DISABLE_CHECKPOINT \
+    bun test \
+      test/server/openapi-refs.test.ts \
+      test/session/compaction-projection.test.ts \
+      test/session/overflow.test.ts \
+      test/flag/codex-mode-flag.test.ts \
+      test/tool/gpt.test.ts \
+      test/session/system.test.ts \
+      test/session/prompt-effect.test.ts \
+      test/session/llm-request-prefix.test.ts --timeout 120000
+  bun typecheck
+  cd ../sdk/js
+  bun typecheck
+  cd ../../..
+
+  bun lint
+  git diff --check \
+    28c1f36c8a3bc85bda7e3691960e7d0b531b8636 \
+    dad492e0af72d22d3ec796f6814eda7e52ed51a8
+)
+```
+
+Expected result: 197 tests pass, two existing cancellation tests skip, and no
+test fails; both typechecks exit zero; lint reports 4,285 warnings and zero
+errors; SDK generation, release metadata, and whitespace checks remain clean.
