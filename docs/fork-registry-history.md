@@ -11,6 +11,7 @@ they are never used as an `upstream` or `main behavior` review basis.
 
 | Date | Upstream | Main behavior | Active FD | Active FC | Changed-path total | Decision summary |
 | --- | --- | --- | ---: | ---: | --- | --- |
+| 2026-09-03 | `f82c177709019c759ce2bb06bd1b04cba488811e` | `96d00e06ad1640a80f70c9eda1ed10e62ed5ab79` | 6 | 16 | 284 paths; 28,467 insertions; 10,209 deletions | Correction: restored upstream's fire-and-forget `prompt_async` queue contract after `1cfe7efc` incorrectly extended synchronous busy admission to that producer route; removed 409 from every published projection, bound the regression to the server's actual `AppRuntime`, and removed unrelated TUI recovery hardening. |
 | 2026-09-02 | `3282b34c46281dc8cd0610433d676a5ec93baa6e` | `7bfe6ac48e0db40b2b0b42c00b05a35032fcc113` | 6 | 16 | 280 paths; 25,704 insertions; 10,208 deletions | Classified all four incoming capabilities: adopted stable live-registry default-model fallback and Workspace-before-Spec Compose Next, then adapted the snapshot-bound `voice_input` protocol with FC-016 Prompt-owner, stop/drain, and grapheme-boundary hardening while retaining the schema/unnamed-call interoperability fix. |
 | 2026-09-01 | `d17e176ba179ea2568cdf5020bb65011aaf86493` | `4866d01f754429e3782f60983311c24468a9949a` | 6 | 15 | 92 paths; 10,085 insertions; 1,664 deletions | Ledger consistency correction for the already-recorded detailed review: adopted action-oriented tool guidance and retained the fork's stronger tri-state Codex-mode resolver, complete identity precedence, independent MCP-search opt-in, and transport separation. This row advances no behavior. |
 | 2026-09-01 | `2ce93f4188275aff0dc0353d36ec5f7538bcb32b` | `c63ae51911f8455fd1cc8defcc4a0a2e827889e2` | 6 | 15 | 273 paths; 25,268 insertions; 10,065 deletions | Classified the single incoming OAuth-branding capability and adopted MiMoCode callback-page and dynamic-registration identity literals exactly; FC-004 remains the only clean carrier overlap, with URL validation, pending imports, request isolation, bounded diagnostics, and redaction unchanged. |
@@ -1644,3 +1645,42 @@ byte-for-byte; the new-session, descending-message, and legacy-session probe
 passes; and the five groups pass 11, 41, 5, 93, and 8 tests, respectively, for
 158 total passes and zero failures. Exact published-SHA CI remains required by
 the synchronization completion gate.
+
+## 2026-09-03 `prompt_async` queue contract correction
+
+- Reviewed upstream:
+  `f82c177709019c759ce2bb06bd1b04cba488811e`.
+- Prior fork `main` tip:
+  `3ec8a8534ad4481c73f1946c966daf3a846cc29f`.
+- Stable main behavior:
+  `96d00e06ad1640a80f70c9eda1ed10e62ed5ab79`.
+- The correction range changes six paths. Relative to the reviewed upstream,
+  the stable behavior contains 284 paths with 28,467 insertions and 10,209
+  deletions.
+
+### Decision notes
+
+- `1cfe7efc8f13da6157f30324c4eeac0111e99115` correctly introduced atomic
+  admission for synchronous session execution, but incorrectly generalized it
+  to the asynchronous producer route. Applying `startPrompt` before
+  `createUserMessage` made a busy session return 409 without recording the
+  user's input.
+- Restored upstream's `SessionPrompt.prompt` path for `prompt_async`; synchronous
+  prompt, command, init, shell, summarize, and resume entry points retain their
+  typed busy admission. The runtime route, published OpenAPI, and JavaScript SDK
+  now agree that `prompt_async` has no 409 response.
+- Removed the unrelated TUI `throwOnError` and editor-restoration changes. The
+  correction owns queue persistence only; final-transition draining remains a
+  separate run-loop invariant.
+
+### Validation evidence
+
+- The server regression occupies the main runner inside the same `AppRuntime`
+  used by the HTTP route and requires exactly one persisted user message. A
+  mutation back to `startPrompt` produced `{ status: 204, texts: [] }`; restoring
+  `prompt` produced `{ status: 204, texts: ["queued while busy"] }`.
+- The focused busy-route and OpenAPI matrix passed nine tests with zero
+  failures. Both `packages/opencode` and `packages/sdk/js` typechecks exited
+  zero, and runtime OpenAPI was byte-identical to the published artifact.
+- The two TUI files are byte-identical to prior fork `main`; this correction
+  adds no client-side failure-recovery behavior and no run-loop break change.

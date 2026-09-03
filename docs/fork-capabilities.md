@@ -15,11 +15,11 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-02
+- Last reviewed: 2026-09-03
 - Upstream: `f82c177709019c759ce2bb06bd1b04cba488811e`
 - Prior reviewed upstream: `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
-- Main behavior: `f1e2ba0019ee6ac13c2608474ae9237865b742f2`
-- Prior fork `main` tip: `3a2b6c88fd50d460199d8b5b2721413d164ecba9`
+- Main behavior: `96d00e06ad1640a80f70c9eda1ed10e62ed5ab79`
+- Prior fork `main` tip: `3ec8a8534ad4481c73f1946c966daf3a846cc29f`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -29,7 +29,7 @@ registry or history commit does not advance either behavior reference.
 
 | ID | Watch surfaces | Upstream relationship | Required decision |
 | --- | --- | --- | --- |
-| FC-001 | actor, inbox, runner, session state, recovery/resume | Typed upstream admission plus stronger fork lifecycle | Preserve atomic admission and linearization |
+| FC-001 | actor, inbox, runner, session state, recovery/resume | Typed upstream admission plus stronger fork lifecycle | Preserve synchronous admission and async queue persistence |
 | FC-002 | checkpoint writer and frozen request prefix | Extension plus adaptation | Preserve writer-mode semantics |
 | FC-003 | read/edit state and instance disposal | Fork hardening | Preserve actor/instance scope |
 | FC-004 | MCP configuration, connection state, and local exit diagnostics | Fork hardening | Preserve validation, redaction, and isolation |
@@ -100,7 +100,7 @@ registry or history commit does not advance either behavior reference.
   main-only OpenAPI regressions, replace-agent actor-scope regressions, and
   actor/session tool tests at the reviewed main behavior.
 - Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
-  main behavior `f1e2ba0019ee6ac13c2608474ae9237865b742f2`.
+  main behavior `96d00e06ad1640a80f70c9eda1ed10e62ed5ab79`.
 - 2026-08-28 review: adopted strict spawn/run argument rejection and the
   existing `send` follow-up path while preserving caller-resolution,
   generation, persistent wake, and frozen-context fail-closed contracts.
