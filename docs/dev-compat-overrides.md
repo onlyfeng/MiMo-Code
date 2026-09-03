@@ -12,13 +12,13 @@ registry/history commit does not advance either behavior reference below.
 
 - Status: active
 - Canonical owner: fork `dev/compat`
-- Last reviewed: 2026-09-02
+- Last reviewed: 2026-09-03
 - Reviewed upstream: `f82c177709019c759ce2bb06bd1b04cba488811e`
-- Accepted `main` tip: `3ec8a8534ad4481c73f1946c966daf3a846cc29f`
-- Inherited main behavior: `f1e2ba0019ee6ac13c2608474ae9237865b742f2`
-- Compat behavior: `4130f181f86477f91245f42e8670d0c84203bcde`
-- Prior compat tip: `bd1eba712180daf135b81146af9266875b6dc6a9`
-- Main-audit inheritance merge: `4130f181f86477f91245f42e8670d0c84203bcde`
+- Accepted `main` tip: `65a31144e14849ee2432001bd62bc7902f2c6f29`
+- Inherited main behavior: `96d00e06ad1640a80f70c9eda1ed10e62ed5ab79`
+- Compat behavior: `560de61b663a159771b53b05e826dc2cc91675ac`
+- Prior compat tip: `6ee56c116384d54f1269766e348e655d2dc659d6`
+- Main-audit inheritance merge: `560de61b663a159771b53b05e826dc2cc91675ac`
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -99,6 +99,16 @@ and retains its provider/model/variant truth. The three network/platform owners
 have no path or contract overlap. All seven entries remain active and unchanged
 at compat behavior `4130f181f86477f91245f42e8670d0c84203bcde`.
 
+The 2026-09-03 PR #73 specified-change propagation inherits the shared
+`prompt_async` queue correction without creating a compat-only override. The
+route now persists through `SessionPrompt.prompt` before joining an active run,
+and the runtime OpenAPI plus generated JavaScript SDK consistently omit a 409
+response for that fire-and-forget endpoint. DC-CONTEXT-001 directly overlaps
+the route and published contract; DC-MODEL-001 overlaps only generated schema
+carriers. The other five owners have no changed path, and all seven active
+entries remain unchanged at compat behavior
+`560de61b663a159771b53b05e826dc2cc91675ac`.
+
 ## Sync index
 
 | ID | Watch surfaces | Relationship to inherited `main` | Required decision |
@@ -162,6 +172,8 @@ at compat behavior `4130f181f86477f91245f42e8670d0c84203bcde`.
 - 2026-09-02 WebSearch/session-ID sync: Xiaomi WebSearch does not use the
   WebFetch/SSRF call seam. The approved private-target policy, per-hop asks,
   timeout, redirect limit, and 5 MB bound remain unchanged.
+- 2026-09-03 PR #73 propagation: no WebFetch/SSRF path or symbol overlap; the
+  approved private-target behavior and inherited bounds remain unchanged.
 - Exit condition: retire or narrow this override only after a shared,
   operator-controlled private-network authorization mechanism preserves
   required intranet access while retaining per-hop permission and resource
@@ -209,6 +221,8 @@ at compat behavior `4130f181f86477f91245f42e8670d0c84203bcde`.
 - 2026-09-02 WebSearch/session-ID sync: the Xiaomi `MimoWebsearch` sidecar is
   not the remote-MCP lifecycle. No MCP path changed, and the RFC1918
   client-creation guarantee remains unchanged.
+- 2026-09-03 PR #73 propagation: no MCP path or symbol overlap; RFC1918 remote
+  MCP reachability remains unchanged.
 - Exit condition: any future `main` private-address MCP classifier triggers a
   fresh policy review and, if intranet access remains required, a minimal
   compat-only production override. Retire the test owner only when the shared
@@ -256,6 +270,8 @@ at compat behavior `4130f181f86477f91245f42e8670d0c84203bcde`.
   both platform fallbacks remain compat-only and unchanged.
 - 2026-09-02 WebSearch/session-ID sync: no ripgrep/archive path or symbol
   overlap; the restricted-network and Windows fallbacks remain unchanged.
+- 2026-09-03 PR #73 propagation: no ripgrep/archive path or symbol overlap;
+  both platform fallbacks remain unchanged.
 - Exit condition: keep this entry compat-only; it is not proposed for `main`.
   Reconsider only when the supported deployment can reliably provision the
   shared binaries, or upstream supplies equivalent fallbacks with the same
@@ -325,6 +341,9 @@ at compat behavior `4130f181f86477f91245f42e8670d0c84203bcde`.
   `model.api.id` for Xiaomi WebSearch. Per-agent MaxMode, final-step and
   `json_schema` gates, hidden-title routing, and retry-status isolation remain
   compat-owned and unchanged.
+- 2026-09-03 PR #73 propagation: generated OpenAPI/SDK carriers overlap, but
+  `AgentConfig.maxMode`, routing, final-step, structured-output, hidden-title,
+  and retry-status behavior remain unchanged.
 - Exit condition: retire when shared `main` exposes equivalent per-agent
   opt-in, generated interfaces, mode exclusions, retry behavior, and final-step
   enforcement; do not retire merely because the global experimental switch
@@ -466,6 +485,10 @@ at compat behavior `4130f181f86477f91245f42e8670d0c84203bcde`.
   legacy formats coexist without migration, while descending message IDs keep
   their chronology marker. Stable memory paths, checkpoint coverage, request
   preflight, and existing WebSearch-output truncation remain unchanged.
+- 2026-09-03 PR #73 propagation: inherited the shared `prompt_async` queue
+  producer and its 204/400/404 public contract. Compat content caps, prefix
+  snapshots, preflight, compaction, checkpoint chronology, and recovery routes
+  remain unchanged.
 - Exit condition: retire only when shared `main` enforces equivalent caps and
   non-throwing serialization at every model-visible boundary and performs the
   same request-aware, active-tool preflight without weakening FD-002 delivery.
@@ -552,6 +575,9 @@ at compat behavior `4130f181f86477f91245f42e8670d0c84203bcde`.
   `session_id`, `actor_id`, and child ID under the new format. Actor-selected
   request models continue through `ctx.extra.model` to WebSearch; frozen
   membership, system, cwd, permissions, and static-prefix behavior are intact.
+- 2026-09-03 PR #73 propagation: FC-001 queue admission is lifecycle-adjacent,
+  but no actor path changed. Frozen membership, system, cwd, permissions, and
+  static-prefix behavior remain intact.
 - Exit condition: retire only when shared `main` supplies equivalent
   frozen-membership full-context actors, bounded state transport, and
   unrecoverable-static-prefix handling while FD-009 and FC-001 remain satisfied
@@ -613,6 +639,9 @@ at compat behavior `4130f181f86477f91245f42e8670d0c84203bcde`.
 - 2026-09-02 WebSearch/session-ID sync: no TUI component path changed. Session
   IDs remain opaque round-trip values; provider/model/variant truth and both
   `titleLocale` submission paths remain unchanged.
+- 2026-09-03 PR #73 propagation: no TUI component path changed. The existing
+  client-visible queued state now has its shared persisted producer restored;
+  provider/model/variant truth and locale submission remain unchanged.
 - Known limits: an unconfigured built-in tier can display `variant: none` while
   the server resolves an agent variant through its default-model path. An
   in-session agent switch can likewise display `variant: none` until the TUI has

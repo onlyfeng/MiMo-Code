@@ -2283,3 +2283,63 @@ Expected result: late default-path tests pass `60/0`; compat owner matrices pass
 `52/0`; both package typechecks and all 12 pre-push tasks succeed; lint exits
 with 4,334 warnings and zero errors; dependency, path/blob, ID compatibility,
 parentage, and whitespace checks remain clean.
+
+## 2026-09-03 PR #73 `prompt_async` queue correction propagation
+
+- Reviewed upstream remains
+  `f82c177709019c759ce2bb06bd1b04cba488811e`; this specified-change
+  propagation did not select or merge a new upstream range.
+- Prior accepted `main` tip:
+  `3ec8a8534ad4481c73f1946c966daf3a846cc29f`.
+- Accepted `main` tip:
+  `65a31144e14849ee2432001bd62bc7902f2c6f29`.
+- Inherited main behavior:
+  `96d00e06ad1640a80f70c9eda1ed10e62ed5ab79`.
+- Prior compat tip:
+  `6ee56c116384d54f1269766e348e655d2dc659d6`.
+- Compat behavior merge:
+  `560de61b663a159771b53b05e826dc2cc91675ac`, whose parents are the prior
+  compat tip and accepted `main` tip.
+- The conflict-free merge tree exactly matched the pre-merge prediction
+  `8493a389421541fda972abb35b10756d97b0a2ae`. No compat owner was added,
+  retired, renumbered, or transferred.
+
+### Shared capability inheritance (1/1)
+
+| # | Capability | Shared owner | Compat overlap | Decision | Evidence |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | Fire-and-forget `prompt_async` queue persistence and 204/400/404 API contract | FC-001; FD-004 owns the API publication boundary | DC-CONTEXT-001 directly overlaps the route and generated contract; DC-MODEL-001 overlaps generated carriers only | Inherit `SessionPrompt.prompt` persistence-before-join and remove 409 from runtime OpenAPI and generated JavaScript SDK; retain all compat context and model extensions | Busy-route `5/0`; OpenAPI contract `6/0`; SDK regeneration idempotent |
+
+Capability count is 1 and result-row count is 1. The final PR #73 tree has no
+TUI source change; final-transition draining remains separately scoped to PR
+#74 and is not included in this propagation.
+
+### Compat owner review (7/7)
+
+| Owner | Incoming overlap | Preserved result | Status evidence |
+| --- | --- | --- | --- |
+| DC-NET-001 | none | Approved private WebFetch call seam and inherited bounds unchanged | Owner paths have zero propagation diff |
+| DC-NET-002 | none | RFC1918 remote-MCP reachability unchanged | Owner paths have zero propagation diff |
+| DC-PLATFORM-001 | none | Restricted-network ripgrep and Windows archive fallbacks unchanged | Owner paths have zero propagation diff |
+| DC-MODEL-001 | generated OpenAPI/SDK carriers only | Per-agent MaxMode schema, routing, final-step, structured-output, hidden-title, and retry-status behavior retained | Idempotent SDK generation and both package typechecks |
+| DC-CONTEXT-001 | direct session route and published API contract | Queue persistence inherited while checkpoint coverage, compaction projection, callable-v2 samples, caps, preflight, chronology, and recovery remain intact | Busy-route `5/0`; OpenAPI contract `6/0` |
+| DC-ACTOR-001 | FC-001 lifecycle adjacency only; no actor path | Frozen membership, system, cwd, permissions, and static-prefix behavior unchanged | Actor owner paths have zero propagation diff |
+| DC-TUI-001 | no component path | Existing queued-state rendering now receives its persisted producer; metadata and locale behavior unchanged | Final propagation has no TUI source path |
+
+Owner count is 7 and result-row count is 7. All owners remain active and
+unchanged.
+
+### Local validation evidence
+
+- `bun ci` installed 4,542 packages from the frozen lockfile without changing
+  `bun.lock` or a dependency manifest.
+- Fresh JavaScript SDK generation completed with no working-tree diff.
+- With all seven ambient selectors removed, the two affected server suites
+  passed 11 tests and 39 assertions with zero failures: busy-route `5/0` and
+  OpenAPI contract `6/0`.
+- `packages/opencode` and `packages/sdk/js` typechecks both exited zero.
+- The repository pre-push gate completed all 12 Turbo typecheck tasks, and root
+  lint exited zero with 4,335 warnings and no errors.
+- The merge parentage, predicted/actual tree identity, dependency equality, and
+  propagation whitespace checks passed. Exact remote-tip CI remains pending
+  publication of the compat documentation commit and is not claimed here.
