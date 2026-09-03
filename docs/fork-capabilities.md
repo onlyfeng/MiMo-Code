@@ -57,11 +57,17 @@ registry or history commit does not advance either behavior reference.
   are linearized per session and actor. `SessionPrompt.startPrompt`,
   `startCommand`, `startSummarize`, and `startResume` share
   `SessionRunState.startRunning` atomic admission; outer entry points report a
-  typed `Session.BusyError`. Recovery and resume remain main-only, accept no
-  agent/task selector, and have no detached `resumeBackground` path. Unknown or
-  ambiguous lifecycle callers fail closed. Frozen-context admission is owned
-  separately by FD-009. Title locale propagation through prompt, command, and
-  main-only resume paths does not broaden recovery/resume beyond the main agent.
+  typed `Session.BusyError`. That admission covers the synchronous entry points
+  only. `POST /session/:sessionID/prompt_async` is deliberately outside it: the
+  route is fire-and-forget, so it persists the user message through
+  `SessionPrompt.prompt` before joining any in-flight run, never reports
+  `Session.BusyError`, and declares no 409. A busy session queues the message
+  for the running loop rather than dropping it. Recovery and resume remain
+  main-only, accept no agent/task selector, and have no detached
+  `resumeBackground` path. Unknown or ambiguous lifecycle callers fail closed.
+  Frozen-context admission is owned separately by FD-009. Title locale
+  propagation through prompt, command, and main-only resume paths does not
+  broaden recovery/resume beyond the main agent.
   Actor registration is positive evidence for peer-only session-base behavior;
   an unknown actor cannot inherit a parent identity by a checkpoint fail-open.
   Actor `spawn` and `run` always create a fresh actor and reject the former
@@ -87,8 +93,10 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/src/tool/session.ts`.
 - Tests/evidence: actor lifecycle/cancel/spawn/turn suites,
   `packages/opencode/test/inbox/fork-agent-compat.test.ts`, inbox wake/retirement
-  tests, `packages/opencode/test/effect/runner.test.ts`, server prompt/recovery
-  and resume admission tests, session run-state tuple/disposal tests,
+  tests, `packages/opencode/test/effect/runner.test.ts`, server
+  prompt/prompt_async-queue/recovery and resume admission tests
+  (`packages/opencode/test/server/session-prompt-busy.test.ts`), session
+  run-state tuple/disposal tests,
   main-only OpenAPI regressions, replace-agent actor-scope regressions, and
   actor/session tool tests at the reviewed main behavior.
 - Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
@@ -101,6 +109,14 @@ registry or history commit does not advance either behavior reference.
   lifecycle/admission/resume ownership. Existing `ses_-...` identifiers remain
   valid inputs; message descending IDs deliberately retain their chronology
   marker.
+- 2026-09-03 correction: `prompt_async` had been routed through `startPrompt`
+  since `1cfe7efc`, which made the whole of `promptWork` — `createUserMessage`
+  included — the admitted work, so a busy session answered 409 and never
+  persisted the message. The TUI's queue depends on that message existing, so
+  typing during a turn silently lost the input. Admission for the fire-and-forget
+  route is now the upstream `prompt` path again; the synchronous `/message`,
+  `/init`, `/summarize`, `/command`, and resume routes keep `startRunning`,
+  which is what the zombie-runner hardening in `1cfe7efc` was for.
 - Retirement condition: upstream provides equivalent generation ownership,
   typed atomic main prompt/command/init/shell/summarize/recovery/resume
   admission, main-only recovery/resume identity, cancellation settlement,

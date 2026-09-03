@@ -1384,29 +1384,47 @@ export function Prompt(props: PromptProps) {
           })),
       })
     } else {
+      // Snapshot before the optimistic clear below, so a rejected send can put
+      // the message back instead of eating it.
+      const submitted = { input: store.prompt.input, parts: [...store.prompt.parts] }
       sdk.client.session
-        .promptAsync({
-          sessionID,
-          ...selectedModel,
-          messageID,
-          agent: agent.name,
-          model: selectedModel,
-          titleLocale: language.intl(),
-          variant,
-          parts: [
-            {
-              id: PartID.ascending(),
-              type: "text",
-              text: inputText,
-            },
-            ...nonTextParts.map(assign),
-          ],
-        })
+        .promptAsync(
+          {
+            sessionID,
+            ...selectedModel,
+            messageID,
+            agent: agent.name,
+            model: selectedModel,
+            titleLocale: language.intl(),
+            variant,
+            parts: [
+              {
+                id: PartID.ascending(),
+                type: "text",
+                text: inputText,
+              },
+              ...nonTextParts.map(assign),
+            ],
+          },
+          // Load-bearing, not tidiness: the generated client resolves non-2xx
+          // into `{ error }` instead of rejecting, so without this the catch
+          // below is dead code and a 400/404/429 (this route is rate limited at
+          // 20/min) vanishes with the input already cleared.
+          { throwOnError: true },
+        )
         .catch((err) => {
           toast.show({
             message: err instanceof Error ? err.message : "Failed to send message",
             variant: "error",
           })
+          // Only while the user has not started typing again — restoring over a
+          // live buffer would clobber it, and the text is still reachable via
+          // history in that case.
+          if (input.plainText.length > 0) return
+          input.setText(submitted.input)
+          setStore("prompt", submitted)
+          restoreExtmarksFromParts(submitted.parts)
+          input.gotoBufferEnd()
         })
     }
     history.append({
