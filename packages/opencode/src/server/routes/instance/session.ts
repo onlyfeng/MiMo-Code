@@ -1186,9 +1186,9 @@ export const SessionRoutes = lazy(() =>
         // runs, so no HTTP client can hang behind a zombie runner the way the
         // synchronous /message route can, and the busy pre-check that route
         // needs buys nothing here. `prompt` persists the user message first and
-        // only then joins the in-flight run, which is what lets the running loop
-        // pick the message up on its next step and the transcript render it as
-        // QUEUED.
+        // only then joins the in-flight run, preserving the queue record and
+        // making it visible to an eligible loop boundary. Draining during the
+        // runner's final transition is a separate run-loop invariant.
         void runRequest(
           "SessionRoutes.prompt_async",
           c,

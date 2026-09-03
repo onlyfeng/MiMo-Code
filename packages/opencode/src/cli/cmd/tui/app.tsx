@@ -1235,23 +1235,17 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     const handoff = (target: HandoffTarget, current: { clear(): void }) => {
       current.clear()
       void sdk.client.session
-        .promptAsync(
-          {
-            sessionID: detection.sessionID,
-            model: { providerID: detection.providerID, modelID: detection.modelID },
-            parts: [
-              {
-                type: "text",
-                synthetic: true,
-                text: formatHarnessReminder({ target, detail: modelDetail }),
-              },
-            ],
-          },
-          // The generated client resolves non-2xx into `{ error }` rather than
-          // rejecting; without this the catch below never runs and the handoff
-          // fails silently.
-          { throwOnError: true },
-        )
+        .promptAsync({
+          sessionID: detection.sessionID,
+          model: { providerID: detection.providerID, modelID: detection.modelID },
+          parts: [
+            {
+              type: "text",
+              synthetic: true,
+              text: formatHarnessReminder({ target, detail: modelDetail }),
+            },
+          ],
+        })
         .catch((error) =>
           toast.show({
             variant: "error",
@@ -1284,19 +1278,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
             description: t("tui.dialog.try_best.continue.description"),
             onSelect: (current) => {
               void sdk.client.session
-                .promptAsync(
-                  {
-                    sessionID: detection.sessionID,
-                    model: { providerID: detection.providerID, modelID: detection.modelID },
-                    parts: [
-                      {
-                        type: "text",
-                        text: `The previous turn was paused by try-best loop detection: ${modelDetail} Abandon that approach. Inspect the current workspace state, explain why the attempt stalled, and continue with a materially different strategy. Do not repeat the same edit or command unchanged.`,
-                      },
-                    ],
-                  },
-                  { throwOnError: true },
-                )
+                .promptAsync({
+                  sessionID: detection.sessionID,
+                  model: { providerID: detection.providerID, modelID: detection.modelID },
+                  parts: [
+                    {
+                      type: "text",
+                      text: `The previous turn was paused by try-best loop detection: ${modelDetail} Abandon that approach. Inspect the current workspace state, explain why the attempt stalled, and continue with a materially different strategy. Do not repeat the same edit or command unchanged.`,
+                    },
+                  ],
+                })
                 .catch((error) =>
                   toast.show({
                     variant: "error",

@@ -92,3 +92,12 @@ test("published OpenAPI keeps the runtime compaction projection contract", async
     required: ["version", "summary_message_id", "summary", "trigger"],
   })
 })
+
+test("prompt_async publishes its accepted and validation responses", async () => {
+  const docs = [await Server.openapi(), await Bun.file(new URL("../../../sdk/openapi.json", import.meta.url)).json()]
+
+  for (const doc of docs) {
+    const promptAsync = operation(doc, "/session/{sessionID}/prompt_async", "post")
+    expect(Object.keys(isRecord(promptAsync?.responses) ? promptAsync.responses : {})).toEqual(["204", "400", "404"])
+  }
+})

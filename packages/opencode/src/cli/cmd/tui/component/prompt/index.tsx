@@ -1384,51 +1384,29 @@ export function Prompt(props: PromptProps) {
           })),
       })
     } else {
-      // Snapshot before the optimistic clear below, so a rejected send can put
-      // the message back instead of eating it.
-      const submitted = { input: store.prompt.input, parts: [...store.prompt.parts] }
       sdk.client.session
-        .promptAsync(
-          {
-            sessionID,
-            ...selectedModel,
-            messageID,
-            agent: agent.name,
-            model: selectedModel,
-            titleLocale: language.intl(),
-            variant,
-            parts: [
-              {
-                id: PartID.ascending(),
-                type: "text",
-                text: inputText,
-              },
-              ...nonTextParts.map(assign),
-            ],
-          },
-          // Load-bearing, not tidiness: the generated client resolves non-2xx
-          // into `{ error }` instead of rejecting, so without this the catch
-          // below is dead code and a 400/404/429 (this route is rate limited at
-          // 20/min) vanishes with the input already cleared.
-          { throwOnError: true },
-        )
+        .promptAsync({
+          sessionID,
+          ...selectedModel,
+          messageID,
+          agent: agent.name,
+          model: selectedModel,
+          titleLocale: language.intl(),
+          variant,
+          parts: [
+            {
+              id: PartID.ascending(),
+              type: "text",
+              text: inputText,
+            },
+            ...nonTextParts.map(assign),
+          ],
+        })
         .catch((err) => {
           toast.show({
             message: err instanceof Error ? err.message : "Failed to send message",
             variant: "error",
           })
-          // Restoration is bound to the session it was submitted to. A pending
-          // send from session A can reject after the user navigated to session
-          // B; restoring there would write A's text into B's composer. Also
-          // bail once the input is destroyed (component unmounted) or the user
-          // has started typing again — restoring over a live buffer would
-          // clobber it, and the text is still reachable via history then.
-          if (input.isDestroyed || input.plainText.length > 0) return
-          if (props.sessionID !== undefined && props.sessionID !== sessionID) return
-          input.setText(submitted.input)
-          setStore("prompt", submitted)
-          restoreExtmarksFromParts(submitted.parts)
-          input.gotoBufferEnd()
         })
     }
     history.append({
