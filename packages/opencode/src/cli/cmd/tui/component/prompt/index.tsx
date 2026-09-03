@@ -1417,10 +1417,14 @@ export function Prompt(props: PromptProps) {
             message: err instanceof Error ? err.message : "Failed to send message",
             variant: "error",
           })
-          // Only while the user has not started typing again — restoring over a
-          // live buffer would clobber it, and the text is still reachable via
-          // history in that case.
-          if (input.plainText.length > 0) return
+          // Restoration is bound to the session it was submitted to. A pending
+          // send from session A can reject after the user navigated to session
+          // B; restoring there would write A's text into B's composer. Also
+          // bail once the input is destroyed (component unmounted) or the user
+          // has started typing again — restoring over a live buffer would
+          // clobber it, and the text is still reachable via history then.
+          if (input.isDestroyed || input.plainText.length > 0) return
+          if (props.sessionID !== undefined && props.sessionID !== sessionID) return
           input.setText(submitted.input)
           setStore("prompt", submitted)
           restoreExtmarksFromParts(submitted.parts)
