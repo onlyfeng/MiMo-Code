@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { Deferred, Effect } from "effect"
+import { Deferred, Effect, Schedule } from "effect"
 import { Hono } from "hono"
 import { ErrorMiddleware } from "../../src/server/middleware"
 import { Server } from "../../src/server/server"
@@ -214,5 +214,73 @@ describe("POST /session/:sessionID/summarize busy-runner behavior", () => {
     })
 
     expect(result).toEqual({ first: "response", status: 409, hasCompaction: false })
+  })
+})
+
+describe("POST /session/:sessionID/prompt_async busy-runner behavior", () => {
+  // prompt_async is fire-and-forget: the route answers 204 before the turn runs,
+  // so no HTTP client can hang behind a zombie runner and the busy pre-check the
+  // synchronous /message route needs does not apply here. Its contract is the
+  // TUI's queue instead — the user message must land in storage even while a
+  // turn is in flight, so an eligible loop boundary can consume it and the
+  // transcript can render it as QUEUED. Admitting it through startRunning made
+  // the whole promptWork (createUserMessage included) conditional on an idle
+  // runner, which dropped the message with no trace.
+  test("queues exactly one message instead of rejecting it while a turn is in flight", async () => {
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
+
+    const result = await Instance.provide({
+      directory: tmp.path,
+      fn: () =>
+        AppRuntime.runPromise(
+          Effect.gen(function* () {
+            const sessions = yield* Session.Service
+            const session = yield* sessions.create({ title: "prompt_async queue test" })
+            const state = yield* SessionRunState.Service
+            const started = yield* Deferred.make<void>()
+            const owner = yield* state.startRunning(
+              session.id,
+              "main",
+              Effect.interrupt,
+              Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+            )
+            yield* Deferred.await(started)
+
+            return yield* Effect.gen(function* () {
+              const response = yield* Effect.promise(async () =>
+                Server.Default().app.request(
+                  `/session/${session.id}/prompt_async?directory=${encodeURIComponent(tmp.path)}`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ parts: [{ type: "text", text: "queued while busy" }] }),
+                  },
+                ),
+              )
+
+              // The route returns before promptWork persists, so poll rather than
+              // sleep a fixed budget.
+              const texts = yield* Effect.gen(function* () {
+                const messages = yield* sessions.messages({ sessionID: session.id, agentID: "*" })
+                return messages
+                  .filter((message) => message.info.role === "user")
+                  .flatMap((message) =>
+                    message.parts.filter((part) => part.type === "text").map((part) => part.text),
+                  )
+              }).pipe(
+                Effect.repeat({ until: (users) => users.length > 0, schedule: Schedule.spaced("20 millis") }),
+                Effect.timeout("3 seconds"),
+                Effect.orElseSucceed(() => [] as string[]),
+              )
+
+              return { status: response.status, texts }
+            }).pipe(
+              Effect.ensuring(state.cancel(session.id).pipe(Effect.andThen(owner.pipe(Effect.exit)))),
+            )
+          }),
+        ),
+    })
+
+    expect(result).toEqual({ status: 204, texts: ["queued while busy"] })
   })
 })

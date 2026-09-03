@@ -5693,10 +5693,6 @@ export type SessionPromptAsyncErrors = {
    * Not found
    */
   404: NotFoundError
-  /**
-   * Conflict — session resource is busy
-   */
-  409: ConflictError
 }
 
 export type SessionPromptAsyncError = SessionPromptAsyncErrors[keyof SessionPromptAsyncErrors]

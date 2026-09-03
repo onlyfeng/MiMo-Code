@@ -4921,16 +4921,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "Conflict — session resource is busy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConflictError"
-                }
-              }
-            }
           }
         },
         "requestBody": {
