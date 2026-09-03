@@ -1164,7 +1164,7 @@ export const SessionRoutes = lazy(() =>
           204: {
             description: "Prompt accepted",
           },
-          ...errors(400, 404, 409),
+          ...errors(400, 404),
         },
       }),
       validator(
@@ -1177,12 +1177,23 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
-        const completion = await runRequest(
-          "SessionRoutes.prompt_async.start",
+        // Deliberately NOT `startPrompt`. That admits through
+        // `SessionRunState.startRunning`, which fails closed with a typed
+        // `Session.BusyError` when the runner is not Idle — and since the whole
+        // of `promptWork` (its `createUserMessage` included) is the admitted
+        // work, a busy session dropped the message before it ever reached
+        // storage. This route is the TUI's queue: it answers 204 before the turn
+        // runs, so no HTTP client can hang behind a zombie runner the way the
+        // synchronous /message route can, and the busy pre-check that route
+        // needs buys nothing here. `prompt` persists the user message first and
+        // only then joins the in-flight run, preserving the queue record and
+        // making it visible to an eligible loop boundary. Draining during the
+        // runner's final transition is a separate run-loop invariant.
+        void runRequest(
+          "SessionRoutes.prompt_async",
           c,
-          SessionPrompt.Service.use((svc) => svc.startPrompt({ ...body, sessionID })),
-        )
-        void runRequest("SessionRoutes.prompt_async", c, completion).catch((err) => {
+          SessionPrompt.Service.use((svc) => svc.prompt({ ...body, sessionID })),
+        ).catch((err) => {
           log.error("prompt_async failed", { sessionID, error: err })
           void Bus.publish(Session.Event.Error, {
             sessionID,
