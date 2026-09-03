@@ -1681,6 +1681,7 @@ the synchronization completion gate.
   `prompt` produced `{ status: 204, texts: ["queued while busy"] }`.
 - The focused busy-route and OpenAPI matrix passed nine tests with zero
   failures. Both `packages/opencode` and `packages/sdk/js` typechecks exited
-  zero, and runtime OpenAPI was byte-identical to the published artifact.
+  zero, and the runtime and published `prompt_async` response projections both
+  contain exactly `204`, `400`, and `404`.
 - The two TUI files are byte-identical to prior fork `main`; this correction
   adds no client-side failure-recovery behavior and no run-loop break change.
