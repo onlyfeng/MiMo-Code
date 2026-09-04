@@ -12274,6 +12274,9 @@
             "type": "string",
             "enum": ["auto", "codex", "default"]
           },
+          "task_id": {
+            "type": "string"
+          },
           "tools": {
             "type": "object",
             "propertyNames": {

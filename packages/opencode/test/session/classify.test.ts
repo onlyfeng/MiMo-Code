@@ -28,7 +28,7 @@ function assistantInfo(
     sessionID,
     role: "assistant",
     time: { created: 0 },
-    parentID: MessageID.make("m-parent"),
+    parentID: MessageID.make("m-1"),
     modelID: "test",
     providerID: "test",
     mode: "",
@@ -274,14 +274,13 @@ describe("classifyAssistantStep", () => {
     ).toBe("invalid")
   })
 
-  test("existing-assistant phase + stale assistant (lastUser.id >= assistant.id) => continue", () => {
-    // user "m-2" comes after assistant "m-1": assistant predates the current turn.
+  test("existing-assistant phase + assistant for a different parent => continue", () => {
     expect(
       classifyAssistantStep({
         phase: "existing-assistant",
         lastUser: userInfo("m-2"),
-        assistant: assistantInfo("m-1", { finish: "stop" }),
-        parts: [textPart("m-1", "old answer")],
+        assistant: assistantInfo("m-3", { finish: "stop" }),
+        parts: [textPart("m-3", "old answer")],
       }),
     ).toEqual({ type: "continue" })
   })
@@ -402,7 +401,7 @@ describe("classifyAssistantStep", () => {
     test("stale turn predating current user (existing-assistant) => continue, not text-tool-call", () => {
       const result = classifyAssistantStep({
         phase: "existing-assistant",
-        lastUser: userInfo("m-3"),
+        lastUser: userInfo("m-0"),
         assistant: assistantInfo("m-2", { finish: "tool-calls" }),
         parts: [textPart("m-2", '<invoke name="bash"><parameter name="command">ls</parameter></invoke>')],
       })

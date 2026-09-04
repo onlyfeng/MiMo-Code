@@ -4,6 +4,7 @@ import { Agent } from "../../src/agent/agent"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Instance } from "../../src/project/instance"
 import { Provider } from "../../src/provider"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Question } from "../../src/question"
 import { Session } from "../../src/session"
 import { MessageID, SessionID } from "../../src/session/schema"
@@ -27,11 +28,12 @@ const it = testEffect(
   ),
 )
 
-const ctx = (sessionID: SessionID, agent: string) => ({
+const ctx = (sessionID: SessionID, agent: string, taskId?: string) => ({
   sessionID,
   messageID: MessageID.ascending(),
   callID: "test-call",
   agent,
+  taskId,
   abort: new AbortController().signal,
   messages: [],
   metadata: () => Effect.void,
@@ -48,6 +50,36 @@ const pending = Effect.fn("PlanToolTest.pending")(function* (question: Question.
 })
 
 describe("tool.plan", () => {
+  it.live("plan_exit carries task metadata into the build continuation", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const question = yield* Question.Service
+        const info = yield* sessions.create({ title: "Test" })
+        yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: info.id,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "plan",
+          model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+        })
+        const tool = yield* (yield* PlanExitTool).init()
+
+        const fiber = yield* tool.execute({}, ctx(info.id, "plan", "T7")).pipe(Effect.forkScoped)
+        const item = yield* pending(question)
+        yield* question.reply({ requestID: item.id, answers: [["Yes"]] })
+
+        expect((yield* Fiber.join(fiber)).metadata).toMatchObject({ switched: true })
+        const user = (yield* sessions.messages({ sessionID: info.id })).findLast(
+          (message) => message.info.role === "user",
+        )
+        expect(user?.info.role).toBe("user")
+        if (user?.info.role === "user") expect(user.info.task_id).toBe("T7")
+      }),
+    ),
+  )
+
   it.live("plan_exit answering No resolves with continue-planning guidance", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {

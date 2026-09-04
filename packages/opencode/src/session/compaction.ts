@@ -254,7 +254,18 @@ export interface Interface {
     auto: boolean
     overflow?: boolean
     agentID?: string
+    task_id?: string
   }) => Effect.Effect<void>
+  readonly createIfLatest: (input: {
+    sessionID: SessionID
+    agent: string
+    model: { providerID: ProviderID; modelID: ModelID }
+    auto: boolean
+    overflow?: boolean
+    agentID?: string
+    task_id?: string
+    expectedUserID: MessageID | undefined
+  }) => Effect.Effect<boolean>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionCompaction") {}
@@ -596,7 +607,7 @@ export const layer: Layer.Layer<
       if (result === "continue" && input.auto) {
         if (replay) {
           const original = replay.info
-          const replayMsg = yield* session.updateMessage({
+          const replayMsg: MessageV2.User = {
             id: MessageID.ascending(),
             role: "user",
             sessionID: input.sessionID,
@@ -606,24 +617,32 @@ export const layer: Layer.Layer<
             model: original.model,
             format: original.format,
             tools: original.tools,
+            task_id: original.task_id,
             system: promptConfig.system,
             systemMode: promptConfig.systemMode,
             harness: promptConfig.harness,
             source: "hook",
-          })
-          for (const part of replay.parts) {
-            if (part.type === "compaction") continue
+          }
+          const parts = replay.parts.flatMap((part): MessageV2.Part[] => {
+            if (part.type === "compaction") return []
             const replayPart =
               part.type === "file" && MessageV2.isMedia(part.mime)
                 ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
                 : part
-            yield* session.updatePart({
-              ...replayPart,
-              id: PartID.ascending(),
-              messageID: replayMsg.id,
-              sessionID: input.sessionID,
-            })
-          }
+            return [
+              {
+                ...replayPart,
+                id: PartID.ascending(),
+                messageID: replayMsg.id,
+                sessionID: input.sessionID,
+              } satisfies MessageV2.Part,
+            ]
+          })
+          yield* session.commitUserMessageIfLatest({
+            expectedUserID: input.parentID,
+            message: replayMsg,
+            parts,
+          })
         }
 
         if (!replay) {
@@ -646,7 +665,7 @@ export const layer: Layer.Layer<
               { enabled: true },
             )).enabled
           ) {
-            const continueMsg = yield* session.updateMessage({
+            const continueMsg: MessageV2.User = {
               id: MessageID.ascending(),
               role: "user",
               sessionID: input.sessionID,
@@ -654,28 +673,35 @@ export const layer: Layer.Layer<
               time: { created: Date.now() },
               agent: userMessage.agent,
               model: userMessage.model,
+              task_id: userMessage.task_id,
               source: "hook",
-            })
+            }
             const text =
               (input.overflow
                 ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
                 : "") +
               "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: continueMsg.id,
-              sessionID: input.sessionID,
-              type: "text",
-              // Internal marker for auto-compaction followups so provider plugins
-              // can distinguish them from manual post-compaction user prompts.
-              // This is not a stable plugin contract and may change or disappear.
-              metadata: { compaction_continue: true },
-              synthetic: true,
-              text,
-              time: {
-                start: Date.now(),
-                end: Date.now(),
-              },
+            yield* session.commitUserMessageIfLatest({
+              expectedUserID: input.parentID,
+              message: continueMsg,
+              parts: [
+                {
+                  id: PartID.ascending(),
+                  messageID: continueMsg.id,
+                  sessionID: input.sessionID,
+                  type: "text",
+                  // Internal marker for auto-compaction followups so provider plugins
+                  // can distinguish them from manual post-compaction user prompts.
+                  // This is not a stable plugin contract and may change or disappear.
+                  metadata: { compaction_continue: true },
+                  synthetic: true,
+                  text,
+                  time: {
+                    start: Date.now(),
+                    end: Date.now(),
+                  },
+                } satisfies MessageV2.TextPart,
+              ],
             })
           }
         }
@@ -690,42 +716,60 @@ export const layer: Layer.Layer<
       return result
     })
 
-    const create = Effect.fn("SessionCompaction.create")(function* (input: {
-      sessionID: SessionID
-      agent: string
-      model: { providerID: ProviderID; modelID: ModelID }
-      auto: boolean
-      overflow?: boolean
-      agentID?: string
-    }) {
+    const boundary = (input: Parameters<Interface["create"]>[0]) => {
       // Tag the synthetic boundary message with agent_id so per-actor
       // filterCompactedEffect lookups stop at this row when scoping by the
       // same agent_id (subagent compaction stays inside its own scope).
-      const msg = yield* session.updateMessage({
+      const message: MessageV2.User = {
         id: MessageID.ascending(),
         role: "user",
         model: input.model,
         sessionID: input.sessionID,
         agentID: input.agentID ?? undefined,
         agent: input.agent,
+        task_id: input.task_id,
         source: "hook",
         time: { created: Date.now() },
-      })
-      yield* session.updatePart({
+      }
+      const part: MessageV2.CompactionPart = {
         id: PartID.ascending(),
-        messageID: msg.id,
-        sessionID: msg.sessionID,
+        messageID: message.id,
+        sessionID: message.sessionID,
         type: "compaction",
         auto: input.auto,
         overflow: input.overflow,
-      })
+      }
+      return { message, part }
+    }
+
+    const publish = (input: Parameters<Interface["create"]>[0]) =>
       // Boundary-insert path also drops effective context from the model's
       // view — publish Compacted so downstream caches (cron sentinel etc)
       // reset on their side too. Same event shape as processCompaction.
-      yield* bus.publish(Event.Compacted, {
+      bus.publish(Event.Compacted, {
         sessionID: input.sessionID,
         ...(input.agentID ? { agentID: input.agentID } : {}),
       })
+
+    const create = Effect.fn("SessionCompaction.create")(function* (input: Parameters<Interface["create"]>[0]) {
+      const next = boundary(input)
+      yield* session.updateMessage(next.message)
+      yield* session.updatePart(next.part)
+      yield* publish(input)
+    })
+
+    const createIfLatest = Effect.fn("SessionCompaction.createIfLatest")(function* (
+      input: Parameters<Interface["createIfLatest"]>[0],
+    ) {
+      const next = boundary(input)
+      const created = yield* session.commitUserMessageIfLatest({
+        expectedUserID: input.expectedUserID,
+        message: next.message,
+        parts: [next.part],
+      })
+      if (!created) return false
+      yield* publish(input)
+      return true
     })
 
     return Service.of({
@@ -733,6 +777,7 @@ export const layer: Layer.Layer<
       prune,
       process: processCompaction,
       create,
+      createIfLatest,
     })
   }),
 )
