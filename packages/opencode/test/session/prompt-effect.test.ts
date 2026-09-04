@@ -281,6 +281,36 @@ let droppedStartGate:
       armed: boolean
     }
   | undefined
+
+const holdNextRunAtExit = Effect.fnUntraced(function* (sessionID: SessionID, actorID = "main") {
+  const gate = {
+    sessionID,
+    actorID,
+    ownerArmed: true,
+    followerArmed: true,
+    ownerExit: yield* Deferred.make<void>(),
+    releaseOwner: yield* Deferred.make<void>(),
+    followerAttached: yield* Deferred.make<void>(),
+  }
+  lateRunGate = gate
+  yield* Effect.addFinalizer(() => Deferred.succeed(gate.releaseOwner, undefined).pipe(Effect.ignore))
+  return gate
+})
+
+const armNextRunFollower = Effect.fnUntraced(function* (sessionID: SessionID, actorID = "main") {
+  const followerAttached = yield* Deferred.make<void>()
+  lateRunGate = {
+    sessionID,
+    actorID,
+    ownerArmed: false,
+    followerArmed: true,
+    ownerExit: yield* Deferred.make<void>(),
+    releaseOwner: yield* Deferred.make<void>(),
+    followerAttached,
+  }
+  return followerAttached
+})
+
 const run = Layer.effect(
   SessionRunState.Service,
   Effect.gen(function* () {
@@ -830,6 +860,42 @@ it.live("loop calls LLM and returns assistant message", () =>
     }),
     { git: true, config: providerCfg },
   ),
+)
+
+it.live(
+  "a stale length result does not continue for a newer reverse-ID user",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Length handoff" })
+        const seeded = yield* seed(chat.id, { finish: "length" })
+        yield* sessions.updateMessage({
+          ...seeded.assistant,
+          time: { ...seeded.assistant.time, completed: Date.now() },
+        })
+        yield* Effect.sleep("2 millis")
+        const nextID = MessageID.ascending("msg_00000000000000000000000010")
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          messageID: nextID,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "new task" }],
+        })
+        yield* llm.text("new answer")
+
+        const result = yield* prompt.loop({ sessionID: chat.id })
+
+        expect(yield* llm.calls).toBe(1)
+        expect(result.info.role === "assistant" ? result.info.parentID : undefined).toBe(nextID)
+        expect(JSON.stringify((yield* llm.inputs)[0]?.messages)).not.toContain("output token limit")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
 )
 
 it.live("locks system and harness to the first user query", () =>
@@ -3860,6 +3926,165 @@ it.live(
         const inputs = yield* llm.inputs
         expect(inputs).toHaveLength(2)
         expect(JSON.stringify(inputs.at(-1)?.messages)).toContain("second")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
+)
+
+it.live(
+  "a prompt persisted after runLoop exits starts a fresh run instead of joining the closing run",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Prompt handoff" })
+        const gate = yield* holdNextRunAtExit(chat.id)
+
+        yield* llm.text("first answer")
+        const first = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "first" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* llm.wait(1).pipe(Effect.timeout("10 seconds"))
+        yield* Deferred.await(gate.ownerExit).pipe(Effect.timeout("10 seconds"))
+
+        yield* llm.text("late answer")
+        const lateID = MessageID.ascending("msg_00000000000000000000000000")
+        const late = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: lateID,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "late while closing" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(gate.followerAttached).pipe(Effect.timeout("10 seconds"))
+
+        expect((yield* sessions.messages({ sessionID: chat.id })).some((item) => item.info.id === lateID)).toBe(true)
+        yield* Deferred.succeed(gate.releaseOwner, undefined)
+        yield* Fiber.join(first).pipe(Effect.timeout("10 seconds"))
+        const result = yield* Fiber.join(late).pipe(Effect.timeout("10 seconds"))
+
+        expect(yield* llm.calls).toBe(2)
+        expect(result.info.role).toBe("assistant")
+        if (result.info.role !== "assistant") return
+        expect(result.info.parentID).toBe(lateID)
+        expect(result.parts.findLast((part) => part.type === "text")?.text).toBe("late answer")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
+)
+
+it.live(
+  "a prompt superseding a closing errored run preserves the error and completes the old assistant",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Errored prompt handoff" })
+        const gate = yield* holdNextRunAtExit(chat.id)
+
+        yield* llm.error(400, { error: { message: "first turn failed" } })
+        const firstID = MessageID.ascending()
+        const first = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: firstID,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "first fails" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(gate.ownerExit).pipe(Effect.timeout("10 seconds"))
+
+        yield* llm.text("late answer after error")
+        const lateID = MessageID.ascending()
+        const late = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: lateID,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "late after error" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(gate.followerAttached).pipe(Effect.timeout("10 seconds"))
+        yield* Deferred.succeed(gate.releaseOwner, undefined)
+        yield* Fiber.join(first).pipe(Effect.timeout("10 seconds"))
+        const result = yield* Fiber.join(late).pipe(Effect.timeout("10 seconds"))
+
+        expect(yield* llm.calls).toBe(2)
+        expect(result.info.role === "assistant" ? result.info.parentID : undefined).toBe(lateID)
+        const after = (yield* sessions.messages({ sessionID: chat.id })).find(
+          (item) => item.info.role === "assistant" && item.info.parentID === firstID,
+        )
+        if (!after || after.info.role !== "assistant") {
+          yield* Effect.die("expected preserved errored assistant")
+          return
+        }
+        expect(after.info.error?.name).toBe("APIError")
+        expect(JSON.stringify(after.info.error)).toContain("first turn failed")
+        expect(after.info.time.completed).toBeNumber()
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
+)
+
+it.live(
+  "cancelling an active run does not restart for a queued prompt",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Cancelled prompt handoff" })
+
+        yield* llm.hang
+        const first = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "first hangs" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* llm.wait(1).pipe(Effect.timeout("10 seconds"))
+
+        const followerAttached = yield* armNextRunFollower(chat.id)
+        yield* llm.text("must not restart")
+        const lateID = MessageID.ascending()
+        const late = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: lateID,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "queued before cancel" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(followerAttached).pipe(Effect.timeout("10 seconds"))
+
+        yield* prompt.cancel(chat.id)
+        yield* Fiber.join(first).pipe(Effect.timeout("10 seconds"))
+        const result = yield* Fiber.join(late).pipe(Effect.timeout("10 seconds"))
+
+        expect(yield* llm.calls).toBe(1)
+        expect(result.info.role === "assistant" ? result.info.error?.name : undefined).toBe("MessageAbortedError")
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).some(
+            (item) => item.info.role === "assistant" && item.info.parentID === lateID,
+          ),
+        ).toBe(false)
       }),
       { git: true, config: providerCfg },
     ),

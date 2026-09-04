@@ -3172,6 +3172,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
     })
 
+    const coversPrompt = (messages: MessageV2.WithParts[], targetID: MessageID, parentID: MessageID) => {
+      const targetIndex = messages.findIndex((item) => item.info.id === targetID)
+      if (targetIndex === -1) return true
+      return messages.findIndex((item) => item.info.role === "user" && item.info.id === parentID) >= targetIndex
+    }
+
     const promptWork = Effect.fnUntraced(function* (
       input: PromptInput,
       run: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>,
@@ -3218,12 +3224,36 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // turn entirely. Running loop() here would produce a spurious assistant
       // response with no user turn.
       if (message.parts.length === 0) return message
-      return yield* run({
-        sessionID: input.sessionID,
-        agentID: input.agentID ?? "main",
-        task_id: input.task_id,
-        titleLocale: input.titleLocale,
-      })
+      // A queued prompt can join a runner after its final message snapshot but
+      // before that runner publishes Idle. The joined result then belongs to an
+      // older user turn, so the caller that persisted this prompt starts or
+      // joins the successor run. Explicit cancellation remains terminal.
+      while (true) {
+        const result = yield* run({
+          sessionID: input.sessionID,
+          agentID: input.agentID ?? "main",
+          task_id: input.task_id,
+          titleLocale: input.titleLocale,
+        })
+        if (result.info.role !== "assistant") return result
+        const assistant = result.info
+        if (MessageV2.AbortedError.isInstance(assistant.error)) return result
+        if (assistant.parentID === message.info.id) return result
+        if (
+          coversPrompt(
+            yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" }),
+            message.info.id,
+            assistant.parentID,
+          )
+        )
+          return result
+        if (assistant.error && !assistant.time.completed) {
+          yield* sessions.updateMessage({
+            ...assistant,
+            time: { ...assistant.time, completed: Date.now() },
+          })
+        }
+      }
     })
 
     const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
@@ -3984,7 +4014,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           if (
             lastAssistant?.finish === "length" &&
             !hasToolCalls &&
-            lastUser.id < lastAssistant.id &&
+            lastAssistant.parentID === lastUser.id &&
             (yield* autoContinueOutputLength({ lastUser, assistant: lastAssistant }))
           ) {
             continue
@@ -4343,7 +4373,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // New streaks are still detectable on the cropped view (e.g. the
             // model loops again after recovery). User-speech guard only skips
             // *new* detection, not re-application of existing spans.
-            if (lastFinished && lastUser.id < lastFinished.id) {
+            if (lastFinished?.parentID === lastUser.id) {
               const triggerCount = streakCfg.trigger_count ?? LOOP_STREAK_TRIGGER_COUNT
               const maxSpan = streakCfg.max_span ?? LOOP_STREAK_MAX_SPAN
               const entries = msgs.flatMap((message) => {
