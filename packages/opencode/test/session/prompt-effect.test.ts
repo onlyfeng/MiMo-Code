@@ -234,13 +234,41 @@ const sessionTaskIDs = {
   pre: [] as Array<string | undefined>,
   post: [] as Array<string | undefined>,
 }
+let sessionPreGate:
+  | {
+      armed: boolean
+      fail: boolean
+      entered: Deferred.Deferred<void>
+      release: Deferred.Deferred<void>
+    }
+  | undefined
+let userQueryPostGate:
+  | {
+      armed: boolean
+      entered: Deferred.Deferred<void>
+      release: Deferred.Deferred<void>
+    }
+  | undefined
 const taskMetadataPlugin = Layer.succeed(
   Plugin.Service,
   Plugin.Service.of({
     trigger: (name, input, output) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         if (name === "session.pre" || name === "session.post") {
           sessionTaskIDs[name === "session.pre" ? "pre" : "post"].push((input as { task_id?: string }).task_id)
+        }
+        const gate = sessionPreGate
+        if (name === "session.pre" && gate?.armed) {
+          gate.armed = false
+          yield* Deferred.succeed(gate.entered, undefined)
+          yield* Deferred.await(gate.release)
+          if (gate.fail) return yield* Effect.die(new Error("session.pre failed after a queued prompt joined"))
+        }
+        const queryGate = userQueryPostGate
+        if (name === "session.userQuery.post" && queryGate?.armed) {
+          queryGate.armed = false
+          yield* Deferred.succeed(queryGate.entered, undefined)
+          yield* Deferred.await(queryGate.release)
         }
         return output
       }),
@@ -334,6 +362,29 @@ const armNextRunFollower = Effect.fnUntraced(function* (sessionID: SessionID, ac
   return followerAttached
 })
 
+const holdNextSessionPre = Effect.fnUntraced(function* (fail = false) {
+  const gate = {
+    armed: true,
+    fail,
+    entered: yield* Deferred.make<void>(),
+    release: yield* Deferred.make<void>(),
+  }
+  sessionPreGate = gate
+  yield* Effect.addFinalizer(() => Deferred.succeed(gate.release, undefined).pipe(Effect.ignore))
+  return gate
+})
+
+const holdNextUserQueryPost = Effect.fnUntraced(function* () {
+  const gate = {
+    armed: true,
+    entered: yield* Deferred.make<void>(),
+    release: yield* Deferred.make<void>(),
+  }
+  userQueryPostGate = gate
+  yield* Effect.addFinalizer(() => Deferred.succeed(gate.release, undefined).pipe(Effect.ignore))
+  return gate
+})
+
 const run = Layer.effect(
   SessionRunState.Service,
   Effect.gen(function* () {
@@ -397,6 +448,8 @@ afterEach(() => {
   lateRunGate = undefined
   disposalRetryGate = undefined
   droppedStartGate = undefined
+  sessionPreGate = undefined
+  userQueryPostGate = undefined
   sessionTaskIDs.pre.length = 0
   sessionTaskIDs.post.length = 0
 })
@@ -1460,7 +1513,7 @@ it.live("persists the process-time compaction projection from the real snapshot 
         sessionID: chat.id,
         agent: "build",
         model: ref,
-        auto: false,
+        auto: true,
         agentID: "main",
       })
       const snapshot = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
@@ -1472,7 +1525,7 @@ it.live("persists the process-time compaction projection from the real snapshot 
           parentID: boundary.info.id,
           messages: snapshot,
           sessionID: chat.id,
-          auto: false,
+          auto: true,
           agentID: "main",
         })
         .pipe(Effect.forkChild)
@@ -1539,6 +1592,13 @@ it.live("persists the process-time compaction projection from the real snapshot 
       expect(part.projection?.compacted_tool_calls).toEqual([{ call_id: "call-large-tail", tokens: 10_000 }])
       expect(part.projection?.manifest).toContain("src/auth.ts (read: lines 10-20, then edited)")
       expect(part.projection?.summary).toContain("PROCESS_SUMMARY")
+      expect(
+        messages.some(
+          (message) =>
+            message.info.role === "user" &&
+            message.parts.some((part) => part.type === "text" && part.metadata?.compaction_continue === true),
+        ),
+      ).toBe(false)
 
       const modelMessages = JSON.stringify(
         yield* MessageV2.toModelMessagesEffect(MessageV2.filterCompacted([...messages].reverse()), model),
@@ -1546,6 +1606,88 @@ it.live("persists the process-time compaction projection from the real snapshot 
       expect(modelMessages.match(/PROCESS_SUMMARY/g)).toHaveLength(1)
       expect(modelMessages).toContain("arrived during compaction")
       expect(modelMessages).toContain("Tool result omitted during compaction: 10000 tokens")
+    }),
+    { git: true, config: providerCfg },
+  ),
+  30_000,
+)
+
+it.live("does not create an automatic compaction boundary from a stale user snapshot", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const compaction = yield* SessionCompaction.Service
+      const chat = yield* sessions.create({ title: "Stale compaction boundary" })
+      const first = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "text", text: "old prompt" }],
+      })
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "text", text: "new prompt" }],
+      })
+
+      const created = yield* compaction.createIfLatest({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        auto: true,
+        expectedUserID: first.info.id,
+      })
+
+      expect(created).toBe(false)
+      expect(
+        (yield* sessions.messages({ sessionID: chat.id })).some((message) =>
+          message.parts.some((part) => part.type === "compaction"),
+        ),
+      ).toBe(false)
+
+      const initiallyEmpty = yield* sessions.create({ title: "Empty stale compaction boundary" })
+      yield* prompt.prompt({
+        sessionID: initiallyEmpty.id,
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "text", text: "arrived after empty snapshot" }],
+      })
+      expect(
+        yield* compaction.createIfLatest({
+          sessionID: initiallyEmpty.id,
+          agent: "build",
+          model: ref,
+          auto: true,
+          expectedUserID: undefined,
+        }),
+      ).toBe(false)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("rejects rebuilding an empty session without fabricating a result", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Empty rebuild" })
+      const exit = yield* prompt
+        .command({
+          sessionID: chat.id,
+          command: Command.Default.REBUILD,
+          arguments: "",
+          agent: "build",
+        })
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(0)
     }),
     { git: true, config: providerCfg },
   ),
@@ -4004,6 +4146,228 @@ it.live(
         if (result.info.role !== "assistant") return
         expect(result.info.parentID).toBe(lateID)
         expect(result.parts.findLast((part) => part.type === "text")?.text).toBe("late answer")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
+)
+
+it.live(
+  "a queued prompt starts a fresh run when the joined runner returns a user message",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const state = yield* SessionRunState.Service
+        const chat = yield* sessions.create({ title: "User-result handoff" })
+        const first = yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "maintenance owner" }],
+        })
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const completion = yield* state.startRunning(
+          chat.id,
+          "main",
+          Effect.succeed(first),
+          Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as(first)),
+        )
+        const owner = yield* completion.pipe(Effect.forkChild)
+        yield* Deferred.await(entered).pipe(Effect.timeout("10 seconds"))
+
+        yield* llm.text("queued answer")
+        const followerAttached = yield* armNextRunFollower(chat.id)
+        const queuedID = MessageID.ascending()
+        const queued = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: queuedID,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "queued behind maintenance" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(followerAttached).pipe(Effect.timeout("10 seconds"))
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(owner).pipe(Effect.timeout("10 seconds"))
+        const result = yield* Fiber.join(queued).pipe(Effect.timeout("10 seconds"))
+
+        expect(yield* llm.calls).toBe(1)
+        expect(result.info.role === "assistant" ? result.info.parentID : undefined).toBe(queuedID)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
+)
+
+taskMetadataIt.live(
+  "a queued prompt retries after the joined runner fails before covering it",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const sessionStatus = yield* SessionStatus.Service
+        const chat = yield* sessions.create({ title: "Failed prompt handoff" })
+        const gate = yield* holdNextSessionPre(true)
+
+        yield* llm.text("recovered answer")
+        const first = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            agent: "build",
+            task_id: "T1",
+            parts: [{ type: "text", text: "first prompt" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(gate.entered).pipe(Effect.timeout("10 seconds"))
+
+        const followerAttached = yield* armNextRunFollower(chat.id)
+        const lateID = MessageID.ascending()
+        const late = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: lateID,
+            agent: "build",
+            task_id: "T2",
+            parts: [{ type: "text", text: "queued before failure" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(followerAttached).pipe(Effect.timeout("10 seconds"))
+        expect((yield* sessions.messages({ sessionID: chat.id })).some((item) => item.info.id === lateID)).toBe(true)
+
+        yield* Deferred.succeed(gate.release, undefined)
+        const exits = yield* Effect.all([Fiber.await(first), Fiber.await(late)], { concurrency: "unbounded" }).pipe(
+          Effect.timeout("10 seconds"),
+        )
+
+        expect(Exit.isFailure(exits[0])).toBe(true)
+        expect(Exit.isSuccess(exits[1])).toBe(true)
+        if (Exit.isFailure(exits[0]))
+          expect(Cause.pretty(exits[0].cause)).toContain("session.pre failed after a queued prompt joined")
+        const result = Exit.isSuccess(exits[1]) ? exits[1].value : undefined
+        expect(yield* llm.calls).toBe(1)
+        expect(result?.info.role === "assistant" ? result.info.parentID : undefined).toBe(lateID)
+        expect(sessionTaskIDs.pre).toEqual(["T1", "T2"])
+        expect(sessionTaskIDs.post).toEqual(["T1", "T2"])
+        expect((yield* sessionStatus.get(chat.id)).type).toBe("idle")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
+)
+
+taskMetadataIt.live(
+  "a queued task supersedes an older output-length continuation",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Length prompt handoff" })
+        const seeded = yield* seed(chat.id, { finish: "length" })
+        yield* sessions.updateMessage({ ...seeded.user, task_id: "T1" })
+        yield* sessions.updateMessage({
+          ...seeded.assistant,
+          time: { ...seeded.assistant.time, completed: Date.now() },
+        })
+        const gate = yield* holdNextSessionPre()
+
+        yield* llm.text("new task answer")
+        const owner = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+        yield* Deferred.await(gate.entered).pipe(Effect.timeout("10 seconds"))
+
+        const followerAttached = yield* armNextRunFollower(chat.id)
+        const lateID = MessageID.ascending()
+        const late = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: lateID,
+            agent: "build",
+            task_id: "T2",
+            parts: [{ type: "text", text: "new task while length closes" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(followerAttached).pipe(Effect.timeout("10 seconds"))
+        yield* Deferred.succeed(gate.release, undefined)
+        yield* Fiber.join(owner).pipe(Effect.timeout("10 seconds"))
+        const result = yield* Fiber.join(late).pipe(Effect.timeout("10 seconds"))
+
+        expect(yield* llm.calls).toBe(1)
+        expect(result.info.role === "assistant" ? result.info.parentID : undefined).toBe(lateID)
+        const input = JSON.stringify((yield* llm.inputs)[0]?.messages)
+        expect(input).toContain("new task while length closes")
+        expect(input).not.toContain("output token limit")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
+)
+
+taskMetadataIt.live(
+  "a queued prompt preserves structured output from the superseded step",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Structured prompt handoff" })
+        const gate = yield* holdNextUserQueryPost()
+        const firstID = MessageID.ascending()
+
+        yield* llm.tool("StructuredOutput", { answer: 4 })
+        yield* llm.text("latest answer")
+        const first = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: firstID,
+            agent: "build",
+            task_id: "T1",
+            format: {
+              type: "json_schema",
+              retryCount: 0,
+              schema: {
+                type: "object",
+                properties: { answer: { type: "number" } },
+                required: ["answer"],
+              },
+            },
+            parts: [{ type: "text", text: "return structured output" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(gate.entered).pipe(Effect.timeout("10 seconds"))
+
+        const followerAttached = yield* armNextRunFollower(chat.id)
+        const lateID = MessageID.ascending()
+        const late = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: lateID,
+            agent: "build",
+            task_id: "T2",
+            parts: [{ type: "text", text: "new task after structured output" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(followerAttached).pipe(Effect.timeout("10 seconds"))
+        yield* Deferred.succeed(gate.release, undefined)
+        const results = yield* Effect.all([Fiber.join(first), Fiber.join(late)], { concurrency: "unbounded" }).pipe(
+          Effect.timeout("10 seconds"),
+        )
+        const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
+        const firstAssistant = messages.find((item) => item.info.role === "assistant" && item.info.parentID === firstID)
+        const lateAssistant = messages.find((item) => item.info.role === "assistant" && item.info.parentID === lateID)
+
+        expect(yield* llm.calls).toBe(2)
+        expect(firstAssistant?.info.role === "assistant" ? firstAssistant.info.structured : undefined).toEqual({
+          answer: 4,
+        })
+        expect(lateAssistant?.info.role === "assistant" ? lateAssistant.info.structured : undefined).toBeUndefined()
+        expect(results[0].info.role === "assistant" ? results[0].info.parentID : undefined).toBe(firstID)
+        expect(results[1].info.role === "assistant" ? results[1].info.parentID : undefined).toBe(lateID)
       }),
       { git: true, config: providerCfg },
     ),

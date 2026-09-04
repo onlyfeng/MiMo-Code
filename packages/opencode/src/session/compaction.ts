@@ -256,6 +256,16 @@ export interface Interface {
     agentID?: string
     task_id?: string
   }) => Effect.Effect<void>
+  readonly createIfLatest: (input: {
+    sessionID: SessionID
+    agent: string
+    model: { providerID: ProviderID; modelID: ModelID }
+    auto: boolean
+    overflow?: boolean
+    agentID?: string
+    task_id?: string
+    expectedUserID: MessageID | undefined
+  }) => Effect.Effect<boolean>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionCompaction") {}
@@ -594,8 +604,17 @@ export const layer: Layer.Layer<
         })
       }
 
+      // Keep the summary/projection, but never append an older auto-followup
+      // after another prompt has taken ownership of the actor transcript.
+      const parentIsLatest = Effect.fnUntraced(function* () {
+        const latest = (yield* session.messages({
+          sessionID: input.sessionID,
+          agentID: input.agentID ?? "main",
+        })).findLast((message) => message.info.role === "user")
+        return latest?.info.id === input.parentID
+      })
       if (result === "continue" && input.auto) {
-        if (replay) {
+        if (replay && (yield* parentIsLatest())) {
           const original = replay.info
           const replayMsg = yield* session.updateMessage({
             id: MessageID.ascending(),
@@ -646,7 +665,8 @@ export const layer: Layer.Layer<
                 overflow: input.overflow === true,
               },
               { enabled: true },
-            )).enabled
+            )).enabled &&
+            (yield* parentIsLatest())
           ) {
             const continueMsg = yield* session.updateMessage({
               id: MessageID.ascending(),
@@ -733,11 +753,24 @@ export const layer: Layer.Layer<
       })
     })
 
+    const createIfLatest = Effect.fn("SessionCompaction.createIfLatest")(function* (
+      input: Parameters<Interface["createIfLatest"]>[0],
+    ) {
+      const latest = (yield* session.messages({
+        sessionID: input.sessionID,
+        agentID: input.agentID ?? "main",
+      })).findLast((message) => message.info.role === "user")
+      if (latest?.info.id !== input.expectedUserID) return false
+      yield* create(input)
+      return true
+    })
+
     return Service.of({
       isOverflow,
       prune,
       process: processCompaction,
       create,
+      createIfLatest,
     })
   }),
 )

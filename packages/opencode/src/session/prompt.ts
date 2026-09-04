@@ -2403,6 +2403,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
 
       if (!task.command) return
+      if (!(yield* isLatestUser(sessionID, lastUser.agentID ?? "main", lastUser.id))) return
 
       const summaryUserMsg: MessageV2.User = {
         id: MessageID.ascending(),
@@ -3183,9 +3184,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return messages.findIndex((item) => item.info.role === "user" && item.info.id === parentID) >= targetIndex
     }
 
+    // An automatic continuation belongs to the snapshot that produced it. Once
+    // a newer user is persisted for the actor, that user owns the next turn.
+    const isLatestUser = Effect.fn("SessionPrompt.isLatestUser")(function* (
+      sessionID: SessionID,
+      agentID: string,
+      messageID: MessageID,
+    ) {
+      const latest = (yield* sessions.messages({ sessionID, agentID })).findLast(
+        (message) => message.info.role === "user",
+      )
+      return latest?.info.id === messageID
+    })
+
     const promptWork = Effect.fnUntraced(function* (
       input: PromptInput,
-      run: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>,
+      run: (input: z.infer<typeof LoopInput>) => Effect.Effect<{
+        started: boolean
+        exit: Exit.Exit<MessageV2.WithParts, never>
+      }>,
       idleAtAdmission?: boolean,
     ) {
       const session = yield* sessions.get(input.sessionID)
@@ -3232,14 +3249,47 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // A queued prompt can join a runner after its final message snapshot but
       // before that runner publishes Idle. The joined result then belongs to an
       // older user turn, so the caller that persisted this prompt starts or
-      // joins the successor run. A shared MessageAbortedError stops handoff.
+      // joins the successor run. If a joined generation fails before producing
+      // a terminal assistant that covers this prompt, retry the handoff once.
+      let retriedFailedHandoff = false
       while (true) {
-        const result = yield* run({
+        const attempt = yield* run({
           sessionID: input.sessionID,
           agentID: input.agentID ?? "main",
           titleLocale: input.titleLocale,
         })
-        if (result.info.role !== "assistant") return result
+        if (Exit.isFailure(attempt.exit)) {
+          if (Cause.hasInterruptsOnly(attempt.exit.cause) || attempt.started || retriedFailedHandoff)
+            return yield* Effect.failCause(attempt.exit.cause)
+          const messages = yield* sessions.messages({
+            sessionID: input.sessionID,
+            agentID: input.agentID ?? "main",
+          })
+          const terminal = messages.findLast(
+            (item) =>
+              item.info.role === "assistant" &&
+              (item.info.error !== undefined || item.info.time.completed !== undefined),
+          )
+          if (
+            !messages.some((item) => item.info.id === message.info.id) ||
+            (terminal &&
+              terminal.info.role === "assistant" &&
+              coversPrompt(messages, message.info.id, terminal.info.parentID))
+          )
+            return yield* Effect.failCause(attempt.exit.cause)
+          retriedFailedHandoff = true
+          continue
+        }
+        const result = attempt.exit.value
+        if (result.info.role !== "assistant") {
+          const messages = yield* sessions.messages({
+            sessionID: input.sessionID,
+            agentID: input.agentID ?? "main",
+          })
+          if (result.info.id === message.info.id || !messages.some((item) => item.info.id === message.info.id))
+            return result
+          continue
+        }
         const assistant = result.info
         if (MessageV2.AbortedError.isInstance(assistant.error)) return result
         if (assistant.parentID === message.info.id) return result
@@ -3262,7 +3312,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
       function* (input: PromptInput) {
-        return yield* promptWork(input, loop)
+        return yield* promptWork(input, runSharedLoop)
       },
     )
 
@@ -3293,7 +3343,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input.sessionID,
         agentID,
         lastAssistant(input.sessionID, agentID).pipe(Effect.catchCause(() => Effect.interrupt)),
-        promptWork(input, (next) => runLoop(next.sessionID, next.agentID, next.titleLocale), idle),
+        promptWork(
+          input,
+          (next) =>
+            runLoop(next.sessionID, next.agentID, next.titleLocale).pipe(
+              Effect.exit,
+              Effect.map((exit) => ({ started: true, exit })),
+            ),
+          idle,
+        ),
       )
     })
 
@@ -3460,6 +3518,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               validation_status: "skipped",
             })
             .pipe(Effect.ignore)
+
+        const latestUserIs = (messageID: MessageID) => isLatestUser(sessionID, resolvedAgentID, messageID)
         // Trim freed space but `lastFinished.tokens` still reflects pre-trim state.
         // Skip one overflow check so the model can respond on the trimmed context;
         // its new assistant message will carry accurate tokens for the next check.
@@ -3495,6 +3555,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             return false
           }
+          if (!(yield* latestUserIs(input.lastUser.id))) return false
 
           outputLengthContinuations++
           yield* slog.info("auto-continuing output length", { attempt: outputLengthContinuations })
@@ -3564,6 +3625,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 }),
               ),
             )
+
+          if (!(yield* latestUserIs(lastUser.id))) return true
 
           if (verdict.ok || verdict.impossible) {
             yield* slog.info("goal satisfied; allowing stop", {
@@ -3660,6 +3723,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             return false
           }
+          if (!(yield* latestUserIs(input.lastUser.id))) return false
 
           invalidContinuations++
           yield* slog.info("auto-continuing invalid output", { attempt: invalidContinuations, reason: input.reason })
@@ -3738,6 +3802,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             return false
           }
+          if (!(yield* latestUserIs(input.lastUser.id))) return false
           textToolCallRetries++
           yield* slog.info("retrying text-form tool call", { attempt: textToolCallRetries })
           // Append a synthetic user turn so the discarded assistant becomes stale
@@ -3798,6 +3863,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             return false
           }
+          if (!(yield* latestUserIs(input.lastUser.id))) return false
 
           structuredRetries++
           yield* slog.info("retrying structured output", { attempt: structuredRetries })
@@ -3849,6 +3915,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             return false
           }
+          if (!(yield* latestUserIs(input.lastUser.id))) return false
           const recoveryText = textNgramRecoveryAttempts === 0 ? TEXT_NGRAM_RECOVERY_REMIND : TEXT_NGRAM_RECOVERY_REPLAN
           const reentry = yield* sessions.updateMessage({
             id: MessageID.ascending(),
@@ -4275,21 +4342,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // main to this subagent path and skip the checkpoint rebuild
             // below. See checkpoint.ts:715 for the matching gate.
             if (lastUser.agentID && lastUser.agentID !== "main") {
-              yield* compaction
-                .create({
-                  sessionID,
-                  agent: lastUser.agent,
-                  model: { providerID: model.providerID, modelID: model.id },
-                  auto: true,
-                  agentID: lastUser.agentID,
-                  task_id: lastUser.task_id,
-                })
-                .pipe(Effect.ignore)
+              const compacted = yield* compaction.createIfLatest({
+                sessionID,
+                agent: lastUser.agent,
+                model: { providerID: model.providerID, modelID: model.id },
+                auto: true,
+                agentID: lastUser.agentID,
+                task_id: lastUser.task_id,
+                expectedUserID: lastUser.id,
+              })
               // After inserting the boundary, the actor's filterCompactedEffect
               // slice begins at the boundary marker — context is freed for the
               // next iteration's stream. Skip the next overflow check so the
               // model can respond on the trimmed context.
-              skipOverflowCheck = true
+              if (compacted) skipOverflowCheck = true
               continue
             }
 
@@ -4329,24 +4395,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // an LLM summary — everything before it is dropped unsummarized
               // (compaction.ts:499, message-v2.ts:1037), which is exactly why
               // we try to write a checkpoint first whenever we are allowed to.
-              yield* compaction
-                .create({
-                  sessionID,
-                  agent: lastUser.agent,
-                  model: { providerID: model.providerID, modelID: model.id },
-                  auto: true,
-                  agentID: lastUser.agentID,
-                  task_id: lastUser.task_id,
-                })
-                .pipe(Effect.ignore)
+              const compacted = yield* compaction.createIfLatest({
+                sessionID,
+                agent: lastUser.agent,
+                model: { providerID: model.providerID, modelID: model.id },
+                auto: true,
+                agentID: lastUser.agentID,
+                task_id: lastUser.task_id,
+                expectedUserID: lastUser.id,
+              })
               // Was the switch the reason no checkpoint existed? Then say so —
               // this path is otherwise completely silent (no status message at
               // all mid-turn), which is how "compaction instead of rebuild"
               // became invisible to the user. A genuine writer failure keeps its
               // existing behaviour untouched.
-              if (attempt === "memory-write-off") yield* noticeMemoryWriteOffFallback(sessionID).pipe(Effect.ignore)
-              if (attempt === "checkpoint-off") yield* noticeCheckpointOffFallback(sessionID).pipe(Effect.ignore)
-              skipOverflowCheck = true
+              if (compacted && attempt === "memory-write-off")
+                yield* noticeMemoryWriteOffFallback(sessionID).pipe(Effect.ignore)
+              if (compacted && attempt === "checkpoint-off")
+                yield* noticeCheckpointOffFallback(sessionID).pipe(Effect.ignore)
+              if (compacted) skipOverflowCheck = true
               continue
             }
 
@@ -4733,18 +4800,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // Fork agents are always subagents (lastUser.agentID is set); use
               // per-actor compaction on overflow (same as non-fork subagent path).
               if (!isBoundedComputation && result === "overflow") {
-                yield* compaction
-                  .create({
-                    sessionID,
-                    agent: lastUser.agent,
-                    model: { providerID: model.providerID, modelID: model.id },
-                    auto: true,
-                    overflow: true,
-                    agentID: lastUser.agentID,
-                    task_id: lastUser.task_id,
-                  })
-                  .pipe(Effect.ignore)
-                skipOverflowCheck = true
+                const compacted = yield* compaction.createIfLatest({
+                  sessionID,
+                  agent: lastUser.agent,
+                  model: { providerID: model.providerID, modelID: model.id },
+                  auto: true,
+                  overflow: true,
+                  agentID: lastUser.agentID,
+                  task_id: lastUser.task_id,
+                  expectedUserID: lastUser.id,
+                })
+                if (compacted) skipOverflowCheck = true
               }
               return "continue" as const
             }
@@ -5065,18 +5131,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // Gate must exclude "main" — see comment at the matching gate
               // earlier in this file (~line 1716) and at checkpoint.ts:715.
               if (lastUser.agentID && lastUser.agentID !== "main") {
-                yield* compaction
-                  .create({
-                    sessionID,
-                    agent: lastUser.agent,
-                    model: { providerID: model.providerID, modelID: model.id },
-                    auto: true,
-                    overflow: true,
-                    agentID: lastUser.agentID,
-                    task_id: lastUser.task_id,
-                  })
-                  .pipe(Effect.ignore)
-                skipOverflowCheck = true
+                const compacted = yield* compaction.createIfLatest({
+                  sessionID,
+                  agent: lastUser.agent,
+                  model: { providerID: model.providerID, modelID: model.id },
+                  auto: true,
+                  overflow: true,
+                  agentID: lastUser.agentID,
+                  task_id: lastUser.task_id,
+                  expectedUserID: lastUser.id,
+                })
+                if (compacted) skipOverflowCheck = true
                 return "continue" as const
               }
 
@@ -5105,21 +5170,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // or memory writing is off and nothing was attempted.
               if (attempt2 === "writer-failed" || attempt2 === "memory-write-off" || attempt2 === "checkpoint-off") {
                 // THE single compaction fallback (see the token-threshold site).
-                yield* compaction
-                  .create({
-                    sessionID,
-                    agent: lastUser.agent,
-                    model: { providerID: model.providerID, modelID: model.id },
-                    auto: true,
-                    overflow: true,
-                    agentID: lastUser.agentID,
-                    task_id: lastUser.task_id,
-                  })
-                  .pipe(Effect.ignore)
+                const compacted = yield* compaction.createIfLatest({
+                  sessionID,
+                  agent: lastUser.agent,
+                  model: { providerID: model.providerID, modelID: model.id },
+                  auto: true,
+                  overflow: true,
+                  agentID: lastUser.agentID,
+                  task_id: lastUser.task_id,
+                  expectedUserID: lastUser.id,
+                })
                 // Same reason-split as the token-threshold site.
-                if (attempt2 === "memory-write-off") yield* noticeMemoryWriteOffFallback(sessionID).pipe(Effect.ignore)
-                if (attempt2 === "checkpoint-off") yield* noticeCheckpointOffFallback(sessionID).pipe(Effect.ignore)
-                skipOverflowCheck = true
+                if (compacted && attempt2 === "memory-write-off")
+                  yield* noticeMemoryWriteOffFallback(sessionID).pipe(Effect.ignore)
+                if (compacted && attempt2 === "checkpoint-off")
+                  yield* noticeCheckpointOffFallback(sessionID).pipe(Effect.ignore)
+                if (compacted) skipOverflowCheck = true
               }
               // "insert-failed" → a checkpoint exists; must not compact.
             }
@@ -5159,6 +5225,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   })
                   break
                 }
+                if (!(yield* latestUserIs(lastUser.id))) continue
                 const recoveryText = textLoopRecoveryAttempts === 0 ? RECOVERY_PROMPT_MILD : RECOVERY_PROMPT_STRONG
                 // Create a NEW user message at the end of conversation (not append to original)
                 const reentry = yield* sessions.updateMessage({
@@ -5222,33 +5289,43 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }).pipe(Effect.onExit(firePostSession), Effect.orDie)
     })
 
+    const runSharedLoop = Effect.fn("SessionPrompt.runSharedLoop")(function* (input: z.infer<typeof LoopInput>) {
+      const agentID = input.agentID ?? "main"
+      let started = false
+      const work = Effect.sync(() => {
+        started = true
+      }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale)))
+      const actor = boundActor ?? spawnRef.current
+      const execution =
+        input.notifyParentOnComplete === true && agentID !== "main" && actor?.runPersistentTurn
+          ? actor.runPersistentTurn({
+              sessionID: input.sessionID,
+              actorID: agentID,
+              work,
+              onInterrupt: lastAssistant(input.sessionID, agentID),
+              notifyParentOnComplete: true,
+              inboxID: input.inboxID,
+            })
+          : Effect.gen(function* () {
+              while (true) {
+                const result = yield* state.ensureRunning(
+                  input.sessionID,
+                  agentID,
+                  lastAssistant(input.sessionID, agentID),
+                  work,
+                )
+                if (!input.inboxID || !(yield* inbox.has(input.inboxID))) return result
+              }
+            }).pipe(state.withRunDisposal)
+      const exit = yield* execution.pipe(Effect.exit)
+      return { started, exit }
+    })
     const loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
       "SessionPrompt.loop",
-    )(function* (input: z.infer<typeof LoopInput>) {
-      const agentID = input.agentID ?? "main"
-      const work = runLoop(input.sessionID, agentID, input.titleLocale)
-      const actor = boundActor ?? spawnRef.current
-      if (input.notifyParentOnComplete === true && agentID !== "main" && actor?.runPersistentTurn) {
-        return yield* actor.runPersistentTurn({
-          sessionID: input.sessionID,
-          actorID: agentID,
-          work,
-          onInterrupt: lastAssistant(input.sessionID, agentID),
-          notifyParentOnComplete: true,
-          inboxID: input.inboxID,
-        })
-      }
-      return yield* Effect.gen(function* () {
-        while (true) {
-          const result = yield* state.ensureRunning(
-            input.sessionID,
-            agentID,
-            lastAssistant(input.sessionID, agentID),
-            work,
-          )
-          if (!input.inboxID || !(yield* inbox.has(input.inboxID))) return result
-        }
-      }).pipe(state.withRunDisposal)
+    )(function* (input) {
+      const attempt = yield* runSharedLoop(input)
+      if (Exit.isFailure(attempt.exit)) return yield* Effect.failCause(attempt.exit.cause)
+      return attempt.exit.value
     })
 
     const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError> = Effect.fn(
@@ -5326,6 +5403,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       if (input.command === Command.Default.REBUILD) {
         const msgs = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
         const lastUser = msgs.findLast((m) => m.info.role === "user")
+        if (!lastUser) {
+          const error = new NamedError.Unknown({ message: "Cannot rebuild an empty session." })
+          yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+          throw error
+        }
         const model = yield* lastModel(input.sessionID)
 
         // Emit the terminal outcome on the status channel, then return to idle.
@@ -5384,18 +5466,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // status channel instead of silently swapping the mechanism, and — per
           // the branch's existing noReply decision (3244ca732) — fabricate
           // neither an assistant reply nor a synthetic user turn.
-          yield* compaction
-            .create({
-              sessionID: input.sessionID,
-              agent: agentName,
-              model: { providerID: model.providerID, modelID: model.modelID },
-              // Not user-requested: the user asked for a rebuild, the system
-              // chose this degradation.
-              auto: true,
-              agentID: lastUser?.info.agentID ?? "main",
-              task_id: lastUser?.info.role === "user" ? lastUser.info.task_id : undefined,
-            })
-            .pipe(Effect.ignore)
+          const compacted = yield* compaction.createIfLatest({
+            sessionID: input.sessionID,
+            agent: agentName,
+            model: { providerID: model.providerID, modelID: model.modelID },
+            // Not user-requested: the user asked for a rebuild, the system
+            // chose this degradation.
+            auto: true,
+            agentID: lastUser?.info.agentID ?? "main",
+            task_id: lastUser?.info.role === "user" ? lastUser.info.task_id : undefined,
+            expectedUserID: lastUser?.info.role === "user" ? lastUser.info.id : undefined,
+          })
+          if (!compacted) {
+            if (!runnerOwnsIdle)
+              yield* status.set(input.sessionID, { type: "idle" }).pipe(Effect.catch(() => Effect.void))
+            return lastUser ?? msgs[msgs.length - 1]!
+          }
           // The two causes are very different and the user has to be able to
           // tell them apart: a writer that genuinely broke (report it) versus the
           // memory write switch being off (expected — you turned it off). When
@@ -5581,7 +5667,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           (next) =>
             promptWork(
               next,
-              (loopInput) => runLoop(loopInput.sessionID, loopInput.agentID, loopInput.titleLocale),
+              (loopInput) =>
+                runLoop(loopInput.sessionID, loopInput.agentID, loopInput.titleLocale).pipe(
+                  Effect.exit,
+                  Effect.map((exit) => ({ started: true, exit })),
+                ),
               idle,
             ),
           true,
@@ -5600,13 +5690,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           const lastUser = msgs.findLast((message) => message.info.role === "user")
           const currentAgent =
             lastUser?.info.role === "user" && lastUser.info.agent ? lastUser.info.agent : yield* agents.defaultAgent()
-          yield* compaction.create({
+          yield* compaction.createIfLatest({
             sessionID: input.sessionID,
             agent: currentAgent,
             model: { providerID: input.providerID, modelID: input.modelID },
             auto: input.auto,
             agentID: "main",
             task_id: lastUser?.info.role === "user" ? lastUser.info.task_id : undefined,
+            expectedUserID: lastUser?.info.role === "user" ? lastUser.info.id : undefined,
           })
           return yield* runLoop(input.sessionID, "main")
         }),
