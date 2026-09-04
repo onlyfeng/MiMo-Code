@@ -86,7 +86,7 @@ export function classifyAssistantStep(input: {
   if (
     assistant.finish === "tool-calls" &&
     !assistant.error &&
-    MessageV2.compareOrder(input.lastUser, assistant) < 0 &&
+    assistant.parentID === input.lastUser.id &&
     !input.parts.some((part) => part.type === "tool") &&
     input.parts.some(
       (part) =>
@@ -101,8 +101,9 @@ export function classifyAssistantStep(input: {
   // 3. Provider-executed-only tool step (no client tool part left, see #1).
   if (assistant.finish === "tool-calls") return { type: "continue" }
 
-  // 4. Stale assistant predating the current user turn — don't terminate on it.
-  if (input.phase === "existing-assistant" && MessageV2.compareOrder(input.lastUser, assistant) >= 0)
+  // 4. An assistant only covers its parent user. Message IDs supplied by API
+  // callers are identifiers and need not follow persistence order.
+  if (input.phase === "existing-assistant" && assistant.parentID !== input.lastUser.id)
     return { type: "continue" }
 
   // 5. Errored step — checked before content so an errored message that also

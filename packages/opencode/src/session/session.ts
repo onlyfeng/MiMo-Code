@@ -10,7 +10,7 @@ import { type ProviderMetadata, type LanguageModelUsage } from "ai"
 import { Flag } from "../flag/flag"
 import { InstallationVersion } from "../installation/version"
 
-import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt } from "../storage"
+import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt, sql } from "../storage"
 import { SyncEvent } from "../sync"
 import type { SQL } from "../storage"
 import { PartTable, SessionTable, MessageTable } from "./session.sql"
@@ -457,6 +457,11 @@ export interface Interface {
   readonly updateMessage: <T extends MessageV2.Info>(msg: T) => Effect.Effect<T>
   readonly createMessage: <T extends MessageV2.Info>(msg: T) => Effect.Effect<T>
   readonly commitUserMessage: (msg: MessageV2.User, parts: MessageV2.Part[]) => Effect.Effect<MessageV2.User>
+  readonly commitUserMessageIfLatest: (input: {
+    expectedUserID: MessageID | undefined
+    message: MessageV2.User
+    parts: MessageV2.Part[]
+  }) => Effect.Effect<boolean>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
   readonly removePart: (input: { sessionID: SessionID; messageID: MessageID; partID: PartID }) => Effect.Effect<PartID>
   readonly getPart: (input: {
@@ -716,132 +721,159 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         ).committed
       }).pipe(Effect.withSpan("Session.createMessage"))
 
+    const parseUserMessage = (msg: MessageV2.User, parts: MessageV2.Part[]) => {
+      const message = MessageV2.User.parse(msg)
+      const parsedParts = parts.map((part) => MessageV2.Part.parse(part))
+      if (parsedParts.some((part) => part.sessionID !== message.sessionID || part.messageID !== message.id)) {
+        throw new Error(`User message parts must belong to ${message.sessionID}/${message.id}`)
+      }
+      return { message, parts: parsedParts }
+    }
+
+    const commitUserMessageInTransaction = (tx: Database.TxOrDb, message: MessageV2.User, parts: MessageV2.Part[]) => {
+      const owner = tx
+        .select({ id: SessionTable.id })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, message.sessionID))
+        .get()
+      if (!owner) throw new NotFoundError({ message: `Session not found: ${message.sessionID}` })
+      const existing = tx
+        .select({
+          session_id: MessageTable.session_id,
+          agent_id: MessageTable.agent_id,
+          time_created: MessageTable.time_created,
+          data: MessageTable.data,
+        })
+        .from(MessageTable)
+        .where(eq(MessageTable.id, message.id))
+        .get()
+      if (
+        existing &&
+        (existing.session_id !== message.sessionID || existing.agent_id !== (message.agentID ?? "main"))
+      ) {
+        throw new Error(`Message ID already belongs to another actor: ${message.id}`)
+      }
+      if (existing) {
+        const existingMessage = MessageV2.User.safeParse({
+          ...existing.data,
+          id: message.id,
+          sessionID: existing.session_id,
+          agentID: message.agentID,
+          time: { ...existing.data.time, created: existing.time_created },
+        })
+        const existingParts = tx
+          .select({
+            id: PartTable.id,
+            message_id: PartTable.message_id,
+            session_id: PartTable.session_id,
+            data: PartTable.data,
+          })
+          .from(PartTable)
+          .where(eq(PartTable.message_id, message.id))
+          .orderBy(PartTable.id)
+          .all()
+          .map((part) =>
+            MessageV2.Part.parse(
+              JSON.parse(
+                JSON.stringify({
+                  ...part.data,
+                  id: part.id,
+                  messageID: part.message_id,
+                  sessionID: part.session_id,
+                }),
+              ),
+            ),
+          )
+        if (!existingMessage.success) {
+          throw new Error(`Message ID already exists with different content: ${message.id}`)
+        }
+        const expectedMessage = MessageV2.User.parse(
+          JSON.parse(JSON.stringify({ ...message, time: existingMessage.data.time })),
+        )
+        const canonicalExistingMessage = MessageV2.User.parse(JSON.parse(JSON.stringify(existingMessage.data)))
+        const expectedParts = parts
+          .map((part) => MessageV2.Part.parse(JSON.parse(JSON.stringify(part))))
+          .sort((a, b) => compareUtf8Bytes(a.id, b.id))
+        if (
+          !isDeepStrictEqual(canonicalExistingMessage, expectedMessage) ||
+          !isDeepStrictEqual(existingParts, expectedParts)
+        ) {
+          throw new Error(`Message ID already exists with different content: ${message.id}`)
+        }
+        return canonicalExistingMessage
+      }
+      const partIDs = parts.map((part) => part.id)
+      if (new Set(partIDs).size !== partIDs.length) {
+        throw new Error(`User message contains duplicate part IDs: ${message.id}`)
+      }
+      const occupiedParts = partIDs.length
+        ? tx.select({ id: PartTable.id }).from(PartTable).where(inArray(PartTable.id, partIDs)).all()
+        : []
+      if (occupiedParts.length > 0) {
+        throw new Error(`Part ID already belongs to another message: ${occupiedParts[0].id}`)
+      }
+      const latest = tx
+        .select({ time_created: MessageTable.time_created })
+        .from(MessageTable)
+        .where(
+          and(eq(MessageTable.session_id, message.sessionID), eq(MessageTable.agent_id, message.agentID ?? "main")),
+        )
+        .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+        .get()
+      const committed: MessageV2.User = {
+        ...message,
+        time: {
+          ...message.time,
+          created: Math.max(Date.now(), (latest?.time_created ?? -1) + 1),
+        },
+      }
+      SyncEvent.run(MessageV2.Event.Updated, { sessionID: committed.sessionID, info: committed })
+      parts.forEach((part) =>
+        SyncEvent.run(MessageV2.Event.PartUpdated, {
+          sessionID: part.sessionID,
+          part: structuredClone(part),
+          time: Date.now(),
+        }),
+      )
+      return committed
+    }
+
     const commitUserMessage = (msg: MessageV2.User, parts: MessageV2.Part[]): Effect.Effect<MessageV2.User> =>
       Effect.sync(() => {
-        const parsedMessage = MessageV2.User.parse(msg)
-        const parsedParts = parts.map((part) => MessageV2.Part.parse(part))
-        if (
-          parsedParts.some((part) => part.sessionID !== parsedMessage.sessionID || part.messageID !== parsedMessage.id)
-        ) {
-          throw new Error(`User message parts must belong to ${parsedMessage.sessionID}/${parsedMessage.id}`)
-        }
+        const parsed = parseUserMessage(msg, parts)
+        return Database.transaction((tx) => commitUserMessageInTransaction(tx, parsed.message, parsed.parts), {
+          behavior: "immediate",
+        })
+      }).pipe(Effect.withSpan("Session.commitUserMessage"))
+
+    const commitUserMessageIfLatest: Interface["commitUserMessageIfLatest"] = Effect.fn(
+      "Session.commitUserMessageIfLatest",
+    )(function* (input) {
+      return yield* Effect.sync(() => {
+        const parsed = parseUserMessage(input.message, input.parts)
         return Database.transaction(
           (tx) => {
-            const owner = tx
-              .select({ id: SessionTable.id })
-              .from(SessionTable)
-              .where(eq(SessionTable.id, parsedMessage.sessionID))
-              .get()
-            if (!owner) throw new NotFoundError({ message: `Session not found: ${parsedMessage.sessionID}` })
-            const existing = tx
-              .select({
-                session_id: MessageTable.session_id,
-                agent_id: MessageTable.agent_id,
-                time_created: MessageTable.time_created,
-                data: MessageTable.data,
-              })
-              .from(MessageTable)
-              .where(eq(MessageTable.id, parsedMessage.id))
-              .get()
-            if (
-              existing &&
-              (existing.session_id !== parsedMessage.sessionID ||
-                existing.agent_id !== (parsedMessage.agentID ?? "main"))
-            ) {
-              throw new Error(`Message ID already belongs to another actor: ${parsedMessage.id}`)
-            }
-            if (existing) {
-              const existingMessage = MessageV2.User.safeParse({
-                ...existing.data,
-                id: parsedMessage.id,
-                sessionID: existing.session_id,
-                agentID: parsedMessage.agentID,
-                time: { ...existing.data.time, created: existing.time_created },
-              })
-              const existingParts = tx
-                .select({
-                  id: PartTable.id,
-                  message_id: PartTable.message_id,
-                  session_id: PartTable.session_id,
-                  data: PartTable.data,
-                })
-                .from(PartTable)
-                .where(eq(PartTable.message_id, parsedMessage.id))
-                .orderBy(PartTable.id)
-                .all()
-                .map((part) =>
-                  MessageV2.Part.parse(
-                    JSON.parse(
-                      JSON.stringify({
-                        ...part.data,
-                        id: part.id,
-                        messageID: part.message_id,
-                        sessionID: part.session_id,
-                      }),
-                    ),
-                  ),
-                )
-              if (!existingMessage.success) {
-                throw new Error(`Message ID already exists with different content: ${parsedMessage.id}`)
-              }
-              const expectedMessage = MessageV2.User.parse(
-                JSON.parse(JSON.stringify({ ...parsedMessage, time: existingMessage.data.time })),
-              )
-              const canonicalExistingMessage = MessageV2.User.parse(
-                JSON.parse(JSON.stringify(existingMessage.data)),
-              )
-              const expectedParts = parsedParts
-                .map((part) => MessageV2.Part.parse(JSON.parse(JSON.stringify(part))))
-                .sort((a, b) => compareUtf8Bytes(a.id, b.id))
-              if (
-                !isDeepStrictEqual(canonicalExistingMessage, expectedMessage) ||
-                !isDeepStrictEqual(existingParts, expectedParts)
-              ) {
-                throw new Error(`Message ID already exists with different content: ${parsedMessage.id}`)
-              }
-              return canonicalExistingMessage
-            }
-            const partIDs = parsedParts.map((part) => part.id)
-            if (new Set(partIDs).size !== partIDs.length) {
-              throw new Error(`User message contains duplicate part IDs: ${parsedMessage.id}`)
-            }
-            const occupiedParts = partIDs.length
-              ? tx.select({ id: PartTable.id }).from(PartTable).where(inArray(PartTable.id, partIDs)).all()
-              : []
-            if (occupiedParts.length > 0) {
-              throw new Error(`Part ID already belongs to another message: ${occupiedParts[0].id}`)
-            }
             const latest = tx
-              .select({ time_created: MessageTable.time_created })
+              .select({ id: MessageTable.id })
               .from(MessageTable)
               .where(
                 and(
-                  eq(MessageTable.session_id, parsedMessage.sessionID),
-                  eq(MessageTable.agent_id, parsedMessage.agentID ?? "main"),
+                  eq(MessageTable.session_id, parsed.message.sessionID),
+                  eq(MessageTable.agent_id, parsed.message.agentID ?? "main"),
+                  sql`json_extract(${MessageTable.data}, '$.role') = 'user'`,
                 ),
               )
               .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+              .limit(1)
               .get()
-            const committed: MessageV2.User = {
-              ...parsedMessage,
-              time: {
-                ...parsedMessage.time,
-                created: Math.max(Date.now(), (latest?.time_created ?? -1) + 1),
-              },
-            }
-            SyncEvent.run(MessageV2.Event.Updated, { sessionID: committed.sessionID, info: committed })
-            parsedParts.forEach((part) =>
-              SyncEvent.run(MessageV2.Event.PartUpdated, {
-                sessionID: part.sessionID,
-                part: structuredClone(part),
-                time: Date.now(),
-              }),
-            )
-            return committed
+            if (latest?.id !== input.expectedUserID) return false
+            commitUserMessageInTransaction(tx, parsed.message, parsed.parts)
+            return true
           },
           { behavior: "immediate" },
         )
-      }).pipe(Effect.withSpan("Session.commitUserMessage"))
+      })
+    })
 
     const updatePart = <T extends MessageV2.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
@@ -1147,6 +1179,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       updateMessage,
       createMessage,
       commitUserMessage,
+      commitUserMessageIfLatest,
       removeMessage,
       removePart,
       updatePart,

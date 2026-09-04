@@ -599,6 +599,7 @@ export interface Interface {
     agentID?: string
     agent: string
     model: { providerID: string; modelID: string }
+    task_id?: string
     boundaryCreatedAt?: number
   }) => Effect.Effect<boolean>
 }
@@ -1780,6 +1781,7 @@ export const layer: Layer.Layer<
       agentID?: string
       agent: string
       model: { providerID: string; modelID: string }
+      task_id?: string
       boundaryCreatedAt?: number
     }) {
       const rendered = yield* renderRebuildContext(input.sessionID, {
@@ -1803,6 +1805,7 @@ export const layer: Layer.Layer<
         model: { providerID: input.model.providerID as ProviderID, modelID: input.model.modelID as ModelID },
         sessionID: input.sessionID,
         agent: input.agent,
+        task_id: input.task_id,
         source: "hook",
         time: { created: syntheticTime },
       })
