@@ -67,6 +67,7 @@ import { Metrics } from "../../src/metrics"
 import { Database, eq } from "../../src/storage"
 import { SessionPrefixSnapshotTable } from "../../src/session/session.sql"
 import { prefixCaptureRef } from "../../src/session/prefix-capture-ref"
+import { SyncEvent } from "../../src/sync"
 
 void Log.init({ print: false })
 
@@ -1669,6 +1670,76 @@ it.live("does not create an automatic compaction boundary from a stale user snap
     }),
     { git: true, config: providerCfg },
   ),
+)
+
+it.live(
+  "checks the latest user and creates the compaction boundary atomically",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* () {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const compaction = yield* SessionCompaction.Service
+        const chat = yield* sessions.create({ title: "Atomic compaction boundary" })
+        const first = yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "old prompt" }],
+        })
+        const nextID = MessageID.ascending()
+        const now = Date.now()
+        const next: MessageV2.User = {
+          id: nextID,
+          sessionID: chat.id,
+          role: "user",
+          time: { created: now },
+          agent: "build",
+          model: ref,
+          source: "user",
+        }
+        const db = Database.Client()
+        const descriptor = Object.getOwnPropertyDescriptor(db, "transaction")
+        const transaction = db.transaction.bind(db)
+        let inject = true
+        // Commit T2 immediately before the next transaction starts. A check
+        // outside that transaction has already gone stale; a check inside sees T2.
+        const intercepted: typeof db.transaction = (callback, config) => {
+          if (inject) {
+            inject = false
+            SyncEvent.run(MessageV2.Event.Updated, { sessionID: chat.id, info: next })
+          }
+          return transaction(callback, config)
+        }
+        db.transaction = intercepted
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() =>
+            descriptor
+              ? Object.defineProperty(db, "transaction", descriptor)
+              : Reflect.deleteProperty(db, "transaction"),
+          ),
+        )
+
+        const created = yield* compaction.createIfLatest({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          auto: true,
+          expectedUserID: first.info.id,
+        })
+
+        expect(inject).toBe(false)
+        expect(created).toBe(false)
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).some((message) =>
+            message.parts.some((part) => part.type === "compaction"),
+          ),
+        ).toBe(false)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  10_000,
 )
 
 it.live("rejects rebuilding an empty session without fabricating a result", () =>

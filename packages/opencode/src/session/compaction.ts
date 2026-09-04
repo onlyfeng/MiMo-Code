@@ -11,7 +11,7 @@ import { SessionProcessor } from "./processor"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config"
-import { NotFoundError } from "@/storage"
+import { Database, NotFoundError, and, desc, eq, sql } from "@/storage"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Layer, Context } from "effect"
 import { InstanceState } from "@/effect"
@@ -20,6 +20,8 @@ import { makeRuntime } from "@/effect/run-service"
 import { fn } from "@/util/fn"
 import path from "path"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
+import { MessageTable } from "./session.sql"
+import { SyncEvent } from "@/sync"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -713,19 +715,11 @@ export const layer: Layer.Layer<
       return result
     })
 
-    const create = Effect.fn("SessionCompaction.create")(function* (input: {
-      sessionID: SessionID
-      agent: string
-      model: { providerID: ProviderID; modelID: ModelID }
-      auto: boolean
-      overflow?: boolean
-      agentID?: string
-      task_id?: string
-    }) {
+    const boundary = (input: Parameters<Interface["create"]>[0]) => {
       // Tag the synthetic boundary message with agent_id so per-actor
       // filterCompactedEffect lookups stop at this row when scoping by the
       // same agent_id (subagent compaction stays inside its own scope).
-      const msg = yield* session.updateMessage({
+      const message: MessageV2.User = {
         id: MessageID.ascending(),
         role: "user",
         model: input.model,
@@ -735,33 +729,71 @@ export const layer: Layer.Layer<
         task_id: input.task_id,
         source: "hook",
         time: { created: Date.now() },
-      })
-      yield* session.updatePart({
+      }
+      const part: MessageV2.CompactionPart = {
         id: PartID.ascending(),
-        messageID: msg.id,
-        sessionID: msg.sessionID,
+        messageID: message.id,
+        sessionID: message.sessionID,
         type: "compaction",
         auto: input.auto,
         overflow: input.overflow,
-      })
+      }
+      return { message, part }
+    }
+
+    const publish = (input: Parameters<Interface["create"]>[0]) =>
       // Boundary-insert path also drops effective context from the model's
       // view — publish Compacted so downstream caches (cron sentinel etc)
       // reset on their side too. Same event shape as processCompaction.
-      yield* bus.publish(Event.Compacted, {
+      bus.publish(Event.Compacted, {
         sessionID: input.sessionID,
         ...(input.agentID ? { agentID: input.agentID } : {}),
       })
+
+    const create = Effect.fn("SessionCompaction.create")(function* (input: Parameters<Interface["create"]>[0]) {
+      const next = boundary(input)
+      yield* session.updateMessage(next.message)
+      yield* session.updatePart(next.part)
+      yield* publish(input)
     })
 
     const createIfLatest = Effect.fn("SessionCompaction.createIfLatest")(function* (
       input: Parameters<Interface["createIfLatest"]>[0],
     ) {
-      const latest = (yield* session.messages({
-        sessionID: input.sessionID,
-        agentID: input.agentID ?? "main",
-      })).findLast((message) => message.info.role === "user")
-      if (latest?.info.id !== input.expectedUserID) return false
-      yield* create(input)
+      const next = boundary(input)
+      const created = yield* Effect.sync(() =>
+        // `message.updated` uses the same immediate transaction. Nested SyncEvent
+        // writes reuse this transaction, so no user row can commit between the
+        // check and the boundary commit.
+        Database.transaction(
+          (tx) => {
+            const latest = tx
+              .select({ id: MessageTable.id })
+              .from(MessageTable)
+              .where(
+                and(
+                  eq(MessageTable.session_id, input.sessionID),
+                  eq(MessageTable.agent_id, input.agentID ?? "main"),
+                  sql`json_extract(${MessageTable.data}, '$.role') = 'user'`,
+                ),
+              )
+              .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+              .limit(1)
+              .get()
+            if (latest?.id !== input.expectedUserID) return false
+            SyncEvent.run(MessageV2.Event.Updated, { sessionID: input.sessionID, info: next.message })
+            SyncEvent.run(MessageV2.Event.PartUpdated, {
+              sessionID: input.sessionID,
+              part: structuredClone(next.part),
+              time: Date.now(),
+            })
+            return true
+          },
+          { behavior: "immediate" },
+        ),
+      )
+      if (!created) return false
+      yield* publish(input)
       return true
     })
 
