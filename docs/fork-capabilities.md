@@ -114,7 +114,7 @@ registry or history commit does not advance either behavior reference.
   main-only OpenAPI regressions, replace-agent actor-scope regressions, and
   actor/session tool tests at the reviewed main behavior.
 - Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
-  main behavior `ce1ea6409e305d0f439dabd8f12fd373c5232cb4`.
+  main behavior `59d53d7fd356aec1e0891a11cb11a6972ce84d7d`.
 - 2026-08-28 review: adopted strict spawn/run argument rejection and the
   existing `send` follow-up path while preserving caller-resolution,
   generation, persistent wake, and frozen-context fail-closed contracts.
@@ -141,12 +141,11 @@ registry or history commit does not advance either behavior reference.
   Optional task authority is persisted with each user row and resolved from the
   actor-scoped user actually selected by the loop, not from whichever queued
   caller wins successor admission; derived synthetic users preserve the binding.
-  Old assistant results remain durable, but their automatic continuations and
-  compaction follow-ups are skipped once a newer actor-scoped user is visible.
-  Latest-user compaction checks and boundary writes share one immediate database
-  transaction, so a persisted user cannot commit between them. Pre-persistence
-  prompt parsing, caller interruption, process disposal, and durable exactly-once
-  delivery remain outside this contract.
+  Old assistant results remain durable, but a derived synthetic/control user or
+  compaction follow-up is committed only while its source user is still latest
+  for the actor. That check, the message, and all of its parts share one immediate
+  database transaction. Pre-persistence prompt parsing, caller interruption,
+  process disposal, and durable exactly-once delivery remain outside this contract.
 - Retirement condition: upstream provides equivalent generation ownership,
   typed atomic main prompt/command/init/shell/summarize/recovery/resume
   admission, main-only recovery/resume identity, cancellation settlement,
