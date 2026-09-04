@@ -1685,3 +1685,32 @@ the synchronization completion gate.
   contain exactly `204`, `400`, and `404`.
 - The two TUI files are byte-identical to prior fork `main`; this correction
   adds no client-side failure-recovery behavior and no run-loop break change.
+
+## 2026-09-04 closing-run prompt handoff correction
+
+- Base fork `main`: `65a31144e14849ee2432001bd62bc7902f2c6f29`.
+- Stable behavior: `87b0ce443741556ae904a6afff7b637894d4be5b`.
+- Scope: the final run-loop snapshot to Runner Idle transition only.
+
+### Decision
+
+- A prompt still persists before joining an active run. When that shared result
+  belongs to an older user row, `promptWork` reuses the existing `run` path to
+  start or join the successor and stops once the returned assistant's parent
+  covers the prompt in the same actor transcript.
+- Assistant staleness, text-form tool retries, output-length continuation, and
+  loop-streak guards use `parentID` rather than lexical ID order, because the
+  public API accepts caller-supplied message IDs.
+- A shared `MessageAbortedError` stops handoff. The correction adds no
+  ticket/lane, database tail, timestamp movement, Runner state, cancellation
+  generation, or detached fiber.
+- This does not claim durable or exactly-once delivery across caller
+  interruption, instance disposal, or compaction/checkpoint visibility changes.
+
+### Validation
+
+- `packages/opencode/test/session/prompt-effect.test.ts`: 87 passed, 2 skipped,
+  0 failed, including closing-window, terminal-error, cancellation, and
+  reverse-ID output-length regressions.
+- Classifier unit/integration tests: 43 passed, 0 failed.
+- Busy-route regression: 5 passed, 0 failed; package typecheck exited zero.

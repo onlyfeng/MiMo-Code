@@ -62,7 +62,10 @@ registry or history commit does not advance either behavior reference.
   route is fire-and-forget, so it persists the user message through
   `SessionPrompt.prompt` before joining any in-flight run, never reports
   `Session.BusyError`, and declares no 409. A busy session queues the message
-  for the running loop rather than dropping it. Recovery and resume remain
+  for the running loop rather than dropping it. If that prompt joins a runner
+  which had already taken its final snapshot, the caller checks whether the
+  returned assistant covers its user row in the same actor transcript and
+  starts or joins the successor run when it does not. Recovery and resume remain
   main-only, accept no agent/task selector, and have no detached
   `resumeBackground` path. Unknown or ambiguous lifecycle callers fail closed.
   Frozen-context admission is owned separately by FD-009. Title locale
@@ -96,11 +99,11 @@ registry or history commit does not advance either behavior reference.
   tests, `packages/opencode/test/effect/runner.test.ts`, server
   prompt/prompt_async-queue/recovery and resume admission tests
   (`packages/opencode/test/server/session-prompt-busy.test.ts`), session
-  run-state tuple/disposal tests,
+  run-state tuple/disposal tests, closing-run prompt handoff/error/cancel tests,
   main-only OpenAPI regressions, replace-agent actor-scope regressions, and
   actor/session tool tests at the reviewed main behavior.
 - Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
-  main behavior `96d00e06ad1640a80f70c9eda1ed10e62ed5ab79`.
+  main behavior `87b0ce443741556ae904a6afff7b637894d4be5b`.
 - 2026-08-28 review: adopted strict spawn/run argument rejection and the
   existing `send` follow-up path while preserving caller-resolution,
   generation, persistent wake, and frozen-context fail-closed contracts.
@@ -117,6 +120,14 @@ registry or history commit does not advance either behavior reference.
   route is now the upstream `prompt` path again; the synchronous `/message`,
   `/init`, `/summarize`, `/command`, and resume routes keep `startRunning`,
   which is what the zombie-runner hardening in `1cfe7efc` was for.
+- 2026-09-04 closing-window correction: a persisted prompt that receives an
+  older runner result now hands off through the existing `run` path until an
+  assistant covers it; a shared `MessageAbortedError` stops handoff. Coverage
+  uses actor transcript order and assistant `parentID`, without tickets, tail
+  movement, new Runner state, cancellation generation, or detached delivery.
+  This closes the final-snapshot-to-Idle window only; compaction/checkpoint
+  visibility, caller interruption, process disposal, and durable exactly-once
+  delivery remain outside this contract.
 - Retirement condition: upstream provides equivalent generation ownership,
   typed atomic main prompt/command/init/shell/summarize/recovery/resume
   admission, main-only recovery/resume identity, cancellation settlement,

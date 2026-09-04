@@ -3227,7 +3227,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // A queued prompt can join a runner after its final message snapshot but
       // before that runner publishes Idle. The joined result then belongs to an
       // older user turn, so the caller that persisted this prompt starts or
-      // joins the successor run. Explicit cancellation remains terminal.
+      // joins the successor run. A shared MessageAbortedError stops handoff.
       while (true) {
         const result = yield* run({
           sessionID: input.sessionID,

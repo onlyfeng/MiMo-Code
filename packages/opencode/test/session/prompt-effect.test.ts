@@ -4041,7 +4041,7 @@ it.live(
 )
 
 it.live(
-  "cancelling an active run does not restart for a queued prompt",
+  "a shared MessageAbortedError does not restart handoff for a queued prompt",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
