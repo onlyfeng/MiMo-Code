@@ -2403,8 +2403,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
 
       if (!task.command) return
-      if (!(yield* isLatestUser(sessionID, lastUser.agentID ?? "main", lastUser.id))) return
-
       const summaryUserMsg: MessageV2.User = {
         id: MessageID.ascending(),
         sessionID,
@@ -2416,15 +2414,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         task_id: lastUser.task_id,
         source: "hook",
       }
-      yield* sessions.updateMessage(summaryUserMsg)
-      yield* sessions.updatePart({
-        id: PartID.ascending(),
-        messageID: summaryUserMsg.id,
-        sessionID,
-        type: "text",
-        text: "Summarize the actor tool output above and continue with your task.",
-        synthetic: true,
-      } satisfies MessageV2.TextPart)
+      yield* sessions.commitUserMessageIfLatest({
+        expectedUserID: lastUser.id,
+        message: summaryUserMsg,
+        parts: [
+          {
+            id: PartID.ascending(),
+            messageID: summaryUserMsg.id,
+            sessionID,
+            type: "text",
+            text: "Summarize the actor tool output above and continue with your task.",
+            synthetic: true,
+          } satisfies MessageV2.TextPart,
+        ],
+      })
     })
 
     const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput) {
@@ -3555,13 +3558,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             return false
           }
-          if (!(yield* latestUserIs(input.lastUser.id))) return false
-
-          outputLengthContinuations++
-          yield* slog.info("auto-continuing output length", { attempt: outputLengthContinuations })
-          const msg = yield* sessions.updateMessage({
+          const msg: MessageV2.User = {
             id: MessageID.ascending(),
-            role: "user" as const,
+            role: "user",
             sessionID: input.lastUser.sessionID,
             agentID: input.lastUser.agentID,
             agent: input.lastUser.agent,
@@ -3571,21 +3570,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             task_id: input.lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
+          }
+          const created = yield* sessions.commitUserMessageIfLatest({
+            expectedUserID: input.lastUser.id,
+            message: msg,
+            parts: [
+              {
+                id: PartID.ascending(),
+                messageID: msg.id,
+                sessionID: msg.sessionID,
+                type: "text",
+                synthetic: true,
+                text: [
+                  "<system-reminder>",
+                  "The previous assistant response hit the model output token limit before completing.",
+                  "Continue the same task from the exact point where it stopped.",
+                  "Do not restart, recap, or repeat prior reasoning. Keep reasoning concise, prefer concrete tool calls or final output, and only stop when the user's task is complete or genuinely blocked.",
+                  "</system-reminder>",
+                ].join("\n"),
+              } satisfies MessageV2.TextPart,
+            ],
           })
-          yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: msg.id,
-            sessionID: msg.sessionID,
-            type: "text",
-            synthetic: true,
-            text: [
-              "<system-reminder>",
-              "The previous assistant response hit the model output token limit before completing.",
-              "Continue the same task from the exact point where it stopped.",
-              "Do not restart, recap, or repeat prior reasoning. Keep reasoning concise, prefer concrete tool calls or final output, and only stop when the user's task is complete or genuinely blocked.",
-              "</system-reminder>",
-            ].join("\n"),
-          } satisfies MessageV2.TextPart)
+          if (!created) return false
+          outputLengthContinuations++
+          yield* slog.info("auto-continuing output length", { attempt: outputLengthContinuations })
           return true
         })
 
@@ -3650,7 +3658,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             return false
           }
 
-          const count = yield* goal.bumpReact(sessionID)
+          const count = active.react + 1
           if (count > MAX_GOAL_REACT) {
             yield* slog.warn("goal hit MAX_GOAL_REACT cap; allowing stop", {
               sessionID,
@@ -3666,15 +3674,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             return false
           }
 
-          yield* slog.info("goal not satisfied; re-entering", { sessionID, attempt: count })
-          yield* bus.publish(Goal.Event.Updated, {
-            sessionID,
-            goal: { condition: active.condition },
-            lastVerdict: { ...verdict, attempt: count, messageID: judgedMessageID },
-          })
-          const reentry = yield* sessions.updateMessage({
+          const reentry: MessageV2.User = {
             id: MessageID.ascending(),
-            role: "user" as const,
+            role: "user",
             sessionID,
             agentID: lastUser.agentID,
             agent: lastUser.agent,
@@ -3684,22 +3686,36 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             task_id: lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
+          }
+          const created = yield* sessions.commitUserMessageIfLatest({
+            expectedUserID: lastUser.id,
+            message: reentry,
+            parts: [
+              {
+                id: PartID.ascending(),
+                messageID: reentry.id,
+                sessionID,
+                type: "text",
+                synthetic: true,
+                text: [
+                  "<system-reminder>",
+                  `Your goal is not yet satisfied: "${active.condition}".`,
+                  "A judge reviewed the transcript and reported what is still missing:",
+                  verdict.reason,
+                  "Keep working toward the goal. Do not stop until it is genuinely met or impossible.",
+                  "</system-reminder>",
+                ].join("\n"),
+              } satisfies MessageV2.TextPart,
+            ],
           })
-          yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: reentry.id,
+          if (!created) return true
+          yield* goal.bumpReact(sessionID)
+          yield* slog.info("goal not satisfied; re-entering", { sessionID, attempt: count })
+          yield* bus.publish(Goal.Event.Updated, {
             sessionID,
-            type: "text",
-            synthetic: true,
-            text: [
-              "<system-reminder>",
-              `Your goal is not yet satisfied: "${active.condition}".`,
-              "A judge reviewed the transcript and reported what is still missing:",
-              verdict.reason,
-              "Keep working toward the goal. Do not stop until it is genuinely met or impossible.",
-              "</system-reminder>",
-            ].join("\n"),
-          } satisfies MessageV2.TextPart)
+            goal: { condition: active.condition },
+            lastVerdict: { ...verdict, attempt: count, messageID: judgedMessageID },
+          })
           return true
         })
 
@@ -3723,10 +3739,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             return false
           }
-          if (!(yield* latestUserIs(input.lastUser.id))) return false
-
-          invalidContinuations++
-          yield* slog.info("auto-continuing invalid output", { attempt: invalidContinuations, reason: input.reason })
           const policy = resolveInvalidOutputPolicy({
             agentName: input.lastUser.agent,
             agentID: input.lastUser.agentID,
@@ -3749,9 +3761,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     "Provide a final answer to the user now, or call a valid tool to make progress on the task.",
                     "Do not respond with only reasoning/thinking.",
                   ]
-          const msg = yield* sessions.updateMessage({
+          const msg: MessageV2.User = {
             id: MessageID.ascending(),
-            role: "user" as const,
+            role: "user",
             sessionID: input.lastUser.sessionID,
             agentID: input.lastUser.agentID,
             agent: input.lastUser.agent,
@@ -3761,15 +3773,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             task_id: input.lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
+          }
+          const created = yield* sessions.commitUserMessageIfLatest({
+            expectedUserID: input.lastUser.id,
+            message: msg,
+            parts: [
+              {
+                id: PartID.ascending(),
+                messageID: msg.id,
+                sessionID: msg.sessionID,
+                type: "text",
+                synthetic: true,
+                text: ["<system-reminder>", ...reminder, "</system-reminder>"].join("\n"),
+              } satisfies MessageV2.TextPart,
+            ],
           })
-          yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: msg.id,
-            sessionID: msg.sessionID,
-            type: "text",
-            synthetic: true,
-            text: ["<system-reminder>", ...reminder, "</system-reminder>"].join("\n"),
-          } satisfies MessageV2.TextPart)
+          if (!created) return false
+          invalidContinuations++
+          yield* slog.info("auto-continuing invalid output", { attempt: invalidContinuations, reason: input.reason })
           return true
         })
 
@@ -3802,16 +3823,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             return false
           }
-          if (!(yield* latestUserIs(input.lastUser.id))) return false
-          textToolCallRetries++
-          yield* slog.info("retrying text-form tool call", { attempt: textToolCallRetries })
           // Append a synthetic user turn so the discarded assistant becomes stale
           // (classify staleness guard) AND the loop reaches generation — mirrors
           // autoRetryStructuredOutput. Without this the loop re-enters, re-detects
           // the same turn, and burns retries with zero model calls.
-          const msg = yield* sessions.updateMessage({
+          const msg: MessageV2.User = {
             id: MessageID.ascending(),
-            role: "user" as const,
+            role: "user",
             sessionID: input.lastUser.sessionID,
             agentID: input.lastUser.agentID,
             agent: input.lastUser.agent,
@@ -3821,21 +3839,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             task_id: input.lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
+          }
+          const created = yield* sessions.commitUserMessageIfLatest({
+            expectedUserID: input.lastUser.id,
+            message: msg,
+            parts: [
+              {
+                id: PartID.ascending(),
+                messageID: msg.id,
+                sessionID: msg.sessionID,
+                type: "text",
+                synthetic: true,
+                text: [
+                  "<system-reminder>",
+                  "Your previous response wrote a tool call as plain text instead of invoking the tool.",
+                  "Re-issue it through the real tool channel — emit a structured tool call, not text.",
+                  "Do not paste the tool call as text again.",
+                  "</system-reminder>",
+                ].join("\n"),
+              } satisfies MessageV2.TextPart,
+            ],
           })
-          yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: msg.id,
-            sessionID: msg.sessionID,
-            type: "text",
-            synthetic: true,
-            text: [
-              "<system-reminder>",
-              "Your previous response wrote a tool call as plain text instead of invoking the tool.",
-              "Re-issue it through the real tool channel — emit a structured tool call, not text.",
-              "Do not paste the tool call as text again.",
-              "</system-reminder>",
-            ].join("\n"),
-          } satisfies MessageV2.TextPart)
+          if (!created) return false
+          textToolCallRetries++
+          yield* slog.info("retrying text-form tool call", { attempt: textToolCallRetries })
           return true
         })
 
@@ -3863,13 +3890,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             return false
           }
-          if (!(yield* latestUserIs(input.lastUser.id))) return false
-
-          structuredRetries++
-          yield* slog.info("retrying structured output", { attempt: structuredRetries })
-          const msg = yield* sessions.updateMessage({
+          const msg: MessageV2.User = {
             id: MessageID.ascending(),
-            role: "user" as const,
+            role: "user",
             sessionID: input.lastUser.sessionID,
             agentID: input.lastUser.agentID,
             agent: input.lastUser.agent,
@@ -3880,22 +3903,31 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             task_id: input.lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
+          }
+          const created = yield* sessions.commitUserMessageIfLatest({
+            expectedUserID: input.lastUser.id,
+            message: msg,
+            parts: [
+              {
+                id: PartID.ascending(),
+                messageID: msg.id,
+                sessionID: msg.sessionID,
+                type: "text",
+                synthetic: true,
+                text: [
+                  "<system-reminder>",
+                  "Your previous response did not produce valid structured output via the StructuredOutput tool",
+                  "(it was plain text, empty, or only reasoning).",
+                  "You MUST call the StructuredOutput tool now, passing JSON that matches the requested schema.",
+                  "Do not reply with plain text and do not respond with only reasoning/thinking.",
+                  "</system-reminder>",
+                ].join("\n"),
+              } satisfies MessageV2.TextPart,
+            ],
           })
-          yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: msg.id,
-            sessionID: msg.sessionID,
-            type: "text",
-            synthetic: true,
-            text: [
-              "<system-reminder>",
-              "Your previous response did not produce valid structured output via the StructuredOutput tool",
-              "(it was plain text, empty, or only reasoning).",
-              "You MUST call the StructuredOutput tool now, passing JSON that matches the requested schema.",
-              "Do not reply with plain text and do not respond with only reasoning/thinking.",
-              "</system-reminder>",
-            ].join("\n"),
-          } satisfies MessageV2.TextPart)
+          if (!created) return false
+          structuredRetries++
+          yield* slog.info("retrying structured output", { attempt: structuredRetries })
           return true
         })
 
@@ -3915,11 +3947,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             return false
           }
-          if (!(yield* latestUserIs(input.lastUser.id))) return false
           const recoveryText = textNgramRecoveryAttempts === 0 ? TEXT_NGRAM_RECOVERY_REMIND : TEXT_NGRAM_RECOVERY_REPLAN
-          const reentry = yield* sessions.updateMessage({
+          const reentry: MessageV2.User = {
             id: MessageID.ascending(),
-            role: "user" as const,
+            role: "user",
             sessionID,
             agentID: input.lastUser.agentID,
             agent: input.lastUser.agent,
@@ -3929,15 +3960,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             task_id: input.lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
+          }
+          const created = yield* sessions.commitUserMessageIfLatest({
+            expectedUserID: input.lastUser.id,
+            message: reentry,
+            parts: [
+              {
+                id: PartID.ascending(),
+                messageID: reentry.id,
+                sessionID,
+                type: "text",
+                synthetic: true,
+                text: recoveryText,
+              } satisfies MessageV2.TextPart,
+            ],
           })
-          yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: reentry.id,
-            sessionID,
-            type: "text",
-            synthetic: true,
-            text: recoveryText,
-          } satisfies MessageV2.TextPart)
+          if (!created) return false
           textNgramRecoveryAttempts++
           yield* slog.info("text n-gram: recovery injected", { attempt: textNgramRecoveryAttempts })
           return true
@@ -5225,12 +5263,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   })
                   break
                 }
-                if (!(yield* latestUserIs(lastUser.id))) continue
                 const recoveryText = textLoopRecoveryAttempts === 0 ? RECOVERY_PROMPT_MILD : RECOVERY_PROMPT_STRONG
                 // Create a NEW user message at the end of conversation (not append to original)
-                const reentry = yield* sessions.updateMessage({
+                const reentry: MessageV2.User = {
                   id: MessageID.ascending(),
-                  role: "user" as const,
+                  role: "user",
                   sessionID,
                   agentID: lastUser.agentID,
                   agent: lastUser.agent,
@@ -5240,15 +5277,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   task_id: lastUser.task_id,
                   source: "hook",
                   time: { created: Date.now() },
+                }
+                const created = yield* sessions.commitUserMessageIfLatest({
+                  expectedUserID: lastUser.id,
+                  message: reentry,
+                  parts: [
+                    {
+                      id: PartID.ascending(),
+                      messageID: reentry.id,
+                      sessionID,
+                      type: "text",
+                      synthetic: true,
+                      text: recoveryText,
+                    } satisfies MessageV2.TextPart,
+                  ],
                 })
-                yield* sessions.updatePart({
-                  id: PartID.ascending(),
-                  messageID: reentry.id,
-                  sessionID,
-                  type: "text",
-                  synthetic: true,
-                  text: recoveryText,
-                } satisfies MessageV2.TextPart)
+                if (!created) continue
                 textLoopRecoveryAttempts++
                 textLoopBuffer.length = 0
                 yield* slog.info("text loop: recovery injected", { attempt: textLoopRecoveryAttempts })

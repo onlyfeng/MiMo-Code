@@ -979,6 +979,92 @@ it.live(
   20_000,
 )
 
+it.live(
+  "does not append an output-length continuation after a newer user commits at the write boundary",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Atomic length continuation" })
+        const seeded = yield* seed(chat.id, { finish: "length" })
+        yield* sessions.updateMessage({
+          ...seeded.assistant,
+          time: { ...seeded.assistant.time, completed: Date.now() },
+        })
+
+        const next: MessageV2.User = {
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "build",
+          model: ref,
+          source: "user",
+        }
+        const nextPart: MessageV2.TextPart = {
+          id: PartID.ascending(),
+          sessionID: chat.id,
+          messageID: next.id,
+          type: "text",
+          text: "new prompt at the continuation boundary",
+        }
+        const ascendingDescriptor = Object.getOwnPropertyDescriptor(MessageID, "ascending")!
+        const ascending = MessageID.ascending
+        let armed = false
+        Object.defineProperty(MessageID, "ascending", {
+          ...ascendingDescriptor,
+          value: (id?: string) => {
+            const messageID = ascending(id)
+            armed = true
+            return messageID
+          },
+        })
+        const db = Database.Client()
+        const descriptor = Object.getOwnPropertyDescriptor(db, "transaction")
+        const transaction = db.transaction.bind(db)
+        let injected = false
+        const intercepted: typeof db.transaction = (callback, config) => {
+          if (armed && !injected) {
+            injected = true
+            SyncEvent.run(MessageV2.Event.Updated, { sessionID: chat.id, info: next })
+            SyncEvent.run(MessageV2.Event.PartUpdated, {
+              sessionID: chat.id,
+              part: nextPart,
+              time: Date.now(),
+            })
+          }
+          return transaction(callback, config)
+        }
+        db.transaction = intercepted
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            Object.defineProperty(MessageID, "ascending", ascendingDescriptor)
+            descriptor
+              ? Object.defineProperty(db, "transaction", descriptor)
+              : Reflect.deleteProperty(db, "transaction")
+          }),
+        )
+
+        yield* llm.text("old turn completed")
+        yield* prompt.loop({ sessionID: chat.id })
+
+        const messages = yield* sessions.messages({ sessionID: chat.id })
+        expect(injected).toBe(true)
+        expect(messages.findLast((message) => message.info.role === "user")?.info.id).toBe(next.id)
+        expect(
+          messages.some((message) =>
+            message.parts.some(
+              (part) => part.type === "text" && part.synthetic && part.text.includes("output token limit"),
+            ),
+          ),
+        ).toBe(false)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
+)
+
 it.live("locks system and harness to the first user query", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {

@@ -11,7 +11,7 @@ import { SessionProcessor } from "./processor"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config"
-import { Database, NotFoundError, and, desc, eq, sql } from "@/storage"
+import { NotFoundError } from "@/storage"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Layer, Context } from "effect"
 import { InstanceState } from "@/effect"
@@ -20,8 +20,6 @@ import { makeRuntime } from "@/effect/run-service"
 import { fn } from "@/util/fn"
 import path from "path"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
-import { MessageTable } from "./session.sql"
-import { SyncEvent } from "@/sync"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -606,19 +604,10 @@ export const layer: Layer.Layer<
         })
       }
 
-      // Keep the summary/projection, but never append an older auto-followup
-      // after another prompt has taken ownership of the actor transcript.
-      const parentIsLatest = Effect.fnUntraced(function* () {
-        const latest = (yield* session.messages({
-          sessionID: input.sessionID,
-          agentID: input.agentID ?? "main",
-        })).findLast((message) => message.info.role === "user")
-        return latest?.info.id === input.parentID
-      })
       if (result === "continue" && input.auto) {
-        if (replay && (yield* parentIsLatest())) {
+        if (replay) {
           const original = replay.info
-          const replayMsg = yield* session.updateMessage({
+          const replayMsg: MessageV2.User = {
             id: MessageID.ascending(),
             role: "user",
             sessionID: input.sessionID,
@@ -633,20 +622,27 @@ export const layer: Layer.Layer<
             systemMode: promptConfig.systemMode,
             harness: promptConfig.harness,
             source: "hook",
-          })
-          for (const part of replay.parts) {
-            if (part.type === "compaction") continue
+          }
+          const parts = replay.parts.flatMap((part): MessageV2.Part[] => {
+            if (part.type === "compaction") return []
             const replayPart =
               part.type === "file" && MessageV2.isMedia(part.mime)
                 ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
                 : part
-            yield* session.updatePart({
-              ...replayPart,
-              id: PartID.ascending(),
-              messageID: replayMsg.id,
-              sessionID: input.sessionID,
-            })
-          }
+            return [
+              {
+                ...replayPart,
+                id: PartID.ascending(),
+                messageID: replayMsg.id,
+                sessionID: input.sessionID,
+              } satisfies MessageV2.Part,
+            ]
+          })
+          yield* session.commitUserMessageIfLatest({
+            expectedUserID: input.parentID,
+            message: replayMsg,
+            parts,
+          })
         }
 
         if (!replay) {
@@ -667,10 +663,9 @@ export const layer: Layer.Layer<
                 overflow: input.overflow === true,
               },
               { enabled: true },
-            )).enabled &&
-            (yield* parentIsLatest())
+            )).enabled
           ) {
-            const continueMsg = yield* session.updateMessage({
+            const continueMsg: MessageV2.User = {
               id: MessageID.ascending(),
               role: "user",
               sessionID: input.sessionID,
@@ -680,27 +675,33 @@ export const layer: Layer.Layer<
               model: userMessage.model,
               task_id: userMessage.task_id,
               source: "hook",
-            })
+            }
             const text =
               (input.overflow
                 ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
                 : "") +
               "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: continueMsg.id,
-              sessionID: input.sessionID,
-              type: "text",
-              // Internal marker for auto-compaction followups so provider plugins
-              // can distinguish them from manual post-compaction user prompts.
-              // This is not a stable plugin contract and may change or disappear.
-              metadata: { compaction_continue: true },
-              synthetic: true,
-              text,
-              time: {
-                start: Date.now(),
-                end: Date.now(),
-              },
+            yield* session.commitUserMessageIfLatest({
+              expectedUserID: input.parentID,
+              message: continueMsg,
+              parts: [
+                {
+                  id: PartID.ascending(),
+                  messageID: continueMsg.id,
+                  sessionID: input.sessionID,
+                  type: "text",
+                  // Internal marker for auto-compaction followups so provider plugins
+                  // can distinguish them from manual post-compaction user prompts.
+                  // This is not a stable plugin contract and may change or disappear.
+                  metadata: { compaction_continue: true },
+                  synthetic: true,
+                  text,
+                  time: {
+                    start: Date.now(),
+                    end: Date.now(),
+                  },
+                } satisfies MessageV2.TextPart,
+              ],
             })
           }
         }
@@ -761,37 +762,11 @@ export const layer: Layer.Layer<
       input: Parameters<Interface["createIfLatest"]>[0],
     ) {
       const next = boundary(input)
-      const created = yield* Effect.sync(() =>
-        // `message.updated` uses the same immediate transaction. Nested SyncEvent
-        // writes reuse this transaction, so no user row can commit between the
-        // check and the boundary commit.
-        Database.transaction(
-          (tx) => {
-            const latest = tx
-              .select({ id: MessageTable.id })
-              .from(MessageTable)
-              .where(
-                and(
-                  eq(MessageTable.session_id, input.sessionID),
-                  eq(MessageTable.agent_id, input.agentID ?? "main"),
-                  sql`json_extract(${MessageTable.data}, '$.role') = 'user'`,
-                ),
-              )
-              .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
-              .limit(1)
-              .get()
-            if (latest?.id !== input.expectedUserID) return false
-            SyncEvent.run(MessageV2.Event.Updated, { sessionID: input.sessionID, info: next.message })
-            SyncEvent.run(MessageV2.Event.PartUpdated, {
-              sessionID: input.sessionID,
-              part: structuredClone(next.part),
-              time: Date.now(),
-            })
-            return true
-          },
-          { behavior: "immediate" },
-        ),
-      )
+      const created = yield* session.commitUserMessageIfLatest({
+        expectedUserID: input.expectedUserID,
+        message: next.message,
+        parts: [next.part],
+      })
       if (!created) return false
       yield* publish(input)
       return true

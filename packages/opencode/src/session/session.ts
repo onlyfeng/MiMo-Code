@@ -8,7 +8,7 @@ import { type ProviderMetadata, type LanguageModelUsage } from "ai"
 import { Flag } from "../flag/flag"
 import { InstallationVersion } from "../installation/version"
 
-import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt } from "../storage"
+import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt, sql } from "../storage"
 import { SyncEvent } from "../sync"
 import type { SQL } from "../storage"
 import { PartTable, SessionTable, MessageTable } from "./session.sql"
@@ -453,6 +453,11 @@ export interface Interface {
   readonly children: (parentID: SessionID, options?: { visible?: boolean }) => Effect.Effect<Info[]>
   readonly remove: (sessionID: SessionID) => Effect.Effect<void>
   readonly updateMessage: <T extends MessageV2.Info>(msg: T) => Effect.Effect<T>
+  readonly commitUserMessageIfLatest: (input: {
+    expectedUserID: MessageID | undefined
+    message: MessageV2.User
+    parts: MessageV2.Part[]
+  }) => Effect.Effect<boolean>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
   readonly removePart: (input: { sessionID: SessionID; messageID: MessageID; partID: PartID }) => Effect.Effect<PartID>
   readonly getPart: (input: {
@@ -663,6 +668,51 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         yield* Effect.sync(() => SyncEvent.run(MessageV2.Event.Updated, { sessionID: msg.sessionID, info: msg }))
         return msg
       }).pipe(Effect.withSpan("Session.updateMessage"))
+
+    const commitUserMessageIfLatest: Interface["commitUserMessageIfLatest"] = Effect.fn(
+      "Session.commitUserMessageIfLatest",
+    )(function* (input) {
+      return yield* Effect.sync(() => {
+        if (
+          input.parts.some(
+            (part) => part.sessionID !== input.message.sessionID || part.messageID !== input.message.id,
+          )
+        ) {
+          throw new Error(`User message parts must belong to ${input.message.sessionID}/${input.message.id}`)
+        }
+        return Database.transaction(
+          (tx) => {
+            const latest = tx
+              .select({ id: MessageTable.id })
+              .from(MessageTable)
+              .where(
+                and(
+                  eq(MessageTable.session_id, input.message.sessionID),
+                  eq(MessageTable.agent_id, input.message.agentID ?? "main"),
+                  sql`json_extract(${MessageTable.data}, '$.role') = 'user'`,
+                ),
+              )
+              .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+              .limit(1)
+              .get()
+            if (latest?.id !== input.expectedUserID) return false
+            SyncEvent.run(MessageV2.Event.Updated, {
+              sessionID: input.message.sessionID,
+              info: input.message,
+            })
+            input.parts.forEach((part) =>
+              SyncEvent.run(MessageV2.Event.PartUpdated, {
+                sessionID: part.sessionID,
+                part: structuredClone(part),
+                time: Date.now(),
+              }),
+            )
+            return true
+          },
+          { behavior: "immediate" },
+        )
+      })
+    })
 
     const updatePart = <T extends MessageV2.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
@@ -965,6 +1015,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       children,
       remove,
       updateMessage,
+      commitUserMessageIfLatest,
       removeMessage,
       removePart,
       updatePart,
