@@ -83,6 +83,7 @@ export const PlanExitTool = Tool.define(
             time: { created: Date.now() },
             agent: "build",
             model,
+            task_id: ctx.taskId,
             source: "hook",
           }
           yield* session.updateMessage(msg)

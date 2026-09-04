@@ -266,8 +266,8 @@ describe("SessionPrompt.genTitle fallback locale", () => {
   })
 })
 
-describe("SessionPrompt prompt locale persistence", () => {
-  test("keeps titleLocale out of the persisted user message", async () => {
+describe("SessionPrompt prompt metadata persistence", () => {
+  test("persists task_id but keeps titleLocale out of the user message", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
       directory: tmp.path,
@@ -280,18 +280,25 @@ describe("SessionPrompt prompt locale persistence", () => {
             const message = yield* prompt.prompt({
               sessionID: session.id,
               agent: "build",
+              task_id: "T7",
               titleLocale: "pt-br",
               noReply: true,
               parts: [{ type: "text", text: "Configure o upload da loja" }],
             })
 
             expect(message.info.role).toBe("user")
-            if (message.info.role === "user") expect(Object.hasOwn(message.info, "titleLocale")).toBe(false)
+            if (message.info.role === "user") {
+              expect(message.info.task_id).toBe("T7")
+              expect(Object.hasOwn(message.info, "titleLocale")).toBe(false)
+            }
 
             const stored = yield* sessions.messages({ sessionID: session.id })
             const user = stored.find((item) => item.info.role === "user")
             expect(user?.info.role).toBe("user")
-            if (user?.info.role === "user") expect(Object.hasOwn(user.info, "titleLocale")).toBe(false)
+            if (user?.info.role === "user") {
+              expect(user.info.task_id).toBe("T7")
+              expect(Object.hasOwn(user.info, "titleLocale")).toBe(false)
+            }
           }),
         ),
     })

@@ -658,6 +658,7 @@ export const layer = Layer.effect(
       agentID?: string
       agent: string
       model: { providerID: string; id: string }
+      task_id?: string
     }) {
       const hasCP = yield* checkpoint.hasCheckpoint(input.sessionID).pipe(Effect.catch(() => Effect.succeed(false)))
       if (!hasCP) return false
@@ -680,6 +681,7 @@ export const layer = Layer.effect(
           agentID: input.agentID,
           agent: input.agent,
           model: { providerID: input.model.providerID, modelID: input.model.id },
+          task_id: input.task_id,
           boundaryCreatedAt: boundaryMsg?.info.time.created,
         })
         .pipe(Effect.catch(() => Effect.succeed(false)))
@@ -754,6 +756,7 @@ export const layer = Layer.effect(
       agentID?: string
       agent: string
       model: { providerID: string; id: string }
+      task_id?: string
       /** Upper bound on the writer wait; see {AUTO,MANUAL}_WRITER_WAIT_MS. */
       writerWaitMs: number
       /** Run once, immediately before the wait begins, to explain the stall. */
@@ -2409,6 +2412,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         time: { created: Date.now() },
         agent: lastUser.agent,
         model: lastUser.model,
+        task_id: lastUser.task_id,
         source: "hook",
       }
       yield* sessions.updateMessage(summaryUserMsg)
@@ -2715,6 +2719,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         system: input.system,
         systemMode: input.systemMode,
         harness: input.harness,
+        task_id: input.task_id,
         format: input.format,
         source: input.source ?? "user",
         provenance: input.provenance,
@@ -3232,7 +3237,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const result = yield* run({
           sessionID: input.sessionID,
           agentID: input.agentID ?? "main",
-          task_id: input.task_id,
           titleLocale: input.titleLocale,
         })
         if (result.info.role !== "assistant") return result
@@ -3289,7 +3293,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input.sessionID,
         agentID,
         lastAssistant(input.sessionID, agentID).pipe(Effect.catchCause(() => Effect.interrupt)),
-        promptWork(input, (next) => runLoop(next.sessionID, next.agentID, next.task_id, next.titleLocale), idle),
+        promptWork(input, (next) => runLoop(next.sessionID, next.agentID, next.titleLocale), idle),
       )
     })
 
@@ -3333,12 +3337,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     const runLoop: (
       sessionID: SessionID,
       agentID?: string,
-      task_id?: string,
       titleLocale?: string,
     ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(function* (
       sessionID: SessionID,
       agentID?: string,
-      task_id?: string,
       titleLocale?: string,
     ) {
       const ctx = yield* InstanceState.context
@@ -3373,6 +3375,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // so session.post reports outcome="cancelled" instead of "error".
       let cancelled = false
       let cancelReason: string | undefined
+      let currentTaskID: string | undefined
+      let sessionPrepared = false
       let lastSystemPrompt: string[] | undefined = undefined
 
       // Fires session.post exactly once via Effect.onExit on the body below.
@@ -3418,7 +3422,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   {
                     sessionID,
                     agentID: resolvedAgentID,
-                    task_id,
+                    task_id: currentTaskID,
                     outcome,
                     error,
                     finalText: finalAsst ? assistantFinalText(finalAsst, finalParts) : undefined,
@@ -3439,17 +3443,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }).pipe(Effect.ignore)
 
       return yield* Effect.gen(function* () {
-        const preSession = { cancel: undefined as boolean | undefined, cancelReason: undefined as string | undefined }
-        yield* plugin.trigger("session.pre", { sessionID, agentID: resolvedAgentID, task_id }, preSession)
-        if (preSession.cancel) {
-          cancelled = true
-          cancelReason = preSession.cancelReason
-          return yield* Effect.fail(
-            new NamedError.Unknown({
-              message: preSession.cancelReason ?? "Session cancelled by plugin",
-            }),
-          )
-        }
         const agentMetrics = { tokens_in: 0, tokens_out: 0, files_changed: 0 }
         const trajectoryForStep = (currentMsgs: MessageV2.WithParts[], assistant: MessageV2.Assistant) =>
           serializeTrajectoryMessages(withAssistantParts(currentMsgs, assistant, MessageV2.parts(assistant.id)))
@@ -3514,6 +3507,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: input.lastUser.model,
             tools: input.lastUser.tools,
             format: input.lastUser.format,
+            task_id: input.lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
           })
@@ -3624,6 +3618,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: lastUser.model,
             tools: lastUser.tools,
             format: lastUser.format,
+            task_id: lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
           })
@@ -3699,6 +3694,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: input.lastUser.model,
             tools: input.lastUser.tools,
             format: input.lastUser.format,
+            task_id: input.lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
           })
@@ -3757,6 +3753,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: input.lastUser.model,
             tools: input.lastUser.tools,
             format: input.lastUser.format,
+            task_id: input.lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
           })
@@ -3814,6 +3811,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             tools: input.lastUser.tools,
             // Must carry format so the next iteration re-registers the StructuredOutput tool.
             format: input.lastUser.format,
+            task_id: input.lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
           })
@@ -3861,6 +3859,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: input.lastUser.model,
             tools: input.lastUser.tools,
             format: input.lastUser.format,
+            task_id: input.lastUser.task_id,
             source: "hook",
             time: { created: Date.now() },
           })
@@ -3957,6 +3956,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             system: sessionPrompt.system,
             systemMode: sessionPrompt.systemMode,
             harness: sessionPrompt.harness,
+          }
+          // The caller that wins a successor run may not own the newest queued
+          // prompt. Bind hooks and tools to the user this iteration selected.
+          currentTaskID = lastUser.task_id
+          if (!sessionPrepared) {
+            sessionPrepared = true
+            const preSession = {
+              cancel: undefined as boolean | undefined,
+              cancelReason: undefined as string | undefined,
+            }
+            yield* plugin.trigger(
+              "session.pre",
+              { sessionID, agentID: resolvedAgentID, task_id: currentTaskID },
+              preSession,
+            )
+            if (preSession.cancel) {
+              cancelled = true
+              cancelReason = preSession.cancelReason
+              return yield* Effect.fail(
+                new NamedError.Unknown({
+                  message: preSession.cancelReason ?? "Session cancelled by plugin",
+                }),
+              )
+            }
           }
           const usageRecovered =
             !!lastFinished &&
@@ -4259,6 +4282,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   model: { providerID: model.providerID, modelID: model.id },
                   auto: true,
                   agentID: lastUser.agentID,
+                  task_id: lastUser.task_id,
                 })
                 .pipe(Effect.ignore)
               // After inserting the boundary, the actor's filterCompactedEffect
@@ -4282,6 +4306,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               agentID: lastUser.agentID,
               agent: lastUser.agent,
               model: { providerID: model.providerID, id: model.id },
+              task_id: lastUser.task_id,
               writerWaitMs: AUTO_WRITER_WAIT_MS,
               // The turn is mid-flight, so explain the stall: without this the
               // TUI would sit on a bare spinner for minutes with no reason.
@@ -4311,6 +4336,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   model: { providerID: model.providerID, modelID: model.id },
                   auto: true,
                   agentID: lastUser.agentID,
+                  task_id: lastUser.task_id,
                 })
                 .pipe(Effect.ignore)
               // Was the switch the reason no checkpoint existed? Then say so —
@@ -4484,7 +4510,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               bypassAgentCheck,
               messages: msgs,
               agentID: lastUser.agentID,
-              task_id,
+              task_id: currentTaskID,
               permission: forkCtx?.parentPermission,
               preserveToolMembership: Boolean(forkCtx),
               frozenToolMembership: forkCtx ? new Set(Object.keys(forkCtx.tools)) : undefined,
@@ -4715,6 +4741,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     auto: true,
                     overflow: true,
                     agentID: lastUser.agentID,
+                    task_id: lastUser.task_id,
                   })
                   .pipe(Effect.ignore)
                 skipOverflowCheck = true
@@ -5046,6 +5073,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     auto: true,
                     overflow: true,
                     agentID: lastUser.agentID,
+                    task_id: lastUser.task_id,
                   })
                   .pipe(Effect.ignore)
                 skipOverflowCheck = true
@@ -5062,6 +5090,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 agentID: lastUser.agentID,
                 agent: lastUser.agent,
                 model: { providerID: model.providerID, id: model.id },
+                task_id: lastUser.task_id,
                 writerWaitMs: AUTO_WRITER_WAIT_MS,
                 onWaitingForWriter: status
                   .set(sessionID, { type: "busy", message: "Writing checkpoint\u2026" })
@@ -5084,6 +5113,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     auto: true,
                     overflow: true,
                     agentID: lastUser.agentID,
+                    task_id: lastUser.task_id,
                   })
                   .pipe(Effect.ignore)
                 // Same reason-split as the token-threshold site.
@@ -5140,6 +5170,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   model: lastUser.model,
                   tools: lastUser.tools,
                   format: lastUser.format,
+                  task_id: lastUser.task_id,
                   source: "hook",
                   time: { created: Date.now() },
                 })
@@ -5195,7 +5226,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       "SessionPrompt.loop",
     )(function* (input: z.infer<typeof LoopInput>) {
       const agentID = input.agentID ?? "main"
-      const work = runLoop(input.sessionID, agentID, input.task_id, input.titleLocale)
+      const work = runLoop(input.sessionID, agentID, input.titleLocale)
       const actor = boundActor ?? spawnRef.current
       if (input.notifyParentOnComplete === true && agentID !== "main" && actor?.runPersistentTurn) {
         return yield* actor.runPersistentTurn({
@@ -5330,6 +5361,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           agentID: lastUser?.info.agentID ?? "main",
           agent: agentName,
           model: { providerID: model.providerID, id: model.modelID },
+          task_id: lastUser?.info.role === "user" ? lastUser.info.task_id : undefined,
           writerWaitMs: MANUAL_WRITER_WAIT_MS,
           onWaitingForWriter: status
             .set(input.sessionID, { type: "busy", message: "Writing checkpoint\u2026" })
@@ -5361,6 +5393,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // chose this degradation.
               auto: true,
               agentID: lastUser?.info.agentID ?? "main",
+              task_id: lastUser?.info.role === "user" ? lastUser.info.task_id : undefined,
             })
             .pipe(Effect.ignore)
           // The two causes are very different and the user has to be able to
@@ -5548,7 +5581,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           (next) =>
             promptWork(
               next,
-              (loopInput) => runLoop(loopInput.sessionID, loopInput.agentID, loopInput.task_id, loopInput.titleLocale),
+              (loopInput) => runLoop(loopInput.sessionID, loopInput.agentID, loopInput.titleLocale),
               idle,
             ),
           true,
@@ -5573,6 +5606,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             model: { providerID: input.providerID, modelID: input.modelID },
             auto: input.auto,
             agentID: "main",
+            task_id: lastUser?.info.role === "user" ? lastUser.info.task_id : undefined,
           })
           return yield* runLoop(input.sessionID, "main")
         }),
@@ -5598,7 +5632,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           Effect.onExit((exit) => Deferred.done(admitted, Exit.isSuccess(exit) ? Exit.void : exit).pipe(Effect.ignore)),
           Effect.orDie,
           Effect.andThen(
-            runLoop(input.sessionID, "main", undefined, input.titleLocale).pipe(
+            runLoop(input.sessionID, "main", input.titleLocale).pipe(
               Effect.ensuring(
                 abandonRecoveredAssistant({
                   sessionID: input.sessionID,

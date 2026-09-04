@@ -230,6 +230,29 @@ function mcpLayer(
 }
 
 const mcp = mcpLayer()
+const sessionTaskIDs = {
+  pre: [] as Array<string | undefined>,
+  post: [] as Array<string | undefined>,
+}
+const taskMetadataPlugin = Layer.succeed(
+  Plugin.Service,
+  Plugin.Service.of({
+    trigger: (name, input, output) =>
+      Effect.sync(() => {
+        if (name === "session.pre" || name === "session.post") {
+          sessionTaskIDs[name === "session.pre" ? "pre" : "post"].push((input as { task_id?: string }).task_id)
+        }
+        return output
+      }),
+    list: () => Effect.succeed([]),
+    init: () => Effect.void,
+    reloadFileHooks: () => Effect.void,
+    triggerActorPreStop: () =>
+      Effect.succeed({ continue: false, contributingPluginNames: [], contributingHookIDs: [] }),
+    triggerActorPostStop: () =>
+      Effect.succeed({ continue: false, contributingPluginNames: [], contributingHookIDs: [] }),
+  }),
+)
 
 const lsp = Layer.succeed(
   LSP.Service,
@@ -374,9 +397,12 @@ afterEach(() => {
   lateRunGate = undefined
   disposalRetryGate = undefined
   droppedStartGate = undefined
+  sessionTaskIDs.pre.length = 0
+  sessionTaskIDs.post.length = 0
 })
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
-function makeHttp(mcpService = mcp, input?: { actor?: boolean }) {
+function makeHttp(mcpService = mcp, input?: { actor?: boolean; plugin?: Layer.Layer<Plugin.Service> }) {
+  const plugin = input?.plugin ?? Plugin.defaultLayer
   const taskRegistry = ActorRegistry.defaultLayer
   const deps = Layer.mergeAll(
     Session.defaultLayer,
@@ -386,7 +412,7 @@ function makeHttp(mcpService = mcp, input?: { actor?: boolean }) {
     AgentSvc.defaultLayer,
     Command.defaultLayer,
     Permission.defaultLayer,
-    Plugin.defaultLayer,
+    plugin,
     Config.defaultLayer,
     ProviderSvc.defaultLayer,
     lsp,
@@ -438,7 +464,7 @@ function makeHttp(mcpService = mcp, input?: { actor?: boolean }) {
   const compaction = SessionCompaction.layer.pipe(
     Layer.provideMerge(proc),
     Layer.provide(AgentSvc.defaultLayer),
-    Layer.provide(Plugin.defaultLayer),
+    Layer.provide(plugin),
     Layer.provideMerge(deps),
   )
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
@@ -474,6 +500,7 @@ function makeHttp(mcpService = mcp, input?: { actor?: boolean }) {
 
 const it = testEffect(makeHttp())
 const itActor = testEffect(makeHttp(mcp, { actor: true }))
+const taskMetadataIt = testEffect(makeHttp(mcp, { plugin: taskMetadataPlugin }))
 const mcpLegacyMetadata = { interrupted: true, output: "must not become a successful result" }
 const mcpErrorImage = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 const mcpErrorAudio = "UklGRiUAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQEAAACA"
@@ -3977,6 +4004,78 @@ it.live(
         if (result.info.role !== "assistant") return
         expect(result.info.parentID).toBe(lateID)
         expect(result.parts.findLast((part) => part.type === "text")?.text).toBe("late answer")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
+)
+
+taskMetadataIt.live(
+  "closing handoff binds task metadata to the latest persisted prompt",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const registry = yield* ToolRegistry.Service
+        const chat = yield* sessions.create({ title: "Prompt metadata handoff" })
+        const gate = yield* holdNextRunAtExit(chat.id)
+        const planExit = (yield* registry.all()).find((item) => item.id === "plan_exit")
+        if (!planExit) throw new Error("plan_exit tool not found")
+        const original = planExit.execute
+        const toolTaskIDs: Array<string | undefined> = []
+        planExit.execute = (_args, ctx) =>
+          Effect.sync(() => {
+            toolTaskIDs.push(ctx.taskId)
+            return { title: "plan_exit", output: "ok", metadata: {} }
+          })
+        yield* Effect.addFinalizer(() => Effect.sync(() => void (planExit.execute = original)))
+
+        yield* llm.text("first answer")
+        const first = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            agent: "build",
+            task_id: "T0",
+            parts: [{ type: "text", text: "first" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(gate.ownerExit).pipe(Effect.timeout("10 seconds"))
+
+        yield* llm.tool("plan_exit", {})
+        yield* llm.text("latest answer")
+        const queued = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            agent: "build",
+            task_id: "T1",
+            parts: [{ type: "text", text: "queued while closing" }],
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(gate.followerAttached).pipe(Effect.timeout("10 seconds"))
+
+        const latestID = MessageID.ascending()
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          messageID: latestID,
+          agent: "build",
+          task_id: "T2",
+          noReply: true,
+          parts: [{ type: "text", text: "latest persisted prompt" }],
+        })
+
+        yield* Deferred.succeed(gate.releaseOwner, undefined)
+        yield* Fiber.join(first).pipe(Effect.timeout("10 seconds"))
+        const result = yield* Fiber.join(queued).pipe(Effect.timeout("10 seconds"))
+
+        expect(yield* llm.calls).toBe(3)
+        const successorInput = (yield* llm.inputs)[1]
+        expect(JSON.stringify(successorInput?.messages)).toContain("queued while closing")
+        expect(JSON.stringify(successorInput?.messages)).toContain("latest persisted prompt")
+        expect(result.info.role === "assistant" ? result.info.parentID : undefined).toBe(latestID)
+        expect(toolTaskIDs).toEqual(["T2"])
+        expect(sessionTaskIDs.pre).toEqual(["T0", "T2"])
+        expect(sessionTaskIDs.post).toEqual(["T0", "T2"])
       }),
       { git: true, config: providerCfg },
     ),

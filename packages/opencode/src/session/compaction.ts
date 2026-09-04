@@ -254,6 +254,7 @@ export interface Interface {
     auto: boolean
     overflow?: boolean
     agentID?: string
+    task_id?: string
   }) => Effect.Effect<void>
 }
 
@@ -606,6 +607,7 @@ export const layer: Layer.Layer<
             model: original.model,
             format: original.format,
             tools: original.tools,
+            task_id: original.task_id,
             system: promptConfig.system,
             systemMode: promptConfig.systemMode,
             harness: promptConfig.harness,
@@ -654,6 +656,7 @@ export const layer: Layer.Layer<
               time: { created: Date.now() },
               agent: userMessage.agent,
               model: userMessage.model,
+              task_id: userMessage.task_id,
               source: "hook",
             })
             const text =
@@ -697,6 +700,7 @@ export const layer: Layer.Layer<
       auto: boolean
       overflow?: boolean
       agentID?: string
+      task_id?: string
     }) {
       // Tag the synthetic boundary message with agent_id so per-actor
       // filterCompactedEffect lookups stop at this row when scoping by the
@@ -708,6 +712,7 @@ export const layer: Layer.Layer<
         sessionID: input.sessionID,
         agentID: input.agentID ?? undefined,
         agent: input.agent,
+        task_id: input.task_id,
         source: "hook",
         time: { created: Date.now() },
       })
