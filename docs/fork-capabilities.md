@@ -65,7 +65,13 @@ registry or history commit does not advance either behavior reference.
   for the running loop rather than dropping it. If that prompt joins a runner
   which had already taken its final snapshot, the caller checks whether the
   returned assistant covers its user row in the same actor transcript and
-  starts or joins the successor run when it does not. Recovery and resume remain
+  starts or joins the successor run when it does not.
+  Each persisted user row owns its optional `task_id`: `session.pre` uses the
+  first actor-scoped user selected for the run, each loop iteration gives tools
+  the task binding of its actual last user, and `session.post` reports the final
+  selected binding. Synthetic continuation and context-boundary users inherit
+  that binding; the caller that happens to win runner admission is not authority.
+  Recovery and resume remain
   main-only, accept no agent/task selector, and have no detached
   `resumeBackground` path. Unknown or ambiguous lifecycle callers fail closed.
   Frozen-context admission is owned separately by FD-009. Title locale
@@ -89,21 +95,26 @@ registry or history commit does not advance either behavior reference.
 - Watch surfaces: `packages/opencode/src/actor/`,
   `packages/opencode/src/effect/runner.ts`, `packages/opencode/src/inbox/`,
   `packages/opencode/src/server/routes/instance/session.ts`,
+  `packages/opencode/src/session/checkpoint.ts`,
+  `packages/opencode/src/session/compaction.ts`,
   `packages/opencode/src/session/llm.ts`,
+  `packages/opencode/src/session/message-v2.ts`,
   `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/session/run-state.ts`,
-  `packages/opencode/src/tool/actor.ts`, and
-  `packages/opencode/src/tool/session.ts`.
+  `packages/opencode/src/tool/actor.ts`, `packages/opencode/src/tool/plan.ts`,
+  `packages/opencode/src/tool/session.ts`,
+  `packages/sdk/openapi.json`, and `packages/sdk/js/src/v2/gen/`.
 - Tests/evidence: actor lifecycle/cancel/spawn/turn suites,
   `packages/opencode/test/inbox/fork-agent-compat.test.ts`, inbox wake/retirement
   tests, `packages/opencode/test/effect/runner.test.ts`, server
   prompt/prompt_async-queue/recovery and resume admission tests
   (`packages/opencode/test/server/session-prompt-busy.test.ts`), session
-  run-state tuple/disposal tests, closing-run prompt handoff/error/cancel tests,
+  run-state tuple/disposal tests, closing-run prompt handoff/error/cancel and
+  per-user task-binding tests,
   main-only OpenAPI regressions, replace-agent actor-scope regressions, and
   actor/session tool tests at the reviewed main behavior.
 - Review basis: upstream `f82c177709019c759ce2bb06bd1b04cba488811e`;
-  main behavior `87b0ce443741556ae904a6afff7b637894d4be5b`.
+  main behavior `77c72b070e9da493b68e3a5ce60d642fb604acf7`.
 - 2026-08-28 review: adopted strict spawn/run argument rejection and the
   existing `send` follow-up path while preserving caller-resolution,
   generation, persistent wake, and frozen-context fail-closed contracts.
@@ -125,6 +136,9 @@ registry or history commit does not advance either behavior reference.
   assistant covers it; a shared `MessageAbortedError` stops handoff. Coverage
   uses actor transcript order and assistant `parentID`, without tickets, tail
   movement, new Runner state, cancellation generation, or detached delivery.
+  Optional task authority is persisted with each user row and resolved from the
+  actor-scoped user actually selected by the loop, not from whichever queued
+  caller wins successor admission; derived synthetic users preserve the binding.
   This closes the final-snapshot-to-Idle window only; compaction/checkpoint
   visibility, caller interruption, process disposal, and durable exactly-once
   delivery remain outside this contract.

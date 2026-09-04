@@ -1689,8 +1689,9 @@ the synchronization completion gate.
 ## 2026-09-04 closing-run prompt handoff correction
 
 - Base fork `main`: `65a31144e14849ee2432001bd62bc7902f2c6f29`.
-- Stable behavior: `87b0ce443741556ae904a6afff7b637894d4be5b`.
-- Scope: the final run-loop snapshot to Runner Idle transition only.
+- Stable behavior: `77c72b070e9da493b68e3a5ce60d642fb604acf7`.
+- Scope: the final run-loop snapshot to Runner Idle transition and the task
+  binding of the actor-scoped user actually selected by the successor.
 
 ### Decision
 
@@ -1704,13 +1705,21 @@ the synchronization completion gate.
 - A shared `MessageAbortedError` stops handoff. The correction adds no
   ticket/lane, database tail, timestamp movement, Runner state, cancellation
   generation, or detached fiber.
+- Optional `task_id` is persisted on each user message. The first selected user
+  binds `session.pre`; each iteration binds tools from its actual last user; and
+  `session.post` reports the final selected user. Synthetic continuation,
+  compaction, checkpoint/rebuild, and `plan_exit` users inherit that binding.
 - This does not claim durable or exactly-once delivery across caller
   interruption, instance disposal, or compaction/checkpoint visibility changes.
 
 ### Validation
 
-- `packages/opencode/test/session/prompt-effect.test.ts`: 87 passed, 2 skipped,
+- `packages/opencode/test/session/prompt-effect.test.ts`: 88 passed, 2 skipped,
   0 failed, including closing-window, terminal-error, cancellation, and
-  reverse-ID output-length regressions.
+  reverse-ID output-length regressions; the closing test proves the successor
+  input contains both queued prompts and binds hooks/tools to the latest one.
 - Classifier unit/integration tests: 43 passed, 0 failed.
-- Busy-route regression: 5 passed, 0 failed; package typecheck exited zero.
+- Busy-route regression: 5 passed, 0 failed; prompt metadata/plan tests passed
+  28/28 and 4/4; compaction/rebuild tests passed 18/18.
+- Root typecheck completed 12/12 tasks; lint completed with zero errors; the v2
+  JavaScript SDK regenerated idempotently from the published OpenAPI document.
