@@ -12,13 +12,13 @@ registry/history commit does not advance either behavior reference below.
 
 - Status: active
 - Canonical owner: fork `dev/compat`
-- Last reviewed: 2026-09-03
+- Last reviewed: 2026-09-04
 - Reviewed upstream: `f82c177709019c759ce2bb06bd1b04cba488811e`
-- Accepted `main` tip: `65a31144e14849ee2432001bd62bc7902f2c6f29`
-- Inherited main behavior: `96d00e06ad1640a80f70c9eda1ed10e62ed5ab79`
-- Compat behavior: `560de61b663a159771b53b05e826dc2cc91675ac`
-- Prior compat tip: `6ee56c116384d54f1269766e348e655d2dc659d6`
-- Main-audit inheritance merge: `560de61b663a159771b53b05e826dc2cc91675ac`
+- Accepted `main` tip: `704e74184eaea02040497a3cc980aeeb99912e05`
+- Inherited main behavior: `59d53d7fd356aec1e0891a11cb11a6972ce84d7d`
+- Compat behavior: `3e207de425621f660a249c074158d1d1564204f5`
+- Prior compat tip: `e94a67e4c6c303776ccad5f399c8de7499000dda`
+- Main-audit inheritance merge: `3e207de425621f660a249c074158d1d1564204f5`
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -109,6 +109,17 @@ carriers. The other five owners have no changed path, and all seven active
 entries remain unchanged at compat behavior
 `560de61b663a159771b53b05e826dc2cc91675ac`.
 
+The 2026-09-04 PR #74 propagation inherits the shared closing-run handoff,
+persisted-task binding, parent-linked classification, and atomic admission for
+derived user turns without adding a compat-only runner mechanism. Six content
+conflicts were resolved semantically: compat keeps its request preflight,
+external-admission checks, monotonic actor chronology, ID/idempotency guards,
+MaxMode routing, and frozen actor context, while the shared conditional write
+guards every synthetic continuation in the same immediate transaction.
+DC-MODEL-001, DC-CONTEXT-001, and DC-ACTOR-001 overlap those paths; the other
+four owners have no incoming production overlap. All seven entries remain
+active at compat behavior `3e207de425621f660a249c074158d1d1564204f5`.
+
 ## Sync index
 
 | ID | Watch surfaces | Relationship to inherited `main` | Required decision |
@@ -174,6 +185,8 @@ entries remain unchanged at compat behavior
   timeout, redirect limit, and 5 MB bound remain unchanged.
 - 2026-09-03 PR #73 propagation: no WebFetch/SSRF path or symbol overlap; the
   approved private-target behavior and inherited bounds remain unchanged.
+- 2026-09-04 PR #74 propagation: no WebFetch/SSRF path or symbol overlap; the
+  approved private-target behavior and inherited bounds remain unchanged.
 - Exit condition: retire or narrow this override only after a shared,
   operator-controlled private-network authorization mechanism preserves
   required intranet access while retaining per-hop permission and resource
@@ -223,6 +236,8 @@ entries remain unchanged at compat behavior
   client-creation guarantee remains unchanged.
 - 2026-09-03 PR #73 propagation: no MCP path or symbol overlap; RFC1918 remote
   MCP reachability remains unchanged.
+- 2026-09-04 PR #74 propagation: no remote-MCP path or symbol overlap; RFC1918
+  reachability remains unchanged.
 - Exit condition: any future `main` private-address MCP classifier triggers a
   fresh policy review and, if intranet access remains required, a minimal
   compat-only production override. Retire the test owner only when the shared
@@ -272,6 +287,8 @@ entries remain unchanged at compat behavior
   overlap; the restricted-network and Windows fallbacks remain unchanged.
 - 2026-09-03 PR #73 propagation: no ripgrep/archive path or symbol overlap;
   both platform fallbacks remain unchanged.
+- 2026-09-04 PR #74 propagation: no ripgrep/archive path or symbol overlap;
+  both platform fallbacks remain unchanged.
 - Exit condition: keep this entry compat-only; it is not proposed for `main`.
   Reconsider only when the supported deployment can reliably provision the
   shared binaries, or upstream supplies equivalent fallbacks with the same
@@ -282,14 +299,14 @@ entries remain unchanged at compat behavior
 - Status: active
 - Canonical owner: `dev/compat` agent configuration and MaxMode routing
 - Base: inherited main behavior
-  `f1e2ba0019ee6ac13c2608474ae9237865b742f2` provides shared MaxMode
+  `59d53d7fd356aec1e0891a11cb11a6972ce84d7d` provides shared MaxMode
   orchestration, bounded candidate/judge retry, main-only session-global retry
   status/event publication, and FC-013's tool-free final-step boundary without
   a compat-style per-agent opt-in contract. It also owns reliable multimodal
   title generation through the hidden `title` agent's `modelRef: "lite"`,
   structured output, and ephemeral retry path.
 - Overrides: compat behavior
-  `4130f181f86477f91245f42e8670d0c84203bcde` adds `agent.maxMode` and generated
+  `3e207de425621f660a249c074158d1d1564204f5` adds `agent.maxMode` and generated
   SDK/OpenAPI exposure, then routes eligible non-final, non-`json_schema` steps
   through MaxMode when the experimental configuration exists.
 - Delta: any configured agent may opt in with `maxMode: true`; the dedicated
@@ -310,8 +327,8 @@ entries remain unchanged at compat behavior
   `packages/opencode/test/session/max-mode-econnreset.test.ts`, and MaxMode
   routing cases in `packages/opencode/test/session/prompt-effect.test.ts`.
 - Review basis: inherited main
-  `f1e2ba0019ee6ac13c2608474ae9237865b742f2`; compat behavior
-  `4130f181f86477f91245f42e8670d0c84203bcde`.
+  `59d53d7fd356aec1e0891a11cb11a6972ce84d7d`; compat behavior
+  `3e207de425621f660a249c074158d1d1564204f5`.
 - Evidence: the agent config schema, resolved agent information, generated
   public schemas, routing predicate, structured-output exclusion, retry
   behavior, main-only session status/event gate, and final-step cases are all
@@ -344,6 +361,9 @@ entries remain unchanged at compat behavior
 - 2026-09-03 PR #73 propagation: generated OpenAPI/SDK carriers overlap, but
   `AgentConfig.maxMode`, routing, final-step, structured-output, hidden-title,
   and retry-status behavior remain unchanged.
+- 2026-09-04 PR #74 propagation: prompt handoff and task metadata overlap the
+  run loop, while per-agent MaxMode routing, final-step and structured-output
+  gates, hidden-title isolation, and retry-status ownership remain unchanged.
 - Exit condition: retire when shared `main` exposes equivalent per-agent
   opt-in, generated interfaces, mode exclusions, retry behavior, and final-step
   enforcement; do not retire merely because the global experimental switch
@@ -354,13 +374,13 @@ entries remain unchanged at compat behavior
 - Status: active
 - Canonical owner: `dev/compat` model-request safety boundary
 - Base: inherited main behavior
-  `f1e2ba0019ee6ac13c2608474ae9237865b742f2` retains FD-002 instruction
+  `59d53d7fd356aec1e0891a11cb11a6972ce84d7d` retains FD-002 instruction
   delivery, shared retry/title construction, versioned skill snapshots, stable
   per-session memory-path templates, FC-007's fixed `Instance.directory`, and
   FC-015's effective compaction window without this complete compat cap,
   serialization, and preflight set.
 - Overrides: compat behavior
-  `4130f181f86477f91245f42e8670d0c84203bcde` bounds model-visible content and
+  `3e207de425621f660a249c074158d1d1564204f5` bounds model-visible content and
   estimates the effective request before dispatch. DC-ACTOR-001 separately owns
   the full-context/static-prefix actor extension.
 - Delta: instruction, inbox, replayed tool input/output, synthetic error media,
@@ -431,8 +451,8 @@ entries remain unchanged at compat behavior
   `packages/opencode/test/lib/llm-server.ts` supporting request-boundary
   assertions.
 - Review basis: inherited main
-  `f1e2ba0019ee6ac13c2608474ae9237865b742f2`; compat behavior
-  `4130f181f86477f91245f42e8670d0c84203bcde`.
+  `59d53d7fd356aec1e0891a11cb11a6972ce84d7d`; compat behavior
+  `3e207de425621f660a249c074158d1d1564204f5`.
 - Evidence: focused tests at the compat behavior tree cover oversized
   instructions, structured provider/tool replay, unserializable inputs,
   synthetic media, UTF-8/surrogate limits, active-tool filtering, recoverable
@@ -489,6 +509,11 @@ entries remain unchanged at compat behavior
   producer and its 204/400/404 public contract. Compat content caps, prefix
   snapshots, preflight, compaction, checkpoint chronology, and recovery routes
   remain unchanged.
+- 2026-09-04 PR #74 propagation: inherited closing-run handoff, parent-linked
+  classification, and atomic derived-user admission. The guarded write reuses
+  compat schema, ownership, ID/idempotency, and monotonic actor chronology in
+  one immediate transaction; compaction retains both pending-external checks,
+  projection, preflight, checkpoint coverage, and bounded recovery.
 - Exit condition: retire only when shared `main` enforces equivalent caps and
   non-throwing serialization at every model-visible boundary and performs the
   same request-aware, active-tool preflight without weakening FD-002 delivery.
@@ -498,12 +523,12 @@ entries remain unchanged at compat behavior
 - Status: active
 - Canonical owner: `dev/compat` actor request/context integration
 - Base: inherited main behavior
-  `f1e2ba0019ee6ac13c2608474ae9237865b742f2` provides FD-009's fail-closed
+  `59d53d7fd356aec1e0891a11cb11a6972ce84d7d` provides FD-009's fail-closed
   frozen-context admission, FC-001's lifecycle linearization, FC-007's fixed
   instance cwd, default-fork checkpoint writers, and FD-002's fail-closed
   main/registered-peer `replace-agent` identity scope.
 - Overrides: compat behavior
-  `4130f181f86477f91245f42e8670d0c84203bcde` extends those shared invariants
+  `3e207de425621f660a249c074158d1d1564204f5` extends those shared invariants
   with explicit full-context actor propagation, bounded actor-visible state,
   and static-prefix overflow handling; it does not replace their ownership.
 - Delta: an actor requesting full context inherits the parent's frozen request
@@ -542,8 +567,8 @@ entries remain unchanged at compat behavior
   `packages/opencode/test/session/prompt-effect.test.ts`, and actor-state cases
   in `packages/opencode/test/util/text-truncate.test.ts`.
 - Review basis: inherited main
-  `f1e2ba0019ee6ac13c2608474ae9237865b742f2`; compat behavior
-  `4130f181f86477f91245f42e8670d0c84203bcde`.
+  `59d53d7fd356aec1e0891a11cb11a6972ce84d7d`; compat behavior
+  `3e207de425621f660a249c074158d1d1564204f5`.
 - Evidence: the full-context actor suite covers inherited system/tool/permission
   membership, frozen parent turn context/system/cwd, actor-scoped replacement,
   default and explicit checkpoint modes, and bounded state; overflow tests
@@ -578,6 +603,10 @@ entries remain unchanged at compat behavior
 - 2026-09-03 PR #73 propagation: FC-001 queue admission is lifecycle-adjacent,
   but no actor path changed. Frozen membership, system, cwd, permissions, and
   static-prefix behavior remain intact.
+- 2026-09-04 PR #74 propagation: actor prompt and compaction paths inherit
+  atomic derived turns and parent task binding. Full-context membership,
+  frozen system/tools/permissions/cwd, and static-prefix fail-closed behavior
+  remain compat-owned and unchanged.
 - Exit condition: retire only when shared `main` supplies equivalent
   frozen-membership full-context actors, bounded state transport, and
   unrecoverable-static-prefix handling while FD-009 and FC-001 remain satisfied
@@ -642,6 +671,9 @@ entries remain unchanged at compat behavior
 - 2026-09-03 PR #73 propagation: no TUI component path changed. The existing
   client-visible queued state now has its shared persisted producer restored;
   provider/model/variant truth and locale submission remain unchanged.
+- 2026-09-04 PR #74 propagation: no TUI component path changed. Shared handoff
+  now drains persisted queued turns; provider/model/variant truth and locale
+  submission remain unchanged.
 - Known limits: an unconfigured built-in tier can display `variant: none` while
   the server resolves an agent variant through its default-model path. An
   in-session agent switch can likewise display `variant: none` until the TUI has

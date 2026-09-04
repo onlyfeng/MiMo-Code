@@ -11,6 +11,8 @@ never used as an inherited `main` or compat behavior review basis.
 
 | Date | Accepted `main` tip | Main behavior | Compat behavior | Active DC | Changed-path total | Decision summary |
 | --- | --- | --- | --- | ---: | --- | --- |
+| 2026-09-04 | `704e74184eaea02040497a3cc980aeeb99912e05` | `59d53d7fd356aec1e0891a11cb11a6972ce84d7d` | `3e207de425621f660a249c074158d1d1564204f5` | 7 | 94 paths; 13,309 insertions; 2,005 deletions | Inherited PR #74's complete closing-run handoff, task binding, parent-linked classification, and atomic derived-user admission while preserving all seven compat owners and adding no runner state. |
+| 2026-09-03 | `65a31144e14849ee2432001bd62bc7902f2c6f29` | `96d00e06ad1640a80f70c9eda1ed10e62ed5ab79` | `560de61b663a159771b53b05e826dc2cc91675ac` | 7 | 94 paths; 12,938 insertions; 1,662 deletions | Inherited PR #73's `prompt_async` persistence-before-join correction and 204/400/404 public contract while preserving all seven compat owners. |
 | 2026-09-02 | `3ec8a8534ad4481c73f1946c966daf3a846cc29f` | `f1e2ba0019ee6ac13c2608474ae9237865b742f2` | `4130f181f86477f91245f42e8670d0c84203bcde` | 7 | 92 paths; 10,031 insertions; 1,662 deletions | Inherited the complete 2/2 WebSearch-model and session-ID audit without a compat fork; preserved request-scoped model flow, opaque legacy/new session keys, message chronology, and all seven DC owners with 112 focused passes. |
 | 2026-09-02 | `3a2b6c88fd50d460199d8b5b2721413d164ecba9` | `dad492e0af72d22d3ec796f6814eda7e52ed51a8` | `6c2fe63ad3d08d3eed4d5dfc44bab3aa934e559e` | 7 | 92 paths; 10,031 insertions; 1,662 deletions | Inherited the complete 4/4 published projection, harness-description, compaction-description, and 0.1.14 release audit; regenerated compat artifacts, preserved all seven DC owners, and retained checkpoint/callable-SDK coverage. |
 | 2026-09-02 | `28c1f36c8a3bc85bda7e3691960e7d0b531b8636` | `7bfe6ac48e0db40b2b0b42c00b05a35032fcc113` | `c8b02aeb991c37e570799bdd3696e276aa35ba77` | 7 | 92 paths; 10,085 insertions; 1,664 deletions | Inherited the complete 4/4 default-model, Compose Next, and voice audit plus FC-016; semantically resolved the Prompt conflict so shared owner/drain/grapheme behavior and compat provider/model/variant metadata both survive, with all seven DC owners unchanged. |
@@ -2343,3 +2345,60 @@ unchanged.
 - The merge parentage, predicted/actual tree identity, dependency equality, and
   propagation whitespace checks passed. Exact remote-tip CI remains pending
   publication of the compat documentation commit and is not claimed here.
+
+## 2026-09-04 PR #74 closing-run handoff propagation
+
+- Reviewed upstream remains
+  `f82c177709019c759ce2bb06bd1b04cba488811e`; this propagation selected no new
+  upstream range.
+- Prior accepted `main` tip:
+  `65a31144e14849ee2432001bd62bc7902f2c6f29`.
+- Accepted `main` tip:
+  `704e74184eaea02040497a3cc980aeeb99912e05`.
+- Inherited main behavior:
+  `59d53d7fd356aec1e0891a11cb11a6972ce84d7d`.
+- Prior compat tip:
+  `e94a67e4c6c303776ccad5f399c8de7499000dda`.
+- Compat behavior merge:
+  `3e207de425621f660a249c074158d1d1564204f5`, whose parents are the prior
+  compat tip and accepted `main` tip.
+- Six content conflicts were reconciled by capability in session classify,
+  compaction, prompt, user admission, and their two combined test files. No
+  compat owner was added, retired, renumbered, or transferred.
+
+### Shared capability inheritance (4/4)
+
+| Capability | Decision | Compat preservation |
+| --- | --- | --- |
+| Closing-run queued-prompt handoff | Inherit caller-local handoff and one retry after a joined run exits | Keep existing Runner and external-admission state; add no ticket, lane, or runner mode |
+| Persisted task binding | Carry `task_id` from the latest user through assistants and derived turns | Keep per-agent MaxMode and actor identity boundaries |
+| Parent-linked classification | Treat only an assistant whose `parentID` matches the current user as its result | Keep compat overflow-placeholder recovery |
+| Atomic derived-user admission | Compare the latest actor user and commit message plus parts in one immediate transaction | Reuse compat schema, ownership, ID/idempotency, monotonic-time, and pending-external guards |
+
+### Compat owner review (7/7)
+
+| Owner | Incoming overlap | Preserved result |
+| --- | --- | --- |
+| DC-NET-001 | none | Approved private WebFetch policy unchanged |
+| DC-NET-002 | none | RFC1918 remote MCP reachability unchanged |
+| DC-PLATFORM-001 | none | Restricted-network and Windows fallbacks unchanged |
+| DC-MODEL-001 | prompt and generated carriers | Per-agent MaxMode, final-step, title, structured-output, and retry-status isolation retained |
+| DC-CONTEXT-001 | session admission, classification, checkpoint, compaction, prompt, SDK/OpenAPI | Caps, preflight, projection, checkpoint chronology, external-admission checks, and recovery retained |
+| DC-ACTOR-001 | checkpoint, prompt, and compaction | Frozen membership/system/tools/permissions/cwd and static-prefix failure retained |
+| DC-TUI-001 | no component path | Provider/model/variant and locale truth unchanged |
+
+### Local validation evidence
+
+- Frozen install completed without changing `bun.lock`; JavaScript SDK
+  generation was idempotent.
+- Full `prompt-effect` passed 131 tests, skipped 2, and failed 0. Focused
+  classify, prompt/plan, compaction, busy-route, checkpoint, MaxMode, actor,
+  prefix, OpenAPI, coverage, and overflow matrices all passed with zero
+  failures.
+- Root typecheck completed all 12 tasks. Root lint exited zero with no errors;
+  propagation whitespace checks passed.
+- The first full prompt run inherited the local umbrella experimental selector
+  and failed seven default-MCP assertions. Clearing that selector made those
+  seven tests and the complete suite pass; no code change was required.
+- Exact remote-tip CI remains pending publication of the compat documentation
+  commit and is not claimed here.
