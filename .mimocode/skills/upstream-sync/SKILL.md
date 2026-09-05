@@ -21,8 +21,10 @@ either scope; it does not authorize propagation. Audit-only requests stay read-o
 compare selected trees and report findings, skipping merge, commit, publication,
 and registry updates. Clean up any resources created for the audit under step 8.
 Do not broaden a specified change into a full sync. Refresh `origin` in every mode;
-refresh `upstream` branch refs only for a full sync without a frozen baseline,
-using `git fetch --no-tags --prune <remote>`.
+refresh `upstream` branch refs only for a full sync without a frozen baseline.
+Override configured fetch mappings with a branch-only refspec and disable tag
+pruning, preserving local tags even with ambient prune-tags settings or tag refspecs:
+`git fetch --no-tags --no-prune-tags --prune --refmap= <remote> '+refs/heads/*:refs/remotes/<remote>/*'`.
 
 For a non-frozen specified change whose source object is missing locally, fetch
 only the named full SHA or PR ref from its owning remote into an unused temporary ref
