@@ -77,6 +77,47 @@ describe("title helpers", () => {
     expect(titleContext({ parts } as MessageV2.WithParts)).toBe("Inspect the parser\nAttachment: diagram.png")
   })
 
+  test("strips leading slash-mentions so skill scaffolding stays out of titles", () => {
+    // compose-next UI mode sends a pure `/compose-next` part + user body as a separate part.
+    const parts = [
+      { type: "text", text: "/compose-next" },
+      { type: "text", text: "implement the login page" },
+    ] as MessageV2.Part[]
+    expect(titleContext({ parts } as MessageV2.WithParts)).toBe("implement the login page")
+
+    // skill-chip / typed mentions bake the prefix into a single body part.
+    expect(titleContext({ parts: [{ type: "text", text: "/compose-next implement the login page" }] } as MessageV2.WithParts)).toBe(
+      "implement the login page",
+    )
+    expect(titleContext({ parts: [{ type: "text", text: "/pdf-official /pptx-official make a deck" }] } as MessageV2.WithParts)).toBe(
+      "make a deck",
+    )
+
+    // Punctuation immediately after the skill name (mention scan treats "," / "." as token end).
+    expect(titleContext({ parts: [{ type: "text", text: "/compose-next, implement the login page" }] } as MessageV2.WithParts)).toBe(
+      "implement the login page",
+    )
+    expect(titleContext({ parts: [{ type: "text", text: "/compose-next. implement the login page" }] } as MessageV2.WithParts)).toBe(
+      "implement the login page",
+    )
+
+    // Pure scaffolding part alone collapses to empty (skipped).
+    expect(titleContext({ parts: [{ type: "text", text: "/compose-next" }] } as MessageV2.WithParts)).toBe("")
+
+    // Multi-segment path "/api/v1" must not be stripped (next char after first segment is "/").
+    expect(titleContext({ parts: [{ type: "text", text: "/api/v1/docs is this path right" }] } as MessageV2.WithParts)).toBe(
+      "/api/v1/docs is this path right",
+    )
+  })
+
+  test("titleInputText strips leading slash-mentions from text and text parts", () => {
+    expect(titleInputText("/compose-next implement the login page", undefined)).toBe("implement the login page")
+    expect(
+      titleInputText("/compose-next", [{ type: "text", text: "implement the login page" }]),
+    ).toBe("implement the login page")
+    expect(titleInputText("/compose-next", undefined)).toBe("")
+  })
+
   test("truncates long Latin titles at a word boundary", () => {
     expect(truncateTitle("Fix ThreadPoolExecutor concurrency issue in production")).toBe(
       "Fix ThreadPoolExecutor concurrency issue in…",

@@ -1,7 +1,7 @@
 import z from "zod"
 import { childProcessEnv } from "@/util/child-process-env"
 import os from "os"
-import { createWriteStream, existsSync, readFileSync, realpathSync } from "node:fs"
+import { createWriteStream, existsSync, realpathSync } from "node:fs"
 import * as Tool from "./tool"
 import path from "path"
 import DESCRIPTION from "./bash.txt"
@@ -32,6 +32,7 @@ import * as BashTokenEfficientHeuristic from "./bash_token_efficient_heuristic"
 import { findGitMainWorktree } from "./auto-worktree-hint"
 
 const MAX_METADATA_LENGTH = 30_000
+export const DEFAULT_MAX_OUTPUT_TOKENS = 30_000
 const DEFAULT_TIMEOUT = Flag.MIMOCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
 const PS = new Set(["powershell", "pwsh"])
 // Delete targets under the OS temp dir are exempt from the forced-ask
@@ -118,8 +119,7 @@ export function bashDescription(gpt = false) {
     .replaceAll("${os}", process.platform)
     .replaceAll("${shell}", name)
     .replaceAll("${chaining}", chaining)
-    .replaceAll("${maxLines}", String(Truncate.MAX_LINES))
-    .replaceAll("${maxBytes}", String(Truncate.MAX_BYTES))
+    .replaceAll("${maxTokens}", String(DEFAULT_MAX_OUTPUT_TOKENS))
 }
 
 // Irreversible file/directory removal commands. Names are matched
@@ -160,7 +160,7 @@ const Parameters = z.object({
     .int()
     .positive()
     .describe(
-      "Maximum approximate tokens returned inline. Full output is saved to tool storage when this limit is exceeded.",
+      `Maximum approximate tokens returned inline. Defaults to ${DEFAULT_MAX_OUTPUT_TOKENS}. Full output is saved to tool storage when this limit is exceeded.`,
     )
     .optional(),
   workdir: z
@@ -661,23 +661,6 @@ function preview(text: string) {
   return "...\n\n" + text.slice(-MAX_METADATA_LENGTH)
 }
 
-const ERROR_PATTERN = /error|exception|failed|fatal|traceback|panic|exit code/i
-const HEAD_BYTES = Math.floor(Truncate.MAX_BYTES * 0.7)
-const HEAD_LINES = Math.floor(Truncate.MAX_LINES * 0.7)
-
-function head(text: string, maxLines: number, maxBytes: number): string {
-  const lines = text.split("\n")
-  const out: string[] = []
-  let bytes = 0
-  for (let i = 0; i < lines.length && out.length < maxLines; i++) {
-    const size = Buffer.byteLength(lines[i], "utf-8") + (i > 0 ? 1 : 0)
-    if (bytes + size > maxBytes) break
-    out.push(lines[i])
-    bytes += size
-  }
-  return out.join("\n")
-}
-
 function headBytes(text: string, maxBytes: number) {
   const buf = Buffer.from(text, "utf-8")
   if (buf.length <= maxBytes) return text
@@ -686,18 +669,18 @@ function headBytes(text: string, maxBytes: number) {
   return buf.subarray(0, end).toString("utf-8")
 }
 
-function tail(text: string, maxLines: number, maxBytes: number) {
-  const lines = text.split("\n")
-  if (lines.length <= maxLines && Buffer.byteLength(text, "utf-8") <= maxBytes) {
+function tail(text: string, maxBytes: number) {
+  if (Buffer.byteLength(text, "utf-8") <= maxBytes) {
     return {
       text,
       cut: false,
     }
   }
 
+  const lines = text.split("\n")
   const out: string[] = []
   let bytes = 0
-  for (let i = lines.length - 1; i >= 0 && out.length < maxLines; i--) {
+  for (let i = lines.length - 1; i >= 0; i--) {
     const size = Buffer.byteLength(lines[i], "utf-8") + (out.length > 0 ? 1 : 0)
     if (bytes + size > maxBytes) {
       if (out.length === 0) {
@@ -1032,15 +1015,14 @@ export const BashTool = Tool.define(
         cwd: string
         env: NodeJS.ProcessEnv
         timeout: number
-        maxOutputTokens?: number
+        maxOutputTokens: number
         description: string
         fileWrite?: boolean
         mainWorktreeHits?: string[]
       },
       ctx: Tool.Context,
     ) {
-      const bytes = input.maxOutputTokens ? input.maxOutputTokens * 4 : Truncate.MAX_BYTES
-      const lines = input.maxOutputTokens ? Number.MAX_SAFE_INTEGER : Truncate.MAX_LINES
+      const bytes = input.maxOutputTokens * 4
       const keep = bytes * 2
       let full = ""
       let first = ""
@@ -1069,7 +1051,7 @@ export const BashTool = Tool.define(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
               const size = Buffer.byteLength(chunk, "utf-8")
               total += size
-              if (input.maxOutputTokens && Buffer.byteLength(first, "utf-8") < Math.floor(bytes / 2)) {
+              if (Buffer.byteLength(first, "utf-8") < Math.floor(bytes / 2)) {
                 first = headBytes(first + chunk, Math.floor(bytes / 2))
               }
               list.push({ text: chunk, size })
@@ -1154,7 +1136,7 @@ export const BashTool = Tool.define(
       }
       if (aborted) meta.push("User aborted the command")
       const raw = list.map((item) => item.text).join("")
-      const end = tail(raw, lines, bytes)
+      const end = tail(raw, bytes)
       if (end.cut) cut = true
       if (!file && end.cut) {
         file = yield* trunc.write(raw)
@@ -1199,31 +1181,9 @@ export const BashTool = Tool.define(
       if (!output) output = "(no output)"
 
       if (cut && file) {
-        if (input.maxOutputTokens) {
-          const suffix = tail(raw, Number.MAX_SAFE_INTEGER, bytes - Buffer.byteLength(first, "utf-8")).text
-          const shown = Buffer.byteLength(first, "utf-8") + Buffer.byteLength(suffix, "utf-8")
-          output = `Warning: truncated output (original token count: ${Math.ceil(total / 4)})\n\n${first}\n…${Math.ceil((total - shown) / 4)} tokens truncated…\n${suffix}`
-        } else {
-          // Check if tail contains error patterns — if so, prepend head for context
-          const tailScan = end.text.length > 2048 ? end.text.slice(-2048) : end.text
-          const hasErrors = ERROR_PATTERN.test(tailScan)
-          if (hasErrors) {
-            let fileContent: string | undefined
-            try {
-              fileContent = readFileSync(file, "utf-8")
-            } catch {
-              fileContent = undefined
-            }
-            if (fileContent) {
-              const headText = head(fileContent, HEAD_LINES, HEAD_BYTES)
-              output = `...output truncated (head+tail shown due to errors)...\n\nFull output saved to: ${file}\n\n${headText}\n\n...middle omitted...\n\n${end.text}`
-            } else {
-              output = `...output truncated...\n\nFull output saved to: ${file}\n\n` + output
-            }
-          } else {
-            output = `...output truncated...\n\nFull output saved to: ${file}\n\n` + output
-          }
-        }
+        const suffix = tail(raw, bytes - Buffer.byteLength(first, "utf-8")).text
+        const shown = Buffer.byteLength(first, "utf-8") + Buffer.byteLength(suffix, "utf-8")
+        output = `Warning: truncated output (original token count: ${Math.ceil(total / 4)})\n\n${first}\n…${Math.ceil((total - shown) / 4)} tokens truncated…\n${suffix}`
       }
 
       if (meta.length > 0) {
@@ -1243,7 +1203,7 @@ export const BashTool = Tool.define(
         command: input.command,
         output,
       })
-      if (cut && file && input.maxOutputTokens) output += `\n\nFull output saved to: ${file}`
+      if (cut && file) output += `\n\nFull output saved to: ${file}`
       if (sink) {
         const stream = sink
         yield* Effect.promise(
@@ -1379,7 +1339,7 @@ export const BashTool = Tool.define(
                   cwd,
                   env: yield* shellEnv(ctx, cwd),
                   timeout,
-                  maxOutputTokens: params.max_output_tokens,
+                  maxOutputTokens: params.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
                   description: params.description,
                   fileWrite,
                   mainWorktreeHits: hits,

@@ -5,7 +5,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { Shell } from "../../src/shell/shell"
-import { BashTool } from "../../src/tool/bash"
+import { BashTool, DEFAULT_MAX_OUTPUT_TOKENS } from "../../src/tool/bash"
 import { Instance } from "../../src/project/instance"
 import { Filesystem } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
@@ -1690,34 +1690,33 @@ describe("tool.bash abort", () => {
 })
 
 describe("tool.bash truncation", () => {
-  test("truncates output exceeding line limit", async () => {
+  test("does not truncate many short lines within the token budget", async () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
         const bash = await initBash()
-        const lineCount = Truncate.MAX_LINES + 500
+        const lineCount = 5000
         const result = await Effect.runPromise(
           bash.execute(
             {
               command: fill("lines", lineCount),
-              description: "Generate lines exceeding limit",
+              description: "Generate many short lines",
             },
             ctx,
           ),
         )
-        mustTruncate(result)
-        expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
-        expect(result.output).toMatch(/Full output saved to:\s+\S+/)
+        expect((result.metadata as { truncated?: boolean }).truncated).toBe(false)
+        expect(result.output).toContain(String(lineCount))
       },
     })
   })
 
-  test("truncates output exceeding byte limit", async () => {
+  test("truncates output exceeding the default token limit", async () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
         const bash = await initBash()
-        const byteCount = Truncate.MAX_BYTES + 10000
+        const byteCount = DEFAULT_MAX_OUTPUT_TOKENS * 4 + 10000
         const result = await Effect.runPromise(
           bash.execute(
             {
@@ -1728,7 +1727,10 @@ describe("tool.bash truncation", () => {
           ),
         )
         mustTruncate(result)
-        expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
+        expect(result.output).toContain(
+          `Warning: truncated output (original token count: ${Math.ceil(byteCount / 4)})`,
+        )
+        expect(result.output).toContain("tokens truncated…")
         expect(result.output).toMatch(/Full output saved to:\s+\S+/)
       },
     })
@@ -1786,7 +1788,7 @@ describe("tool.bash truncation", () => {
       directory: projectRoot,
       fn: async () => {
         const bash = await initBash()
-        const lineCount = Truncate.MAX_LINES + 100
+        const lineCount = 30_000
         const result = await Effect.runPromise(
           bash.execute(
             {

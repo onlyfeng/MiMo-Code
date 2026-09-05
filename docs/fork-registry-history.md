@@ -1723,3 +1723,68 @@ the synchronization completion gate.
   28/28 and 4/4; compaction/rebuild tests passed 18/18.
 - Root typecheck completed 12/12 tasks; lint completed with zero errors; the v2
   JavaScript SDK regenerated idempotently from the published OpenAPI document.
+
+## 2026-09-05 Bash, subtask, title, and fixture synchronization
+
+- Prior reviewed upstream: `f82c177709019c759ce2bb06bd1b04cba488811e`.
+- Reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`.
+- Prior fork main tip: `704e74184eaea02040497a3cc980aeeb99912e05`.
+- Main merge and stable behavior: `eb2ace2e1cb2554707f5e062cc5649a5ef0a3eae`.
+- Range: 10 commits, five first-parent commits, 16 incoming paths. No
+  dependency, lockfile, migration, workflow, or generated SDK input changes.
+
+### Capability inventory (7/7)
+
+Every row uses audit range `AR-20260905-EC3` with the source and main behavior
+SHAs above. Compat counterparts are the pre-merge audit of `8b3466b8`; their
+final merge and validation belong to `dev-compat-registry-history.md`.
+
+| ID | Capability / commit | Paths and symbols | main counterpart | compat counterpart | Relationship | Drift | canonical_owner | Disposition | Status evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| C01 | Remove resetDatabase fixture / `af49d5da` | test/fixture/db.ts; SSE/project-init-git/share/workspace fixtures; prefix/subtask tests | FC-008 | FC-008; shared tests; compat no unique fixture owner | complementary | tests | shared main | adopt reset removal; retain active prefix/subtask assertions | Main affected matrix and typecheck; compat final evidence pending propagation |
+| C02 | Keep terminal subtask tool state / `99e51b2d` | src/session/prompt.ts handleSubtask; prompt-effect late metadata regression | FD-002/009 FC-001/009 | FD-002/009 FC-001/009; DC-ACTOR/CONTEXT prompt carrier | complementary | behavior,tests | shared main | adopt terminal guard and state assignment; add late metadata regression | Main affected matrix and typecheck; compat final evidence pending propagation |
+| C03 | Export LLMServerTokens through Node entry / `1d6a9fe2` | src/node.ts; absent src/llm-server/tokens.ts | FD-004 | FD-004; shared Node export | conflicting | API/build | shared main | omit dangling export under FD-004; no token implementation exists | Main affected matrix and typecheck; compat final evidence pending propagation |
+| C04 | Unify Bash output on token budget / `c2cf9b8f` | src/tool/bash.ts and descriptions; bash.test.ts; DC-CONTEXT replay adapter | FD-001/006 FC-007 | FD-001/006 FC-007; shared Bash boundary | partial duplicate; conflicting compat replay | behavior,contract,tests,docs | shared main; replay adapter dev/compat-only | adopt token budget; preserve permission; reconcile compat head+tail within existing cap | Main affected matrix and typecheck; compat final evidence pending propagation |
+| C05 | Quarantine timeout auth override test / `c56f26c9` | test/plugin/auth-override.test.ts prepareConfigDependencies | FC-008 | FC-008; shared test isolation | conflicting | tests | shared main | reject skip: fork fixed fixture and exact baseline CI passes | Main affected matrix and typecheck; compat final evidence pending propagation |
+| C06 | Cover mixed CJK case-insensitive session search / `e3e9c1b4` | test/server/session-list.test.ts; Session.list SQL LIKE | FC-001 | FC-001; shared list contract | no overlap | tests | shared main | adopt SQL LIKE characterization | Main affected matrix and typecheck; compat final evidence pending propagation |
+| C07 | Strip leading slash mentions from title context / `ec3f9894` | src/session/prompt.ts titleInputText/titleContext/stripLeadingSlashMentions; prompt.test.ts | FC-011 | FC-011; DC-TUI titleLocale and DC-ACTOR prompt carrier | complementary | behavior,tests | shared main | adopt leading mention cleanup; preserve locale/ephemeral/filter paths | Main affected matrix and typecheck; compat final evidence pending propagation |
+
+Inventory and result counts are both seven. All six FD and all sixteen FC
+entries remain required; no retirement condition is met by this range. The
+Bash change is complementary to permission/cwd ownership and conflicts with
+compat's head-only replay slice, so the latter requires a bounded adaptation.
+No duplicate consolidation, compat promotion, or upstream publication occurs.
+
+### Validation
+
+- Ran package `bun typecheck`, repository lint (zero errors), `git diff --check`,
+  and the stable affected session/Bash/exec/fixture matrix. Commands remove
+  `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and
+  `MIMOCODE_CODEX_MODE`; the package preload retains its
+  `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true` harness baseline.
+- The late-metadata mutation check fails without the running guard and passes
+  with it. The retained error-metadata subtask test also passes.
+- `bun ci` preserves `bun.lock`; Node entry, auth-override and fork-prefix
+  tests remain byte-identical to the prior main tip. No `resetDatabase`
+  references or unresolved conflict markers remain.
+- Exact published-SHA CI is a separate completion gate. Pre-sync test runs
+  `33849354969` and `33851920767` contain existing timeouts; their outcomes
+  are not proof for the new branch tips.
+
+Stable main matrix: **383 pass, 2 existing skip, 0 fail** across 24 test files.
+
+| Group | Files (under `packages/opencode`) | Pass / skip |
+| --- | --- | --- |
+| session | `test/session/prompt-effect.test.ts`, `test/session/prompt.test.ts`, `test/session/fork-prefix-invariant.test.ts`, `test/session/llm-request-prefix.test.ts`, `test/session/max-mode.test.ts`, `test/session/replace-agent-subagent.test.ts`, `test/session/checkpoint-fork-mode.test.ts`, `test/session/run-state-tuple-key.test.ts`, `test/session/run-state-dispose.test.ts` | 170 / 2 |
+| bash | `test/tool/bash.test.ts`, `test/tool/auto-worktree-bash-write.test.ts`, `test/tool/bash-isolated-git-guard.test.ts`, `test/tool/bash-conflict-ownership.test.ts`, `test/permission/auto-approve-delete.test.ts`, `test/permission/skip-all.test.ts`, `test/cli/yolo.test.ts`, `test/cli/tui/permission-bash-delete.test.tsx` | 116 / 0 |
+| exec | `test/tool/tool-script.test.ts` | 75 / 0 |
+| fixture-1 | `test/control-plane/sse.test.ts` | 2 / 0 |
+| fixture-2 | `test/server/project-init-git.test.ts` | 2 / 0 |
+| fixture-3 | `test/share/share-next.test.ts` | 8 / 0 |
+| fixture-4 | `test/workspace/workspace-restore.test.ts` | 2 / 0 |
+| fixture-5 | `test/server/session-list.test.ts` | 6 / 0 |
+| fixture-6 | `test/plugin/auth-override.test.ts` | 2 / 0 |
+
+Run each row from `packages/opencode` with the three ambient selectors
+removed, using `bun test <row files> --timeout 120000`. Fixture rows run in
+separate processes so their existing database close/reset behavior is isolated.

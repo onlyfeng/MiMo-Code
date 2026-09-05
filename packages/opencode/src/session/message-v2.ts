@@ -1073,7 +1073,18 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
           if (part.state.status === "completed") {
             const outputText = part.state.time.compacted
               ? "[Old tool result content cleared]"
-              : capModelReplayToolText(part.state.output)
+              : capModelReplayToolText(
+                  part.state.output,
+                  "tool output",
+                  // Bash archives its full output and appends the path after its
+                  // token-budget preview. Keep that pointer inside the replay cap.
+                  part.tool === "bash" &&
+                    part.state.metadata.truncated === true &&
+                    typeof part.state.metadata.outputPath === "string" &&
+                    part.state.metadata.outputPath.length > 0
+                    ? "head+tail"
+                    : "head",
+                )
             const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
             const finalAttachments = routeAttachments({
               tool: part.tool,

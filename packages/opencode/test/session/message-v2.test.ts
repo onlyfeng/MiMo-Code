@@ -837,6 +837,68 @@ describe("session.message-v2.toModelMessage", () => {
     expect(value).toContain("tool output truncated before model replay")
   })
 
+  test.each([
+    { name: "archived Bash", tool: "bash", metadata: { truncated: true, outputPath: "/tmp/tool-output" }, tail: true },
+    { name: "archived Read", tool: "read", metadata: { truncated: true, outputPath: "/tmp/tool-output" }, tail: false },
+    { name: "Bash without a path", tool: "bash", metadata: { truncated: true }, tail: false },
+    { name: "Bash with an empty path", tool: "bash", metadata: { truncated: true, outputPath: "" }, tail: false },
+    {
+      name: "untruncated Bash",
+      tool: "bash",
+      metadata: { truncated: false, outputPath: "/tmp/tool-output" },
+      tail: false,
+    },
+  ])("bounds completed output replay for $name", async (item) => {
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("m-user"),
+        parts: [{ ...basePart("m-user", "u1"), type: "text", text: "run tool" }],
+      },
+      {
+        info: assistantInfo("m-assistant", "m-user"),
+        parts: [
+          {
+            ...basePart("m-assistant", "a1"),
+            type: "tool",
+            callID: "call-1",
+            tool: item.tool,
+            state: {
+              status: "completed",
+              input: { command: "generate output" },
+              output: [
+                "Warning: truncated output (original token count: 40000)",
+                "HEAD",
+                "首🙂".repeat(9000),
+                "…10000 tokens truncated…",
+                "尾🙂".repeat(9000),
+                "TAIL",
+                "Full output saved to: /tmp/tool-output",
+              ].join("\n"),
+              title: "Large tool output",
+              metadata: item.metadata,
+              time: { start: 0, end: 1 },
+            },
+          },
+        ],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, model)
+    const replay = result
+      .flatMap((message) => (message.role === "tool" ? message.content : []))
+      .find((part) => part.type === "tool-result")
+    if (replay?.output.type !== "text") throw new Error("Expected a text tool result")
+
+    expect(Buffer.byteLength(replay.output.value, "utf8")).toBeLessThanOrEqual(MODEL_VISIBLE_TEXT_CAP_BYTES)
+    expect(replay.output.value).toContain("Warning: truncated output")
+    expect(replay.output.value).toContain("HEAD")
+    expect(replay.output.value).toContain("tool output truncated before model replay")
+    expect(replay.output.value).not.toContain("\uFFFD")
+    expect(replay.output.value.includes("TAIL")).toBe(item.tail)
+    expect(replay.output.value.includes("Full output saved to: /tmp/tool-output")).toBe(item.tail)
+    expect(replay.output.value.endsWith("Full output saved to: /tmp/tool-output")).toBe(item.tail)
+  })
+
   test("caps completed tool input before rebuilding model messages", async () => {
     const userID = "m-user"
     const assistantID = "m-assistant"
