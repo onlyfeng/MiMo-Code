@@ -3872,19 +3872,19 @@ it.live(
 )
 
 it.live(
-  "cancel finalizes subtask tool state",
+  "cancel finalizes subtask tool state and ignores late metadata",
   () =>
     provideTmpdirInstance(
       () =>
         Effect.gen(function* () {
-          const ready = defer<void>()
           const aborted = defer<void>()
           const registry = yield* ToolRegistry.Service
           const { actor } = yield* registry.named()
+          const ready = defer<Parameters<typeof actor.execute>[1]>()
           const original = actor.execute
           actor.execute = (_args, ctx) =>
             Effect.callback<never>((_resume) => {
-              ready.resolve()
+              ready.resolve(ctx)
               ctx.abort.addEventListener("abort", () => aborted.resolve(), { once: true })
               return Effect.sync(() => aborted.resolve())
             })
@@ -3895,7 +3895,7 @@ it.live(
           yield* addSubtask(chat.id, msg.id)
 
           const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
-          yield* Effect.promise(() => ready.promise)
+          const ctx = yield* Effect.promise(() => ready.promise)
           yield* prompt.cancel(chat.id)
           yield* Effect.promise(() => aborted.promise)
 
@@ -3914,6 +3914,9 @@ it.live(
           expect(tool.state.status).not.toBe("running")
           expect(taskMsg.info.time.completed).toBeDefined()
           expect(taskMsg.info.finish).toBeDefined()
+
+          yield* ctx.metadata({ title: "late metadata", metadata: { late: true } })
+          expect(MessageV2.parts(taskMsg.info.id).find((part) => part.id === tool.id)).toEqual(tool)
         }),
       { git: true, config: cfg },
     ),
@@ -5122,7 +5125,7 @@ it.live.skip(
 
           expect(tool.state.metadata.truncated).toBe(true)
           expect(typeof tool.state.metadata.outputPath).toBe("string")
-          expect(tool.state.output).toMatch(/\.\.\.output truncated\.\.\./)
+          expect(tool.state.output).toContain("Warning: truncated output")
           expect(tool.state.output).toMatch(/Full output saved to:\s+\S+/)
           expect(tool.state.output).not.toContain("Tool execution aborted")
         }),

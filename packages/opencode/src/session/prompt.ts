@@ -262,9 +262,9 @@ export type GenTitlePart =
   | { type: "image"; data: string; mime: string; filename?: string }
 
 export function titleInputText(text: string | undefined, parts: GenTitlePart[] | undefined) {
-  const chunks = [text?.trim() ?? ""]
+  const chunks = [stripLeadingSlashMentions(text ?? "")]
   for (const part of parts ?? []) {
-    if (part.type === "text") chunks.push(part.text.trim())
+    if (part.type === "text") chunks.push(stripLeadingSlashMentions(part.text))
     else chunks.push(part.filename ? `Attachment: ${part.filename}` : `Attachment: ${part.mime}`)
   }
   return chunks.filter(Boolean).join("\n").trim()
@@ -295,6 +295,19 @@ export function titlePromptText(text: string, locale?: string) {
   ].join("\n")
 }
 
+// Strip leading slash-mention tokens ("/skill1 /skill2 body") so title generation focuses
+// on task text, not skill scaffolding. Skill chips / compose-next UI mode / typed mentions
+// all write `/name` into the body; without this the title starts with the skill name.
+// Heuristic (no skill allowlist): any kebab-form `/name` at line start is treated as a
+// mention. Multi-segment paths ("/api/v1") are safe (next char after first segment is "/"),
+// but a single leading segment ("/api endpoint…") will be stripped — acceptable for titles.
+export function stripLeadingSlashMentions(text: string) {
+  return (text || "")
+    .trimStart()
+    .replace(/^(?:\/[A-Za-z][A-Za-z0-9_:-]*(?![A-Za-z0-9_:-]|\/)[\s,.;:!?]*)+/, "")
+    .trim()
+}
+
 export function truncateTitle(value: string) {
   if (value.length <= TITLE_MAX_LENGTH) return value
   const prefix = value.substring(0, TITLE_MAX_LENGTH)
@@ -312,7 +325,12 @@ export function truncateTitle(value: string) {
 export function titleContext(input: MessageV2.WithParts) {
   const chunks: string[] = []
   for (const part of input.parts) {
-    if (part.type === "text" && !part.synthetic && !part.ignored && part.text.trim()) chunks.push(part.text.trim())
+    if (part.type === "text" && !part.synthetic && !part.ignored && part.text.trim()) {
+      // Strip leading skill/slash mentions (e.g. compose-next slash part, skill-chip prefixes).
+      // Pure scaffolding parts ("/compose-next" alone) collapse to "" and are skipped.
+      const cleaned = stripLeadingSlashMentions(part.text)
+      if (cleaned) chunks.push(cleaned)
+    }
     if (part.type === "subtask") {
       const value = (part.prompt || part.description).trim()
       if (value) chunks.push(value)
@@ -2310,6 +2328,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           messages: msgs,
           metadata: (val: { title?: string; metadata?: Record<string, any> }) =>
             Effect.gen(function* () {
+              if (part.state.status !== "running") return
               part = yield* sessions.updatePart({
                 ...part,
                 type: "tool",
@@ -2339,7 +2358,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               assistantMessage.time.completed = Date.now()
               yield* sessions.updateMessage(assistantMessage)
               if (part.state.status === "running") {
-                yield* sessions.updatePart({
+                part = yield* sessions.updatePart({
                   ...part,
                   state: {
                     status: "error",
@@ -2372,7 +2391,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       yield* sessions.updateMessage(assistantMessage)
 
       if (result && part.state.status === "running") {
-        yield* sessions.updatePart({
+        part = yield* sessions.updatePart({
           ...part,
           state: {
             status: "completed",
@@ -2387,7 +2406,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
 
       if (!result) {
-        yield* sessions.updatePart({
+        part = yield* sessions.updatePart({
           ...part,
           state: {
             status: "error",
