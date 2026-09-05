@@ -19,10 +19,21 @@ exact-SHA CI are authoritative; history and agent memory are risk hints only.
 Resolve ambiguous scope before fetching or mutation. A frozen baseline constrains
 either scope; it does not authorize propagation. Audit-only requests stay read-only:
 compare selected trees and report findings, skipping merge, commit, publication,
-and cleanup steps below. Do not broaden a specified change into a full sync.
-Refresh `origin` in every mode and `upstream` only for a full sync without a frozen
-baseline, using `git fetch --no-tags --prune <remote>`. Record selected SHAs after
-fetching and use them for the audit.
+and registry updates. Clean up any resources created for the audit under step 8.
+Do not broaden a specified change into a full sync. Refresh `origin` in every mode;
+refresh `upstream` branch refs only for a full sync without a frozen baseline,
+using `git fetch --no-tags --prune <remote>`.
+
+For a non-frozen specified change whose source object is missing locally, fetch
+only the named full SHA or PR ref from its owning remote into an unused temporary ref
+under `refs/codex/upstream-sync/<operation>/`:
+`git fetch --no-tags --no-write-fetch-head --refmap= <remote> <sha-or-pr-ref>:<temporary-ref>`.
+Resolve a PR ref to a SHA first and verify the fetched commit matches the selected
+SHA before auditing. Record the temporary ref and its SHA for cleanup. Do not
+advance `upstream/main`, merge unrelated commits, or move the upstream review
+baseline. Frozen mode has no targeted-fetch exception: stop if the required
+frozen source is unavailable locally. Record selected SHAs after fetching and use
+them for the audit.
 
 ## Evidence-driven workflow
 
@@ -34,9 +45,11 @@ fetching and use them for the audit.
    Query project memory, if available, only for prior risk patterns; recheck all
    mutable facts live.
 2. Record remotes, branch tips, worktrees, dirty/untracked state, and selected
-   immutable SHAs. Leave existing state in place and work in dedicated
-   worktrees. `upstream` is read-only; pushes, PR creation, and other writes
-   target only `onlyfeng/MiMo-Code`. Use `-R onlyfeng/MiMo-Code` for fork GitHub
+   immutable SHAs. Leave existing state in place; use dedicated worktrees for
+   changes and detached temporary worktrees only when an audit needs a checkout.
+   Record resources created by this operation. `upstream` is read-only; pushes,
+   PR creation, and other writes target only `onlyfeng/MiMo-Code`.
+   Use `-R onlyfeng/MiMo-Code` for fork GitHub
    queries and `--repo onlyfeng/MiMo-Code` for PR creation; verify the PR's base
    repository afterwards. Upstream evidence queries must be explicitly scoped
    and read-only.
@@ -76,9 +89,13 @@ fetching and use them for the audit.
    reproduce narrowly; permit at most one same-SHA rerun when evidence supports
    an infrastructure/timing failure. A timeout alone is not evidence of a flake
    or completion.
-8. Remove only this operation's clean, integrated temporary branches and
-   worktrees, after verifying they contain no user work. Keep open-PR resources
-   and unrelated or dirty worktrees.
+8. Clean up only recorded resources created by this operation, including audits.
+   Verify worktrees are clean and contain no user work; mutation branches and
+   worktrees also require integration. Detached audit worktrees need no merge.
+   Delete temporary source refs with `git update-ref -d <ref> <recorded-sha>`;
+   preserve them if the SHA no longer matches.
+   Keep open-PR resources and unrelated or dirty worktrees; report anything
+   retained rather than forcing cleanup.
 
 ## Completion report
 
