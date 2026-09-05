@@ -394,8 +394,9 @@ active at compat behavior `3e207de425621f660a249c074158d1d1564204f5`.
   the full-context/static-prefix actor extension.
 - Delta: instruction, inbox, replayed tool input/output, synthetic error media,
   judge fields, and actor state use explicit UTF-8/character caps and
-  non-throwing serialization. HTTP title inputs and retained v2 skill-catalog
-  snapshots remain bounded; stable `{current_session_id}` memory instructions
+  non-throwing serialization. HTTP title text, image, and part validation
+  retains its existing limits; retained v2 skill-catalog snapshots remain
+  bounded; stable `{current_session_id}` memory instructions
   are counted without being rewritten before filesystem-tool execution.
   Request preflight accounts for system/messages, treats current-turn context
   as unshrinkable, includes only active tool schemas, and uses the inherited
@@ -463,8 +464,8 @@ active at compat behavior `3e207de425621f660a249c074158d1d1564204f5`.
   existing 50 KiB model-replay cap. Completed Bash output with truncated=true
   and a non-empty archive outputPath now uses the existing head+tail slice
   within that same cap, retaining the tail and full-output pointer. Other
-  tools and unarchived Bash retain head slicing. HTTP title input validation
-  remains bounded; automatic/internal ensureTitle-to-genTitle input has no
+  tools and unarchived Bash retain head slicing. HTTP title text/image/part limits
+  remain in force; locale has no schema length cap; automatic/internal ensureTitle-to-genTitle input has no
   unified cap, a pre-existing limit clarified here rather than a new sync
   regression.
 - Review basis: inherited main
