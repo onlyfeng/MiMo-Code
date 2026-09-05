@@ -2402,3 +2402,71 @@ unchanged.
   seven tests and the complete suite pass; no code change was required.
 - Exact remote-tip CI remains pending publication of the compat documentation
   commit and is not claimed here.
+
+## 2026-09-05 upstream ec3f9894 propagation
+
+- Audit range `AR-20260905-EC3`: old upstream `f82c177709019c759ce2bb06bd1b04cba488811e`,
+  new upstream `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`.
+- Accepted main tip: `430fe9db3b8087976b326bdf4dc2bf1fd5eb5734`; main behavior: `eb2ace2e1cb2554707f5e062cc5649a5ef0a3eae`.
+- Prior compat tip: `8b3466b844d206c1a9659e3fd677e887417b3b86`.
+- Compat merge and stable behavior: `9121d0efc66fbce72c75342cdf3d2159c13f8c34`.
+- The merge inherits shared main and includes the required DC-CONTEXT-001
+  Bash replay adaptation. The following registry commit changes no behavior.
+
+### Capability inventory (7/7)
+
+The commit/path/symbol evidence for C01-C07 is the matching seven-row main
+audit in `fork-registry-history.md`. Every row below uses the complete source,
+main, and compat audit range above and records the final branch disposition.
+
+| ID | Upstream capability / commit | main_counterpart | compat_counterpart | Relationship | Drift | canonical_owner | Disposition | Status evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| C01 | Remove resetDatabase fixture / `af49d5da` | FC-008 fixture cleanup; active fork assertions | Inherited unchanged; prefix/subtask assertions stay active | complementary | tests | shared main | adopt reset removal; retain active prefix/subtask assertions | Stable main and compat affected matrices; final source-delta review |
+| C02 | Keep terminal subtask tool state / `99e51b2d` | FC-001 subtask settlement | Inherited guard and late-metadata regression; preserved DC-ACTOR context | complementary | behavior,tests | shared main | adopt terminal guard and state assignment; add late metadata regression | Stable main and compat affected matrices; final source-delta review |
+| C03 | Export LLMServerTokens through Node entry / `1d6a9fe2` | FD-004 absent token subsystem | Inherited exclusion; Node entry remains unchanged | conflicting | API/build | shared main | omit dangling export under FD-004; no token implementation exists | Stable main and compat affected matrices; final source-delta review |
+| C04 | Unify Bash output on token budget / `c2cf9b8f` | Shared Bash token-budget implementation | DC-CONTEXT-001 head+tail replay adaptation within 50 KiB | partial duplicate; conflicting compat replay | behavior,contract,tests,docs | shared main | adopt token budget; preserve permission; reconcile compat head+tail within existing cap | Stable main and compat affected matrices; final source-delta review |
+| C05 | Quarantine timeout auth override test / `c56f26c9` | FC-008 repaired auth fixture | Inherited active test; rejected upstream skip | conflicting | tests | shared main | reject skip: fork fixed fixture and exact baseline CI passes | Stable main and compat affected matrices; final source-delta review |
+| C06 | Cover mixed CJK case-insensitive session search / `e3e9c1b4` | Shared Session.list LIKE characterization | Inherited test-only coverage | no overlap | tests | shared main | adopt SQL LIKE characterization | Stable main and compat affected matrices; final source-delta review |
+| C07 | Strip leading slash mentions from title context / `ec3f9894` | Shared title helpers and locale/ephemeral path | Inherited mention cleanup; DC-MODEL/TUI behavior preserved | complementary | behavior,tests | shared main | adopt leading mention cleanup; preserve locale/ephemeral/filter paths | Stable main and compat affected matrices; final source-delta review |
+
+Inventory and result counts are both seven. The Bash replay adaptation is
+owned only by DC-CONTEXT-001; it does not promote the compat cap into main.
+All seven DC entries remain active, and the six FD / sixteen FC registries
+are inherited byte-for-byte from accepted main. No duplicate consolidation,
+cap broadening, owner promotion, or upstream publication was performed.
+
+### Validation and limits
+
+- Package typecheck and repository lint completed with zero errors. The
+  matrix below removes the three ambient selectors, preserves package preload
+  `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`, and uses `--timeout 120000`.
+- The real MessageV2 replay regression first failed for archived Bash tail
+  retention, then passed after the adapter. Read, missing/empty archive path,
+  and untruncated Bash controls retain the prior head-only behavior; UTF-8
+  byte caps and complete archive pointers are checked.
+- The final prompt delta exactly adopts upstream title/subtask changes while
+  preserving the pre-sync compat carrier. The CJK test matches shared main.
+  The SDK/OpenAPI, lockfile, manifests, workflows, TUI, network, and platform
+  fallback surfaces are unchanged by this propagation.
+- HTTP title body/part validation has existing size limits. Automatic and
+  internal title calls have no common input cap; this older limitation is
+  documented without changing that independent behavior.
+- Exact pushed-SHA CI, remote tips, and ancestry are separate completion
+  evidence, not implied by these local results.
+
+| Group | Files (under `packages/opencode`) | Pass / skip |
+| --- | --- | --- |
+| session | `test/session/prompt-effect.test.ts`, `test/session/prompt.test.ts`, `test/session/fork-prefix-invariant.test.ts`, `test/session/llm-request-prefix.test.ts`, `test/session/max-mode.test.ts`, `test/session/replace-agent-subagent.test.ts`, `test/session/checkpoint-fork-mode.test.ts`, `test/session/run-state-tuple-key.test.ts`, `test/session/run-state-dispose.test.ts` | 214 / 2 |
+| bash | `test/tool/bash.test.ts`, `test/tool/auto-worktree-bash-write.test.ts`, `test/tool/bash-isolated-git-guard.test.ts`, `test/tool/bash-conflict-ownership.test.ts`, `test/permission/auto-approve-delete.test.ts`, `test/permission/skip-all.test.ts`, `test/cli/yolo.test.ts`, `test/cli/tui/permission-bash-delete.test.tsx` | 116 / 0 |
+| exec | `test/tool/tool-script.test.ts` | 75 / 0 |
+| fixture-1 | `test/control-plane/sse.test.ts` | 2 / 0 |
+| fixture-2 | `test/server/project-init-git.test.ts` | 2 / 0 |
+| fixture-3 | `test/share/share-next.test.ts` | 8 / 0 |
+| fixture-4 | `test/workspace/workspace-restore.test.ts` | 2 / 0 |
+| fixture-5 | `test/server/session-list.test.ts` | 6 / 0 |
+| fixture-6 | `test/plugin/auth-override.test.ts` | 2 / 0 |
+| compat | `test/session/message-v2.test.ts`, `test/util/text-truncate.test.ts`, `test/session/overflow.test.ts`, `test/cli/tui/model-metadata.test.tsx` | 157 / 0 |
+
+Stable compat matrix: **584 pass, 2 existing skip, 0 fail**.
+Run each row separately from `packages/opencode` with the three selectors
+removed, using `bun test <row files> --timeout 120000`.
