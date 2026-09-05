@@ -82,8 +82,13 @@ them for the audit.
    remote-tip equality, live-workflow CI success for each exact final SHA, and
    mode-specific ancestry or exclusions. Full sync requires the selected
    upstream SHA to be an ancestor of fork `main`, then `main` of `dev/compat`.
-   If live upstream advanced, audit the new delta before claiming current
-   parity. Any later commit requires fresh final-SHA CI and remote proof,
+   During non-frozen full-sync propagation, if the refreshed upstream tip
+   advanced, select that new SHA, update the inventory, and repeat propagation through `main`
+   and `dev/compat`, affected validation, registry updates, publication, and
+   final-SHA CI/remote/ancestry proofs. Recheck live refs after that cycle.
+   Until it finishes, report alignment only through the last fully propagated
+   and verified upstream SHA; auditing a newer delta alone is not current parity.
+   Any later commit requires fresh final-SHA CI and remote proof,
    including documentation-only commits. A clean merge, local green run, or
    old CI is insufficient. For a current failure, inspect the failed log and
    reproduce narrowly; permit at most one same-SHA rerun when evidence supports
