@@ -2199,3 +2199,45 @@ GenerationLease and the broader retirement Tasks 1–10 remain pending.
 Final remote-tip equality, exact-SHA test/typecheck/lint CI and selected-source
 ancestry through main to compat are publication checks, distinct from these
 local results. This specified integration does not claim current-upstream parity.
+
+
+## 2026-09-08 compact integration CI follow-up
+
+This continues the same specified COMPACT-01 inventory (N=1), with selected
+upstream and all FD/FC ownership unchanged. Main source/test behavior advances
+to `1ad318dc86895a63763fe47bfa965ca8d5b3d45b`; production trees are identical to
+`69eb01bbd0e2c54da76c145613a31d23d2cedbf3`. Later audit commits only update docs.
+
+The first published tip `a7def0bff1acd7c88fd27b4342af336e0bdf83a7` passed lint
+and typecheck, but test run `34153723673` failed five cases in three files
+outside the earlier 165-file local inventory. The failed CI result is retained;
+no same-SHA rerun was used. The agent and system fixtures still expected old
+prompt text or top-level apply_patch/view_image. The main classifier fixtures
+had the same handmade/missing frozen schemas already corrected in compat.
+
+The four-file test-only correction:
+
+- Checks compact declarations, single-call exec guidance and direct actor/control
+  tools, while retaining ordinary non-Codex file-tool expectations.
+- Captures actual parent schemas for read, grep and skill_search. Matching read
+  schemas execute; changed schemas fail closed without file content; grep's
+  whitelist denial and skill permission denial stay independently observable.
+- Routes the optional live orchestrator's observation through the existing
+  read-only nested-tool projection. It sees retained validated terminal children,
+  including exec_command normalized to Bash; omitted records remain unavailable.
+  Only its default-off placeholder was run; all 13 real-provider cases remain skipped.
+
+Final effective local inventory: **2,178 pass, 0 fail, 26 skip and 6,091 assertions
+across 169 files**. This extends the prior 165-file effective result with complete
+system (19 pass / 86 assertions), agent (51 / 194), classifier (13 / 49), and
+live-default (1 pass / 13 skip / 1 assertion) files. The separately repeated
+five-case nested-projection suite is not counted twice. Per-file hashes and
+production invariance bind the inherited results to the final test tree.
+
+Package typecheck and repository lint pass (4,399 warnings, zero errors).
+The same eight default selectors are cleared before import, preserving package
+preload flags; the live-default check additionally clears its opt-in selectors.
+Node build/import evidence remains valid for unchanged production. No real
+provider benchmark is added. Shared registries retain all six FD and sixteen FC
+entries, now referencing the final source/test behavior. Final publication still
+requires successful CI for the new exact branch tips and fresh remote/ancestry proof.
