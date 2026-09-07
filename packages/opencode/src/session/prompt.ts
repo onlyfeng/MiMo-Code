@@ -5771,12 +5771,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError>>()
       const validate = Effect.gen(function* () {
         const candidates = yield* recoveryCandidates(input.sessionID)
-        if (candidates.some((item) => item.assistantMessageID === input.assistantMessageID)) return
-        yield* Effect.fail(
-          new NotFoundError({
-            message: "No resumable interrupted turn found for assistant message " + input.assistantMessageID,
-          }),
-        )
+        if (!candidates.some((item) => item.assistantMessageID === input.assistantMessageID))
+          return yield* Effect.fail(
+            new NotFoundError({
+              message: "No resumable interrupted turn found for assistant message " + input.assistantMessageID,
+            }),
+          )
+        // Settle only after runner admission and candidate validation, before
+        // reporting admission or entering runLoop. Its finalizer stays idempotent.
+        return yield* abandonRecoveredAssistant(input)
       })
       const completion = yield* state.startRunning(
         input.sessionID,
