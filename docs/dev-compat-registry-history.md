@@ -2661,3 +2661,75 @@ Validation at the recorded behavior:
   the five registry/history paths excluded: **92 files changed, 10497 insertions(+), 2115 deletions(-)**. Final remote-tip,
   exact-SHA CI, and selected-upstream/main/compat ancestry are verified at
   publication, separately from this local source/test evidence.
+
+
+## 2026-09-07 selected harness, schema experiment and actor recovery
+
+- Mode: specified ALIAS-01 / SCHEMA-01 / RECOVERY-01 propagation. Selected
+  upstream stays `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; no upstream fetch or
+  unrelated upstream integration is performed by this operation.
+- Prior compat tip: `a6cbcb3b61a98eb9abbe5e1aa2a06880f1c5f286`.
+- Accepted final main tip: `c1dfc423fe021072d37b8585b5bcc33c4742d514`.
+- Inherited main source/test behavior: `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
+- Compat source/test behavior merge: `e9e0a6b57a0a865927afaba5316782cdc0af7ee4`.
+- Final shared-audit inheritance merge: `c7e154ded8c2ac4c4dd950b1040d065a939c5f65`. Semantic
+  reconciliation kept the two pending-external checks, continuationMessageID
+  tracking/cleanup, and successful-write receipts together. The resulting
+  source/test/generated hashes equal the validated compat behavior snapshot;
+  only documentation differs from that snapshot. Later registry commits do
+  not advance either source/test behavior reference.
+
+Capability inventory N=3, all canonically owned by shared main:
+
+| ID | Main contract | Compat result | Decisive evidence |
+| --- | --- | --- | --- |
+| ALIAS-01 | Explicit trusted harness_model, session/process/inference precedence and identity exclusions | Inherit the shared resolver and trust provenance; carry the identity through compat frozen prefixes, compaction and per-agent routing | harness-alias and request-prefix tests; same-source cold writer identity assertion; generated Config/Provider model fields |
+| SCHEMA-01 | Standalone read/glob/grep declaration experiment with unchanged permissions, validators and executors | Inherit the experiment and its regressions; keep production tool exposure unchanged | 19 experiment tests within the final compat matrix; the versioned main experiment report remains separately attributed, not a compat live-quality claim |
+| RECOVERY-01 | Registered persistent/full actor resume with frozen receiver/model context, persisted task source and atomic ownership | Preserve required turnContext, current-turn/active-tool preflight, chronology and external-request guards while inheriting owned continuation receipts | Real spawn/interruption/resume/idle-cancel and source/race regressions; eight compat integration cases (90 assertions), including compaction, invalid output, foreign hook and lost CAS |
+
+All seven DC entries were re-reviewed and remain active. DC-MODEL-001,
+DC-CONTEXT-001 and DC-ACTOR-001 have real agent/prompt/prefix/compaction/
+checkpoint/actor/generated overlaps. Per-agent MaxMode and final-step bounds,
+content caps, effective-window preflight, frozen MCP/tool membership, coverage,
+chronology and static-prefix failure behavior remain. The cold fork:false writer
+now carries modelIdentity from its own writerPrefix; it does not borrow a live
+or parent identity. Public session recovery/resume stays main-only, while the
+internal actor tool admits the explicitly supported retained-context lifecycle.
+
+DC-NET-001, DC-NET-002, DC-PLATFORM-001 and DC-TUI-001 have no changed owned
+implementation; their 16 explicit owned source/test paths are byte-identical to
+the prior compat tip. MCP production also equals main. Of the 92 prior
+non-registry main/compat delta paths, 16 overlap the selected incoming work.
+The other 76 paths have 75 unchanged blobs and one deliberately strengthened
+checkpoint-fork-mode test asserting the cold writer identity. These blob and
+marker checks establish preservation scope, not behavioral correctness alone.
+
+Final local validation:
+
+- **771 pass, 4 skip, 0 fail, 2,858 assertions**, 65 files under the package's
+  30-second per-test budget. The declared live/legacy skips remain. The matrix
+  covers actor/inbox/Runner, checkpoint/compaction/prefix/overflow, request
+  admission, MaxMode, actor tools, alias inference, experiments and OpenAPI.
+- Source/test/generated snapshots did not change during validation or the later
+  shared-audit merge. Shared FD/FC registries and history inherit final main
+  byte-for-byte. All seven current DC Base/Overrides/review references name the
+  source/test commits recorded above.
+- Opencode and JavaScript SDK package typecheck, repository lint (zero errors,
+  warnings retained), git diff checks, Node bundle and plain Node import/alias
+  schema smoke pass. Frozen bun ci preserves bun.lock.
+- Two owning SDK/OpenAPI generation rounds are idempotent across 45 tracked SDK
+  files. The 141-operation compat contract retains MaxMode, checkpoint coverage,
+  compaction projection and callable-v2 checks while adding the two shared
+  harness_model fields. Internal recovery receipts add no public selector.
+- The same seven ambient selectors are cleared before imports; package preload
+  retains orchestrator=true as the harness baseline. The inherited separate
+  non-test default-off proof and unchanged main alias trust regressions remain
+  separately scoped; this matrix does not claim a new live provider benchmark.
+- Independent source review confirms successful conditional-write receipts
+  grant only owned continuation authority. A failed compaction CAS can finish
+  the owned summary without writing another user or issuing another request;
+  neither failure labels nor matching external hook metadata grant authority.
+
+Final fork remote equality, successful active-workflow CI for both exact final
+branch tips, selected-upstream/main/compat ancestry, and excluded upstream
+commits are checked at publication. Local validation alone is not that proof.
