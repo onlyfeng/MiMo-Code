@@ -17,8 +17,8 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-07
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior: `62a43906cfaa7184f5a3f795d512f4b670d9ec65`
-- Prior fork `main` tip: `95b592e08b4471c1018757d01620055368c51ef5`
+- Main behavior: `9847165e0749f33c7ac01b72f933ac9cf47e3e55`
+- Prior fork `main` tip: `774a795682c648b7f3637b9159c063ef6a2a4018`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -57,7 +57,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `62a43906cfaa7184f5a3f795d512f4b670d9ec65`.
+  main behavior `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -101,7 +101,7 @@ registry or history commit does not advance either behavior reference.
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `62a43906cfaa7184f5a3f795d512f4b670d9ec65`.
+  main behavior `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
@@ -161,7 +161,7 @@ registry or history commit does not advance either behavior reference.
   capability subsystem. Omitted the dangling export; no listener, token
   implementation, route, OpenAPI, or SDK surface is restored.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `62a43906cfaa7184f5a3f795d512f4b670d9ec65`.
+  main behavior `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -213,7 +213,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/websearch.test.ts` regression binds the Xiaomi
   sidecar request to the resolved API model ID.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `62a43906cfaa7184f5a3f795d512f4b670d9ec65`.
+  main behavior `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
   complete resolved identity while keeping transport and harness/toolset as
   separate decisions. MiMo v2.5 precedence remains authoritative even when an
@@ -287,7 +287,7 @@ registry or history commit does not advance either behavior reference.
   output path. This changes direct Bash output only; nested shell exclusions,
   permission attribution, code-size gates, and timeout units remain intact.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `62a43906cfaa7184f5a3f795d512f4b670d9ec65`.
+  main behavior `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
 - 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
   resolved identity. The compact single-exec authority model remains rejected;
   direct permission-visible tools and nested actor/shell/control exclusions are
@@ -340,7 +340,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `62a43906cfaa7184f5a3f795d512f4b670d9ec65`.
+  main behavior `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
 - 2026-08-28 review: adopted removal of the unimplemented `actor_id` resume
   argument from actor `spawn` and `run`. Follow-up work uses `send` only while
   the actor remains reusable. A completed ephemeral `context: "full"` actor has
