@@ -18,6 +18,13 @@
 - 不增加公开恢复 agentID/task_id selector，不增加 resumeBackground。
 - 所有实验数据区分真实 usage、估算、回放以及真实模型任务结果。
 
+默认路径的包级验证在导入 flag 模块前移除以下外部选择器：
+`MIMOCODE_EXPERIMENTAL`、`MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`、
+`MIMOCODE_CODEX_MODE`、`MIMOCODE_DISABLE_CHECKPOINT`、
+`MIMOCODE_COMPACTION_MAX_CONTEXT`、`MIMOCODE_ENABLE_EXEC_TOOL`、
+`MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY`。保留包 preload 的
+`MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`；独立非测试默认关闭验证还移除该值。
+
 ### Task 1: 显式别名与缓存传播
 
 **Covers:** S1, S2, S5
@@ -67,6 +74,7 @@ SessionPrompt recovery/resume 输入；冻结 context 绑定接收方 Instance/R
 - [x] RED：持久 full-context actor 中断后可恢复且 task/system/tools/permissions 不漂移。
 - [x] RED：未知 actor、ephemeral 释放、cancel、dispose、换代、过时候选及 busy 均拒绝且不写消息。
 - [x] 实现严格准入、候选父用户固定和冻结上下文同代验证，不重新捕获上下文。
+- [x] 验证受控压缩/内部重试的确切成功提交回执；外部同 hook/task/model 消息和丢失 CAS 不获得续行资格。
 - [x] 验证 resume/send/cancel/dispose 竞态，inbox 保留与后继唤醒，旧代完成和通知不能污染新代。
 - [x] 独立需求与代码审查；保持 HTTP 主 agent 恢复、现有 actor 生命周期和 task 来源回归通过。
 

@@ -17,7 +17,7 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-07
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior: `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`
+- Main behavior: `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`
 - Prior fork `main` tip: `4d876d54a304689db1f86e5f6f8f0da577d0f5d4`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
@@ -57,7 +57,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
+  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -101,7 +101,7 @@ registry or history commit does not advance either behavior reference.
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
+  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
@@ -174,7 +174,7 @@ registry or history commit does not advance either behavior reference.
   records its historical absence; the Node entry now restores the functional
   LLMServerTokens export for explicit embedding alongside Server.listen.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
+  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -241,7 +241,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/websearch.test.ts` regression binds the Xiaomi
   sidecar request to the resolved API model ID.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
+  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
   complete resolved identity while keeping transport and harness/toolset as
   separate decisions. MiMo v2.5 precedence remains authoritative even when an
@@ -326,7 +326,7 @@ registry or history commit does not advance either behavior reference.
   output path. This changes direct Bash output only; nested shell exclusions,
   permission attribution, code-size gates, and timeout units remain intact.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
+  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
 - 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
   resolved identity. The compact single-exec authority model remains rejected;
   direct permission-visible tools and nested actor/shell/control exclusions are
@@ -370,12 +370,17 @@ registry or history commit does not advance either behavior reference.
   not rebuild released context or broaden the public main-only recovery/resume
   API. Only an explicit full-context persistent spawn selects retained context;
   the existing ephemeral release policy remains unchanged.
+  Successful internal retry/compaction writes can continue the admitted task
+  without recapturing its frozen context. Their exact conditional-write receipt
+  advances only this runner's current parent; another hook user or a failed
+  conditional write cannot grant recovery authority.
 - Upstream relationship: rejects the log-and-spawn fallback anchored at
   `8e5cc8a84b91af38eefde2d2bf054216d880d82f`; fork behavior is anchored at
   `3a4a244c8af1cd455518e0226c4df12d50b9b5e9` and refined through
   `aed2e8c73478f3a22d8cbaa49a9fe107766c14d0`.
 - Watch surfaces: `packages/opencode/src/actor/spawn.ts`,
   `packages/opencode/src/session/checkpoint.ts`,
+  `packages/opencode/src/session/compaction.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
   `packages/opencode/src/session/prefix-capture-ref.ts`,
   `packages/opencode/src/session/prompt.ts`,
@@ -385,8 +390,10 @@ registry or history commit does not advance either behavior reference.
   child-session/fork-mode/main-slice/prefix-capture/watermark tests, and
   `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
+  The actor spawn suite also exercises owned compaction and invalid-output
+  continuations, a same-source foreign hook user, and a lost compaction write.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
+  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
 - 2026-08-28 review: adopted removal of the unimplemented `actor_id` resume
   argument from actor `spawn` and `run`. Follow-up work uses `send` only while
   the actor remains reusable. A completed ephemeral `context: "full"` actor has

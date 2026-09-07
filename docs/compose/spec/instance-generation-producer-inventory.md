@@ -36,6 +36,11 @@ fingerprints are `manual`; they describe the current `InstanceContext`,
 GenerationLease/producer APIs remain pending. This scoped refresh does not
 reclassify the entire historical inventory or advance its original baseline.
 
+Recovery continuation IDs are synchronous receipts of this runner's successful
+conditional user-message writes, including compaction boundary/replay/continue.
+They remain inside its existing Runner ownership and are not independently
+scheduled producers. Hook labels and failed writes never grant those receipts.
+
 ## Manual refresh procedure
 
 Run the searches from `packages/opencode`, inspect every result on a changed

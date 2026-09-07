@@ -61,7 +61,9 @@ Codex 工具成员可能不包含 read/glob/grep。受控数据工具实验显�
 重新捕获，不支持跨进程恢复，也不恢复已明确取消的 actor。
 
 恢复选取该 actor 最后的有效中断候选，沿用其持久化父用户及 task_id，不接受调用方
-提供 task 来源、不写替代用户。严格原子准入而非 join：并发恢复、send、cancel、dispose
+提供 task 来源、不创建替代的外部用户请求。内部重试和自动压缩可在本恢复 runner 成功
+CAS 写入后，用实际新消息 ID 回执推进当前父用户；回执必须保持原 session、actor、agent、
+task 和模型来源。仅有 `source="hook"` 标签不构成授权，CAS 失败不推进。严格原子准入而非 join：并发恢复、send、cancel、dispose
 不能重复执行或在拒绝时改写消息。旧 assistant 仅在有效准入及候选验证后结算。
 待收 inbox 消息不得抢走恢复父用户，退出后仍须由已有唤醒路径处理，不能丢失。
 
