@@ -17,8 +17,8 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-07
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior: `3c361041eedb84e67e2c86e2fca1cd7c880e7d3f`
-- Prior fork `main` tip: `f45bbccddb5d6d532f6ad8ff2acc2c93a625dddb`
+- Main behavior: `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`
+- Prior fork `main` tip: `4d876d54a304689db1f86e5f6f8f0da577d0f5d4`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -57,7 +57,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `3c361041eedb84e67e2c86e2fca1cd7c880e7d3f`.
+  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -101,7 +101,7 @@ registry or history commit does not advance either behavior reference.
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `3c361041eedb84e67e2c86e2fca1cd7c880e7d3f`.
+  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
@@ -174,7 +174,7 @@ registry or history commit does not advance either behavior reference.
   records its historical absence; the Node entry now restores the functional
   LLMServerTokens export for explicit embedding alongside Server.listen.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `3c361041eedb84e67e2c86e2fca1cd7c880e7d3f`.
+  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -195,6 +195,15 @@ registry or history commit does not advance either behavior reference.
   opt-in and may enable MCP Tool Search regardless of the resolved harness.
   Process environment selectors are startup configuration; mutating them during
   an active session is outside this contract.
+  An explicitly configured `provider.<id>.models.<id>.harness_model` may name
+  a canonical lower-case GPT-5-or-newer target for an opaque deployment alias.
+  The parsed configuration snapshot is the sole source of this trust; catalog
+  metadata, plugin model replacement, and mutable plugin config hooks cannot
+  grant or replace it. Automatic inference first excludes MiMo, GPT-4, and OSS
+  in any resolved identity, including tagged and namespaced identities.
+  The declaration changes neither API model identity nor transport. Capture,
+  run-loop, and compaction cache profiles include the optional declaration;
+  an absent declaration preserves the original profile key.
   Exact MiMo v2.5 identities win over generic aliases. MiMo Responses transport
   is selected only by a resolved PTC identity; transport never selects the Codex
   harness/toolset. Unrelated GPT-4 families do not gain Codex tools through
@@ -207,17 +216,23 @@ registry or history commit does not advance either behavior reference.
   `b15b0971846861a4b25576d340ce1a4207f87712`; upstream's separate fallbacks are
   not authoritative for fork request behavior.
 - Watch surfaces: `packages/opencode/src/flag/flag.ts`,
+  `packages/opencode/src/config/config.ts`,
+  `packages/opencode/src/config/provider.ts`,
   `packages/opencode/src/tool/gpt.ts`,
   `packages/opencode/src/provider/provider.ts`,
   `packages/opencode/src/session/system.ts`,
   `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
+  `packages/opencode/src/session/compaction.ts`,
+  `packages/opencode/src/session/prefix-snapshot.ts`,
   `packages/opencode/src/tool/registry.ts`,
+  `packages/opencode/src/tool/tool-script-ref.ts`,
   `packages/opencode/src/tool/tool-script.ts`,
   `packages/opencode/src/tool/websearch/index.ts`,
   `packages/opencode/src/agent/agent.ts`, and
   `packages/opencode/src/server/routes/instance/experimental.ts`.
 - Tests/evidence: `packages/opencode/test/flag/codex-mode-flag.test.ts`,
+  `packages/opencode/test/tool/harness-alias.test.ts`,
   system-prompt, GPT helper, request-prefix, tool-registry, agent-generation,
   `packages/opencode/test/provider/provider.test.ts`, and
   `packages/opencode/test/tool/tool-script.test.ts` regressions cover explicit
@@ -226,7 +241,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/websearch.test.ts` regression binds the Xiaomi
   sidecar request to the resolved API model ID.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `3c361041eedb84e67e2c86e2fca1cd7c880e7d3f`.
+  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
   complete resolved identity while keeping transport and harness/toolset as
   separate decisions. MiMo v2.5 precedence remains authoritative even when an
@@ -275,6 +290,13 @@ registry or history commit does not advance either behavior reference.
   before and after normalization. Replayable nested parts are capped at 256 KiB,
   and the expanded TUI retains bounded ANSI-free outer output alongside live
   children.
+  Data-tool declaration compaction is confined to the standalone
+  `script/experiments/tool-schema*.ts` evaluation. It edits only approved
+  descriptions for `read`, `glob`, and `grep`; validators, execution, permissions,
+  and non-candidate declarations stay unchanged. Its explicit default harness
+  does not establish savings for the default Codex toolset or change production
+  requests. Measurement methods, synthetic replay, and live task results remain
+  separately attributed in [the experiment record](experiments/tool-schema-2026-09-07.md).
 - Upstream relationship: selectively adopts safe custom-exec input
   normalization from upstream while rejecting its compact single-exec authority
   model, nested shell bridge, and nested actor send-only exposure. The
@@ -286,6 +308,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/src/tool/tool-script-ref.ts`,
   `packages/opencode/src/tool/tool-script.ts`,
   `packages/opencode/src/tool/tool-script.txt`,
+  `packages/opencode/script/experiments/tool-schema*.ts`,
   `packages/opencode/src/cli/cmd/tui/routes/session/index.tsx`, and
   `packages/opencode/src/cli/cmd/tui/routes/session/exec-expanded.tsx`.
 - Tests/evidence: `packages/opencode/test/tool/tool-script.test.ts` covers direct
@@ -295,12 +318,15 @@ registry or history commit does not advance either behavior reference.
   actor, and TUI visibility tests cover the outer authority surface;
   `packages/opencode/test/cli/tui/exec-expanded.test.tsx` covers bounded
   ANSI-free outer output with and without nested parts.
+  `packages/opencode/test/experiments/tool-schema*.test.ts` checks the isolated
+  evaluation's declaration constraints, real SDK protocol, oracle, and evidence
+  attribution; replay success is not evidence of model task completion.
 - 2026-09-05 Bash-output review: adopted the shared default of 30,000
   approximate output tokens and the unified head/tail preview with an archived
   output path. This changes direct Bash output only; nested shell exclusions,
   permission attribution, code-size gates, and timeout units remain intact.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `3c361041eedb84e67e2c86e2fca1cd7c880e7d3f`.
+  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
 - 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
   resolved identity. The compact single-exec authority model remains rejected;
   direct permission-visible tools and nested actor/shell/control exclusions are
@@ -337,6 +363,13 @@ registry or history commit does not advance either behavior reference.
   identity remain frozen; a qualifying child cannot fall back to live context.
   Retry, detached continuation, recovery, and resume reuse that admitted frozen
   membership and cannot recapture a later live context.
+  Explicit `actor resume <actor-id>` requires a controllable registered
+  persistent actor retaining its full context in the original receiver Instance
+  and undisposed run scope. A changed API/family/harness identity, released
+  context, explicit cancellation, or process restart rejects recovery. It does
+  not rebuild released context or broaden the public main-only recovery/resume
+  API. Only an explicit full-context persistent spawn selects retained context;
+  the existing ephemeral release policy remains unchanged.
 - Upstream relationship: rejects the log-and-spawn fallback anchored at
   `8e5cc8a84b91af38eefde2d2bf054216d880d82f`; fork behavior is anchored at
   `3a4a244c8af1cd455518e0226c4df12d50b9b5e9` and refined through
@@ -353,7 +386,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `3c361041eedb84e67e2c86e2fca1cd7c880e7d3f`.
+  main behavior `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
 - 2026-08-28 review: adopted removal of the unimplemented `actor_id` resume
   argument from actor `spawn` and `run`. Follow-up work uses `send` only while
   the actor remains reusable. A completed ephemeral `context: "full"` actor has

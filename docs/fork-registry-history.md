@@ -1981,3 +1981,73 @@ Changed-path calculation against selected upstream, excluding the five
 registry/history paths as above: **310 files changed, 33398 insertions(+), 9911 deletions(-)**. The incremental main source change
 contains 31 paths, 4,155 insertions and 162 deletions. Final remote SHA/CI and
 main-to-compat ancestry are publication checks, distinct from these local tests.
+
+
+## 2026-09-07 selected harness, schema experiment and actor recovery
+
+- Scope: specified change; selected upstream source remains
+  `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`. No upstream branch was fetched or advanced,
+  and no unrelated upstream commit was integrated.
+- Prior main tip: `4d876d54a304689db1f86e5f6f8f0da577d0f5d4`.
+- Main source/test behavior: `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`. Registry-only commits do not advance this basis.
+- Prior compat tip: `a6cbcb3b61a98eb9abbe5e1aa2a06880f1c5f286`; compat propagation and its
+  seven-DC verification are recorded in its separate append-only ledger.
+- Capability inventory N=3; the selected source/test delta is the prior main tip
+  through the behavior SHA above. All three capabilities are canonically owned by main.
+
+| ID | Selected behavior and disposition | Preserved contract | Decisive source and evidence |
+| --- | --- | --- | --- |
+| ALIAS-01 | FD-005: adapt GPT API alias inference into explicit `harness_model` declarations | Session then process then inference; MiMo/GPT-4/OSS exclusions; one prompt/tool/MCP/exec/retry decision; configuration snapshot provenance and three prefix-key producers | `config/config.ts`, `config/provider.ts`, `provider/provider.ts`, `tool/gpt.ts`, prefix/registry call sites; `test/tool/harness-alias.test.ts` including plugin config mutation across two instances |
+| SCHEMA-01 | FD-006: retain an independent read/glob/grep declaration experiment; no production adoption | Validators, permission/control tools, membership and executors unchanged; synthetic fixture confinement; measured usage separated from replay and tokenizer estimates | `script/experiments/tool-schema*.ts`, 19 experiment regressions, [versioned results](experiments/tool-schema-2026-09-07.md) |
+| RECOVERY-01 | FC-001 / FD-009: adapt resume for a registered persistent actor retaining its original receiver and frozen context | Explicit spawn persistent+full only; default ephemeral/run unchanged; persisted user/task, strict admission, owned cancellation, deferred inbox, model/harness identity; public main-only selectors unchanged | `actor/spawn.ts`, `session/prompt.ts`, `tool/actor.ts`; real create/interruption/resume/idle-cancel test and receiver-retirement, admission and cancellation regressions |
+
+All six FD and sixteen FC entries were reviewed, including clean overlaps.
+FD-002 and FC-002/005/013 preserve instruction identity, frozen prefix, skill
+permission and MaxMode behavior while carrying the unified harness identity.
+FD-004 has provider/schema adjacency only: its explicit discovery/proxy/audio
+admission is unchanged. FC-007 retains fixed cwd and tool permission boundaries;
+FC-009/015 retain retry provenance and compaction projection/budgets. FC-003/004,
+FC-006/008, FC-010/011/012/014/016 and FD-001 have no changed owned implementation.
+The experiment follows the existing package isolation contract and never enters
+production imports. No owner is retired or renumbered.
+
+The constrained actor changes add a source-bound frozen-context receipt and
+actor-owned recovery supervisor. The migration [producer inventory](compose/spec/instance-generation-producer-inventory.md)
+adds three manual rows and refreshes two changed notification rows; it distinguishes
+detached graceful cancellation, Runner cancellation and generation settlement.
+The original generation-retirement plan remains pending; these current
+Instance/RunDisposal receipts do not claim its planned GenerationLease APIs exist.
+
+### Local verification at the source/test behavior
+
+- Final affected actor/session/checkpoint/inbox/tool/HTTP matrix: **577 pass,
+  4 skip, 0 fail, 2,048 assertions**, 54 files, package 30-second test budget.
+  The skips are declared live/legacy skips, not failed or zero-case filters.
+- Alias call-chain matrix: **454 pass, 0 fail**, 14 files; after the global-config
+  isolation correction, config/provider/alias matrix: **185 pass, 0 fail**, three
+  files. These overlapping suites are reported separately, not summed.
+- Experiment suite: **19 pass, 0 fail, 113 assertions**. Final declarations yield
+  24/24 offline replays and 64 local SDK HTTP requests, with zero validator,
+  denied or execution errors. `o200k_base` tools count is 18,342 to 17,852
+  (-490, 2.67%); this is not provider billing usage or model quality evidence.
+  The two final live pilot requests timed out; valid tool evaluations are zero,
+  and schema error/completion rates remain null. The earlier declaration version
+  and all six attempted live requests are explicitly distinguished in the result.
+- Package `bun typecheck`, repository `bun lint` (zero errors, warnings retained),
+  `git diff --check`, frozen `bun ci`, Node bundle and plain Node import/schema
+  smoke pass. The lockfile is unchanged. Node smoke proves import/schema use,
+  not a live-provider actor recovery run.
+- SDK/OpenAPI generation is idempotent. The 140-operation public surface is
+  unchanged; only Config model and Provider model `harness_model` fields are added.
+- Seven ambient experimental/context selectors are cleared as recorded in the
+  implementation plan; package preload retains orchestrator=true. A separate
+  non-test child removes it too and proves an undeclared opaque API alias stays
+  on default harness while an explicit trusted declaration selects Codex.
+- Independent reviews reproduced and closed configuration-hook trust pollution,
+  receiver/cancellation continuation races, actor-tool caller/creation admission,
+  and idle persistent-context release. No real user configuration was changed;
+  the live experiment's isolated credential copy and directory were removed.
+
+Exact final remote tips, their active-workflow CI and selected-source/main/compat
+ancestry are publication checks performed after the registry companion commits;
+none is implied by these local test results.
