@@ -14,11 +14,11 @@ registry/history commit does not advance either behavior reference below.
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-07
 - Reviewed upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
-- Accepted `main` tip: `774a795682c648b7f3637b9159c063ef6a2a4018`
-- Inherited main behavior: `62a43906cfaa7184f5a3f795d512f4b670d9ec65`
-- Compat behavior: `d5396a50856f264eda899c3094d9dd232d728307`
-- Prior compat tip: `26e225997deee7573baeae1715b092d9491f3fa7`
-- Main-audit inheritance merge: `51d1ccbf68856b09ea720ffd5ade5e377421acb7`
+- Accepted `main` tip: `f45bbccddb5d6d532f6ad8ff2acc2c93a625dddb`
+- Inherited main behavior: `9847165e0749f33c7ac01b72f933ac9cf47e3e55`
+- Compat behavior: `9f3e37daa94e2b28d85c3a758e0241307f3eceff`
+- Prior compat tip: `bf85673a521537b5cb44002401eb55ad856e4009`
+- Main-audit inheritance merge: `bfe7c3a418c8ec878c7f79f65f7466cfe0226585`
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -133,6 +133,15 @@ The single test conflict retained the new recovery cases and the existing
 `d5396a50856f264eda899c3094d9dd232d728307`; the later shared-audit inheritance
 merge changes documentation only.
 
+The subsequent 2026-09-07 specified audio adoption inherits AUDIO-01 without
+conflicts or a compat-only adaptation. The two explicit, authenticated audio
+endpoints and every selected provider/server/test source are byte-identical to
+accepted main. DC-MODEL-001 and DC-CONTEXT-001 have generated-contract adjacency;
+regeneration preserves their existing schemas. DC-TUI-001 retains its independent
+TUI metadata behavior. The network/platform owners and DC-ACTOR-001 have no
+changed owned implementation. All seven overrides remain active at the new
+compat behavior recorded above; the later main-audit merge is documentation-only.
+
 ## Sync index
 
 | ID | Watch surfaces | Relationship to inherited `main` | Required decision |
@@ -150,13 +159,13 @@ merge changes documentation only.
 - Status: active
 - Canonical owner: `dev/compat` WebFetch destination policy
 - Base: inherited main behavior
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65` implements FC-010's inherited
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55` implements FC-010's inherited
   destination-classification, per-hop authorization, and resource-bound
   contract by applying `assertSafeUrl()` before the initial and redirected
   target's permission decision and request. DC-NET-001 overrides only whether
   compat WebFetch invokes that inherited classifier at its call seam.
 - Overrides: compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307` removes only the
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff` removes only the
   `assertSafeUrl` import and its two call sites from WebFetch. The inherited
   classifier implementation and tests, including full IPv6 link-local
   `fe80::/10` coverage, remain byte-identical to `main`; compat WebFetch does
@@ -178,8 +187,8 @@ merge changes documentation only.
   approved private-target call seam and inherited per-hop authorization,
   HTTP(S), redirect, timeout, and response-size bounds remain unchanged.
 - Review basis: inherited main
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65`; compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307`.
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55`; compat behavior
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff`.
 - Evidence: the main-to-compat source diff is exactly the import and two
   classification-call deletions. The inherited classifier tests cover the
   complete IPv6 link-local `fe80::/10` range and DNS-resolved link-local
@@ -215,11 +224,11 @@ merge changes documentation only.
 - Status: active
 - Canonical owner: `dev/compat` remote-MCP compatibility guarantee
 - Base: inherited main behavior
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65` and FC-004 validate that remote
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55` and FC-004 validate that remote
   MCP URLs parse as HTTP(S), but deliberately make no fork-wide private-network
   promise.
 - Overrides: compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307` adds a compat-owned guarantee and
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff` adds a compat-owned guarantee and
   characterization test. There is no MCP production-source fork.
 - Delta: an RFC1918 endpoint such as `http://192.168.1.1/mcp` reaches mocked
   client creation and is not rejected merely because its address is private.
@@ -236,8 +245,8 @@ merge changes documentation only.
   remains byte-identical to accepted main; the existing RFC1918 test keeps its
   mocked client-creation scope and does not establish OAuth interoperability.
 - Review basis: inherited main
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65`; compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307`.
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55`; compat behavior
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff`.
 - Evidence: `packages/opencode/src/mcp/index.ts` is unchanged from accepted
   `main`, while the compat behavior adds only the mocked RFC1918 lifecycle
   guarantee on this surface.
@@ -271,11 +280,11 @@ merge changes documentation only.
 - Status: active
 - Canonical owner: `dev/compat` platform and restricted-network adaptation
 - Base: inherited main behavior
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65` retains the shared
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55` retains the shared
   `ripgrep`/archive behavior without this environment-specific fallback set and
   resolves relative file-tool paths against immutable `Instance.directory`.
 - Overrides: compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307` carries the established no-rg
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff` carries the established no-rg
   listing boundary and Windows archive extraction adaptation instead of
   promoting them to shared `main`.
 - Delta: simple file listing remains available when `ripgrep` cannot be
@@ -294,8 +303,8 @@ merge changes documentation only.
   Restricted-network and Windows fallbacks, their failure boundaries, and the
   inherited fixed-instance-cwd contract remain unchanged.
 - Review basis: inherited main
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65`; compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307`.
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55`; compat behavior
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff`.
 - Evidence: focused regressions distinguish simple fallback listings from
   operations that require real `ripgrep` and cover real-cwd marker scanning,
   ignore semantics, errors, abort, deep trees, and the Windows ZIP guard at the
@@ -327,14 +336,14 @@ merge changes documentation only.
 - Status: active
 - Canonical owner: `dev/compat` agent configuration and MaxMode routing
 - Base: inherited main behavior
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65` provides shared MaxMode
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55` provides shared MaxMode
   orchestration, bounded candidate/judge retry, main-only session-global retry
   status/event publication, and FC-013's tool-free final-step boundary without
   a compat-style per-agent opt-in contract. It also owns reliable multimodal
   title generation through the hidden `title` agent's `modelRef: "lite"`,
   structured output, and ephemeral retry path.
 - Overrides: compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307` adds `agent.maxMode` and generated
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff` adds `agent.maxMode` and generated
   SDK/OpenAPI exposure, then routes eligible non-final, non-`json_schema` steps
   through MaxMode when the experimental configuration exists.
 - Delta: any configured agent may opt in with `maxMode: true`; the dedicated
@@ -363,8 +372,8 @@ merge changes documentation only.
   retry-status isolation remain unchanged. App locale-fixture inheritance
   creates no alternate title or MaxMode path.
 - Review basis: inherited main
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65`; compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307`.
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55`; compat behavior
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff`.
 - Evidence: the agent config schema, resolved agent information, generated
   public schemas, routing predicate, structured-output exclusion, retry
   behavior, main-only session status/event gate, and final-step cases are all
@@ -410,13 +419,13 @@ merge changes documentation only.
 - Status: active
 - Canonical owner: `dev/compat` model-request safety boundary
 - Base: inherited main behavior
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65` retains FD-002 instruction
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55` retains FD-002 instruction
   delivery, shared retry/title construction, versioned skill snapshots, stable
   per-session memory-path templates, FC-007's fixed `Instance.directory`, and
   FC-015's effective compaction window without this complete compat cap,
   serialization, and preflight set.
 - Overrides: compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307` bounds model-visible content and
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff` bounds model-visible content and
   estimates the effective request before dispatch. DC-ACTOR-001 separately owns
   the full-context/static-prefix actor extension.
 - Delta: instruction, inbox, replayed tool input/output, synthetic error media,
@@ -501,8 +510,8 @@ merge changes documentation only.
   floors, effective windows, checkpoint chronology, external-admission guards,
   and the published compat contract remain unchanged.
 - Review basis: inherited main
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65`; compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307`.
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55`; compat behavior
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff`.
 - Evidence: focused tests at the compat behavior tree cover oversized
   instructions, structured provider/tool replay, unserializable inputs,
   synthetic media, UTF-8/surrogate limits, active-tool filtering, recoverable
@@ -573,12 +582,12 @@ merge changes documentation only.
 - Status: active
 - Canonical owner: `dev/compat` actor request/context integration
 - Base: inherited main behavior
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65` provides FD-009's fail-closed
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55` provides FD-009's fail-closed
   frozen-context admission, FC-001's lifecycle linearization, FC-007's fixed
   instance cwd, default-fork checkpoint writers, and FD-002's fail-closed
   main/registered-peer `replace-agent` identity scope.
 - Overrides: compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307` extends those shared invariants
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff` extends those shared invariants
   with explicit full-context actor propagation, bounded actor-visible state,
   and static-prefix overflow handling; it does not replace their ownership.
 - Delta: an actor requesting full context inherits the parent's frozen request
@@ -625,8 +634,8 @@ merge changes documentation only.
   membership/system/tools/permissions/cwd, known-actor replacement, and
   static-prefix failure behavior remain unchanged.
 - Review basis: inherited main
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65`; compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307`.
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55`; compat behavior
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff`.
 - Evidence: the full-context actor suite covers inherited system/tool/permission
   membership, frozen parent turn context/system/cwd, actor-scoped replacement,
   default and explicit checkpoint modes, and bounded state; overflow tests
@@ -676,12 +685,12 @@ merge changes documentation only.
 - Canonical owner: `dev/compat` TUI request-metadata presentation
 - Legacy ID: FD-007
 - Base: inherited main behavior
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65` follows upstream's condensed
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55` follows upstream's condensed
   model presentation, which may omit the provider label or an unselected
   variant, and propagates the current BCP 47 `titleLocale` through TUI prompt
   submissions and automatic title generation.
 - Overrides: compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307` displays one request-oriented
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff` displays one request-oriented
   `alias · providerID/modelID · variant: <value>` row in the prompt and
   subagent footer.
 - Delta: provider/model is unconditional, the persisted or explicitly selected
@@ -706,8 +715,8 @@ merge changes documentation only.
   fixture and both locale assertions are retained, while TUI request metadata,
   locale submission, and the known variant-display limits remain unchanged.
 - Review basis: inherited main
-  `62a43906cfaa7184f5a3f795d512f4b670d9ec65`; compat behavior
-  `d5396a50856f264eda899c3094d9dd232d728307`.
+  `9847165e0749f33c7ac01b72f933ac9cf47e3e55`; compat behavior
+  `9f3e37daa94e2b28d85c3a758e0241307f3eceff`.
 - Evidence: rendering tests cover the unified label and narrow layout; model
   tests cover explicit and persisted variants, literal/group agent refs,
   mismatched models, absent variants, and unknown built-in tiers. Prompt and

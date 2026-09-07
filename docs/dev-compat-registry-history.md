@@ -2587,3 +2587,46 @@ Final compat documentation publication and successful CI for each exact final
 branch SHA, remote-tip equality, and selected-upstream-to-main-to-compat
 ancestry remain separate synchronization completion gates. No pending CI is
 reported as successful by this record.
+
+## 2026-09-07 explicit basic audio adoption
+
+- Mode: specified AUDIO-01 change; reviewed upstream remains
+  `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`.
+- Prior compat: `bf85673a521537b5cb44002401eb55ad856e4009`.
+- Inherited main behavior: `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
+- Compat behavior merge: `9f3e37daa94e2b28d85c3a758e0241307f3eceff`.
+- Accepted main registry companion: `f45bbccddb5d6d532f6ad8ff2acc2c93a625dddb`.
+- Shared-audit inheritance merge: `bfe7c3a418c8ec878c7f79f65f7466cfe0226585`
+  changes documentation only relative to the verified compat behavior.
+
+### Capability inventory and result (1)
+
+| ID | Main contract | Compat disposition | Verification |
+| --- | --- | --- | --- |
+| AUDIO-01 | Explicit speech/transcription on the existing serve socket, dedicated Bearer before body/bootstrap, fixed directory and bounded/cancellable requests | Inherit every selected source/test unchanged, with no conflicts; all seven DC owners remain active | 227 tests across nine affected files, package typecheck, source-derived SDK/OpenAPI and Node admission smoke |
+
+DC-MODEL-001 and DC-CONTEXT-001 have generated-schema adjacency; regenerated
+artifacts stay byte-identical to the existing compat artifacts. DC-TUI-001 is
+adjacent to the unchanged TUI voice path. DC-NET-001, DC-NET-002,
+DC-PLATFORM-001 and DC-ACTOR-001 have no changed owned path. The new provider
+HTTP adapter does not modify WebFetch policy, MCP routing, session/actor context,
+MaxMode or model-status projection. Shared FD/FC registries and history remain
+identical to accepted main. The newer upstream tool-name case flag is excluded.
+
+Validation at the recorded behavior:
+
+- **227 pass, 0 fail, 716 assertions**, nine files: audio protocol/transport/service,
+  Provider, audio HTTP/admission/shared-bootstrap cancellation, OpenAPI and TUI
+  voice. Main's corresponding matrix is 225 pass / 0 fail.
+- `bun ci` preserves the lockfile; package `bun typecheck` passes. The SDK build
+  and published OpenAPI generation leave tracked artifacts unchanged.
+- Node build and plain Node v24.16.0 smoke pass: default audio returns four 404s,
+  explicitly enabled wrong-credential requests return two 401s, with no `Bun`
+  global or database creation. Successful audio requests are covered by the local
+  HTTP fixtures, not a live paid provider call.
+- The seven ambient default-path selectors are removed; package preload retains
+  its Orchestrator flag. The separate non-test child additionally removes it and
+  proves that an API key alone cannot enable audio.
+- Later registry commits do not change these source/test trees. Exact final
+  branch-tip CI, remote equality, main-to-compat ancestry and excluded upstream
+  commits are checked after publication; none is implied by the local matrix.
