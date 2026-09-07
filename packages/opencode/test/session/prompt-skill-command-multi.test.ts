@@ -82,7 +82,17 @@ describe("skill command with additional mentions", () => {
               ? String(tool.function.name)
               : "",
           )
-          expect(toolNames).toEqual(expect.arrayContaining(["exec", "apply_patch", "bash"]))
+          expect(toolNames).toContain("exec")
+          expect(toolNames).not.toContain("apply_patch")
+          expect(toolNames).not.toContain("bash")
+          const declarations = JSON.stringify(
+            (request.tools as Array<{ function?: { name?: string; description?: string } }>).find(
+              (tool) => tool.function?.name === "exec",
+            ),
+          )
+          expect(declarations).toContain("apply_patch(input:")
+          expect(declarations).toContain("bash(input:")
+          expect(declarations).not.toContain("read(input:")
           expect(toolNames.length).toBeGreaterThan(1)
         }),
         { git: true, config: providerCfg },

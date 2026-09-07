@@ -590,15 +590,17 @@ describe("Actor.spawn subagent mode", () => {
           (hit) =>
             Array.isArray(hit.body.tools) &&
             hit.body.tools.some(
-              (tool) => (tool as { function?: { name?: string } }).function?.name === "view_image",
+              (tool) => (tool as { function?: { name?: string } }).function?.name === "exec",
             ),
         )
-        const names = (request?.body.tools as Array<{ function?: { name?: string } }> | undefined)?.map(
-          (tool) => tool.function?.name,
-        )
+        const tools = request?.body.tools as Array<{ function?: { name?: string; description?: string } }> | undefined
+        const names = tools?.map((tool) => tool.function?.name)
+        const declarations = tools?.find((tool) => tool.function?.name === "exec")?.function?.description
         expect(names).toContain("exec")
-        expect(names).toContain("view_image")
+        expect(names).not.toContain("view_image")
+        expect(declarations).toContain("view_image(input:")
         expect(names).not.toContain("apply_patch")
+        expect(declarations).not.toContain("apply_patch(input:")
         expect(names).not.toContain("read")
         expect(names).not.toContain("edit")
         expect(names).not.toContain("write")
@@ -632,15 +634,17 @@ describe("Actor.spawn subagent mode", () => {
           (hit) =>
             Array.isArray(hit.body.tools) &&
             hit.body.tools.some(
-              (tool) => (tool as { function?: { name?: string } }).function?.name === "view_image",
+              (tool) => (tool as { function?: { name?: string } }).function?.name === "exec",
             ),
         )
-        const names = (request?.body.tools as Array<{ function?: { name?: string } }> | undefined)?.map(
-          (tool) => tool.function?.name,
-        )
+        const tools = request?.body.tools as Array<{ function?: { name?: string; description?: string } }> | undefined
+        const names = tools?.map((tool) => tool.function?.name)
+        const declarations = tools?.find((tool) => tool.function?.name === "exec")?.function?.description
         expect(names).toContain("exec")
-        expect(names).toContain("apply_patch")
-        expect(names).toContain("view_image")
+        expect(names).not.toContain("apply_patch")
+        expect(declarations).toContain("apply_patch(input:")
+        expect(names).not.toContain("view_image")
+        expect(declarations).toContain("view_image(input:")
         expect(names).not.toContain("read")
         expect(names).not.toContain("edit")
         expect(names).not.toContain("write")

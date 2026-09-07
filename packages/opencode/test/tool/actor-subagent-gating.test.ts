@@ -17,12 +17,13 @@ afterEach(async () => {
   await Instance.disposeAll()
 })
 
-const ids = (agent: Agent.Info) =>
+const ids = (agent: Agent.Info, preserveMembership = false) =>
   Effect.gen(function* () {
     const tools = yield* (yield* ToolRegistry.Service).tools({
       providerID: ProviderID.opencode,
       modelID: ModelID.make("opencode/claude-sonnet-4-6"),
       agent,
+      preserveMembership,
     })
     return tools.map((t) => t.id)
   })
@@ -82,7 +83,11 @@ describe("ToolRegistry.tools: actor tool subagent gating", () => {
       Effect.gen(function* () {
         const writer = yield* get("checkpoint-writer")
         expect(writer.mode).toBe("subagent")
-        expect(yield* ids(writer)).toEqual(yield* ids(yield* get("build")))
+        expect(yield* ids(writer, true)).toEqual(yield* ids(yield* get("build"), true))
+        const ordinary = yield* ids(writer)
+        expect(ordinary).toContain("actor")
+        expect(ordinary).not.toContain("question")
+        expect(ordinary).not.toContain("plan_exit")
       }),
     ),
   )
