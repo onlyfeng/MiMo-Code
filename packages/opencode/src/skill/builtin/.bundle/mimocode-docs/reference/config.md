@@ -52,6 +52,8 @@ All optional.
 | `provider.<id>.models.<model>.harness_model` | Explicit trusted GPT-5+ identity for an opaque deployment alias (for example `gpt-5.6-sol`). Used only by automatic harness inference; session/process choices and actual MiMo/GPT-4/OSS exclusions take precedence. Does not replace the API model ID. |
 | `enabled_providers` / `disabled_providers` | Allowlist / blocklist providers |
 
+When the resolved harness is `codex`, compact tools are automatic: hidden shell/file/task/skill/MCP calls go through `exec`, while authorized actor and interactive controls remain direct. Harness priority is session → `MIMOCODE_CODEX_MODE` process override → inference. An explicit session `default` keeps native declarations; `MIMOCODE_ENABLE_EXEC_TOOL=true` only adds exec to a non-Codex harness and does not compact it. Nested calls retain their normal validators, permission checks and frozen membership. `tools.exec_command` uses `cmd`, with `yield_time_ms` as a terminating millisecond command timeout, not a background-terminal handle.
+
 For custom endpoints, adapter selection, provider reuse, credential handling, and verification, read @providers.md before editing.
 
 ### Model groups

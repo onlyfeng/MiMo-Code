@@ -77,7 +77,7 @@ Build the management presentation.
 
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
-          const tool = (yield* registry.tools({
+          const tool = (yield* registry.registered({
             providerID: ProviderID.make("opencode"),
             modelID: ModelID.make("gpt-5"),
             agent,
@@ -120,7 +120,7 @@ Build the management presentation.
         Effect.gen(function* () {
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
-          const tool = (yield* registry.tools({
+          const tool = (yield* registry.registered({
             providerID: ProviderID.make("opencode"),
             modelID: ModelID.make("gpt-5"),
             agent,
@@ -181,7 +181,7 @@ description: Analyze quasar telemetry and operational metrics.
 
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
-          const tool = (yield* registry.tools({
+          const tool = (yield* registry.registered({
             providerID: ProviderID.make("opencode"),
             modelID: ModelID.make("gpt-5"),
             agent,
@@ -242,7 +242,7 @@ description: Inspect restricted quasar telemetry.
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
           const permission: Permission.Ruleset = [{ permission: "skill", pattern: "restricted-quasar", action: "deny" }]
-          const tools = yield* registry.tools({
+          const tools = yield* registry.registered({
             providerID: ProviderID.make("opencode"),
             modelID: ModelID.make("gpt-5"),
             agent,
@@ -376,7 +376,7 @@ description: Exact skill for direct execution boundary tests.
               `compose-next must be present in Skill.modelInvocable(${agentName})`,
             ).toBe(true)
 
-            const tool = (yield* registry.tools({
+            const tool = (yield* registry.registered({
               providerID: ProviderID.make("opencode"),
               modelID: ModelID.make("gpt-5"),
               agent,

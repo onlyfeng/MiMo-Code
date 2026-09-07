@@ -9,120 +9,197 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { testEffect } from "../lib/effect"
 import { provideTmpdirInstance } from "../fixture/fixture"
 
-const it = testEffect(
-  Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer),
-)
+const it = testEffect(Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
 describe("ToolRegistry.tools: invocation style resolution", () => {
-  it.live("exposes exec by default only to GPT models", () =>
+  it.live("compacts Codex declarations while retaining registered implementations", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const reg = yield* ToolRegistry.Service
         const agents = yield* Agent.Service
-        const general = yield* agents.get("general")
-        if (!general) throw new Error("no general agent")
-        const ids = (modelID: string) =>
-          reg
-            .tools({
-              providerID: ProviderID.opencode,
-              modelID: ModelID.make(modelID),
-              agent: general,
-            })
-            .pipe(Effect.map((tools) => tools.map((tool) => tool.id)))
-
-        const gpt = yield* reg.tools({
+        const input = {
           providerID: ProviderID.opencode,
-          modelID: ModelID.make("openai/gpt-5.4"),
-          agent: general,
-        })
-        const exec = gpt.find((tool) => tool.id === "exec")
-        expect(exec).toBeDefined()
-        expect(exec?.description).toContain("Run independent calls with `Promise.all` or `Promise.allSettled`")
-        expect(exec?.description).toContain("keep dependent operations sequential")
-        expect(exec?.description).toContain("do not use `exec` merely to force concurrency")
-        expect(exec?.description).toContain("apply_patch(input:")
-        expect(exec?.description).not.toContain("bash(input:")
-        expect(exec?.description).not.toContain("exec_command(input:")
-        expect(exec?.description).toContain("Shell execution is intentionally unavailable inside `exec`")
-        expect(exec?.description).not.toContain("read(input:")
-        expect(exec?.description).not.toContain("write(input:")
-        expect(exec?.description).not.toContain("edit(input:")
-        expect(gpt.map((tool) => tool.id)).toEqual(
-          expect.arrayContaining(["bash", "apply_patch", "skill_search", "skill", "task", "exec"]),
+          modelID: ModelID.make("gpt-5.4"),
+          agent: yield* agents.get("build"),
+        }
+        const advertised = yield* reg.tools(input)
+        expect(advertised.map((tool) => tool.id)).not.toContain("bash")
+        expect(advertised.map((tool) => tool.id)).not.toContain("apply_patch")
+        expect(advertised.map((tool) => tool.id)).toContain("actor")
+        const registered = yield* reg.registered(input)
+        expect(registered.map((tool) => tool.id)).toEqual(
+          expect.arrayContaining(["bash", "apply_patch", "skill", "skill_search", "task", "exec"]),
         )
-        expect(yield* ids("anthropic/claude-sonnet-4-6")).not.toContain("exec")
-        expect(yield* ids("mimo-v2")).not.toContain("exec")
+        const exec = advertised.find((tool) => tool.id === "exec")
+        expect(exec?.description).toContain("exec_command(input:")
+        expect(exec?.description).toContain("apply_patch(input:")
+        expect(exec?.description).toContain("task(input:")
+        expect(exec?.description).not.toContain("actor(input:")
+        const normal = yield* reg.tools({ ...input, harness: "default" })
+        expect(normal.map((tool) => tool.id)).toContain("bash")
+        expect(normal.map((tool) => tool.id)).not.toContain("exec")
       }),
     ),
+  )
+
+  it.live(
+    "exposes exec by default only to GPT models",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const reg = yield* ToolRegistry.Service
+          const agents = yield* Agent.Service
+          const general = yield* agents.get("general")
+          if (!general) throw new Error("no general agent")
+          const ids = (modelID: string) =>
+            reg
+              .tools({
+                providerID: ProviderID.opencode,
+                modelID: ModelID.make(modelID),
+                agent: general,
+              })
+              .pipe(Effect.map((tools) => tools.map((tool) => tool.id)))
+
+          const gpt = yield* reg.tools({
+            providerID: ProviderID.opencode,
+            modelID: ModelID.make("openai/gpt-5.4"),
+            agent: general,
+          })
+          const exec = gpt.find((tool) => tool.id === "exec")
+          expect(exec).toBeDefined()
+          expect(exec?.description).toContain("Run independent calls with `Promise.all` or `Promise.allSettled`")
+          expect(exec?.description).toContain("keep dependent operations sequential")
+          expect(exec?.description).toContain(
+            "Return an intermediate result whenever the next action needs model judgment",
+          )
+          expect(exec?.description).toContain("apply_patch(input:")
+          expect(exec?.description).toContain("bash(input:")
+          expect(exec?.description).toContain("exec_command(input:")
+          expect(exec?.description).not.toContain("read(input:")
+          expect(exec?.description).not.toContain("write(input:")
+          expect(exec?.description).not.toContain("edit(input:")
+          expect(gpt.map((tool) => tool.id)).toContain("exec")
+          for (const hidden of ["bash", "apply_patch", "skill_search", "skill", "task"])
+            expect(gpt.map((tool) => tool.id)).not.toContain(hidden)
+          expect(yield* ids("anthropic/claude-sonnet-4-6")).not.toContain("exec")
+          expect(yield* ids("mimo-v2")).not.toContain("exec")
+        }),
+      ),
     30000,
   )
 
-  it.live("keeps exec beside safe GPT allowlist members without nesting shell", () =>
+  it.live("compact declarations omit denied and user-disabled capabilities", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const reg = yield* ToolRegistry.Service
         const agents = yield* Agent.Service
-        const general = yield* agents.get("general")
-        if (!general) throw new Error("no general agent")
-        const ids = (toolAllowlist: string[]) =>
-          reg
-            .tools({
-              providerID: ProviderID.opencode,
-              modelID: ModelID.make("openai/gpt-5.4"),
-              agent: { ...general, toolAllowlist },
-            })
-            .pipe(Effect.map((tools) => tools.map((tool) => tool.id)))
-
-        expect(yield* ids(["apply_patch"])).toEqual(expect.arrayContaining(["apply_patch", "exec"]))
-        expect(yield* ids(["bash"])).toContain("bash")
-        expect(yield* ids(["bash"])).not.toContain("exec")
-        expect(yield* ids(["missing_tool"])).not.toContain("exec")
+        const input = {
+          providerID: ProviderID.opencode,
+          modelID: ModelID.make("gpt-5.4"),
+          agent: yield* agents.get("build"),
+          permission: [{ permission: "task", pattern: "*", action: "deny" as const }],
+          tools: { bash: false },
+        }
+        const registered = yield* reg.registered(input)
+        expect(registered.map((tool) => tool.id)).not.toContain("task")
+        expect(registered.map((tool) => tool.id)).not.toContain("bash")
+        const exec = registered.find((tool) => tool.id === "exec")
+        expect(exec?.description).not.toContain("task(input:")
+        expect(exec?.description).not.toContain("exec_command(input:")
       }),
     ),
-    30000,
   )
 
-  it.live("keeps MiMo transport separate from the explicit harness toolset", () =>
+  it.live("keeps exec available to an agent restricted to an authorized MCP tool", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const reg = yield* ToolRegistry.Service
         const agents = yield* Agent.Service
-        const general = yield* agents.get("general")
-        if (!general) throw new Error("no general agent")
-        const normal = yield* reg.tools({
+        const input = {
           providerID: ProviderID.opencode,
-          modelID: ModelID.make("mimo"),
-          modelAPIID: "mimo-v2.6-ptc",
-          modelFamily: "mimo-v2.6",
-          agent: general,
-        })
-        const codex = yield* reg.tools({
-          providerID: ProviderID.opencode,
-          modelID: ModelID.make("mimo"),
-          modelAPIID: "mimo-v2.6-ptc",
-          modelFamily: "mimo-v2.6",
-          agent: general,
-          harness: "codex",
-        })
-        const ids = normal.map((tool) => tool.id)
-        const codexIDs = codex.map((tool) => tool.id)
-
-        expect(ids).not.toContain("exec")
-        expect(ids).not.toContain("apply_patch")
-        expect(ids).toContain("edit")
-        expect(ids).toContain("write")
-        expect(ids).toContain("read")
-        expect(codexIDs).toContain("exec")
-        expect(codexIDs).toContain("apply_patch")
-        expect(codexIDs).not.toContain("edit")
-        expect(codexIDs).not.toContain("write")
-        expect(codexIDs).not.toContain("read")
+          modelID: ModelID.make("gpt-5.4"),
+          agent: { ...(yield* agents.get("general")), toolAllowlist: ["remote_lookup"] },
+          additionalTools: ["remote_lookup"],
+        }
+        expect((yield* reg.tools(input)).map((tool) => tool.id)).toEqual(["exec"])
+        expect((yield* reg.tools({ ...input, tools: { remote_lookup: false } })).map((tool) => tool.id)).not.toContain(
+          "exec",
+        )
       }),
     ),
+  )
+
+  it.live(
+    "keeps the compact gateway for permitted nested GPT tools",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const reg = yield* ToolRegistry.Service
+          const agents = yield* Agent.Service
+          const general = yield* agents.get("general")
+          if (!general) throw new Error("no general agent")
+          const ids = (toolAllowlist: string[]) =>
+            reg
+              .tools({
+                providerID: ProviderID.opencode,
+                modelID: ModelID.make("openai/gpt-5.4"),
+                agent: { ...general, toolAllowlist },
+              })
+              .pipe(Effect.map((tools) => tools.map((tool) => tool.id)))
+
+          expect(yield* ids(["apply_patch"])).toEqual(["exec"])
+          expect(yield* ids(["bash"])).not.toContain("bash")
+          expect(yield* ids(["bash"])).toContain("exec")
+          expect(yield* ids(["missing_tool"])).not.toContain("exec")
+        }),
+      ),
     30000,
   )
 
-  it.live("exposes skill_search to GPT and Claude models", () =>
+  it.live(
+    "keeps MiMo transport separate from the explicit harness toolset",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const reg = yield* ToolRegistry.Service
+          const agents = yield* Agent.Service
+          const general = yield* agents.get("general")
+          if (!general) throw new Error("no general agent")
+          const normal = yield* reg.tools({
+            providerID: ProviderID.opencode,
+            modelID: ModelID.make("mimo"),
+            modelAPIID: "mimo-v2.6-ptc",
+            modelFamily: "mimo-v2.6",
+            agent: general,
+          })
+          const codex = yield* reg.tools({
+            providerID: ProviderID.opencode,
+            modelID: ModelID.make("mimo"),
+            modelAPIID: "mimo-v2.6-ptc",
+            modelFamily: "mimo-v2.6",
+            agent: general,
+            harness: "codex",
+          })
+          const ids = normal.map((tool) => tool.id)
+          const codexIDs = codex.map((tool) => tool.id)
+
+          expect(ids).not.toContain("exec")
+          expect(ids).not.toContain("apply_patch")
+          expect(ids).toContain("edit")
+          expect(ids).toContain("write")
+          expect(ids).toContain("read")
+          expect(codexIDs).toContain("exec")
+          expect(codexIDs).not.toContain("apply_patch")
+          expect(codex.find((tool) => tool.id === "exec")?.description).toContain("apply_patch(input:")
+          expect(codexIDs).not.toContain("edit")
+          expect(codexIDs).not.toContain("write")
+          expect(codexIDs).not.toContain("read")
+        }),
+      ),
+    30000,
+  )
+
+  it.live("registers skill_search for GPT and Claude models", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const reg = yield* ToolRegistry.Service
@@ -131,7 +208,7 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
         if (!general) throw new Error("no general agent")
         const ids = (modelID: string) =>
           reg
-            .tools({
+            .registered({
               providerID: ProviderID.opencode,
               modelID: ModelID.make(modelID),
               agent: general,
@@ -152,7 +229,7 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
         const agents = yield* Agent.Service
         const general = yield* agents.get("general")
         if (!general) throw new Error("no general agent")
-        const tools = yield* reg.tools({
+        const tools = yield* reg.registered({
           providerID: ProviderID.make("openai"),
           modelID: ModelID.make("gpt-5"),
           agent: general,
@@ -191,39 +268,41 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
     ),
   )
 
-  it.live("masks multiedit for GPT models", () =>
-    provideTmpdirInstance((dir) =>
-      Effect.gen(function* () {
-        yield* Effect.promise(() => fs.mkdir(path.join(dir, ".mimocode/tool"), { recursive: true }))
-        yield* Effect.promise(() =>
-          Bun.write(
-            path.join(dir, ".mimocode/tool/multiedit.ts"),
-            [
-              "export default {",
-              "  description: 'multi-edit files',",
-              "  args: {},",
-              "  execute: async () => 'done',",
-              "}",
-            ].join("\n"),
-          ),
-        )
-        const reg = yield* ToolRegistry.Service
-        const agents = yield* Agent.Service
-        const general = yield* agents.get("general")
-        if (!general) throw new Error("no general agent")
-        const ids = (modelID: string) =>
-          reg
-            .tools({
-              providerID: ProviderID.opencode,
-              modelID: ModelID.make(modelID),
-              agent: general,
-            })
-            .pipe(Effect.map((tools) => tools.map((tool) => tool.id)))
+  it.live(
+    "masks multiedit for GPT models",
+    () =>
+      provideTmpdirInstance((dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() => fs.mkdir(path.join(dir, ".mimocode/tool"), { recursive: true }))
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(dir, ".mimocode/tool/multiedit.ts"),
+              [
+                "export default {",
+                "  description: 'multi-edit files',",
+                "  args: {},",
+                "  execute: async () => 'done',",
+                "}",
+              ].join("\n"),
+            ),
+          )
+          const reg = yield* ToolRegistry.Service
+          const agents = yield* Agent.Service
+          const general = yield* agents.get("general")
+          if (!general) throw new Error("no general agent")
+          const ids = (modelID: string) =>
+            reg
+              .tools({
+                providerID: ProviderID.opencode,
+                modelID: ModelID.make(modelID),
+                agent: general,
+              })
+              .pipe(Effect.map((tools) => tools.map((tool) => tool.id)))
 
-        expect(yield* ids("openai/gpt-5.4")).not.toContain("multiedit")
-        expect(yield* ids("anthropic/claude-sonnet-4-6")).toContain("multiedit")
-      }),
-    ),
+          expect(yield* ids("openai/gpt-5.4")).not.toContain("multiedit")
+          expect(yield* ids("anthropic/claude-sonnet-4-6")).toContain("multiedit")
+        }),
+      ),
     30000,
   )
 
@@ -251,30 +330,28 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
     ),
   )
 
-  it.live(
-    "invocationStyleByTool.task='shell' replaces parameters with { script } once shell field exists",
-    () =>
-      provideTmpdirInstance(
-        () =>
-          Effect.gen(function* () {
-            const reg = yield* ToolRegistry.Service
-            const agents = yield* Agent.Service
-            const general = yield* agents.get("general")
-            if (!general) throw new Error("no general agent")
-            const tools = yield* reg.tools({
-              providerID: ProviderID.opencode,
-              modelID: ModelID.make("opencode/claude-sonnet-4-6"),
-              agent: general,
-            })
-            const task = tools.find((t) => t.id === "task")
-            expect(task).toBeDefined()
-            // Task has shell field (Task 13 added it). Shell mode is active: parameters has `script`.
-            const schema = task!.parameters as any
-            expect(schema.shape?.script ?? schema._def?.shape?.script).toBeDefined()
-            expect(schema.shape?.action ?? schema._def?.shape?.action).toBeUndefined()
-          }),
-        { config: { tool: { invocation_style_by_tool: { task: "shell" } } } },
-      ),
+  it.live("invocationStyleByTool.task='shell' replaces parameters with { script } once shell field exists", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const reg = yield* ToolRegistry.Service
+          const agents = yield* Agent.Service
+          const general = yield* agents.get("general")
+          if (!general) throw new Error("no general agent")
+          const tools = yield* reg.tools({
+            providerID: ProviderID.opencode,
+            modelID: ModelID.make("opencode/claude-sonnet-4-6"),
+            agent: general,
+          })
+          const task = tools.find((t) => t.id === "task")
+          expect(task).toBeDefined()
+          // Task has shell field (Task 13 added it). Shell mode is active: parameters has `script`.
+          const schema = task!.parameters as any
+          expect(schema.shape?.script ?? schema._def?.shape?.script).toBeDefined()
+          expect(schema.shape?.action ?? schema._def?.shape?.action).toBeUndefined()
+        }),
+      { config: { tool: { invocation_style_by_tool: { task: "shell" } } } },
+    ),
   )
 
   it.live("invocationStyleByTool.read='shell' falls back to JSON (read has no shell field)", () =>

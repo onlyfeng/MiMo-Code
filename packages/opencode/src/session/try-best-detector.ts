@@ -1,6 +1,7 @@
 import path from "path"
 import type { MessageV2 } from "./message-v2"
 import { isRecord } from "@/util/record"
+import { observedToolParts } from "./observed-tool-parts"
 
 export const TRY_BEST_EDIT_WINDOW = 12
 export const TRY_BEST_EDIT_SIMILARITY = 0.8
@@ -150,6 +151,13 @@ export class TryBestMonitor {
 
   consume(part: MessageV2.ToolPart): TryBestIncident | undefined {
     if (part.state.status === "pending" || part.state.status === "running") return undefined
+    if (part.tool === "exec")
+      return observedToolParts(part)
+        .slice(1)
+        .reduce<TryBestIncident | undefined>((first, child) => {
+          const incident = this.consume(child)
+          return first ?? incident
+        }, undefined)
     if (EDIT_TOOLS.has(part.tool)) return this.edit(part)
     if (part.tool !== "bash") return undefined
     return this.bash(part)

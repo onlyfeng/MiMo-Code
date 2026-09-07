@@ -26,7 +26,10 @@ export type Context<M extends Metadata = Metadata> = {
   extra?: { [key: string]: unknown }
   messages: MessageV2.WithParts[]
   metadata(input: { title?: string; metadata?: M }): Effect.Effect<void>
-  ask(input: Omit<Permission.Request, "id" | "sessionID" | "tool">): Effect.Effect<void>
+  ask(
+    input: Omit<Permission.Request, "id" | "sessionID" | "tool">,
+    invocation?: { callID: string; abort: AbortSignal; input: unknown },
+  ): Effect.Effect<void>
   // Whether this instance currently exempts irreversible deletes from the extra
   // bash_delete confirmation. Supplied by the caller (which holds the Permission
   // service) instead of read from a process-global, so it stays instance-scoped:

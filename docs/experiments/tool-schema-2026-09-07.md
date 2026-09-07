@@ -1,5 +1,7 @@
 # FD-006 数据工具声明精简实验
 
+> **2026-09-08 后续决定：** 用户另行授权融合 upstream 已发布的生产 Codex 紧凑模式，见[使用说明](../codex-compact-tools.md)。本页保留 09-07 独立 default-harness 实验的方法与结果；下文的当时生产决策不再代表当前 Codex 默认行为。
+
 本实验仅在 `packages/opencode/script/experiments/tool-schema*.ts` 中运行，不修改
 普通 TUI、默认注册表、权限、工具执行、配置或模型提示。候选只有 `read`、`glob`、
 `grep` 的顶层描述和明确字段描述；原 Zod validator、字段名、required、enum、数值

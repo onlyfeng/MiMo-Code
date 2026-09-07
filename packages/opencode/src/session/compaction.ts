@@ -20,6 +20,7 @@ import { makeRuntime } from "@/effect/run-service"
 import { fn } from "@/util/fn"
 import path from "path"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
+import { observedToolParts } from "./observed-tool-parts"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -94,7 +95,7 @@ export function buildFileManifest(messages: MessageV2.WithParts[], env: { worktr
 
   for (const message of messages) {
     const mutatedFiles = new Set<string>()
-    for (const part of message.parts) {
+    for (const part of message.parts.flatMap(observedToolParts)) {
       if (part.type === "patch") {
         for (const file of part.files) {
           if (mutatedFiles.has(relativeFile(file, env.worktree))) continue
@@ -306,10 +307,7 @@ export const layer: Layer.Layer<
     // calls, then erases output of older tool calls to free context space.
     // Scoped to (sessionID, agentID): only inspects messages belonging to the
     // given actor — main-agent messages stay untouched when agentID is set.
-    const prune = Effect.fn("SessionCompaction.prune")(function* (input: {
-      sessionID: SessionID
-      agentID?: string
-    }) {
+    const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID; agentID?: string }) {
       const cfg = yield* config.get()
       if (!cfg.compaction?.prune) return
       log.info("pruning", { agentID: input.agentID ?? "main" })
@@ -333,7 +331,7 @@ export const layer: Layer.Layer<
           const part = msg.parts[partIndex]
           if (part.type === "tool")
             if (part.state.status === "completed") {
-              if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+              if (observedToolParts(part).some((item) => PRUNE_PROTECTED_TOOLS.includes(item.tool))) continue
               if (part.state.time.compacted) break loop
               const estimate = Token.estimate(part.state.output)
               total += estimate
@@ -465,10 +463,7 @@ export const layer: Layer.Layer<
         { context: [], prompt: undefined },
       )
       const prompt =
-        compacting.prompt ??
-        [agent.prompt, ...compacting.context]
-          .filter((item): item is string => !!item)
-          .join("\n\n")
+        compacting.prompt ?? [agent.prompt, ...compacting.context].filter((item): item is string => !!item).join("\n\n")
       const msgs = structuredClone(history)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
       const modelMessages = yield* MessageV2.toModelMessagesEffect(
@@ -525,7 +520,7 @@ export const layer: Layer.Layer<
         permission: parentSession.permission,
         sessionID: input.sessionID,
         tools: frozen?.tools ? SessionPrefixSnapshot.restoreTools(frozen.tools) : {},
-        activeTools: frozen?.tools?.map((item) => item.name),
+        activeTools: frozen?.tools ? SessionPrefixSnapshot.restoreActiveTools(frozen.tools) : undefined,
         toolChoice: "none",
         system: [],
         prebuiltSystem: frozen?.system,
@@ -559,9 +554,7 @@ export const layer: Layer.Layer<
 
       if (result === "text-repeat") return yield* rollback("Compaction produced repeated text")
       if (result === "stop") return yield* rollback("Compaction failed before producing a summary")
-      if (
-        !MessageV2.parts(msg.id).some((part) => part.type === "text" && part.text.trim().length > 0)
-      )
+      if (!MessageV2.parts(msg.id).some((part) => part.type === "text" && part.text.trim().length > 0))
         return yield* rollback("Compaction produced no usable summary")
 
       if (compactionPart) {
@@ -588,7 +581,7 @@ export const layer: Layer.Layer<
                 model: parentModel,
                 fixed: {
                   system: frozen.system,
-                  tools: frozen.tools ?? [],
+                  tools: frozen.tools?.filter((item) => item.active !== false).map(({ active, ...item }) => item) ?? [],
                   summary: buildSummaryMessage(summary, trigger, true),
                   manifest,
                 },

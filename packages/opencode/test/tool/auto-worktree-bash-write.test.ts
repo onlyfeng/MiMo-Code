@@ -3,6 +3,10 @@ import { $ } from "bun"
 import os from "os"
 import path from "path"
 import { commandMainWorktreeHits, commandWritesFiles } from "../../src/tool/bash"
+import { Instance } from "../../src/project/instance"
+import { MessageV2 } from "../../src/session/message-v2"
+import { buildFileManifest } from "../../src/session/compaction"
+import { sessionMutatedMainWorktrees } from "../../src/tool/auto-worktree-hint"
 
 let mainRepo = ""
 let scratchDir = ""
@@ -177,3 +181,67 @@ describe("bash commandMainWorktreeHits", () => {
     expect(hits).toEqual([path.resolve(mainRepo)])
   })
 })
+
+for (const fixture of [
+  { name: "truncated nested result", nested: true, metadata: { truncated: true }, expected: false, manifest: false },
+  {
+    name: "nested relative path",
+    nested: true,
+    metadata: { truncated: true, files: [{ relativePath: "retained.ts", type: "add" }] },
+    expected: false,
+    manifest: true,
+  },
+  { name: "direct legacy result", nested: false, metadata: {}, expected: true, manifest: false },
+]) {
+  test(`apply_patch transcript ${fixture.name} preserves only known worktree evidence`, async () => {
+    await Instance.provide({
+      directory: mainRepo,
+      fn: async () => {
+        const info = MessageV2.Assistant.parse({
+          id: "msg_patch_evidence",
+          sessionID: "ses_patch_evidence",
+          role: "assistant",
+          parentID: "msg_parent",
+          time: { created: 1 },
+          modelID: "test",
+          providerID: "test",
+          mode: "build",
+          agent: "build",
+          path: { cwd: mainRepo, root: mainRepo },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        })
+        const state = {
+          status: "completed",
+          input: {},
+          output: "completed",
+          title: "patch",
+          metadata: fixture.metadata,
+          time: { start: 1, end: 2 },
+        }
+        const part = MessageV2.ToolPart.parse({
+          id: "prt_patch_evidence",
+          sessionID: info.sessionID,
+          messageID: info.id,
+          type: "tool",
+          tool: fixture.nested ? "exec" : "apply_patch",
+          callID: "outer",
+          state: fixture.nested
+            ? {
+                ...state,
+                metadata: {
+                  exec_schema: 1,
+                  sub_parts: [{ seq: 1, type: "tool", tool: "apply_patch", callID: "outer:1", state }],
+                },
+              }
+            : state,
+        })
+        const messages = [{ info, parts: [part] }]
+        expect(sessionMutatedMainWorktrees(messages)).toEqual(fixture.expected ? [Instance.directory] : [])
+        const manifest = buildFileManifest(messages, { worktree: mainRepo })
+        if (fixture.manifest) expect(manifest).toContain("retained.ts (written)")
+        else expect(manifest).toBeUndefined()
+      },
+    })
+  })
+}

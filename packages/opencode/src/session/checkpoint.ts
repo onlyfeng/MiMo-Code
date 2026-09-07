@@ -904,6 +904,7 @@ export const layer: Layer.Layer<
                 modelIdentity: prefix.modelIdentity,
                 system: prefix.system,
                 tools: prefix.tools,
+                activeTools: prefix.activeTools,
                 loadedMcpTools: prefix.loadedMcpTools,
                 inheritedMessages: prefix.inheritedMessages,
                 parentPermission: prefix.parentPermission,
@@ -936,8 +937,10 @@ export const layer: Layer.Layer<
             })
 
             return {
+              modelIdentity: writerPrefix.modelIdentity,
               system: writerPrefix.system,
               tools: writerPrefix.tools,
+              activeTools: writerPrefix.activeTools,
               loadedMcpTools: writerPrefix.loadedMcpTools,
               inheritedMessages: writerPrefix.inheritedMessages,
               parentPermission: writerPrefix.parentPermission,

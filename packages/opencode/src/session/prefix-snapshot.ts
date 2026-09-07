@@ -51,26 +51,40 @@ export function systemHash(system: string[]) {
 }
 
 export function toolsHash(tools: Record<string, AITool>, activeTools: string[]) {
+  // Identity includes hidden schemas as well as the wire membership: hidden MCP
+  // changes must invalidate the immutable executable pool captured by a fork.
   return hash(
-    activeTools.toSorted().flatMap((name) => {
-      const item = tools[name]
-      return item ? [{ name, description: item.description, inputSchema: item.inputSchema }] : []
-    }),
+    Object.keys(tools)
+      .toSorted()
+      .map((name) => {
+        const item = tools[name]
+        return {
+          name,
+          description: item.description,
+          inputSchema: item.inputSchema,
+          active: activeTools.includes(name),
+        }
+      }),
   )
 }
 
 export async function snapshotTools(tools: Record<string, AITool>, activeTools: string[]) {
   return Promise.all(
-    activeTools.flatMap((name) => {
-      const item = tools[name]
-      if (!item) return []
-      return [
-        Promise.resolve(asSchema(item.inputSchema).jsonSchema).then(
-          (input_schema): SessionPrefixToolSnapshot => ({ name, description: item.description, input_schema }),
-        ),
-      ]
-    }),
+    Object.entries(tools).map(([name, item]) =>
+      Promise.resolve(asSchema(item.inputSchema).jsonSchema).then(
+        (input_schema): SessionPrefixToolSnapshot => ({
+          name,
+          description: item.description,
+          input_schema,
+          active: activeTools.includes(name),
+        }),
+      ),
+    ),
   )
+}
+
+export function restoreActiveTools(items: SessionPrefixToolSnapshot[]) {
+  return items.filter((item) => item.active !== false).map((item) => item.name)
 }
 
 export function restoreTools(items: SessionPrefixToolSnapshot[]) {
@@ -92,10 +106,7 @@ export const get = Effect.fn("SessionPrefixSnapshot.get")(function* (sessionID: 
         .select()
         .from(SessionPrefixSnapshotTable)
         .where(
-          and(
-            eq(SessionPrefixSnapshotTable.session_id, sessionID),
-            eq(SessionPrefixSnapshotTable.profile_key, key),
-          ),
+          and(eq(SessionPrefixSnapshotTable.session_id, sessionID), eq(SessionPrefixSnapshotTable.profile_key, key)),
         )
         .get(),
     ),

@@ -17,6 +17,8 @@ import {
   type McpToolSearchEntry,
 } from "../tool/mcp-tool-search"
 import type { PromptConfig } from "./session"
+import { resolveHarnessMode } from "../tool/gpt"
+import { GPT_TOP_LEVEL_TOOLS } from "../tool/tool-script-ref"
 
 /**
  * Build the LLM request prefix (system + tools + inheritedMessages) from the
@@ -80,8 +82,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
 
   // Find the last user message; required for system "user.system" pass-through
   const lastUserMsg = input.msgs.findLast((m) => m.info.role === "user")
-  if (!lastUserMsg)
-    return yield* Effect.die(new Error("buildLLMRequestPrefix: no user message in msgs"))
+  if (!lastUserMsg) return yield* Effect.die(new Error("buildLLMRequestPrefix: no user message in msgs"))
   const lastUser = input.prompt
     ? {
         ...(lastUserMsg.info as MessageV2.User),
@@ -104,7 +105,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     }))
 
   // Resolve tools using parent agent's permission and toolAllowlist
-  const toolDefs = yield* toolRegistry.tools({
+  const toolDefs = yield* toolRegistry.registered({
     modelID: input.model.id,
     modelAPIID: input.model.api.id,
     modelFamily: input.model.family,
@@ -112,6 +113,8 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     providerID: input.model.providerID,
     agent: input.agent,
     permission: input.permission,
+    tools: lastUser.tools,
+    additionalTools: Object.entries(input.mcpTools ?? {}).flatMap(([id, item]) => (item.execute ? [id] : [])),
     harness: lastUser.harness,
   })
   const rawTools: Record<string, AITool> = {}
@@ -123,6 +126,14 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     })
   }
   const localToolNames = new Set(Object.keys(rawTools))
+  const compact =
+    resolveHarnessMode({
+      modelID: input.model.id,
+      modelAPIID: input.model.api.id,
+      modelFamily: input.model.family,
+      harnessModel: input.model.harness_model,
+      harness: lastUser.harness,
+    }) === "codex"
   const mcpSearchEntries: McpToolSearchEntry[] = []
   const agentToolAllowlist = input.agent.toolAllowlist ? new Set(input.agent.toolAllowlist) : undefined
   for (const [id, item] of Object.entries(input.mcpTools ?? {})) {
@@ -147,34 +158,44 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     user: lastUser,
   })
   if (!input.useMcpToolSearch) {
-    return { system, tools: resolved, inheritedMessages, loadedMcpTools: [] }
+    return {
+      system,
+      tools: resolved,
+      activeTools: Object.keys(resolved).filter((id) =>
+        compact ? localToolNames.has(id) && GPT_TOP_LEVEL_TOOLS.has(id) : id !== MCP_TOOL_SEARCH_ID,
+      ),
+      inheritedMessages,
+      loadedMcpTools: [],
+    }
   }
 
   const catalog = createMcpToolSearchCatalog(
-    mcpSearchEntries
-      .filter((entry) => resolved[entry.name])
-      .toSorted((a, b) => a.name.localeCompare(b.name)),
+    mcpSearchEntries.filter((entry) => resolved[entry.name]).toSorted((a, b) => a.name.localeCompare(b.name)),
   )
   const loadedMcpTools = restoreMcpToolSearchMatches(
     catalog,
     input.msgs.flatMap((message) => {
       if (message.info.role !== "assistant" || message.info.parentID !== lastUser.id) return []
       return message.parts.flatMap((part) =>
-        part.type === "tool" &&
-        part.tool === MCP_TOOL_SEARCH_ID &&
-        part.state.status === "completed"
+        part.type === "tool" && part.tool === MCP_TOOL_SEARCH_ID && part.state.status === "completed"
           ? [part.state.metadata]
           : [],
       )
     }),
   )
   const searchActive =
-    input.model.capabilities.toolcall &&
-    catalog.entries.length > 0 &&
-    resolved[MCP_TOOL_SEARCH_ID] !== undefined
-  const tools = Object.fromEntries(
-    Object.entries(resolved).filter(([id]) => id !== MCP_TOOL_SEARCH_ID || searchActive),
-  )
+    input.model.capabilities.toolcall && catalog.entries.length > 0 && resolved[MCP_TOOL_SEARCH_ID] !== undefined
+  const tools = Object.fromEntries(Object.entries(resolved).filter(([id]) => id !== MCP_TOOL_SEARCH_ID || searchActive))
 
-  return { system, tools, inheritedMessages, loadedMcpTools: [...loadedMcpTools] }
+  return {
+    system,
+    tools,
+    activeTools: Object.keys(tools).filter((id) =>
+      compact
+        ? localToolNames.has(id) && GPT_TOP_LEVEL_TOOLS.has(id)
+        : localToolNames.has(id) || loadedMcpTools.has(id),
+    ),
+    inheritedMessages,
+    loadedMcpTools: [...loadedMcpTools],
+  }
 })

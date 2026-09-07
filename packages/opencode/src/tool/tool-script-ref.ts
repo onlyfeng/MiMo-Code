@@ -49,25 +49,23 @@ export const toolScriptRegistry: {
     | undefined
 } = { current: undefined }
 
-// Agent control-flow tools make no sense inside a script (they steer the
-// conversation, not data) — excluded from both the declared API and dispatch.
-// bash is also excluded: nesting a shell escape hatch inside a high-budget
-// aggregate would hide many commands behind one opaque outer call.
+// Compact Codex requests advertise exec plus the fork's direct actor and
+// interactive/lifecycle controls. wait is reserved for upstream compatibility;
+// it is not a separately registered tool. StructuredOutput is request-owned.
+export const GPT_TOP_LEVEL_TOOLS = new Set(["exec", "wait", "actor", "question", "plan_exit", "session", "workflow"])
+
+// These controls retain their direct conversation/actor entry points. Nested
+// data, shell, task and skill calls use the same request authority as direct calls.
 export const TOOL_SCRIPT_EXCLUDED = new Set([
   "exec",
   "mcp_tool_search",
   "invalid",
   "question",
-  "task",
   "actor",
-  "skill",
-  "skill_search",
   "plan_exit",
-  "cron",
   "session",
   "workflow",
   "change_directory",
-  "bash",
 ])
 
 // Reserved aliases share the target definition and therefore its permission,

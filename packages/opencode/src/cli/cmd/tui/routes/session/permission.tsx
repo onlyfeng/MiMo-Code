@@ -4,7 +4,7 @@ import { Portal, useKeyboard, useRenderer, useTerminalDimensions, type JSX } fro
 import type { TextareaRenderable } from "@opentui/core"
 import { useKeybind } from "../../context/keybind"
 import { useTheme, selectedForeground } from "../../context/theme"
-import type { PermissionRequest } from "@mimo-ai/sdk/v2"
+import type { Part, PermissionRequest } from "@mimo-ai/sdk/v2"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../component/border"
 import { useSync } from "../../context/sync"
@@ -131,6 +131,16 @@ function TextBody(props: { title: string; description?: string; icon?: string })
 
 type PromptTheme = ReturnType<typeof useTheme>["theme"]
 
+export function BashCommandBody(props: { command: string; theme: Pick<PromptTheme, "text"> }) {
+  return (
+    <Show when={props.command}>
+      <box paddingLeft={1}>
+        <text fg={props.theme.text}>{"$ " + props.command}</text>
+      </box>
+    </Show>
+  )
+}
+
 // Command and deletions each live in an explicitly sized scrollbox: the
 // Prompt's maxHeight used to make yoga silently drop overflowing rows (hiding
 // deletion targets), and the unpainted space cells of the warning lines leaked
@@ -209,6 +219,38 @@ export function BashDeleteBody(props: {
   )
 }
 
+export function permissionToolInput(
+  request: Pick<PermissionRequest, "tool" | "metadata">,
+  parts: readonly Part[],
+): Record<string, unknown> {
+  const tool = request.tool
+  if (!tool) return {}
+  const exec = request.metadata?.exec
+  if (
+    exec &&
+    typeof exec === "object" &&
+    !Array.isArray(exec) &&
+    "parentCallID" in exec &&
+    exec.parentCallID === tool.callID &&
+    "callID" in exec &&
+    typeof exec.callID === "string" &&
+    exec.callID.startsWith(`${tool.callID}:`) &&
+    exec.callID.length > tool.callID.length + 1 &&
+    "input" in exec &&
+    exec.input &&
+    typeof exec.input === "object" &&
+    !Array.isArray(exec.input)
+  ) {
+    return exec.input as Record<string, unknown>
+  }
+  for (const part of parts) {
+    if (part.type === "tool" && part.callID === tool.callID && part.state.status !== "pending") {
+      return part.state.input ?? {}
+    }
+  }
+  return {}
+}
+
 export function PermissionPrompt(props: { request: PermissionRequest }) {
   const sdk = useSDK()
   const sync = useSync()
@@ -218,17 +260,9 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
 
   const session = createMemo(() => sync.data.session.find((s) => s.id === props.request.sessionID))
 
-  const input = createMemo(() => {
-    const tool = props.request.tool
-    if (!tool) return {}
-    const parts = sync.data.part[tool.messageID] ?? []
-    for (const part of parts) {
-      if (part.type === "tool" && part.callID === tool.callID && part.state.status !== "pending") {
-        return part.state.input ?? {}
-      }
-    }
-    return {}
-  })
+  const input = createMemo(() =>
+    permissionToolInput(props.request, props.request.tool ? (sync.data.part[props.request.tool.messageID] ?? []) : []),
+  )
 
   const { theme } = useTheme()
   const config = useTuiConfig()
@@ -377,13 +411,7 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
               return {
                 icon: "#",
                 title,
-                body: (
-                  <Show when={command}>
-                    <box paddingLeft={1}>
-                      <text fg={theme.text}>{"$ " + command}</text>
-                    </box>
-                  </Show>
-                ),
+                body: <BashCommandBody command={command} theme={theme} />,
               }
             }
 

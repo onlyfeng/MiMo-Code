@@ -1,5 +1,7 @@
 # 指定别名、schema 实验和 actor 恢复实施计划
 
+> **2026-09-08 范围修订：** 后续用户授权生产 Codex 紧凑工具融合，见[当前合同](../../codex-compact-tools.md)。下文 Task 2 的仅实验限制记录原交付范围，不再约束当前 Codex 生产路径；ALIAS-01、RECOVERY-01 与独立实验本身继续保留。
+
 > **For agentic workers:** Use compose:subagent or compose:execute task by task, with independent review before integration.
 
 **Goal:** 按用户指定范围融合三个能力，并维护 main / dev/compat 的行为与审核证据。

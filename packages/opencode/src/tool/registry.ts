@@ -73,8 +73,9 @@ import * as BashInteractive from "./bash-interactive"
 import { resolveInvocationStyle } from "./invocation-style"
 import { BuiltinWorkflow } from "@/workflow/builtin"
 import { ToolScriptTool, renderToolScriptDeclarations } from "./tool-script"
-import { bindToolScriptRef, TOOL_SCRIPT_EXCLUDED, toolScriptRegistry } from "./tool-script-ref"
+import { bindToolScriptRef, GPT_TOP_LEVEL_TOOLS, TOOL_SCRIPT_EXCLUDED, toolScriptRegistry } from "./tool-script-ref"
 import { type HarnessMode, resolveHarnessMode } from "./gpt"
+import { canSearchSkills } from "../skill/search-access"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -129,7 +130,10 @@ export interface Interface {
     permission?: Permission.Ruleset
     preserveMembership?: boolean
     harness?: HarnessMode
+    tools?: Record<string, boolean>
+    additionalTools?: readonly string[]
   }) => Effect.Effect<Tool.Def[]>
+  readonly registered: Interface["tools"]
   readonly reload: () => Effect.Effect<void>
 }
 
@@ -356,17 +360,7 @@ export const layer = Layer.effect(
       return ["Available agent types and the tools they have access to:", description].join("\n")
     })
 
-    const available = Effect.fn("ToolRegistry.available")(function* (input: {
-      providerID: ProviderID
-      modelID: ModelID
-      modelAPIID?: string
-      modelFamily?: string
-      harnessModel?: string
-      agent: Agent.Info
-      permission?: Permission.Ruleset
-      preserveMembership?: boolean
-      harness?: HarnessMode
-    }) {
+    const available = Effect.fn("ToolRegistry.available")(function* (input: Parameters<Interface["tools"]>[0]) {
       const useGPTTools =
         resolveHarnessMode({
           modelID: input.modelID,
@@ -399,17 +393,31 @@ export const layer = Layer.effect(
         return true
       })
 
+      const permission = Agent.runtimePermission(input.agent, input.permission)
+      const disabled = Permission.disabled(
+        [...filtered.map((tool) => tool.id), ...(input.additionalTools ?? [])],
+        permission,
+      )
+      // Frozen membership is rebound first; the child runtime enforces its own
+      // narrower gates. Ordinary requests never describe denied nested tools.
+      if (!input.preserveMembership) {
+        filtered = filtered.filter(
+          (tool) =>
+            input.tools?.[tool.id] !== false &&
+            (!disabled.has(tool.id) || tool.id === MCP_TOOL_SEARCH_ID) &&
+            (tool.id !== "skill_search" ||
+              canSearchSkills({ permission, toolAllowlist: input.agent.toolAllowlist, tools: input.tools })),
+        )
+      }
+
       if (input.agent.toolAllowlist && !input.preserveMembership) {
         const allowed = new Set(input.agent.toolAllowlist)
         const allowExecGateway =
           useGPTTools &&
-          filtered.some(
-            (tool) =>
-              allowed.has(tool.id) &&
-              tool.id !== ToolScriptTool.id &&
-              tool.id !== "wait" &&
-              !TOOL_SCRIPT_EXCLUDED.has(tool.id),
-          )
+          [
+            ...filtered.map((tool) => tool.id),
+            ...(input.additionalTools ?? []).filter((id) => !disabled.has(id) && input.tools?.[id] !== false),
+          ].some((id) => allowed.has(id) && id !== ToolScriptTool.id && id !== "wait" && !TOOL_SCRIPT_EXCLUDED.has(id))
         filtered = filtered.filter(
           (tool) =>
             tool.id === "invalid" ||
@@ -456,13 +464,13 @@ export const layer = Layer.effect(
     )
     yield* Effect.addFinalizer(() => Effect.sync(releaseToolScriptRegistry))
 
-    const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
+    const registered: Interface["registered"] = Effect.fn("ToolRegistry.registered")(function* (input) {
       const availableTools = yield* available(input)
 
       const cfg = yield* config.get()
       const resolveStyle = (toolId: string): "json" | "shell" => resolveInvocationStyle(cfg.tool, toolId)
 
-      return yield* Effect.forEach(
+      const definitions = yield* Effect.forEach(
         availableTools.filtered,
         Effect.fnUntraced(function* (tool: Tool.Def) {
           using _ = log.time(tool.id)
@@ -485,7 +493,6 @@ export const layer = Layer.effect(
               description,
               tool.id === ActorTool.id ? yield* describeTask(input.agent) : undefined,
               tool.id === WorkflowTool.id ? yield* describeWorkflow() : undefined,
-              tool.id === ToolScriptTool.id ? yield* describeToolScript(availableTools.filtered) : undefined,
             ]
               .filter(Boolean)
               .join("\n"),
@@ -496,6 +503,18 @@ export const layer = Layer.effect(
         }),
         { concurrency: "unbounded" },
       )
+      if (!definitions.some((tool) => tool.id === ToolScriptTool.id)) return definitions
+      const declarations = yield* describeToolScript(definitions)
+      return definitions.map((tool) =>
+        tool.id === ToolScriptTool.id ? { ...tool, description: `${tool.description}\n${declarations}` } : tool,
+      )
+    })
+
+    const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
+      const definitions = yield* registered(input)
+      return resolveHarnessMode(input) === "codex"
+        ? definitions.filter((tool) => GPT_TOP_LEVEL_TOOLS.has(tool.id))
+        : definitions
     })
 
     const named: Interface["named"] = Effect.fn("ToolRegistry.named")(function* () {
@@ -509,7 +528,7 @@ export const layer = Layer.effect(
       yield* InstanceState.invalidate(state)
     })
 
-    return Service.of({ ids, all, named, tools, reload })
+    return Service.of({ ids, all, named, tools, registered, reload })
   }),
 ).pipe(Layer.provide(Git.defaultLayer))
 

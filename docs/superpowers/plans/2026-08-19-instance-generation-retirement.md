@@ -1,5 +1,7 @@
 # Instance Generation Retirement Implementation Plan
 
+> **Compact tools amendment (2026-09-08):** [Codex compact tools](../../codex-compact-tools.md) pin the complete request tool pool separately from advertised names, preserve frozen schemas and add child permission receipts plus close/abort/join. This updates exec producers in the inventory; it does not implement GenerationLease or complete Tasks 1–10.
+
 > **Scope amendment (2026-09-07):** Approved audio and model integrations permit
 > explicit `serve --audio-api` / `serve --llm-server` routes, capability discovery,
 > and temporary token management under

@@ -318,11 +318,7 @@ function appendTurnContextBeforeLastMessage(messages: ModelMessage[], user: Mess
   const head = messages.slice(0, -1)
   const userIndex = head.findLastIndex((message) => message.role === "user")
   if (userIndex < 0) return appendTurnContext(messages, user, true)
-  return [
-    ...appendTurnContext(head.slice(0, userIndex + 1), user, true),
-    ...head.slice(userIndex + 1),
-    tail,
-  ]
+  return [...appendTurnContext(head.slice(0, userIndex + 1), user, true), ...head.slice(userIndex + 1), tail]
 }
 
 export interface Interface {
@@ -807,7 +803,7 @@ const live: Layer.Layer<
           const repaired = await ToolCompat.repairToolCall({
             toolName: failed.toolCall.toolName,
             input: failed.toolCall.input,
-            toolNames: activeTools,
+            toolNames: Object.keys(tools),
             getSchema: (toolName) => failed.inputSchema({ toolName }),
           })
           if (repaired) {
@@ -1036,7 +1032,11 @@ export const defaultLayer = Layer.suspend(() =>
   ),
 )
 
-export function resolveTools(input: Pick<StreamInput, "tools" | "activeTools" | "agent" | "permission" | "user">) {
+export function resolveTools(
+  input: Pick<StreamInput, "tools" | "activeTools" | "agent" | "permission"> & {
+    user: MessageV2.User | { tools: MessageV2.User["tools"] }
+  },
+) {
   const permission = Agent.runtimePermission(input.agent, input.permission)
   const disabled = Permission.disabled(Object.keys(input.tools), permission)
   return Record.filter(

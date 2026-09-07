@@ -1,3 +1,4 @@
+import { observedToolParts } from "@/session/observed-tool-parts"
 import { Instance } from "@/project/instance"
 import { Database, eq } from "@/storage"
 import { SessionTable } from "@/session/session.sql"
@@ -145,7 +146,9 @@ export function sessionMutatedMainWorktrees(messages: MessageV2.WithParts[]): st
     if (mainRoot) hits.add(mainRoot)
   }
   for (const message of messages) {
-    for (const part of message.parts) {
+    for (const [original, part] of message.parts.flatMap((original) =>
+      observedToolParts(original).map((part) => [original, part] as const),
+    )) {
       if (part.type !== "tool" || part.state.status !== "completed") continue
 
       if (FILE_WRITE_TOOLS.has(part.tool)) {
@@ -155,8 +158,9 @@ export function sessionMutatedMainWorktrees(messages: MessageV2.WithParts[]): st
           : [
               toolInputString(part, "file_path") ??
                 toolInputString(part, "notebook_path") ??
-                // Legacy apply_patch results predate per-file metadata.
-                (part.tool === "apply_patch" ? Instance.directory : undefined),
+                // Only direct legacy results predate per-file metadata. An
+                // exec child with missing paths cannot establish this location.
+                (part.tool === "apply_patch" && part === original ? Instance.directory : undefined),
             ].filter((item): item is string => item !== undefined)
         candidates.forEach((candidate) => consider(findGitMainWorktree(resolveCandidate(candidate))))
         continue

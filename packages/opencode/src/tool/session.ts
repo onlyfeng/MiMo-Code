@@ -119,6 +119,7 @@ export function forkQuery(deps: {
       modelIdentity: prefix.modelIdentity,
       system: prefix.system,
       tools: prefix.tools,
+      activeTools: prefix.activeTools,
       loadedMcpTools: prefix.loadedMcpTools,
       inheritedMessages: prefix.inheritedMessages,
       parentPermission: prefix.parentPermission,
