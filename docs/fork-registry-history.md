@@ -2064,3 +2064,46 @@ they do not grant additional permission. The active FC-011 watch list now names
 these paths explicitly so a path-based audit also detects them. This correction
 changes only documentation evidence; main source/test behavior remains
 `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`, and the capability inventory remains N=3.
+
+
+### Same-operation actor continuation correction and final main validation
+
+- Final main source/test behavior: `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`; prior selected
+  source/test behavior was `40f5019ff8f6e47f7fe646164fafb73f0089f9e2`.
+  This is a RECOVERY-01 correction, not a fourth inventory capability.
+- Actual resumed provider-overflow and invalid-output regressions showed that
+  legitimate internal users were rejected by the original fixed-parent guard.
+  The runner now accepts only its own successful conditional-write receipts,
+  checking the original session, actor, configured agent, task, and model source
+  before advancing its local parent. Compaction exposes an internal receipt
+  after successful writes; no public schema or selector is added.
+- A foreign hook user, even with matching model/task fields, gains no authority.
+  A lost compaction conditional write creates no continuation receipt or extra
+  model request. It may safely finish at the owned summary; the contract is
+  absence of foreign-user takeover, not an unconditional failure result.
+- The four decisive continuation tests pass with 35 assertions. The final
+  affected matrix is **589 pass, 4 skip, 0 fail, 2,128 assertions**, 56 files,
+  under the package 30-second per-test budget. Source/test/generated hashes
+  remain unchanged during that matrix. The declared live/legacy skips remain.
+- Final package typecheck, repository lint (zero errors; warnings retained),
+  Node bundle and plain Node import/alias-schema smoke pass. Owning SDK/OpenAPI
+  generation is idempotent and the previously described 140-operation public
+  contract is unchanged. A first smoke harness incorrectly expected the removed
+  Config.get export; the corrected smoke checks the existing Config.Service and
+  schema exports without changing production code.
+- All six active FD and sixteen FC records now refer to the final source basis.
+  FD-009 additionally watches compaction's internal continuation seam. The
+  ownership correction above remains in force; FC-011 has changed content.
+  FC-001/009/015 and FD-002/009 retain source, retry, and compaction boundaries;
+  the other previously reviewed owners are unchanged by this follow-up.
+- ALIAS-01 and SCHEMA-01 source/tests and experiment declarations are unchanged
+  by the follow-up, so their separately scoped evidence above still applies.
+  No further live-provider request was made. The seven cleared selectors and
+  package preload baseline remain as recorded in the implementation plan.
+- User guidance, the selected design/plan, and the migration producer inventory
+  explain owned continuations. The broader generation-retirement migration
+  remains pending. Selected upstream stays `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
+  registry-only commits do not advance this final source/test basis.
+
+Final remote-tip equality, active-workflow CI for each final SHA, and ancestry
+through main to compat are publication gates checked after these records.
