@@ -18,6 +18,8 @@ import { InstanceMiddleware } from "./routes/instance/middleware"
 import { WorkspaceRoutes } from "./routes/control/workspace"
 import { setChildProcessEnv } from "@/util/child-process-env"
 import { createAudio, type AudioOptions } from "./audio"
+import { createModelAPI, type ModelAPIOptions } from "./model-api"
+import { LLMServerTokens } from "@/llm-server/tokens"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -35,13 +37,18 @@ export type Listener = {
 
 export const Default = lazy(() => create({}))
 
-function create(opts: { cors?: string[]; audio?: AudioOptions }) {
+function create(opts: { cors?: string[]; audio?: AudioOptions; llm?: ModelAPIOptions }) {
+  if (opts.audio && opts.llm) throw new Error("audio-api and llm-server are mutually exclusive")
+  const llm = createModelAPI(opts.llm)
   const audio = createAudio(opts.audio)
+  const optional = new Hono()
+  if (opts.llm) optional.route("/v1", llm.app)
+  else optional.route("/v1/audio", audio.app).route("/v1", llm.app)
   const app = new Hono()
     .onError(ErrorMiddleware)
     .use(CorsMiddleware(opts))
     .use(LoggerMiddleware)
-    .route("/v1/audio", audio.app)
+    .route("/", optional)
     .use(AuthMiddleware)
     .use(CompressionMiddleware)
     .route("/global", GlobalRoutes())
@@ -56,6 +63,7 @@ function create(opts: { cors?: string[]; audio?: AudioOptions }) {
         .route("/", InstanceRoutes(runtime.upgradeWebSocket)),
       runtime,
       audio,
+      llm,
     }
   }
 
@@ -73,6 +81,7 @@ function create(opts: { cors?: string[]; audio?: AudioOptions }) {
       .route("/", UIRoutes()),
     runtime,
     audio,
+    llm,
   }
 }
 
@@ -106,6 +115,7 @@ export async function listen(opts: {
   noAuth?: boolean
   childEnv?: NodeJS.ProcessEnv
   audio?: AudioOptions
+  llm?: ModelAPIOptions
 }): Promise<Listener> {
   if (opts.childEnv) setChildProcessEnv(opts.childEnv)
   const isLoopback = opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
@@ -118,6 +128,17 @@ export async function listen(opts: {
 
   const built = create(opts)
   const server = await built.runtime.listen(opts)
+  if (opts.llm) {
+    await LLMServerTokens.publish({
+      directory: opts.llm.directory,
+      listenerID: built.llm.id,
+      hostname: opts.hostname,
+      port: server.port,
+    }).catch(async (error) => {
+      await Promise.all([built.llm.close(), server.stop(true)])
+      throw error
+    })
+  }
 
   const next = new URL("http://localhost")
   next.hostname = opts.hostname
@@ -144,8 +165,13 @@ export async function listen(opts: {
     stop(close?: boolean) {
       closing ??= (async () => {
         if (mdns) MDNS.unpublish()
-        // Close audio admission before socket shutdown and instance retirement.
-        await Promise.all([built.audio.close(), server.stop(close)])
+        // Close optional API admission before socket shutdown and instance retirement.
+        await Promise.all([
+          built.audio.close(),
+          built.llm.close(),
+          opts.llm ? LLMServerTokens.unpublish({ directory: opts.llm.directory, listenerID: built.llm.id }) : undefined,
+          server.stop(close),
+        ])
       })()
       return closing
     },

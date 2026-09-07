@@ -346,7 +346,7 @@ describe("explicit audio HTTP API", () => {
             body: "{}",
           })
         ).status,
-      ).toBe(401)
+      ).toBe(404)
     })
   })
 
@@ -518,7 +518,7 @@ describe("explicit audio HTTP API", () => {
     )
   }, 15_000)
 
-  test("a non-test child keeps audio off even when its API key exists in the environment", async () => {
+  test("a non-test child keeps audio and models off even when an API key exists in the environment", async () => {
     await using tmp = await tmpdir({ root: "cwd" })
     const env: NodeJS.ProcessEnv = { ...process.env, MIMOCODE_AUDIO_API_KEY: key }
     for (const name of [
@@ -551,7 +551,7 @@ describe("explicit audio HTTP API", () => {
       expect(JSON.parse(stdout)).toEqual({
         orchestrator: false,
         apiKeyPresent: true,
-        statuses: [404, 404],
+        statuses: [404, 404, 404, 404],
         initialized: false,
       })
     } finally {

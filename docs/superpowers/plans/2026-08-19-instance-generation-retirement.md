@@ -1,11 +1,11 @@
 # Instance Generation Retirement Implementation Plan
 
-> **Scope amendment (2026-09-07):** The approved basic audio integration permits
-> the explicit, authenticated `/v1/audio/speech` and `/v1/audio/transcriptions`
-> exception described in [FD-004](../../upstream-deviations.md#fd-004--ordinary-instances-expose-no-implicit-openai-compatible-listener).
-> This changes the planned broad `/v1` exclusion below; it does not mark any
-> pending generation-retirement task complete or restore the general capability
-> service, token registry, or implicit TUI listener.
+> **Scope amendment (2026-09-07):** Approved audio and model integrations permit
+> explicit `serve --audio-api` / `serve --llm-server` routes, capability discovery,
+> and temporary token management under
+> [FD-004](../../upstream-deviations.md#fd-004--ordinary-instances-expose-no-implicit-openai-compatible-listener).
+> This narrows the planned broad `/v1` and llm-server exclusions below; it does
+> not mark any instance-generation retirement work in this plan complete.
 
 > **Status (2026-08-22):** Task 0 completed through PR #59 at
 > `ffc89d3916197e5860e91050616476f423c09ad4`; the inventory was rechecked at
@@ -2016,20 +2016,21 @@ opaque ID is otherwise legal JavaScript.
 
 Because server/thread/worker surfaces change, freeze the exact rejected surface
 set in `fd-004-rejected-surfaces.json`: absent source paths
-`src/cli/cmd/llm-server.ts`, `src/config/llm-server.ts`,
-`src/llm-server/`, and `src/server/routes/instance/capability.ts`; forbidden
-server path prefix `/v1` except the two explicitly enabled audio routes governed
-by current FD-004 (ordinary instances still expose neither); rejected schema/property/enum names
+`src/config/llm-server.ts` and `src/server/routes/instance/capability.ts`;
+`src/cli/cmd/llm-server.ts` and `src/llm-server/` are permitted only for the
+explicit model/token contract in current FD-004. Reject implicit `/v1` mounting;
+allow its explicitly enabled model/audio routes and static listener identity probe
+(ordinary instances still expose none). Audit rejected schema/property/enum names
 `LLMServerConfig`, `llmServer`,
-`voice_design`, and `voice_clone`; the upstream token-registry, implicit-listener,
-whole-server password, and address/token persistence symbols
-`LLMServerTokens`, `LLMServerCapability`, `CapabilityRoutes`,
-`CAPABILITY_PREFIX`, `ConfigLLMServer`, `generatedServerPassword`,
-`generateServerPassword`, `clearGeneratedServerPassword`,
-`MIMOCODE_SERVER_PASSWORD_SUPPLIED`, `addressFile`, `publish`, and `unpublish`;
-and the required `script/format.ts` generator call. The manifest scopes generic
-names such as `publish` to the rejected LLM-server paths/symbol graph rather
-than banning them repository-wide.
+`voice_design`, and `voice_clone`; reject implicit instance-route and generated
+whole-server-password symbols `CapabilityRoutes`, `CAPABILITY_PREFIX`,
+`ConfigLLMServer`, `generatedServerPassword`, `generateServerPassword`,
+`clearGeneratedServerPassword`, and `MIMOCODE_SERVER_PASSWORD_SUPPLIED`.
+Permit `LLMServerTokens`, `LLMServerCapability`, `publish`, and `unpublish` only
+within the explicit model API and its directory-scoped CLI/Node export. Keep the
+required `script/format.ts` generator call. The manifest must distinguish these
+explicit owners from the rejected implicit-listener graph instead of banning
+generic names repository-wide.
 
 `check-fd004-boundary.ts --check` parses the source route mounts, config schemas,
 tracked OpenAPI, and generated JS types against that manifest; it also asserts

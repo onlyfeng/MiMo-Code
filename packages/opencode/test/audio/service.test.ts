@@ -25,6 +25,7 @@ async function fixture<T>(
   fn: (seen: Seen[]) => Promise<T>,
   options: {
     npm?: string
+    baseURL?: string | null
     handle?: (request: Request, body: Record<string, unknown>) => Response | Promise<Response>
   } = {},
 ) {
@@ -61,7 +62,7 @@ async function fixture<T>(
             npm: options.npm ?? "@ai-sdk/openai-compatible",
             options: {
               apiKey: "local-vendor-key",
-              baseURL: `http://127.0.0.1:${server.port}/v1`,
+              ...(options.baseURL === null ? {} : { baseURL: options.baseURL ?? `http://127.0.0.1:${server.port}/v1` }),
               headers: { "x-provider-header": "provider-value" },
             },
             models: {
@@ -94,6 +95,19 @@ const transcription = (req: Parameters<typeof transcribe>[0]["req"], abort = new
   transcribe({ req, audio: bytes, mediaType: "audio/wav", abort })
 
 describe("audio service", () => {
+  test("invalid raw transport configuration fails before any provider request", async () => {
+    for (const baseURL of [null, "not-a-url", "ftp://localhost/audio", "http://localhost/v1?wrong=path"]) {
+      await fixture(
+        async (seen) => {
+          expect(await rejected(speech({ model: "audio/tts", input: "hello" }))).toMatchObject({ status: 501 })
+          expect(await rejected(transcription({ model: "audio/asr" }))).toMatchObject({ status: 501 })
+          expect(seen).toHaveLength(0)
+        },
+        { baseURL },
+      )
+    }
+  })
+
   test("raw TTS sends the API model, preset, instructions and model headers", () =>
     fixture(async (seen) => {
       const result = await speech({

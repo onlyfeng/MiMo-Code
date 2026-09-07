@@ -65,8 +65,50 @@ async function resolveModel(ref: string, kind: "speech" | "transcription", abort
   return model
 }
 
-function audioOverChat(model: Provider.Model) {
-  return ["@ai-sdk/openai", "@ai-sdk/azure", "@ai-sdk/openai-compatible"].includes(model.api.npm)
+/** Shared by discovery and execution; resolving a factory does not generate audio. */
+export async function resolveTransport(model: Provider.Model, kind: "speech" | "transcription", abort: AbortSignal) {
+  abort.throwIfAborted()
+  if (kind === "speech") {
+    const speech = await AppRuntime.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* Provider.Service).getSpeech(model)
+      }),
+      { signal: abort },
+    ).catch((error) => {
+      abort.throwIfAborted()
+      if (error instanceof Provider.SpeechUnsupportedError) return undefined
+      return failed(error)
+    })
+    if (speech) return { type: "native" as const, speech }
+  }
+  if (!["@ai-sdk/openai", "@ai-sdk/azure", "@ai-sdk/openai-compatible"].includes(model.api.npm)) {
+    throw new RequestError(
+      501,
+      `This provider does not support audio-over-chat ${kind}`,
+      "invalid_request_error",
+      "unsupported_capability",
+    )
+  }
+  const provider = await AppRuntime.runPromise(
+    Effect.gen(function* () {
+      return yield* (yield* Provider.Service).getProvider(model.providerID)
+    }),
+    { signal: abort },
+  ).catch((error) => {
+    abort.throwIfAborted()
+    return failed(error)
+  })
+  const base = provider?.options.baseURL
+  const url = typeof base === "string" && base === base.trim() && URL.canParse(base) ? new URL(base) : undefined
+  if (!url || !["http:", "https:"].includes(url.protocol) || url.search || url.hash || url.username || url.password) {
+    throw new RequestError(
+      501,
+      "Audio over chat requires an explicit HTTP(S) baseURL without credentials, query or fragment",
+      "invalid_request_error",
+      "unsupported_capability",
+    )
+  }
+  return { type: "chat" as const }
 }
 
 export async function synthesize(input: {
@@ -79,25 +121,8 @@ export async function synthesize(input: {
   if (rejection) throw new RequestError(400, rejection)
   input.abort.throwIfAborted()
   const model = await resolveModel(parsed.data.model, "speech", input.abort)
-  const speech = await AppRuntime.runPromise(
-    Effect.gen(function* () {
-      return yield* (yield* Provider.Service).getSpeech(model)
-    }),
-    { signal: input.abort },
-  ).catch((error) => {
-    input.abort.throwIfAborted()
-    if (error instanceof Provider.SpeechUnsupportedError) return undefined
-    return failed(error)
-  })
-
-  if (!speech) {
-    if (!audioOverChat(model))
-      throw new RequestError(
-        501,
-        "This provider does not support speech synthesis",
-        "invalid_request_error",
-        "unsupported_capability",
-      )
+  const transport = await resolveTransport(model, "speech", input.abort)
+  if (transport.type === "chat") {
     if (parsed.data.speed !== undefined)
       throw new RequestError(400, "speed is not supported by this audio-over-chat provider")
     const result = await AudioChat.synthesize({
@@ -114,7 +139,7 @@ export async function synthesize(input: {
   }
 
   const result = await generateSpeech({
-    model: speech,
+    model: transport.speech,
     text: parsed.data.input,
     voice: parsed.data.voice,
     outputFormat: parsed.data.response_format,
@@ -142,14 +167,7 @@ export async function transcribe(input: {
   if (rejection) throw new RequestError(400, rejection)
   input.abort.throwIfAborted()
   const model = await resolveModel(parsed.data.model, "transcription", input.abort)
-  if (!audioOverChat(model)) {
-    throw new RequestError(
-      501,
-      "This provider does not support audio-over-chat transcription",
-      "invalid_request_error",
-      "unsupported_capability",
-    )
-  }
+  await resolveTransport(model, "transcription", input.abort)
   if (Provider.modelKind(model) === "language") {
     const language =
       parsed.data.language && parsed.data.language !== "auto" ? ` The audio is in ${parsed.data.language}.` : ""

@@ -369,6 +369,11 @@ registry or history commit does not advance either behavior reference.
   retaining `pathsOverlap`, `tmpOnlyDelete`, explicit delete approval, and
   immutable instance-cwd handling. Full output remains archived independently
   of the inline preview; `metadata.truncated` prevents wrapper re-truncation.
+- 2026-09-07 explicit model API review: capability discovery and token-scoped
+  chat/audio admission use a fixed startup directory. Requests cannot select a
+  different directory or workspace; the new Node token export is opt-in host
+  functionality. FD-004 remains the canonical listener/auth owner. Coverage:
+  `test/server/model-api.test.ts`, shared `server/api-request.ts`, and CLI tests.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
 - Retirement condition: upstream retains fixed instance cwd and supplies
@@ -448,6 +453,14 @@ registry or history commit does not advance either behavior reference.
   fork already has relevant fixture isolation and all three pass on both
   pre-sync branch SHAs. Existing unrelated CI timeouts are tracked separately;
   this decision does not claim that the fixture removal fixes those failures.
+- 2026-09-07 model API lifecycle review: token verification precedes body and
+  bootstrap; both optional API modes use bounded uploads and cancellation-aware
+  instance waiting. SSE retains admission and its instance lease until EOF or
+  producer cancellation acknowledgement, including cancellation at response
+  handoff. Bun cancellation uses an explicit SSE error and close; unrelated
+  shared bootstrap producers remain owned by their original callers. CLI stop
+  closes admission before instance disposal. Direct and native HTTP regressions
+  cover these seams without changing the ordinary actor/workflow lifecycle.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
 - 2026-08-25 publication companion: the `AGENTS.md` default-environment rule is
