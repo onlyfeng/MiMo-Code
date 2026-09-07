@@ -2,6 +2,7 @@ import z from "zod"
 import os from "os"
 import fuzzysort from "fuzzysort"
 import { Config } from "../config"
+import { ConfigProvider } from "../config/provider"
 import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
 import { NoSuchModelError, type Provider as SDK } from "ai"
 import { Log } from "../util"
@@ -1035,6 +1036,7 @@ export const Model = Schema.Struct({
   api: ProviderApiInfo,
   name: Schema.String,
   family: Schema.optional(Schema.String),
+  harness_model: Schema.optional(ConfigProvider.HarnessModel),
   capabilities: ProviderCapabilities,
   cost: ProviderCost,
   limit: ProviderLimit,
@@ -1558,6 +1560,11 @@ const layer: Layer.Layer<
 
           for (const [modelID, model] of Object.entries(provider.models)) {
             model.api.id = model.api.id ?? model.id ?? modelID
+            // Only explicit instance configuration grants alias trust. Reapply
+            // after plugin replacement; catalog/plugin claims alone are ignored.
+            const harnessModel = Config.configuredHarnessModel(cfg, providerID, modelID)
+            if (harnessModel) model.harness_model = harnessModel
+            else delete model.harness_model
             if (
               modelID === "gpt-5-chat-latest" ||
               (providerID === ProviderID.openrouter && modelID === "openai/gpt-5-chat")

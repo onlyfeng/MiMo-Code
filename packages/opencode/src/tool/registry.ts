@@ -124,6 +124,7 @@ export interface Interface {
     modelID: ModelID
     modelAPIID?: string
     modelFamily?: string
+    harnessModel?: string
     agent: Agent.Info
     permission?: Permission.Ruleset
     preserveMembership?: boolean
@@ -360,6 +361,7 @@ export const layer = Layer.effect(
       modelID: ModelID
       modelAPIID?: string
       modelFamily?: string
+      harnessModel?: string
       agent: Agent.Info
       permission?: Permission.Ruleset
       preserveMembership?: boolean
@@ -370,6 +372,7 @@ export const layer = Layer.effect(
           modelID: input.modelID,
           modelAPIID: input.modelAPIID,
           modelFamily: input.modelFamily,
+          harnessModel: input.harnessModel,
           harness: input.harness,
         }) === "codex"
       let filtered = (yield* all()).filter((tool) => {

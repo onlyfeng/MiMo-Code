@@ -29,7 +29,7 @@ THE EXCEPTION — `run` blocks the conversation; only for a tiny lookup that gat
           Use it for essentially all delegation: investigation, analysis, review,
           implementation, long searches — anything that takes real time.
           required: subagent_type, description, prompt
-          optional: command, context
+          optional: command, context, lifecycle="persistent" (requires context="full")
 - run:    **RARE EXCEPTION.** Same launch, but BLOCKS the whole conversation until
           the subagent finishes; result returned inline. Allowed ONLY when you
           cannot make your very next decision without the result in THIS turn, and
@@ -41,8 +41,15 @@ THE EXCEPTION — `run` blocks the conversation; only for a tiny lookup that gat
 - status: poll actor state without blocking. required: actor_id.
           Returns: { status: "pending"|"running"|"idle"|"unknown", actor_id, turnCount, ... }
 - wait:   block until actor completes (success/failure/cancelled) or timeout (default 10 min).
+          Persistent actors remain reusable after success: use notifications/status;
+          their wait resolves on failure/cancellation or timeout, not successful idle.
           required: actor_id. optional: timeout_ms.
           Returns: { status, actor_id, result?, error? }
+- resume: retry the latest interrupted turn of a persistent full-context actor.
+          required: actor_id. Preserves the original user/task; returns after admission.
+          Requires the original live instance and frozen model identity. Cancelled,
+          released, replaced, busy, or completed actors are rejected. Queued messages
+          wait until recovery ends; completion uses the existing actor notification.
 - cancel: stop a running actor (graceful). required: actor_id. Idempotent.
 - send:   deliver message to another actor's inbox, waking it when the actor
           remains reusable.
@@ -93,7 +100,21 @@ You are the subagent's only briefing — it hasn't seen this conversation.
 ## Actor ID vs Task ID
 
 `actor_id` identifies a live subagent. It is returned by `spawn`/`run` and accepted by
-`status`, `wait`, `cancel`, and `send`. Task IDs (T1, T2, ...) come from the `task` tool — only pass a `task_id` you got from a `task` tool call this session. If the `task_id` is malformed or unknown, the binding is dropped: the subagent's findings won't be captured to any task, and the tool result tells you so.
+`status`, `wait`, `cancel`, `resume`, and `send`. Task IDs (T1, T2, ...) come from the `task` tool — only pass a `task_id` you got from a `task` tool call this session. If the `task_id` is malformed or unknown, the binding is dropped: the subagent's findings won't be captured to any task, and the tool result tells you so.
+
+## Recovering an interrupted actor
+
+Use `{"operation":{"action":"resume","actor_id":"<existing>"}}` to retry the
+existing interrupted user turn. This accepts no new prompt, model, or task ID.
+Only persistent full-context actors retaining their original context qualify;
+ordinary ephemeral subagents require a new spawn after termination.
+
+Opt in when creating the actor:
+`{"operation":{"action":"spawn","subagent_type":"general","description":"Recoverable review","prompt":"Review the specified module","context":"full","lifecycle":"persistent"}}`.
+This spawn-only option retains frozen context until cancellation; omit it for the
+normal ephemeral lifecycle. Use `status` for progress and `cancel` when finished
+with the actor to release its retained context. Resume retries interruption,
+not a successfully completed turn.
 
 ## Following up with an existing subagent
 

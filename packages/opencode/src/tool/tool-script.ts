@@ -642,7 +642,7 @@ export const ToolScriptTool = Tool.define(
           if (!getDefs) throw new Error("exec tool registry unavailable")
           const agentInfo = yield* agents.get(ctx.agent)
           const model = ctx.extra?.model as
-            | { id: ModelID; providerID: ProviderID; api?: { id: string }; family?: string }
+            | { id: ModelID; providerID: ProviderID; api?: { id: string }; family?: string; harness_model?: string }
             | undefined
           const harness = ctx.extra?.harness as HarnessMode | undefined
           const toolWhitelist =
@@ -660,6 +660,7 @@ export const ToolScriptTool = Tool.define(
                     modelID: model.id,
                     modelAPIID: model.api?.id,
                     modelFamily: model.family,
+                    harnessModel: model.harness_model,
                     agent: agentInfo,
                     harness,
                   }

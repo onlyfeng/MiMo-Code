@@ -3,10 +3,16 @@ import { Flag } from "@/flag/flag"
 export type HarnessMode = "auto" | "codex" | "default"
 export type ResolvedHarnessMode = Exclude<HarnessMode, "auto">
 
+// Explicit configuration names a canonical modern GPT identity, never a
+// display name, wildcard, or arbitrary instruction to force the Codex harness.
+export const GPT_HARNESS_MODEL_PATTERN =
+  /^gpt-(?:[5-9]|[1-9][0-9]+)(?:\.[0-9]+)*(?:-(?!oss(?:-|$)|mimo(?:-|$)|gpt-4)[a-z0-9]+)*$/
+
 export type HarnessResolutionInput = {
   modelID: string
   modelAPIID?: string
   modelFamily?: string
+  harnessModel?: string
   harness?: HarnessMode
 }
 
@@ -27,7 +33,16 @@ export function resolveHarnessMode(input: HarnessResolutionInput): ResolvedHarne
   if (override !== undefined) return override ? "codex" : "default"
   const processMode = Flag.MIMOCODE_CODEX_MODE
   if (processMode !== undefined) return processMode ? "codex" : "default"
-  if (isMimoModel(input.modelID, input.modelAPIID, input.modelFamily)) return "default"
+  const identities = [input.modelID, input.modelAPIID, input.modelFamily].flatMap((value) =>
+    value ? [value.toLowerCase()] : [],
+  )
+  if (
+    identities.some(
+      (id) => id.includes("gpt-4") || id.includes("gpt-oss") || /(?:^|[/_.:-])(?:mimo|oss)(?:$|[/_.:-])/.test(id),
+    )
+  )
+    return "default"
+  if (input.harnessModel && GPT_HARNESS_MODEL_PATTERN.test(input.harnessModel)) return "codex"
   const modelID = input.modelID.toLowerCase()
   if (modelID.includes("gpt-") && !modelID.includes("oss") && !modelID.includes("gpt-4")) return "codex"
   return "default"
@@ -36,15 +51,19 @@ export function resolveHarnessMode(input: HarnessResolutionInput): ResolvedHarne
 export function isMcpToolSearchEnabled(
   enabled: boolean,
   harness: HarnessMode | undefined,
-  ...modelIDs: Array<string | undefined>
+  modelID = "",
+  modelAPIID?: string,
+  modelFamily?: string,
+  harnessModel?: string,
 ) {
   // The dedicated MCP selector is independent of prompt/toolset selection.
   if (enabled) return true
   return (
     resolveHarnessMode({
-      modelID: modelIDs[0] ?? "",
-      modelAPIID: modelIDs[1],
-      modelFamily: modelIDs[2],
+      modelID,
+      modelAPIID,
+      modelFamily,
+      harnessModel,
       harness,
     }) === "codex"
   )
@@ -64,12 +83,19 @@ export function usesMimoResponsesApi(...values: Array<string | undefined>) {
   return isMimoModel(...ids) && ids.some((id) => /(?:^|[/_.-])ptc(?:$|[/_.-])/.test(id))
 }
 
-export function usesGPTToolset(modelID: string, harness?: HarnessMode, ...aliases: Array<string | undefined>) {
+export function usesGPTToolset(
+  modelID: string,
+  harness?: HarnessMode,
+  modelAPIID?: string,
+  modelFamily?: string,
+  harnessModel?: string,
+) {
   return (
     resolveHarnessMode({
       modelID,
-      modelAPIID: aliases[0],
-      modelFamily: aliases[1],
+      modelAPIID,
+      modelFamily,
+      harnessModel,
       harness,
     }) === "codex"
   )

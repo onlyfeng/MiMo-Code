@@ -1,5 +1,6 @@
 import * as Tool from "./tool"
 import { RecoverableError } from "./recoverable"
+import { NotFoundError } from "@/storage"
 import DESCRIPTION from "./actor.txt"
 import DESCRIPTION_CHECKPOINT from "./actor.checkpoint.txt"
 import SHELL_DESCRIPTION from "./actor.shell.txt"
@@ -37,7 +38,7 @@ const id = "actor"
 const MODEL_PARAM_DESCRIPTION =
   "(optional) Model for this subagent: a model group name (e.g. ultra/standard/lite) or a literal provider/model (e.g. mimo-v2.5-pro). Overrides the agent's configured model; defaults to the agent's model, else the parent's. If no model_groups are configured, the tier names resolve to the default model. To discover valid provider/model values (e.g. a vision-capable model for image tasks), run `actor models` (or `actor models --vision`)."
 
-const KNOWN_ACTOR_VERBS = ["run", "spawn", "status", "wait", "cancel", "send", "models"]
+const KNOWN_ACTOR_VERBS = ["run", "spawn", "status", "wait", "cancel", "resume", "send", "models"]
 
 function levenshteinActor(a: string, b: string): number {
   const m = a.length, n = b.length
@@ -66,10 +67,11 @@ function suggestActorVerb(input: string): string | undefined {
 // Zod validation time (inside execute), not at parse time.
 type ActorShellArgs =
   | { operation: { action: "run"; subagent_type: string; description: string; prompt: string; model?: string; task_id?: string; timeout_ms?: number; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
-  | { operation: { action: "spawn"; subagent_type: string; description: string; prompt: string; model?: string; task_id?: string; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
+  | { operation: { action: "spawn"; subagent_type: string; description: string; prompt: string; lifecycle?: "persistent"; model?: string; task_id?: string; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
   | { operation: { action: "status"; actor_id: string } }
   | { operation: { action: "wait"; actor_id: string; timeout_ms?: number } }
   | { operation: { action: "cancel"; actor_id: string } }
+  | { operation: { action: "resume"; actor_id: string } }
   | { operation: { action: "send"; to_actor_id: string; content: string; to_session_id?: string; type?: string } }
   | { operation: { action: "models"; vision?: boolean; limit?: number } }
 
@@ -160,10 +162,10 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
       if (rejected) return yield* rejected
       const { flags, rest } = yield* extractNamedFlags(
         args,
-        ["model", "task", "command", "context", "output-schema"],
+        ["model", "task", "command", "context", "lifecycle", "output-schema"],
         line,
       )
-      if (rest.length !== 3) return yield* actorArityError("spawn", '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--task <TID>] [--command <cmd>] [--context none|state|full] [--output-schema <json>]', rest, line)
+      if (rest.length !== 3) return yield* actorArityError("spawn", '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--task <TID>] [--command <cmd>] [--context none|state|full] [--lifecycle persistent] [--output-schema <json>]', rest, line)
       return {
         operation: {
           action: "spawn" as const,
@@ -174,6 +176,7 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
           ...(flags.task ? { task_id: flags.task } : {}),
           ...(flags.command ? { command: flags.command } : {}),
           ...(flags.context ? { context: flags.context } : {}),
+          ...(flags.lifecycle ? { lifecycle: flags.lifecycle } : {}),
           ...(flags["output-schema"] ? { output_schema: JSON.parse(flags["output-schema"]) } : {}),
         },
       } as ActorShellArgs
@@ -192,6 +195,9 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
         },
       } as ActorShellArgs
     }
+    case "resume":
+      if (args.length !== 1) return yield* actorArityError("resume", "<actor_id>", args, line)
+      return { operation: { action: "resume" as const, actor_id: args[0] } } as ActorShellArgs
     case "cancel":
       if (args.length !== 1) return yield* actorArityError("cancel", "<actor_id>", args, line)
       return { operation: { action: "cancel" as const, actor_id: args[0] } } as ActorShellArgs
@@ -453,6 +459,12 @@ export const ActorTool = Tool.define(
           .describe(MODEL_PARAM_DESCRIPTION),
         command: z.string().min(1).optional().describe("(optional) The command that triggered this task."),
         context: contextField,
+        lifecycle: z
+          .literal("persistent")
+          .optional()
+          .describe(
+            'Only when interrupted-work recovery is needed: requires context="full" and retains frozen context until cancelled. Omit for the normal ephemeral lifecycle.',
+          ),
         task_id: z
           .string()
           .min(1)
@@ -477,6 +489,11 @@ export const ActorTool = Tool.define(
         action: z.literal("wait"),
         actor_id: actorIdRequiredField,
         timeout_ms: timeoutField,
+      })
+
+      const resumeSchema = z.strictObject({
+        action: z.literal("resume"),
+        actor_id: actorIdRequiredField,
       })
 
       const cancelSchema = z.strictObject({
@@ -531,6 +548,7 @@ export const ActorTool = Tool.define(
             statusSchema,
             waitSchema,
             cancelSchema,
+            resumeSchema,
             sendSchema,
             modelsSchema,
           ])
@@ -543,7 +561,7 @@ export const ActorTool = Tool.define(
         const cfg = yield* config.get()
 
         // When called through exec, subagents may only use `send` to communicate
-        // with the parent. All other actions (spawn, run, cancel, status, wait,
+        // with the parent. All other actions (spawn, run, cancel, resume, status, wait,
         // models) are restricted to primary agents. Peer actors have a primary
         // agent type so they are unaffected by this guard.
         if (ctx.extra?.fromExec) {
@@ -580,6 +598,46 @@ export const ActorTool = Tool.define(
           if (peer) return { entry: peer, sessionID: sid }
           return undefined
         })
+
+        if (op.action === "resume") {
+          const callers = (yield* agent.list()).filter((item) => item.name === ctx.agent)
+          const caller =
+            ctx.actorID && ctx.actorID !== "main"
+              ? yield* actorRegistry.get(ctx.sessionID, ctx.actorID)
+              : undefined
+          if (
+            callers.length !== 1 ||
+            callers[0].mode === "subagent" ||
+            (ctx.actorID && ctx.actorID !== "main" && caller?.mode !== "peer")
+          )
+            return yield* Effect.fail(new RecoverableError("Only a primary agent or registered peer can resume actors"))
+          const found = yield* findActor(op.actor_id)
+          if (!found || found.entry.mode === "main") return unknownResponse("resume", op.actor_id)
+          if (found.sessionID !== ctx.sessionID && (yield* sessions.get(found.sessionID)).parentID !== ctx.sessionID)
+            return unknownResponse("resume", op.actor_id)
+          const actor = yield* requireActor()
+          if (!actor.resume) return yield* Effect.fail(new RecoverableError("Actor recovery is unavailable"))
+          yield* actor
+            .resume({ sessionID: found.sessionID, actorID: found.entry.actorID, signal: ctx.abort })
+            .pipe(
+              Effect.catch((error) =>
+                Effect.fail(
+                  new RecoverableError(
+                    NotFoundError.isInstance(error)
+                      ? error.data.message
+                      : error instanceof Error
+                        ? error.message
+                        : String(error),
+                  ),
+                ),
+              ),
+            )
+          return {
+            title: "Actor resume: running",
+            output: JSON.stringify({ status: "running", actor_id: found.entry.actorID }),
+            metadata: { actor_id: found.entry.actorID, status: "running" },
+          }
+        }
 
         if (op.action ==="send") {
           const inboxSvc = inboxServiceRef.current
@@ -671,8 +729,9 @@ export const ActorTool = Tool.define(
           if (!found) return unknownResponse("cancel", op.actor_id)
           const entry = found.entry
 
-          // Already terminal? No-op — return current status. Idempotent.
-          if (entry.status === "idle") {
+          // Persistent full-context actors retain recovery state while idle.
+          // They still need cancellation to release it; other idle actors stay no-op.
+          if (entry.status === "idle" && !(entry.lifecycle === "persistent" && entry.contextMode === "full")) {
             const snapshot = {
               status: entry.status,
               actor_id: entry.actorID,
@@ -722,6 +781,9 @@ export const ActorTool = Tool.define(
             : `${header} (${shown.length} of ${ordered.length}):\n${lines.join("\n")}${more}\nPass any of these to actor --model.`
           return { title: header, output, metadata: { count: shown.length, total: ordered.length, vision: !!op.vision } as Record<string, any> }
         }
+
+        if (op.action === "spawn" && op.lifecycle && op.context !== "full")
+          return yield* Effect.fail(new RecoverableError('Persistent actor spawn requires context="full"'))
 
         // op.action ==="run" or "spawn" — schema guarantees
         // description / prompt / subagent_type are present and non-empty.
@@ -836,6 +898,7 @@ export const ActorTool = Tool.define(
                 )
               }
               return {
+                modelIdentity: prefix.modelIdentity,
                 system: prefix.system,
                 tools: prefix.tools,
                 loadedMcpTools: prefix.loadedMcpTools,
@@ -882,6 +945,7 @@ export const ActorTool = Tool.define(
           tools: next.toolAllowlist ? [...next.toolAllowlist] : "INHERIT",
           model,
           background,
+          ...(op.action === "spawn" && op.lifecycle ? { lifecycle: op.lifecycle } : {}),
           ...(forkContext ? { forkContext } : {}),
           task_id: effectiveTaskId,
           onReady: ({ actorID, sessionID }) =>

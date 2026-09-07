@@ -49,6 +49,7 @@ All optional.
 | `small_model` | **Legacy / not recommended** — carried over from OpenCode for back-compat. Prefer configuring the `lite` group instead. If set, its literal `provider/model` still wins for cheap tasks (title generation, etc.); if unset, cheap tasks route through the `lite` group |
 | `model_groups` | Named capability tiers usable anywhere a model string is accepted — see [Model groups](#model-groups) |
 | `provider` | Custom provider configs & model overrides |
+| `provider.<id>.models.<model>.harness_model` | Explicit trusted GPT-5+ identity for an opaque deployment alias (for example `gpt-5.6-sol`). Used only by automatic harness inference; session/process choices and actual MiMo/GPT-4/OSS exclusions take precedence. Does not replace the API model ID. |
 | `enabled_providers` / `disabled_providers` | Allowlist / blocklist providers |
 
 For custom endpoints, adapter selection, provider reuse, credential handling, and verification, read @providers.md before editing.

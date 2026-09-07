@@ -38,6 +38,7 @@ export function provider(model: Provider.Model, harness?: HarnessMode) {
       modelID: model.id,
       modelAPIID: model.api.id,
       modelFamily: model.family,
+      harnessModel: model.harness_model,
       harness,
     }) === "codex"
   )

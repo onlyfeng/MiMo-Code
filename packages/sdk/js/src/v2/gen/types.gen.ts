@@ -2033,6 +2033,10 @@ export type ProviderConfig = {
       id?: string
       name?: string
       family?: string
+      /**
+       * Explicitly trusted canonical GPT-5 or newer identity for automatic harness inference. Does not change the API model or transport; session/process choices and MiMo/GPT-4/OSS exclusions take precedence.
+       */
+      harness_model?: string
       release_date?: string
       attachment?: boolean
       reasoning?: boolean
@@ -2897,6 +2901,10 @@ export type Model = {
   }
   name: string
   family?: string
+  /**
+   * Explicitly trusted canonical GPT-5 or newer identity for automatic harness inference. Does not change the API model or transport; session/process choices and MiMo/GPT-4/OSS exclusions take precedence.
+   */
+  harness_model?: string
   capabilities: {
     temperature: boolean
     reasoning: boolean

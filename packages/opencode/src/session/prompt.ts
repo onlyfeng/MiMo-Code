@@ -99,7 +99,7 @@ import {
   assistantFinalText,
   sessionErrorText,
 } from "./trajectory"
-import { prefixCaptureRef } from "./prefix-capture-ref"
+import { prefixCaptureRef, prefixModelIdentity } from "./prefix-capture-ref"
 import { spawnRef } from "@/actor/spawn-ref"
 import type { Interface as ActorInterface } from "@/actor/spawn"
 import { Inbox } from "@/inbox"
@@ -453,6 +453,14 @@ export interface Interface {
   readonly resume: (
     input: ResumeTurnInput,
   ) => Effect.Effect<MessageV2.WithParts, InstanceType<typeof NotFoundError> | Session.BusyError>
+  /** Internal actor lifecycle entry; never exposed by HTTP recovery/resume schemas. */
+  readonly startActorResume?: (input: {
+    sessionID: SessionID
+    actorID: string
+    modelIdentity?: string
+    validate: Effect.Effect<void, InstanceType<typeof NotFoundError>>
+    onAdmitted: Effect.Effect<void>
+  }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError>
   readonly startSummarize: (
     input: SummarizeInput,
   ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, Session.BusyError>
@@ -571,6 +579,7 @@ export const layer = Layer.effect(
         const captureSession = yield* sessions.get(input.sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
         if (!captureSession) return empty
         const capturePrompt = yield* sessions.resolvePrompt({ sessionID: input.sessionID })
+        const modelIdentity = prefixModelIdentity(model, capturePrompt.harness)
         const captureMessages = input.msgs as MessageV2.WithParts[]
         const captureUser = captureMessages.findLast((message) => message.info.role === "user")
         if (!captureUser || captureUser.info.role !== "user") return empty
@@ -580,6 +589,7 @@ export const layer = Layer.effect(
           modelID: model.id,
           modelAPIID: model.api.id ?? "",
           modelFamily: model.family ?? "",
+          harnessModel: model.harness_model,
           agent: ag.name,
           agentID: captureUser.info.agentID ?? "main",
           harness: capturePrompt.harness,
@@ -617,6 +627,7 @@ export const layer = Layer.effect(
             model.id,
             model.api.id,
             model.family,
+            model.harness_model,
           ),
           prebuiltSystem: frozen?.system,
           prompt: capturePrompt,
@@ -625,8 +636,10 @@ export const layer = Layer.effect(
           Effect.provideService(ToolRegistry.Service, registry),
           Effect.catch(() => Effect.succeed(empty)),
         )
+        if (prefixModelIdentity(model, capturePrompt.harness) !== modelIdentity) return empty
         return {
           ...prefix,
+          modelIdentity,
           ...(frozen
             ? {
                 tools: SessionPrefixSnapshot.restoreTools(frozen.tools ?? []),
@@ -1742,6 +1755,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input.model.id,
         input.model.api.id,
         input.model.family,
+        input.model.harness_model,
       )
       const run = yield* runner()
       const promptOps = yield* ops()
@@ -1876,6 +1890,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         modelID: input.model.id,
         modelAPIID: input.model.api.id,
         modelFamily: input.model.family,
+        harnessModel: input.model.harness_model,
         providerID: input.model.providerID,
         // A full-context fork inherits the parent's frozen wire membership.
         // Keep the child allowlist as an execution-time gate above instead of
@@ -3377,8 +3392,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       )
     })
 
-    const recoveryCandidates = Effect.fn("SessionPrompt.recoveryCandidates")(function* (sessionID: SessionID) {
-      const msgs = yield* sessions.messages({ sessionID, agentID: "main" })
+    const recoveryCandidates = Effect.fn("SessionPrompt.recoveryCandidates")(function* (sessionID: SessionID, agentID = "main") {
+      const msgs = yield* sessions.messages({ sessionID, agentID })
       const candidates: RecoveryCandidate[] = []
       for (const [index, msg] of msgs.entries()) {
         if (msg.info.role !== "assistant" || "completed" in msg.info.time) continue
@@ -3403,10 +3418,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     const abandonRecoveredAssistant = Effect.fn("SessionPrompt.abandonRecoveredAssistant")(function* (input: {
       sessionID: SessionID
       assistantMessageID: MessageID
+      agentID?: string
+      expectedParentID?: MessageID
     }) {
-      const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
+      const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
       const message = messages.find((item) => item.info.id === input.assistantMessageID)
       if (!message || message.info.role !== "assistant" || "completed" in message.info.time) return
+      if (
+        input.expectedParentID &&
+        (message.info.parentID !== input.expectedParentID ||
+          messages.findLast((item) => item.info.role === "user")?.info.id !== input.expectedParentID ||
+          messages.findLast((item) => item.info.role === "assistant")?.info.id !== message.info.id)
+      )
+        return yield* Effect.fail(new NotFoundError({ message: "Actor recovery candidate changed before settlement" }))
       yield* sessions.updateMessage({
         ...message.info,
         time: { ...message.info.time, completed: Date.now() },
@@ -3418,10 +3442,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       sessionID: SessionID,
       agentID?: string,
       titleLocale?: string,
+      resumeIdentity?: string,
+      recoveryParentID?: MessageID,
     ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(function* (
       sessionID: SessionID,
       agentID?: string,
       titleLocale?: string,
+      resumeIdentity?: string,
+      recoveryParentID?: MessageID,
     ) {
       const ctx = yield* InstanceState.context
       const slog = elog.with({ sessionID })
@@ -4045,7 +4073,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // must not touch session-level status (Runner.onBusy is Effect.void
           // for non-main actors per F47).
           if (!agentID || agentID === "main") yield* status.set(sessionID, { type: "busy" })
-          yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
+          if (!resumeIdentity) yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
           yield* slog.info("loop", { step })
 
           // F37: filter by agentID so subagent slices stay isolated from the
@@ -4075,6 +4103,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+          if (recoveryParentID && lastUser.id !== recoveryParentID)
+            return yield* Effect.die(new Error("Actor recovery user changed during the resumed turn"))
           lastUser = {
             ...lastUser,
             system: sessionPrompt.system,
@@ -4281,6 +4311,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
 
           const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID, lastUser)
+          if (resumeIdentity && prefixModelIdentity(model, sessionPrompt.harness) !== resumeIdentity)
+            return yield* Effect.die(new Error("Actor model identity changed during recovery"))
           lastModelForPrune = model
           lastFinishedForPrune = usageRecovered ? undefined : lastFinished
           const task = tasks.pop()
@@ -4878,6 +4910,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               modelID: model.id,
               modelAPIID: model.api.id ?? "",
               modelFamily: model.family ?? "",
+              harnessModel: model.harness_model,
               agent: agent.name,
               agentID: lastUser.agentID ?? "main",
               harness: sessionPrompt.harness,
@@ -5767,38 +5800,82 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       )
     })
 
-    const startResume = Effect.fn("SessionPrompt.startResume")(function* (input: ResumeTurnInput) {
+    const startResumeTurn = Effect.fn("SessionPrompt.startResumeTurn")(function* (input: {
+      sessionID: SessionID
+      actorID: string
+      assistantMessageID?: MessageID
+      titleLocale?: string
+      validate?: Effect.Effect<void, InstanceType<typeof NotFoundError>>
+      onAdmitted?: Effect.Effect<void>
+      resumeIdentity?: string
+    }) {
       const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError>>()
+      const recovered: { id?: MessageID; parentID?: MessageID } = {}
+      const abandon = Effect.suspend(() =>
+        recovered.id
+          ? abandonRecoveredAssistant({
+              sessionID: input.sessionID,
+              assistantMessageID: recovered.id,
+              agentID: input.actorID,
+              expectedParentID: input.resumeIdentity ? recovered.parentID : undefined,
+            })
+          : Effect.void,
+      )
       const validate = Effect.gen(function* () {
-        const candidates = yield* recoveryCandidates(input.sessionID)
-        if (!candidates.some((item) => item.assistantMessageID === input.assistantMessageID))
+        const candidates = yield* recoveryCandidates(input.sessionID, input.actorID)
+        const candidate = input.assistantMessageID
+          ? candidates.find((item) => item.assistantMessageID === input.assistantMessageID)
+          : candidates.at(-1)
+        if (!candidate)
           return yield* Effect.fail(
             new NotFoundError({
-              message: "No resumable interrupted turn found for assistant message " + input.assistantMessageID,
+              message: "No resumable interrupted turn found for " + (input.assistantMessageID ?? input.actorID),
             }),
           )
-        // Settle only after runner admission and candidate validation, before
-        // reporting admission or entering runLoop. Its finalizer stays idempotent.
-        return yield* abandonRecoveredAssistant(input)
+        if (input.validate) {
+          yield* input.validate
+          const current = yield* recoveryCandidates(input.sessionID, input.actorID)
+          if (
+            !current.some(
+              (item) =>
+                item.assistantMessageID === candidate.assistantMessageID &&
+                item.parentMessageID === candidate.parentMessageID,
+            )
+          )
+            return yield* Effect.fail(
+              new NotFoundError({ message: "Actor recovery candidate changed during validation" }),
+            )
+        }
+        recovered.id = candidate.assistantMessageID
+        recovered.parentID = candidate.parentMessageID
+        // Runner owns the actor before validation and settlement. Inbox messages
+        // stay queued for the entire recovered turn, preserving its original user.
+        if (input.onAdmitted) yield* input.onAdmitted
+        yield* abandon
       })
       const completion = yield* state.startRunning(
         input.sessionID,
-        "main",
-        lastAssistant(input.sessionID, "main"),
+        input.actorID,
+        lastAssistant(input.sessionID, input.actorID),
         validate.pipe(
           Effect.onExit((exit) => Deferred.done(admitted, Exit.isSuccess(exit) ? Exit.void : exit).pipe(Effect.ignore)),
           Effect.orDie,
           Effect.andThen(
-            runLoop(input.sessionID, "main", input.titleLocale).pipe(
+            Effect.suspend(() =>
+              runLoop(
+                input.sessionID,
+                input.actorID,
+                input.titleLocale,
+                input.resumeIdentity,
+                input.resumeIdentity ? recovered.parentID : undefined,
+              ),
+            ).pipe(
               Effect.ensuring(
-                abandonRecoveredAssistant({
-                  sessionID: input.sessionID,
-                  assistantMessageID: input.assistantMessageID,
-                }).pipe(
+                abandon.pipe(
                   Effect.catchCause((cause) =>
                     elog.warn("recovered-assistant-abandon-failed", {
                       sessionID: input.sessionID,
-                      messageID: input.assistantMessageID,
+                      messageID: recovered.id,
                       cause,
                     }),
                   ),
@@ -5817,6 +5894,26 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return yield* Effect.failCause(admission.cause)
     })
 
+    const startResume = (input: ResumeTurnInput) => startResumeTurn({ ...input, actorID: "main" })
+    const startActorResume: NonNullable<Interface["startActorResume"]> = (input) =>
+      startResumeTurn({
+        ...input,
+        resumeIdentity: input.modelIdentity,
+        validate: Effect.gen(function* () {
+          const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.actorID })
+          const user = messages.findLast((message) => message.info.role === "user")?.info
+          if (!input.modelIdentity || user?.role !== "user")
+            return yield* Effect.fail(new NotFoundError({ message: "Actor frozen model identity is unavailable" }))
+          const model = yield* provider
+            .getModel(user.model.providerID, user.model.modelID)
+            .pipe(Effect.catch(() => Effect.fail(new NotFoundError({ message: "Actor frozen model is unavailable" }))))
+          const prompt = yield* sessions.resolvePrompt({ sessionID: input.sessionID })
+          if (prefixModelIdentity(model, prompt.harness) !== input.modelIdentity)
+            return yield* Effect.fail(new NotFoundError({ message: "Actor frozen model identity has changed" }))
+          yield* input.validate
+        }),
+      })
+
     const resume = Effect.fn("SessionPrompt.resume")(function* (input: ResumeTurnInput) {
       return yield* yield* startResume(input)
     })
@@ -5827,6 +5924,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       startPrompt,
       recovery,
       startResume,
+      startActorResume,
       resume,
       startSummarize,
       loop,

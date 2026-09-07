@@ -376,3 +376,29 @@ describe("actor.shell.parse: full parity flags", () => {
     expect(Number.isNaN(op.timeout_ms)).toBe(true)
   })
 })
+
+describe("actor.shell.parse: resume", () => {
+  test("spawn explicitly opts into persistent full context for later recovery", async () => {
+    expect(await parse('actor spawn general "lookup" "read it" --context full --lifecycle persistent')).toEqual([
+      {
+        operation: {
+          action: "spawn",
+          subagent_type: "general",
+          description: "lookup",
+          prompt: "read it",
+          context: "full",
+          lifecycle: "persistent",
+        },
+      },
+    ])
+  })
+
+  test("resume selects one registered actor without a task selector", async () => {
+    expect(await parse("actor resume explore-1")).toEqual([{ operation: { action: "resume", actor_id: "explore-1" } }])
+  })
+  test("resume rejects missing target and extra task selector", async () => {
+    for (const script of ["actor resume", "actor resume explore-1 --task T1", "actor resume explore-1 other"]) {
+      expect((await Effect.runPromise(Effect.exit(parseActorScript(script))))._tag).toBe("Failure")
+    }
+  })
+})

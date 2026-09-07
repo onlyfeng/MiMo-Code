@@ -1,0 +1,390 @@
+{
+  "date": "2026-09-07",
+  "decision": "experiment_only_no_production_change",
+  "candidateTools": ["read", "glob", "grep"],
+  "toolCount": 20,
+  "harness": "default",
+  "fixtureSeed": "schema-20260907",
+  "modelSamplingSeed": null,
+  "catalog": {
+    "baselineMeasure": {
+      "sha256": "730e8b153a06781adcf7636847b856fe488a6480b238e98b3876e6415b7be469",
+      "utf8Bytes": 78802,
+      "characters": 78595,
+      "estimatedTokens": 19649,
+      "exactTokens": null
+    },
+    "compactMeasure": {
+      "sha256": "6e0f003a8eff608263106ec467aaa0c59ac2b365be280f5299e92c1da502dce6",
+      "utf8Bytes": 76761,
+      "characters": 76554,
+      "estimatedTokens": 19139,
+      "exactTokens": null
+    },
+    "constraintsEqual": true,
+    "nonCandidatesEqual": true,
+    "nonCandidateHash": "00ab05e44029a39850cbf99f338cc70f3e09a2e73c82d701086fdf0bf9789c12",
+    "declarationRevision": "after_explicit_spawn_lifecycle_and_wait_documentation",
+    "liveValidated": false,
+    "namedEncodingTokens": {
+      "baseline": 18222,
+      "compact": 17732
+    },
+    "actorHelpFiles": {
+      "actor.txt": "a6ef9686e8de307b7b3e74733bd34e9a3bff259fab9076473470883a343acdd0",
+      "actor.checkpoint.txt": "fcfe24381c3afe98b552b454f0ca12f3148fe1452704d0cdac09ef9987b94f0d"
+    },
+    "changesSinceLiveCatalog": [
+      {
+        "tool": "actor",
+        "changedPaths": ["description", "parameters.properties.operation.anyOf[0].properties.lifecycle"],
+        "lifecycleChange": "Optional lifecycle= persistent field was absent from the live snapshot and present in final offline declarations"
+      }
+    ]
+  },
+  "offline": {
+    "model": {
+      "providerID": "schema",
+      "modelID": "schema-offline",
+      "apiID": "schema-offline",
+      "npm": "@ai-sdk/openai-compatible",
+      "family": null,
+      "harnessModel": null,
+      "harness": "default"
+    },
+    "environment": {
+      "packageTestPreload": true,
+      "orchestrator": true,
+      "isolationRootProvided": false
+    },
+    "runs": 24,
+    "replayCompleted": 24,
+    "requests": 64,
+    "validationErrors": 0,
+    "deniedCalls": 0,
+    "toolDeclarationsOnWire": {
+      "baseline": {
+        "sha256": "760edb348cbcea89dd2301151058f83b83996d64e2b05699f529d34d4397156d",
+        "utf8Bytes": 79422,
+        "tokens": 18342,
+        "requestsWithSameDeclaration": 32
+      },
+      "compact": {
+        "sha256": "72149828100901e4572900071f04132ae1b03a62b991f597699c709f30e767b9",
+        "utf8Bytes": 77381,
+        "tokens": 17852,
+        "requestsWithSameDeclaration": 32
+      }
+    },
+    "liveTaskCompletionRate": null,
+    "providerUsage": null,
+    "harnessMembership": [
+      {
+        "harness": "auto",
+        "tools": [
+          "invalid",
+          "question",
+          "bash",
+          "read",
+          "glob",
+          "grep",
+          "edit",
+          "write",
+          "notebook_edit",
+          "actor",
+          "webfetch",
+          "mcp_tool_search",
+          "skill_search",
+          "skill",
+          "plan_exit",
+          "memory",
+          "history",
+          "task",
+          "cron",
+          "workflow"
+        ]
+      },
+      {
+        "harness": "codex",
+        "tools": [
+          "invalid",
+          "question",
+          "bash",
+          "view_image",
+          "actor",
+          "webfetch",
+          "mcp_tool_search",
+          "skill_search",
+          "skill",
+          "apply_patch",
+          "plan_exit",
+          "memory",
+          "history",
+          "task",
+          "exec",
+          "cron",
+          "workflow"
+        ]
+      },
+      {
+        "harness": "default",
+        "tools": [
+          "invalid",
+          "question",
+          "bash",
+          "read",
+          "glob",
+          "grep",
+          "edit",
+          "write",
+          "notebook_edit",
+          "actor",
+          "webfetch",
+          "mcp_tool_search",
+          "skill_search",
+          "skill",
+          "plan_exit",
+          "memory",
+          "history",
+          "task",
+          "cron",
+          "workflow"
+        ]
+      }
+    ],
+    "sourceArtifact": {
+      "name": "schema-offline-release.json",
+      "sha256": "4792df09415430ce9b863786b6b4d08cfe37067eb7a202e493da779673230f22"
+    },
+    "suite": {
+      "tests": 19,
+      "passed": 19,
+      "failed": 0,
+      "assertions": 113,
+      "log": "schema-suite-release.log",
+      "logSha256": "97bf6466d807f6fabf54935364e3281c8db3367d806d8fad954f6abfd5424ca5"
+    },
+    "executionErrors": 0,
+    "wireEvidence": {
+      "source": "local_http_request",
+      "scope": "synthetic_request_body",
+      "status": "complete",
+      "capturedRequests": 64,
+      "missingRequests": 0
+    },
+    "reduction": {
+      "catalogBytes": 2041,
+      "catalogPercent": 2.590035785893763,
+      "wireBytes": 2041,
+      "wirePercent": 2.5698169272997395,
+      "wireTokens": 490,
+      "wireTokenPercent": 2.671464398647916
+    },
+    "shellHelpFollowup": {
+      "changedFile": "packages/opencode/src/tool/actor.shell.txt",
+      "changedFileSha256": "5386e2da6fb289a58cf96c8012248544ef624b5e51560e7c6543f8b169d2a3a1",
+      "includedInDefaultHarnessDeclarations": false,
+      "sourceArtifact": {
+        "name": "schema-offline-shell-check.json",
+        "sha256": "d3622dffccf9d842fe664bdaee1fa4183043c7ffc3a6b0c4068c4fe1a137706d"
+      },
+      "catalogUnchanged": true,
+      "wireToolsUnchanged": true,
+      "replayCompleted": 24,
+      "requests": 64,
+      "log": "schema-shell-check.log"
+    }
+  },
+  "tokenizer": {
+    "name": "o200k_base",
+    "library": "tiktoken",
+    "version": "0.12.0",
+    "vocabularyFiles": [
+      {
+        "cacheKey": "fb374d419588a4632f3f557e76b4b70aebbca790",
+        "sha256": "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d"
+      }
+    ],
+    "claim": "Named tokenizer applied to JSON tools from a local SDK HTTP stub; not provider billing tokens"
+  },
+  "liveFinalPilot": {
+    "model": {
+      "providerID": "gz4399-codex",
+      "modelID": "gpt-6-astra",
+      "apiID": "gpt-6-astra",
+      "npm": "@ai-sdk/openai-compatible",
+      "family": "gpt-6",
+      "harnessModel": null,
+      "harness": "default"
+    },
+    "environment": {
+      "packageTestPreload": false,
+      "orchestrator": false,
+      "isolationRootProvided": true
+    },
+    "limits": {
+      "cases": 1,
+      "repeats": 1,
+      "maxSteps": 3,
+      "maxOutputTokens": 1024
+    },
+    "timeoutMs": 30000,
+    "maxRetries": 0,
+    "wireEvidence": {
+      "source": "sdk_request_metadata",
+      "scope": "tools_only",
+      "status": "missing",
+      "capturedRequests": 0,
+      "missingRequests": 2
+    },
+    "runs": [
+      {
+        "arm": "baseline",
+        "case": "glob-read",
+        "repeat": 0,
+        "termination": "provider_error",
+        "requests": 1,
+        "toolCalls": 0,
+        "errorCategory": "timeout",
+        "statusCode": null,
+        "providerUsage": []
+      },
+      {
+        "arm": "compact",
+        "case": "glob-read",
+        "repeat": 0,
+        "termination": "provider_error",
+        "requests": 1,
+        "toolCalls": 0,
+        "errorCategory": "timeout",
+        "statusCode": null,
+        "providerUsage": []
+      }
+    ],
+    "validToolEvaluations": 0,
+    "schemaErrorRate": null,
+    "modelTaskCompletionRate": null,
+    "harnessMembership": [
+      {
+        "harness": "auto",
+        "tools": [
+          "invalid",
+          "question",
+          "bash",
+          "view_image",
+          "actor",
+          "webfetch",
+          "mcp_tool_search",
+          "skill_search",
+          "skill",
+          "apply_patch",
+          "plan_exit",
+          "memory",
+          "history",
+          "task",
+          "exec",
+          "cron",
+          "workflow"
+        ]
+      },
+      {
+        "harness": "codex",
+        "tools": [
+          "invalid",
+          "question",
+          "bash",
+          "view_image",
+          "actor",
+          "webfetch",
+          "mcp_tool_search",
+          "skill_search",
+          "skill",
+          "apply_patch",
+          "plan_exit",
+          "memory",
+          "history",
+          "task",
+          "exec",
+          "cron",
+          "workflow"
+        ]
+      },
+      {
+        "harness": "default",
+        "tools": [
+          "invalid",
+          "question",
+          "bash",
+          "read",
+          "glob",
+          "grep",
+          "edit",
+          "write",
+          "notebook_edit",
+          "actor",
+          "webfetch",
+          "mcp_tool_search",
+          "skill_search",
+          "skill",
+          "plan_exit",
+          "memory",
+          "history",
+          "task",
+          "cron",
+          "workflow"
+        ]
+      }
+    ],
+    "catalogSnapshot": {
+      "baselineMeasure": {
+        "sha256": "33f5670d5dc435d9ed7541a3a6b18ab892eb9c3b180a81cfee7f4b418895f8f9",
+        "utf8Bytes": 77830,
+        "characters": 77623,
+        "estimatedTokens": 19406,
+        "exactTokens": null
+      },
+      "compactMeasure": {
+        "sha256": "599c4c82fc5a92a076413d39c051cc7f8d5c5875f73ab833cdffee0f5e908f9c",
+        "utf8Bytes": 75789,
+        "characters": 75582,
+        "estimatedTokens": 18896,
+        "exactTokens": null
+      },
+      "constraintsEqual": true,
+      "nonCandidatesEqual": true,
+      "nonCandidateHash": "911371e8bc09dee976adb26a92d1a6d4b8b6870f4d50b9e35788bad0e088b066",
+      "sourceArtifact": {
+        "name": "schema-live-final-pilot.json",
+        "sha256": "79602415a376f5cd0ceaccf81cd55b0cfa7c7002b93ff68005247851135fc3bf"
+      },
+      "declarationRevision": "before_explicit_spawn_lifecycle_and_wait_documentation",
+      "scope": "Registry declaration snapshot only; no successful SDK wire metadata was captured"
+    },
+    "finalOfflineDeclarationsLiveValidated": false
+  },
+  "liveAttemptHistory": {
+    "totalRequests": 6,
+    "beforeRunnerReview": {
+      "requests": 2,
+      "reasonClassified": false,
+      "includedInComparison": false
+    },
+    "classifiedBeforeOptionsCorrection": {
+      "requests": 2,
+      "timeouts": 2,
+      "includedInComparison": false
+    },
+    "finalRunner": {
+      "requests": 2,
+      "timeouts": 2,
+      "validToolEvaluations": 0
+    }
+  },
+  "scopeLimits": [
+    "Synthetic read/glob/grep tasks only",
+    "No default Codex harness savings claim",
+    "No live billing usage or successful wire metadata",
+    "No candidate declaration compression enabled in production",
+    "Live final pilot predates the explicit actor spawn lifecycle field and final lifecycle/wait documentation; final declarations were rechecked offline only"
+  ]
+}

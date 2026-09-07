@@ -17,8 +17,29 @@ import type { Effect } from "effect"
 import type { SessionID } from "./schema"
 import type { ModelMessage, Tool as AITool } from "ai"
 import type { Permission } from "../permission"
+import type { Provider } from "../provider"
+import { resolveHarnessMode, type HarnessMode } from "../tool/gpt"
+
+/** Decisions that choose the request harness and tool membership. No credentials. */
+export const prefixModelIdentity = (model: Provider.Model, harness?: HarnessMode) =>
+  JSON.stringify([
+    model.providerID,
+    model.id,
+    model.api.id,
+    model.api.npm,
+    model.family ?? null,
+    model.harness_model ?? null,
+    resolveHarnessMode({
+      modelID: model.id,
+      modelAPIID: model.api.id,
+      modelFamily: model.family,
+      harnessModel: model.harness_model,
+      harness,
+    }),
+  ])
 
 export interface PrefixCaptureResult {
+  readonly modelIdentity?: string
   readonly system: string[]
   readonly tools: Record<string, AITool>
   readonly loadedMcpTools?: readonly string[]

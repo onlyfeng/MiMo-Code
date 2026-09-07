@@ -431,6 +431,7 @@ export const layer: Layer.Layer<
         modelID: parentModel.id,
         modelAPIID: parentModel.api.id ?? "",
         modelFamily: parentModel.family ?? "",
+        harnessModel: parentModel.harness_model,
         agent: parentAgent.name,
         agentID: requestUser.info.agentID ?? "main",
         harness: promptConfig.harness,

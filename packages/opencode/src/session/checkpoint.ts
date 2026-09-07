@@ -901,6 +901,7 @@ export const layer: Layer.Layer<
                 msgs: msgsAtWatermark,
               })
               return {
+                modelIdentity: prefix.modelIdentity,
                 system: prefix.system,
                 tools: prefix.tools,
                 loadedMcpTools: prefix.loadedMcpTools,

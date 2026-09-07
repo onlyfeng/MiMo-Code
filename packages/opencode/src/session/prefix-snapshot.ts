@@ -14,6 +14,7 @@ type Profile = {
   modelID: string
   modelAPIID: string
   modelFamily: string
+  harnessModel?: string
   agent: string
   agentID: string
   harness: string

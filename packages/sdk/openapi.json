@@ -15155,6 +15155,11 @@
                 "family": {
                   "type": "string"
                 },
+                "harness_model": {
+                  "description": "Explicitly trusted canonical GPT-5 or newer identity for automatic harness inference. Does not change the API model or transport; session/process choices and MiMo/GPT-4/OSS exclusions take precedence.",
+                  "type": "string",
+                  "pattern": "^gpt-(?:[5-9]|[1-9][0-9]+)(?:\\.[0-9]+)*(?:-(?!oss(?:-|$)|mimo(?:-|$)|gpt-4)[a-z0-9]+)*$"
+                },
                 "release_date": {
                   "type": "string"
                 },
@@ -16802,6 +16807,11 @@
           },
           "family": {
             "type": "string"
+          },
+          "harness_model": {
+            "description": "Explicitly trusted canonical GPT-5 or newer identity for automatic harness inference. Does not change the API model or transport; session/process choices and MiMo/GPT-4/OSS exclusions take precedence.",
+            "type": "string",
+            "pattern": "^gpt-(?:[5-9]|[1-9][0-9]+)(?:\\.[0-9]+)*(?:-(?!oss(?:-|$)|mimo(?:-|$)|gpt-4)[a-z0-9]+)*$"
           },
           "capabilities": {
             "type": "object",

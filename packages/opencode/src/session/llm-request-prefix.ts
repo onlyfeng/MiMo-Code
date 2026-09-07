@@ -108,6 +108,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     modelID: input.model.id,
     modelAPIID: input.model.api.id,
     modelFamily: input.model.family,
+    harnessModel: input.model.harness_model,
     providerID: input.model.providerID,
     agent: input.agent,
     permission: input.permission,
