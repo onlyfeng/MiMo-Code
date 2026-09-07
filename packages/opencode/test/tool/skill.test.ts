@@ -84,7 +84,7 @@ Use this skill.
 
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
-          const tool = (yield* registry.tools({
+          const tool = (yield* registry.registered({
             providerID: "opencode" as any,
             modelID: "gpt-5" as any,
             agent,
@@ -122,7 +122,7 @@ Use this skill.
         Effect.gen(function* () {
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
-          const tool = (yield* registry.tools({
+          const tool = (yield* registry.registered({
             providerID: "opencode" as any,
             modelID: "gpt-5" as any,
             agent,
@@ -169,7 +169,7 @@ description: Secret skill that must not be enumerated.
 
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
-          const tool = (yield* registry.tools({
+          const tool = (yield* registry.registered({
             providerID: "opencode" as any,
             modelID: "gpt-5" as any,
             agent,
@@ -226,10 +226,7 @@ description: Exact skill for direct load boundary tests.
             tool.execute({ name: "direct-load" }, { ...base, agent: "title", messages: [] }),
           )
 
-          expect([messageDisabled, allowlistHidden].map((exit) => exit._tag)).toEqual([
-            "Failure",
-            "Failure",
-          ])
+          expect([messageDisabled, allowlistHidden].map((exit) => exit._tag)).toEqual(["Failure", "Failure"])
         }),
       { git: true },
     ),
@@ -269,7 +266,7 @@ description: Anyone may start this one.
 
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
-          const tool = (yield* registry.tools({
+          const tool = (yield* registry.registered({
             providerID: "opencode" as any,
             modelID: "gpt-5" as any,
             agent,

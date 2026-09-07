@@ -7,7 +7,12 @@ import path from "path"
 import { evalScript } from "../../src/workflow/sandbox"
 import { Agent } from "../../src/agent/agent"
 import { Truncate, Tool } from "../../src/tool"
-import { ToolScriptTool, renderToolScriptDeclarations, viewExecSubtools, type ExecSubPartSnapshot } from "../../src/tool/tool-script"
+import {
+  ToolScriptTool,
+  renderToolScriptDeclarations,
+  viewExecSubtools,
+  type ExecSubPartSnapshot,
+} from "../../src/tool/tool-script"
 import { RecoverableError } from "../../src/tool/recoverable"
 import { toolScriptRegistry, TOOL_SCRIPT_EXCLUDED } from "../../src/tool/tool-script-ref"
 import { Instance } from "../../src/project/instance"
@@ -15,6 +20,10 @@ import { Plugin } from "../../src/plugin"
 import { Bus } from "../../src/bus"
 import { Metrics } from "../../src/metrics"
 import { ModelID, ProviderID } from "../../src/provider/schema"
+import { MessageV2 } from "../../src/session/message-v2"
+import { buildFileManifest } from "../../src/session/compaction"
+import { TryBestMonitor } from "../../src/session/try-best-detector"
+import { sessionMutatedMainWorktrees } from "../../src/tool/auto-worktree-hint"
 
 describe("sandbox non-deterministic mode", () => {
   test("deterministic:false keeps Date and Math.random", async () => {
@@ -71,6 +80,7 @@ describe("sandbox non-deterministic mode", () => {
 })
 
 let cancelledTool: string | undefined
+let rewrittenArgs: { tool: string; args: unknown } | undefined
 const hookCalls = { before: [] as string[], after: [] as string[] }
 const plugin = Layer.succeed(
   Plugin.Service,
@@ -80,6 +90,8 @@ const plugin = Layer.succeed(
         const tool = (input as { tool?: string }).tool
         if (name === "tool.execute.before" && tool) {
           hookCalls.before.push(tool)
+          if (rewrittenArgs?.tool === tool && output && typeof output === "object")
+            Object.assign(output, { args: rewrittenArgs.args })
           if (tool === cancelledTool && output && typeof output === "object")
             Object.assign(output, { cancel: true, cancelReason: "blocked by test hook" })
         }
@@ -109,9 +121,7 @@ const bus = Layer.succeed(
     subscribeAllCallback: () => Effect.succeed(() => {}),
   }),
 )
-const runtime = ManagedRuntime.make(
-  Layer.mergeAll(Truncate.defaultLayer, Agent.defaultLayer, plugin, bus),
-)
+const runtime = ManagedRuntime.make(Layer.mergeAll(Truncate.defaultLayer, Agent.defaultLayer, plugin, bus))
 
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mimocode-test-toolscript-"))
 afterAll(async () => {
@@ -125,9 +135,7 @@ function fakeDef(id: string, execute: (args: any) => Promise<string>): Tool.Def 
     description: `fake ${id}`,
     parameters: z.object({ value: z.string().optional() }),
     execute: (args: any) =>
-      Effect.promise(() => execute(args)).pipe(
-        Effect.map((output) => ({ title: id, output, metadata: {} })),
-      ),
+      Effect.promise(() => execute(args)).pipe(Effect.map((output) => ({ title: id, output, metadata: {} }))),
   }
 }
 
@@ -136,7 +144,8 @@ async function runToolScript(
   defs: Tool.Def[],
   abort?: AbortSignal,
   opts?: {
-    ask?: () => Effect.Effect<void>
+    ask?: Tool.Context["ask"]
+    requestTools?: Tool.Def[]
     maxToolCalls?: number
     timeoutSeconds?: number
     toolWhitelist?: Set<string> | string[]
@@ -178,6 +187,7 @@ async function runToolScript(
               callID: "call_test",
               extra: {
                 ...(opts?.model ? { model: opts.model } : {}),
+                ...(opts?.requestTools ? { execTools: { current: opts.requestTools } } : {}),
                 ...(opts?.toolWhitelist ? { toolWhitelist: opts.toolWhitelist } : {}),
                 ...(opts?.mcp ? { execMcp: { current: opts.mcp } } : {}),
               },
@@ -196,6 +206,350 @@ async function runToolScript(
 }
 
 describe("exec", () => {
+  test("uses request-scoped executable definitions without consulting the live registry", async () => {
+    let registryCalls = 0
+    const result = await runToolScript(
+      `return (await tools.pinned({})).output`,
+      [fakeDef("fresh", async () => "new authority")],
+      undefined,
+      {
+        requestTools: [fakeDef("pinned", async () => "frozen authority")],
+        onRegistryInput: () => registryCalls++,
+      },
+    )
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output).toContain("frozen authority")
+    expect(registryCalls).toBe(0)
+  })
+
+  test("empty request-scoped executable definitions never fall back to the live registry", async () => {
+    let called = false
+    const result = await runToolScript(
+      `try { await tools.secret({}) } catch (error) { return error.message }`,
+      [
+        fakeDef("secret", async () => {
+          called = true
+          return "unexpected"
+        }),
+      ],
+      undefined,
+      { requestTools: [] },
+    )
+    expect(result.output).toContain("unknown tool: secret")
+    expect(called).toBe(false)
+  })
+
+  test("nested approval receives its child call and the actual arguments after hooks", async () => {
+    const requests: unknown[] = []
+    const controller = new AbortController()
+    let nestedSignal: AbortSignal | undefined
+    const parameters = z.object({ value: z.string() })
+    const guarded: Tool.Def<typeof parameters> = {
+      id: "guarded",
+      description: "Permission-bearing nested operation",
+      parameters,
+      execute: (args, ctx) =>
+        Effect.gen(function* () {
+          nestedSignal = ctx.abort
+          yield* ctx.ask({ permission: "guarded", patterns: [args.value], always: [], metadata: {} })
+          return { title: "guarded", output: args.value, metadata: {} }
+        }),
+    }
+    rewrittenArgs = { tool: "guarded", args: { value: "after hook" } }
+    try {
+      const result = await runToolScript(
+        `return await tools.guarded({ value: "before hook" })`,
+        [guarded],
+        controller.signal,
+        {
+          ask: (request, invocation) =>
+            Effect.sync(() => {
+              requests.push({ request, invocation })
+            }),
+        },
+      )
+      expect(result.metadata.status).toBe("completed")
+      expect(requests).toEqual([
+        {
+          request: { permission: "guarded", patterns: ["after hook"], always: [], metadata: {} },
+          invocation: { callID: "call_test:1", abort: nestedSignal, input: { value: "after hook" } },
+        },
+      ])
+      expect(nestedSignal).not.toBe(controller.signal)
+      expect(viewExecSubtools(result.metadata)[0]?.state.input).toEqual({ value: "after hook" })
+    } finally {
+      rewrittenArgs = undefined
+    }
+  })
+
+  test("early termination interrupts Effect-only nested waits and joins their cleanup", async () => {
+    const release = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<void>()
+    let cleaned = false
+    let settled = false
+    const waiting: Tool.Def = {
+      id: "waiting",
+      description: "A nested operation waiting on an Effect rather than ctx.abort",
+      parameters: z.object({}),
+      execute: () =>
+        Effect.promise(() => {
+          started.resolve()
+          return release.promise
+        }).pipe(
+          Effect.as({ title: "waiting", output: "released", metadata: {} }),
+          Effect.ensuring(
+            Effect.promise(async () => {
+              await new Promise((resolve) => setTimeout(resolve, 25))
+              cleaned = true
+            }),
+          ),
+        ),
+    }
+    const pending = runToolScript(`tools.waiting({}); throw new Error("terminate outer exec")`, [waiting]).then(
+      (result) => {
+        settled = true
+        return result
+      },
+    )
+    try {
+      await started.promise
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(settled).toBe(true)
+      expect(cleaned).toBe(true)
+      expect((await pending).metadata.status).toBe("code_error")
+    } finally {
+      release.resolve()
+      await pending
+    }
+  })
+  test("exec_command strictly maps its public milliseconds input to the bash executor", async () => {
+    const received: unknown[] = []
+    const bash: Tool.Def = {
+      id: "bash",
+      description: "Run a shell command",
+      parameters: z.object({ command: z.string(), timeout: z.number(), description: z.string() }),
+      execute: (args) =>
+        Effect.sync(() => {
+          received.push(args)
+          return { title: "shell", output: "mapped", metadata: {} }
+        }),
+    }
+    const result = await runToolScript(
+      `return await tools.exec_command({ cmd: "pwd", yield_time_ms: 23, max_output_tokens: 31, workdir: "/tmp", description: "Inspect cwd" })`,
+      [bash],
+    )
+    expect(result.metadata.status).toBe("completed")
+    expect(received).toEqual([
+      { command: "pwd", timeout: 23, max_output_tokens: 31, workdir: "/tmp", description: "Inspect cwd" },
+    ])
+    const declarations = renderToolScriptDeclarations([bash])
+    expect(declarations).toContain("exec_command(input: { cmd: string;")
+    expect(declarations).toContain("yield_time_ms?: number")
+  })
+
+  test("exec_command preserves canonical bash policy hook cancellation", async () => {
+    let calls = 0
+    cancelledTool = "bash"
+    try {
+      const result = await runToolScript(`return await tools.exec_command({ cmd: "pwd" })`, [
+        fakeDef("bash", async () => {
+          calls++
+          return "unexpected"
+        }),
+      ])
+      expect(result.metadata.status).toBe("completed")
+      expect(result.output).toContain("blocked by test hook")
+      expect(calls).toBe(0)
+      expect(viewExecSubtools(result.metadata)[0]?.tool).toBe("exec_command")
+    } finally {
+      cancelledTool = undefined
+    }
+  })
+
+  test("exec_command rejects unknown fields and invalid millisecond budgets before bash admission", async () => {
+    let calls = 0
+    const bash = fakeDef("bash", async () => {
+      calls++
+      return "unexpected"
+    })
+    for (const input of [
+      { cmd: "pwd", yieldTimeMs: 100 },
+      { command: "pwd" },
+      { cmd: "pwd", yield_time_ms: 0 },
+      { cmd: "pwd", yield_time_ms: -1 },
+      { cmd: "pwd", yield_time_ms: 1.5 },
+      { cmd: "pwd", max_output_tokens: 0 },
+    ]) {
+      const result = await runToolScript(`return await tools.exec_command(${JSON.stringify(input)})`, [bash])
+      expect(result.metadata.status).toBe("code_error")
+      expect(result.output).not.toContain("unknown tool")
+    }
+    expect(calls).toBe(0)
+  })
+
+  test("forwards authorized nested attachments on every outer terminal path", async () => {
+    const attachment = {
+      type: "file" as const,
+      mime: "image/png",
+      url: "data:image/png;base64,aGVsbG8=",
+      filename: "image.png",
+    }
+    const image: Tool.Def = {
+      id: "image",
+      description: "Authorized image result",
+      parameters: z.object({}),
+      execute: () =>
+        Effect.succeed({ title: "image", output: "image loaded", metadata: {}, attachments: [attachment] }),
+    }
+    for (const [code, status] of [
+      ['return "requested image"', "completed"],
+      ['throw new Error("later script failure")', "code_error"],
+      ['return "x".repeat(256 * 1024 + 1)', "budget_exceeded"],
+    ] as const) {
+      const result = await runToolScript(`await tools.image({}); ${code}`, [image])
+      expect(result.metadata.status).toBe(status)
+      expect(result).toMatchObject({ attachments: [attachment] })
+      expect(result.output).not.toContain(attachment.url)
+    }
+  })
+
+  test("bounds relayed attachments by count and encoded bytes while reporting omissions", async () => {
+    const attachment = (value: string) => ({
+      type: "file" as const,
+      mime: "image/png",
+      url: `data:image/png;base64,${value}`,
+    })
+    const image = (attachments: ReturnType<typeof attachment>[]): Tool.Def => ({
+      id: "image",
+      description: "Authorized image result",
+      parameters: z.object({}),
+      execute: () => Effect.succeed({ title: "image", output: "image loaded", metadata: {}, attachments }),
+    })
+    const many = Array.from({ length: 9 }, (_, i) => attachment(Buffer.from(String(i)).toString("base64")))
+    const count = await runToolScript(`await tools.image({}); return "done"`, [image([...many, many[0]])])
+    expect(count).toMatchObject({
+      attachments: many.slice(0, 8),
+      metadata: { attachments_forwarded: 8, attachments_omitted: 1 },
+    })
+    expect(count.output).toContain("1 attachment(s) not forwarded")
+    const bytes = await runToolScript(`await tools.image({}); return "done"`, [
+      image([attachment("a".repeat(10 * 1024 * 1024)), many[0]]),
+    ])
+    expect(bytes).toMatchObject({
+      attachments: [many[0]],
+      metadata: { attachments_forwarded: 1, attachments_omitted: 1 },
+    })
+    expect(bytes.output).toContain("10 MiB")
+    expect(Buffer.byteLength(JSON.stringify(bytes.metadata))).toBeLessThanOrEqual(256 * 1024)
+  })
+
+  for (const trigger of ["media", "patch"]) {
+    test(`preserves bounded side-effect evidence after large ${trigger} in exec`, async () => {
+      const image = {
+        type: "file" as const,
+        mime: "image/png",
+        url: `data:image/png;base64,${Buffer.alloc(trigger === "media" ? 300 * 1024 : 1).toString("base64")}`,
+      }
+      const patch = trigger === "patch" ? `+${"large patch content ".repeat(20_000)}` : "+small edit"
+      const result = await runToolScript(
+        `
+        await tools.view_image({})
+        await tools.apply_patch({patch_text: "fixture patch"})
+        await tools.bash({command: "touch changed.ts"})
+        for (let i = 0; i < 3; i++) await tools.bash({command: "bun test"})
+        return "done"
+      `,
+        [
+          {
+            id: "view_image",
+            description: "image fixture",
+            parameters: z.object({}),
+            execute: () => Effect.succeed({ title: "image", output: "image loaded", metadata: {}, attachments: [image] }),
+          },
+          {
+            id: "apply_patch",
+            description: "patch fixture",
+            parameters: z.object({ patch_text: z.string() }),
+            execute: () =>
+              Effect.succeed({
+                title: "patch",
+                output: "updated changed.ts",
+                metadata: {
+                  diff: patch,
+                  files: [{ filePath: "/repo/changed.ts", relativePath: "changed.ts", type: "add", patch }],
+                },
+              }),
+          },
+          {
+            id: "bash",
+            description: "shell fixture",
+            parameters: z.object({ command: z.string() }),
+            execute: (args: { command: string }) =>
+              Effect.succeed({
+                title: "shell",
+                output: args.command === "bun test" ? "test failed" : "updated",
+                metadata: args.command === "bun test" ? { exit: 1 } : { exit: 0, mainWorktreeHits: ["/repo"] },
+              }),
+          },
+        ],
+      )
+      expect(result.metadata.status).toBe("completed")
+      expect(result).toMatchObject({ attachments: [image] })
+      const info = MessageV2.Assistant.parse({
+        id: "msg_test",
+        sessionID: "ses_test",
+        role: "assistant",
+        parentID: "msg_parent",
+        time: { created: 1 },
+        modelID: "test",
+        providerID: "test",
+        mode: "build",
+        agent: "build",
+        path: { cwd: "/repo", root: "/repo" },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+      const part = MessageV2.ToolPart.parse({
+        id: "prt_test",
+        sessionID: info.sessionID,
+        messageID: info.id,
+        type: "tool",
+        tool: "exec",
+        callID: "call_test",
+        state: {
+          status: "completed",
+          input: { code: "fixture" },
+          ...result,
+          time: { start: 1, end: 2 },
+          attachments: result.attachments?.map((attachment, index) => ({
+            ...attachment,
+            id: `prt_image_${index}`,
+            sessionID: info.sessionID,
+            messageID: info.id,
+          })),
+        },
+      })
+      const messages = [{ info, parts: [part] }]
+      expect(buildFileManifest(messages, { worktree: "/repo" })).toContain("changed.ts (written)")
+      expect(sessionMutatedMainWorktrees(messages)).toEqual(["/repo"])
+      expect(new TryBestMonitor().consume(part)?.reason).toBe("bash_retry")
+      expect(Buffer.byteLength(JSON.stringify(result.metadata.sub_parts))).toBeLessThanOrEqual(256 * 1024)
+      expect(JSON.stringify(result.metadata)).not.toContain(image.url)
+      if (trigger === "patch") {
+        expect(result.metadata.sub_parts_truncated).toBe(true)
+        expect(JSON.stringify(result.metadata)).not.toContain(patch)
+      }
+    })
+  }
+
+  test("reserved aliases cannot enter ALL_TOOLS as standalone custom definitions", async () => {
+    const result = await runToolScript(`return ALL_TOOLS.map((item) => item.name)`, [
+      fakeDef("exec_command", async () => "unexpected"),
+    ])
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output).not.toContain("exec_command")
+  })
+
   test("passes the complete model identity to its late-bound registry", async () => {
     let received: Parameters<NonNullable<typeof toolScriptRegistry.current>>[0] | undefined
     const result = await runToolScript(`return ALL_TOOLS.length`, [], undefined, {
@@ -299,10 +653,7 @@ describe("exec", () => {
           }
         }),
     }
-    const result = await runToolScript(
-      `return await tools.probe({ operation: { action: "spawn" } })`,
-      [probe],
-    )
+    const result = await runToolScript(`return await tools.probe({ operation: { action: "spawn" } })`, [probe])
     const records = result.metadata.sub_parts as ExecSubPartSnapshot[]
 
     expect(records).toHaveLength(1)
@@ -370,20 +721,22 @@ describe("exec", () => {
   test("preserves scalar nested input and filters malformed persisted attachments", () => {
     const metadata = {
       exec_schema: 1,
-      sub_parts: [{
-        seq: 1,
-        type: "tool",
-        callID: "outer:1",
-        tool: "scalar_mcp",
-        state: {
-          status: "completed",
-          input: "literal",
-          title: "Scalar",
-          output: "ok",
-          time: { start: 1, end: 2 },
-          attachments: [{ bad: true }, { type: "file", mime: "text/plain", url: "data:text/plain;base64, b2s=" }],
+      sub_parts: [
+        {
+          seq: 1,
+          type: "tool",
+          callID: "outer:1",
+          tool: "scalar_mcp",
+          state: {
+            status: "completed",
+            input: "literal",
+            title: "Scalar",
+            output: "ok",
+            time: { start: 1, end: 2 },
+            attachments: [{ bad: true }, { type: "file", mime: "text/plain", url: "data:text/plain;base64, b2s=" }],
+          },
         },
-      }],
+      ],
     }
     const part = viewExecSubtools(metadata)[0]
     expect(part?.state.input).toBe("literal")
@@ -452,10 +805,10 @@ describe("exec", () => {
     const boom = fakeDef("boom", async () => {
       throw new Error("kapow")
     })
-    const result = await runToolScript(
-      `await Promise.all([tools.slow({}), tools.boom({})]); return "unreachable"`,
-      [slow, boom],
-    )
+    const result = await runToolScript(`await Promise.all([tools.slow({}), tools.boom({})]); return "unreachable"`, [
+      slow,
+      boom,
+    ])
     const parts = viewExecSubtools(result.metadata)
     expect(result.metadata.status).toBe("code_error")
     expect(parts).toHaveLength(2)
@@ -588,15 +941,12 @@ describe("exec", () => {
     hookCalls.before.length = 0
     hookCalls.after.length = 0
     try {
-      const result = await runToolScript(
-        `return (await tools.secret({})).output`,
-        [
-          fakeDef("secret", async () => {
-            called = true
-            return "should never run"
-          }),
-        ],
-      )
+      const result = await runToolScript(`return (await tools.secret({})).output`, [
+        fakeDef("secret", async () => {
+          called = true
+          return "should never run"
+        }),
+      ])
       expect(result.metadata.status).toBe("completed")
       expect(result.output).toContain("blocked by test hook")
       expect(called).toBe(false)
@@ -613,10 +963,9 @@ describe("exec", () => {
     hookCalls.before.length = 0
     hookCalls.after.length = 0
     try {
-      const result = await runToolScript(
-        `return (await tools.echo({ value: "ok" })).output`,
-        [fakeDef("echo", async (args) => args.value)],
-      )
+      const result = await runToolScript(`return (await tools.echo({ value: "ok" })).output`, [
+        fakeDef("echo", async (args) => args.value),
+      ])
       expect(result.output).toContain("ok")
       expect(hookCalls.before).toEqual(["echo"])
       expect(hookCalls.after).toEqual(["echo"])
@@ -632,10 +981,7 @@ describe("exec", () => {
         throw new Error("kapow")
       }),
     ]
-    const result = await runToolScript(
-      `try { await tools.boom({}) } catch (e) { return e.message }`,
-      defs,
-    )
+    const result = await runToolScript(`try { await tools.boom({}) } catch (e) { return e.message }`, defs)
     expect(result.metadata.status).toBe("completed")
     expect(result.output).toContain("boom: kapow")
     expect(result.output).toContain("→ error")
@@ -807,20 +1153,17 @@ return r.output;`,
     expect(result.output).toContain("unknown tool: mcp_tool_search")
   })
 
-  test("skill_search is not dispatchable through the sandbox", async () => {
+  test("skill_search is dispatchable when present in the authorized tool set", async () => {
     let called = false
     const defs = [
       fakeDef("skill_search", async () => {
         called = true
-        return "should never run"
+        return "authorized skill catalog"
       }),
     ]
-    const result = await runToolScript(
-      `try { await tools.skill_search({ value: "restricted" }) } catch (e) { return e.message }`,
-      defs,
-    )
-    expect(result.output).toContain("unknown tool: skill_search")
-    expect(called).toBe(false)
+    const result = await runToolScript(`return await tools.skill_search({ value: "available" })`, defs)
+    expect(result.output).toContain("authorized skill catalog")
+    expect(called).toBe(true)
   })
 
   test("mcp_tool_search is not dispatchable through the sandbox", async () => {
@@ -838,7 +1181,7 @@ return r.output;`,
     expect(called).toBe(false)
   })
 
-  test("bash and exec_command stay outside the aggregate sandbox", async () => {
+  test("bash and exec_command respect the canonical runtime whitelist", async () => {
     let called = false
     const defs = [
       fakeDef("bash", async () => {
@@ -854,6 +1197,8 @@ return r.output;`,
       return errors
       `,
       defs,
+      undefined,
+      { toolWhitelist: ["exec_command"] },
     )
     expect(result.metadata.status).toBe("completed")
     expect(result.metadata.toolCalls).toBe(0)
@@ -922,10 +1267,7 @@ return r.output;`,
   })
 
   test("files.readText rejects paths outside jail (catchable)", async () => {
-    const result = await runToolScript(
-      `try { await files.readText("/etc/passwd") } catch (e) { return e.message }`,
-      [],
-    )
+    const result = await runToolScript(`try { await files.readText("/etc/passwd") } catch (e) { return e.message }`, [])
     expect(result.metadata.status).toBe("completed")
     expect(result.output).toContain("outside allowed roots")
   })
@@ -1101,10 +1443,7 @@ return r.output;`,
         return Effect.succeed({ title: "probe", output: "ok", metadata: {} })
       },
     }
-    const result = await runToolScript(
-      `return await tools.probe({})`,
-      [probeDef],
-    )
+    const result = await runToolScript(`return await tools.probe({})`, [probeDef])
     expect(result.metadata.status).toBe("completed")
     expect(capturedExtra).toBeDefined()
     expect(capturedExtra!.fromExec).toBe(true)
@@ -1125,34 +1464,32 @@ describe("renderToolScriptDeclarations", () => {
     expect(text).not.toContain("mcp_tool_search(input:")
     expect(text).toContain("name: string; description: string")
     expect(text).toContain("declare const ALL_TOOLS")
-    expect(text).not.toContain("task(input:")
+    expect(text).toContain("task(input:")
     expect(text).not.toContain("question(input:")
-    expect(text).not.toContain("skill_search(input:")
+    expect(text).toContain("skill_search(input:")
     expect(text).toContain("declare const tools")
   })
 
-  test("exclusion list covers agent control-flow tools, MCP search, and bash", () => {
+  test("exclusion list preserves direct actor and conversation-control entry points", () => {
     for (const id of [
-      "task",
       "question",
       "actor",
-      "skill",
-      "skill_search",
       "plan_exit",
       "exec",
       "mcp_tool_search",
-      "bash",
+      "session",
+      "workflow",
+      "change_directory",
     ]) {
       expect(TOOL_SCRIPT_EXCLUDED.has(id)).toBe(true)
     }
   })
 
-  test("does not render bash or exec_command inside exec", () => {
+  test("renders bash and the strict exec_command adapter inside exec", () => {
     const text = renderToolScriptDeclarations([fakeDef("bash", async () => "x")])
-    expect(text).not.toContain("bash(input:")
-    expect(text).not.toContain("exec_command(input:")
+    expect(text).toContain("bash(input:")
+    expect(text).toContain("exec_command(input: { cmd: string;")
   })
-
 })
 
 describe("exec MCP dispatch", () => {
@@ -1258,7 +1595,7 @@ describe("exec MCP dispatch", () => {
     expect(result.output).toContain("builtin version")
   })
 
-  test("attachments are dropped with a note", async () => {
+  test("MCP attachments are relayed outside the sandbox string result", async () => {
     const mcp = {
       srv_img: fakeMcpTool(async () => ({
         output: "here is your chart",
@@ -1266,17 +1603,13 @@ describe("exec MCP dispatch", () => {
         attachments: [{ type: "file", mime: "image/png", url: "data:image/png;base64,xxxx" }],
       })),
     }
-    const result = await runToolScript(
-      `const r = await tools.srv_img({}); return r.output`,
-      [],
-      undefined,
-      { mcp },
-    )
+    const result = await runToolScript(`const r = await tools.srv_img({}); return r.output`, [], undefined, { mcp })
     expect(result.output).toContain("here is your chart")
-    expect(result.output).toContain("non-text attachment(s) dropped")
-    expect(viewExecSubtools(result.metadata)[0]?.state.attachments).toEqual([
-      { type: "file", mime: "image/png", url: "data:image/png;base64,xxxx" },
-    ])
+    expect(result.output).not.toContain("attachment(s) dropped")
+    expect(result).toMatchObject({
+      attachments: [{ type: "file", mime: "image/png", url: "data:image/png;base64,xxxx" }],
+    })
+    expect(viewExecSubtools(result.metadata)[0]?.state.attachments).toBeUndefined()
   })
 
   test("MCP calls count against the tool call budget", async () => {
@@ -1305,6 +1638,31 @@ describe("exec MCP dispatch", () => {
     )
     expect(result.output).toContain("denied:")
     expect(result.output).toContain("unknown tool")
+  })
+
+  test("reserved aliases and excluded controls reject case-variant MCP fallback", async () => {
+    for (const [name, candidate] of [
+      ["exec_command", "Exec_Command"],
+      ["actor", "Actor"],
+    ]) {
+      let called = false
+      const result = await runToolScript(
+        `try { await tools[${JSON.stringify(name)}]({cmd: "printf hidden"}) } catch (error) { return error.message }`,
+        [],
+        undefined,
+        {
+          mcp: {
+            [candidate]: fakeMcpTool(async () => {
+              called = true
+              return { output: "reserved name bypassed", metadata: {}, attachments: [] }
+            }),
+          },
+        },
+      )
+      expect(result.metadata.status).toBe("completed")
+      expect(result.output).toContain(`unknown tool: ${name}`)
+      expect(called).toBe(false)
+    }
   })
 
   test("reserved exec_command alias cannot fall through to an MCP tool", async () => {

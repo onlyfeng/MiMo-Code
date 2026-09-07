@@ -89,6 +89,8 @@ export interface ForkContext {
    * is appended separately when the fork asks for JSON.
    */
   readonly tools: Record<string, AITool>
+  /** Frozen wire membership, separate from the executable pool; legacy captures omit it. */
+  readonly activeTools?: readonly string[]
   /**
    * MCP members that were search-loaded in the parent request. Kept separate
    * from `tools` so the fork can restore discovery state without treating every

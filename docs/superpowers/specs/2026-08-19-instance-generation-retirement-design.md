@@ -1,5 +1,7 @@
 # Instance Generation Retirement Design
 
+> **Compact tools amendment (2026-09-08):** The separately authorized [production integration](../../codex-compact-tools.md) permits nested shell/task/skill calls under request-scoped authority, while actor and interactive controls remain direct. Earlier blanket exec exclusions below are historical design scope. GenerationLease retirement requirements remain pending.
+
 > **Status (2026-08-22):** The verified refs below are historical. The producer
 > inventory was merged through PR #59 at
 > `ffc89d3916197e5860e91050616476f423c09ad4` and rechecked at main

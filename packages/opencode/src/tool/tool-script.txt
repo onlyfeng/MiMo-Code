@@ -9,7 +9,7 @@ const results = await Promise.all(urls.map((url) => tools.webfetch({ url, format
 return results.map((result) => result.output)
 ```
 
-Use `exec` when JavaScript can batch multiple independent tool calls, programmatically transform their results, or keep large intermediate outputs out of the conversation. Run independent calls with `Promise.all` or `Promise.allSettled`, but keep dependent operations sequential. Prefer direct tool calls when a result needs model judgment before the next call or only one small call is needed; do not use `exec` merely to force concurrency.
+Use `exec` to call the available tools, batch independent operations, transform their results, or keep large intermediate outputs out of the conversation. Run independent calls with `Promise.all` or `Promise.allSettled`, and keep dependent operations sequential. Return an intermediate result whenever the next action needs model judgment. Actor management, questions, plan approval, session control, and workflows retain their direct tool entry points.
 
 MCP tools inside `exec` are called through the same global `tools` object as built-in tools. MCP catalog names are opaque: they may use underscores, hyphens, or a server-specific prefix, and are not guaranteed to start with `mcp__`. Use the exact `name` from `ALL_TOOLS` and bracket notation:
 
@@ -38,17 +38,18 @@ The script environment provides JavaScript built-ins plus `tools`, `files`, and 
 
 - Call built-in tools, and other tool IDs that are valid JavaScript identifiers, with `await tools.name(input)`.
 - Search `ALL_TOOLS` names and descriptions for the capability you need, then call the exact catalog name with `await tools[name](input)`; the same permission checks as direct calls apply. Do not infer availability or MCP status from a name prefix.
-- `exec_command` is reserved as the `bash` alias and is therefore unavailable inside `exec`; it cannot fall through to an MCP tool with that name.
+- `exec_command` is the permission-gated `bash` adapter: `await tools.exec_command({ cmd: "git status", yield_time_ms: 10000, max_output_tokens: 10000, workdir: "/absolute/project/path" })`. Its optional `description` summarizes the command. `yield_time_ms` is a command timeout in milliseconds: expiry terminates the command, and does not return a background session. It defaults to 10000 ms; `max_output_tokens` defaults to 10000. Unknown fields and misspelled names are rejected. `tools.bash` keeps its own declared input shape. The reserved alias cannot fall through to an MCP tool.
 - MCP results carry parsed `structuredContent` in the `structured` field when the server provides it.
+- Authorized image and file attachments are forwarded automatically to the outer result, including when later script code fails. Binary data does not enter the JavaScript return value. Each execution forwards at most 8 unique attachments and 10 MiB of encoded attachment data; excess attachments are omitted with a count and budget warning. The separate text result limit remains 256 KiB.
 - Use `Promise.all` or `Promise.allSettled` only for independent calls; at most 8 run concurrently.
 - Return a small JSON-serializable aggregate. Circular values, BigInt, and throwing getters fail execution.
 - Use `console.log` only for debugging; logs are included in the result.
 - Tool permissions are enforced for every nested call.
 - State does not persist between executions. For temporary cross-execution data, use `files.writeText` and `files.readText` under the OS temp directory.
-- Shell execution is intentionally unavailable inside `exec`; call the outer `bash` tool directly so each shell operation remains reviewable.
-- Conversation-control tools are not available inside `exec`.
+- Shell commands use the same working-directory, permission, deletion confirmation, process cancellation, and output limits as the Bash tool. Each nested permission request identifies the actual command. Use explicit `workdir` for another directory; there is no mutable session cwd.
+- `actor`, `question`, `plan_exit`, `session`, and `workflow` are not callable inside `exec`; use their direct entry points when available. `task`, `skill`, `skill_search`, and an enabled `cron` are callable here if authorized.
 
-By default an execution may make 50 tool calls and use 60 seconds of active compute. The `max_tool_calls` and `timeout_seconds` inputs can raise those limits to 500 calls and 600 seconds. Time waiting for nested tools does not count toward active compute.
+By default an execution may make 50 tool calls and use 60 seconds of active compute. The `max_tool_calls` and `timeout_seconds` inputs can raise those limits to 500 calls and 600 seconds. Time waiting for nested tools does not count toward active compute. The wall-clock limit is 30 minutes. When execution terminates, admission closes, queued calls are rejected, running tool effects are interrupted, and their cleanup is joined before the result is finalized.
 
 The result is wrapped in `<exec status="...">` and may contain `<return_value>`, `<warnings>`, `<logs>`, `<trace>`, and `<error_message>` blocks.
 

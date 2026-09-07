@@ -17,6 +17,8 @@ import {
   type McpToolSearchEntry,
 } from "../tool/mcp-tool-search"
 import type { PromptConfig } from "./session"
+import { resolveHarnessMode } from "../tool/gpt"
+import { GPT_TOP_LEVEL_TOOLS } from "../tool/tool-script-ref"
 
 /**
  * Build the LLM request prefix (system + tools + inheritedMessages) from the
@@ -109,7 +111,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     }))
 
   // Resolve tools using parent agent's permission and toolAllowlist
-  const toolDefs = yield* toolRegistry.tools({
+  const toolDefs = yield* toolRegistry.registered({
     modelID: input.model.id,
     modelAPIID: input.model.api.id,
     modelFamily: input.model.family,
@@ -117,6 +119,8 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     providerID: input.model.providerID,
     agent: input.agent,
     permission: input.permission,
+    tools: lastUser.tools,
+    additionalTools: Object.entries(input.mcpTools ?? {}).flatMap(([id, item]) => (item.execute ? [id] : [])),
     harness: lastUser.harness,
   })
   const rawTools: Record<string, AITool> = {}
@@ -128,6 +132,14 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     })
   }
   const localToolNames = new Set(Object.keys(rawTools))
+  const compact =
+    resolveHarnessMode({
+      modelID: input.model.id,
+      modelAPIID: input.model.api.id,
+      modelFamily: input.model.family,
+      harnessModel: input.model.harness_model,
+      harness: lastUser.harness,
+    }) === "codex"
   const mcpSearchEntries: McpToolSearchEntry[] = []
   const agentToolAllowlist = input.agent.toolAllowlist ? new Set(input.agent.toolAllowlist) : undefined
   for (const [id, item] of Object.entries(input.mcpTools ?? {})) {
@@ -155,6 +167,9 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     return {
       system,
       tools: resolved,
+      activeTools: Object.keys(resolved).filter((id) =>
+        compact ? localToolNames.has(id) && GPT_TOP_LEVEL_TOOLS.has(id) : id !== MCP_TOOL_SEARCH_ID,
+      ),
       inheritedMessages,
       currentTurnMessages: converted.currentTurnMessages,
       loadedMcpTools: [],
@@ -182,6 +197,11 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   return {
     system,
     tools,
+    activeTools: Object.keys(tools).filter((id) =>
+      compact
+        ? localToolNames.has(id) && GPT_TOP_LEVEL_TOOLS.has(id)
+        : localToolNames.has(id) || loadedMcpTools.has(id),
+    ),
     inheritedMessages,
     currentTurnMessages: converted.currentTurnMessages,
     loadedMcpTools: [...loadedMcpTools],

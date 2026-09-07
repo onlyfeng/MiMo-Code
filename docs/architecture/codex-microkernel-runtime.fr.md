@@ -1,5 +1,7 @@
 # Environnement d’exécution à micronoyau Codex de MiMoCode pour les modèles GPT
 
+> **Mise à jour du 2026-09-08 :** Cette analyse historique précède l’intégration des outils compacts. Les outils shell/image directs, les exclusions, le registre dynamique et l’absence de transfert des pièces jointes sont remplacés par [le contrat actuel](../codex-compact-tools.md). La résolution du harness est unifiée ; les définitions autorisées et les noms exposés sont figés séparément, et exec transmet des pièces jointes dans des limites définies.
+
 > « Environnement d’exécution à micronoyau Codex » est la formulation employée dans ce document pour résumer l’architecture actuelle. Il ne s’agit ni du nom officiel d’un module dans le code source, ni d’une référence à un micronoyau de système d’exploitation.
 
 ## Résumé

@@ -146,9 +146,11 @@ import {
   restoreMcpToolSearchMatches,
   type McpToolSearchEntry,
 } from "@/tool/mcp-tool-search"
-import { isMcpToolSearchEnabled } from "@/tool/gpt"
+import { isMcpToolSearchEnabled, resolveHarnessMode } from "@/tool/gpt"
+import { GPT_TOP_LEVEL_TOOLS, TOOL_SCRIPT_EXCLUDED } from "@/tool/tool-script-ref"
 import { canonicalSkillCatalog, isSkillCatalogSnapshot, skillCatalogSnapshotVersion } from "./skill-catalog"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
+import { isDeepStrictEqual } from "node:util"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -618,6 +620,7 @@ export const layer = Layer.effect(
           system: [] as string[],
           turnContext: undefined as string | undefined,
           tools: {} as Record<string, AITool>,
+          activeTools: [] as string[],
           loadedMcpTools: [] as string[],
           inheritedMessages: [] as ModelMessage[],
           parentPermission: [] as Permission.Ruleset,
@@ -697,6 +700,7 @@ export const layer = Layer.effect(
           ...(frozen
             ? {
                 tools: SessionPrefixSnapshot.restoreTools(frozen.tools ?? []),
+                activeTools: SessionPrefixSnapshot.restoreActiveTools(frozen.tools ?? [], frozen.active_tools),
                 loadedMcpTools: frozen.loaded_mcp_tools ?? [],
               }
             : {}),
@@ -1780,6 +1784,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       permission?: Permission.Ruleset
       preserveToolMembership?: boolean
       frozenToolMembership?: ReadonlySet<string>
+      frozenTools?: Record<string, AITool>
       frozenLoadedMcpTools?: ReadonlySet<string>
       mcpContext: MCP.TurnContext
       harness?: MessageV2.User["harness"]
@@ -1798,6 +1803,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // same process would overwrite (request state must never live in a
       // global; see toolWhitelist/mcpToolSearch precedent).
       const execMcp: { current: Record<string, AITool> } = { current: {} }
+      const execTools: { current: Tool.Def[] } = { current: [] }
+      const useGPTTools =
+        resolveHarnessMode({
+          modelID: input.model.id,
+          modelAPIID: input.model.api.id,
+          modelFamily: input.model.family,
+          harnessModel: input.model.harness_model,
+          harness: input.harness,
+        }) === "codex"
       const useMcpToolSearch = isMcpToolSearchEnabled(
         Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
         input.harness,
@@ -1892,6 +1906,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           ...(disabledTools.size ? { disabledTools } : {}),
           mcpToolSearch: mcpCatalog.current,
           execMcp,
+          execTools,
         },
         agent: input.agent.name,
         actorID: input.agentID,
@@ -1911,11 +1926,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               },
             }
           }),
-        ask: (req) =>
+        ask: (req, nested) =>
           permission
             .ask(
               {
                 ...req,
+                ...(nested
+                  ? {
+                      metadata: {
+                        ...req.metadata,
+                        exec: {
+                          parentCallID: options.toolCallId,
+                          callID: nested.callID,
+                          input: nested.input,
+                        },
+                      },
+                    }
+                  : {}),
                 sessionID: input.session.id,
                 tool: { messageID: input.processor.message.id, callID: options.toolCallId },
                 ruleset: effectivePermission,
@@ -1926,7 +1953,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 ...(askForward ? { forward: askForward } : {}),
                 ...(askInherit ? { inherit: askInherit } : {}),
               },
-              options.abortSignal,
+              nested?.abort ?? options.abortSignal,
             )
             .pipe(Effect.orDie),
         // Instance-scoped delete exemption (see Tool.Context.autoApproveDelete):
@@ -1935,7 +1962,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         autoApproveDelete: () => permission.autoApproveDelete(),
       })
 
-      for (const item of yield* registry.tools({
+      const mcpTools = Object.entries(yield* mcp.tools(input.mcpContext)).toSorted(([a], [b]) => a.localeCompare(b))
+      const definitions = yield* registry.registered({
         modelID: input.model.id,
         modelAPIID: input.model.api.id,
         modelFamily: input.model.family,
@@ -1949,7 +1977,46 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         permission: input.permission ?? input.session.permission,
         preserveMembership: input.preserveToolMembership,
         harness: input.harness,
-      })) {
+        tools: input.tools,
+        additionalTools: mcpTools.flatMap(([id, item]) => (item.execute ? [id] : [])),
+      })
+      // Pin the exact request implementations before crossing into a model or
+      // script. Reloads cannot add hidden capabilities to an in-flight request.
+      for (const id of Permission.disabled(
+        definitions.map((item) => item.id),
+        effectivePermission,
+      ))
+        disabledTools.add(id)
+      if (input.frozenTools) {
+        for (const item of definitions) {
+          if (TOOL_SCRIPT_EXCLUDED.has(item.id)) continue
+          const frozen = input.frozenTools[item.id]
+          if (
+            !frozen ||
+            !isDeepStrictEqual(
+              yield* Effect.promise(() => Promise.resolve(asSchema(frozen.inputSchema).jsonSchema)),
+              ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters)),
+            )
+          )
+            disabledTools.add(item.id)
+        }
+      }
+      if (
+        !canSearchSkills({
+          permission: effectivePermission,
+          toolAllowlist: input.agent.toolAllowlist,
+          tools: input.tools,
+        })
+      )
+        disabledTools.add("skill_search")
+      execTools.current = definitions.filter((item) => !disabledTools.has(item.id) && !blockedByIdentity(item.id))
+      const execGateway = () =>
+        useGPTTools &&
+        (execTools.current.some(
+          (item) => !TOOL_SCRIPT_EXCLUDED.has(item.id) && (!whitelist || whitelist.has(item.id)),
+        ) ||
+          Object.keys(execMcp.current).some((id) => !whitelist || whitelist.has(id)))
+      for (const item of definitions) {
         const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
         tools[item.id] = tool({
           description: item.description,
@@ -1967,7 +2034,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 const ctx = context(args, options)
                 if (
                   blockedByIdentity(item.id) ||
-                  (whitelist && !whitelist.has(item.id) && item.id !== MCP_TOOL_SEARCH_ID)
+                  disabledTools.has(item.id) ||
+                  (whitelist &&
+                    !whitelist.has(item.id) &&
+                    item.id !== MCP_TOOL_SEARCH_ID &&
+                    !(item.id === "exec" && execGateway()))
                 ) {
                   const output = rejectionFor(item.id)
                   log.debug("tool execute rejected", {
@@ -2052,11 +2123,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             )
           },
         })
-        if (item.id !== MCP_TOOL_SEARCH_ID) activeTools.add(item.id)
+        if (item.id !== MCP_TOOL_SEARCH_ID && (!useGPTTools || GPT_TOP_LEVEL_TOOLS.has(item.id)))
+          activeTools.add(item.id)
       }
 
       const localToolNames = new Set(Object.keys(tools))
-      const mcpTools = Object.entries(yield* mcp.tools(input.mcpContext)).toSorted(([a], [b]) => a.localeCompare(b))
       const agentToolAllowlist = input.agent.toolAllowlist ? new Set(input.agent.toolAllowlist) : undefined
       const disabledMcpTools = Permission.disabled(
         mcpTools.map(([key]) => key),
@@ -2074,7 +2145,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
         const transformed = ProviderTransform.schema(input.model, schema)
         item.inputSchema = jsonSchema(transformed)
+        const frozen = input.frozenTools?.[key]
+        const frozenSchemaMatches =
+          !input.frozenTools ||
+          (frozen &&
+            isDeepStrictEqual(
+              yield* Effect.promise(() => Promise.resolve(asSchema(frozen.inputSchema).jsonSchema)),
+              transformed,
+            ))
         const available =
+          frozenSchemaMatches &&
           input.tools?.[key] !== false &&
           !disabledMcpTools.has(key) &&
           (!agentToolAllowlist || agentToolAllowlist.has(key))
@@ -2086,7 +2166,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             parameters: transformed as unknown as JSONObject,
           })
         }
-        if (searchable && !useMcpToolSearch && input.model.capabilities.toolcall) activeTools.add(key)
+        if (searchable && !useMcpToolSearch && !useGPTTools && input.model.capabilities.toolcall) activeTools.add(key)
         const executeMcp = (
           args: Parameters<typeof execute>[0],
           opts: Parameters<typeof execute>[1],
@@ -2102,12 +2182,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 sessionID: input.session.id,
               })
               const ctx = context(args, opts)
-              if (!useMcpToolSearch && (!available || !input.model.capabilities.toolcall)) {
+              if (!available || !input.model.capabilities.toolcall) {
                 return yield* Effect.fail(
                   new RecoverableError(`The MCP tool "${key}" is unavailable for this request.`),
                 )
               }
-              if (requireLoaded && useMcpToolSearch && !loadedMcpTools.has(key)) {
+              if (requireLoaded && useMcpToolSearch && !useGPTTools && !loadedMcpTools.has(key)) {
                 return yield* Effect.fail(
                   new RecoverableError(
                     `The MCP tool "${key}" is not loaded for this request. Call ${MCP_TOOL_SEARCH_ID} first, then retry on the next step.`,
@@ -2290,13 +2370,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       if (
         useMcpToolSearch &&
+        !useGPTTools &&
         input.model.capabilities.toolcall &&
         mcpCatalog.current.entries.length > 0 &&
         tools[MCP_TOOL_SEARCH_ID]
       ) {
         activeTools.add(MCP_TOOL_SEARCH_ID)
       }
-      loadedMcpTools.forEach((name) => activeTools.add(name))
+      if (!useGPTTools) loadedMcpTools.forEach((name) => activeTools.add(name))
 
       // MCP Tool Search keeps full schemas out of the outer model tool list;
       // it is a context-budget optimization, not an authorization boundary.
@@ -2306,15 +2387,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // metrics, normalization, and truncation pipeline above.
       execMcp.current = execMcpTools
 
-      const snapshotToolNames = new Set(activeTools)
-      if (useMcpToolSearch && input.model.capabilities.toolcall) {
-        mcpCatalog.current.entries.forEach((entry) => snapshotToolNames.add(entry.name))
-      }
+      // Wire-hidden tools belong in a capture; request-disabled tools do not.
+      // A child may omit its parent's user.tools/actor whitelist, so retaining
+      // rejected MCP implementations here would mint authority on warm capture.
+      const snapshotTools = Object.fromEntries(
+        Object.entries(
+          LLM.resolveTools({
+            tools,
+            activeTools: [...activeTools],
+            agent: input.agent,
+            permission: input.permission ?? input.session.permission,
+            user: { tools: input.tools },
+          }),
+        ).filter(([id]) =>
+          localToolNames.has(id)
+            ? !blockedByIdentity(id) &&
+              (!whitelist || whitelist.has(id) || id === MCP_TOOL_SEARCH_ID || (id === "exec" && execGateway()))
+            : Object.hasOwn(execMcpTools, id),
+        ),
+      )
 
       return {
         tools,
+        snapshotTools,
         activeTools: [...activeTools].filter((name) => tools[name]),
-        snapshotToolNames: [...snapshotToolNames].filter((name) => tools[name]),
         loadedMcpTools: [...loadedMcpTools],
       }
     })
@@ -3476,7 +3572,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       )
     })
 
-    const recoveryCandidates = Effect.fn("SessionPrompt.recoveryCandidates")(function* (sessionID: SessionID, agentID = "main") {
+    const recoveryCandidates = Effect.fn("SessionPrompt.recoveryCandidates")(function* (
+      sessionID: SessionID,
+      agentID = "main",
+    ) {
       const msgs = yield* sessions.messages({ sessionID, agentID })
       const candidates: RecoveryCandidate[] = []
       for (const [index, msg] of msgs.entries()) {
@@ -4838,13 +4937,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               permission: forkCtx?.parentPermission,
               preserveToolMembership: Boolean(forkCtx),
               frozenToolMembership: forkCtx ? new Set(Object.keys(forkCtx.tools)) : undefined,
+              frozenTools: forkCtx?.tools,
               frozenLoadedMcpTools: forkCtx?.loadedMcpTools ? new Set(forkCtx.loadedMcpTools) : undefined,
               mcpContext,
               harness: lastUser.harness,
             })
             const tools = resolvedTools.tools
             const activeTools = resolvedTools.activeTools
-            const snapshotToolNames = resolvedTools.snapshotToolNames
 
             if (lastUser.format?.type === "json_schema") {
               tools["StructuredOutput"] = createStructuredOutputTool({
@@ -4853,8 +4952,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   structured = output
                 },
               })
+              resolvedTools.snapshotTools.StructuredOutput = tools.StructuredOutput
               activeTools.push("StructuredOutput")
-              snapshotToolNames.push("StructuredOutput")
             }
 
             if (step === 1)
@@ -5157,7 +5256,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   messages: [...modelMsgs, ...dispatchSyntheticMessages],
                   mergeTurnContextIntoLastUser: true,
                   tools: forkTools,
-                  activeTools: activeTools.filter((id) => forkTools[id]),
+                  activeTools: activeTools.filter(
+                    (id) =>
+                      forkTools[id] &&
+                      (id === "StructuredOutput" ||
+                        !forkCtx.activeTools ||
+                        forkCtx.activeTools.includes(id) ||
+                        resolvedTools.loadedMcpTools.includes(id)),
+                  ),
                   model,
                   toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
                   agentID: lastUser.agentID,
@@ -5329,13 +5435,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               collapseCheckpointTail: true,
             }).pipe(Effect.provideService(LLM.Service, llm), Effect.provideService(ToolRegistry.Service, registry))
             const currentToolsHash = SessionPrefixSnapshot.toolsHash(
-              tools,
-              snapshotToolNames,
+              resolvedTools.snapshotTools,
               activeTools,
               resolvedTools.loadedMcpTools,
             )
             const currentTools = yield* Effect.promise(() =>
-              SessionPrefixSnapshot.snapshotTools(tools, snapshotToolNames),
+              SessionPrefixSnapshot.snapshotTools(resolvedTools.snapshotTools, activeTools),
             )
             const resolvedPrefix = yield* Effect.gen(function* () {
               if (!frozen) {

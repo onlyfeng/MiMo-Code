@@ -58,6 +58,8 @@ export type SessionPrefixToolSnapshot = {
   name: string
   description?: string
   input_schema: JSONSchema7
+  /** Legacy snapshots only stored advertised tools. */
+  active?: boolean
 }
 
 export const SessionPrefixSnapshotTable = sqliteTable(

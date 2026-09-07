@@ -120,6 +120,7 @@ export function forkQuery(deps: {
       system: prefix.system,
       turnContext: prefix.turnContext,
       tools: prefix.tools,
+      activeTools: prefix.activeTools,
       loadedMcpTools: prefix.loadedMcpTools,
       inheritedMessages: prefix.inheritedMessages,
       parentPermission: prefix.parentPermission,

@@ -50,34 +50,48 @@ export function systemHash(system: string[]) {
   return hash(system)
 }
 
-export function toolsHash(
-  tools: Record<string, AITool>,
-  snapshotTools: string[],
-  activeTools: string[] = snapshotTools,
-  loadedMcpTools: string[] = [],
-) {
+export function toolsHash(tools: Record<string, AITool>, activeTools: string[], loadedMcpTools: string[] = []) {
+  // Identity includes hidden schemas as well as the wire membership: hidden MCP
+  // changes must invalidate the immutable executable pool captured by a fork.
   return hash({
-    tools: snapshotTools.toSorted().flatMap((name) => {
-      const item = tools[name]
-      return item ? [{ name, description: item.description, inputSchema: item.inputSchema }] : []
-    }),
-    active_tools: activeTools.toSorted(),
+    tools: Object.keys(tools)
+      .toSorted()
+      .map((name) => {
+        const item = tools[name]
+        return {
+          name,
+          description: item.description,
+          inputSchema: item.inputSchema,
+          active: activeTools.includes(name),
+        }
+      }),
     loaded_mcp_tools: loadedMcpTools.toSorted(),
   })
 }
 
 export async function snapshotTools(tools: Record<string, AITool>, activeTools: string[]) {
   return Promise.all(
-    activeTools.flatMap((name) => {
-      const item = tools[name]
-      if (!item) return []
-      return [
-        Promise.resolve(asSchema(item.inputSchema).jsonSchema).then(
-          (input_schema): SessionPrefixToolSnapshot => ({ name, description: item.description, input_schema }),
-        ),
-      ]
-    }),
+    Object.entries(tools).map(([name, item]) =>
+      Promise.resolve(asSchema(item.inputSchema).jsonSchema).then(
+        (input_schema): SessionPrefixToolSnapshot => ({
+          name,
+          description: item.description,
+          input_schema,
+          active: activeTools.includes(name),
+        }),
+      ),
+    ),
   )
+}
+
+export function restoreActiveTools(items: SessionPrefixToolSnapshot[], legacyActiveTools?: readonly string[] | null) {
+  // A shared-main writer updates the JSON but cannot update compat's extra
+  // column. Complete new-format flags therefore outrank a stale legacy mask.
+  if (items.every((item) => typeof item.active === "boolean")) {
+    return items.filter((item) => item.active).map((item) => item.name)
+  }
+  if (legacyActiveTools) return items.filter((item) => legacyActiveTools.includes(item.name)).map((item) => item.name)
+  return items.map((item) => item.name)
 }
 
 export function restoreTools(items: SessionPrefixToolSnapshot[], activeTools?: string[]) {
@@ -106,10 +120,7 @@ export const get = Effect.fn("SessionPrefixSnapshot.get")(function* (sessionID: 
         .select()
         .from(SessionPrefixSnapshotTable)
         .where(
-          and(
-            eq(SessionPrefixSnapshotTable.session_id, sessionID),
-            eq(SessionPrefixSnapshotTable.profile_key, key),
-          ),
+          and(eq(SessionPrefixSnapshotTable.session_id, sessionID), eq(SessionPrefixSnapshotTable.profile_key, key)),
         )
         .get(),
     ),

@@ -8,6 +8,59 @@ import { AppRuntime } from "../../src/effect/app-runtime"
 import { tmpdir } from "../fixture/fixture"
 
 describe("session prefix snapshot", () => {
+  test("retains hidden executable schemas separately from advertised membership", async () => {
+    const tools = {
+      exec: tool({ description: "gateway", inputSchema: jsonSchema({ type: "object", properties: {} }) }),
+      hidden: tool({
+        description: "hidden target",
+        inputSchema: jsonSchema({
+          type: "object",
+          properties: { count: { type: "integer", minimum: 2 } },
+          required: ["count"],
+          additionalProperties: false,
+        }),
+      }),
+    }
+    const snapshot = JSON.parse(JSON.stringify(await SessionPrefixSnapshot.snapshotTools(tools, ["exec", "absent"])))
+    expect(snapshot.map((item: { name: string }) => item.name)).toEqual(["exec", "hidden"])
+    expect(snapshot[1].input_schema).toEqual({
+      type: "object",
+      properties: { count: { type: "integer", minimum: 2 } },
+      required: ["count"],
+      additionalProperties: false,
+    })
+    const restored = SessionPrefixSnapshot.restoreTools(snapshot)
+    expect(Object.keys(restored)).toEqual(["exec", "hidden"])
+    expect(restored.hidden.execute).toBeUndefined()
+    expect(SessionPrefixSnapshot.restoreActiveTools(snapshot)).toEqual(["exec"])
+    expect(SessionPrefixSnapshot.toolsHash(tools, ["exec"])).not.toBe(
+      SessionPrefixSnapshot.toolsHash({ exec: tools.exec }, ["exec"]),
+    )
+    expect(
+      SessionPrefixSnapshot.restoreActiveTools([{ name: "legacy", input_schema: { type: "object", properties: {} } }]),
+    ).toEqual(["legacy"])
+    expect(SessionPrefixSnapshot.restoreActiveTools(await SessionPrefixSnapshot.snapshotTools(tools, []))).toEqual([])
+  })
+
+  test("invalidates snapshots when only hidden membership, schema, or advertisement changes", () => {
+    const exec = tool({ inputSchema: jsonSchema({ type: "object", properties: {} }) })
+    const hidden = tool({ inputSchema: jsonSchema({ type: "object", properties: { count: { type: "number" } } }) })
+    const before = SessionPrefixSnapshot.toolsHash({ exec, hidden }, ["exec"])
+    expect(before).not.toBe(SessionPrefixSnapshot.toolsHash({ exec }, ["exec"]))
+    expect(before).not.toBe(SessionPrefixSnapshot.toolsHash({ exec, hidden: exec }, ["exec"]))
+    expect(before).not.toBe(SessionPrefixSnapshot.toolsHash({ exec, hidden }, ["exec", "hidden"]))
+  })
+
+  test("retains loaded MCP membership in the full-pool snapshot identity", () => {
+    const tools = { exec: tool({ inputSchema: jsonSchema({ type: "object", properties: {} }) }) }
+    expect(SessionPrefixSnapshot.toolsHash(tools, ["exec"], ["first"])).not.toBe(
+      SessionPrefixSnapshot.toolsHash(tools, ["exec"], ["second"]),
+    )
+    expect(SessionPrefixSnapshot.toolsHash(tools, ["exec"], ["first", "second"])).toBe(
+      SessionPrefixSnapshot.toolsHash(tools, ["exec"], ["second", "first"]),
+    )
+  })
+
   test("pins, rotates, advances, and cascades with its session", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
@@ -201,11 +254,7 @@ describe("session prefix snapshot", () => {
     }
     const snapshot = await SessionPrefixSnapshot.snapshotTools(tools, Object.keys(tools))
 
-    expect(Object.keys(SessionPrefixSnapshot.restoreTools(snapshot))).toEqual([
-      "local",
-      "mcp_loaded",
-      "mcp_searchable",
-    ])
+    expect(Object.keys(SessionPrefixSnapshot.restoreTools(snapshot))).toEqual(["local", "mcp_loaded", "mcp_searchable"])
     expect(Object.keys(SessionPrefixSnapshot.restoreTools(snapshot, ["local", "mcp_loaded"]))).toEqual([
       "local",
       "mcp_loaded",

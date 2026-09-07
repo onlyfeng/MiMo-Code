@@ -180,7 +180,8 @@ describe("explicit GPT harness aliases", () => {
             }
             const tools = (yield* registry.tools(input)).map((tool) => tool.id)
             expect(tools).toContain("exec")
-            expect(tools).toContain("apply_patch")
+            expect(tools).not.toContain("apply_patch")
+            expect((yield* registry.registered(input)).map((tool) => tool.id)).toContain("apply_patch")
             expect(tools).not.toContain("edit")
             const defaults = (yield* registry.tools({ ...input, harness: "default" })).map((tool) => tool.id)
             expect(defaults).toContain("edit")
@@ -239,54 +240,56 @@ describe("explicit GPT harness aliases", () => {
     ),
   )
 
-  it.live("does not grant a second instance trust from plugin mutations of cached global config", () =>
-    provideTmpdirInstance((directory) =>
-      Effect.gen(function* () {
-        const file = path.join(Global.Path.config, "mimocode.json")
-        yield* Effect.acquireRelease(
-          Effect.promise(async () => {
-            const previous = (await Bun.file(file).exists()) ? await Bun.file(file).text() : undefined
-            const plugin = path.join(directory, "global-models.ts")
-            await Bun.write(
-              plugin,
-              `export default async () => ({ config(config) {
+  it.live(
+    "does not grant a second instance trust from plugin mutations of cached global config",
+    () =>
+      provideTmpdirInstance((directory) =>
+        Effect.gen(function* () {
+          const file = path.join(Global.Path.config, "mimocode.json")
+          yield* Effect.acquireRelease(
+            Effect.promise(async () => {
+              const previous = (await Bun.file(file).exists()) ? await Bun.file(file).text() : undefined
+              const plugin = path.join(directory, "global-models.ts")
+              await Bun.write(
+                plugin,
+                `export default async () => ({ config(config) {
                 config.provider.local.models.trusted.harness_model = "gpt-6-astra"
                 config.provider.local.models.opaque.harness_model = "gpt-6-astra"
               } })`,
-            )
-            await Bun.write(
-              file,
-              JSON.stringify({
-                plugin: [pathToFileURL(plugin).href],
-                provider: {
-                  local: {
-                    npm: "@ai-sdk/openai-compatible",
-                    models: { trusted: { harness_model: "gpt-5.6-sol" }, opaque: {} },
+              )
+              await Bun.write(
+                file,
+                JSON.stringify({
+                  plugin: [pathToFileURL(plugin).href],
+                  provider: {
+                    local: {
+                      npm: "@ai-sdk/openai-compatible",
+                      models: { trusted: { harness_model: "gpt-5.6-sol" }, opaque: {} },
+                    },
                   },
-                },
+                }),
+              )
+              return previous
+            }),
+            (previous) =>
+              Effect.promise(() =>
+                previous === undefined ? fs.rm(file, { force: true }) : fs.writeFile(file, previous),
+              ),
+          )
+          const inspect = () =>
+            provideTmpdirInstance(() =>
+              Effect.gen(function* () {
+                yield* (yield* Plugin.Service).list()
+                const providers = yield* Provider.Service
+                const trusted = yield* providers.getModel(ProviderID.make("local"), ModelID.make("trusted"))
+                const opaque = yield* providers.getModel(ProviderID.make("local"), ModelID.make("opaque"))
+                return { trusted: trusted.harness_model, opaque: opaque.harness_model }
               }),
             )
-            return previous
-          }),
-          (previous) =>
-            Effect.promise(() =>
-              previous === undefined ? fs.rm(file, { force: true }) : fs.writeFile(file, previous),
-            ),
-        )
-        const inspect = () =>
-          provideTmpdirInstance(() =>
-            Effect.gen(function* () {
-              yield* (yield* Plugin.Service).list()
-              const providers = yield* Provider.Service
-              const trusted = yield* providers.getModel(ProviderID.make("local"), ModelID.make("trusted"))
-              const opaque = yield* providers.getModel(ProviderID.make("local"), ModelID.make("opaque"))
-              return { trusted: trusted.harness_model, opaque: opaque.harness_model }
-            }),
-          )
-        expect(yield* inspect()).toEqual({ trusted: "gpt-5.6-sol", opaque: undefined })
-        expect(yield* inspect()).toEqual({ trusted: "gpt-5.6-sol", opaque: undefined })
-      }),
-    ),
+          expect(yield* inspect()).toEqual({ trusted: "gpt-5.6-sol", opaque: undefined })
+          expect(yield* inspect()).toEqual({ trusted: "gpt-5.6-sol", opaque: undefined })
+        }),
+      ),
     30000,
   )
 })

@@ -26,6 +26,20 @@ changes the checkpoint writer's tool contract, but not its
 responsibility. #59 records this inventory baseline without changing a
 producer. The checkpoint row therefore remains unchanged.
 
+## 2026-09-08 compact exec amendment
+
+[Codex compact tools](../../codex-compact-tools.md) add the manually classified
+request-pool and nested-execution rows below. Existing actor/checkpoint captors
+now carry the complete registered pool, its active subset and model identity;
+cold and warm capture preserve these independently. This refresh describes the
+current EffectBridge/RunDisposal contract, not completed GenerationLease migration.
+
+| Producer                                       | Fingerprint | Current ownership and settlement                                                                                                                                                       | Evidence                                                                   | Planned migration              |
+| ---------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------ |
+| `src/session/prompt.ts:resolveTools.execTools` | manual      | Request-owned authorized implementations; no live registry reread during exec; frozen actors retain membership and reject changed hidden schemas                                       | `test/session/codex-compact.test.ts`, `test/session/prompt-effect.test.ts` | Task 2 / Task 5 remain pending |
+| `src/tool/tool-script.ts:callTool`             | manual      | Captured instance bridge; admission closes before abort; nested effects and finalizers join before the outer result; per-child permission receipt retains the actual post-hook command | `test/tool/tool-script.test.ts`, `test/session/codex-compact.test.ts`      | Task 5 remains pending         |
+| `src/tool/tool-script.ts:attachments`          | manual      | Request-local bounded host relay into ordinary persisted FileParts; no module-global media state                                                                                       | `test/session/codex-compact.test.ts`                                       | Task 5 remains pending         |
+
 ## 2026-09-07 selected actor recovery amendment
 
 The constrained [actor resume integration](../../actor-recovery.md) adds the

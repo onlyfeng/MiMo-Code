@@ -20,6 +20,7 @@ import { makeRuntime } from "@/effect/run-service"
 import { fn } from "@/util/fn"
 import path from "path"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
+import { observedToolParts } from "./observed-tool-parts"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -94,7 +95,7 @@ export function buildFileManifest(messages: MessageV2.WithParts[], env: { worktr
 
   for (const message of messages) {
     const mutatedFiles = new Set<string>()
-    for (const part of message.parts) {
+    for (const part of message.parts.flatMap(observedToolParts)) {
       if (part.type === "patch") {
         for (const file of part.files) {
           if (mutatedFiles.has(relativeFile(file, env.worktree))) continue
@@ -358,7 +359,7 @@ export const layer: Layer.Layer<
           const part = msg.parts[partIndex]
           if (part.type === "tool")
             if (part.state.status === "completed") {
-              if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+              if (observedToolParts(part).some((item) => PRUNE_PROTECTED_TOOLS.includes(item.tool))) continue
               if (part.state.time.compacted) break loop
               const estimate = Token.estimate(part.state.output)
               total += estimate
@@ -473,6 +474,9 @@ export const layer: Layer.Layer<
         permission: Agent.runtimePermission(parentAgent, parentSession.permission),
       })
       const frozen = yield* SessionPrefixSnapshot.get(input.sessionID, profileKey)
+      const frozenActiveTools = frozen?.tools
+        ? SessionPrefixSnapshot.restoreActiveTools(frozen.tools, frozen.active_tools)
+        : undefined
       if (!frozen) {
         log.warn("compaction prefix snapshot missing", { sessionID: input.sessionID, profileKey })
       }
@@ -548,8 +552,8 @@ export const layer: Layer.Layer<
         agent: parentAgent,
         permission: parentSession.permission,
         sessionID: input.sessionID,
-        tools: frozen?.tools ? SessionPrefixSnapshot.restoreTools(frozen.tools, frozen.active_tools ?? undefined) : {},
-        activeTools: frozen?.active_tools ?? frozen?.tools?.map((item) => item.name),
+        tools: frozen?.tools ? SessionPrefixSnapshot.restoreTools(frozen.tools) : {},
+        activeTools: frozenActiveTools,
         toolChoice: "none",
         system: [],
         prebuiltSystem: frozen?.system,
@@ -610,7 +614,10 @@ export const layer: Layer.Layer<
                 model: parentModel,
                 fixed: {
                   system: frozen.system,
-                  tools: frozen.tools ?? [],
+                  tools:
+                    frozen.tools
+                      ?.filter((item) => frozenActiveTools?.includes(item.name))
+                      .map(({ active, ...item }) => item) ?? [],
                   summary: buildSummaryMessage(summary, trigger, true),
                   manifest,
                 },

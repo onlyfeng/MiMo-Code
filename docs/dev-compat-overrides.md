@@ -469,6 +469,10 @@ matrix or exact-head CI record.
   session-global retry status/events. Fresh compat generation retains
   `Agent.maxMode` and `AgentConfig.maxMode`; ALIAS-01 creates no compat-only
   harness resolver or eighth DC owner.
+- 2026-09-08 compact-tool integration: The shared Codex advertisement subset
+  flows through compat's existing `runStep` and per-agent MaxMode paths.
+  Non-final/non-`json_schema` gating, hidden-title isolation, and retry-status
+  ownership remain unchanged; compact declarations add no new MaxMode policy.
 - Exit condition: retire when shared `main` exposes equivalent per-agent
   opt-in, generated interfaces, mode exclusions, retry behavior, and final-step
   enforcement; do not retire merely because the global experimental switch
@@ -644,6 +648,17 @@ matrix or exact-head CI record.
   Recovery may stop at its owned summary when a continuation CAS loses; this
   grants no authority to the competing user. SCHEMA-01 remains an experiment
   and changes neither production validators nor default authority exposure.
+- 2026-09-08 compact-tool integration: Prefix snapshots retain the complete
+  request-authorized pool separately from advertised tools. Complete boolean
+  `active` flags in the shared JSON format take precedence over a potentially
+  stale compat `active_tools` column; legacy JSON uses that column, including
+  an empty list, and falls back to all stored tools only when neither format
+  records a mask. Loaded MCP membership remains a separate hash input.
+  Request preflight and compaction-tail budgeting count only advertised
+  descriptors, including exec's compact declarations. Current-turn context,
+  pending-external checks, successful-commit receipts, and continuation cleanup
+  remain intact. Request-local structured schemas participate in snapshot
+  rotation when a session changes output format.
 - Exit condition: retire only when shared `main` enforces equivalent caps and
   non-throwing serialization at every model-visible boundary and performs the
   same request-aware, active-tool preflight without weakening FD-002 delivery.
@@ -758,6 +773,12 @@ matrix or exact-head CI record.
   prefix. The earlier dated “Recovery remains main-only” note is historical;
   internal actor resume is now supported, while public session recovery/resume
   and its OpenAPI remain main-only with no agent/task selectors.
+- 2026-09-08 compact-tool integration: Full-context actors inherit the complete
+  authorized tool pool and its separate advertised subset. Hidden native and
+  MCP schemas that differ from the frozen contract fail closed; each request
+  still owns its StructuredOutput executor. Required frozen `turnContext`,
+  same-capture `modelIdentity` in both checkpoint modes, parent permissions,
+  original receiver/cwd, and static-prefix overflow handling remain intact.
 - Exit condition: retire only when shared `main` supplies equivalent
   frozen-membership full-context actors, bounded state transport, and
   unrecoverable-static-prefix handling while FD-009 and FC-001 remain satisfied

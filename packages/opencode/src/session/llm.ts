@@ -802,7 +802,7 @@ const live: Layer.Layer<
           const repaired = await ToolCompat.repairToolCall({
             toolName: failed.toolCall.toolName,
             input: failed.toolCall.input,
-            toolNames: activeTools,
+            toolNames: Object.keys(tools),
             getSchema: (toolName) => failed.inputSchema({ toolName }),
           })
           if (repaired) {
@@ -1031,7 +1031,11 @@ export const defaultLayer = Layer.suspend(() =>
   ),
 )
 
-export function resolveTools(input: Pick<StreamInput, "tools" | "activeTools" | "agent" | "permission" | "user">) {
+export function resolveTools(
+  input: Pick<StreamInput, "tools" | "activeTools" | "agent" | "permission"> & {
+    user: MessageV2.User | { tools: MessageV2.User["tools"] }
+  },
+) {
   const permission = Agent.runtimePermission(input.agent, input.permission)
   const disabled = Permission.disabled(Object.keys(input.tools), permission)
   return Record.filter(

@@ -1,5 +1,7 @@
 # MiMoCode's Codex Microkernel Runtime for GPT Models
 
+> **2026-09-08 update:** This historical analysis predates the compact-tool integration. Its top-level shell/image tools, control exclusions, live registry and missing media relay are superseded by [the current contract](../codex-compact-tools.md). Harness resolution is unified; authorized definitions and advertised names are frozen separately, and exec relays bounded attachments.
+
 > “Codex microkernel runtime” is this document's summary of the current architecture. It is not an official module name in the source code, nor does it refer to an operating-system-level microkernel.
 
 ## Abstract

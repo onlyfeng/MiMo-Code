@@ -2,7 +2,7 @@ import { Worktree } from "../../src/worktree"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, expect } from "bun:test"
-import { dynamicTool, jsonSchema, type Tool as AITool } from "ai"
+import { asSchema, dynamicTool, jsonSchema, type Tool as AITool } from "ai"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import * as Stream from "effect/Stream"
@@ -1618,6 +1618,18 @@ for (const harness of ["codex", "auto"] as const) {
         yield* llm.text("third answer kept verbatim")
         yield* prompt.loop({ sessionID: chat.id })
         const beforeRequest = (yield* llm.inputs)[2]
+        const frozenTools = yield* Effect.sync(() =>
+          Database.use(
+            (db) =>
+              db
+                .select()
+                .from(SessionPrefixSnapshotTable)
+                .where(eq(SessionPrefixSnapshotTable.session_id, chat.id))
+                .get()?.tools ?? [],
+          ),
+        )
+        expect(frozenTools.find((item) => item.name === "bash")?.active).toBe(false)
+        expect(frozenTools.find((item) => item.name === "exec")?.active).toBe(true)
 
         yield* compaction.create({
           sessionID: chat.id,
@@ -1667,7 +1679,9 @@ for (const harness of ["codex", "auto"] as const) {
         expect(serialized).not.toContain("second query kept verbatim")
         expect(serialized).not.toContain("third query kept verbatim")
         const toolNames = (request.tools as Array<Record<string, unknown>>).map(wireToolName)
-        expect(toolNames).toEqual(expect.arrayContaining(["exec", "apply_patch", "bash"]))
+        expect(toolNames).toContain("exec")
+        expect(toolNames).not.toContain("apply_patch")
+        expect(toolNames).not.toContain("bash")
         expect(toolNames.length).toBeGreaterThan(1)
         expect((yield* sessions.get(chat.id)).prompt).toEqual({
           system: marker,
@@ -2557,152 +2571,154 @@ it.live("compaction preserves the parent's appended turn context", () =>
   ),
 )
 
-it.live("persists the process-time compaction projection from the real snapshot and arrived tail", () =>
-  provideTmpdirServer(
-    Effect.fnUntraced(function* ({ dir, llm }) {
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const compaction = yield* SessionCompaction.Service
-      const providers = yield* ProviderSvc.Service
-      const model = yield* providers.getModel(ref.providerID, ref.modelID)
-      const chat = yield* sessions.create({ title: "Compaction projection" })
-      yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        model: ref,
-        noReply: true,
-        parts: [{ type: "text", text: "inspect and edit auth" }],
-      })
-      yield* llm.text("prepared")
-      const history = yield* prompt.loop({ sessionID: chat.id })
-      const authPath = path.join(dir, "src/auth.ts")
-      for (const [tool, input, output, metadata] of [
-        [
-          "read",
-          { file_path: authPath, offset: 10, limit: 11 },
-          "10: before\n20: after\n\n(Showing lines 10-20 of 100)",
-          { truncated: true },
-        ],
-        ["edit", { file_path: authPath, old_string: "before", new_string: "after" }, "ok", {}],
-      ] as const) {
-        yield* sessions.updatePart({
-          id: PartID.ascending(),
+it.live(
+  "persists the process-time compaction projection from the real snapshot and arrived tail",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ dir, llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const compaction = yield* SessionCompaction.Service
+        const providers = yield* ProviderSvc.Service
+        const model = yield* providers.getModel(ref.providerID, ref.modelID)
+        const chat = yield* sessions.create({ title: "Compaction projection" })
+        yield* prompt.prompt({
           sessionID: chat.id,
-          messageID: history.info.id,
-          type: "tool",
-          tool,
-          callID: `call-${tool}`,
-          state: {
-            status: "completed",
-            input,
-            output,
-            title: tool,
-            metadata,
-            time: { start: Date.now(), end: Date.now() },
-          },
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "inspect and edit auth" }],
         })
-      }
+        yield* llm.text("prepared")
+        const history = yield* prompt.loop({ sessionID: chat.id })
+        const authPath = path.join(dir, "src/auth.ts")
+        for (const [tool, input, output, metadata] of [
+          [
+            "read",
+            { file_path: authPath, offset: 10, limit: 11 },
+            "10: before\n20: after\n\n(Showing lines 10-20 of 100)",
+            { truncated: true },
+          ],
+          ["edit", { file_path: authPath, old_string: "before", new_string: "after" }, "ok", {}],
+        ] as const) {
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            sessionID: chat.id,
+            messageID: history.info.id,
+            type: "tool",
+            tool,
+            callID: `call-${tool}`,
+            state: {
+              status: "completed",
+              input,
+              output,
+              title: tool,
+              metadata,
+              time: { start: Date.now(), end: Date.now() },
+            },
+          })
+        }
 
-      yield* compaction.create({
-        sessionID: chat.id,
-        agent: "build",
-        model: ref,
-        auto: true,
-        agentID: "main",
-      })
-      const snapshot = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
-      const boundary = snapshot.at(-1)!
-      const release = defer<void>()
-      yield* llm.hold("PROCESS_SUMMARY", release.promise)
-      const processing = yield* compaction
-        .process({
-          parentID: boundary.info.id,
-          messages: snapshot,
+        yield* compaction.create({
           sessionID: chat.id,
+          agent: "build",
+          model: ref,
           auto: true,
           agentID: "main",
         })
-        .pipe(Effect.forkChild)
-      yield* llm.wait(1)
+        const snapshot = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
+        const boundary = snapshot.at(-1)!
+        const release = defer<void>()
+        yield* llm.hold("PROCESS_SUMMARY", release.promise)
+        const processing = yield* compaction
+          .process({
+            parentID: boundary.info.id,
+            messages: snapshot,
+            sessionID: chat.id,
+            auto: true,
+            agentID: "main",
+          })
+          .pipe(Effect.forkChild)
+        yield* llm.wait(1)
 
-      const tailUser = yield* sessions.updateMessage({
-        id: MessageID.ascending(),
-        sessionID: chat.id,
-        agentID: "main",
-        role: "user" as const,
-        time: { created: Date.now() },
-        agent: "build",
-        model: ref,
-      })
-      yield* sessions.updatePart({
-        id: PartID.ascending(),
-        sessionID: chat.id,
-        messageID: tailUser.id,
-        type: "text",
-        text: "arrived during compaction",
-      })
-      const tailAssistant = yield* sessions.updateMessage({
-        id: MessageID.ascending(),
-        sessionID: chat.id,
-        agentID: "main",
-        role: "assistant" as const,
-        parentID: tailUser.id,
-        time: { created: Date.now(), completed: Date.now() },
-        modelID: ref.modelID,
-        providerID: ref.providerID,
-        mode: "build",
-        agent: "build",
-        path: { cwd: dir, root: dir },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        finish: "stop",
-      })
-      yield* sessions.updatePart({
-        id: PartID.ascending(),
-        sessionID: chat.id,
-        messageID: tailAssistant.id,
-        type: "tool",
-        tool: "read",
-        callID: "call-large-tail",
-        state: {
-          status: "completed",
-          input: { file_path: path.join(dir, "large.log") },
-          output: "x".repeat(40_000),
-          title: "read",
-          metadata: {},
-          time: { start: Date.now(), end: Date.now() },
-        },
-      })
+        const tailUser = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          agentID: "main",
+          role: "user" as const,
+          time: { created: Date.now() },
+          agent: "build",
+          model: ref,
+        })
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          sessionID: chat.id,
+          messageID: tailUser.id,
+          type: "text",
+          text: "arrived during compaction",
+        })
+        const tailAssistant = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          agentID: "main",
+          role: "assistant" as const,
+          parentID: tailUser.id,
+          time: { created: Date.now(), completed: Date.now() },
+          modelID: ref.modelID,
+          providerID: ref.providerID,
+          mode: "build",
+          agent: "build",
+          path: { cwd: dir, root: dir },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          finish: "stop",
+        })
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          sessionID: chat.id,
+          messageID: tailAssistant.id,
+          type: "tool",
+          tool: "read",
+          callID: "call-large-tail",
+          state: {
+            status: "completed",
+            input: { file_path: path.join(dir, "large.log") },
+            output: "x".repeat(40_000),
+            title: "read",
+            metadata: {},
+            time: { start: Date.now(), end: Date.now() },
+          },
+        })
 
-      release.resolve(undefined)
-      expect(yield* Fiber.join(processing)).toBe("continue")
+        release.resolve(undefined)
+        expect(yield* Fiber.join(processing)).toBe("continue")
 
-      const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
-      const part = messages
-        .flatMap((message) => message.parts)
-        .find((part): part is MessageV2.CompactionPart => part.type === "compaction")!
-      expect(part.projection?.tail_start_id).toBe(tailUser.id)
-      expect(part.projection?.tail_end_id).toBe(tailAssistant.id)
-      expect(part.projection?.compacted_tool_calls).toEqual([{ call_id: "call-large-tail", tokens: 10_000 }])
-      expect(part.projection?.manifest).toContain("src/auth.ts (read: lines 10-20, then edited)")
-      expect(part.projection?.summary).toContain("PROCESS_SUMMARY")
-      expect(
-        messages.some(
-          (message) =>
-            message.info.role === "user" &&
-            message.parts.some((part) => part.type === "text" && part.metadata?.compaction_continue === true),
-        ),
-      ).toBe(false)
+        const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
+        const part = messages
+          .flatMap((message) => message.parts)
+          .find((part): part is MessageV2.CompactionPart => part.type === "compaction")!
+        expect(part.projection?.tail_start_id).toBe(tailUser.id)
+        expect(part.projection?.tail_end_id).toBe(tailAssistant.id)
+        expect(part.projection?.compacted_tool_calls).toEqual([{ call_id: "call-large-tail", tokens: 10_000 }])
+        expect(part.projection?.manifest).toContain("src/auth.ts (read: lines 10-20, then edited)")
+        expect(part.projection?.summary).toContain("PROCESS_SUMMARY")
+        expect(
+          messages.some(
+            (message) =>
+              message.info.role === "user" &&
+              message.parts.some((part) => part.type === "text" && part.metadata?.compaction_continue === true),
+          ),
+        ).toBe(false)
 
-      const modelMessages = JSON.stringify(
-        yield* MessageV2.toModelMessagesEffect(MessageV2.filterCompacted([...messages].reverse()), model),
-      )
-      expect(modelMessages.match(/PROCESS_SUMMARY/g)).toHaveLength(1)
-      expect(modelMessages).toContain("arrived during compaction")
-      expect(modelMessages).toContain("Tool result omitted during compaction: 10000 tokens")
-    }),
-    { git: true, config: providerCfg },
-  ),
+        const modelMessages = JSON.stringify(
+          yield* MessageV2.toModelMessagesEffect(MessageV2.filterCompacted([...messages].reverse()), model),
+        )
+        expect(modelMessages.match(/PROCESS_SUMMARY/g)).toHaveLength(1)
+        expect(modelMessages).toContain("arrived during compaction")
+        expect(modelMessages).toContain("Tool result omitted during compaction: 10000 tokens")
+      }),
+      { git: true, config: providerCfg },
+    ),
   30_000,
 )
 
@@ -3541,6 +3557,13 @@ it.live(
                       name: "frozen_only",
                       description: "captured before reload",
                       input_schema: { type: "object", properties: {} },
+                      active: true,
+                    },
+                    {
+                      name: "frozen_hidden",
+                      description: "registered before reload",
+                      input_schema: { type: "object", properties: { old: { type: "boolean" } } },
+                      active: false,
                     },
                   ],
                   loaded_mcp_tools: ["frozen_only"],
@@ -3561,8 +3584,9 @@ it.live(
             msgs: yield* sessions.messages({ sessionID: chat.id }),
           })
 
-          expect(Object.keys(captured.tools)).toEqual(["frozen_only"])
+          expect(Object.keys(captured.tools)).toEqual(["frozen_only", "frozen_hidden"])
           expect(captured.tools.frozen_only?.description).toBe("captured before reload")
+          expect(captured.activeTools).toEqual(["frozen_only"])
           expect(captured.loadedMcpTools).toEqual(["frozen_only"])
         }),
         { git: true, config: providerCfg },
@@ -3570,6 +3594,268 @@ it.live(
     ),
   30_000,
 )
+
+mcpIt.live(
+  "warm capture restores new JSON activity before stale legacy database columns",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const model = { providerID: ref.providerID, modelID: ModelID.make("gpt-5-test") }
+        const parent = yield* sessions.create({ title: "Snapshot format compatibility" })
+        yield* llm.text("parent completed")
+        yield* prompt.prompt({
+          sessionID: parent.id,
+          model,
+          parts: [{ type: "text", text: "Create the persisted prefix before format migration" }],
+        })
+        const capture = prefixCaptureRef.current
+        if (!capture) throw new Error("real prefix capture was not bound")
+        const messages = yield* sessions.messages({ sessionID: parent.id })
+        const tools = ["exec", "hidden"].map((name) => ({
+          name,
+          description: `captured ${name}`,
+          input_schema: { type: "object" as const, properties: {} },
+        }))
+        const cases = [
+          { tools, active: ["exec"], expected: ["exec"] },
+          { tools, active: [], expected: [] },
+          { tools, active: null, expected: ["exec", "hidden"] },
+          { tools: [{ ...tools[0], active: true }, tools[1]], active: ["hidden"], expected: ["hidden"] },
+          {
+            tools: tools.map((item) => ({ ...item, active: item.name === "exec" })),
+            active: ["hidden"],
+            expected: ["exec"],
+          },
+          { tools: tools.map((item) => ({ ...item, active: false })), active: ["exec"], expected: [] },
+        ]
+        for (const item of cases) {
+          yield* Effect.sync(() =>
+            Database.use((db) =>
+              db
+                .update(SessionPrefixSnapshotTable)
+                .set({ tools: item.tools, active_tools: item.active, loaded_mcp_tools: ["hidden"] })
+                .where(eq(SessionPrefixSnapshotTable.session_id, parent.id))
+                .run(),
+            ),
+          )
+          const prefix = yield* capture({
+            sessionID: parent.id,
+            agentName: "build",
+            providerID: model.providerID,
+            modelID: model.modelID,
+            msgs: messages,
+          })
+          expect(Object.keys(prefix.tools)).toEqual(["exec", "hidden"])
+          expect(prefix.activeTools).toEqual(item.expected)
+          expect(prefix.loadedMcpTools).toEqual(["hidden"])
+        }
+        expect(yield* llm.inputs).toHaveLength(1)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
+)
+
+for (const disabled of [false, true]) {
+  mcpIt.live(`warm MCP capture ${disabled ? "excludes parent-disabled" : "retains authorized hidden"} tools`, () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const model = { providerID: ref.providerID, modelID: ModelID.make("gpt-5-test") }
+        const parent = yield* sessions.create({
+          title: "Warm MCP membership",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* llm.text("parent completed")
+        yield* prompt.prompt({
+          sessionID: parent.id,
+          model,
+          tools: { mcp_success: !disabled },
+          parts: [{ type: "text", text: "complete the parent request before capture" }],
+        })
+        const requests = yield* llm.inputs
+        expect(requests).toHaveLength(1)
+        expect((requests[0].tools as Array<Record<string, unknown>>).map(wireToolName)).not.toContain("mcp_success")
+        const snapshot = yield* Effect.sync(() =>
+          Database.use((db) =>
+            db
+              .select()
+              .from(SessionPrefixSnapshotTable)
+              .where(eq(SessionPrefixSnapshotTable.session_id, parent.id))
+              .get(),
+          ),
+        )
+        expect(snapshot).toBeDefined()
+        const capture = prefixCaptureRef.current
+        if (!capture) throw new Error("real prefix capture was not bound")
+        const prefix = yield* capture({
+          sessionID: parent.id,
+          agentName: "build",
+          providerID: model.providerID,
+          modelID: model.modelID,
+          msgs: yield* sessions.messages({ sessionID: parent.id }),
+        })
+        expect(prefix.activeTools).not.toContain("mcp_success")
+        expect(Object.hasOwn(prefix.tools, "mcp_success")).toBe(!disabled)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+}
+
+itActor.live("full-context structured output remains advertised outside the captured parent tool subset", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const actors = yield* Effect.serviceOption(Actor.Service)
+      if (actors._tag === "None") throw new Error("real Actor service was not provided")
+      const model = { providerID: ref.providerID, modelID: ModelID.make("gpt-5-test") }
+      const parent = yield* sessions.create({ title: "Text parent with structured child" })
+      yield* prompt.prompt({
+        sessionID: parent.id,
+        model,
+        noReply: true,
+        parts: [{ type: "text", text: "capture an ordinary text request" }],
+      })
+      const capture = prefixCaptureRef.current
+      if (!capture) throw new Error("real prefix capture was not bound")
+      const messages = yield* sessions.messages({ sessionID: parent.id })
+      const prefix = yield* capture({
+        sessionID: parent.id,
+        agentName: "build",
+        providerID: model.providerID,
+        modelID: model.modelID,
+        msgs: messages,
+      })
+      expect(prefix.activeTools).toBeDefined()
+      expect(prefix.activeTools).not.toContain("StructuredOutput")
+      expect(prefix.tools.StructuredOutput).toBeUndefined()
+      yield* llm.tool("StructuredOutput", { ok: true })
+      const spawned = yield* actors.value.spawn({
+        mode: "subagent",
+        sessionID: parent.id,
+        agentType: "build",
+        task: "return the structured result",
+        context: "full",
+        tools: [],
+        background: false,
+        model,
+        format: {
+          type: "json_schema",
+          schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+          retryCount: 0,
+        },
+        forkContext: { ...prefix, model, watermarkMsgID: messages.at(-1)!.info.id },
+      })
+      const outcome = yield* Deferred.await(spawned.outcome)
+      expect(outcome.status).toBe("success")
+      if (outcome.status === "success") expect(outcome.structured).toEqual({ ok: true })
+      const requests = yield* llm.inputs
+      expect(requests).toHaveLength(1)
+      expect((requests[0].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("StructuredOutput")
+      expect(requests[0].tool_choice).toBe("required")
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+for (const changed of [false, true]) {
+  itActor.live(
+    `frozen hidden tools ${changed ? "reject changed" : "execute matching"} schemas through exec and direct dispatch`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const prompt = yield* SessionPrompt.Service
+          const sessions = yield* Session.Service
+          // makeHttp conditionally exposes Actor, so its inferred shared layer
+          // type omits this service. This fixture explicitly enables it above.
+          const actors = yield* Effect.serviceOption(Actor.Service)
+          if (actors._tag === "None") throw new Error("real Actor service was not provided")
+          const actor = actors.value
+          const model = { providerID: ref.providerID, modelID: ModelID.make("gpt-5-test") }
+          const parent = yield* sessions.create({
+            title: "Frozen hidden schema",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          yield* prompt.prompt({
+            sessionID: parent.id,
+            model,
+            noReply: true,
+            parts: [{ type: "text", text: "capture the original tool contract" }],
+          })
+          const capture = prefixCaptureRef.current
+          if (!capture) throw new Error("real prefix capture was not bound")
+          const messages = yield* sessions.messages({ sessionID: parent.id })
+          const prefix = yield* capture({
+            sessionID: parent.id,
+            agentName: "build",
+            providerID: model.providerID,
+            modelID: model.modelID,
+            msgs: messages,
+          })
+          expect(prefix.activeTools).toContain("exec")
+          expect(prefix.activeTools).not.toContain("bash")
+          expect(prefix.tools.bash).toBeDefined()
+          const schema = yield* Effect.promise(() =>
+            Promise.resolve(asSchema(prefix.tools.bash.inputSchema).jsonSchema),
+          )
+          // The older captured contract allowed a single command. The current
+          // registry contract is wider; neither entry point may silently adopt it.
+          const tools = changed
+            ? {
+                ...prefix.tools,
+                bash: {
+                  ...prefix.tools.bash,
+                  inputSchema: jsonSchema({
+                    ...schema,
+                    properties: { ...schema.properties, command: { type: "string", enum: ["printf original"] } },
+                  }),
+                },
+              }
+            : prefix.tools
+          yield* llm.tool("exec", {
+            code: 'return await tools.bash({command:"printf nested > compact-nested.txt",description:"Write nested fixture"})',
+          })
+          yield* llm.tool("bash", {
+            command: "printf direct > compact-direct.txt",
+            description: "Write direct fixture",
+          })
+          yield* llm.text("done")
+          const spawned = yield* actor.spawn({
+            mode: "subagent",
+            sessionID: parent.id,
+            agentType: "build",
+            task: "exercise the captured shell tool",
+            context: "full",
+            tools: ["bash"],
+            background: false,
+            model,
+            forkContext: { ...prefix, tools, model, watermarkMsgID: messages.at(-1)!.info.id },
+          })
+          expect((yield* Deferred.await(spawned.outcome)).status).toBe("success")
+          expect(
+            yield* Effect.promise(() => Bun.file(path.join(Instance.directory, "compact-nested.txt")).exists()),
+          ).toBe(!changed)
+          expect(
+            yield* Effect.promise(() => Bun.file(path.join(Instance.directory, "compact-direct.txt")).exists()),
+          ).toBe(!changed)
+          const requests = yield* llm.inputs
+          expect(requests).toHaveLength(3)
+          expect((requests[0].tools as Array<Record<string, unknown>>).map(wireToolName)).not.toContain("bash")
+          const parts = (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).flatMap(
+            (message) => message.parts,
+          )
+          expect(parts.some((part) => part.type === "tool" && part.tool === "exec")).toBe(true)
+          expect(parts.some((part) => part.type === "tool" && part.tool === "bash")).toBe(true)
+        }),
+        { git: true, config: providerCfg },
+      ),
+  )
+}
 
 it.live(
   "loop injects the dynamic environment block only when the flag is set",

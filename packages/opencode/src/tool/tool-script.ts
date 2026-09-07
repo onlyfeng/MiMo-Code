@@ -13,6 +13,7 @@ import { Metrics } from "@/metrics"
 import { Plugin } from "@/plugin"
 import type { ModelID, ProviderID } from "../provider/schema"
 import { MessageV2 } from "../session/message-v2"
+import { normalizeResult } from "../session/try-best-detector"
 import { evalScript, type HostFn } from "../workflow/sandbox"
 import { toolScriptRegistry, TOOL_SCRIPT_ALIASES, TOOL_SCRIPT_EXCLUDED } from "./tool-script-ref"
 import type { HarnessMode } from "./gpt"
@@ -32,11 +33,36 @@ const ACTIVE_DEADLINE_S_CEILING = 600
 const WALL_DEADLINE_MS = 30 * 60 * 1000
 const MAX_RESULT_BYTES = 256 * 1024
 const MAX_SUB_PARTS_BYTES = 256 * 1024
+const MAX_SUB_PART_EVIDENCE_BYTES = 8 * 1024
+const MAX_ATTACHMENTS = 8
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_LOG_BYTES = 64 * 1024
 const MAX_CODE_BYTES = 128 * 1024
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 const EXEC_PROGRESS_DEBOUNCE_MS = 150
 const TRACE_TAIL_ENTRIES = 20
+const EXEC_COMMAND_DEFAULT_YIELD_TIME_MS = 10_000
+const EXEC_COMMAND_DEFAULT_MAX_OUTPUT_TOKENS = 10_000
+
+const ExecCommandParameters = z.strictObject({
+  cmd: z.string().describe("Shell command to execute."),
+  yield_time_ms: z.number().int().positive().optional().describe("Command timeout in milliseconds; defaults to 10000."),
+  max_output_tokens: z.number().int().positive().optional().describe("Inline output token budget; defaults to 10000."),
+  workdir: z.string().optional().describe("Working directory; prefer an absolute path."),
+  description: z.string().optional().describe("Short description of the command."),
+})
+
+function execCommandArgs(args: unknown) {
+  const input = ExecCommandParameters.parse(args)
+  const description = input.description ?? input.cmd
+  return {
+    command: input.cmd,
+    timeout: input.yield_time_ms ?? EXEC_COMMAND_DEFAULT_YIELD_TIME_MS,
+    max_output_tokens: input.max_output_tokens ?? EXEC_COMMAND_DEFAULT_MAX_OUTPUT_TOKENS,
+    workdir: input.workdir,
+    description: description.length > 80 ? `${description.slice(0, 77)}...` : description,
+  }
+}
 
 function normalizeExecCode(code: string) {
   return code
@@ -96,8 +122,10 @@ export function renderToolScriptDeclarations(defs: Tool.Def[]): string {
     const def = defs.find((item) => item.id === target)
     if (!def) return []
     const summary = def.description.split("\n").find((line) => line.trim()) ?? ""
-    const input = schemaToTs(z.toJSONSchema(def.parameters))
-    return [`  /** Alias for ${target}. ${summary.trim().slice(0, 180)} */\n  ${alias}(input: ${input}): Promise<ToolResult>`]
+    const input = schemaToTs(z.toJSONSchema(alias === "exec_command" ? ExecCommandParameters : def.parameters))
+    return [
+      `  /** Alias for ${target}. ${summary.trim().slice(0, 180)} */\n  ${alias}(input: ${input}): Promise<ToolResult>`,
+    ]
   })
   return [
     "```ts",
@@ -323,11 +351,78 @@ export const EXEC_METADATA_SCHEMA = 1
 const EXEC_SUB_PART_TRUNCATED = "[truncated: exec sub_parts byte budget]"
 
 function compactExecSubPart(part: ExecSubPartSnapshot): ExecSubPartSnapshot {
-  const shared = {
-    input: { truncated: true },
-    metadata: { truncated: true },
-    time: { ...part.state.time },
+  const input: Record<string, unknown> = { truncated: true }
+  const metadata: Record<string, unknown> = { truncated: true }
+  const evidence = { input, metadata, output: EXEC_SUB_PART_TRUNCATED }
+  // Preserve exact, bounded facts for transcript consumers, never arbitrary
+  // arguments or partial paths/diffs. The enclosing snapshot keeps its own cap.
+  const retain = (target: Record<string, unknown>, key: string, value: unknown) => {
+    if (
+      typeof value !== "string" &&
+      typeof value !== "boolean" &&
+      !(typeof value === "number" && Number.isFinite(value))
+    )
+      return
+    if (typeof value === "string" && value.length > MAX_SUB_PART_EVIDENCE_BYTES) return
+    const previous = target[key]
+    target[key] = value
+    if (Buffer.byteLength(JSON.stringify(evidence), "utf8") <= MAX_SUB_PART_EVIDENCE_BYTES) return
+    if (previous === undefined) delete target[key]
+    else target[key] = previous
   }
+  const args = metadataRecord(part.state.input)
+  const meta = metadataRecord(part.state.metadata)
+  for (const key of ["cancelled", "rejected", "recoverable"]) retain(metadata, key, meta[key])
+  if (["bash", "exec_command"].includes(part.tool)) {
+    retain(input, "command", args.command ?? args.cmd)
+    retain(metadata, "exit", meta.exit)
+    if (Array.isArray(meta.mainWorktreeHits)) {
+      const hits: string[] = []
+      metadata.mainWorktreeHits = hits
+      for (const hit of meta.mainWorktreeHits.slice(0, 32)) {
+        if (typeof hit !== "string" || hit.length > MAX_SUB_PART_EVIDENCE_BYTES) continue
+        hits.push(hit)
+        if (Buffer.byteLength(JSON.stringify(evidence), "utf8") > MAX_SUB_PART_EVIDENCE_BYTES) hits.pop()
+      }
+      if (!hits.length) delete metadata.mainWorktreeHits
+    }
+    if (part.state.output) retain(evidence, "output", normalizeResult(part.state.output))
+  }
+  if (["read", "write", "edit", "multiedit", "notebook_edit", "str_replace", "apply_patch"].includes(part.tool)) {
+    for (const key of ["file_path", "path", "notebook_path", "offset"]) retain(input, key, args[key])
+    if (args.old_string === "") retain(input, "old_string", "")
+    retain(metadata, "filepath", meta.filepath ?? metadataRecord(meta.filediff).file)
+    retain(metadata, "exists", meta.exists)
+    if (part.tool === "apply_patch" && Array.isArray(meta.files)) {
+      const files: Record<string, unknown>[] = []
+      const sources: [Record<string, unknown>, Record<string, unknown>][] = []
+      metadata.files = files
+      // Keep file identities before considering optional diff text.
+      for (const item of meta.files.slice(0, 32)) {
+        const file: Record<string, unknown> = {}
+        files.push(file)
+        const original = metadataRecord(item)
+        for (const key of ["filePath", "relativePath", "movePath", "type"]) retain(file, key, original[key])
+        if (!Object.keys(file).length) files.pop()
+        else sources.push([file, original])
+      }
+      for (const [file, original] of sources) retain(file, "patch", original.patch)
+      if (!files.length) delete metadata.files
+    }
+    if (part.tool === "multiedit" && Array.isArray(meta.results)) {
+      const results: Record<string, unknown>[] = []
+      metadata.results = results
+      for (const item of meta.results.slice(0, 32)) {
+        const result: Record<string, unknown> = {}
+        results.push(result)
+        retain(result, "diff", metadataRecord(item).diff)
+        if (!Object.keys(result).length) results.pop()
+      }
+      if (!results.length) delete metadata.results
+    }
+    retain(metadata, "diff", meta.diff)
+  }
+  const shared = { input, metadata, time: { ...part.state.time } }
   if (part.state.status === "completed") {
     return {
       seq: part.seq,
@@ -338,7 +433,7 @@ function compactExecSubPart(part: ExecSubPartSnapshot): ExecSubPartSnapshot {
         status: "completed",
         ...shared,
         title: EXEC_SUB_PART_TRUNCATED,
-        output: EXEC_SUB_PART_TRUNCATED,
+        output: evidence.output,
       },
     }
   }
@@ -366,7 +461,6 @@ function compactExecSubPart(part: ExecSubPartSnapshot): ExecSubPartSnapshot {
     },
   }
 }
-
 function metadataRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {}
   return value as Record<string, unknown>
@@ -410,41 +504,52 @@ export function viewExecSubtools(metadata: unknown): ExecSubPartSnapshot[] {
       const stateMetadata = optionalMetadata(state.metadata)
       const attachments = normalizeAttachments(state.attachments)
       if (
-        typeof seq !== "number" || !Number.isInteger(seq) || seq < 1 ||
+        typeof seq !== "number" ||
+        !Number.isInteger(seq) ||
+        seq < 1 ||
         type !== "tool" ||
-        typeof callID !== "string" || callID.length === 0 ||
-        seenSeq.has(seq) || seenCallID.has(callID) ||
-        typeof tool !== "string" || tool.length === 0 ||
+        typeof callID !== "string" ||
+        callID.length === 0 ||
+        seenSeq.has(seq) ||
+        seenCallID.has(callID) ||
+        typeof tool !== "string" ||
+        tool.length === 0 ||
         (status !== "running" && status !== "completed" && status !== "error") ||
         !Object.prototype.hasOwnProperty.call(state, "input") ||
-        typeof start !== "number" || !Number.isFinite(start) ||
+        typeof start !== "number" ||
+        !Number.isFinite(start) ||
         ((status === "completed" || status === "error") && (typeof end !== "number" || !Number.isFinite(end))) ||
         (status === "completed" && (typeof state.title !== "string" || typeof state.output !== "string")) ||
         (status === "error" && typeof state.error !== "string")
-      ) return []
+      )
+        return []
       seenSeq.add(seq)
       seenCallID.add(callID)
-      return [{
-        seq,
-        type: "tool" as const,
-        callID,
-        tool,
-        state: {
-          status,
-          input,
-          ...(typeof state.title === "string" ? { title: state.title } : {}),
-          ...(typeof state.output === "string" ? { output: state.output } : {}),
-          ...(typeof state.error === "string" ? { error: state.error } : {}),
-          ...(stateMetadata ? { metadata: stateMetadata } : {}),
-          time: {
-            start,
-            ...(typeof end === "number" && Number.isFinite(end) ? { end } : {}),
+      return [
+        {
+          seq,
+          type: "tool" as const,
+          callID,
+          tool,
+          state: {
+            status,
+            input,
+            ...(typeof state.title === "string" ? { title: state.title } : {}),
+            ...(typeof state.output === "string" ? { output: state.output } : {}),
+            ...(typeof state.error === "string" ? { error: state.error } : {}),
+            ...(stateMetadata ? { metadata: stateMetadata } : {}),
+            time: {
+              start,
+              ...(typeof end === "number" && Number.isFinite(end) ? { end } : {}),
+            },
+            ...(attachments ? { attachments } : {}),
+            ...(state.providerOutput !== undefined ? { providerOutput: state.providerOutput } : {}),
+            ...(optionalMetadata(state.providerMetadata)
+              ? { providerMetadata: optionalMetadata(state.providerMetadata) }
+              : {}),
           },
-          ...(attachments ? { attachments } : {}),
-          ...(state.providerOutput !== undefined ? { providerOutput: state.providerOutput } : {}),
-          ...(optionalMetadata(state.providerMetadata) ? { providerMetadata: optionalMetadata(state.providerMetadata) } : {}),
-        },
-      } satisfies ExecSubPartSnapshot]
+        } satisfies ExecSubPartSnapshot,
+      ]
     })
     .toSorted((a, b) => a.seq - b.seq)
 }
@@ -535,6 +640,29 @@ export const ToolScriptTool = Tool.define(
           const activeDeadlineMs = (params.timeout_seconds ?? ACTIVE_DEADLINE_S_DEFAULT) * 1000
           const trace: TraceEntry[] = []
           const subParts: ExecSubPartSnapshot[] = []
+          const attachments: ExecAttachment[] = []
+          const attachmentURLs = new Set<string>()
+          const attachmentBudget = { bytes: 0, omitted: 0 }
+          const relayAttachments = (items: ExecAttachment[] | undefined) => {
+            const accepted: ExecAttachment[] = []
+            for (const item of items ?? []) {
+              if (attachmentURLs.has(item.url)) continue
+              const bytes = Buffer.byteLength(JSON.stringify(item), "utf8")
+              if (attachments.length >= MAX_ATTACHMENTS || attachmentBudget.bytes + bytes > MAX_ATTACHMENT_BYTES) {
+                attachmentBudget.omitted++
+                continue
+              }
+              attachmentURLs.add(item.url)
+              attachmentBudget.bytes += bytes
+              attachments.push(item)
+              accepted.push(item)
+            }
+            return accepted.length ? accepted : undefined
+          }
+          const attachmentNotice = () =>
+            attachmentBudget.omitted
+              ? `<warnings>\n${attachmentBudget.omitted} attachment(s) not forwarded: exec allows at most ${MAX_ATTACHMENTS} unique attachments and 10 MiB of encoded attachment data per execution. View fewer or smaller files.\n</warnings>\n`
+              : ""
           const subPartByCallID = new Map<string, ExecSubPartSnapshot>()
           const progress: {
             pending: Promise<void>
@@ -597,6 +725,13 @@ export const ToolScriptTool = Tool.define(
             toolCalls: subParts.length,
             counts: tally(),
             recent: recentTail(),
+            ...(attachments.length || attachmentBudget.omitted
+              ? {
+                  attachments_forwarded: attachments.length,
+                  attachments_omitted: attachmentBudget.omitted,
+                  attachments_bytes: attachmentBudget.bytes,
+                }
+              : {}),
             ...subPartMetadata(),
           })
           // completeToolCall REPLACES part metadata with execute()'s return value,
@@ -638,13 +773,38 @@ export const ToolScriptTool = Tool.define(
             }
           }
 
-          const getDefs = toolScriptRegistry.current
-          if (!getDefs) throw new Error("exec tool registry unavailable")
-          const agentInfo = yield* agents.get(ctx.agent)
-          const model = ctx.extra?.model as
-            | { id: ModelID; providerID: ProviderID; api?: { id: string }; family?: string; harness_model?: string }
-            | undefined
-          const harness = ctx.extra?.harness as HarnessMode | undefined
+          const requestTools = ctx.extra?.execTools as { current: Tool.Def[] } | undefined
+          const candidates = requestTools
+            ? requestTools.current
+            : yield* Effect.gen(function* () {
+                // Only synthetic tool callers without a request snapshot use the
+                // late-bound registry. An empty request snapshot stays empty.
+                const getDefs = toolScriptRegistry.current
+                if (!getDefs) throw new Error("exec tool registry unavailable")
+                const agentInfo = yield* agents.get(ctx.agent)
+                const model = ctx.extra?.model as
+                  | {
+                      id: ModelID
+                      providerID: ProviderID
+                      api?: { id: string }
+                      family?: string
+                      harness_model?: string
+                    }
+                  | undefined
+                return yield* getDefs(
+                  model
+                    ? {
+                        providerID: model.providerID,
+                        modelID: model.id,
+                        modelAPIID: model.api?.id,
+                        modelFamily: model.family,
+                        harnessModel: model.harness_model,
+                        agent: agentInfo,
+                        harness: ctx.extra?.harness as HarnessMode | undefined,
+                      }
+                    : undefined,
+                )
+              })
           const toolWhitelist =
             ctx.extra?.toolWhitelist instanceof Set
               ? ctx.extra.toolWhitelist
@@ -652,23 +812,10 @@ export const ToolScriptTool = Tool.define(
                 ? new Set(ctx.extra.toolWhitelist.filter((id): id is string => typeof id === "string"))
                 : undefined
           const disabledTools = ctx.extra?.disabledTools instanceof Set ? ctx.extra.disabledTools : undefined
-          const defs = (
-            yield* getDefs(
-              model
-                ? {
-                    providerID: model.providerID,
-                    modelID: model.id,
-                    modelAPIID: model.api?.id,
-                    modelFamily: model.family,
-                    harnessModel: model.harness_model,
-                    agent: agentInfo,
-                    harness,
-                  }
-                : undefined,
-            )
-          ).filter(
+          const defs = candidates.filter(
             (def) =>
               !TOOL_SCRIPT_EXCLUDED.has(def.id) &&
+              !Object.hasOwn(TOOL_SCRIPT_ALIASES, def.id) &&
               (!toolWhitelist || toolWhitelist.has(def.id)) &&
               !disabledTools?.has(def.id),
           )
@@ -728,15 +875,11 @@ export const ToolScriptTool = Tool.define(
                 module: ts.ModuleKind.ESNext,
                 target: ts.ScriptTarget.ESNext,
               },
-          })
+            })
           const original = transpile(normalized)
           const candidate = normalized.replace(/^(\s*)<(?=(?:const|let|var)\b)/, "$1")
-          const repaired =
-            original.diagnostics?.length && candidate !== normalized ? transpile(candidate) : undefined
-          const result =
-            repaired && !repaired.diagnostics?.length
-              ? repaired
-              : original
+          const repaired = original.diagnostics?.length && candidate !== normalized ? transpile(candidate) : undefined
+          const result = repaired && !repaired.diagnostics?.length ? repaired : original
           const code = result === original ? normalized : candidate
           const hasImport = /^\s*(import|export)\s/m.test(code)
           const formatDiagnostics = (diagnostics: readonly ts.Diagnostic[]): string => {
@@ -768,6 +911,12 @@ export const ToolScriptTool = Tool.define(
           const withSlot = makeSemaphore(MAX_CONCURRENT)
           const nestedController = new AbortController()
           const nestedAbort = AbortSignal.any([ctx.abort, nestedController.signal])
+          const interrupted = Effect.callback<never>((resume) => {
+            const abort = () => resume(Effect.interrupt)
+            if (nestedAbort.aborted) abort()
+            else nestedAbort.addEventListener("abort", abort, { once: true })
+            return Effect.sync(() => nestedAbort.removeEventListener("abort", abort))
+          })
           const admittedCalls = new Set<Promise<unknown>>()
           let lifecycleClosed = false
           let closeNestedCallsPromise: Promise<void> | undefined
@@ -803,9 +952,7 @@ export const ToolScriptTool = Tool.define(
               recent: recentTail(),
               ...subPartMetadata(),
             }
-            progress.pending = progress.pending
-              .then(() => bridge.promise(ctx.metadata({ metadata })))
-              .catch(() => {})
+            progress.pending = progress.pending.then(() => bridge.promise(ctx.metadata({ metadata }))).catch(() => {})
           }
           const publishProgress = (options?: { immediate?: boolean }) => {
             if (progress.closed) return
@@ -857,14 +1004,16 @@ export const ToolScriptTool = Tool.define(
           }
 
           const callTool: HostFn = (name: unknown, args: unknown) => {
-            if (lifecycleClosed) return Promise.reject(new Error("exec terminated before nested tool started"))
+            if (lifecycleClosed || nestedAbort.aborted)
+              return Promise.reject(new Error("exec terminated before nested tool started"))
             const id = String(name)
             const alias = TOOL_SCRIPT_ALIASES[id as keyof typeof TOOL_SCRIPT_ALIASES]
             const def = byId.get(alias ?? id)
+            if (TOOL_SCRIPT_EXCLUDED.has(id) || (alias && !def)) return Promise.reject(new Error(`unknown tool: ${id}`))
             const mcpID = def ? undefined : ToolCompat.resolveName(id, [...mcpById.keys()])
             const mcpDef = mcpID ? mcpById.get(mcpID) : undefined
             if (!def && !mcpDef) return Promise.reject(new Error(`unknown tool: ${id}`))
-            const toolArgs = args
+            const toolArgs = id === "exec_command" ? execCommandArgs(args) : args
             calls++
             if (calls > maxToolCalls)
               return Promise.reject(new Error(`tool call budget exceeded (${maxToolCalls} per execution)`))
@@ -913,10 +1062,10 @@ export const ToolScriptTool = Tool.define(
               metricStatus?: (output: A) => "success" | "error"
             }) =>
               Effect.gen(function* () {
-                const beforeOutput: { args: unknown; cancel?: boolean; cancelReason?: string } = { args }
+                const beforeOutput: { args: unknown; cancel?: boolean; cancelReason?: string } = { args: toolArgs }
                 yield* plugin.trigger(
                   "tool.execute.before",
-                  { tool: id, sessionID: ctx.sessionID, callID: subCtx.callID },
+                  { tool: def?.id ?? id, sessionID: ctx.sessionID, callID: subCtx.callID },
                   beforeOutput,
                 )
                 if (beforeOutput.cancel) {
@@ -932,10 +1081,11 @@ export const ToolScriptTool = Tool.define(
                     .pipe(Effect.ignore)
                   return input.cancel(beforeOutput.cancelReason || "Tool call cancelled by hook")
                 }
+                subPart.state.input = beforeOutput.args
                 const output = yield* input.execute(beforeOutput.args)
                 yield* plugin.trigger(
                   "tool.execute.after",
-                  { tool: id, sessionID: ctx.sessionID, callID: subCtx.callID, args: beforeOutput.args },
+                  { tool: def?.id ?? id, sessionID: ctx.sessionID, callID: subCtx.callID, args: beforeOutput.args },
                   output,
                 )
                 yield* bus
@@ -952,7 +1102,11 @@ export const ToolScriptTool = Tool.define(
               })
             const executeDef = (tool: Tool.Def) =>
               withPolicy({
-                execute: (nextArgs) => tool.execute(nextArgs, subCtx),
+                execute: (nextArgs) =>
+                  tool.execute(nextArgs, {
+                    ...subCtx,
+                    ask: (request) => ctx.ask(request, { callID, abort: nestedAbort, input: nextArgs }),
+                  }),
                 cancel: (reason) => ({
                   title: "Cancelled",
                   output: reason,
@@ -966,8 +1120,8 @@ export const ToolScriptTool = Tool.define(
             // truncation. Here we only adapt the wrapped result shape for the
             // guest: structuredContent (when the server sent it) crosses as a
             // parsed value under `structured` so scripts can filter/aggregate
-            // without re-parsing text; media attachments cannot cross the
-            // sandbox string boundary and are dropped with a note.
+            // without re-parsing text. Attachments stay on the host and are
+            // relayed through the outer result, outside the sandbox string bridge.
             type ExecNestedResult = {
               title: string
               output: string
@@ -996,12 +1150,9 @@ export const ToolScriptTool = Tool.define(
                     attachments?: unknown[]
                   }
                   const structured = r?.metadata?.mcp?.structuredContent
-                  const dropped = Array.isArray(r?.attachments) && r.attachments.length
-                    ? `\n[note: ${r.attachments.length} non-text attachment(s) dropped — binary content cannot cross the exec sandbox]`
-                    : ""
                   return {
                     title: id,
-                    output: String(r?.output ?? "") + dropped,
+                    output: String(r?.output ?? ""),
                     metadata: (r?.metadata ?? {}) as Record<string, unknown>,
                     attachments: normalizeAttachments(r?.attachments),
                     ...(structured !== undefined && { structured }),
@@ -1010,74 +1161,88 @@ export const ToolScriptTool = Tool.define(
               )
             const executeBuiltin = def
               ? executeDef(def).pipe(
-                  Effect.map((result): ExecNestedResult => ({
-                    title: result.title,
-                    output: result.output,
-                    metadata: result.metadata,
-                    attachments: normalizeAttachments(result.attachments),
-                    providerOutput: (result as { providerOutput?: unknown }).providerOutput,
-                    providerMetadata: (result as { providerMetadata?: Record<string, unknown> }).providerMetadata,
-                  })),
+                  Effect.map(
+                    (result): ExecNestedResult => ({
+                      title: result.title,
+                      output: result.output,
+                      metadata: result.metadata,
+                      attachments: normalizeAttachments(result.attachments),
+                      providerOutput: (result as { providerOutput?: unknown }).providerOutput,
+                      providerMetadata: (result as { providerMetadata?: Record<string, unknown> }).providerMetadata,
+                    }),
+                  ),
                 )
               : executeMcp(mcpDef!)
             return trackCall(
               withSlot.run(() =>
                 bridge
-                .promise(executeBuiltin)
-                .then(
-                  (result) => {
-                    if (progress.closed || subPart.state.status !== "running")
+                  .promise(
+                    Effect.suspend(() => (nestedAbort.aborted ? Effect.interrupt : executeBuiltin)).pipe(
+                      Effect.raceFirst(interrupted),
+                    ),
+                  )
+                  .then(
+                    (result) => {
+                      if (progress.closed || subPart.state.status !== "running")
+                        return {
+                          title: result.title,
+                          output: result.output,
+                          metadata: result.metadata,
+                        }
+                      const durationMs = Date.now() - start
+                      relayAttachments(result.attachments)
+                      subPart.state = {
+                        status: "completed",
+                        input: subPart.state.input,
+                        title: result.title,
+                        output: result.output,
+                        metadata: metadataRecord(result.metadata),
+                        ...(result.providerOutput !== undefined ? { providerOutput: result.providerOutput } : {}),
+                        ...(result.providerMetadata ? { providerMetadata: result.providerMetadata } : {}),
+                        time: { start, end: Date.now() },
+                        }
+                      trace.push({ name: id, status: "success", durationMs })
+                      publishProgress()
+                      const structured = (result as { structured?: unknown }).structured
                       return {
                         title: result.title,
                         output: result.output,
                         metadata: result.metadata,
+                        ...(structured !== undefined && { structured }),
                       }
-                    const durationMs = Date.now() - start
-                    subPart.state = {
-                      status: "completed",
-                      input: subPart.state.input,
-                      title: result.title,
-                      output: result.output,
-                      metadata: metadataRecord(result.metadata),
-                      ...(result.providerOutput !== undefined ? { providerOutput: result.providerOutput } : {}),
-                      ...(result.providerMetadata ? { providerMetadata: result.providerMetadata } : {}),
-                      time: { start, end: Date.now() },
-                      ...(result.attachments ? { attachments: result.attachments } : {}),
-                    }
-                    trace.push({ name: id, status: "success", durationMs })
-                    publishProgress()
-                    const structured = (result as { structured?: unknown }).structured
-                    return {
-                      title: result.title,
-                      output: result.output,
-                      metadata: result.metadata,
-                      ...(structured !== undefined && { structured }),
-                    }
-                  },
-                  (err) => {
-                    const message = err instanceof Error ? err.message : String(err)
-                    if (progress.closed || subPart.state.status !== "running") throw new Error(`${id}: ${message}`)
-                    const durationMs = Date.now() - start
-                    const toolResultMetadata = getToolResultMetadata(err)
-                    const toolResultAttachments = normalizeAttachments(getToolResultAttachments(err))
-                    const currentMetadata = subPart.state.metadata
-                    subPart.state = {
-                      status: "error",
-                      input: subPart.state.input,
-                      ...(typeof subPart.state.title === "string" ? { title: subPart.state.title } : {}),
-                      error: message,
-                      ...((currentMetadata || toolResultMetadata)
-                        ? { metadata: { ...currentMetadata, ...toolResultMetadata, ...(isRecoverableError(err) ? { recoverable: true } : {}) } }
-                        : isRecoverableError(err) ? { metadata: { recoverable: true } }
-                        : {}),
-                      time: { start, end: Date.now() },
-                      ...(toolResultAttachments?.length ? { attachments: toolResultAttachments } : {}),
-                    }
-                    trace.push({ name: id, status: "error", durationMs, error: message })
-                    publishProgress()
-                    throw new Error(`${id}: ${message}`)
-                  },
-                ),
+                    },
+                    (err) => {
+                      const message = err instanceof Error ? err.message : String(err)
+                      if (progress.closed || subPart.state.status !== "running") throw new Error(`${id}: ${message}`)
+                      const durationMs = Date.now() - start
+                      const toolResultMetadata = getToolResultMetadata(err)
+                      const toolResultAttachments = relayAttachments(
+                        normalizeAttachments(getToolResultAttachments(err)),
+                      )
+                      const currentMetadata = subPart.state.metadata
+                      subPart.state = {
+                        status: "error",
+                        input: subPart.state.input,
+                        ...(typeof subPart.state.title === "string" ? { title: subPart.state.title } : {}),
+                        error: message,
+                        ...(currentMetadata || toolResultMetadata
+                          ? {
+                              metadata: {
+                                ...currentMetadata,
+                                ...toolResultMetadata,
+                                ...(isRecoverableError(err) ? { recoverable: true } : {}),
+                              },
+                            }
+                          : isRecoverableError(err)
+                            ? { metadata: { recoverable: true } }
+                            : {}),
+                        time: { start, end: Date.now() },
+                        }
+                      trace.push({ name: id, status: "error", durationMs, error: message })
+                      publishProgress()
+                      throw new Error(`${id}: ${message}`)
+                    },
+                  ),
               ),
             )
           }
@@ -1138,16 +1303,18 @@ export const ToolScriptTool = Tool.define(
 const __out = __serialize(__ret, false);
 return { __undef: __out.value === undefined, json: __out.value === undefined ? "" : JSON.stringify(__out.value), warnings: __out.warnings };`,
                 {
-                __callTool: callTool,
-                __log: logHook,
-                __readText: readText,
-                __writeText: writeText,
-              }, {
-                deterministic: false,
-                deadlineMs: WALL_DEADLINE_MS,
-                activeDeadlineMs,
-                interrupt: () => ctx.abort.aborted,
-              }),
+                  __callTool: callTool,
+                  __log: logHook,
+                  __readText: readText,
+                  __writeText: writeText,
+                },
+                {
+                  deterministic: false,
+                  deadlineMs: WALL_DEADLINE_MS,
+                  activeDeadlineMs,
+                  interrupt: () => ctx.abort.aborted,
+                },
+              ),
             catch: (err) => (err instanceof Error ? err : new Error(String(err))),
           }).pipe(Effect.result)
 
@@ -1177,7 +1344,8 @@ return { __undef: __out.value === undefined, json: __out.value === undefined ? "
             return {
               title: status,
               metadata: terminalMetadata(status),
-              output: `<exec status="${status}">\n<error_message>\n${explained}\n</error_message>\n${logBlock}${traceBlock}</exec>`,
+              ...(attachments.length ? { attachments } : {}),
+              output: `<exec status="${status}">\n<error_message>\n${explained}\n</error_message>\n${logBlock}${traceBlock}${attachmentNotice()}</exec>`,
             }
           }
 
@@ -1197,7 +1365,8 @@ return { __undef: __out.value === undefined, json: __out.value === undefined ? "
             return {
               title: "result too large",
               metadata: terminalMetadata("budget_exceeded"),
-              output: `<exec status="budget_exceeded">\n<error_message>\nreturned value is ${returnedBytes} bytes (max ${MAX_RESULT_BYTES}). Aggregate or slice the data before returning.\n</error_message>\n${warningsBlock}${logBlock}${traceBlock}</exec>`,
+              ...(attachments.length ? { attachments } : {}),
+              output: `<exec status="budget_exceeded">\n<error_message>\nreturned value is ${returnedBytes} bytes (max ${MAX_RESULT_BYTES}). Aggregate or slice the data before returning.\n</error_message>\n${warningsBlock}${logBlock}${traceBlock}${attachmentNotice()}</exec>`,
             }
           }
 
@@ -1205,7 +1374,8 @@ return { __undef: __out.value === undefined, json: __out.value === undefined ? "
           return {
             title: `${subParts.length} tool calls`,
             metadata: terminalMetadata("completed"),
-            output: `<exec status="completed">\n<return_value>\n${returnedText}\n</return_value>\n${warningsBlock}${logBlock}${traceBlock}</exec>`,
+            ...(attachments.length ? { attachments } : {}),
+            output: `<exec status="completed">\n<return_value>\n${returnedText}\n</return_value>\n${warningsBlock}${logBlock}${traceBlock}${attachmentNotice()}</exec>`,
           }
         }).pipe(Effect.orDie),
     }

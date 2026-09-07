@@ -11,8 +11,8 @@
 // SessionPrompt.layer (which already holds all needed services) populates
 // this ref on initialisation; tryStartCheckpointWriter reads it at call time.
 //
-// Missing ref at call time → tryStartCheckpointWriter logs a warning and
-// proceeds without forkContext (same guard as a missing spawnRef).
+// A caller requiring frozen context must reject a missing captor before
+// creating a child; it cannot substitute a later live request prefix.
 import type { Effect } from "effect"
 import type { SessionID } from "./schema"
 import type { ModelMessage, Tool as AITool } from "ai"
@@ -43,6 +43,8 @@ export interface PrefixCaptureResult {
   readonly system: string[]
   readonly turnContext: string | undefined
   readonly tools: Record<string, AITool>
+  /** Advertised subset; absent on legacy captures that advertised every tool. */
+  readonly activeTools?: readonly string[]
   readonly loadedMcpTools?: readonly string[]
   readonly inheritedMessages: ModelMessage[]
   readonly parentPermission: Permission.Ruleset
