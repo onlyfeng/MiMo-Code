@@ -2931,32 +2931,141 @@ it.live("resume continues an incomplete assistant without creating or rewriting 
   ),
 )
 
-it.live("a non-retryable processor error remains an explicit recovery candidate", () =>
+taskMetadataIt.live("resume settles the old assistant before returning admission and entering the new loop", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
       const prompt = yield* SessionPrompt.Service
       const sessions = yield* Session.Service
-      const chat = yield* sessions.create({ title: "Errored recovery candidate" })
-      yield* user(chat.id, "fail without retry")
-      yield* llm.error(400, { error: { message: "terminal provider failure" } })
+      const chat = yield* sessions.create({ title: "Recovery settlement timing" })
+      const seeded = yield* seed(chat.id)
+      const before = yield* sessions.messages({ sessionID: chat.id })
+      const gate = yield* holdNextSessionPre()
+      yield* llm.text("resumed answer")
 
-      yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.exit)
+      const completion = yield* prompt.startResume({
+        sessionID: chat.id,
+        assistantMessageID: seeded.assistant.id,
+      })
+      const admitted = yield* sessions.messages({ sessionID: chat.id })
+      const abandoned = admitted.find((message) => message.info.id === seeded.assistant.id)?.info
+      expect(abandoned?.role === "assistant" && abandoned.time.completed).toEqual(expect.any(Number))
+      expect(abandoned?.role === "assistant" && abandoned.error?.name).toBe("MessageAbortedError")
+      expect(admitted.map((message) => message.info.id)).toEqual(before.map((message) => message.info.id))
+      yield* Deferred.await(gate.entered).pipe(Effect.timeout("10 seconds"))
+      expect(yield* llm.calls).toBe(0)
+      expect(
+        (yield* sessions.messages({ sessionID: chat.id })).find((message) => message.info.id === seeded.assistant.id)
+          ?.info,
+      ).toEqual(abandoned)
 
-      const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
-      const assistant = messages.findLast(
-        (message): message is MessageV2.WithParts & { info: MessageV2.Assistant } => message.info.role === "assistant",
+      yield* Deferred.succeed(gate.release, undefined)
+      const result = yield* completion.pipe(Effect.timeout("10 seconds"))
+      const after = yield* sessions.messages({ sessionID: chat.id })
+      expect(after.find((message) => message.info.id === seeded.assistant.id)?.info).toEqual(abandoned)
+      expect(after.filter((message) => message.info.role === "user").map((message) => message.info)).toEqual(
+        before.filter((message) => message.info.role === "user").map((message) => message.info),
       )
-      expect(assistant).toBeDefined()
-      if (!assistant) return
-      expect(assistant.info.error?.name).toBe("APIError")
-      expect(assistant.info.time.completed).toBeUndefined()
-      expect(yield* prompt.recovery({ sessionID: chat.id })).toEqual([
-        {
-          assistantMessageID: assistant.info.id,
-          parentMessageID: assistant.info.parentID,
-          created: assistant.info.time.created,
-        },
-      ])
+      expect(after.find((message) => message.info.id === seeded.user.id)?.parts).toEqual(
+        expect.arrayContaining(before.find((message) => message.info.id === seeded.user.id)!.parts),
+      )
+      expect(result.info.id).not.toBe(seeded.assistant.id)
+      expect(result.info.role === "assistant" && result.info.parentID).toBe(seeded.user.id)
+      expect(result.parts.findLast((part) => part.type === "text")?.text).toBe("resumed answer")
+      expect(JSON.stringify((yield* llm.inputs)[0].messages)).toContain("hi there")
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+taskMetadataIt.live(
+  "a non-retryable processor error remains an explicit recovery candidate and settles before resuming",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Errored recovery candidate" })
+        yield* user(chat.id, "fail without retry")
+        yield* llm.error(400, { error: { message: "terminal provider failure" } })
+
+        yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.exit)
+
+        const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
+        const assistant = messages.findLast(
+          (message): message is MessageV2.WithParts & { info: MessageV2.Assistant } =>
+            message.info.role === "assistant",
+        )
+        expect(assistant).toBeDefined()
+        if (!assistant) return
+        expect(assistant.info.error?.name).toBe("APIError")
+        expect(assistant.info.time.completed).toBeUndefined()
+        expect(yield* prompt.recovery({ sessionID: chat.id })).toEqual([
+          {
+            assistantMessageID: assistant.info.id,
+            parentMessageID: assistant.info.parentID,
+            created: assistant.info.time.created,
+          },
+        ])
+        const gate = yield* holdNextSessionPre()
+        yield* llm.text("recovered after provider error")
+        const completion = yield* prompt.startResume({ sessionID: chat.id, assistantMessageID: assistant.info.id })
+        const abandoned = (yield* sessions.messages({ sessionID: chat.id })).find(
+          (message) => message.info.id === assistant.info.id,
+        )?.info
+        expect(abandoned?.role === "assistant" && abandoned.time.completed).toEqual(expect.any(Number))
+        expect(abandoned?.role === "assistant" && abandoned.error?.name).toBe("MessageAbortedError")
+        yield* Deferred.await(gate.entered).pipe(Effect.timeout("10 seconds"))
+        expect(yield* llm.calls).toBe(1)
+        yield* Deferred.succeed(gate.release, undefined)
+        const result = yield* completion.pipe(Effect.timeout("10 seconds"))
+        expect(result.info.id).not.toBe(assistant.info.id)
+        expect(result.parts.findLast((part) => part.type === "text")?.text).toBe("recovered after provider error")
+      }),
+      { git: true, config: providerCfg },
+    ),
+)
+
+it.live("resume rejected by a busy runner leaves the incomplete assistant unchanged", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const state = yield* SessionRunState.Service
+      const chat = yield* sessions.create({ title: "Busy recovery admission" })
+      const seeded = yield* seed(chat.id)
+      const before = yield* sessions.messages({ sessionID: chat.id })
+      yield* state.startRunning(chat.id, "main", Effect.succeed(before[1]), Effect.never)
+      yield* Effect.addFinalizer(() => state.cancel(chat.id))
+
+      const exit = yield* prompt
+        .startResume({ sessionID: chat.id, assistantMessageID: seeded.assistant.id })
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBeInstanceOf(Session.BusyError)
+      expect(yield* sessions.messages({ sessionID: chat.id })).toEqual(before)
+      expect(yield* llm.calls).toBe(0)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("resume of a superseded recovery candidate leaves its assistant unchanged", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Stale recovery admission" })
+      const seeded = yield* seed(chat.id)
+      yield* user(chat.id, "a later request supersedes the interrupted turn")
+      const before = yield* sessions.messages({ sessionID: chat.id })
+
+      const exit = yield* prompt
+        .startResume({ sessionID: chat.id, assistantMessageID: seeded.assistant.id })
+        .pipe(Effect.timeout("10 seconds"), Effect.exit)
+
+      expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toMatchObject({ name: "NotFoundError" })
+      expect(yield* sessions.messages({ sessionID: chat.id })).toEqual(before)
+      expect(yield* llm.calls).toBe(0)
     }),
     { git: true, config: providerCfg },
   ),
@@ -2969,6 +3078,7 @@ it.live("resume admission terminates when its claimed runner is cancelled before
       const sessions = yield* Session.Service
       const chat = yield* sessions.create({ title: "Dropped recovery admission" })
       const seeded = yield* seed(chat.id)
+      const before = yield* sessions.messages({ sessionID: chat.id })
       droppedStartGate = { sessionID: chat.id, actorID: "main", armed: true }
 
       const exit = yield* prompt
@@ -2976,6 +3086,7 @@ it.live("resume admission terminates when its claimed runner is cancelled before
         .pipe(Effect.timeout("1 second"), Effect.exit)
 
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(yield* sessions.messages({ sessionID: chat.id })).toEqual(before)
     }),
     { git: true, config: providerCfg },
   ),
