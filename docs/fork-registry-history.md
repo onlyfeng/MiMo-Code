@@ -1873,3 +1873,67 @@ test workflow runs opencode and cannot stand in for those three package runs.
 Final remote-tip equality, ancestry, and successful CI for each exact published
 SHA remain synchronization completion gates, with propagation evidence routed
 to the compat history rather than asserted here in advance.
+
+## 2026-09-07 explicit basic audio adoption
+
+- Mode: specified change, approved basic TTS and standard multipart transcription.
+- Source: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; audio files are
+  unchanged in live upstream main `9061f90b94dfe0339616aada7019d1c2e70709ba`.
+  This operation does not advance the reviewed upstream baseline or incorporate
+  the newer tool-name case flag.
+- Prior main: `774a795682c648b7f3637b9159c063ef6a2a4018`.
+- Main source/test behavior: `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
+- Prior compat: `bf85673a521537b5cb44002401eb55ad856e4009`.
+- Compat source/test inheritance: `9f3e37daa94e2b28d85c3a758e0241307f3eceff`.
+
+### Capability inventory and result (1)
+
+| ID | Selected behavior / surfaces | Owner and main result | Compat result | Evidence |
+| --- | --- | --- | --- | --- |
+| AUDIO-01 | Upstream basic speech/transcription schemas, raw audio transport, provider speech factory, and two HTTP handlers | FD-004; adopt as serve-only explicit audio option with separate Bearer auth before body/bootstrap, fixed directory, bounded requests, cancellation and intake-first shutdown | Inherited byte-for-byte without conflicts; no new DC override | `src/audio/`, `src/server/audio.ts`, `cli/cmd/serve.ts`, Provider speech cache; audio/provider/HTTP/OpenAPI/TUI-voice matrix |
+
+Inventory and result counts are one. All six FD and sixteen FC owners were
+checked against the selected changed surfaces. FD-004 now permits only this
+explicit audio exception; the general model-discovery/chat-proxy/token service,
+voice design/cloning and automatic TUI listener remain absent. FD-005 has
+provider-file overlap, but existing language transport and harness identity are
+unchanged. FC-007's fixed-directory boundary is applied before audio bootstrap.
+FC-016's independent TUI voice path remains unchanged. Other owner contracts
+have no changed implementation. The historical generation-retirement plan's
+blanket `/v1` exclusion is amended, without declaring its pending work complete.
+
+All seven compat owners retain their existing behavior. DC-MODEL-001 and
+DC-CONTEXT-001 have generated-contract adjacency only; regeneration adds no API
+schema changes. DC-TUI-001 has voice-path adjacency, with no TUI component delta.
+The three network/platform owners and DC-ACTOR-001 have no changed owned path.
+Configured provider HTTP transport is distinct from the WebFetch permission and
+SSRF seam; neither branch's WebFetch policy changes.
+
+### Verification scope
+
+- Main: **225 pass, 0 fail**, nine affected test files; compat: **227 pass,
+  0 fail**, the same matrix including its existing additional cases.
+- Both package `bun typecheck` commands pass. Main repository lint reports zero
+  errors; existing warning policy remains unchanged. Source and generated diffs
+  pass `git diff --check`; frozen `bun ci` leaves `bun.lock` unchanged.
+- SDK and published OpenAPI are regenerated from each branch's source and remain
+  unchanged. They contain no optional audio or general capability endpoints.
+- Main's Node bundle builds and loads on plain Node v24.16.0 without `Bun`;
+  default routes return 404, explicit audio rejects wrong credentials with 401,
+  and no database is created by these admission probes.
+- Local HTTP fixtures cover native/raw TTS and raw ASR, real credentials/headers
+  on the wire, headers-only unauthorized requests, actual chunked size limits,
+  concurrent admission, client abort and listener shutdown. A separate non-test
+  child proves an audio key does not itself enable the feature.
+- The shared-bootstrap cancellation regression first failed twice, then passed:
+  audio cancellation/close finishes before an unrelated bootstrap is released.
+  The callback is discarded before entry; entered provider work still drains.
+- Default-path commands remove ambient experimental, MCP search, Codex mode,
+  workflow-tool, compaction max/ratio and checkpoint-disable selectors. Package
+  preload retains `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`; the non-test child
+  removes that selector too.
+- No live paid-provider call was made. Raw custom fetch/OAuth adapters, native
+  Whisper-style transcription, non-OpenAI-shaped ASR fallback and native speech
+  response-size limiting are outside this adoption. See [audio-api.md](audio-api.md).
+- Exact final remote-SHA CI and publication are verified after the registry
+  companion commits; these local results alone do not establish publication.
