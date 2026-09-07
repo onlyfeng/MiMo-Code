@@ -3,10 +3,16 @@ import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
 import { Log } from "../../util"
+import { Instance } from "../../project/instance"
 
 export const ServeCommand = cmd({
   command: "serve",
-  builder: (yargs) => withNetworkOptions(yargs),
+  builder: (yargs) =>
+    withNetworkOptions(yargs).option("audio-api", {
+      type: "boolean",
+      default: false,
+      describe: "enable authenticated speech and transcription endpoints (requires MIMOCODE_AUDIO_API_KEY)",
+    }),
   describe: "starts a headless mimocode server",
   handler: async (args) => {
     const opts = await resolveNetworkOptions(args)
@@ -22,10 +28,25 @@ export const ServeCommand = cmd({
       console.log("Warning: MIMOCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
 
-    const server = await Server.listen(opts)
+    const server = await Server.listen({
+      ...opts,
+      audio: args["audio-api"]
+        ? { key: process.env.MIMOCODE_AUDIO_API_KEY ?? "", directory: process.cwd() }
+        : undefined,
+    })
     console.log(`mimocode server listening on http://${server.hostname}:${server.port}`)
 
-    await new Promise(() => {})
-    await server.stop()
+    if (args["audio-api"]) console.log("Audio API enabled at /v1/audio (Bearer authentication required)")
+    await new Promise<void>((resolve) => {
+      const stop = () => {
+        process.off("SIGINT", stop)
+        process.off("SIGTERM", stop)
+        resolve()
+      }
+      process.once("SIGINT", stop)
+      process.once("SIGTERM", stop)
+    })
+    await server.stop(true)
+    await Instance.disposeAll()
   },
 })

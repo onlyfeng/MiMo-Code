@@ -9,7 +9,7 @@ import { Npm } from "../npm"
 import { Hash } from "@mimo-ai/shared/util/hash"
 import { Plugin } from "../plugin"
 import { NamedError } from "@mimo-ai/shared/util/error"
-import { type LanguageModelV3 } from "@ai-sdk/provider"
+import { type LanguageModelV3, type SpeechModelV3 } from "@ai-sdk/provider"
 import * as ModelsDev from "./models"
 import { Auth } from "../auth"
 import { Env } from "../env"
@@ -1088,6 +1088,7 @@ export interface Interface {
   readonly getProvider: (providerID: ProviderID) => Effect.Effect<Info>
   readonly getModel: (providerID: ProviderID, modelID: ModelID) => Effect.Effect<Model>
   readonly getLanguage: (model: Model) => Effect.Effect<LanguageModelV3>
+  readonly getSpeech: (model: Model) => Effect.Effect<SpeechModelV3>
   readonly closest: (
     providerID: ProviderID,
     query: string[],
@@ -1100,6 +1101,7 @@ export interface Interface {
 
 interface State {
   models: Map<string, LanguageModelV3>
+  speech: Map<string, SpeechModelV3>
   providers: Record<ProviderID, Info>
   sdk: Map<string, BundledSDK>
   modelLoaders: Record<string, CustomModelLoader>
@@ -1247,6 +1249,7 @@ const layer: Layer.Layer<
 
         const providers: Record<ProviderID, Info> = {} as Record<ProviderID, Info>
         const languages = new Map<string, LanguageModelV3>()
+        const speeches = new Map<string, SpeechModelV3>()
         const modelLoaders: {
           [providerID: string]: CustomModelLoader
         } = {}
@@ -1591,6 +1594,7 @@ const layer: Layer.Layer<
 
         return {
           models: languages,
+          speech: speeches,
           providers,
           sdk,
           modelLoaders,
@@ -1821,6 +1825,41 @@ const layer: Layer.Layer<
       })
     })
 
+    function speechFactory(sdk: object) {
+      const candidate: { speechModel?: unknown; speech?: unknown } = sdk
+      const factory = candidate.speechModel ?? candidate.speech
+      if (typeof factory !== "function") return undefined
+      return factory as (modelID: string) => SpeechModelV3
+    }
+
+    // Speech factories share SDK credentials with language models, but have their
+    // own instance cache and must never use a language-specific model loader.
+    const getSpeech = Effect.fn("Provider.getSpeech")(function* (model: Model) {
+      if (isFreeApiSunset() && isFreeApiModel({ providerID: model.providerID, modelID: model.id })) {
+        throw new Error("MiMo free API service has ended. Sign in or configure a third-party API.")
+      }
+      const s = yield* InstanceState.get(state)
+      const envs = yield* env.all()
+      const key = `${model.providerID}/${model.id}`
+      if (s.speech.has(key)) return s.speech.get(key)!
+
+      return yield* Effect.promise(async () => {
+        const sdk = await resolveSDK(model, s, envs)
+        const factory = speechFactory(sdk)
+        if (!factory)
+          throw new SpeechUnsupportedError({ modelID: model.id, providerID: model.providerID, npm: model.api.npm })
+        try {
+          const speech = factory.call(sdk, model.api.id)
+          s.speech.set(key, speech)
+          return speech
+        } catch (error) {
+          if (error instanceof NoSuchModelError)
+            throw new ModelNotFoundError({ modelID: model.id, providerID: model.providerID }, { cause: error })
+          throw error
+        }
+      })
+    })
+
     const closest = Effect.fn("Provider.closest")(function* (providerID: ProviderID, query: string[]) {
       const s = yield* InstanceState.get(state)
       const provider = s.providers[providerID]
@@ -1967,6 +2006,7 @@ const layer: Layer.Layer<
       getProvider,
       getModel,
       getLanguage,
+      getSpeech,
       closest,
       getSmallModel,
       getVisionModel,
@@ -2003,6 +2043,25 @@ export function parseModel(model: string) {
     modelID: ModelID.make(rest.join("/")),
   }
 }
+
+export type ModelKind = "language" | "speech" | "transcription"
+
+export function modelKind(model: Model): ModelKind {
+  const input = model.capabilities.input
+  const output = model.capabilities.output
+  if (output.audio && !output.text) return "speech"
+  if (input.audio && !input.text && output.text) return "transcription"
+  return "language"
+}
+
+export const SpeechUnsupportedError = NamedError.create(
+  "ProviderSpeechUnsupportedError",
+  z.object({
+    providerID: ProviderID.zod,
+    modelID: ModelID.zod,
+    npm: z.string(),
+  }),
+)
 
 export const ModelNotFoundError = NamedError.create(
   "ProviderModelNotFoundError",

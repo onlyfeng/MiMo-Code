@@ -1,5 +1,12 @@
 # Instance Generation Retirement Implementation Plan
 
+> **Scope amendment (2026-09-07):** The approved basic audio integration permits
+> the explicit, authenticated `/v1/audio/speech` and `/v1/audio/transcriptions`
+> exception described in [FD-004](../../upstream-deviations.md#fd-004--ordinary-instances-expose-no-implicit-openai-compatible-listener).
+> This changes the planned broad `/v1` exclusion below; it does not mark any
+> pending generation-retirement task complete or restore the general capability
+> service, token registry, or implicit TUI listener.
+
 > **Status (2026-08-22):** Task 0 completed through PR #59 at
 > `ffc89d3916197e5860e91050616476f423c09ad4`; the inventory was rechecked at
 > main `b5c2181d6c4c98b91cdef8e3b789f7da37bdffad`. Tasks 1 through 10 remain
@@ -2011,7 +2018,8 @@ Because server/thread/worker surfaces change, freeze the exact rejected surface
 set in `fd-004-rejected-surfaces.json`: absent source paths
 `src/cli/cmd/llm-server.ts`, `src/config/llm-server.ts`,
 `src/llm-server/`, and `src/server/routes/instance/capability.ts`; forbidden
-server path prefix `/v1`; rejected schema/property/enum names
+server path prefix `/v1` except the two explicitly enabled audio routes governed
+by current FD-004 (ordinary instances still expose neither); rejected schema/property/enum names
 `LLMServerConfig`, `llmServer`,
 `voice_design`, and `voice_clone`; the upstream token-registry, implicit-listener,
 whole-server password, and address/token persistence symbols

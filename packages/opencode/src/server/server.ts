@@ -17,6 +17,7 @@ import { WorkspaceRouterMiddleware } from "./workspace"
 import { InstanceMiddleware } from "./routes/instance/middleware"
 import { WorkspaceRoutes } from "./routes/control/workspace"
 import { setChildProcessEnv } from "@/util/child-process-env"
+import { createAudio, type AudioOptions } from "./audio"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -34,11 +35,13 @@ export type Listener = {
 
 export const Default = lazy(() => create({}))
 
-function create(opts: { cors?: string[] }) {
+function create(opts: { cors?: string[]; audio?: AudioOptions }) {
+  const audio = createAudio(opts.audio)
   const app = new Hono()
     .onError(ErrorMiddleware)
     .use(CorsMiddleware(opts))
     .use(LoggerMiddleware)
+    .route("/v1/audio", audio.app)
     .use(AuthMiddleware)
     .use(CompressionMiddleware)
     .route("/global", GlobalRoutes())
@@ -52,6 +55,7 @@ function create(opts: { cors?: string[] }) {
         .use(FenceMiddleware)
         .route("/", InstanceRoutes(runtime.upgradeWebSocket)),
       runtime,
+      audio,
     }
   }
 
@@ -68,6 +72,7 @@ function create(opts: { cors?: string[] }) {
       )
       .route("/", UIRoutes()),
     runtime,
+    audio,
   }
 }
 
@@ -100,10 +105,10 @@ export async function listen(opts: {
   cors?: string[]
   noAuth?: boolean
   childEnv?: NodeJS.ProcessEnv
+  audio?: AudioOptions
 }): Promise<Listener> {
   if (opts.childEnv) setChildProcessEnv(opts.childEnv)
-  const isLoopback =
-    opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
+  const isLoopback = opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
   if (!isLoopback && !Flag.MIMOCODE_SERVER_PASSWORD && !opts.noAuth) {
     throw new Error(
       "Refusing to bind to non-loopback address without MIMOCODE_SERVER_PASSWORD. " +
@@ -139,7 +144,8 @@ export async function listen(opts: {
     stop(close?: boolean) {
       closing ??= (async () => {
         if (mdns) MDNS.unpublish()
-        await server.stop(close)
+        // Close audio admission before socket shutdown and instance retirement.
+        await Promise.all([built.audio.close(), server.stop(close)])
       })()
       return closing
     },
