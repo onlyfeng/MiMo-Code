@@ -2107,3 +2107,95 @@ changes only documentation evidence; main source/test behavior remains
 
 Final remote-tip equality, active-workflow CI for each final SHA, and ancestry
 through main to compat are publication gates checked after these records.
+
+
+## 2026-09-08 Codex compact tools specified integration
+
+- Mode: specified behavior, capability inventory N=1. Selected upstream remains
+  `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; the released compact registration
+  comes from `1a0ffba7842af3f11edcb456688bbdf067407c08` in v0.1.14. No upstream
+  branch or release tag was advanced, and unrelated newer upstream work is excluded.
+- Prior fork main tip: `c1dfc423fe021072d37b8585b5bcc33c4742d514`; prior compat tip:
+  `ad7b70702ef77cacb4a83189e0fff30d480d0c66`.
+- Main source/test behavior: `69eb01bbd0e2c54da76c145613a31d23d2cedbf3`. Later registry/history changes do
+  not advance this behavior reference. Compat integration has its own ledger.
+
+| ID | Selected behavior and disposition | Main result | Compat target | Decisive source and evidence |
+| --- | --- | --- | --- | --- |
+| COMPACT-01 | Adapt released Codex compact registration and nested execution | Automatic for the final resolved Codex harness, with direct actor and interactive control exceptions | Inherit through main while retaining all seven DC contracts | registry registered/advertised split; prompt frozen pool; tool-script pinned dispatch, permission receipts and media; real SDK compact, prefix, checkpoint and effect-carrier regressions |
+
+The user decision replaces the earlier blanket production rejection in FD-006.
+It does not remove FD-006's residual authority, direct-control, schema, cancellation,
+media or size/unit contracts, and does not turn the independent SCHEMA-01 experiment
+into evidence of production token savings or model quality. The existing
+FD-005 resolver, trusted aliases and session/process/inference precedence remain.
+
+All six FD and sixteen FC entries were reviewed. The changed shared owners are
+FD-006/009 and FC-002/004/005/007/008/011/015, with FD-001/002/005 and FC-001/009/013
+checked at their permission, prompt, actor, retry and final-step carrier seams.
+FD-004 and FC-003/006/010/012/014/016 have unchanged owned production behavior.
+No identifier is retired or renumbered. Public API schemas, generated SDK/OpenAPI,
+lockfile and workflows are unchanged; no generation is required from unchanged
+public schema inputs.
+
+Warm captures now retain complete authorized tool definitions, including schemas, and separate active
+names. Parent-disabled MCP tools cannot enter a child's frozen authority; hidden
+schemas must match before rebinding. New request-local StructuredOutput schemas
+participate in prefix identity, so JSON A / JSON B / text requests rotate correctly.
+Both checkpoint modes carry the model identity from their corresponding captor.
+Codex hidden MCP calls need no redundant invisible search; explicit non-Codex
+search retains its permission-only discovery exception and user-disable boundary.
+
+Nested built-in calls retain post-hook input and child cancellation for permission
+receipts. Close/abort/join waits for Effect finalizers. Media is relayed through
+ordinary outer FileParts with 8-item / 10-MiB limits. Bounded terminal evidence
+feeds manifests, worktree hints, pruning and retry detection; media does not consume
+the nested-record budget, cancelled/rejected results are not observed as effects,
+and absent nested paths cannot imply a cwd mutation. Oversized evidence fields
+or whole records may still be omitted within the existing 256-KiB budget.
+
+The [usage guide](codex-compact-tools.md), selected design/plan, historical
+architecture notes and [producer inventory](compose/spec/instance-generation-producer-inventory.md)
+record this decision. The inventory adds three manually classified exec rows;
+GenerationLease and the broader retirement Tasks 1–10 remain pending.
+
+### Validation
+
+- The final affected inventory contains 165 test files. Its initial frozen-tree
+  run at `82829017922e8f7215431aa0c06dfb71cf8635f6` recorded 2,093 pass,
+  1 fail, 13 skip and 5,761 assertions. The only failure was the unchanged
+  queued-cancellation test's whole-case three-second limit. The original fork
+  baseline independently reproduced that same limit; phase timing on the new
+  tree showed the first HTTP request arrived after the limit, before cancellation.
+- The final test-only correction keeps a separate three-second bound on cancel
+  plus joining both callers, while allowing 30 seconds for the complete fixture.
+  The decisive fixed case passes all three assertions. Its complete request-flow
+  file was rerun; 106 pass, 0 fail, 2 skip and 531 assertions. Together with the other 164 unchanged
+  files, the effective inventory is 2,094 pass, 0 fail, 13 skip and 5,761 assertions. The original failed
+  record is retained, not rewritten as a green matrix. All 1,367 hashed
+  source/test/lock files except this one test are unchanged from that matrix.
+- Earlier focused regressions corrected stale compact-wire fixtures and exposed
+  a real MCP discovery dispatch regression. The permission-only discovery case
+  first failed, then passed after retaining the search exception without bypassing
+  explicit user disable or tool execution permissions. The four affected files'
+  focused verification passed 92 cases and 524 assertions before the final matrix.
+- All eight ambient selectors were removed before module loading:
+  MIMOCODE_EXPERIMENTAL, MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
+  MIMOCODE_CODEX_MODE, MIMOCODE_DISABLE_CHECKPOINT,
+  MIMOCODE_COMPACTION_MAX_CONTEXT, MIMOCODE_COMPACTION_TRIGGER_RATIO,
+  MIMOCODE_ENABLE_EXEC_TOOL and MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY.
+  Package preload flags, including orchestrator=true, remain the harness baseline.
+  Explicit search cases temporarily enable only their dedicated Flag property
+  and restore it on release; surrounding default cases retain ordinary behavior.
+  Test subprocesses used a 30-second default per-case limit, with actor/spawn
+  and prompt-effect CLI budgets of 90 seconds. File walls were 180 seconds,
+  except prompt-effect at 600 seconds; the final main matrix had no file timeout.
+- Package typecheck, repository lint (zero errors, existing warnings retained),
+  documentation consistency and diff checks pass. Frozen bun ci preserved the
+  lockfile. The Node bundle and plain Node v24.16.0 import/export smoke pass
+  with no Bun global. Production source did not change after that build.
+  No live-provider token, error-rate or completion-rate benchmark was performed.
+
+Final remote-tip equality, exact-SHA test/typecheck/lint CI and selected-source
+ancestry through main to compat are publication checks, distinct from these
+local results. This specified integration does not claim current-upstream parity.
