@@ -10,8 +10,8 @@ await Log.init({ print: false })
 const server = await Server.listen({ hostname: "127.0.0.1", port: 0 })
 try {
   const statuses = await Promise.all(
-    ["speech", "transcriptions"].map(async (endpoint) => {
-      const response = await fetch(new URL(`/v1/audio/${endpoint}`, server.url), {
+    ["/v1/audio/speech", "/v1/audio/transcriptions", "/v1/models", "/v1/chat/completions"].map(async (endpoint) => {
+      const response = await fetch(new URL(endpoint, server.url), {
         method: "POST",
         headers: { authorization: `Bearer ${process.env.MIMOCODE_AUDIO_API_KEY}` },
         body: "malformed body must remain unread",

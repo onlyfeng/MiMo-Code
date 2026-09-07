@@ -1,7 +1,9 @@
 # 显式音频 API
 
 `mimo serve --audio-api` 在现有服务端口上提供基础语音合成和转写。
-普通 TUI、ACP、嵌入式实例以及不带该参数的 `serve` 默认不开放音频接口。
+普通 TUI、ACP、嵌入式实例以及不带显式 API 参数的 `serve` 默认不开放音频接口。
+也可通过 [模型 API](model-api.md) 的 `--llm-server` 模式使用按模型授权的临时令牌；
+它与这里的 `--audio-api` 静态密钥模式互斥。
 仅设置环境变量也不会开启接口。
 
 ## 启动与调用
@@ -19,8 +21,8 @@ mimo serve --port 4096 --audio-api
 Basic 认证规则。未设置服务器密码时，普通 API 的原有本机免密行为仍然存在。
 
 调用方必须明确提供当前项目配置中的 `provider/model`。以下示例中的
-`audio/tts`、`audio/asr` 是占位模型名，需要替换为自己的配置。这里没有自动
-选模型、通用聊天代理、模型列表接口或临时令牌签发命令。
+`audio/tts`、`audio/asr` 是占位模型名，需要替换为自己的配置。静态密钥模式不提供
+自动选模或聊天代理；能力发现、模型列表和临时令牌见 [模型 API](model-api.md)。
 
 ```sh
 curl --fail-with-body http://127.0.0.1:4096/v1/audio/speech \
@@ -50,7 +52,9 @@ reasoning 而无正文时会报错，不会把推理内容当成转写结果，�
 
 对外的标准 multipart 转写协议不等于所有供应商的原生转写协议均受支持。
 本次没有加入 Whisper 风格 `/audio/transcriptions` 供应商适配，也不包含
-非 OpenAI 形状 SDK 的多模态兜底。音频聊天适配需要显式 `baseURL`，使用配置的
+非 OpenAI 形状 SDK 的多模态兜底。音频聊天适配支持 `@ai-sdk/openai`、
+`@ai-sdk/azure`、`@ai-sdk/openai-compatible`，要求显式 HTTP(S) `baseURL`，
+且 URL 不含用户名/密码、查询参数或 fragment。它使用配置的
 供应商凭据和 headers，并合并模型 headers；不依赖聊天专用插件钩子。
 这条原始 HTTP 路径不复用 SDK 的自定义 `fetch`、URL 变量替换或 OAuth
 传输适配；依赖这些机制的配置需要独立的供应商适配，不能直接视为已支持。

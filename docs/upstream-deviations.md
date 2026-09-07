@@ -30,7 +30,7 @@ registry or history commit does not advance either behavior reference.
 | --- | --- | --- | --- |
 | FD-001 | yolo, permission, Bash delete | Rejects shared mutable delete approval | Preserve request/instance isolation |
 | FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
-| FD-004 | instance server, explicit audio API, `/v1`, SDK/OpenAPI | Adopts basic audio behind explicit admission; rejects implicit general capability service | Preserve opt-in, authentication-before-bootstrap, and bounded shutdown |
+| FD-004 | instance server, explicit model/audio APIs, `/v1`, SDK/OpenAPI | Adopts capability discovery and token-scoped proxy behind explicit admission; rejects implicit capability service | Preserve opt-in, authentication-before-bootstrap, and bounded shutdown |
 | FD-005 | model identity, prompt, discovery, tools, retry | Adapts inconsistent upstream classification | Preserve one resolved identity |
 | FD-006 | direct tools, nested `exec`, timeout and normalization | Selectively adopts compatibility normalization | Preserve authority and size/unit boundaries |
 | FD-009 | actor/checkpoint context capture, retry, resume | Rejects live-context fallback | Fail before child execution and reuse frozen membership |
@@ -120,24 +120,30 @@ registry or history commit does not advance either behavior reference.
 - Canonical owner: fork `main` instance-server and generated API boundary
 - Observable contract: ordinary TUI, `serve`, ACP, and embedded instances do
   not mount an implicit `/v1` capability surface or bind an additional listener
-  merely because provider credentials exist. Fork SDK/OpenAPI artifacts are
-  generated from that source behavior. The explicit exception is
-  `mimo serve --audio-api`: its existing socket exposes only speech and
-  transcription with a dedicated Bearer key, a fixed startup directory, bounded
-  bodies/concurrency, cancellation, and intake closure before instance retirement.
-  The key alone enables nothing and cannot replace generic API Basic auth.
-- Upstream relationship: rejects the listener and capability surface anchored
-  at `b4bbe81c67f215d32bdbf1b7984928dea80b7c92`; compatible upstream APIs remain
-  independently adoptable. Basic upstream audio is extracted into an audio-only
-  service; model discovery, general chat proxy, token management, voice design,
-  and voice cloning remain absent.
+  merely because provider credentials or issued tokens exist. Fork SDK/OpenAPI
+  artifacts are generated from that default-off source behavior. Explicit
+  `mimo serve --llm-server` enables model discovery, chat completions, and basic
+  audio on its existing socket using temporary directory/model-scoped tokens.
+  `mimo serve --audio-api` remains the mutually exclusive static-key audio mode.
+  Both authenticate before body/bootstrap, fix the startup directory, bound
+  bodies/concurrency, propagate cancellation, and close intake before retirement.
+  Neither credential replaces generic API Basic auth. Capability selection
+  chooses a model; it does not grant a separate endpoint capability scope.
+- Upstream relationship: rejects the implicit listener and unsafe admission
+  ordering anchored at `b4bbe81c67f215d32bdbf1b7984928dea80b7c92`. Independently
+  adopts capability discovery, explicit token management, standard chat proxy,
+  and basic audio from `6203ea2e`. Tokens require a finite absolute lifetime;
+  empty model scopes do not grant all models. Discovery shares audio transport
+  validation with execution. Voice design and cloning remain absent.
 - Watch surfaces: `packages/opencode/src/cli/cmd/tui/thread.ts`,
   `packages/opencode/src/cli/cmd/tui/worker.ts`,
-  `packages/opencode/src/cli/cmd/llm-server.ts`,
+  `packages/opencode/src/cli/cmd/llm-server.ts`, `packages/opencode/src/index.ts`,
+  `packages/opencode/src/node.ts`,
   `packages/opencode/src/llm-server/`,
   `packages/opencode/src/audio/`, `packages/opencode/src/provider/provider.ts`,
   `packages/opencode/src/cli/cmd/serve.ts`,
-  `packages/opencode/src/server/audio.ts`, `packages/opencode/src/server/server.ts`,
+  `packages/opencode/src/server/audio.ts`, `packages/opencode/src/server/model-api.ts`,
+  `packages/opencode/src/server/api-request.ts`, `packages/opencode/src/server/server.ts`,
   `packages/opencode/src/server/middleware.ts`,
   `packages/opencode/src/server/routes/instance/`, `packages/sdk/openapi.json`,
   `packages/sdk/js/src/v2/gen/`, and `script/generate.ts`.
@@ -155,11 +161,18 @@ registry or history commit does not advance either behavior reference.
   authentication before body/instance access, fixed directory, bounds and stop.
   [Audio API](audio-api.md) records the supported backend protocols and explicit
   exclusions. Ordinary OpenAPI/SDK artifacts remain source-generated and omit
-  this optional audio-only protocol.
+  these optional protocols. [Model API](model-api.md),
+  `packages/opencode/test/llm-server/`, `packages/opencode/test/server/model-api.test.ts`,
+  and `packages/opencode/test/server/model-bootstrap-cancel.test.ts` cover discovery,
+  token persistence/expiry/revocation, scoped requests, and streaming lifetime.
 - 2026-09-05 Node-export review: upstream adds a `LLMServerTokens` re-export
   but the fork has already removed its implementation with the implicit
   capability subsystem. Omitted the dangling export; no listener, token
-  implementation, route, OpenAPI, or SDK surface is restored.
+  implementation, route, OpenAPI, or SDK surface was restored in that review.
+- 2026-09-07 selected adoption: the explicit model/token implementation is now
+  present under the narrower contract above. The September 5 Node-export note
+  records its historical absence; the Node entry now restores the functional
+  LLMServerTokens export for explicit embedding alongside Server.listen.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `9847165e0749f33c7ac01b72f933ac9cf47e3e55`.
 - Retirement condition: the listener is explicit opt-in, authentication
