@@ -6862,8 +6862,11 @@ it.live(
         const b = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
         yield* Effect.sleep(50)
 
-        yield* prompt.cancel(chat.id)
-        const [exitA, exitB] = yield* Effect.all([Fiber.await(a), Fiber.await(b)])
+        // Bound cancellation independently of fixture and first-request setup.
+        const [exitA, exitB] = yield* prompt.cancel(chat.id).pipe(
+          Effect.andThen(Effect.all([Fiber.await(a), Fiber.await(b)])),
+          Effect.timeout("3 seconds"),
+        )
         expect(Exit.isSuccess(exitA)).toBe(true)
         expect(Exit.isSuccess(exitB)).toBe(true)
         if (Exit.isSuccess(exitA) && Exit.isSuccess(exitB)) {
@@ -6872,7 +6875,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  30_000,
 )
 
 itActor.live(
