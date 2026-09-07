@@ -8,6 +8,7 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { ActorRegistry } from "../../src/actor/registry"
 import { Instance } from "../../src/project/instance"
 import { MessageV2 } from "../../src/session/message-v2"
+import { observedToolParts } from "../../src/session/observed-tool-parts"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import type { SessionID } from "../../src/session/schema"
 import { tmpdir } from "../fixture/fixture"
@@ -241,9 +242,9 @@ function decodeOperation(input: Record<string, any>): Record<string, any> {
 }
 
 /**
- * Every tool call the model emitted this turn, in order, read back out of the
- * persisted message parts (not out of the reply text). This is the assertion
- * target for every test in this file.
+ * Persisted outer calls and retained, validated terminal exec children, in
+ * transcript order. This read-only view cannot recover omitted nested records.
+ * It is the assertion target for every test in this file.
  */
 async function toolCalls(sessionID: SessionID): Promise<Call[]> {
   const rt = ManagedRuntime.make(SessionNs.defaultLayer)
@@ -252,7 +253,7 @@ async function toolCalls(sessionID: SessionID): Promise<Call[]> {
     const out: Call[] = []
     for (const message of messages) {
       if (message.info.role !== "assistant") continue
-      for (const part of message.parts) {
+      for (const part of message.parts.flatMap(observedToolParts)) {
         if (part.type !== "tool") continue
         const tool = part as MessageV2.ToolPart
         const input = (tool.state as any).input ?? {}

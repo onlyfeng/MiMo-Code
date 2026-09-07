@@ -37,9 +37,12 @@ test("agent prompts use runtime tool names and GPT generation guidance", () => {
   expect(PROMPT_GENERATE).toContain("use the actor tool")
   expect(PROMPT_GENERATE).not.toContain("use the Agent tool")
   expect(PROMPT_GENERATE_GPT).toContain("`exec`")
-  expect(PROMPT_GENERATE_GPT).toContain("`apply_patch`")
-  expect(PROMPT_GENERATE_GPT).toContain("`view_image`")
+  expect(PROMPT_GENERATE_GPT).toContain('`tools.exec_command({cmd: "..."})`')
+  expect(PROMPT_GENERATE_GPT).toContain("`tools.apply_patch`")
+  expect(PROMPT_GENERATE_GPT).toContain("`tools.view_image` inside `exec`")
   expect(PROMPT_GENERATE_GPT).toContain("`actor`")
+  expect(PROMPT_GENERATE_GPT).toContain("Actor delegation/recovery and interactive controls remain direct when listed")
+  expect(PROMPT_GENERATE_GPT).toContain("task and skill operations use the declared nested methods")
 })
 
 test("returns default native agents when no config", async () => {
@@ -1039,11 +1042,21 @@ itTool.live("compose's tool list swaps GPT-specific file tools", () =>
         agent: compose!,
       })
       const gptIDs = gptTools.map((t) => t.id)
-      expect(gptIDs).toContain("apply_patch")
-      expect(gptIDs).toContain("view_image")
+      expect(gptIDs).toEqual(expect.arrayContaining(["exec", "actor", "question"]))
+      expect(gptIDs).not.toContain("apply_patch")
+      expect(gptIDs).not.toContain("view_image")
       expect(gptIDs).not.toContain("edit")
       expect(gptIDs).not.toContain("write")
       expect(gptIDs).not.toContain("read")
+      const gptDeclarations = gptTools.find((tool) => tool.id === "exec")?.description
+      expect(gptDeclarations).toContain("apply_patch(input:")
+      expect(gptDeclarations).toContain("view_image(input:")
+      expect(gptDeclarations).toContain("exec_command(input:")
+      expect(gptDeclarations).not.toContain("edit(input:")
+      expect(gptDeclarations).not.toContain("write(input:")
+      expect(gptDeclarations).not.toContain("read(input:")
+      expect(gptDeclarations).not.toContain("actor(input:")
+      expect(gptDeclarations).not.toContain("question(input:")
 
       const claudeTools = yield* registry.tools({
         modelID: ModelID.make("claude-opus-4-7"),
@@ -1057,18 +1070,24 @@ itTool.live("compose's tool list swaps GPT-specific file tools", () =>
       expect(claudeIDs).not.toContain("apply_patch")
       expect(claudeIDs).not.toContain("view_image")
 
-      const claudeCodexIDs = (
-        yield* registry.tools({
-          modelID: ModelID.make("claude-opus-4-7"),
-          providerID: ProviderID.make("anthropic"),
-          agent: compose!,
-          harness: "codex",
-        })
-      ).map((tool) => tool.id)
-      expect(claudeCodexIDs).toContain("exec")
+      const claudeCodexTools = yield* registry.tools({
+        modelID: ModelID.make("claude-opus-4-7"),
+        providerID: ProviderID.make("anthropic"),
+        agent: compose!,
+        harness: "codex",
+      })
+      const claudeCodexIDs = claudeCodexTools.map((tool) => tool.id)
+      expect(claudeCodexIDs).toEqual(expect.arrayContaining(["exec", "actor", "question"]))
+      expect(claudeCodexIDs).not.toContain("apply_patch")
+      expect(claudeCodexIDs).not.toContain("view_image")
       expect(claudeCodexIDs).not.toContain("edit")
       expect(claudeCodexIDs).not.toContain("write")
       expect(claudeCodexIDs).not.toContain("read")
+      const claudeCodexDeclarations = claudeCodexTools.find((tool) => tool.id === "exec")?.description
+      expect(claudeCodexDeclarations).toContain("apply_patch(input:")
+      expect(claudeCodexDeclarations).toContain("view_image(input:")
+      expect(claudeCodexDeclarations).toContain("exec_command(input:")
+      expect(claudeCodexDeclarations).not.toContain("read(input:")
     }),
   ),
 )

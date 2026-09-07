@@ -25,11 +25,12 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { ActorRegistry } from "../../src/actor/registry"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import type { Actor } from "../../src/actor/spawn"
-import { MessageID } from "../../src/session/schema"
+import { MessageID, type SessionID } from "../../src/session/schema"
+import { prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { Flag } from "../../src/flag/flag"
 import { Log } from "../../src/util"
-import { jsonSchema, tool } from "ai"
+import { asSchema, jsonSchema, tool } from "ai"
 import { tmpdir } from "../fixture/fixture"
 import {
   startScriptedLLMServer,
@@ -85,6 +86,28 @@ function writeConfig(dir: string, origin: string) {
       },
     }),
   )
+}
+
+function captureParentTools(sessionID: SessionID) {
+  return Effect.gen(function* () {
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    yield* prompt.prompt({
+      sessionID,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "Capture the parent tool contracts." }],
+    })
+    const capture = prefixCaptureRef.current
+    if (!capture) return yield* Effect.die("missing production prefix capture")
+    return (yield* capture({
+      sessionID,
+      agentName: "build",
+      providerID: ProviderID.make("alibaba"),
+      modelID: ModelID.make("qwen-plus"),
+      msgs: yield* sessions.messages({ sessionID }),
+    })).tools
+  })
 }
 
 const JSON_SCHEMA = {
@@ -493,7 +516,7 @@ describe("classifier routing — integration", () => {
     }
   })
 
-  test("full-context fork sends frozen parent tool schemas with live dispatch", async () => {
+  test.each([false, true])("full-context fork binds live dispatch only to matching frozen schemas (changed: %s)", async (changed) => {
     await using tmp = await tmpdir({ git: true })
     const readmePath = path.join(tmp.path, "README.md")
     const stub = startScriptedLLMServer([
@@ -529,6 +552,10 @@ describe("classifier routing — integration", () => {
               const prompt = yield* SessionPrompt.Service
               const registry = yield* ActorRegistry.Service
               const session = yield* sessions.create({ title: "fork-frozen-tools" })
+              const capturedTools = yield* captureParentTools(session.id)
+              const readSchema = yield* Effect.promise(() =>
+                Promise.resolve(asSchema(capturedTools.read.inputSchema).jsonSchema),
+              )
 
               yield* registry.register({
                 sessionID: session.id,
@@ -555,24 +582,18 @@ describe("classifier routing — integration", () => {
                   }),
                   grep: tool({
                     description: "frozen parent grep description",
-                    inputSchema: jsonSchema({
-                      type: "object",
-                      properties: { pattern: { type: "string" } },
-                      required: ["pattern"],
-                      additionalProperties: false,
-                    }),
+                    inputSchema: capturedTools.grep.inputSchema,
                   }),
                   read: tool({
                     description: "frozen parent read description",
-                    inputSchema: jsonSchema({
-                      type: "object",
-                      properties: {
-                        file_path: { type: "string" },
-                        frozen_arg: { type: "string" },
-                      },
-                      required: ["file_path"],
-                      additionalProperties: false,
-                    }),
+                    inputSchema: jsonSchema(
+                      changed
+                        ? {
+                            ...readSchema,
+                            properties: { ...readSchema.properties, frozen_arg: { type: "string" } },
+                          }
+                        : readSchema,
+                    ),
                   }),
                   missing_frozen: tool({
                     description: "captured tool whose live implementation disappeared",
@@ -610,9 +631,14 @@ describe("classifier routing — integration", () => {
               expect(names).not.toContain("missing_frozen")
               expect(names).not.toContain("bash")
               expect(read?.function.description).toBe("frozen parent read description")
-              expect(JSON.stringify(read?.function.parameters)).toContain("frozen_arg")
+              expect(JSON.stringify(read?.function.parameters).includes("frozen_arg")).toBe(changed)
               expect(stub.captures).toHaveLength(3)
               expect(JSON.stringify(stub.captures[1].messages)).toContain("not in this actor's whitelist")
+              if (changed) {
+                expect(JSON.stringify(stub.captures[2].messages)).toContain("not in this actor's whitelist")
+                expect(JSON.stringify(stub.captures[2].messages)).not.toContain("Frozen Tool Dispatch")
+                return
+              }
               expect(JSON.stringify(stub.captures[2].messages)).toContain("Frozen Tool Dispatch")
             }),
           ),
@@ -750,6 +776,7 @@ description: Inspect restricted quasar telemetry.
                 title: "fork-skill-permission",
                 permission: [{ permission: "skill", pattern: "*", action: "allow" }],
               })
+              const capturedTools = yield* captureParentTools(session.id)
 
               yield* registry.register({
                 sessionID: session.id,
@@ -764,7 +791,7 @@ description: Inspect restricted quasar telemetry.
 
               const forkCtx: Actor.ForkContext = {
                 system: ["fork-system-prompt"],
-                tools: { skill_search: {} as Actor.ForkContext["tools"][string] },
+                tools: { skill_search: capturedTools.skill_search },
                 inheritedMessages: [],
                 parentPermission: [
                   { permission: "skill", pattern: "restricted-quasar", action: "deny" },
