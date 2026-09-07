@@ -1928,7 +1928,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         definitions.map((item) => item.id),
         effectivePermission,
       ))
-        disabledTools.add(id)
+        // Search describes only the already-authorized MCP catalog. Its
+        // existing permission-only discovery exception must survive dispatch;
+        // explicit user.tools:false remains in disabledTools above.
+        if (id !== MCP_TOOL_SEARCH_ID) disabledTools.add(id)
       if (input.frozenTools) {
         for (const item of definitions) {
           if (TOOL_SCRIPT_EXCLUDED.has(item.id)) continue

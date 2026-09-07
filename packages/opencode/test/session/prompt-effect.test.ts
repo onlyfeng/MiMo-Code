@@ -18,6 +18,7 @@ import { Permission } from "../../src/permission"
 import { Plugin } from "../../src/plugin"
 import { Provider as ProviderSvc } from "../../src/provider"
 import { Env } from "../../src/env"
+import { Flag } from "../../src/flag/flag"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Question } from "../../src/question"
 import { Todo } from "../../src/session/todo"
@@ -163,6 +164,21 @@ function withInstructionsDisabled<A, E, R>(fx: () => Effect.Effect<A, E, R>) {
       Effect.sync(() => {
         if (previous === undefined) delete process.env.MIMOCODE_DISABLE_INSTRUCTIONS
         else process.env.MIMOCODE_DISABLE_INSTRUCTIONS = previous
+      }),
+  )
+}
+
+function withMcpToolSearch<A, E, R>(fx: Effect.Effect<A, E, R>) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH
+      Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH = true
+      return previous
+    }),
+    () => fx,
+    (previous) =>
+      Effect.sync(() => {
+        Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH = previous
       }),
   )
 }
@@ -1112,7 +1128,13 @@ it.live("locks system and harness to the first user query", () =>
           .filter((message) => JSON.stringify(message.content).includes("first system prompt"))
           .map((message) => message.role),
       ).toEqual(["system"])
-      expect(toolNames).toEqual(expect.arrayContaining(["exec", "apply_patch", "bash"]))
+      expect(toolNames).toContain("exec")
+      expect(toolNames).not.toContain("apply_patch")
+      expect(toolNames).not.toContain("bash")
+      const declarations = JSON.stringify(wireTool(input.tools as Array<Record<string, unknown>>, "exec"))
+      expect(declarations).toContain("apply_patch(input:")
+      expect(declarations).toContain("bash(input:")
+      expect(declarations).not.toContain("read(input:")
       expect(toolNames.length).toBeGreaterThan(1)
 
       yield* prompt.prompt({
@@ -3147,6 +3169,7 @@ mcpIt.live("MCP isError becomes a tool error without losing standard result fiel
         sessionID: session.id,
         agent: "build",
         model: mcpRef,
+        harness: "default",
         noReply: true,
         parts: [{ type: "text", text: "send the message" }],
       })
@@ -3229,7 +3252,7 @@ mcpIt.live("MCP isError becomes a tool error without losing standard result fiel
       })
     }),
     { git: true, config: mediaProviderCfg },
-  ),
+  ).pipe(withMcpToolSearch),
 )
 
 mcpIt.live("MCP structuredContent is persisted and reaches the model alongside text", () =>
@@ -3254,6 +3277,7 @@ mcpIt.live("MCP structuredContent is persisted and reaches the model alongside t
         sessionID: session.id,
         agent: "build",
         model: mcpRef,
+        harness: "default",
         noReply: true,
         parts: [{ type: "text", text: "inspect the window" }],
       })
@@ -3302,7 +3326,7 @@ mcpIt.live("MCP structuredContent is persisted and reaches the model alongside t
       expect(followup).not.toContain("success-meta-is-client-only")
     }),
     { git: true, config: providerCfg },
-  ),
+  ).pipe(withMcpToolSearch),
 )
 
 mcpIt.live("exec can call a catalogued MCP tool without loading its outer schema", () =>
@@ -3339,7 +3363,8 @@ mcpIt.live("exec can call a catalogued MCP tool without loading its outer schema
       expect(tool?.state.output).toContain('"windowID": 42')
 
       const tools = (yield* llm.inputs)[0].tools as Array<Record<string, unknown>>
-      expect(tools.map(wireToolName)).toContain("mcp_tool_search")
+      expect(tools.map(wireToolName)).toContain("exec")
+      expect(tools.map(wireToolName)).not.toContain("mcp_tool_search")
       expect(tools.map(wireToolName)).not.toContain("mcp_success")
     }),
     { git: true, config: providerCfg },
@@ -3360,6 +3385,7 @@ mcpIt.live("rejects an MCP call that was not loaded by search", () =>
         sessionID: session.id,
         agent: "build",
         model: mcpRef,
+        harness: "default",
         noReply: true,
         parts: [{ type: "text", text: "call the MCP tool directly" }],
       })
@@ -3379,7 +3405,7 @@ mcpIt.live("rejects an MCP call that was not loaded by search", () =>
       expect(tools.map(wireToolName)).not.toContain("mcp_success")
     }),
     { git: true, config: providerCfg },
-  ),
+  ).pipe(withMcpToolSearch),
 )
 
 mcpIt.live("resets loaded MCP tools for a new user request", () =>
@@ -3396,6 +3422,7 @@ mcpIt.live("resets loaded MCP tools for a new user request", () =>
         sessionID: session.id,
         agent: "build",
         model: mcpRef,
+        harness: "default",
         noReply: true,
         parts: [{ type: "text", text: "inspect the window" }],
       })
@@ -3408,6 +3435,7 @@ mcpIt.live("resets loaded MCP tools for a new user request", () =>
         sessionID: session.id,
         agent: "build",
         model: mcpRef,
+        harness: "default",
         noReply: true,
         parts: [{ type: "text", text: "new request" }],
       })
@@ -3420,7 +3448,7 @@ mcpIt.live("resets loaded MCP tools for a new user request", () =>
       expect((requests[3].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("mcp_tool_search")
     }),
     { git: true, config: providerCfg },
-  ),
+  ).pipe(withMcpToolSearch),
 )
 
 mcpIt.live("accumulates MCP matches across searches in one user request", () =>
@@ -3434,6 +3462,7 @@ mcpIt.live("accumulates MCP matches across searches in one user request", () =>
         sessionID: session.id,
         agent: "build",
         model: mcpRef,
+        harness: "default",
         noReply: true,
         parts: [{ type: "text", text: "use two MCP capabilities" }],
       })
@@ -3449,7 +3478,7 @@ mcpIt.live("accumulates MCP matches across searches in one user request", () =>
       expect((requests[2].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("mcp_success")
     }),
     { git: true, config: providerCfg },
-  ),
+  ).pipe(withMcpToolSearch),
 )
 
 mcpIt.live("keeps discovery reachable when permissions allow only an MCP tool", () =>
@@ -3469,6 +3498,7 @@ mcpIt.live("keeps discovery reachable when permissions allow only an MCP tool", 
         sessionID: session.id,
         agent: "build",
         model: mcpRef,
+        harness: "default",
         noReply: true,
         parts: [{ type: "text", text: "use the permitted MCP capability" }],
       })
@@ -3487,7 +3517,52 @@ mcpIt.live("keeps discovery reachable when permissions allow only an MCP tool", 
       expect((requests[1].tools as Array<Record<string, unknown>>).map(wireToolName)).not.toContain("mcp_result")
     }),
     { git: true, config: providerCfg },
-  ),
+  ).pipe(withMcpToolSearch),
+)
+
+mcpIt.live("an explicit search disable keeps the permitted MCP tool unloaded", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Disabled discovery with a permitted MCP tool",
+        permission: [
+          { permission: "*", pattern: "*", action: "deny" },
+          { permission: "mcp_success", pattern: "*", action: "allow" },
+        ],
+      })
+
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: mcpRef,
+        harness: "default",
+        tools: { mcp_tool_search: false },
+        noReply: true,
+        parts: [{ type: "text", text: "discovery is disabled for this request" }],
+      })
+      yield* llm.tool("mcp_tool_search", { query: "structured success" })
+      yield* llm.tool("mcp_success", {})
+      yield* llm.text("done")
+      yield* prompt.loop({ sessionID: session.id })
+
+      const requests = yield* llm.inputs
+      expect(requests).toHaveLength(3)
+      for (const request of requests) {
+        const names = ((request.tools ?? []) as Array<Record<string, unknown>>).map(wireToolName)
+        expect(names).not.toContain("mcp_tool_search")
+        expect(names).not.toContain("mcp_success")
+      }
+      expect(
+        (yield* MessageV2.filterCompactedEffect(session.id))
+          .flatMap((message) => message.parts)
+          .some((part) => part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed"),
+      ).toBe(false)
+      expect(JSON.stringify(requests[2])).not.toContain("Window updated")
+    }),
+    { git: true, config: providerCfg },
+  ).pipe(withMcpToolSearch),
 )
 
 mcpIt.live("searches only MCP tools allowed by the configured agent", () =>
@@ -3501,6 +3576,7 @@ mcpIt.live("searches only MCP tools allowed by the configured agent", () =>
         sessionID: session.id,
         agent: "restricted",
         model: mcpRef,
+        harness: "default",
         noReply: true,
         parts: [{ type: "text", text: "use the allowed MCP tool" }],
       })
@@ -3520,7 +3596,7 @@ mcpIt.live("searches only MCP tools allowed by the configured agent", () =>
       ])
     }),
     { git: true, config: restrictedAgentProviderCfg },
-  ),
+  ).pipe(withMcpToolSearch),
 )
 
 mcpIt.live(
@@ -3536,6 +3612,7 @@ mcpIt.live(
           sessionID: session.id,
           agent: "build",
           model: { providerID: ProviderID.openai, modelID: ModelID.make("gpt-5.2") },
+          harness: "default",
           noReply: true,
           parts: [{ type: "text", text: "inspect the window" }],
         })
@@ -3553,7 +3630,7 @@ mcpIt.live(
         expect(JSON.stringify(tools)).not.toContain("Secret nested MCP error selector")
       }),
       { git: true, config: gptProviderCfg },
-    ),
+    ).pipe(withMcpToolSearch),
   30_000,
 )
 
@@ -3568,6 +3645,7 @@ mcpIt.live("degrades the MCP catalog to names at high context pressure", () =>
         sessionID: session.id,
         agent: "build",
         model: mcpRef,
+        harness: "default",
         noReply: true,
         parts: [{ type: "text", text: `inspect available MCP tools ${"x".repeat(230_000)}` }],
       })
@@ -3581,7 +3659,7 @@ mcpIt.live("degrades the MCP catalog to names at high context pressure", () =>
       expect(catalog).not.toContain("Return a standard structured MCP success result")
     }),
     { git: true, config: providerCfg },
-  ),
+  ).pipe(withMcpToolSearch),
 )
 
 mcpIt.live(

@@ -82,7 +82,7 @@ function config(url: string): Partial<Config.Info> {
             tool_call: true,
             attachment: true,
             modalities: { input: ["text", "image"], output: ["text"] },
-            limit: { context: 100000, output: 10000 },
+          limit: { context: 256000, output: 10000 },
           },
         },
       },
