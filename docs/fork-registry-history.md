@@ -1937,3 +1937,47 @@ SSRF seam; neither branch's WebFetch policy changes.
   response-size limiting are outside this adoption. See [audio-api.md](audio-api.md).
 - Exact final remote-SHA CI and publication are verified after the registry
   companion commits; these local results alone do not establish publication.
+
+
+## 2026-09-07 explicit model API specified adoption
+
+- Selected upstream source: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; this operation does not advance
+  the upstream review baseline or incorporate unrelated upstream commits.
+- Prior fork main tip: `f45bbccddb5d6d532f6ad8ff2acc2c93a625dddb`.
+- Main source/test behavior: `3c361041eedb84e67e2c86e2fca1cd7c880e7d3f`. Subsequent registry-only commits
+  do not change this source basis.
+- Reviewed the six active FD and sixteen active FC owners. FD-004 now permits
+  the explicitly enabled capability service and finite temporary tokens; its
+  implicit-listener rejection remains active. FC-007/008 cover fixed directory
+  and cancellation; FD-005 retains resolved model identity. Other owned source
+  surfaces, TUI, actor/MaxMode/compaction behavior, provider core, workflow files,
+  and existing generated artifacts remain identical to the prior main tip.
+- Capability inventory N=2, both adapted from the selected upstream source:
+
+| ID | Accepted behavior | Preserved boundary | Local evidence |
+| --- | --- | --- | --- |
+| MODEL-01 | Capability-based model selection and scoped model listing | Current configured providers; dry-resolved factories; dedicated/default/stable ranking; usable raw transcription remains available when chat is unavailable | 15 capability regressions; real CLI capability/model issuance; HTTP model scope |
+| MODEL-02 | Explicit chat/SSE proxy, existing audio reuse, temporary tokens and CLI/Node management | Fixed directory and one model; finite idle/absolute expiry; auth before body/bootstrap; two requests/25 MiB/120 seconds; acknowledged stream cancellation; independent Basic/static-audio credentials | Protocol/service, token, CLI, native HTTP and shared-bootstrap regressions; real source-entry renewal and Node provider calls |
+
+Local affected-suite verification: **334 pass, 0 fail** across 16 files under the
+package's 30-second per-test budget; package typecheck and repository lint pass
+(lint retains warnings). Seven ambient experimental/context selectors are
+removed; package preload's orchestrator selector is retained as the harness
+baseline. A separate non-test child removes the orchestrator selector as well
+and proves default-off requests remain 404 before bootstrap. SDK/OpenAPI
+regeneration is unchanged. Node v24.16.0 builds and runs token lifecycle,
+scoped discovery and non-stream/SSE chat against a local provider, with no Bun
+global; the smoke host explicitly exits after listener/instance disposal.
+Real serve CLI startup, issuance, revocation, default-off behavior, mutually
+exclusive flags, cross-directory source renewal, and SIGTERM exit 0 are verified
+with user configuration blocked from the isolated fixture.
+
+Independent transport review reproduced the Bun HTTP sink's unhandled abort
+and verified the SSE error/close correction. A real provider request reproduced
+client provider_options overriding the scoped model; the entire client option
+bag is now rejected, while trusted project/model/plugin options remain.
+
+Changed-path calculation against selected upstream, excluding the five
+registry/history paths as above: **310 files changed, 33398 insertions(+), 9911 deletions(-)**. The incremental main source change
+contains 31 paths, 4,155 insertions and 162 deletions. Final remote SHA/CI and
+main-to-compat ancestry are publication checks, distinct from these local tests.
