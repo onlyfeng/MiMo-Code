@@ -7,7 +7,7 @@ import { SessionPrompt } from "@/session/prompt"
 import { SessionRunState } from "@/session/run-state"
 import { isRunDisposing, RunDisposal, type RunDisposalState } from "@/session/run-disposal"
 import { ActorRegistry } from "@/actor/registry"
-import { createActorLifecycle, type ForkGenerationOwner, type TerminalStatus } from "@/actor/lifecycle"
+import { createActorLifecycle, type ForkGenerationOwner, type WakeGenerationOwner, type TerminalStatus } from "@/actor/lifecycle"
 import { TaskRegistry } from "@/task/registry"
 import { TaskGate, MAX_TASK_GATE_SUBAGENT_REACT } from "@/task/gate"
 import { Agent } from "@/agent/agent"
@@ -28,6 +28,7 @@ import { Plugin, HookEvent } from "@/plugin"
 import { parseReturnHeader, type ReturnStatus } from "./return-header"
 import { assistantFinalText, sessionErrorText } from "@/session/trajectory"
 import { Log } from "@/util"
+import { NotFoundError } from "@/storage/db"
 import { Instance, type InstanceContext } from "@/project/instance"
 import { InstanceState } from "@/effect"
 import { InstanceRef } from "@/effect/instance-ref"
@@ -73,6 +74,8 @@ This format lets the spawning agent and the checkpoint writer extract your progr
 `
 
 export interface ForkContext {
+  /** Produced by the same resolved model that captured system/tools. */
+  readonly modelIdentity?: string
   readonly system: string[]
   /** Parent turn context frozen at capture time and replayed instead of child live context. */
   readonly turnContext: string | undefined
@@ -124,9 +127,10 @@ type NotificationTarget = {
 const withNotificationTarget = <A, E, R>(
   target: NotificationTarget,
   effect: Effect.Effect<A, E, R>,
+  source?: RunDisposalState,
 ): Effect.Effect<A | undefined, E, R> =>
   Effect.suspend(() =>
-    isRunDisposing(target.disposal)
+    isRunDisposing(target.disposal) || (source && isRunDisposing(source))
       ? Effect.succeed(undefined)
       : effect.pipe(
           Effect.provideService(InstanceRef, target.instance),
@@ -303,6 +307,11 @@ export interface SpawnResult {
 
 export interface Interface {
   readonly spawn: (input: SpawnInput) => Effect.Effect<SpawnResult>
+  readonly resume?: (input: {
+    sessionID: SessionID
+    actorID: string
+    signal?: AbortSignal
+  }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError>
   readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
   readonly getForkContext: (sessionID: SessionID, actorID: string) => Effect.Effect<ForkContext | undefined>
   readonly runPersistentTurn?: (input: {
@@ -377,7 +386,18 @@ export const layer = Layer.effect(
           Effect.map((exit) => (Exit.isSuccess(exit) ? exit.value : undefined)),
         )
 
-    const lifecycleState = createActorLifecycle<MessageV2.WithParts, ForkContext, NotificationTarget>()
+    type FrozenContext = { context: ForkContext; instance: InstanceContext; disposal: RunDisposalState }
+    const lifecycleState = createActorLifecycle<MessageV2.WithParts, FrozenContext, NotificationTarget>()
+    const retainForkContext = (key: string, context: ForkContext, receiver?: InstanceContext) => {
+      const capture = state.withRunDisposal(
+        Effect.gen(function* () {
+          const instance = yield* InstanceState.context
+          const disposal = yield* RunDisposal
+          yield* lifecycleState.setForkContext(key, { context, instance, disposal })
+        }),
+      )
+      return receiver ? capture.pipe(Effect.provideService(InstanceRef, receiver)) : capture
+    }
     const actorKey = lifecycleState.key
     const isCancelled = (sessionID: SessionID, actorID: string) =>
       lifecycleState.isCancelled(actorKey(sessionID, actorID))
@@ -489,7 +509,8 @@ export const layer = Layer.effect(
           extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string },
         ) =>
           Effect.gen(function* () {
-            if (isRunDisposing(yield* RunDisposal)) return
+            const source = yield* RunDisposal
+            if (isRunDisposing(source)) return
             if (!input.background || input.agentType === "checkpoint-writer") return
             yield* withNotificationTarget(
               notificationTarget,
@@ -509,13 +530,19 @@ export const layer = Layer.effect(
                         ...extra,
                       }),
                     })
-                    .pipe(Effect.ignoreCause({ log: "Warn", message: "actor inbox notification failed" })),
+                    .pipe(
+                      (effect) => withNotificationTarget(notificationTarget, effect, source),
+                      Effect.ignoreCause({ log: "Warn", message: "actor inbox notification failed" }),
+                    ),
                   bus
                     .publish(TuiEvent.ToastShow, {
                       message: `Child "${description}" ${status}`,
                       variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
                     })
-                    .pipe(Effect.ignoreCause({ log: "Warn", message: "actor toast notification failed" })),
+                    .pipe(
+                      (effect) => withNotificationTarget(notificationTarget, effect, source),
+                      Effect.ignoreCause({ log: "Warn", message: "actor toast notification failed" }),
+                    ),
                 ],
                 { concurrency: "unbounded", discard: true },
               ),
@@ -963,7 +990,7 @@ export const layer = Layer.effect(
           lifecycle,
           tools: input.tools,
         })
-        if (input.forkContext) yield* lifecycleState.setForkContext(key, input.forkContext)
+        if (input.forkContext) yield* retainForkContext(key, input.forkContext, instanceRef)
         return yield* forkWork({
           sessionID: child.id,
           parentSessionID: input.sessionID,
@@ -1016,7 +1043,7 @@ export const layer = Layer.effect(
         // work fiber detaches below, so a concurrent reclaim can see it (MR104 #2).
         // Synchronous + best-effort: a throwing callback must not fail the spawn.
         if (input.onActorID) yield* Effect.sync(() => input.onActorID!(actorID)).pipe(Effect.ignore)
-        if (input.forkContext) yield* lifecycleState.setForkContext(key, input.forkContext)
+        if (input.forkContext) yield* retainForkContext(key, input.forkContext)
 
         // Auto-inject return-format instruction for lifecycle-managed subagents.
         // Agents with an explicit completionGate keep this behavior even when
@@ -1104,8 +1131,11 @@ export const layer = Layer.effect(
       actor: Actor | undefined,
       status: TerminalStatus,
       extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string } = {},
+      source?: RunDisposalState,
     ) =>
       Effect.gen(function* () {
+        const origin = source ?? (yield* RunDisposal)
+        if (isRunDisposing(origin)) return
         if (!actor) return
         if (!actor.background) return
         if (actor.mode !== "peer" && actor.mode !== "subagent") return
@@ -1113,7 +1143,7 @@ export const layer = Layer.effect(
         // Resolve the parent session: a peer runs in its own child session (notify
         // its parentID); a subagent shares the parent's session.
         const parentSessionID = actor.mode === "peer" ? (yield* session.get(sessionID)).parentID : sessionID
-        if (!parentSessionID) return
+        if (!parentSessionID || isRunDisposing(origin)) return
         const notificationTarget = yield* resolveNotificationTarget(actorKey(sessionID, actorID), parentSessionID)
         if (!notificationTarget) return
         yield* withNotificationTarget(
@@ -1131,6 +1161,7 @@ export const layer = Layer.effect(
               ...extra,
             }),
           }),
+          origin,
         ).pipe(Effect.ignoreCause)
         yield* withNotificationTarget(
           notificationTarget,
@@ -1138,8 +1169,84 @@ export const layer = Layer.effect(
             message: `Child "${actor.description}" ${status}`,
             variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
           }),
+          origin,
         ).pipe(Effect.ignoreCause)
       }).pipe(Effect.catchCause((cause) => Effect.logError(`terminal notify failed: ${Cause.pretty(cause)}`)))
+
+    const finishPersistentTurn = (
+      input: { sessionID: SessionID; actorID: string; notifyParentOnComplete: boolean },
+      actor: Actor,
+      owner: WakeGenerationOwner<MessageV2.WithParts>,
+      result: Exit.Exit<MessageV2.WithParts>,
+    ) =>
+      Effect.gen(function* () {
+        const key = actorKey(input.sessionID, input.actorID)
+        const source = yield* RunDisposal
+        const terminalResult = yield* Effect.gen(function* () {
+          const value = Exit.isSuccess(result) ? result.value : undefined
+          const assistant = value?.info.role === "assistant" ? value.info : undefined
+          const effectFailure = Exit.isFailure(result) && !Cause.hasInterruptsOnly(result.cause)
+          const assistantFailure = assistant?.error !== undefined
+          const cancelled =
+            !effectFailure &&
+            !assistantFailure &&
+            ((yield* lifecycleState.isCancelled(key)) ||
+              (Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)))
+          const status =
+            effectFailure || assistantFailure
+              ? ("failed" as const)
+              : cancelled
+                ? ("cancelled" as const)
+                : ("completed" as const)
+          const error = effectFailure
+            ? Cause.pretty(result.cause)
+            : assistantFailure
+              ? (sessionErrorText(assistant.error) ?? "unknown")
+              : undefined
+          const claimed = yield* lifecycleState.claimTerminal(key, owner, status, "turn", error)
+          if (claimed) {
+            yield* Effect.gen(function* () {
+              // Settle the old receiver's receipts without writing through a
+              // disposed instance or notifying a parent that is still alive.
+              if (isRunDisposing(source)) return
+              yield* actorReg
+                .updateStatus(input.sessionID, input.actorID, {
+                  status: "idle",
+                  lastOutcome: status === "completed" ? "success" : status === "failed" ? "failure" : "cancelled",
+                  lastError: status === "failed" ? error : undefined,
+                })
+                .pipe(Effect.ignoreCause)
+              if (input.notifyParentOnComplete) {
+                const finalText = assistant && value ? assistantFinalText(assistant, value.parts) : undefined
+                const parsed = parseReturnHeader(finalText)
+                yield* notifyTerminal(
+                  input.sessionID,
+                  input.actorID,
+                  actor,
+                  status,
+                  status === "completed"
+                    ? {
+                        result: finalText ?? "(no output)",
+                        ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                        ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                      }
+                    : status === "failed"
+                      ? { error }
+                      : {},
+                  source,
+                )
+              }
+            }).pipe(Effect.ensuring(lifecycleState.settleTerminal(owner)))
+          } else {
+            yield* Deferred.await(owner.terminalDone)
+          }
+          if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
+          return result.value
+        }).pipe(Effect.exit)
+        yield* lifecycleState.finishWake(key, owner, terminalResult)
+        if (Exit.isFailure(terminalResult)) return yield* Effect.failCause(terminalResult.cause)
+        return terminalResult.value
+      })
 
     const runPersistentTurnImpl = Effect.fn("Actor.runPersistentTurn.impl")(function* (
       input: {
@@ -1216,66 +1323,7 @@ export const layer = Layer.effect(
             const result = yield* state
               .ensureRunning(input.sessionID, input.actorID, input.onInterrupt, guardedWork)
               .pipe(Effect.interruptible, Effect.exit)
-            const terminalResult = yield* Effect.gen(function* () {
-              const value = Exit.isSuccess(result) ? result.value : undefined
-              const assistant = value?.info.role === "assistant" ? value.info : undefined
-              const effectFailure = Exit.isFailure(result) && !Cause.hasInterruptsOnly(result.cause)
-              const assistantFailure = assistant?.error !== undefined
-              const cancelled =
-                !effectFailure &&
-                !assistantFailure &&
-                ((yield* lifecycleState.isCancelled(key)) ||
-                  (Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)))
-              const status =
-                effectFailure || assistantFailure
-                  ? ("failed" as const)
-                  : cancelled
-                    ? ("cancelled" as const)
-                    : ("completed" as const)
-              const error = effectFailure
-                ? Cause.pretty(result.cause)
-                : assistantFailure
-                  ? (sessionErrorText(assistant.error) ?? "unknown")
-                  : undefined
-              const claimed = yield* lifecycleState.claimTerminal(key, owner, status, "turn", error)
-              if (claimed) {
-                yield* Effect.gen(function* () {
-                  yield* actorReg
-                    .updateStatus(input.sessionID, input.actorID, {
-                      status: "idle",
-                      lastOutcome: status === "completed" ? "success" : status === "failed" ? "failure" : "cancelled",
-                      lastError: status === "failed" ? error : undefined,
-                    })
-                    .pipe(Effect.ignoreCause)
-                  if (input.notifyParentOnComplete) {
-                    const finalText = assistant && value ? assistantFinalText(assistant, value.parts) : undefined
-                    const parsed = parseReturnHeader(finalText)
-                    yield* notifyTerminal(
-                      input.sessionID,
-                      input.actorID,
-                      actor,
-                      status,
-                      status === "completed"
-                        ? {
-                            result: finalText ?? "(no output)",
-                            ...(parsed.status ? { reportedStatus: parsed.status } : {}),
-                            ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
-                          }
-                        : status === "failed"
-                          ? { error }
-                          : {},
-                    )
-                  }
-                }).pipe(Effect.ensuring(lifecycleState.settleTerminal(owner)))
-              } else {
-                yield* Deferred.await(owner.terminalDone)
-              }
-              if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
-              return result.value
-            }).pipe(Effect.exit)
-            yield* lifecycleState.finishWake(key, owner, terminalResult)
-            if (Exit.isFailure(terminalResult)) return yield* Effect.failCause(terminalResult.cause)
-            return terminalResult.value
+            return yield* finishPersistentTurn(input, actor, owner, result)
           }
         }),
       )
@@ -1288,9 +1336,143 @@ export const layer = Layer.effect(
       return yield* runPersistentTurnImpl(input, wakeSource).pipe(state.withRunDisposal)
     })
 
+    const resume: NonNullable<Interface["resume"]> = Effect.fn("Actor.resume")(function* (input) {
+      if (input.signal?.aborted || isRunDisposing(yield* RunDisposal)) return yield* Effect.interrupt
+      const key = actorKey(input.sessionID, input.actorID)
+      const frozen = yield* lifecycleState.getForkContext(key)
+      const unavailable = () =>
+        new NotFoundError({ message: "Actor has no resumable turn with retained current-instance context" })
+      const actor = yield* actorReg.get(input.sessionID, input.actorID)
+      if (
+        !actor ||
+        actor.lifecycle !== "persistent" ||
+        actor.contextMode !== "full" ||
+        (actor.mode !== "peer" && actor.mode !== "subagent") ||
+        actor.lastOutcome === "cancelled" ||
+        !frozen ||
+        isRunDisposing(frozen.disposal) ||
+        frozen.instance.disposing ||
+        !sessionPrompt.startActorResume
+      )
+        return yield* Effect.fail(unavailable())
+      const startActorResume = sessionPrompt.startActorResume
+      const validate = Effect.gen(function* () {
+        const current = yield* lifecycleState.getForkContext(key)
+        const instance = yield* InstanceState.context
+        const disposal = yield* RunDisposal
+        if (
+          current !== frozen ||
+          instance !== frozen.instance ||
+          disposal !== frozen.disposal ||
+          isRunDisposing(frozen.disposal)
+        )
+          return yield* Effect.fail(unavailable())
+      })
+      return yield* Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          yield* validate
+          const ownership = yield* lifecycleState.acquireWake(key)
+          if (ownership._tag === "blocked") return yield* Effect.fail(unavailable())
+          if (ownership._tag !== "owner") return yield* Effect.fail(new Session.BusyError(input.sessionID))
+          const owner = ownership.owner
+          const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError> | Session.BusyError>()
+          const accepted = { value: false, withdrawn: false }
+          // This supervisor owns the actor generation until the actual Runner has
+          // settled. Interrupting the admission caller/completion waiter cannot
+          // release it or let a queued inbox turn join an unfinished recovery.
+          const work = Effect.gen(function* () {
+            const completion = yield* startActorResume({
+              ...input,
+              modelIdentity: frozen.context.modelIdentity,
+              validate: validate.pipe(
+                Effect.andThen(
+                  Effect.gen(function* () {
+                    if (
+                      input.signal?.aborted ||
+                      accepted.withdrawn ||
+                      !(yield* lifecycleState.isCurrentOpen(key, owner))
+                    )
+                      return yield* Effect.interrupt
+                  }),
+                ),
+              ),
+              onAdmitted: Effect.gen(function* () {
+                if (input.signal?.aborted || accepted.withdrawn || !(yield* lifecycleState.isCurrentOpen(key, owner)))
+                  return yield* Effect.interrupt
+                // Ownership transfers here, immediately before old-message settlement.
+                accepted.value = true
+                yield* actorReg
+                  .updateStatus(input.sessionID, input.actorID, { status: "running" })
+                  .pipe(Effect.ignoreCause)
+              }),
+            })
+            yield* Deferred.succeed(admitted, undefined)
+            return yield* completion
+          }).pipe(
+            Effect.interruptible,
+            Effect.exit,
+            Effect.flatMap((result) =>
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const settled = yield* (
+                    Exit.isFailure(result) ? Effect.failCause(result.cause) : Effect.succeed(result.value)
+                  ).pipe(Effect.orDie, Effect.exit)
+                  if (accepted.value)
+                    return yield* finishPersistentTurn(
+                      { ...input, notifyParentOnComplete: true },
+                      actor,
+                      owner,
+                      settled,
+                    )
+                  yield* lifecycleState.finishWake(key, owner, settled)
+                  if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
+                  return result.value
+                }),
+              ),
+            ),
+            // A cancel between ownership transfer and settlement must also
+            // release the caller. Publish failure only after generation cleanup.
+            Effect.onExit((exit) =>
+              Exit.isFailure(exit) ? Deferred.done(admitted, exit).pipe(Effect.ignore) : Effect.void,
+            ),
+          )
+          const fiber = yield* work.pipe(Effect.forkIn(scope))
+          const admission = input.signal
+            ? Effect.raceFirst(
+                Deferred.await(admitted),
+                Effect.callback<never>((resume) => {
+                  const abort = () => resume(Effect.interrupt)
+                  if (input.signal!.aborted) abort()
+                  else input.signal!.addEventListener("abort", abort, { once: true })
+                  return Effect.sync(() => input.signal!.removeEventListener("abort", abort))
+                }),
+              )
+            : Deferred.await(admitted)
+          yield* restore(admission).pipe(
+            Effect.onInterrupt(() =>
+              Effect.gen(function* () {
+                if (accepted.value) return
+                accepted.withdrawn = true
+                yield* state.cancelActor(input.sessionID, input.actorID)
+                yield* Deferred.await(owner.done)
+              }),
+            ),
+          )
+          return Fiber.join(fiber).pipe(Effect.orDie)
+        }),
+      ).pipe(
+        state.withRunDisposal,
+        Effect.provideService(InstanceRef, frozen.instance),
+        Effect.provideService(RunDisposal, frozen.disposal),
+      )
+    })
+
     const cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void> =
       Effect.fn("Actor.cancel")(function* (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") {
         const key = actorKey(sessionID, actorID)
+        const receiver = yield* lifecycleState.getForkContext(key)
+        const inReceiver = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          receiver ? withNotificationTarget(receiver, effect) : effect
         const ownership = yield* lifecycleState.acquireCancel(key)
         if (ownership._tag === "noop") return
         if (ownership._tag === "follower") {
@@ -1340,11 +1522,20 @@ export const layer = Layer.effect(
               yield* Deferred.await(ownership.generation.done)
               return
             }
-            yield* (
+            const stop =
               mode === "graceful"
                 ? state.cancelActorDetached(sessionID, actorID)
                 : state.cancelActor(sessionID, actorID)
-            ).pipe(Effect.ignoreCause({ log: "Warn", message: "actor runner interrupt failed during cancel" }))
+            yield* (receiver
+              ? stop.pipe(
+                  Effect.provideService(InstanceRef, receiver.instance),
+                  Effect.provideService(RunDisposal, receiver.disposal),
+                )
+              : stop).pipe(Effect.ignoreCause({ log: "Warn", message: "actor runner interrupt failed during cancel" }))
+            if (receiver && isRunDisposing(receiver.disposal)) {
+              yield* retire
+              return
+            }
             const actor = yield* actorReg.get(sessionID, actorID).pipe(
               Effect.catchCause((cause) => {
                 log.warn("actor lookup failed during cancel; retrying before cleanup", {
@@ -1365,6 +1556,10 @@ export const layer = Layer.effect(
                 )
               }),
             )
+            if (receiver && isRunDisposing(receiver.disposal)) {
+              yield* retire
+              return
+            }
             if (!actor) {
               if (actorID === "main") return
               yield* actorReg
@@ -1373,8 +1568,8 @@ export const layer = Layer.effect(
                   lastOutcome: "cancelled",
                   lastError: undefined,
                 })
-                .pipe(Effect.ignoreCause)
-              yield* inbox.drain(sessionID, actorID).pipe(Effect.ignoreCause)
+                .pipe(inReceiver, Effect.ignoreCause)
+              yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
               yield* retire
               return
             }
@@ -1391,9 +1586,9 @@ export const layer = Layer.effect(
                     lastOutcome: "cancelled",
                     lastError: undefined,
                   })
-                  .pipe(Effect.ignoreCause)
-                yield* inbox.drain(sessionID, actorID).pipe(Effect.ignoreCause)
-                yield* notifyTerminal(sessionID, actorID, actor, "cancelled")
+                  .pipe(inReceiver, Effect.ignoreCause)
+                yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+                yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
                 yield* retire
               })
               return
@@ -1403,7 +1598,7 @@ export const layer = Layer.effect(
             if (actor.lifecycle !== "persistent" && actor.status === "idle" && actor.lastOutcome != null && !live)
               return
             if (actor.lifecycle === "persistent" && actor.status === "idle" && actor.lastOutcome === "cancelled") {
-              yield* inbox.drain(sessionID, actorID).pipe(Effect.ignoreCause)
+              yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
               yield* retire
               return
             }
@@ -1413,16 +1608,16 @@ export const layer = Layer.effect(
                 lastOutcome: "cancelled",
                 lastError: undefined,
               })
-              .pipe(Effect.ignoreCause)
-            yield* inbox.drain(sessionID, actorID).pipe(Effect.ignoreCause)
-            yield* notifyTerminal(sessionID, actorID, actor, "cancelled")
+              .pipe(inReceiver, Effect.ignoreCause)
+            yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+            yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
             yield* retire
           }).pipe(Effect.ensuring(settleClaim), Effect.ensuring(releaseEpisode)),
         )
       })
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
-      return yield* lifecycleState.getForkContext(actorKey(sessionID, actorID))
+      return (yield* lifecycleState.getForkContext(actorKey(sessionID, actorID)))?.context
     })
 
     // === T40 stall watchdog ===
@@ -1572,7 +1767,7 @@ export const layer = Layer.effect(
         if (!instance.disposing) yield* captureNotificationTarget(instance)
         yield* scanRememberedTargets
       })
-    const impl = Service.of({ spawn, cancel, getForkContext, runPersistentTurn, scanStalledOnce })
+    const impl = Service.of({ spawn, resume, cancel, getForkContext, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it

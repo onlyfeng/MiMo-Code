@@ -242,6 +242,7 @@ export const ExperimentalRoutes = lazy(() =>
               modelID: resolved.id,
               modelAPIID: resolved.api.id,
               modelFamily: resolved.family,
+              harnessModel: resolved.harness_model,
               agent: yield* agents.get(yield* agents.defaultAgent()),
             })
           }),

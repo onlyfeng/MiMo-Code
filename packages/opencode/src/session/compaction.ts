@@ -273,6 +273,8 @@ export interface Interface {
     auto: boolean
     overflow?: boolean
     agentID?: string
+    /** Internal receipt for a user actually committed by this compaction. */
+    onUserCommitted?: (message: MessageV2.User) => void
     waitForPendingExternalRequest?: () => Effect.Effect<void>
   }) => Effect.Effect<"continue" | "stop" | "text-repeat">
   readonly create: (input: {
@@ -293,6 +295,8 @@ export interface Interface {
     agentID?: string
     task_id?: string
     expectedUserID: MessageID | undefined
+    /** Internal receipt; never inferred by scanning hook messages. */
+    onUserCommitted?: (message: MessageV2.User) => void
   }) => Effect.Effect<boolean>
 }
 
@@ -385,6 +389,7 @@ export const layer: Layer.Layer<
       auto: boolean
       overflow?: boolean
       agentID?: string
+      onUserCommitted?: (message: MessageV2.User) => void
       waitForPendingExternalRequest?: () => Effect.Effect<void>
     }) {
       const snapshotLen = input.messages.length
@@ -459,6 +464,7 @@ export const layer: Layer.Layer<
         modelID: parentModel.id,
         modelAPIID: parentModel.api.id ?? "",
         modelFamily: parentModel.family ?? "",
+        harnessModel: parentModel.harness_model,
         agent: parentAgent.name,
         agentID: requestUser.info.agentID ?? "main",
         harness: promptConfig.harness,
@@ -674,7 +680,10 @@ export const layer: Layer.Layer<
             message: replayMsg,
             parts,
           })
-          if (created) continuationMessageID = replayMsg.id
+          if (created) {
+            continuationMessageID = replayMsg.id
+            input.onUserCommitted?.(replayMsg)
+          }
         }
 
         if (!replay) {
@@ -735,7 +744,10 @@ export const layer: Layer.Layer<
                 } satisfies MessageV2.TextPart,
               ],
             })
-            if (created) continuationMessageID = continueMsg.id
+            if (created) {
+              continuationMessageID = continueMsg.id
+              input.onUserCommitted?.(continueMsg)
+            }
           }
         }
 
@@ -807,6 +819,7 @@ export const layer: Layer.Layer<
         parts: [next.part],
       })
       if (!created) return false
+      input.onUserCommitted?.(next.message)
       yield* publish(input)
       return true
     })

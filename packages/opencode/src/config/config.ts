@@ -515,6 +515,14 @@ export type Info = z.output<typeof Info> & {
   mcp_origins?: Record<string, ConfigMCP.Origin>
 }
 
+// Config hooks receive the mutable config object. Alias trust must retain the
+// parsed declaration, even if a plugin later edits or replaces model metadata.
+const harnessDeclarations = new WeakMap<Info, ReadonlyMap<string, ReadonlyMap<string, string>>>()
+
+export function configuredHarnessModel(config: Info, providerID: string, modelID: string) {
+  return harnessDeclarations.get(config)?.get(providerID)?.get(modelID)
+}
+
 type State = {
   config: Info
   directories: string[]
@@ -680,7 +688,9 @@ export const layer = Layer.effect(
     )
 
     const getGlobal = Effect.fn("Config.getGlobal")(function* () {
-      return yield* cachedGlobal
+      // Instance merges retain nested references. Never expose the cached
+      // source to mutable config hooks or a later instance could trust them.
+      return structuredClone(yield* cachedGlobal)
     })
 
     const ensureGitignore = Effect.fn("Config.ensureGitignore")(function* (dir: string) {
@@ -1013,6 +1023,20 @@ export const layer = Layer.effect(
         if (Flag.MIMOCODE_DISABLE_PRUNE) {
           result.compaction = { ...result.compaction, prune: false }
         }
+
+        harnessDeclarations.set(
+          result,
+          new Map(
+            Object.entries(result.provider ?? {}).map(([providerID, provider]) => [
+              providerID,
+              new Map(
+                Object.entries(provider.models ?? {}).flatMap(([modelID, model]) =>
+                  model.harness_model ? [[modelID, model.harness_model] as const] : [],
+                ),
+              ),
+            ]),
+          ),
+        )
 
         return {
           config: result,

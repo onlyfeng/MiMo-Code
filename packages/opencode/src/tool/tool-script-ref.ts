@@ -42,6 +42,7 @@ export const toolScriptRegistry: {
         modelID: ModelID
         modelAPIID?: string
         modelFamily?: string
+        harnessModel?: string
         agent: Agent.Info
         harness?: HarnessMode
       }) => Effect.Effect<Tool.Def[]>)

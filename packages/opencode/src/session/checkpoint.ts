@@ -928,6 +928,7 @@ export const layer: Layer.Layer<
                 msgs: msgsAtWatermark,
               })
               return {
+                modelIdentity: prefix.modelIdentity,
                 system: prefix.system,
                 turnContext: prefix.turnContext,
                 tools: prefix.tools,
@@ -963,6 +964,7 @@ export const layer: Layer.Layer<
             })
 
             return {
+              modelIdentity: writerPrefix.modelIdentity,
               system: writerPrefix.system,
               turnContext: writerPrefix.turnContext,
               tools: writerPrefix.tools,

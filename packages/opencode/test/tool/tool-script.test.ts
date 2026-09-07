@@ -146,6 +146,7 @@ async function runToolScript(
       providerID: ProviderID
       api: { id: string }
       family?: string
+      harness_model?: string
     }
     onRegistryInput?: (input: Parameters<NonNullable<typeof toolScriptRegistry.current>>[0]) => void
     onMetadata?: (metadata: Record<string, unknown>) => void
@@ -203,6 +204,7 @@ describe("exec", () => {
         providerID: ProviderID.make("xiaomi"),
         api: { id: "mimo-v2.5-pro" },
         family: "mimo-v2.6",
+        harness_model: "gpt-5.6-sol",
       },
       onRegistryInput: (input) => {
         received = input
@@ -215,6 +217,7 @@ describe("exec", () => {
       modelID: "mimo",
       modelAPIID: "mimo-v2.5-pro",
       modelFamily: "mimo-v2.6",
+      harnessModel: "gpt-5.6-sol",
     })
   })
 

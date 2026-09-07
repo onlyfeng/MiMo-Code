@@ -2,13 +2,20 @@ import { Schema } from "effect"
 import { zod } from "@/util/effect-zod"
 import { withStatics } from "@/util/schema"
 import { ConfigRetry } from "./retry"
+import { GPT_HARNESS_MODEL_PATTERN } from "../tool/gpt"
 
 const PositiveInt = Schema.Number.check(Schema.isInt()).check(Schema.isGreaterThan(0))
+
+export const HarnessModel = Schema.String.check(Schema.isPattern(GPT_HARNESS_MODEL_PATTERN)).annotate({
+  description:
+    "Explicitly trusted canonical GPT-5 or newer identity for automatic harness inference. Does not change the API model or transport; session/process choices and MiMo/GPT-4/OSS exclusions take precedence.",
+})
 
 export const Model = Schema.Struct({
   id: Schema.optional(Schema.String),
   name: Schema.optional(Schema.String),
   family: Schema.optional(Schema.String),
+  harness_model: Schema.optional(HarnessModel),
   release_date: Schema.optional(Schema.String),
   attachment: Schema.optional(Schema.Boolean),
   reasoning: Schema.optional(Schema.Boolean),

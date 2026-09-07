@@ -116,6 +116,7 @@ export function forkQuery(deps: {
     if (prefix.inheritedMessages.length === 0)
       return "(fork-query unavailable: prefix capture returned no inherited messages)"
     const forkCtx = {
+      modelIdentity: prefix.modelIdentity,
       system: prefix.system,
       turnContext: prefix.turnContext,
       tools: prefix.tools,

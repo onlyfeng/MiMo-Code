@@ -1,8 +1,9 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, describe, expect } from "bun:test"
-import { Deferred, Effect, Layer } from "effect"
+import { Deferred, Effect, Layer, Fiber, Cause, Exit } from "effect"
 import { and, eq } from "drizzle-orm"
+import { jsonSchema, type Tool as AITool } from "ai"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
 import { Command } from "../../src/command"
@@ -35,8 +36,9 @@ import { ToolRegistry } from "../../src/tool"
 import { Truncate } from "../../src/tool"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
-import { InboxArrived } from "../../src/actor/events"
+import { ActorStatusChanged, InboxArrived } from "../../src/actor/events"
 import { Actor } from "../../src/actor/spawn"
+import { spawnRef } from "../../src/actor/spawn-ref"
 import { Worktree } from "../../src/worktree"
 import { Memory } from "../../src/memory"
 import { History } from "../../src/history"
@@ -47,25 +49,37 @@ import { TaskRegistry } from "../../src/task/registry"
 import { defaultLayer as SchedulerDefaultLayer } from "../../src/cron/scheduler"
 import { Auth } from "../../src/auth"
 import { Database } from "../../src/storage"
-import { MessageTable } from "../../src/session/session.sql"
+import { MessageTable, SessionTable } from "../../src/session/session.sql"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID } from "../../src/session/schema"
 import { Instance } from "../../src/project/instance"
+import { InstanceRef } from "../../src/effect/instance-ref"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Ripgrep } from "../../src/file/ripgrep"
 import { Format } from "../../src/format"
-import { provideTmpdirServer } from "../fixture/fixture"
+import { provideTmpdirServer, provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
 import { reply } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
 import { inboxServiceRef } from "../../src/inbox/inbox-ref"
 import { Flag } from "../../src/flag/flag"
+import { prefixModelIdentity, prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 
+let recoveryHooks: { pre: (string | undefined)[]; post: (string | undefined)[] } | undefined
+let resumeCompletionGate: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
+let cancelCompletionGate: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
+let terminalWriteGate: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
+let resumeValidationGate: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void>; settlement?: boolean } | undefined
 let agentLookupFailure: { agent: string; armed: boolean } | undefined
 
 afterEach(async () => {
   agentLookupFailure = undefined
+  resumeValidationGate = undefined
+  resumeCompletionGate = undefined
+  cancelCompletionGate = undefined
+  terminalWriteGate = undefined
+  recoveryHooks = undefined
   await Instance.disposeAll()
 })
 
@@ -122,7 +136,21 @@ const lsp = Layer.succeed(
 )
 
 const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
-const run = SessionRunState.layer.pipe(Layer.provide(status))
+const run = Layer.effect(
+  SessionRunState.Service,
+  Effect.gen(function* () {
+    const inner = yield* SessionRunState.Service
+    return SessionRunState.Service.of({
+      ...inner,
+      cancelActor: (...args) => inner.cancelActor(...args).pipe(Effect.andThen(Effect.gen(function* () {
+        const gate = cancelCompletionGate
+        if (!gate) return
+        yield* Deferred.succeed(gate.hit, undefined)
+        yield* Deferred.await(gate.release)
+      }))),
+    })
+  }),
+).pipe(Layer.provide(SessionRunState.layer.pipe(Layer.provide(status))))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 
 function makeLayer(
@@ -163,7 +191,21 @@ function makeLayer(
   const question = Question.layer.pipe(Layer.provideMerge(deps))
   const todo = Todo.layer.pipe(Layer.provideMerge(deps))
   const checkpoint = SessionCheckpoint.defaultLayer
-  const taskRegistry = ActorRegistry.defaultLayer
+  const taskRegistry = Layer.effect(
+    ActorRegistry.Service,
+    Effect.gen(function* () {
+      const inner = yield* ActorRegistry.Service
+      return ActorRegistry.Service.of({
+        ...inner,
+        updateStatus: (...args) => inner.updateStatus(...args).pipe(Effect.andThen(Effect.gen(function* () {
+          const gate = terminalWriteGate
+          if (!gate || args[2].status !== "idle") return
+          yield* Deferred.succeed(gate.hit, undefined)
+          yield* Deferred.await(gate.release)
+        }))),
+      })
+    }),
+  ).pipe(Layer.provide(ActorRegistry.defaultLayer))
   const taskWaiter = ActorWaiter.defaultLayer
   const team = Team.defaultLayer
   const registry = ToolRegistry.layer.pipe(
@@ -209,7 +251,7 @@ function makeLayer(
   return Layer.mergeAll(
     TestLLMServer.layer,
     Actor.layer.pipe(
-      Layer.provideMerge(opts?.settledError ? settledPromptLayer(opts.settledError, prompt) : prompt),
+      Layer.provideMerge(resumePromptLayer(opts?.settledError ? settledPromptLayer(opts.settledError, prompt) : prompt)),
       Layer.provide(Worktree.defaultLayer),
       Layer.provideMerge(taskRegistry),
       Layer.provide(TaskRegistry.defaultLayer),
@@ -217,6 +259,43 @@ function makeLayer(
       Layer.provide(Inbox.defaultLayer),
     ),
   ).pipe(Layer.provide(summary))
+}
+
+function resumePromptLayer<A, E, R>(real: Layer.Layer<A, E, R>) {
+  return Layer.effect(
+    SessionPrompt.Service,
+    Effect.gen(function* () {
+      const inner = yield* SessionPrompt.Service
+      return SessionPrompt.Service.of({
+        ...inner,
+        startActorResume: (input) => {
+          if (!inner.startActorResume) return Effect.die("actor resume implementation missing")
+          return inner.startActorResume({
+            ...input,
+            onAdmitted: input.onAdmitted.pipe(Effect.andThen(Effect.gen(function* () {
+              const gate = resumeValidationGate
+              if (!gate?.settlement) return
+              yield* Deferred.succeed(gate.hit, undefined)
+              yield* Deferred.await(gate.release)
+            }))),
+            validate: Effect.gen(function* () {
+              const gate = resumeValidationGate
+              if (gate && !gate.settlement) {
+                yield* Deferred.succeed(gate.hit, undefined)
+                yield* Deferred.await(gate.release)
+              }
+              yield* input.validate
+            }),
+          }).pipe(Effect.map((completion) => completion.pipe(Effect.onExit(() => Effect.gen(function* () {
+            const gate = resumeCompletionGate
+            if (!gate) return
+            yield* Deferred.succeed(gate.hit, undefined)
+            yield* Deferred.await(gate.release)
+          })))))
+        },
+      })
+    }),
+  ).pipe(Layer.provideMerge(real))
 }
 
 /**
@@ -272,7 +351,11 @@ let postStopReentry: { calls: number; finished: Deferred.Deferred<void> } | unde
 const pausePreStopPlugin = Layer.succeed(
   Plugin.Service,
   Plugin.Service.of({
-    trigger: (_name, _input, output) => Effect.succeed(output),
+    trigger: (name, input, output) => Effect.sync(() => {
+      if (recoveryHooks && (name === "session.pre" || name === "session.post"))
+        recoveryHooks[name === "session.pre" ? "pre" : "post"].push((input as { task_id?: string }).task_id)
+      return output
+    }),
     list: () => Effect.succeed([]),
     init: () => Effect.void,
     reloadFileHooks: () => Effect.void,
@@ -2218,3 +2301,1119 @@ describe("AgentOutcome failure classification", () => {
     ),
   )
 })
+
+describe("Actor resume", () => {
+  it.live("resume preserves the interrupted persistent actor user and frozen context", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const sessions = yield* Session.Service
+        const parent = yield* sessions.create({ title: "resume persistent actor" })
+        const context = {
+          modelIdentity: prefixModelIdentity(yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)),
+          system: ["frozen-resume-system"],
+          turnContext: "frozen-resume-turn-context",
+          tools: {},
+          inheritedMessages: [],
+          parentPermission: [],
+          watermarkMsgID: MessageID.ascending(),
+          model: ref,
+        }
+        yield* llm.error(400, { error: { message: "invalid request" } })
+        const spawned = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "explore",
+          task: "original recovery task",
+          context: "full",
+          lifecycle: "persistent",
+          tools: [],
+          background: false,
+          model: ref,
+          forkContext: context,
+        })
+        expect((yield* Deferred.await(spawned.outcome)).status).toBe("failure")
+        const before = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+        const old = before.findLast((m) => m.info.role === "assistant")!
+        expect(old.info.role === "assistant" && old.info.time.completed).toBeUndefined()
+        expect(typeof actor.resume).toBe("function")
+        if (!actor.resume) return
+        yield* llm.text("resumed result")
+        const completion = yield* actor.resume(spawned)
+        const admitted = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+        expect(admitted.find((m) => m.info.id === old.info.id)?.info).toMatchObject({
+          time: { completed: expect.any(Number) },
+          error: { name: "MessageAbortedError" },
+        })
+        const result = yield* completion
+        const after = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+        expect(after.filter((m) => m.info.role === "user")).toEqual(before.filter((m) => m.info.role === "user"))
+        expect(result.info.role === "assistant" && result.info.parentID).toBe(
+          old.info.role === "assistant" && old.info.parentID,
+        )
+        expect(result.parts.some((p) => p.type === "text" && p.text === "resumed result")).toBe(true)
+        expect(yield* actor.getForkContext(spawned.sessionID, spawned.actorID)).toBe(context)
+        expect(JSON.stringify((yield* llm.inputs)[1])).toContain("frozen-resume-system")
+        expect(JSON.stringify((yield* llm.inputs)[1]).split(context.turnContext)).toHaveLength(2)
+        expect((yield* (yield* ActorRegistry.Service).get(spawned.sessionID, spawned.actorID))?.lastOutcome).toBe(
+          "success",
+        )
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+})
+
+const interruptedActor = Effect.fnUntraced(function* (
+  lifecycle: "persistent" | "ephemeral" = "persistent",
+  read = false,
+) {
+  const llm = yield* TestLLMServer
+  const actor = yield* Actor.Service
+  const sessions = yield* Session.Service
+  const parent = yield* sessions.create({ title: "actor resume boundaries" })
+  const context = {
+    modelIdentity: prefixModelIdentity(yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)),
+    system: ["frozen-resume-boundary"],
+    turnContext: "frozen-boundary-turn-context",
+    tools: (read
+      ? {
+          read: {
+            description: "Frozen read",
+            inputSchema: jsonSchema({
+              type: "object",
+              properties: { filePath: { type: "string" } },
+              required: ["filePath"],
+            }),
+          },
+        }
+      : {}) as Record<string, AITool>,
+    inheritedMessages: [],
+    parentPermission: [{ permission: "*", pattern: "*", action: "allow" as const }],
+    watermarkMsgID: MessageID.ascending(),
+    model: ref,
+  }
+  yield* llm.error(400, { error: { message: "invalid request" } })
+  const spawned = yield* actor.spawn({
+    mode: "subagent",
+    sessionID: parent.id,
+    agentType: "explore",
+    task: "original-task-provenance",
+    context: "full",
+    lifecycle,
+    tools: read ? ["read"] : [],
+    background: false,
+    model: ref,
+    forkContext: context,
+  })
+  expect((yield* Deferred.await(spawned.outcome)).status).toBe("failure")
+  const messages = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+  return { ...spawned, messages, context }
+})
+
+for (const continuation of ["compaction", "invalid output"] as const) {
+  pauseIt.live(
+    `resume accepts owned ${continuation} continuations and preserves original task provenance`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const actor = yield* Actor.Service
+          const sessions = yield* Session.Service
+          const spawned = yield* interruptedActor()
+          const user = spawned.messages.find((message) => message.info.role === "user")!
+          if (user.info.role !== "user") return yield* Effect.die("original user missing")
+          const original = { ...user.info, task_id: "T7" }
+          yield* sessions.updateMessage(original)
+          recoveryHooks = { pre: [], post: [] }
+          if (continuation === "compaction") {
+            yield* llm.error(400, {
+              error: { code: "context_length_exceeded", message: "maximum context length is 4096 tokens" },
+            })
+            yield* llm.text("recovery compaction summary")
+          } else yield* llm.reason("thinking without a usable answer")
+          yield* llm.text("completed recovered continuation")
+          const completion = yield* actor.resume!(spawned)
+          const result = yield* completion
+          expect(
+            result.parts.some((part) => part.type === "text" && part.text === "completed recovered continuation"),
+          ).toBe(true)
+          const messages = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+          expect(messages.filter((message) => message.info.role === "user" && message.info.source !== "hook")).toEqual([
+            { ...user, info: original },
+          ])
+          const continuations = messages.filter(
+            (message) => message.info.role === "user" && message.info.source === "hook",
+          )
+          expect(continuations.length).toBeGreaterThan(0)
+          expect(continuations.every((message) => message.info.role === "user" && message.info.task_id === "T7")).toBe(
+            true,
+          )
+          expect(result.info.role === "assistant" && result.info.parentID).toBe(
+            messages.findLast((message) => message.info.role === "user")!.info.id,
+          )
+          expect(recoveryHooks.pre).toEqual(["T7"])
+          expect(recoveryHooks.post).toEqual(["T7"])
+          expect(yield* actor.getForkContext(spawned.sessionID, spawned.actorID)).toBe(spawned.context)
+        }),
+        { git: true, config: providerCfg },
+      ),
+    30_000,
+  )
+}
+
+for (const phase of ["owned continuation", "compaction CAS"] as const) {
+  it.live(
+    `resume keeps a foreign hook user outside its authority during ${phase}`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const actor = yield* Actor.Service
+          const sessions = yield* Session.Service
+          const spawned = yield* interruptedActor("persistent", true)
+          const original = spawned.messages.find((message) => message.info.role === "user")!
+          if (original.info.role !== "user") return yield* Effect.die("original user missing")
+          const release = Promise.withResolvers<void>()
+          yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+          if (phase === "owned continuation") {
+            yield* llm.reason("need an internal continuation")
+            yield* llm.push(
+              reply()
+                .wait(release.promise)
+                .tool("read", { filePath: `${dir}/config.json` }),
+            )
+          } else {
+            yield* llm.error(400, {
+              error: { code: "context_length_exceeded", message: "maximum context length is 4096 tokens" },
+            })
+            yield* llm.push(reply().wait(release.promise).text("compaction summary before external write").stop())
+          }
+          const completion = yield* actor.resume!(spawned)
+          yield* llm.wait(3).pipe(Effect.timeout("8 seconds"))
+          const owned = (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).findLast(
+            (message) => message.info.role === "user",
+          )!
+          expect(owned.info.id).not.toBe(original.info.id)
+          const foreign = {
+            ...original.info,
+            id: MessageID.ascending(),
+            source: "hook" as const,
+            time: { created: Date.now() },
+          }
+          yield* sessions.updateMessage(foreign)
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: foreign.id,
+            sessionID: spawned.sessionID,
+            type: "text",
+            text: "foreign-hook-must-not-own-recovery",
+            synthetic: true,
+          })
+          release.resolve()
+          const result = yield* completion.pipe(Effect.exit)
+          if (phase === "owned continuation") {
+            expect(result._tag).toBe("Failure")
+            if (result._tag === "Failure") expect(Cause.pretty(result.cause)).toContain("Actor recovery user changed")
+          } else {
+            // A zero-tail projection can finish at its existing summary after
+            // the replay CAS loses. That is not authority for the foreign user.
+            expect(result._tag).toBe("Success")
+            if (result._tag === "Success") {
+              expect(result.value.info).toMatchObject({ summary: true, parentID: owned.info.id })
+              expect(result.value.info.role === "assistant" && result.value.info.error).toBeUndefined()
+            }
+          }
+          expect(
+            (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID }))
+              .filter((message) => message.info.role === "user")
+              .map((message) => message.info.id),
+          ).toEqual([original.info.id, owned.info.id, foreign.id])
+          expect(yield* llm.calls).toBe(3)
+          expect(JSON.stringify(yield* llm.inputs)).not.toContain("foreign-hook-must-not-own-recovery")
+          expect(MessageV2.get({ sessionID: spawned.sessionID, messageID: foreign.id }).info).toEqual(foreign)
+        }),
+        { git: true, config: providerCfg },
+      ),
+    30_000,
+  )
+}
+
+for (const retirement of ["ephemeral", "cancelled", "disposed"] as const) {
+  it.live(`resume rejects ${retirement} context without rewriting interrupted messages`, () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ dir }) {
+        const actor = yield* Actor.Service
+        const sessions = yield* Session.Service
+        const spawned = yield* interruptedActor(retirement === "ephemeral" ? "ephemeral" : "persistent")
+        if (retirement === "cancelled") yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
+        if (retirement === "disposed") {
+          const old = yield* InstanceRef
+          yield* Effect.promise(() => Instance.provide({ directory: dir, fn: () => Instance.dispose() }))
+          const replacement = yield* Effect.promise(() =>
+            Instance.provide({ directory: dir, fn: () => Instance.current }),
+          )
+          expect(replacement).not.toBe(old)
+          expect(replacement.generation).not.toBe(old?.generation)
+          expect(old?.disposing).toBe(true)
+        }
+        expect(actor.resume).toBeDefined()
+        if (!actor.resume) return
+        const result = yield* actor.resume(spawned).pipe(Effect.exit)
+        expect(result._tag).toBe("Failure")
+        // SQLite messages remain readable after instance disposal without reloading services.
+        expect(MessageV2.get({ sessionID: spawned.sessionID, messageID: spawned.messages.at(-1)!.info.id })).toEqual(
+          spawned.messages.at(-1)!,
+        )
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+}
+
+it.live("resume rejects a busy runner and concurrent resume without changing the old candidate", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const state = yield* SessionRunState.Service
+      const spawned = yield* interruptedActor()
+      if (!actor.resume) return yield* Effect.die("resume missing")
+      const release = yield* Deferred.make<void>()
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const current = spawned.messages.at(-1)!
+      const busy = yield* state.startRunning(
+        spawned.sessionID,
+        spawned.actorID,
+        Effect.succeed(current),
+        Deferred.await(release).pipe(Effect.as(current)),
+      )
+      expect((yield* actor.resume(spawned).pipe(Effect.exit))._tag).toBe("Failure")
+      expect(yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).toEqual(
+        spawned.messages,
+      )
+      yield* Deferred.succeed(release, undefined)
+      yield* busy
+      yield* llm.hang
+      const completion = yield* actor.resume(spawned)
+      yield* llm.wait(2)
+      const snapshot = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+      expect((yield* actor.resume(spawned).pipe(Effect.exit))._tag).toBe("Failure")
+      expect(yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).toEqual(snapshot)
+      expect(yield* llm.calls).toBe(2)
+      yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
+      yield* completion.pipe(Effect.exit)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("resume rejects changed model harness identity before settling the old assistant", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const provider = yield* ProviderSvc.Service
+      const spawned = yield* interruptedActor()
+      const model = yield* provider.getModel(ref.providerID, ref.modelID)
+      const previous = model.harness_model
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          model.harness_model = previous
+        }),
+      )
+      model.harness_model = "gpt-5.4"
+      if (!actor.resume) return yield* Effect.die("resume missing")
+      const result = yield* actor.resume(spawned).pipe(Effect.exit)
+      expect(result._tag).toBe("Failure")
+      expect(yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).toEqual(
+        spawned.messages,
+      )
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+for (const outcome of ["success", "failure"] as const) {
+  pauseIt.live(
+    `resume defers inbox for every loop step and consumes it after ${outcome}`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const actor = yield* Actor.Service
+          const sessions = yield* Session.Service
+          const inbox = inboxServiceRef.current!
+          const spawned = yield* interruptedActor("persistent", true)
+          const original = spawned.messages.find((m) => m.info.role === "user")!
+          if (original.info.role !== "user") return yield* Effect.die("user missing")
+          yield* sessions.updateMessage({ ...original.info, task_id: "T7" })
+          recoveryHooks = { pre: [], post: [] }
+          const release = Promise.withResolvers<void>()
+          yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+          yield* llm.push(
+            reply()
+              .wait(release.promise)
+              .tool("read", { filePath: `${dir}/config.json` }),
+          )
+          if (outcome === "success") yield* llm.text("original recovery complete")
+          else yield* llm.error(400, { error: { message: "second recovery step failed" } })
+          yield* llm.text("queued followup complete")
+          if (!actor.resume) return yield* Effect.die("resume missing")
+          const completion = yield* actor.resume(spawned)
+          yield* llm.wait(2)
+          const queued = yield* inbox.send({
+            receiverSessionID: spawned.sessionID,
+            receiverActorID: spawned.actorID,
+            senderSessionID: spawned.sessionID,
+            senderActorID: "main",
+            content: "queued-after-recovery",
+          })
+          expect(yield* inbox.has(queued.inboxID)).toBe(true)
+          expect(
+            (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).filter(
+              (m) => m.info.role === "user",
+            ),
+          ).toHaveLength(1)
+          release.resolve()
+          const resumed = yield* completion.pipe(Effect.timeout("8 seconds"))
+          expect(resumed.info.role === "assistant" && resumed.info.parentID).toBe(original.info.id)
+          yield* llm.wait(4).pipe(Effect.timeout("8 seconds"))
+          const inputs = yield* llm.inputs
+          expect(JSON.stringify(inputs[1])).not.toContain("queued-after-recovery")
+          expect(JSON.stringify(inputs[2])).not.toContain("queued-after-recovery")
+          expect(JSON.stringify(inputs[3])).toContain("queued-after-recovery")
+          expect(yield* inbox.has(queued.inboxID)).toBe(false)
+          const messages = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+          expect(messages.filter((m) => m.info.role === "user")).toHaveLength(2)
+          expect(messages.find((m) => m.info.id === original.info.id)?.info).toMatchObject({ task_id: "T7" })
+          const recovery = messages.filter(
+            (m) =>
+              m.info.role === "assistant" &&
+              m.info.id > spawned.messages.at(-1)!.info.id &&
+              m.info.parentID === original.info.id,
+          )
+          expect(recovery).toHaveLength(2)
+          expect(recoveryHooks.pre[0]).toBe("T7")
+          expect(recoveryHooks.post[0]).toBe("T7")
+          expect(recoveryHooks.pre).toEqual(["T7", undefined])
+        }),
+        { git: true, config: providerCfg },
+      ),
+    20_000,
+  )
+}
+
+for (const stop of ["cancel", "dispose"] as const) {
+  it.live(
+    `resume completion waiter cancellation retains ownership until receiver ${stop}`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const actor = yield* Actor.Service
+          const reg = yield* ActorRegistry.Service
+          const spawned = yield* interruptedActor()
+          if (!actor.resume) return yield* Effect.die("resume missing")
+          yield* llm.hang
+          const completion = yield* actor.resume(spawned)
+          yield* llm.wait(2)
+          const waiter = yield* completion.pipe(Effect.forkChild)
+          yield* Fiber.interrupt(waiter)
+          expect((yield* reg.get(spawned.sessionID, spawned.actorID))?.status).toBe("running")
+          expect((yield* actor.resume(spawned).pipe(Effect.exit))._tag).toBe("Failure")
+          expect(yield* llm.calls).toBe(2)
+          if (stop === "cancel") yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
+          else yield* Effect.promise(() => Instance.provide({ directory: dir, fn: () => Instance.dispose() }))
+          yield* completion.pipe(Effect.exit, Effect.timeout("3 seconds"))
+          expect((yield* actor.resume(spawned).pipe(Effect.exit))._tag).toBe("Failure")
+        }),
+        { git: true, config: providerCfg },
+      ),
+    15_000,
+  )
+}
+
+for (const race of ["caller cancellation", "new persisted user"] as const) {
+  it.live(
+    `resume validation rejects ${race} before settlement`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const actor = yield* Actor.Service
+          const sessions = yield* Session.Service
+          const spawned = yield* interruptedActor()
+          if (!actor.resume) return yield* Effect.die("resume missing")
+          const hit = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          resumeValidationGate = { hit, release }
+          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+          yield* llm.text("must not run cancelled recovery")
+          const caller = yield* actor.resume(spawned).pipe(Effect.forkChild)
+          yield* Deferred.await(hit).pipe(Effect.timeout("5 seconds"))
+          if (race === "caller cancellation") yield* Fiber.interrupt(caller)
+          else {
+            const original = spawned.messages.find((m) => m.info.role === "user")!.info
+            if (original.role !== "user") return yield* Effect.die("user missing")
+            yield* sessions.updateMessage({
+              ...original,
+              id: MessageID.ascending(),
+              task_id: "T99",
+              time: { created: Date.now() },
+            })
+          }
+          yield* Deferred.succeed(release, undefined)
+          if (race === "new persisted user") expect((yield* Fiber.await(caller))._tag).toBe("Failure")
+          else {
+            // Wait until any incorrectly detached work could reach the provider.
+            yield* llm.wait(2).pipe(Effect.timeoutOption("300 millis"))
+          }
+          const old = spawned.messages.at(-1)!
+          expect(MessageV2.get({ sessionID: spawned.sessionID, messageID: old.info.id })).toEqual(old)
+          expect(yield* llm.calls).toBe(1)
+        }),
+        { git: true, config: providerCfg },
+      ),
+    15_000,
+  )
+}
+
+it.live(
+  "resume tool uses the captured identity and accepts only the owning peer parent",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const sessions = yield* Session.Service
+        const parent = yield* sessions.create({ title: "captured recovery peer" })
+        const user: MessageV2.User = {
+          id: MessageID.ascending(),
+          sessionID: parent.id,
+          agentID: "main",
+          role: "user",
+          agent: "build",
+          model: ref,
+          time: { created: Date.now() },
+        }
+        yield* sessions.updateMessage(user)
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          sessionID: parent.id,
+          messageID: user.id,
+          type: "text",
+          text: "capture recovery prefix",
+        })
+        const capture = prefixCaptureRef.current!
+        const captured = yield* capture({
+          sessionID: parent.id,
+          agentName: "build",
+          providerID: ref.providerID,
+          modelID: ref.modelID,
+          msgs: yield* sessions.messages({ sessionID: parent.id }),
+        })
+        expect(captured.modelIdentity).toBe(
+          prefixModelIdentity(yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)),
+        )
+        yield* llm.error(400, { error: { message: "peer interrupted" } })
+        const peer = yield* actor.spawn({
+          mode: "peer",
+          sessionID: parent.id,
+          agentType: "build",
+          task: "recover peer original task",
+          context: "full",
+          tools: [],
+          background: false,
+          model: ref,
+          forkContext: { ...captured, watermarkMsgID: user.id, model: ref },
+        })
+        expect((yield* Deferred.await(peer.outcome)).status).toBe("failure")
+        const tools = yield* (yield* ToolRegistry.Service).tools({
+          providerID: ref.providerID,
+          modelID: ref.modelID,
+          agent: (yield* (yield* AgentSvc.Service).get("build"))!,
+        })
+        const tool = tools.find((tool) => tool.id === "actor")!
+        const ctx = {
+          sessionID: parent.id,
+          messageID: user.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        }
+        const outsider = yield* sessions.create({ title: "unrelated parent" })
+        const unknown = yield* tool.execute(
+          { operation: { action: "resume", actor_id: peer.actorID } },
+          { ...ctx, sessionID: outsider.id },
+        )
+        expect(JSON.parse(unknown.output).status).toBe("unknown")
+        expect(yield* llm.calls).toBe(1)
+        const blocked = yield* tool
+          .execute(
+            { operation: { action: "resume", actor_id: peer.actorID } },
+            { ...ctx, agent: "explore", extra: { fromExec: true } },
+          )
+          .pipe(Effect.exit)
+        expect(blocked._tag).toBe("Failure")
+        const subagentCaller = yield* (yield* ActorRegistry.Service).register({
+          sessionID: parent.id,
+          actorID: "registered-subagent-caller",
+          mode: "subagent",
+          agent: "general",
+          description: "cannot manage a sibling recovery",
+          contextMode: "none",
+          background: false,
+          lifecycle: "ephemeral",
+        })
+        for (const caller of [
+          { ...ctx, agent: "explore" },
+          { ...ctx, actorID: subagentCaller.actorID },
+        ]) {
+          const denied = yield* tool.execute(
+            { operation: { action: "resume", actor_id: peer.actorID } },
+            caller,
+          ).pipe(Effect.exit)
+          expect(denied._tag).toBe("Failure")
+        }
+        expect(yield* llm.calls).toBe(1)
+        expect(
+          tool.parameters.safeParse({ operation: { action: "resume", actor_id: peer.actorID, task_id: "T1" } }).success,
+        ).toBe(false)
+        yield* llm.hang
+        const result = yield* tool.execute({ operation: { action: "resume", actor_id: peer.actorID } }, ctx)
+        expect(JSON.parse(result.output)).toEqual({ actor_id: peer.actorID, status: "running" })
+        yield* llm.wait(2)
+        const input = JSON.stringify((yield* llm.inputs)[1])
+        expect(input).toContain("capture recovery prefix")
+        expect(input).toContain("recover peer original task")
+        yield* actor.cancel(peer.sessionID, peer.actorID, "forced")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  15_000,
+)
+
+it.live("resume rejects changed session harness decision without settling the candidate", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const spawned = yield* interruptedActor()
+      yield* Effect.sync(() =>
+        Database.use((db) =>
+          db
+            .update(SessionTable)
+            .set({ prompt: { harness: "codex", systemMode: "append" } })
+            .where(eq(SessionTable.id, spawned.sessionID))
+            .run(),
+        ),
+      )
+      if (!actor.resume) return yield* Effect.die("resume missing")
+      expect((yield* actor.resume(spawned).pipe(Effect.exit))._tag).toBe("Failure")
+      const old = spawned.messages.at(-1)!
+      expect(MessageV2.get({ sessionID: spawned.sessionID, messageID: old.info.id })).toEqual(old)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live(
+  "resume tool cancellation withdraws validation before settlement",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const sessions = yield* Session.Service
+        const spawned = yield* interruptedActor()
+        const tools = yield* (yield* ToolRegistry.Service).tools({
+          providerID: ref.providerID,
+          modelID: ref.modelID,
+          agent: (yield* (yield* AgentSvc.Service).get("build"))!,
+        })
+        const tool = tools.find((tool) => tool.id === "actor")!
+        // Tool initialization can build the global app graph alongside this test
+        // layer. Bind the real Actor service that owns this fixture's frozen lease.
+        const previousActor = spawnRef.current
+        spawnRef.current = yield* Actor.Service
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            spawnRef.current = previousActor
+          }),
+        )
+        const hit = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        resumeValidationGate = { hit, release }
+        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+        yield* llm.text("must not resume after tool abort")
+        const abort = new AbortController()
+        const caller = yield* tool
+          .execute(
+            { operation: { action: "resume", actor_id: spawned.actorID } },
+            {
+              sessionID: spawned.sessionID,
+              messageID: spawned.messages.at(-1)!.info.id,
+              agent: "build",
+              abort: abort.signal,
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
+          .pipe(Effect.forkChild)
+        yield* Effect.raceFirst(
+          Deferred.await(hit),
+          Fiber.await(caller).pipe(
+            Effect.flatMap((exit) =>
+              Effect.die(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : JSON.stringify(exit.value)),
+            ),
+          ),
+        ).pipe(Effect.timeout("5 seconds"))
+        abort.abort()
+        yield* Deferred.succeed(release, undefined)
+        expect((yield* Fiber.await(caller))._tag).toBe("Failure")
+        expect(yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).toEqual(
+          spawned.messages,
+        )
+        expect(yield* llm.calls).toBe(1)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  15_000,
+)
+
+it.live(
+  "resume isolated peer keeps its receiver lease across parent replacement",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ dir, llm }) {
+        const actor = yield* Actor.Service
+        const sessions = yield* Session.Service
+        const parentContext = (yield* InstanceRef)!
+        const parent = yield* sessions.create({ title: "isolated recovery parent" })
+        const model = yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)
+        yield* provideTmpdirInstance(
+          (receiverDir) =>
+            Effect.gen(function* () {
+              const receiver = (yield* InstanceRef)!
+              yield* llm.error(400, { error: { message: "isolated peer interrupted" } })
+              const peer = yield* actor
+                .spawn({
+                  mode: "peer",
+                  sessionID: parent.id,
+                  agentType: "build",
+                  task: "isolated recovery task",
+                  context: "full",
+                  tools: [],
+                  background: false,
+                  model: ref,
+                  cwd: receiverDir,
+                  forkContext: {
+                    modelIdentity: prefixModelIdentity(model),
+                    system: ["isolated frozen prefix"],
+                    turnContext: "isolated-recovery-turn-context",
+                    tools: {},
+                    inheritedMessages: [],
+                    parentPermission: [],
+                    watermarkMsgID: MessageID.ascending(),
+                    model: ref,
+                  },
+                })
+                .pipe(Effect.provideService(InstanceRef, parentContext))
+              expect((yield* Deferred.await(peer.outcome)).status).toBe("failure")
+              yield* Effect.promise(() => Instance.provide({ directory: dir, fn: () => Instance.dispose() }))
+              const replacement = yield* Effect.promise(() =>
+                Instance.provide({ directory: dir, fn: () => Instance.current }),
+              )
+              expect(replacement.generation).not.toBe(parentContext.generation)
+              expect(receiver.disposing).toBe(false)
+              if (!actor.resume) return yield* Effect.die("resume missing")
+              yield* llm.text("isolated resumed result")
+              const completion = yield* actor.resume(peer).pipe(Effect.provideService(InstanceRef, replacement))
+              const result = yield* completion
+              expect(result.info.role === "assistant" && result.info.path.cwd).toBe(receiver.directory)
+              expect(result.parts.some((part) => part.type === "text" && part.text === "isolated resumed result")).toBe(
+                true,
+              )
+              expect(yield* llm.calls).toBe(2)
+              expect(JSON.stringify((yield* llm.inputs)[1]).split("isolated-recovery-turn-context")).toHaveLength(2)
+            }),
+          { git: true, config: providerCfg(llm.url) },
+        )
+      }),
+      { git: true, config: providerCfg },
+    ),
+  20_000,
+)
+
+it.live("resume handoff cancellation settles admission after the owned supervisor exits", () =>
+  provideTmpdirServer(Effect.fnUntraced(function* () {
+    const actor = yield* Actor.Service
+    const spawned = yield* interruptedActor()
+    const hit = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    resumeValidationGate = { hit, release, settlement: true }
+    yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+    if (!actor.resume) return yield* Effect.die("resume missing")
+    const caller = yield* actor.resume(spawned).pipe(Effect.forkChild)
+    yield* Deferred.await(hit).pipe(Effect.timeout("5 seconds"))
+    yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced").pipe(Effect.timeout("3 seconds"))
+    const result = yield* Fiber.await(caller).pipe(Effect.timeoutOption("300 millis"))
+    expect(result._tag).toBe("Some")
+    if (result._tag === "Some") expect(result.value._tag).toBe("Failure")
+    const old = spawned.messages.at(-1)!
+    expect(MessageV2.get({ sessionID: spawned.sessionID, messageID: old.info.id })).toEqual(old)
+  }), { git: true, config: providerCfg }),
+  15_000,
+)
+
+it.live("resume receiver disposal does not notify a still-live isolated parent", () =>
+  provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
+    const actor = yield* Actor.Service
+    const sessions = yield* Session.Service
+    const parentContext = (yield* InstanceRef)!
+    const parent = yield* sessions.create({ title: "live parent disposed recovery receiver" })
+    const notifications: string[] = []
+    const off = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
+      if (event.properties.receiverSessionID === parent.id && event.properties.type === "actor_notification")
+        notifications.push(event.properties.inboxID)
+    })
+    yield* Effect.addFinalizer(() => Effect.sync(off))
+    const model = yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)
+    yield* provideTmpdirInstance((receiverDir) => Effect.gen(function* () {
+      yield* llm.error(400, { error: { message: "isolated peer interrupted" } })
+      const peer = yield* actor.spawn({
+        mode: "peer", sessionID: parent.id, agentType: "build", task: "disposed recovery must not notify parent",
+        context: "full", tools: [], background: true, model: ref, cwd: receiverDir,
+        forkContext: {
+          modelIdentity: prefixModelIdentity(model),
+          system: ["isolated frozen prefix"],
+          turnContext: "isolated-disposal-turn-context",
+          tools: {},
+          inheritedMessages: [],
+          parentPermission: [],
+          watermarkMsgID: MessageID.ascending(),
+          model: ref,
+        },
+      }).pipe(Effect.provideService(InstanceRef, parentContext))
+      expect((yield* Deferred.await(peer.outcome)).status).toBe("failure")
+      yield* Effect.yieldNow
+      expect(notifications).toHaveLength(1)
+      if (!actor.resume) return yield* Effect.die("resume missing")
+      yield* llm.hang
+      const completion = yield* actor.resume(peer).pipe(Effect.provideService(InstanceRef, parentContext))
+      yield* llm.wait(2)
+      const hit = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      resumeCompletionGate = { hit, release }
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      yield* Effect.promise(() => Instance.provide({ directory: receiverDir, fn: () => Instance.dispose() }))
+      yield* Deferred.await(hit).pipe(Effect.timeout("3 seconds"))
+      const replacement = yield* Effect.promise(() => Instance.provide({ directory: receiverDir, fn: () => Instance.current }))
+      const reg = yield* ActorRegistry.Service
+      yield* reg.updateStatus(peer.sessionID, peer.actorID, { status: "pending", lastOutcome: "success" }).pipe(Effect.provideService(InstanceRef, replacement))
+      const current = yield* reg.get(peer.sessionID, peer.actorID)
+      yield* Deferred.succeed(release, undefined)
+      yield* completion.pipe(Effect.exit, Effect.timeout("3 seconds"))
+      expect(yield* reg.get(peer.sessionID, peer.actorID)).toEqual(current)
+      expect(parentContext.disposing).toBe(false)
+      expect(notifications).toHaveLength(1)
+    }), { git: true, config: providerCfg(llm.url) })
+  }), { git: true, config: providerCfg }),
+  20_000,
+)
+
+for (const mode of ["graceful", "forced"] as const) {
+  it.live(`resume isolated receiver ${mode} cancel from parent stops the owned runner`, () =>
+    provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const parentContext = (yield* InstanceRef)!
+      const parent = yield* sessions.create({ title: "parent cancels isolated recovery" })
+      const model = yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)
+      const notifications: string[] = []
+      const off = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
+        if (event.properties.receiverSessionID === parent.id && event.properties.type === "actor_notification")
+          notifications.push(event.properties.inboxID)
+      })
+      yield* Effect.addFinalizer(() => Effect.sync(off))
+      yield* provideTmpdirInstance((receiverDir) => Effect.gen(function* () {
+        yield* llm.error(400, { error: { message: "isolated peer interrupted" } })
+        const peer = yield* actor.spawn({
+          mode: "peer", sessionID: parent.id, agentType: "build", task: "cancel this isolated recovery",
+          context: "full", tools: [], background: true, model: ref, cwd: receiverDir,
+          forkContext: {
+            modelIdentity: prefixModelIdentity(model),
+            system: ["isolated frozen prefix"],
+            turnContext: "isolated-disposal-turn-context",
+            tools: {},
+            inheritedMessages: [],
+            parentPermission: [],
+            watermarkMsgID: MessageID.ascending(),
+            model: ref,
+          },
+        }).pipe(Effect.provideService(InstanceRef, parentContext))
+        expect((yield* Deferred.await(peer.outcome)).status).toBe("failure")
+        yield* Effect.yieldNow
+        if (!actor.resume) return yield* Effect.die("resume missing")
+        yield* llm.hang
+        const completion = yield* actor.resume(peer).pipe(Effect.provideService(InstanceRef, parentContext))
+        yield* llm.wait(2)
+        const hit = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        if (mode === "graceful") resumeCompletionGate = { hit, release }
+        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+        yield* actor.cancel(peer.sessionID, peer.actorID, mode).pipe(Effect.provideService(InstanceRef, parentContext))
+        if (mode === "graceful") {
+          yield* Deferred.await(hit).pipe(Effect.timeout("3 seconds"))
+          expect(yield* actor.getForkContext(peer.sessionID, peer.actorID)).toBeUndefined()
+          const forced = yield* actor.cancel(peer.sessionID, peer.actorID, "forced").pipe(
+            Effect.provideService(InstanceRef, parentContext),
+            Effect.forkScoped,
+          )
+          expect((yield* Fiber.join(forced).pipe(Effect.timeoutOption("100 millis")))._tag).toBe("None")
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(forced).pipe(Effect.timeout("3 seconds"))
+        }
+        const settled = yield* completion.pipe(Effect.exit, Effect.timeoutOption("500 millis"))
+        expect(settled._tag).toBe("Some")
+        expect(notifications).toHaveLength(2)
+        expect(yield* actor.getForkContext(peer.sessionID, peer.actorID)).toBeUndefined()
+        yield* actor.cancel(peer.sessionID, peer.actorID, "forced").pipe(Effect.provideService(InstanceRef, parentContext), Effect.timeout("3 seconds"))
+        expect(notifications).toHaveLength(2)
+        expect((yield* actor.resume(peer).pipe(Effect.exit))._tag).toBe("Failure")
+      }), { git: true, config: providerCfg(llm.url) })
+    }), { git: true, config: providerCfg }),
+    20_000,
+  )
+}
+
+for (const pause of ["cancel runner exit", "terminal status write"] as const) {
+  it.live(`resume receiver disposal after ${pause} prevents stale writes and notification`, () =>
+    provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const parentContext = (yield* InstanceRef)!
+      const parent = yield* sessions.create({ title: "disposed receiver terminal continuation" })
+      const model = yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)
+      const notifications: string[] = []
+      const off = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
+        if (event.properties.receiverSessionID === parent.id && event.properties.type === "actor_notification")
+          notifications.push(event.properties.inboxID)
+      })
+      yield* Effect.addFinalizer(() => Effect.sync(off))
+      yield* provideTmpdirInstance((receiverDir) => Effect.gen(function* () {
+        yield* llm.error(400, { error: { message: "isolated peer interrupted" } })
+        const peer = yield* actor.spawn({
+          mode: "peer", sessionID: parent.id, agentType: "build", task: "guard receiver terminal continuation",
+          context: "full", tools: [], background: true, model: ref, cwd: receiverDir,
+          forkContext: {
+            modelIdentity: prefixModelIdentity(model),
+            system: ["isolated frozen prefix"],
+            turnContext: "isolated-disposal-turn-context",
+            tools: {},
+            inheritedMessages: [],
+            parentPermission: [],
+            watermarkMsgID: MessageID.ascending(),
+            model: ref,
+          },
+        }).pipe(Effect.provideService(InstanceRef, parentContext))
+        expect((yield* Deferred.await(peer.outcome)).status).toBe("failure")
+        yield* Effect.yieldNow
+        expect(notifications).toHaveLength(1)
+        if (!actor.resume) return yield* Effect.die("resume missing")
+        const hit = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        if (pause === "terminal status write") terminalWriteGate = { hit, release }
+        else cancelCompletionGate = { hit, release }
+        yield* Effect.gen(function* () {
+          if (pause === "terminal status write") yield* llm.text("resumed successfully")
+          else yield* llm.hang
+          const completion = yield* actor.resume!(peer).pipe(Effect.provideService(InstanceRef, parentContext))
+          yield* llm.wait(2)
+          const cancel = pause === "cancel runner exit"
+            ? yield* actor.cancel(peer.sessionID, peer.actorID, "forced").pipe(Effect.provideService(InstanceRef, parentContext), Effect.forkScoped)
+            : undefined
+          yield* Deferred.await(hit).pipe(Effect.timeout("3 seconds"))
+          yield* Effect.promise(() => Instance.provide({ directory: receiverDir, fn: () => Instance.dispose() }))
+          const replacement = yield* Effect.promise(() => Instance.provide({ directory: receiverDir, fn: () => Instance.current }))
+          const reg = yield* ActorRegistry.Service
+          yield* reg.updateStatus(peer.sessionID, peer.actorID, { status: "pending", lastOutcome: "success" }).pipe(Effect.provideService(InstanceRef, replacement))
+          const current = yield* reg.get(peer.sessionID, peer.actorID)
+          yield* Deferred.succeed(release, undefined)
+          if (cancel) yield* Fiber.join(cancel).pipe(Effect.timeout("3 seconds"))
+          yield* completion.pipe(Effect.exit, Effect.timeout("3 seconds"))
+          expect(yield* reg.get(peer.sessionID, peer.actorID)).toEqual(current)
+          expect(notifications).toHaveLength(1)
+          expect(parentContext.disposing).toBe(false)
+        }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
+      }), { git: true, config: providerCfg(llm.url) })
+    }), { git: true, config: providerCfg }),
+    20_000,
+  )
+}
+
+it.live(
+  "resume tool recovers a persistent full-context actor created by the spawn tool",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm, dir }) {
+        const actor = yield* Actor.Service
+        const sessions = yield* Session.Service
+        const reg = yield* ActorRegistry.Service
+        const parent = yield* sessions.create({ title: "user-accessible persistent recovery" })
+        const user: MessageV2.User = {
+          id: MessageID.ascending(),
+          sessionID: parent.id,
+          agentID: "main",
+          role: "user",
+          agent: "build",
+          model: ref,
+          time: { created: Date.now() },
+          system: "persistent-entry-frozen-system",
+          systemMode: "replace-agent",
+        }
+        yield* sessions.updateMessage(user)
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          sessionID: parent.id,
+          messageID: user.id,
+          type: "text",
+          text: "parent history inherited by the persistent actor",
+        })
+        const assistant: MessageV2.Assistant = {
+          id: MessageID.ascending(),
+          sessionID: parent.id,
+          agentID: "main",
+          role: "assistant",
+          time: { created: Date.now(), completed: Date.now() },
+          parentID: user.id,
+          modelID: ref.modelID,
+          providerID: ref.providerID,
+          mode: "build",
+          agent: "build",
+          path: { cwd: dir, root: dir },
+          cost: 0,
+          finish: "stop",
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }
+        yield* sessions.updateMessage(assistant)
+        const tools = yield* (yield* ToolRegistry.Service).tools({
+          providerID: ref.providerID,
+          modelID: ref.modelID,
+          agent: (yield* (yield* AgentSvc.Service).get("build"))!,
+        })
+        const tool = tools.find((tool) => tool.id === "actor")!
+        const previousActor = spawnRef.current
+        spawnRef.current = actor
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            spawnRef.current = previousActor
+          }),
+        )
+        const task = yield* Effect.gen(function* () {
+          const tasks = yield* TaskRegistry.Service
+          return yield* tasks.create({ session_id: parent.id, summary: "original delegated recovery task" })
+        }).pipe(Effect.provide(TaskRegistry.defaultLayer))
+        const ctx = {
+          sessionID: parent.id,
+          messageID: assistant.id,
+          agent: "build",
+          actorID: "main",
+          abort: new AbortController().signal,
+          messages: yield* sessions.messages({ sessionID: parent.id }),
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        }
+        const operation = {
+          action: "spawn",
+          description: "Persistent recovery fixture",
+          prompt: "original delegated recovery task",
+          subagent_type: "general",
+          lifecycle: "persistent",
+          context: "full",
+          task_id: task.id,
+        } as const
+        const parsed = tool.parameters.safeParse({ operation })
+        if (!parsed.success) return yield* Effect.die(parsed.error)
+        const before = yield* reg.listBySession(parent.id)
+        for (const context of [undefined, "none", "state"] as const) {
+          const rejected = yield* tool.execute({ operation: { ...operation, context } }, ctx).pipe(Effect.exit)
+          expect(rejected._tag).toBe("Failure")
+          expect(yield* reg.listBySession(parent.id)).toEqual(before)
+        }
+        expect(yield* llm.calls).toBe(0)
+        yield* llm.error(400, { error: { message: "persistent tool actor interrupted" } })
+        const created = yield* tool.execute({ operation }, ctx)
+        const actorID = created.metadata.actorId
+        if (typeof actorID !== "string") return yield* Effect.die("spawn tool did not return actorId")
+        const failed = yield* tool.execute({ operation: { action: "wait", actor_id: actorID, timeout_ms: 5000 } }, ctx)
+        expect(JSON.parse(failed.output)).toMatchObject({ status: "idle", lastOutcome: "failure" })
+        yield* Effect.yieldNow
+        expect(yield* reg.get(parent.id, actorID)).toMatchObject({ lifecycle: "persistent", contextMode: "full" })
+        const frozen = yield* actor.getForkContext(parent.id, actorID)
+        expect(frozen?.system.join("\n")).toContain("persistent-entry-frozen-system")
+        expect(frozen?.turnContext).toBe("persistent-entry-frozen-system")
+        expect(frozen?.modelIdentity).toBeDefined()
+        const interrupted = yield* sessions.messages({ sessionID: parent.id, agentID: actorID })
+        const originalUsers = interrupted.filter((message) => message.info.role === "user")
+        expect(originalUsers).toHaveLength(1)
+        expect(originalUsers[0].info).toMatchObject({ task_id: task.id })
+        // The first provider turn can initialize the global app graph too.
+        // Keep both tool calls on the actual Actor service owning this fixture.
+        spawnRef.current = actor
+        const finished = yield* Deferred.make<void>()
+        const off = yield* (yield* Bus.Service).subscribeCallback(ActorStatusChanged, (event) => {
+          if (
+            event.properties.actorID === actorID &&
+            event.properties.sessionID === parent.id &&
+            event.properties.status === "idle" &&
+            event.properties.lastOutcome === "success"
+          )
+            Deferred.doneUnsafe(finished, Effect.void)
+        })
+        yield* Effect.addFinalizer(() => Effect.sync(off))
+        yield* llm.text("recovered persistent tool result")
+        const resumed = yield* tool.execute({ operation: { action: "resume", actor_id: actorID } }, ctx)
+        expect(JSON.parse(resumed.output)).toEqual({ actor_id: actorID, status: "running" })
+        // Persistent success stays idle; wait keeps waiting for attention.
+        yield* Deferred.await(finished).pipe(Effect.timeout("5 seconds"))
+        const completed = yield* tool.execute({ operation: { action: "status", actor_id: actorID } }, ctx)
+        expect(JSON.parse(completed.output)).toMatchObject({ status: "idle" })
+        expect(yield* reg.get(parent.id, actorID)).toMatchObject({ lastOutcome: "success" })
+        yield* Effect.yieldNow
+        const after = yield* sessions.messages({ sessionID: parent.id, agentID: actorID })
+        expect(after.filter((message) => message.info.role === "user")).toEqual(originalUsers)
+        expect(after.at(-1)?.info).toMatchObject({ role: "assistant", parentID: originalUsers[0].info.id })
+        expect(
+          after.at(-1)?.parts.some((part) => part.type === "text" && part.text === "recovered persistent tool result"),
+        ).toBe(true)
+        expect(yield* actor.getForkContext(parent.id, actorID)).toBe(frozen)
+        // Parent notification wakes are separate requests. Match the actor's
+        // original user text rather than counting every call on the provider.
+        const requests = (yield* llm.inputs).filter((request) =>
+          (request.messages as { role: string; content: string | { type: string; text?: string }[] }[]).some(
+            (message) =>
+              message.role === "user" &&
+              (typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content).some(
+                (part) => part.type === "text" && part.text?.startsWith("original delegated recovery task"),
+              ),
+          ),
+        )
+        expect(requests).toHaveLength(2)
+        expect(JSON.stringify(requests[1])).toContain("parent history inherited by the persistent actor")
+        expect(JSON.stringify(requests[1])).toContain("original delegated recovery task")
+        const systems = requests.map((request) =>
+          (request.messages as { role: string; content: unknown }[]).filter((message) => message.role === "system"),
+        )
+        expect(JSON.stringify(systems[1])).toContain("persistent-entry-frozen-system")
+        expect(systems[1]).toEqual(systems[0])
+        // replace-agent keeps its frozen context in system messages only.
+        expect(
+          JSON.stringify(
+            (requests[1].messages as { role: string; content: unknown }[]).filter((message) => message.role === "user"),
+          ).split("persistent-entry-frozen-system"),
+        ).toHaveLength(1)
+        yield* tool.execute({ operation: { action: "cancel", actor_id: actorID } }, ctx)
+        expect(!!(yield* actor.getForkContext(parent.id, actorID))).toBe(false)
+        expect(yield* reg.get(parent.id, actorID)).toMatchObject({ status: "idle", lastOutcome: "cancelled" })
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
+)

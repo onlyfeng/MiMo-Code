@@ -1576,116 +1576,131 @@ it.live("persists auto as its own harness mode", () =>
   ),
 )
 
-it.live("uses the frozen system and appends the compaction prompt to the existing conversation", () =>
-  provideTmpdirServer(
-    Effect.fnUntraced(function* ({ llm }) {
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const compaction = yield* SessionCompaction.Service
-      const chat = yield* sessions.create({ title: "Compaction prompt" })
-      const marker = "SESSION_SYSTEM_MUST_SKIP_COMPACTION"
+for (const harness of ["codex", "auto"] as const) {
+  it.live(`uses the frozen system and appends the compaction prompt to the existing conversation with ${harness}`, () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const compaction = yield* SessionCompaction.Service
+        const chat = yield* sessions.create({ title: "Compaction prompt" })
+        const marker = "SESSION_SYSTEM_MUST_SKIP_COMPACTION"
 
-      yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        model: ref,
-        noReply: true,
-        system: marker,
-        systemMode: "replace-agent",
-        harness: "codex",
-        parts: [{ type: "text", text: "first query" }],
-      })
-
-      yield* llm.text("before compaction")
-      yield* prompt.loop({ sessionID: chat.id })
-      yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        model: ref,
-        noReply: true,
-        parts: [{ type: "text", text: "second query kept verbatim" }],
-      })
-      yield* llm.text("second answer kept verbatim")
-      yield* prompt.loop({ sessionID: chat.id })
-      yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        model: ref,
-        noReply: true,
-        parts: [{ type: "text", text: "third query kept verbatim" }],
-      })
-      yield* llm.text("third answer kept verbatim")
-      yield* prompt.loop({ sessionID: chat.id })
-      const beforeRequest = (yield* llm.inputs)[2]
-
-      yield* compaction.create({
-        sessionID: chat.id,
-        agent: "compaction",
-        model: ref,
-        auto: false,
-      })
-      const snapshot = yield* sessions.messages({ sessionID: chat.id })
-      const boundary = snapshot.at(-1)!
-      yield* llm.text("summary")
-      expect(
-        yield* compaction.process({
-          parentID: boundary.info.id,
-          messages: snapshot,
+        yield* prompt.prompt({
           sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          system: marker,
+          systemMode: "replace-agent",
+          harness,
+          parts: [{ type: "text", text: "first query" }],
+        })
+
+        yield* llm.text("before compaction")
+        yield* prompt.loop({ sessionID: chat.id })
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "second query kept verbatim" }],
+        })
+        yield* llm.text("second answer kept verbatim")
+        yield* prompt.loop({ sessionID: chat.id })
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "third query kept verbatim" }],
+        })
+        yield* llm.text("third answer kept verbatim")
+        yield* prompt.loop({ sessionID: chat.id })
+        const beforeRequest = (yield* llm.inputs)[2]
+
+        yield* compaction.create({
+          sessionID: chat.id,
+          agent: "compaction",
+          model: ref,
           auto: false,
-        }),
-      ).toBe("continue")
-      const compactionRequest = (yield* llm.inputs)[3]
-      expect(compactionRequest.model).toBe(ref.modelID)
-      expect(compactionRequest.messages).toBeArray()
-      expect(beforeRequest.messages).toBeArray()
-      if (!Array.isArray(compactionRequest.messages) || !Array.isArray(beforeRequest.messages)) return
-      expect(compactionRequest.messages.slice(0, beforeRequest.messages.length)).toEqual(beforeRequest.messages)
-      expect((compactionRequest.tools as Array<Record<string, unknown>>).map(wireToolName)).toEqual(
-        (beforeRequest.tools as Array<Record<string, unknown>>).map(wireToolName),
-      )
-      expect(compactionRequest.tools).toEqual(beforeRequest.tools)
-      expect(compactionRequest.tool_choice).toBe("none")
-      expect(JSON.stringify(compactionRequest)).toContain(marker)
-      expect(JSON.stringify(compactionRequest)).toContain("third answer kept verbatim")
-      expect(JSON.stringify(compactionRequest)).toContain("1. Task Overview")
-      expect(JSON.stringify(compactionRequest)).not.toContain("When constructing the summary")
+        })
+        const snapshot = yield* sessions.messages({ sessionID: chat.id })
+        const boundary = snapshot.at(-1)!
+        yield* llm.text("summary")
+        expect(
+          yield* compaction.process({
+            parentID: boundary.info.id,
+            messages: snapshot,
+            sessionID: chat.id,
+            auto: false,
+          }),
+        ).toBe("continue")
+        const compactionRequest = (yield* llm.inputs)[3]
+        expect(compactionRequest.model).toBe(ref.modelID)
+        expect(compactionRequest.tools).toEqual(beforeRequest.tools)
+        expect(compactionRequest.messages).toBeArray()
+        expect(beforeRequest.messages).toBeArray()
+        if (!Array.isArray(compactionRequest.messages) || !Array.isArray(beforeRequest.messages)) return
+        expect(compactionRequest.messages.slice(0, beforeRequest.messages.length)).toEqual(beforeRequest.messages)
+        expect(compactionRequest.tool_choice).toBe("none")
+        expect(JSON.stringify(compactionRequest)).toContain(marker)
+        expect(JSON.stringify(compactionRequest)).toContain("third answer kept verbatim")
+        expect(JSON.stringify(compactionRequest)).toContain("1. Task Overview")
+        expect(JSON.stringify(compactionRequest)).not.toContain("When constructing the summary")
 
-      yield* prompt.prompt({
-        sessionID: chat.id,
-        agent: "build",
-        model: ref,
-        noReply: true,
-        parts: [{ type: "text", text: "after compaction" }],
-      })
-      yield* llm.text("continued")
-      yield* prompt.loop({ sessionID: chat.id })
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "after compaction" }],
+        })
+        yield* llm.text("continued")
+        yield* prompt.loop({ sessionID: chat.id })
 
-      const request = (yield* llm.inputs)[4]
-      const serialized = JSON.stringify(request)
-      expect(serialized).toContain(marker)
-      expect(serialized).toContain("summary")
-      expect(serialized).not.toContain("first query")
-      expect(serialized).not.toContain("second query kept verbatim")
-      expect(serialized).not.toContain("third query kept verbatim")
-      const toolNames = (request.tools as Array<Record<string, unknown>>).map(wireToolName)
-      expect(toolNames).toEqual(expect.arrayContaining(["exec", "apply_patch", "bash"]))
-      expect(toolNames.length).toBeGreaterThan(1)
-      expect((yield* sessions.get(chat.id)).prompt).toEqual({
-        system: marker,
-        systemMode: "replace-agent",
-        harness: "codex",
-      })
-    }),
-    {
-      git: true,
-      config: (url) => ({
-        ...providerCfg(url),
-        agent: { compaction: { model: "test/gpt-5-test" } },
+        const request = (yield* llm.inputs)[4]
+        const serialized = JSON.stringify(request)
+        expect(serialized).toContain(marker)
+        expect(serialized).toContain("summary")
+        expect(serialized).not.toContain("first query")
+        expect(serialized).not.toContain("second query kept verbatim")
+        expect(serialized).not.toContain("third query kept verbatim")
+        const toolNames = (request.tools as Array<Record<string, unknown>>).map(wireToolName)
+        expect(toolNames).toEqual(expect.arrayContaining(["exec", "apply_patch", "bash"]))
+        expect(toolNames.length).toBeGreaterThan(1)
+        expect((yield* sessions.get(chat.id)).prompt).toEqual({
+          system: marker,
+          systemMode: "replace-agent",
+          harness,
+        })
       }),
-    },
-  ),
-)
+      {
+        git: true,
+        config: (url) => {
+          const config = providerCfg(url)
+          return {
+            ...config,
+            provider: {
+              ...config.provider,
+              test: {
+                ...config.provider.test,
+                models: {
+                  ...config.provider.test.models,
+                  "test-model": {
+                    ...config.provider.test.models["test-model"],
+                    ...(harness === "auto" ? { harness_model: "gpt-5.6-sol" } : {}),
+                  },
+                },
+              },
+            },
+            agent: { compaction: { model: "test/gpt-5-test" } },
+          }
+        },
+      },
+    ),
+  )
+}
 
 it.live("provider-overflow compaction uses its configured model and strips media", () =>
   provideTmpdirServer(

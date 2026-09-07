@@ -675,7 +675,7 @@ describe("tool.actor", () => {
         expect(result.metadata.sessionId).toBe(chat.id)
         expect(result.metadata.actorId).toBeDefined()
         expect(result.output).toContain(`actor_id: ${result.metadata.actorId}`)
-        // The id is offered for follow-up via send/wait, never for a resume arg.
+        // The id is offered for follow-up, never as a spawn/run resume argument.
         expect(result.output).toContain("send")
       }),
     ),
@@ -926,6 +926,8 @@ describe("Actor tool subagent_type enum (F36)", () => {
         // run (sync) and spawn (async): operation envelope required; action/description/prompt/subagent_type required.
         expect(wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general" } }).success).toBe(true)
         expect(wrap({ operation: { action: "spawn", description: "x", prompt: "y", subagent_type: "general" } }).success).toBe(true)
+        expect(wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general", context: "full", lifecycle: "persistent" } }).success).toBe(false)
+        expect(wrap({ operation: { action: "spawn", description: "x", prompt: "y", subagent_type: "general", context: "full", lifecycle: "ephemeral" } }).success).toBe(false)
 
         expect(wrap({ operation: { action: "run", description: "", prompt: "y", subagent_type: "general" } }).success).toBe(false)
         expect(wrap({ operation: { action: "run", description: "x", prompt: "", subagent_type: "general" } }).success).toBe(false)
@@ -972,9 +974,9 @@ describe("Actor tool subagent_type enum (F36)", () => {
         expect(Object.keys(flat.properties)).toEqual(["operation"])
         expect(flat.required).toEqual(["operation"])
         // The operation node must carry type:"object" (the .meta fix) so models
-        // don't stringify the envelope, and must retain its inner 7-way union.
+        // don't stringify the envelope, and must retain its inner 8-way union.
         expect(flat.properties.operation.type).toBe("object")
-        expect((flat.properties.operation.oneOf ?? flat.properties.operation.anyOf).length).toBe(7)
+        expect((flat.properties.operation.oneOf ?? flat.properties.operation.anyOf).length).toBe(8)
       }),
     ),
   )

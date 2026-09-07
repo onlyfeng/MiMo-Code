@@ -576,6 +576,7 @@ export const layer = Layer.effect(
             modelID: resolved.id,
             modelAPIID: resolved.api.id,
             modelFamily: resolved.family,
+            harnessModel: resolved.harness_model,
           }) === "codex"
             ? [PROMPT_GENERATE_GPT]
             : []),

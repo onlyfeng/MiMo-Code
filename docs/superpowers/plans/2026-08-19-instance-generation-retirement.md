@@ -7,6 +7,12 @@
 > This narrows the planned broad `/v1` and llm-server exclusions below; it does
 > not mark any instance-generation retirement work in this plan complete.
 
+> **Actor recovery amendment (2026-09-07):** The selected capability integration
+> adds [constrained actor resume](../../actor-recovery.md) only while the
+> registered persistent actor retains its original frozen context and receiver
+> run scope. It preserves the main-only public recovery API and does not
+> implement the broader retirement architecture or complete pending Tasks 1–10.
+
 > **Status (2026-08-22):** Task 0 completed through PR #59 at
 > `ffc89d3916197e5860e91050616476f423c09ad4`; the inventory was rechecked at
 > main `b5c2181d6c4c98b91cdef8e3b789f7da37bdffad`. Tasks 1 through 10 remain

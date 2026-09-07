@@ -87,6 +87,7 @@ function installRecordingCapture() {
         firstMsgID: first?.id,
       })
       return {
+        modelIdentity: "canned-writer-model-identity",
         system: ["sys-canned"],
         turnContext: undefined,
         tools: {},
@@ -339,9 +340,12 @@ describe("checkpoint writer forkContext shape per mode", () => {
           // firstMsgID confirms alignment landed on u1 (NOT u2).
           expect(call.firstMsgID).toBe(u1.id)
 
-          const fc = spawnLog.lastInput?.forkContext as { watermarkMsgID: string } | undefined
+          const fc = spawnLog.lastInput?.forkContext as
+            | { watermarkMsgID: string; modelIdentity?: string }
+            | undefined
           expect(fc).toBeDefined()
           expect(fc?.watermarkMsgID).toBe(u2.id)
+          expect(fc?.modelIdentity).toBe("canned-writer-model-identity")
         }),
       { config: { checkpoint: { fork: false } } },
     ),

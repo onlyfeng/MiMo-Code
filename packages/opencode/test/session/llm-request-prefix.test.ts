@@ -33,7 +33,10 @@ function makeAgent(): Agent.Info {
 }
 
 describe("buildLLMRequestPrefix", () => {
-  test("keeps MiMo v2.5 API aliases on the normal frozen toolset", async () => {
+  test.each([
+    { id: "mimo", api: "mimo-v2.5-pro", family: "mimo-v2.6", trust: undefined, codex: false },
+    { id: "opaque", api: "slot-17", family: "opaque", trust: "gpt-5.6-sol", codex: true },
+  ])("captures the resolved harness toolset for $id", async (identity) => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
       directory: tmp.path,
@@ -70,10 +73,11 @@ describe("buildLLMRequestPrefix", () => {
             sessionID: session.id,
             agent: makeAgent(),
             model: ProviderTest.model({
-              id: ModelID.make("mimo"),
+              id: ModelID.make(identity.id),
               providerID: ProviderID.make("xiaomi"),
-              api: { id: "mimo-v2.5-pro" } as never,
-              family: "mimo-v2.6",
+              api: { id: identity.api } as never,
+              family: identity.family,
+              harness_model: identity.trust,
             }),
             msgs: await AppRuntime.runPromise(
               SessionNs.Service.use((svc) => svc.messages({ sessionID: session.id })),
@@ -82,11 +86,11 @@ describe("buildLLMRequestPrefix", () => {
           }),
         )
 
-        expect(prefix.tools.exec).toBeUndefined()
-        expect(prefix.tools.apply_patch).toBeUndefined()
-        expect(prefix.tools.edit).toBeDefined()
-        expect(prefix.tools.write).toBeDefined()
-        expect(prefix.tools.read).toBeDefined()
+        expect(!!prefix.tools.exec).toBe(identity.codex)
+        expect(!!prefix.tools.apply_patch).toBe(identity.codex)
+        expect(!!prefix.tools.edit).toBe(!identity.codex)
+        expect(!!prefix.tools.write).toBe(!identity.codex)
+        expect(!!prefix.tools.read).toBe(!identity.codex)
       },
     })
   })

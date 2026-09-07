@@ -2,7 +2,7 @@ Launch a subagent for complex multi-step tasks autonomously.
 
 Subagent restriction: when running as a subagent, you can ONLY use
 `actor send` to communicate with the parent. All other actions (spawn, run,
-cancel, status, wait, models) are restricted to primary agents. Use
+cancel, resume, status, wait, models) are restricted to primary agents. Use
 `actor send main "..."` to report progress or findings.
 
 `actor spawn` is THE DEFAULT: it returns an actor_id immediately, so subagents run in
@@ -23,7 +23,7 @@ appends them at request time per-agent).
 #   - $vars are preserved as literal text (no expansion)
 
 # DEFAULT — return actor_id immediately, run in the background, stay responsive:
-    actor spawn <subagent_type> "<description>" "<prompt>" [--model <ref>] [--command <cmd>] [--context none|state|full] [--output-schema '<json>']
+    actor spawn <subagent_type> "<description>" "<prompt>" [--model <ref>] [--command <cmd>] [--context none|state|full] [--lifecycle persistent] [--output-schema '<json>']
     # bind it to one of your `task` tool tasks (TID from the `task` tool, e.g. T4):
     actor spawn <subagent_type> "<description>" "<prompt>" --task <TID>
 
@@ -39,6 +39,17 @@ appends them at request time per-agent).
 # inspect / control:
     actor status <actor_id>     # current state without blocking
     actor cancel <actor_id>     # graceful stop
+    actor resume <actor_id>     # retry the original interrupted user/task of a persistent full-context actor
+    # resume requires retained original instance/model identity; busy, cancelled,
+    # completed, or released actors are rejected. No --task/model/prompt overrides.
+    # Returns after admission; queued messages wait until recovery completes.
+
+# opt into interrupted-work recovery when creating an actor (spawn only):
+    actor spawn general "Recoverable review" "Review the specified module" --context full --lifecycle persistent
+    # Default spawn/run actors are ephemeral. Persistent requires full context and
+    # retains that frozen context until cancelled. Use status for progress; cancel
+    # when no longer needed to release it. Resume retries interruption, not completion.
+    # On success use notifications/status; wait returns only on failure/cancel/timeout.
 
 # deliver a message to another actor's inbox, waking it when it remains reusable. A
 # completed ephemeral context=full actor needs a fresh spawn after its frozen context is
