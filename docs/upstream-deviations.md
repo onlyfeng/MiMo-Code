@@ -30,7 +30,7 @@ registry or history commit does not advance either behavior reference.
 | --- | --- | --- | --- |
 | FD-001 | yolo, permission, Bash delete | Rejects shared mutable delete approval | Preserve request/instance isolation |
 | FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
-| FD-004 | instance server, `/v1`, SDK/OpenAPI | Rejects implicit listener/capability surface | Keep ordinary instances opt-in only |
+| FD-004 | instance server, explicit audio API, `/v1`, SDK/OpenAPI | Adopts basic audio behind explicit admission; rejects implicit general capability service | Preserve opt-in, authentication-before-bootstrap, and bounded shutdown |
 | FD-005 | model identity, prompt, discovery, tools, retry | Adapts inconsistent upstream classification | Preserve one resolved identity |
 | FD-006 | direct tools, nested `exec`, timeout and normalization | Selectively adopts compatibility normalization | Preserve authority and size/unit boundaries |
 | FD-009 | actor/checkpoint context capture, retry, resume | Rejects live-context fallback | Fail before child execution and reuse frozen membership |
@@ -121,14 +121,23 @@ registry or history commit does not advance either behavior reference.
 - Observable contract: ordinary TUI, `serve`, ACP, and embedded instances do
   not mount an implicit `/v1` capability surface or bind an additional listener
   merely because provider credentials exist. Fork SDK/OpenAPI artifacts are
-  generated from that source behavior.
+  generated from that source behavior. The explicit exception is
+  `mimo serve --audio-api`: its existing socket exposes only speech and
+  transcription with a dedicated Bearer key, a fixed startup directory, bounded
+  bodies/concurrency, cancellation, and intake closure before instance retirement.
+  The key alone enables nothing and cannot replace generic API Basic auth.
 - Upstream relationship: rejects the listener and capability surface anchored
   at `b4bbe81c67f215d32bdbf1b7984928dea80b7c92`; compatible upstream APIs remain
-  independently adoptable.
+  independently adoptable. Basic upstream audio is extracted into an audio-only
+  service; model discovery, general chat proxy, token management, voice design,
+  and voice cloning remain absent.
 - Watch surfaces: `packages/opencode/src/cli/cmd/tui/thread.ts`,
   `packages/opencode/src/cli/cmd/tui/worker.ts`,
   `packages/opencode/src/cli/cmd/llm-server.ts`,
   `packages/opencode/src/llm-server/`,
+  `packages/opencode/src/audio/`, `packages/opencode/src/provider/provider.ts`,
+  `packages/opencode/src/cli/cmd/serve.ts`,
+  `packages/opencode/src/server/audio.ts`, `packages/opencode/src/server/server.ts`,
   `packages/opencode/src/server/middleware.ts`,
   `packages/opencode/src/server/routes/instance/`, `packages/sdk/openapi.json`,
   `packages/sdk/js/src/v2/gen/`, and `script/generate.ts`.
@@ -139,6 +148,14 @@ registry or history commit does not advance either behavior reference.
   runtime and published OpenAPI recovery/resume operations remain main-only,
   omit their upstream agent/task selectors, and expose the same compaction
   projection contract.
+- Audio evidence: `packages/opencode/test/audio/`,
+  `packages/opencode/test/server/audio-api.test.ts`,
+  `packages/opencode/test/server/audio-admission.test.ts`, and its isolated
+  non-test default-off child cover the extracted protocols, provider requests,
+  authentication before body/instance access, fixed directory, bounds and stop.
+  [Audio API](audio-api.md) records the supported backend protocols and explicit
+  exclusions. Ordinary OpenAPI/SDK artifacts remain source-generated and omit
+  this optional audio-only protocol.
 - 2026-09-05 Node-export review: upstream adds a `LLMServerTokens` re-export
   but the fork has already removed its implementation with the implicit
   capability subsystem. Omitted the dangling export; no listener, token
