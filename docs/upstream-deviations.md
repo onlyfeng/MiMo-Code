@@ -14,11 +14,11 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-07
+- Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior: `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`
-- Prior fork `main` tip: `4d876d54a304689db1f86e5f6f8f0da577d0f5d4`
+- Main behavior: `69eb01bbd0e2c54da76c145613a31d23d2cedbf3`
+- Prior fork `main` tip: `c1dfc423fe021072d37b8585b5bcc33c4742d514`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -26,14 +26,14 @@ registry or history commit does not advance either behavior reference.
 
 ## Sync index
 
-| ID | Watch surfaces | Upstream relationship | Required decision |
-| --- | --- | --- | --- |
-| FD-001 | yolo, permission, Bash delete | Rejects shared mutable delete approval | Preserve request/instance isolation |
-| FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
-| FD-004 | instance server, explicit model/audio APIs, `/v1`, SDK/OpenAPI | Adopts capability discovery and token-scoped proxy behind explicit admission; rejects implicit capability service | Preserve opt-in, authentication-before-bootstrap, and bounded shutdown |
-| FD-005 | model identity, prompt, discovery, tools, retry | Adapts inconsistent upstream classification | Preserve one resolved identity |
-| FD-006 | direct tools, nested `exec`, timeout and normalization | Selectively adopts compatibility normalization | Preserve authority and size/unit boundaries |
-| FD-009 | actor/checkpoint context capture, retry, resume | Rejects live-context fallback | Fail before child execution and reuse frozen membership |
+| ID     | Watch surfaces                                                        | Upstream relationship                                                                                             | Required decision                                                                     |
+| ------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| FD-001 | yolo, permission, Bash delete                                         | Rejects shared mutable delete approval                                                                            | Preserve request/instance isolation                                                   |
+| FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries               | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
+| FD-004 | instance server, explicit model/audio APIs, `/v1`, SDK/OpenAPI        | Adopts capability discovery and token-scoped proxy behind explicit admission; rejects implicit capability service | Preserve opt-in, authentication-before-bootstrap, and bounded shutdown                |
+| FD-005 | model identity, prompt, discovery, tools, retry                       | Adapts inconsistent upstream classification                                                                       | Preserve one resolved identity                                                        |
+| FD-006 | compact Codex declarations and nested execution                       | Adopts released compact registration with direct actor/interactive exceptions                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
+| FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
 
 ## FD-001 — `--yolo` must not mutate delete approval state
 
@@ -57,7 +57,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
+  main behavior `69eb01bbd0e2c54da76c145613a31d23d2cedbf3`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -101,7 +101,7 @@ registry or history commit does not advance either behavior reference.
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
+  main behavior `69eb01bbd0e2c54da76c145613a31d23d2cedbf3`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
@@ -174,7 +174,7 @@ registry or history commit does not advance either behavior reference.
   records its historical absence; the Node entry now restores the functional
   LLMServerTokens export for explicit embedding alongside Server.listen.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
+  main behavior `69eb01bbd0e2c54da76c145613a31d23d2cedbf3`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -241,7 +241,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/websearch.test.ts` regression binds the Xiaomi
   sidecar request to the resolved API model ID.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
+  main behavior `69eb01bbd0e2c54da76c145613a31d23d2cedbf3`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
   complete resolved identity while keeping transport and harness/toolset as
   separate decisions. MiMo v2.5 precedence remains authoritative even when an
@@ -282,51 +282,76 @@ registry or history commit does not advance either behavior reference.
 
 - Status: active
 - Canonical owner: fork `main` direct-tool and nested-execution authority boundary
-- Observable contract: GPT/Codex models retain direct permission-visible tools.
-  Nested `exec` excludes `actor`, shell/control capabilities including `bash`
-  and the `exec_command` alias, respects request-scoped allowlists, and keeps the
-  public compute budget as `timeout_seconds` in seconds. Custom outer code
-  wrappers may be normalized, but the 128 KiB raw-code limit is enforced both
-  before and after normalization. Replayable nested parts are capped at 256 KiB,
-  and the expanded TUI retains bounded ANSI-free outer output alongside live
-  children.
-  Data-tool declaration compaction is confined to the standalone
-  `script/experiments/tool-schema*.ts` evaluation. It edits only approved
-  descriptions for `read`, `glob`, and `grep`; validators, execution, permissions,
-  and non-candidate declarations stay unchanged. Its explicit default harness
-  does not establish savings for the default Codex toolset or change production
-  requests. Measurement methods, synthetic replay, and live task results remain
-  separately attributed in [the experiment record](experiments/tool-schema-2026-09-07.md).
-- Upstream relationship: selectively adopts safe custom-exec input
-  normalization from upstream while rejecting its compact single-exec authority
-  model, nested shell bridge, and nested actor send-only exposure. The
-  `fromExec` actor guard is retained as defense in depth, not as authority to
-  expose `actor` inside `exec`.
+- Observable contract: the final FD-005 Codex harness automatically advertises
+  compact TypeScript tool declarations through `exec`, while the complete
+  authorized implementation pool remains registered. `actor`, `question`,
+  `plan_exit`, `session`, and `workflow` retain direct entries when available;
+  `StructuredOutput` remains request-owned. Nested Bash/`exec_command`, task,
+  skill/search, enabled cron, data and MCP calls use the pinned request pool,
+  effective permissions, user toggles and agent/actor/frozen allowlists. Hidden
+  direct calls retain the same gates. Codex MCP calls need no redundant search
+  load; non-Codex explicit search retains its load-before-direct contract.
+  Each nested built-in permission receipt identifies the actual post-hook input and
+  inherits the parent permission routing, while using the child abort signal.
+  Termination closes intake, aborts and joins nested effects/finalizers. Frozen
+  captures preserve the full pool and active subset separately; changed hidden
+  schemas fail closed before execution. The existing resolver precedence,
+  actor task source and recovery admission remain unchanged.
+  The public compute budget remains `timeout_seconds` in seconds. The strict
+  `exec_command` adapter uses `yield_time_ms` as a command timeout in milliseconds,
+  with no background terminal resume semantics or fuzzy argument repair.
+  Code is bounded at 128 KiB before and after normalization, serialized script
+  return values and replayable nested records at 256 KiB each. Logs, traces and
+  warnings have their separate existing bounds. The host relays at most eight
+  authorized attachments totaling 10 MiB encoded data and reports omissions;
+  images reach ordinary persisted FileParts and the next model request.
+  Expanded TUI output remains bounded and ANSI-free. Retained validated nested
+  records feed file manifests, worktree hints and repeated-failure detection.
+  Snapshot compaction keeps at most 8 KiB of selected facts per child and 32
+  entries per retained array; oversized fields or whole records may be omitted
+  within the overall bound. Missing paths never imply a cwd mutation.
+  The standalone read/glob/grep experiment remains separate and its token
+  estimates establish no Codex production savings; see [current usage](codex-compact-tools.md)
+  and [historical evaluation](experiments/tool-schema-2026-09-07.md).
+- Upstream relationship: adapts released v0.1.14 compact registration from
+  `1a0ffba7842af3f11edcb456688bbdf067407c08`, as present in the selected
+  `6203ea2e` baseline. It adopts hidden tools, compact declarations and the
+  nested shell adapter, while retaining direct actor and interactive/lifecycle
+  controls rather than narrowing actor functionality to send-only scripts.
+  Existing normalization, fixed cwd, deletion approval and code/unit limits
+  remain; broader upstream source and selectors are not restored.
 - Watch surfaces: `packages/opencode/src/agent/prompt/generate-gpt.txt`,
   `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/tool/registry.ts`,
   `packages/opencode/src/tool/tool-script-ref.ts`,
   `packages/opencode/src/tool/tool-script.ts`,
   `packages/opencode/src/tool/tool-script.txt`,
+  `packages/opencode/src/session/llm-request-prefix.ts`,
+  `packages/opencode/src/session/prefix-snapshot.ts`,
+  `packages/opencode/src/session/observed-tool-parts.ts`,
+  `packages/opencode/src/cli/cmd/tui/routes/session/permission.tsx`,
   `packages/opencode/script/experiments/tool-schema*.ts`,
   `packages/opencode/src/cli/cmd/tui/routes/session/index.tsx`, and
   `packages/opencode/src/cli/cmd/tui/routes/session/exec-expanded.tsx`.
-- Tests/evidence: `packages/opencode/test/tool/tool-script.test.ts` covers direct
-  visibility, exclusions, wrapper normalization, request allowlists,
-  `timeout_seconds`, pre/post-normalization byte checks, replay schema, the
-  256 KiB terminal snapshot, and close-abort-join settlement. Registry, skill,
-  actor, and TUI visibility tests cover the outer authority surface;
-  `packages/opencode/test/cli/tui/exec-expanded.test.tsx` covers bounded
-  ANSI-free outer output with and without nested parts.
-  `packages/opencode/test/experiments/tool-schema*.test.ts` checks the isolated
-  evaluation's declaration constraints, real SDK protocol, oracle, and evidence
-  attribution; replay success is not evidence of model task completion.
+- Tests/evidence: `test/tool/tool-script.test.ts` covers request-pool pinning,
+  strict alias validation, canonical Bash policy hooks, child ask receipts,
+  permission/allowlist exclusions, media bounds and close-abort-join. The real
+  HTTP/SDK `test/session/codex-compact.test.ts` checks wire visibility, hidden
+  MCP execution/denial, shell approval with no rejected write, and image delivery.
+  `test/session/prompt-effect.test.ts` covers frozen hidden-schema positive and
+  negative execution; registry, prefix, checkpoint, skill, TUI permission and
+  `test/session/exec-effect-carriers.test.ts` cover the other carriers.
+  Experiment-only tests retain their independent evidence attribution.
+- 2026-09-08 selected integration: the explicit user decision supersedes the
+  earlier blanket production compact/shell rejection in the dated notes below.
+  FD-006 remains active for the residual authority, control-entry, schema,
+  cancellation, media and budget differences.
 - 2026-09-05 Bash-output review: adopted the shared default of 30,000
   approximate output tokens and the unified head/tail preview with an archived
   output path. This changes direct Bash output only; nested shell exclusions,
   permission attribution, code-size gates, and timeout units remain intact.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
+  main behavior `69eb01bbd0e2c54da76c145613a31d23d2cedbf3`.
 - 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
   resolved identity. The compact single-exec authority model remains rejected;
   direct permission-visible tools and nested actor/shell/control exclusions are
@@ -347,10 +372,11 @@ registry or history commit does not advance either behavior reference.
   normalization. Rejected the nested `bash`/`exec_command` bridge and its typo
   repair because they cross the authority boundary. The raw code size gate is
   retained before and after normalization.
-- Retirement condition: nested execution receives an immutable request-scoped
-  capability set, every nested operation remains individually permission- and
-  lifecycle-attributable, shell/control tools cannot bypass direct boundaries,
-  and timeout compatibility is preserved.
+- Retirement condition: upstream preserves equivalent request-pinned authority,
+  full-pool/active-schema freezing, direct actor/interactive functionality,
+  child permission attribution, close-abort-join, media delivery and budget/unit
+  compatibility. Fork implementation of these conditions alone does not retire
+  the residual upstream difference.
 
 ## FD-009 — frozen-context capture fails closed before actor execution
 
@@ -363,6 +389,11 @@ registry or history commit does not advance either behavior reference.
   identity remain frozen; a qualifying child cannot fall back to live context.
   Retry, detached continuation, recovery, and resume reuse that admitted frozen
   membership and cannot recapture a later live context.
+  The complete authorized tool pool is frozen separately from its advertised
+  names, so compact tools remain executable without gaining newly registered
+  or parent-disabled members. Rebinding a hidden tool requires its frozen input
+  schema to match; changed schemas fail closed. Warm capture and cold checkpoint
+  writers carry the model identity produced by their corresponding prefix capture.
   Explicit `actor resume <actor-id>` requires a controllable registered
   persistent actor retaining its full context in the original receiver Instance
   and undisposed run scope. A changed API/family/harness identity, released
@@ -383,6 +414,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/src/session/compaction.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
   `packages/opencode/src/session/prefix-capture-ref.ts`,
+  `packages/opencode/src/session/prefix-snapshot.ts`,
   `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/tool/actor.ts`, and
   `packages/opencode/src/tool/session.ts`.
@@ -393,7 +425,7 @@ registry or history commit does not advance either behavior reference.
   The actor spawn suite also exercises owned compaction and invalid-output
   continuations, a same-source foreign hook user, and a lost compaction write.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `f9e8a8a4f8be6cb826319e7dfa20c680606f6601`.
+  main behavior `69eb01bbd0e2c54da76c145613a31d23d2cedbf3`.
 - 2026-08-28 review: adopted removal of the unimplemented `actor_id` resume
   argument from actor `spawn` and `run`. Follow-up work uses `send` only while
   the actor remains reusable. A completed ephemeral `context: "full"` actor has
