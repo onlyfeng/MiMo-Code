@@ -2733,3 +2733,88 @@ Final local validation:
 Final fork remote equality, successful active-workflow CI for both exact final
 branch tips, selected-upstream/main/compat ancestry, and excluded upstream
 commits are checked at publication. Local validation alone is not that proof.
+
+
+## 2026-09-08 Codex compact tools specified propagation
+
+- Mode: specified COMPACT-01 propagation, capability inventory N=1. Selected
+  upstream remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; no upstream ref
+  or release tag was advanced and no unrelated newer upstream work is included.
+- Prior compat tip: `ad7b70702ef77cacb4a83189e0fff30d480d0c66`.
+- Accepted final main tip: `588d183d5e8b944fa613205e55b41d805d7d5231`.
+- Inherited main source/test behavior: `1ad318dc86895a63763fe47bfa965ca8d5b3d45b`.
+- Compat source/test behavior: `15219ecfe351c07ebf5162f2f7b44422e9925b58`.
+- Shared-audit inheritance merge: `15219ecfe351c07ebf5162f2f7b44422e9925b58`. Later registry/history changes
+  do not advance either behavior reference.
+
+| ID | Main contract | Compat result | Decisive evidence |
+| --- | --- | --- | --- |
+| COMPACT-01 | Automatic Codex compact advertisements, direct actor/interactive controls, request-pinned hidden executors and permissions | Inherit shared behavior while preserving all seven DC contracts, full frozen executor membership and active-only request budgets | Real SDK wire and permission cases; frozen prefix/checkpoint and legacy active-mask regressions; actor/MaxMode/preflight matrix |
+
+DC-MODEL-001, DC-CONTEXT-001 and DC-ACTOR-001 have direct prompt, prefix,
+checkpoint, compaction or actor overlap. Per-agent MaxMode, shared runStep,
+final-step tool limits, UTF-8/content caps, current-turn context, chronological
+coverage and unrecoverable static-prefix failure remain. Both external-request
+guards, continuation tracking/cleanup and successful conditional-write receipts
+retain their owned admission semantics. Network/platform/TUI owners keep their
+existing contracts; there is no eighth DC owner.
+
+New all-boolean active flags in the shared snapshot JSON take precedence over
+the legacy compat active_tools column. Old or mixed snapshots still honor that
+column, including an explicit empty array; missing legacy metadata falls back
+to all stored tools. Restoration retains the complete frozen authorized pool,
+while preflight and compaction count only advertised descriptors, including the
+actual exec declaration text. loaded_mcp_tools remains a compat hash dimension.
+This avoids dropping hidden native tools or reactivating stale legacy names.
+
+The 94-path prior main/compat delta is partitioned into 76 protected unchanged
+paths, 14 incoming overlaps, one explicitly reserved actor wire-test oracle,
+one shared frozen-schema fixture adaptation, and two compat registry/history
+paths. All 76 protected paths retain their original blob and mode on both sides. The final MCP search dispatch correction
+is inherited identically, with no new compat production fork. Three generated
+SDK/OpenAPI blobs retain the prior compat versions; public schema inputs did
+not change, so this operation does not claim a fresh generation round.
+
+### Validation
+
+- Effective affected inventory: **2,601 pass, 0 fail, 26 skip, 1 todo and 7,362 assertions
+  across 192 files**. The existing instruction-suite todo is
+  retained, not counted as a pass. Evidence combines 186 unchanged complete
+  files with the final complete classifier, request-flow and actor files, plus
+  the newly included system, agent and live-default test files.
+- The original frozen `ae7a405858628a400f268f738635628a5eb7304c` matrix recorded
+  2,461 pass, 2 fail, 13 skip, 1 todo and 6,733 assertions: 187 file passes,
+  one classifier failure and one actor file wall timeout. Those records remain.
+  The classifier fixtures had incompatible handmade or missing schemas; their
+  corrected parent captures pass 13 cases and 49 assertions, including a separate
+  schema-drift rejection. Grep uses its real schema so its whitelist rejection
+  remains independent of the schema gate.
+- Actor's complete 600-second-wall follow-up passes 66 cases and 337 assertions
+  in 137.962 seconds. The original incomplete file is not counted twice or
+  relabeled as a pass. The inherited cancellation test separates initialization
+  from its preserved three-second cancel/join bound; the final entire request-flow
+  file passes 142 cases, 2 skips and 765 assertions. Its earlier green result is
+  replaced, not added to the effective totals.
+- Within the original matrix, only the classifier and request-flow test files
+  changed; production and all other selected tests remain unchanged. The three
+  added system, agent and live-default files correct shared expectations exposed
+  by main CI and observe retained nested effects using the existing projection.
+  Their final complete runs add 71 pass, 13 skip and 281 assertions. The
+  live-default result does not execute the 13 skipped provider cases. The classifier merge preserves
+  compat required turnContext and is byte-identical to its earlier validated
+  file. Hash evidence separates inherited
+  validation from the replacement runs. All eight ambient selectors and scoped
+  MCP search test flags follow the shared main ledger, retaining package preload
+  defaults. Per-case budgets are 30 seconds by default and 90 seconds for the
+  two long actor/request files; file walls are 180 seconds normally and 600 seconds
+  for the explicit long-file runs.
+- Owning-package typecheck, repository lint (4,449 warnings, zero errors),
+  Node bundle and plain Node v24.16.0 import/export smoke pass with no Bun global.
+  Production did not change after that build. Frozen bun ci preserves bun.lock;
+  source-derived public SDK/OpenAPI inputs are unchanged. No live-provider token,
+  error-rate or task-completion benchmark is claimed.
+
+Shared FD/FC registries and main history inherit final main byte-for-byte.
+Exact final remote-tip equality, test/typecheck/lint CI and selected-source
+ancestry through main to compat are checked separately at publication. This
+specified propagation does not claim current-upstream parity.
