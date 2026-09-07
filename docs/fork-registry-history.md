@@ -2051,3 +2051,16 @@ Instance/RunDisposal receipts do not claim its planned GenerationLease APIs exis
 Exact final remote tips, their active-workflow CI and selected-source/main/compat
 ancestry are publication checks performed after the registry companion commits;
 none is implied by these local test results.
+
+### Same-operation ownership correction
+
+The preceding selected-capability entry incorrectly included FC-011 in its
+unchanged-implementation group. That FC-011 classification is withdrawn:
+`tool/actor.ts`, `tool/actor.txt`, `tool/actor.shell.txt` and the bundled
+`mimocode-docs` configuration reference changed under its existing content
+ownership. They document explicit persistent/full creation, constrained resume,
+idle wait/status and cancellation release, and trusted harness configuration;
+they do not grant additional permission. The active FC-011 watch list now names
+these paths explicitly so a path-based audit also detects them. This correction
+changes only documentation evidence; main source/test behavior remains
+`40f5019ff8f6e47f7fe646164fafb73f0089f9e2`, and the capability inventory remains N=3.

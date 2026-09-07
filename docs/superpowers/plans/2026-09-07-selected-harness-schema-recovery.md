@@ -18,6 +18,13 @@
 - 不增加公开恢复 agentID/task_id selector，不增加 resumeBackground。
 - 所有实验数据区分真实 usage、估算、回放以及真实模型任务结果。
 
+默认路径的包级验证在导入 flag 模块前移除以下外部选择器：
+`MIMOCODE_EXPERIMENTAL`、`MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`、
+`MIMOCODE_CODEX_MODE`、`MIMOCODE_DISABLE_CHECKPOINT`、
+`MIMOCODE_COMPACTION_MAX_CONTEXT`、`MIMOCODE_ENABLE_EXEC_TOOL`、
+`MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY`。保留包 preload 的
+`MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`；独立非测试默认关闭验证还移除该值。
+
 ### Task 1: 显式别名与缓存传播
 
 **Covers:** S1, S2, S5

@@ -583,6 +583,10 @@ registry or history commit does not advance either behavior reference.
 - Upstream relationship: fork-facing guidance plus selectively adopted upstream
   documentation improvements.
 - Watch surfaces: `packages/opencode/src/session/prompt/default.txt`,
+  `packages/opencode/src/tool/actor.ts`,
+  `packages/opencode/src/tool/actor.txt`,
+  `packages/opencode/src/tool/actor.shell.txt`,
+  `packages/opencode/src/skill/builtin/.bundle/mimocode-docs/`,
   MiniMax/GPT prompt text, actor shell tokenizer/help, TUI skill i18n, and
   bundled `pdf-official` and `mimocode-docs` content.
 - Tests/evidence: session system, including the actionable task/actor guidance
@@ -606,6 +610,11 @@ registry or history commit does not advance either behavior reference.
   active workspace before Spec writes its durable document there; without-spec
   and missing-document finalize paths remain conditional. This is bundled
   workflow guidance and does not widen file, worktree, or publication authority.
+- 2026-09-07 selected-capability review: actor help documents explicit
+  persistent full-context creation, constrained resume, successful idle status
+  and cancellation release. Bundled configuration guidance describes
+  `harness_model`; these instructions do not widen runtime permission or
+  restore public actor/task recovery selectors.
 - Retirement condition: the corresponding prompts/content cease to ship or
   upstream guidance is factually equivalent for fork branch names, keys,
   runtime support, and user-facing errors.
