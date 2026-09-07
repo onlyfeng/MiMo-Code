@@ -1788,3 +1788,88 @@ Stable main matrix: **383 pass, 2 existing skip, 0 fail** across 24 test files.
 Run each row from `packages/opencode` with the three ambient selectors
 removed, using `bun test <row files> --timeout 120000`. Fixture rows run in
 separate processes so their existing database close/reset behavior is isolated.
+
+## 2026-09-07 recovery timing and isolated fixture synchronization
+
+- Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`.
+- Reviewed upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`.
+- Prior fork main tip: `95b592e08b4471c1018757d01620055368c51ef5`.
+- Prior fork compat tip: `26e225997deee7573baeae1715b092d9491f3fa7`.
+- Main merge and stable behavior: `62a43906cfaa7184f5a3f795d512f4b670d9ec65`.
+- Upstream range: two commits, one first-parent commit, six incoming paths.
+  Four capabilities come from that range; the fifth is the accepted main-only
+  synchronization skill awaiting propagation to compat. No dependency,
+  lockfile, migration, workflow, or generated SDK input changes.
+
+### Capability inventory (5/5)
+
+Every row uses audit range `AR-20260907-6203` and the SHAs above. Counterparts
+describe the selected pre-merge branch tips. Abbreviated paths use the package
+named in their row; C01 paths are under `packages/opencode`.
+Final main-to-compat propagation, compat validation, and published branch-tip
+evidence belong to `dev-compat-registry-history.md` on compat.
+
+| ID | Capability | Paths, producers, and tests | main counterpart | compat counterpart | Relationship | Drift | canonical_owner | Disposition and evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| C01 | Early recovered-assistant settlement | `src/session/prompt.ts`: `startResume`, `startRunning`, `abandonRecoveredAssistant`, `admitted`, `runLoop`; `test/session/prompt-effect.test.ts`, recovery/busy/OpenAPI and Runner/run-state suites | Atomic main-only admission; settlement previously in finalizer | Same admission plus DC-MODEL-001/DC-CONTEXT-001/DC-ACTOR-001 overlays | Complementary intent; different admission protocol | behavior, tests | shared main: FC-001/009, FD-002/009; compat overlays retain their owners | Adapt settlement after atomic admission and candidate lookup, before admission success and new loop; preserve finalizer and message non-mutation on Busy/NotFound/pre-work cancellation; focused RED/GREEN and main session/runtime/server groups pass |
+| C02 | Preserve session-diff line endings | `packages/ui/src/components/session-diff.ts`: patch reconstruction and `text`; paired `session-diff.test.ts` with six new cases | Same blobs as prior upstream | Same blobs as main | No fork overlap | behavior, tests | shared main; no FD/FC/DC override | Adopt both upstream files unchanged; 8 tests and UI typecheck pass |
+| C03 | Supply App language fixture `intl()` | `packages/app/src/components/prompt-input/submit.test.ts`: language fixture and prompt/custom-command captures; producer `submit.ts` forwards `language.intl()` as `titleLocale` | Existing `zh-CN` fixture and two locale assertions | Same blob as main; shared locale evidence adjacent to DC-TUI-001 | Equivalent fixture capability with stronger fork assertions | tests | shared main; FC-001 locale contract, DC-TUI-001 evidence adjacency | Keep fork file unchanged, subsuming upstream `en-US` fixture; 5 tests and App typecheck pass; assertions reject missing or wrong locale |
+| C04 | Isolate enterprise storage test HTTP | `packages/enterprise/bunfig.toml`, `test/preload.ts`; real producer `src/core/storage.ts`; complete `test/core/storage.test.ts` and `test/core/share.test.ts` | No preload counterpart | No preload counterpart; same storage source/tests as main | No fork overlap | test configuration, tests | shared main: FC-008 | Adopt both upstream files unchanged; 16 tests and enterprise typecheck pass with fixed test credentials and in-memory interception of the current S3 origin; no live S3/R2 claim |
+| C05 | Propagate accepted synchronization skill | `.mimocode/skills/upstream-sync/SKILL.md`, produced by accepted main commit `95b592e0`; propagation check is blob equality | Already accepted at selected main | File absent at selected compat | Main-to-compat documentation propagation; outside upstream increment | process documentation | shared main: FC-008/012 | Inherit unchanged through main; no code change or new consolidation; final equality and branch-tip evidence are recorded in compat history |
+
+Inventory and result counts are both five. All six FD and all sixteen FC
+entries remain active; this range meets no retirement condition. Shared
+registries retain their ownership and are inherited unchanged by compat.
+
+### Recovery decision and evidence boundary
+
+- Upstream settles before its Runner call. The fork settles inside admitted
+  validation work, after both the atomic claim and successful candidate lookup,
+  before completing `admitted` or entering `runLoop`. Runner ownership and busy
+  publication still occur first; this is not a guarantee about every status
+  event preceding storage mutation.
+- Main-only identity, existing locale propagation, synchronous resume wrapper,
+  partial-context retention, and idempotent finalizer remain intact. Rejected
+  Busy/NotFound requests and cancellation before work starts preserve complete
+  persisted message snapshots.
+- Before the timing change, two new completion assertions failed; the final
+  focused recovery run passes 8 tests with zero failures. The full session
+  group below includes those tests, so they are not counted twice.
+- The enterprise preload is package test configuration. It exercises the real
+  adapter's key/JSON/list-bound behavior through intercepted HTTP; unrelated
+  origins still use the original fetch. It does not prove general network
+  isolation, R2, signature validation, pagination, or deployed-bucket behavior.
+
+### Local main validation
+
+Stable main matrix: **220 pass, 2 existing skip, 0 fail**. Core groups account
+for 191 passes; UI/App/enterprise account for 29. Every command below exits
+zero. Counts describe this stable behavior tree, not a future compat tree or
+published branch-tip CI result.
+
+| Package / group | Files relative to package | Pass / skip |
+| --- | --- | --- |
+| opencode / session | `test/session/prompt-effect.test.ts`, `test/session/llm-request-prefix.test.ts`, `test/session/fork-prefix-invariant.test.ts`, `test/session/checkpoint-fork-mode.test.ts`, `test/session/replace-agent-subagent.test.ts` | 116 / 2 |
+| opencode / runtime | `test/effect/runner.test.ts`, `test/session/run-state-tuple-key.test.ts`, `test/session/run-state-dispose.test.ts` | 61 / 0 |
+| opencode / server | `test/server/session-recovery.test.ts`, `test/server/session-prompt-busy.test.ts`, `test/server/openapi-refs.test.ts` | 14 / 0 |
+| ui | `src/components/session-diff.test.ts` | 8 / 0 |
+| app | `src/components/prompt-input/submit.test.ts` | 5 / 0 |
+| enterprise | `test/core/storage.test.ts`, `test/core/share.test.ts` | 16 / 0 |
+
+Run each row from its package directory with `bun test <row files> --timeout
+120000`. Clear `MIMOCODE_EXPERIMENTAL`,
+`MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE`, and
+`MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`; core groups additionally clear
+`MIMOCODE_COMPACTION_MAX_CONTEXT`, `MIMOCODE_COMPACTION_TRIGGER_RATIO`, and
+`MIMOCODE_DISABLE_CHECKPOINT`. Preserve package preloads: opencode retains
+`MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true` and its managed fixture defaults,
+App retains HappyDOM, and enterprise loads its new S3 fixture. These are test
+harness baselines, not an isolated-runtime default-off proof. Run the complete
+enterprise files because the storage list cases share their setup data.
+
+Package `bun typecheck` passes in opencode, UI, App, and enterprise; lint has
+zero errors. UI/App/enterprise test evidence is local and explicit: the current
+test workflow runs opencode and cannot stand in for those three package runs.
+Final remote-tip equality, ancestry, and successful CI for each exact published
+SHA remain synchronization completion gates, with propagation evidence routed
+to the compat history rather than asserted here in advance.
