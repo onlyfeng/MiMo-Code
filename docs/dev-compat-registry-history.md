@@ -2470,3 +2470,120 @@ cap broadening, owner promotion, or upstream publication was performed.
 Stable compat matrix: **584 pass, 2 existing skip, 0 fail**.
 Run each row separately from `packages/opencode` with the three selectors
 removed, using `bun test <row files> --timeout 120000`.
+
+## 2026-09-07 recovery timing and isolated fixture propagation
+
+- Audit range `AR-20260907-6203`: prior upstream
+  `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`, selected upstream
+  `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`.
+- Prior compat tip: `26e225997deee7573baeae1715b092d9491f3fa7`.
+- Accepted main tip: `774a795682c648b7f3637b9159c063ef6a2a4018`.
+- Inherited main behavior: `62a43906cfaa7184f5a3f795d512f4b670d9ec65`.
+- Compat merge and stable behavior: `d5396a50856f264eda899c3094d9dd232d728307`.
+- Shared-audit inheritance merge: `51d1ccbf68856b09ea720ffd5ade5e377421acb7`.
+  This merge and the following compat registry update change documentation
+  only; neither advances the source/test behavior references above.
+
+### Capability inventory (5/5)
+
+Every row uses the complete audit range above. C01-C04 cover the four
+capabilities in the selected upstream range; C05 propagates the previously
+accepted main synchronization skill and is outside that upstream increment.
+The matching main audit in `fork-registry-history.md` supplies producer,
+commit, symbol, and main-validation details. Paths below are repository-relative
+unless their owning package is named explicitly.
+
+| ID | Capability | main counterpart | compat counterpart | Relationship | Drift | canonical_owner | Disposition and status evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| C01 | Early recovered-assistant settlement | FC-001 atomic main-only admission, now with early settlement | Same admission plus DC-MODEL-001/DC-CONTEXT-001/DC-ACTOR-001 overlays | Complementary intent; upstream uses a different admission protocol | behavior, tests | shared main: FC-001/009, FD-002/009; existing compat overlays retain their owners | Inherit shared adaptation after atomic admission and candidate validation, before admission success and the new loop. The complete startResume/resume block matches main; session/runtime/server matrices pass, including rejection non-mutation and successful 400 recovery |
+| C02 | Preserve session-diff line endings | Adopted upstream session-diff implementation and tests | Same two UI blobs | No fork overlap | behavior, tests | shared main; no FD/FC/DC override | Inherit packages/ui/src/components/session-diff.ts and its test unchanged from upstream. Main executed 8 tests and UI typecheck; compat evidence is exact blob and package/lockfile equality, not a repeated test run |
+| C03 | Supply App language fixture intl() | Existing zh-CN fixture and two titleLocale assertions subsume upstream en-US fixture | Same unchanged App submit fixture; DC-TUI-001 evidence adjacency | Equivalent fixture capability with stronger fork assertions | tests | shared main: FC-001 locale contract; DC-TUI-001 presentation owner unchanged | Preserve packages/app/src/components/prompt-input/submit.test.ts and both locale assertions. Main executed 5 tests and App typecheck; compat inherits equal fixture, producer, package, and lockfile blobs |
+| C04 | Isolate enterprise storage test HTTP | New package preload and bunfig, adopted from upstream | Same fixture, storage/share producers, and tests | No fork overlap | test configuration, tests | shared main: FC-008 | Inherit packages/enterprise/bunfig.toml and test/preload.ts byte-for-byte from upstream. Main executed 16 storage/share tests and enterprise typecheck; compat inherits those blobs and unchanged package/lockfile inputs. No live S3/R2 or general network-isolation claim |
+| C05 | Propagate accepted synchronization skill | Already accepted in main at 95b592e0 | File absent at prior compat; now identical to accepted main | Main-to-compat documentation propagation; outside upstream increment | process documentation | shared main: FC-008/012 | Inherit .mimocode/skills/upstream-sync/SKILL.md unchanged. Exact blob equality proves propagation; no new runtime behavior, compat owner, or duplicate consolidation |
+
+Inventory and result counts are both five. The six FD and sixteen FC entries
+remain active and are inherited byte-for-byte from accepted main, as is the
+shared history. No compat owner was added, retired, renumbered, or promoted.
+
+### Compat owner review (7/7)
+
+| Owner | Incoming overlap | Preserved result and evidence |
+| --- | --- | --- |
+| DC-NET-001 | No overlap | WebFetch/SSRF source and tests have no incoming delta. The three-line approved-private-target call-seam override, per-hop asks, and resource bounds remain unchanged |
+| DC-NET-002 | No overlap | MCP source remains byte-identical to main; the existing RFC1918 lifecycle sentinel retains mocked client-creation scope with OAuth disabled |
+| DC-PLATFORM-001 | No overlap | Ripgrep/archive source and tests are unchanged; restricted-network and Windows fallbacks retain their failure and fixed-cwd boundaries |
+| DC-MODEL-001 | Direct prompt-path overlap; MaxMode semantic adjacency | Per-agent opt-in, final-step and structured-output gates, hidden-title routing, and retry-status isolation retained; session and MaxMode/context matrices pass |
+| DC-CONTEXT-001 | Direct prompt/recovery overlap | Caps, active-tool preflight, current-turn recovery floor, effective window, external-admission checks, checkpoint chronology, and published contract retained; session/server/MaxMode-context matrices pass |
+| DC-ACTOR-001 | Direct prompt-path overlap; full-context semantic adjacency | Main-only recovery does not broaden actor identity; frozen membership/system/tools/permissions/cwd and static-prefix failure retained by unchanged source and session/overflow regressions |
+| DC-TUI-001 | App locale-fixture semantic adjacency; no TUI component overlap | Provider/model/variant metadata and both titleLocale submission paths unchanged. Existing App locale assertions are inherited unchanged; known variant-display limits remain recorded |
+
+### Merge review and evidence boundaries
+
+- Relative to prior compat, the only opencode production change is the
+  15-line `startResume` validation hunk in `src/session/prompt.ts`. The complete
+  `startResume` and synchronous `resume` block is byte-identical to accepted
+  main. Other compat production owners and their established boundaries have
+  no incoming source delta.
+- The sole textual conflict was in `test/session/prompt-effect.test.ts`, where
+  new recovery cases met the existing assistant type narrowing. Local hunk
+  resolution retains all new cases and the same type predicate in the enhanced
+  400-provider-error case; it does not replace the surrounding compat tests.
+- Settlement occurs after runner ownership and candidate validation, before
+  admission success and the new loop. Busy publication still precedes this
+  work; the change does not promise storage mutation before every status event.
+  Existing finalizer idempotence, main-only recovery identity, locale propagation, and
+  frozen/context ownership remain intact.
+- The gate-based recovery tests observe completed/abandoned state while
+  `session.pre` blocks model dispatch, then require a new assistant and actual
+  answer with the original user parent and partial context. They preserve
+  existing user metadata and parts while allowing established synthetic
+  skill-catalog additions. Busy, stale-candidate, and pre-work cancellation
+  controls require complete persisted message snapshots to remain unchanged.
+  No claim is made that all exceptional candidates with a nonempty finish
+  reason become newly recoverable.
+- UI and enterprise fixture files match the selected upstream exactly. The
+  App fixture, synchronization skill, shared registries, and MCP production
+  source match accepted main. All package manifests and `bun.lock` match main;
+  manifests, lockfile, SDK/OpenAPI artifacts, and workflows are unchanged from
+  prior compat. No SDK generation or unrelated consolidation was needed.
+
+### Local compat validation
+
+Stable compat matrix: **331 pass, 2 existing skip, 0 fail** across 14 opencode
+test files. These are completed compat runs, verified against their command
+records and terminal logs; they do not include main's 29 non-core tests.
+
+| Group | Files relative to packages/opencode | Pass / skip |
+| --- | --- | --- |
+| session | `test/session/prompt-effect.test.ts`, `test/session/llm-request-prefix.test.ts`, `test/session/fork-prefix-invariant.test.ts`, `test/session/checkpoint-fork-mode.test.ts`, `test/session/replace-agent-subagent.test.ts` | 151 / 2 |
+| runtime | `test/effect/runner.test.ts`, `test/session/run-state-tuple-key.test.ts`, `test/session/run-state-dispose.test.ts` | 61 / 0 |
+| server | `test/server/session-recovery.test.ts`, `test/server/session-prompt-busy.test.ts`, `test/server/openapi-refs.test.ts` | 16 / 0 |
+| MaxMode/context | `test/session/max-mode.test.ts`, `test/session/max-mode-econnreset.test.ts`, `test/session/overflow.test.ts` | 103 / 0 |
+
+Run each row separately from `packages/opencode` using
+`bun test <row files> --timeout 120000`. All four recorded commands cleared
+`MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`,
+`MIMOCODE_CODEX_MODE`, `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`,
+`MIMOCODE_COMPACTION_MAX_CONTEXT`, `MIMOCODE_COMPACTION_TRIGGER_RATIO`, and
+`MIMOCODE_DISABLE_CHECKPOINT`. The package preload retains
+`MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true` and its managed fixture defaults;
+this is the package harness baseline, not an isolated-runtime default-off proof.
+Package `bun typecheck` and repository `bun lint` also exited zero.
+
+Main's UI/App/enterprise runs total 29 passes and are recorded in shared
+history. They were not repeated on compat: exact inherited source/test/fixture,
+package-manifest, and lockfile equality supplies the stated inheritance
+basis. The normal opencode CI workflow does not replace those explicit
+non-core checks.
+
+The accepted main tip `774a795682c648b7f3637b9159c063ef6a2a4018` has successful
+exact-SHA [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/34092812586),
+[typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/34092812580), and
+[lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/34092812567) runs; the
+test run includes all four shards and the isolated stdio observer. This main
+evidence does not stand in for the final compat documentation SHA.
+
+Final compat documentation publication and successful CI for each exact final
+branch SHA, remote-tip equality, and selected-upstream-to-main-to-compat
+ancestry remain separate synchronization completion gates. No pending CI is
+reported as successful by this record.
