@@ -74,6 +74,7 @@ SessionPrompt recovery/resume 输入；冻结 context 绑定接收方 Instance/R
 - [x] RED：持久 full-context actor 中断后可恢复且 task/system/tools/permissions 不漂移。
 - [x] RED：未知 actor、ephemeral 释放、cancel、dispose、换代、过时候选及 busy 均拒绝且不写消息。
 - [x] 实现严格准入、候选父用户固定和冻结上下文同代验证，不重新捕获上下文。
+- [x] 验证受控压缩/内部重试的确切成功提交回执；外部同 hook/task/model 消息和丢失 CAS 不获得续行资格。
 - [x] 验证 resume/send/cancel/dispose 竞态，inbox 保留与后继唤醒，旧代完成和通知不能污染新代。
 - [x] 独立需求与代码审查；保持 HTTP 主 agent 恢复、现有 actor 生命周期和 task 来源回归通过。
 

@@ -3474,6 +3474,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // fresh user turn starts clean.
       let textToolCallRetries = 0
       const resolvedAgentID = agentID ?? "main"
+      const recovery = recoveryParentID
+        ? { currentUserID: recoveryParentID, source: undefined as MessageV2.User | undefined }
+        : undefined
       const mcpContext: MCP.TurnContext = {
         sessionId: sessionID,
         turnId: ulid(),
@@ -3570,6 +3573,31 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             .pipe(Effect.ignore)
 
         const latestUserIs = (messageID: MessageID) => isLatestUser(sessionID, resolvedAgentID, messageID)
+        const hasRecoverySource = (user: MessageV2.User) =>
+          recovery?.source &&
+          user.sessionID === sessionID &&
+          (user.agentID ?? "main") === resolvedAgentID &&
+          user.agent === recovery.source.agent &&
+          user.task_id === recovery.source.task_id &&
+          user.model.providerID === recovery.source.model.providerID &&
+          user.model.modelID === recovery.source.model.modelID
+        // Only this runner's successful conditional writes can advance its
+        // authority. A source="hook" label on another producer grants nothing.
+        const recoveryCommitted = (expectedUserID: MessageID | undefined) =>
+          recovery
+            ? (user: MessageV2.User) => {
+                if (recovery.currentUserID !== expectedUserID || !hasRecoverySource(user))
+                  throw new Error("Actor recovery continuation changed its source")
+                recovery.currentUserID = user.id
+              }
+            : undefined
+        const commitContinuation = (input: Parameters<typeof sessions.commitUserMessageIfLatest>[0]) =>
+          sessions.commitUserMessageIfLatest(input).pipe(
+            Effect.map((created) => {
+              if (created) recoveryCommitted(input.expectedUserID)?.(input.message)
+              return created
+            }),
+          )
         // Trim freed space but `lastFinished.tokens` still reflects pre-trim state.
         // Skip one overflow check so the model can respond on the trimmed context;
         // its new assistant message will carry accurate tokens for the next check.
@@ -3618,7 +3646,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             source: "hook",
             time: { created: Date.now() },
           }
-          const created = yield* sessions.commitUserMessageIfLatest({
+          const created = yield* commitContinuation({
             expectedUserID: input.lastUser.id,
             message: msg,
             parts: [
@@ -3734,7 +3762,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             source: "hook",
             time: { created: Date.now() },
           }
-          const created = yield* sessions.commitUserMessageIfLatest({
+          const created = yield* commitContinuation({
             expectedUserID: lastUser.id,
             message: reentry,
             parts: [
@@ -3821,7 +3849,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             source: "hook",
             time: { created: Date.now() },
           }
-          const created = yield* sessions.commitUserMessageIfLatest({
+          const created = yield* commitContinuation({
             expectedUserID: input.lastUser.id,
             message: msg,
             parts: [
@@ -3887,7 +3915,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             source: "hook",
             time: { created: Date.now() },
           }
-          const created = yield* sessions.commitUserMessageIfLatest({
+          const created = yield* commitContinuation({
             expectedUserID: input.lastUser.id,
             message: msg,
             parts: [
@@ -3951,7 +3979,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             source: "hook",
             time: { created: Date.now() },
           }
-          const created = yield* sessions.commitUserMessageIfLatest({
+          const created = yield* commitContinuation({
             expectedUserID: input.lastUser.id,
             message: msg,
             parts: [
@@ -4008,7 +4036,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             source: "hook",
             time: { created: Date.now() },
           }
-          const created = yield* sessions.commitUserMessageIfLatest({
+          const created = yield* commitContinuation({
             expectedUserID: input.lastUser.id,
             message: reentry,
             parts: [
@@ -4103,8 +4131,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
-          if (recoveryParentID && lastUser.id !== recoveryParentID)
-            return yield* Effect.die(new Error("Actor recovery user changed during the resumed turn"))
+          if (recovery) {
+            if (lastUser.id !== recovery.currentUserID)
+              return yield* Effect.die(new Error("Actor recovery user changed during the resumed turn"))
+            recovery.source ??= structuredClone(lastUser)
+            if (!hasRecoverySource(lastUser))
+              return yield* Effect.die(new Error("Actor recovery continuation changed its source"))
+          }
           lastUser = {
             ...lastUser,
             system: sessionPrompt.system,
@@ -4332,6 +4365,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const allMsgs = yield* sessions.messages({ sessionID, agentID: lastUser.agentID ?? "main" })
             const result = yield* compaction.process({
               parentID: lastUser.id,
+              onUserCommitted: recoveryCommitted(lastUser.id),
               messages: allMsgs,
               sessionID,
               auto: compactionPart?.auto ?? false,
@@ -4439,6 +4473,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 agentID: lastUser.agentID,
                 task_id: lastUser.task_id,
                 expectedUserID: lastUser.id,
+                onUserCommitted: recoveryCommitted(lastUser.id),
               })
               // After inserting the boundary, the actor's filterCompactedEffect
               // slice begins at the boundary marker — context is freed for the
@@ -4492,6 +4527,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 agentID: lastUser.agentID,
                 task_id: lastUser.task_id,
                 expectedUserID: lastUser.id,
+                onUserCommitted: recoveryCommitted(lastUser.id),
               })
               // Was the switch the reason no checkpoint existed? Then say so —
               // this path is otherwise completely silent (no status message at
@@ -4898,6 +4934,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   agentID: lastUser.agentID,
                   task_id: lastUser.task_id,
                   expectedUserID: lastUser.id,
+                  onUserCommitted: recoveryCommitted(lastUser.id),
                 })
                 if (compacted) skipOverflowCheck = true
               }
@@ -5230,6 +5267,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   agentID: lastUser.agentID,
                   task_id: lastUser.task_id,
                   expectedUserID: lastUser.id,
+                  onUserCommitted: recoveryCommitted(lastUser.id),
                 })
                 if (compacted) skipOverflowCheck = true
                 return "continue" as const
@@ -5269,6 +5307,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   agentID: lastUser.agentID,
                   task_id: lastUser.task_id,
                   expectedUserID: lastUser.id,
+                  onUserCommitted: recoveryCommitted(lastUser.id),
                 })
                 // Same reason-split as the token-threshold site.
                 if (compacted && attempt2 === "memory-write-off")
@@ -5330,7 +5369,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   source: "hook",
                   time: { created: Date.now() },
                 }
-                const created = yield* sessions.commitUserMessageIfLatest({
+                const created = yield* commitContinuation({
                   expectedUserID: lastUser.id,
                   message: reentry,
                   parts: [

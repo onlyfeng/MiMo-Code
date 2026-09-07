@@ -2403,6 +2403,132 @@ const interruptedActor = Effect.fnUntraced(function* (
   return { ...spawned, messages, context }
 })
 
+for (const continuation of ["compaction", "invalid output"] as const) {
+  pauseIt.live(
+    `resume accepts owned ${continuation} continuations and preserves original task provenance`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const actor = yield* Actor.Service
+          const sessions = yield* Session.Service
+          const spawned = yield* interruptedActor()
+          const user = spawned.messages.find((message) => message.info.role === "user")!
+          if (user.info.role !== "user") return yield* Effect.die("original user missing")
+          const original = { ...user.info, task_id: "T7" }
+          yield* sessions.updateMessage(original)
+          recoveryHooks = { pre: [], post: [] }
+          if (continuation === "compaction") {
+            yield* llm.error(400, {
+              error: { code: "context_length_exceeded", message: "maximum context length is 4096 tokens" },
+            })
+            yield* llm.text("recovery compaction summary")
+          } else yield* llm.reason("thinking without a usable answer")
+          yield* llm.text("completed recovered continuation")
+          const completion = yield* actor.resume!(spawned)
+          const result = yield* completion
+          expect(
+            result.parts.some((part) => part.type === "text" && part.text === "completed recovered continuation"),
+          ).toBe(true)
+          const messages = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+          expect(messages.filter((message) => message.info.role === "user" && message.info.source !== "hook")).toEqual([
+            { ...user, info: original },
+          ])
+          const continuations = messages.filter(
+            (message) => message.info.role === "user" && message.info.source === "hook",
+          )
+          expect(continuations.length).toBeGreaterThan(0)
+          expect(continuations.every((message) => message.info.role === "user" && message.info.task_id === "T7")).toBe(
+            true,
+          )
+          expect(result.info.role === "assistant" && result.info.parentID).toBe(
+            messages.findLast((message) => message.info.role === "user")!.info.id,
+          )
+          expect(recoveryHooks.pre).toEqual(["T7"])
+          expect(recoveryHooks.post).toEqual(["T7"])
+          expect(yield* actor.getForkContext(spawned.sessionID, spawned.actorID)).toBe(spawned.context)
+        }),
+        { git: true, config: providerCfg },
+      ),
+    30_000,
+  )
+}
+
+for (const phase of ["owned continuation", "compaction CAS"] as const) {
+  it.live(
+    `resume keeps a foreign hook user outside its authority during ${phase}`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const actor = yield* Actor.Service
+          const sessions = yield* Session.Service
+          const spawned = yield* interruptedActor("persistent", true)
+          const original = spawned.messages.find((message) => message.info.role === "user")!
+          if (original.info.role !== "user") return yield* Effect.die("original user missing")
+          const release = Promise.withResolvers<void>()
+          yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+          if (phase === "owned continuation") {
+            yield* llm.reason("need an internal continuation")
+            yield* llm.push(
+              reply()
+                .wait(release.promise)
+                .tool("read", { filePath: `${dir}/config.json` }),
+            )
+          } else {
+            yield* llm.error(400, {
+              error: { code: "context_length_exceeded", message: "maximum context length is 4096 tokens" },
+            })
+            yield* llm.push(reply().wait(release.promise).text("compaction summary before external write").stop())
+          }
+          const completion = yield* actor.resume!(spawned)
+          yield* llm.wait(3).pipe(Effect.timeout("8 seconds"))
+          const owned = (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).findLast(
+            (message) => message.info.role === "user",
+          )!
+          expect(owned.info.id).not.toBe(original.info.id)
+          const foreign = {
+            ...original.info,
+            id: MessageID.ascending(),
+            source: "hook" as const,
+            time: { created: Date.now() },
+          }
+          yield* sessions.updateMessage(foreign)
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: foreign.id,
+            sessionID: spawned.sessionID,
+            type: "text",
+            text: "foreign-hook-must-not-own-recovery",
+            synthetic: true,
+          })
+          release.resolve()
+          const result = yield* completion.pipe(Effect.exit)
+          if (phase === "owned continuation") {
+            expect(result._tag).toBe("Failure")
+            if (result._tag === "Failure") expect(Cause.pretty(result.cause)).toContain("Actor recovery user changed")
+          } else {
+            // A zero-tail projection can finish at its existing summary after
+            // the replay CAS loses. That is not authority for the foreign user.
+            expect(result._tag).toBe("Success")
+            if (result._tag === "Success") {
+              expect(result.value.info).toMatchObject({ summary: true, parentID: owned.info.id })
+              expect(result.value.info.role === "assistant" && result.value.info.error).toBeUndefined()
+            }
+          }
+          expect(
+            (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID }))
+              .filter((message) => message.info.role === "user")
+              .map((message) => message.info.id),
+          ).toEqual([original.info.id, owned.info.id, foreign.id])
+          expect(yield* llm.calls).toBe(3)
+          expect(JSON.stringify(yield* llm.inputs)).not.toContain("foreign-hook-must-not-own-recovery")
+          expect(MessageV2.get({ sessionID: spawned.sessionID, messageID: foreign.id }).info).toEqual(foreign)
+        }),
+        { git: true, config: providerCfg },
+      ),
+    30_000,
+  )
+}
+
 for (const retirement of ["ephemeral", "cancelled", "disposed"] as const) {
   it.live(`resume rejects ${retirement} context without rewriting interrupted messages`, () =>
     provideTmpdirServer(
