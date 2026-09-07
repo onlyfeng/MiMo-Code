@@ -2630,3 +2630,34 @@ Validation at the recorded behavior:
 - Later registry commits do not change these source/test trees. Exact final
   branch-tip CI, remote equality, main-to-compat ancestry and excluded upstream
   commits are checked after publication; none is implied by the local matrix.
+
+
+## 2026-09-07 explicit model API propagation
+
+- Accepted main tip: `4d876d54a304689db1f86e5f6f8f0da577d0f5d4`.
+- Inherited main source/test behavior: `3c361041eedb84e67e2c86e2fca1cd7c880e7d3f`.
+- Prior compat tip: `94a8b3b0e0b57fa2b8344b59a723aa514469cb61`.
+- Compat source/test behavior: `072b557f2176f12d46271f0b111144d3fd26ddab`.
+- Shared-audit inheritance merge: `d5e067fed337d78d8b52a8d660e51df57088372c`. Later registry-only changes do
+  not advance the main or compat behavior reference.
+- Inventory N=2: MODEL-01 capability discovery and MODEL-02 explicit scoped
+  chat/audio proxy plus finite temporary tokens are both inherited unchanged.
+  FD-004 remains the shared owner; no eighth DC entry is introduced.
+- All seven active owners were re-reviewed. MODEL/CONTEXT/ACTOR have semantic
+  adjacency; NET/PLATFORM/TUI have no incoming owned path overlap. Standard
+  proxy calls do not execute agent tools, MaxMode, compaction or actor context.
+- Source invariance: the prior 92 non-registry delta paths have the same path
+  set and identical old/new blobs on each side after propagation. The incoming
+  source paths have no intersection with that compat delta. Shared FD/FC and
+  history are inherited byte-for-byte from accepted main.
+- Validation: **336 pass, 0 fail** across 16 affected test files with the same
+  default selectors and package 30-second test budget as main; package
+  typecheck and repository lint pass (warnings retained). Generated JS SDK
+  and published OpenAPI are unchanged after regeneration from compat source.
+  Node v24.16.0 builds and exercises token lifecycle, scoped discovery and real
+  non-stream/SSE chat with no Bun global; the smoke host explicitly exits after
+  listener/instance disposal. Ordinary default-off routes remain 404.
+- Changed-path calculation, inherited main behavior to compat behavior with
+  the five registry/history paths excluded: **92 files changed, 10497 insertions(+), 2115 deletions(-)**. Final remote-tip,
+  exact-SHA CI, and selected-upstream/main/compat ancestry are verified at
+  publication, separately from this local source/test evidence.
