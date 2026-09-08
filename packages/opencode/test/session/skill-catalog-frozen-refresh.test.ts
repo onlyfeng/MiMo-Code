@@ -158,6 +158,31 @@ it.live("catalog refresh and tool rotation preserve every non-catalog frozen byt
           expect(rotated.tools_hash).not.toBe("stale-fixture")
           expect(rotated.system).toEqual(after.system)
           expect(wire((yield* llm.inputs)[2], "system")).not.toContain("MUTATED_AGENTS_NEW")
+          yield* llm.tool("StructuredOutput", { ok: true })
+          yield* prompt.prompt({
+            sessionID: session.id,
+            agent: "build",
+            model,
+            format: {
+              type: "json_schema",
+              retryCount: 0,
+              schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+            },
+            parts: [{ type: "text", text: "Switch to structured output with the frozen instructions" }],
+          })
+          expect(wire((yield* llm.inputs)[3], "system")).toContain("The user has requested structured output")
+          expect(wire((yield* llm.inputs)[3], "system")).toContain("FROZEN_AGENTS_OLD")
+          expect(wire((yield* llm.inputs)[3], "system")).not.toContain("PLUGIN_NEW")
+          yield* llm.text("back to text")
+          yield* prompt.prompt({
+            sessionID: session.id,
+            agent: "build",
+            model,
+            format: { type: "text" },
+            parts: [{ type: "text", text: "Switch back to ordinary text" }],
+          })
+          expect((yield* rows(session.id))[0].system).toEqual(rotated.system)
+          expect(wire((yield* llm.inputs)[4], "system")).not.toContain("The user has requested structured output")
         }),
       { git: true, config: (url) => ({ ...config(url), plugin: [pathToFileURL(plugin).href] }) },
     )
