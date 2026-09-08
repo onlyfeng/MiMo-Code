@@ -33,7 +33,7 @@ export const PermissionRoutes = lazy(() =>
           requestID: PermissionID.zod,
         }),
       ),
-      validator("json", z.object({ reply: Permission.Reply.zod, message: z.string().optional() })),
+      validator("json", Permission.ReplyBody.zod),
       async (c) =>
         jsonRequest("PermissionRoutes.reply", c, function* () {
           const params = c.req.valid("param")
@@ -43,6 +43,7 @@ export const PermissionRoutes = lazy(() =>
             requestID: params.requestID,
             reply: json.reply,
             message: json.message,
+            scope: json.scope,
           })
           return true
         }),
@@ -126,7 +127,7 @@ export const PermissionRoutes = lazy(() =>
       describeRoute({
         summary: "Get auto-approve-delete state",
         description:
-          "Whether irreversible deletes skip the extra bash_delete confirmation. Instance-scoped; defaults to the MIMOCODE_AUTO_APPROVE_DELETE env var.",
+          "Whether irreversible deletes skip human confirmation after explicit deny checks. Instance-scoped; initialized from MIMOCODE_AUTO_APPROVE_DELETE or dangerous startup mode.",
         operationId: "permission.autoApproveDelete",
         responses: {
           200: {
@@ -150,7 +151,7 @@ export const PermissionRoutes = lazy(() =>
       describeRoute({
         summary: "Set auto-approve-delete state",
         description:
-          "Trust the model with irreversible deletes, skipping the extra bash_delete confirmation. Distinct from skip-all, which deliberately does NOT cover forced-ask permissions. Applies to this directory instance: same-directory subagents share it, while isolated worktrees and other directories do not. Explicit `bash: deny` rules still block. Already-pending delete asks are left for a human — the command they guard is irreversible.",
+          "Trust the model with irreversible deletes after explicit deny checks. This runtime control is independent of skip-all. Applies to this directory instance: same-directory subagents share it, while isolated worktrees and other directories do not. Explicit bash, bash_delete, and external_directory denies still block. Already-pending delete asks are left for a human.",
         operationId: "permission.setAutoApproveDelete",
         responses: {
           200: {

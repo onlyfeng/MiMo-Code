@@ -62,7 +62,7 @@ export function forkQuery(deps: {
   sessions: Session.Interface
   provider: Provider.Interface
   actor: ActorInterface
-}, targetSessionID: SessionID, question: string, selectedModel?: { providerID: ProviderID; modelID: ModelID }) {
+}, targetSessionID: SessionID, question: string, selectedModel?: { providerID: ProviderID; modelID: ModelID }, runApproval?: Tool.Context["runApproval"]) {
   return Effect.gen(function* () {
     // a. Resolve the target's persisted history and the slice to snapshot.
     // A child created via `session create` runs as a PEER actor whose actorID
@@ -140,6 +140,7 @@ export function forkQuery(deps: {
     // write/edit/bash/patch are unavailable to the fork. background:false so we
     // await the answer; lifecycle:"ephemeral" so the host session is disposable.
     const result = yield* deps.actor.spawn({
+      runApproval,
       mode: "subagent",
       sessionID: childSession.id,
       parentSessionID: targetSessionID,
@@ -830,6 +831,7 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
 
         const spawnExit = yield* Effect.exit(
           actor.spawn({
+            runApproval: ctx.runApproval,
             mode: "peer",
             sessionID: ctx.sessionID as SessionID,
             agentType: op.mode ?? "build",
@@ -1204,7 +1206,7 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
 
       if (op.action === "ask") {
         const actor = yield* requireActor()
-        const answer = yield* forkQuery({ sessions, provider, actor }, op.session_id as SessionID, op.question)
+        const answer = yield* forkQuery({ sessions, provider, actor }, op.session_id as SessionID, op.question, undefined, ctx.runApproval)
         return {
           title: `Asked ${op.session_id}`,
           output: answer,

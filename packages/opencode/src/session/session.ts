@@ -1,3 +1,4 @@
+import * as RunApproval from "./run-approval"
 import { Slug } from "@mimo-ai/shared/util/slug"
 import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 import path from "path"
@@ -849,6 +850,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
     const commitUserMessageIfLatest: Interface["commitUserMessageIfLatest"] = Effect.fn(
       "Session.commitUserMessageIfLatest",
     )(function* (input) {
+      const runApproval = yield* RunApproval.current
       return yield* Effect.sync(() => {
         const parsed = parseUserMessage(input.message, input.parts)
         return Database.transaction(
@@ -872,7 +874,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           },
           { behavior: "immediate" },
         )
-      })
+      }).pipe(Effect.tap((committed) => Effect.sync(() => {
+        if (committed) RunApproval.register(runApproval, input.message.id, input.expectedUserID)
+      })))
     })
 
     const updatePart = <T extends MessageV2.Part>(part: T): Effect.Effect<T> =>
