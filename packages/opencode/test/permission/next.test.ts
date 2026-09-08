@@ -824,8 +824,8 @@ it.live("ask - bash_delete stays pending even with explicit bash_delete allow", 
   withDir({ git: true }, () =>
     Effect.gen(function* () {
       // Even a named allow rule cannot pre-authorize a forced-ask permission.
-      // The env-var opt-out (MIMOCODE_AUTO_APPROVE_DELETE, tool-side) is the
-      // only bypass; the permission layer itself refuses to honor allow.
+      // Only the instance's separate delete exemption can bypass the ask;
+      // the permission layer itself refuses to honor a blanket allow.
       const fiber = yield* ask({
         sessionID: SessionID.make("session_test"),
         permission: "bash_delete",

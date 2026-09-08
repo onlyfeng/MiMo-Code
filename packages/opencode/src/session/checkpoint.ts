@@ -1,3 +1,4 @@
+import * as RunApproval from "./run-approval"
 import fs from "fs/promises"
 import path from "path"
 import z from "zod"
@@ -1813,6 +1814,8 @@ export const layer: Layer.Layer<
         source: "hook",
         time: { created: syntheticTime },
       })
+
+      RunApproval.register(yield* RunApproval.current, msg.id)
 
       yield* session.updatePart({
         id: PartID.ascending(),

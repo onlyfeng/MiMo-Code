@@ -13,6 +13,7 @@ import { McpSampling } from "../../src/mcp/sampling"
 import { DEFAULT_CHUNK_TIMEOUT } from "../../src/provider/provider"
 import { MCP } from "../../src/mcp/index"
 import { Permission } from "../../src/permission"
+import * as RunApproval from "../../src/session/run-approval"
 import type { SessionID } from "../../src/session/schema"
 import { wav } from "./wav-fixture"
 
@@ -410,13 +411,14 @@ function wireSampling(
   serverName = "fixture",
   livenessIntervalMs?: number,
   chunkTimeoutMs?: number,
+  runApproval?: RunApproval.Scope,
 ) {
   return AppRuntime.runPromise(
     Effect.gen(function* () {
       const bridge = yield* EffectBridge.make()
       McpSampling.setActiveSession(client, SESSION)
       McpSampling.serve(serverName, client as never, bridge, livenessIntervalMs, chunkTimeoutMs)
-    }),
+    }).pipe(RunApproval.provide(runApproval)),
   )
 }
 
@@ -1846,6 +1848,65 @@ describe("sampling streams, and a stalled stream is observable", () => {
 })
 
 describe("the approval prompt", () => {
+  test("sampling cannot borrow the connection creator's live or expired run approval", async () => {
+    wire = stubProvider(TRANSCRIPT)
+    await withInstance(config({ mcp: { fixture: { type: "local", command: ["true"] } } }), async () => {
+      const h = await harness({ text: "hi" })
+      const controller = new AbortController()
+      const scope: RunApproval.Scope = {
+        id: "81a807b3-7b17-42bf-b9b1-9e9fb7c4af56",
+        active: true,
+        signal: controller.signal,
+        messages: new Set(),
+        close: () => { scope.active = false; controller.abort() },
+      }
+      // This is the real connection bridge, created while run A is active.
+      await wireSampling(h.client, "fixture", undefined, undefined, scope)
+      try {
+        for (const target of ["ses_sampling_other_run", "ses_sampling_after_run"] as SessionID[]) {
+          McpSampling.setActiveSession(h.client, target)
+          const pending = h.client.callTool(
+            { name: "transcribe_audio_fixture", arguments: {} },
+            CallToolResultSchema,
+            { timeout: 10_000 },
+          )
+          try {
+            const request = await waitForAsk()
+            expect(request.sessionID).toBe(target)
+            expect(request.runID).toBeUndefined()
+            // Closing the unrelated creator must neither approve nor abort this
+            // sampling request. Reusing its bridge after closure is safe too.
+            scope.active = false
+            controller.abort()
+            const prompts = await AppRuntime.runPromise(Permission.Service.use((permission) => permission.list()))
+            expect(prompts.some((item) => item.id === request.id)).toBe(true)
+            expect(h.toolActive()).toBe(true)
+            await AppRuntime.runPromise(
+              Permission.Service.use((permission) => permission.reply({ requestID: request.id, reply: "once" })),
+            )
+            const result = await pending
+            expect(result.isError).toBeFalsy()
+            expect((result.content as Array<{ text: string }>)[0].text).toBe(TRANSCRIPT)
+            expect(McpSampling.inFlightCount(h.client)).toBe(0)
+            expect(
+              await AppRuntime.runPromise(Permission.Service.use((permission) => permission.list())),
+            ).toHaveLength(0)
+          } finally {
+            await AppRuntime.runPromise(McpSampling.cancelAll(h.client))
+            await pending.catch(() => {})
+          }
+        }
+        expect(wire!.bodies).toHaveLength(2)
+      } finally {
+        scope.active = false
+        controller.abort()
+        await AppRuntime.runPromise(McpSampling.cancelAll(h.client))
+        expect(McpSampling.inFlightCount(h.client)).toBe(0)
+        await h.client.close()
+      }
+    })
+  }, 30_000)
+
   test("carries server, model, content types and audio size, and no credentials", async () => {
     wire = stubProvider(TRANSCRIPT)
     const buffer = wav(2)

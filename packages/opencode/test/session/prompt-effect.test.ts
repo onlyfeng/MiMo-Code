@@ -1,3 +1,4 @@
+import * as RunApproval from "../../src/session/run-approval"
 import { Worktree } from "../../src/worktree"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -8289,4 +8290,369 @@ it.live(
       { git: true, config: cfg },
     ),
   30_000,
+)
+
+it.live("run approval survives real SDK tool bridge and does not leak into the next same-session run", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const permission = yield* Permission.Service
+      const bus = yield* Bus.Service
+      const chat = yield* sessions.create({
+        title: "Run approval",
+        permission: [{ permission: "bash", pattern: "*", action: "ask" }],
+      })
+      const seen: Array<string | undefined> = []
+      const off = yield* bus.subscribeCallback(Permission.Event.Asked, (event) => {
+        seen.push(event.properties.runID)
+        Effect.runFork(permission.reply({ requestID: event.properties.id, reply: "once" }))
+      })
+      try {
+        for (const runID of ["6dfb4578-326e-4af8-9db9-a8c2310ab1da", undefined]) {
+          yield* llm.tool("bash", { command: "echo scoped", description: "Print a marker" })
+          yield* llm.text("done")
+          const completion = yield* prompt.startPrompt({
+            sessionID: chat.id,
+            model: ref,
+            parts: [{ type: "text", text: "print" }],
+            runID,
+          })
+          yield* completion
+        }
+        expect(seen).toEqual(["6dfb4578-326e-4af8-9db9-a8c2310ab1da", undefined])
+      } finally {
+        off()
+      }
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+for (const agentID of ["main", "worker"])
+  it.live(
+    `run approval keeps its tag across automatic ${agentID === "main" ? "checkpoint rebuild" : "compaction"} and synthetic continuation`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const prompt = yield* SessionPrompt.Service
+          const sessions = yield* Session.Service
+          const permission = yield* Permission.Service
+          const bus = yield* Bus.Service
+          const chat = yield* sessions.create({
+            title: "Run compaction",
+            permission: [{ permission: "bash", pattern: "*", action: "ask" }],
+          })
+          const seen: Permission.Request[] = []
+          const off = yield* bus.subscribeCallback(Permission.Event.Asked, (event) => {
+            seen.push(event.properties)
+            Effect.runFork(Effect.gen(function* () {
+              if (agentID === "main" && seen.length === 1) {
+                // Seed a completed checkpoint before overflow, so this test
+                // exercises rebuild rather than starting a separate writer.
+                const boundary = (yield* sessions.messages({ sessionID: chat.id })).findLast((message) => message.info.role === "user")!
+                yield* Effect.promise(() => Bun.write(checkpointPath(chat.id), "Topic: Continue the second marker\n"))
+                yield* Effect.sync(() => Database.use((db) => db.update(SessionTable).set({ last_checkpoint_message_id: boundary.info.id }).where(eq(SessionTable.id, chat.id)).run()))
+              }
+              yield* permission.reply({ requestID: event.properties.id, reply: "once" })
+            }))
+          })
+          try {
+            yield* llm.push(
+              reply()
+                .tool("bash", { command: "echo before", description: "Before compaction" })
+                .usage({ input: 95000, output: 10 }),
+            )
+            if (agentID !== "main") yield* llm.text("The first command succeeded. Continue the requested work.")
+            yield* llm.tool("bash", { command: "echo after", description: "After compaction" })
+            yield* llm.text("done")
+            yield* yield* prompt.startPrompt({
+              sessionID: chat.id,
+              agentID,
+              model: ref,
+              runID: "6dfb4578-326e-4af8-9db9-a8c2310ab1da",
+              parts: [{ type: "text", text: "run two markers" }],
+            })
+            expect(seen.map((request) => request.runID)).toEqual([
+              "6dfb4578-326e-4af8-9db9-a8c2310ab1da",
+              "6dfb4578-326e-4af8-9db9-a8c2310ab1da",
+            ])
+            const messages = yield* sessions.messages({ sessionID: chat.id, agentID })
+            expect(
+              messages.some((message) =>
+                message.parts.some((part) => part.type === (agentID === "main" ? "checkpoint" : "compaction")),
+              ),
+            ).toBe(true)
+            const parents = seen
+              .map((request) => messages.find((message) => message.info.id === request.tool?.messageID)?.info)
+              .map((info) => (info?.role === "assistant" ? info.parentID : undefined))
+            expect(parents[0]).toBeDefined()
+            expect(parents[1]).toBeDefined()
+            expect(parents[0]).not.toBe(parents[1])
+          } finally {
+            off()
+          }
+        }),
+        { git: true, config: providerCfg },
+      ),
+  )
+
+itActor.live("run approval command subtask gives its foreground child the creator tag", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const permission = yield* Permission.Service
+      const bus = yield* Bus.Service
+      const chat = yield* sessions.create({
+        title: "Command child",
+        permission: [{ permission: "bash", pattern: "*", action: "ask" }],
+      })
+      const seen: Permission.Request[] = []
+      const off = yield* bus.subscribeCallback(Permission.Event.Asked, (event) => {
+        seen.push(event.properties)
+        Effect.runFork(permission.reply({ requestID: event.properties.id, reply: "once" }))
+      })
+      try {
+        yield* llm.tool("bash", { command: "echo child", description: "Child marker" })
+        yield* llm.text("child complete")
+        yield* llm.text("command complete")
+        yield* yield* prompt.startCommand({
+          sessionID: chat.id,
+          runID: "6dfb4578-326e-4af8-9db9-a8c2310ab1da",
+          command: "scoped",
+          arguments: "",
+        })
+        expect(seen.map((request) => request.runID)).toEqual(["6dfb4578-326e-4af8-9db9-a8c2310ab1da"])
+        const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "*" })
+        const actor = messages.find((message) => message.info.id === seen[0]?.tool?.messageID)
+        expect(actor?.info.agentID).toBeDefined()
+        expect(actor?.info.agentID).not.toBe("main")
+      } finally {
+        off()
+      }
+    }),
+    {
+      git: true,
+      config: (url) => ({
+        ...providerCfg(url),
+        command: {
+          scoped: { template: "print a marker", description: "Run scoped child", agent: "general", subtask: true },
+        },
+        agent: {
+          general: { model: "test/test-model", prompt: "Run the requested command then stop.", completionGate: false },
+        },
+      }),
+    },
+  ),
+)
+
+it.live("run approval disconnect retracts an already pending command permission without executing it", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const permission = yield* Permission.Service
+      const bus = yield* Bus.Service
+      const chat = yield* sessions.create({
+        title: "Disconnected command",
+        permission: [{ permission: "bash", pattern: "*", action: "ask" }],
+      })
+      const asked = yield* Deferred.make<Permission.Request>()
+      const controller = new AbortController()
+      const off = yield* bus.subscribeCallback(Permission.Event.Asked, (event) => {
+        Effect.runFork(Deferred.succeed(asked, event.properties))
+      })
+      try {
+        yield* llm.tool("bash", { command: "echo bad > should-not-exist.txt", description: "Must never execute" })
+        yield* llm.text("cancelled")
+        const completion = yield* prompt
+          .startCommand({
+            sessionID: chat.id,
+            runID: "6dfb4578-326e-4af8-9db9-a8c2310ab1da",
+            command: "scoped",
+            arguments: "",
+          })
+          .pipe(Effect.provideService(RunApproval.RequestSignal, controller.signal))
+        const request = yield* Deferred.await(asked)
+        expect(request.runID).toBe("6dfb4578-326e-4af8-9db9-a8c2310ab1da")
+        expect((yield* permission.list()).some((pending) => pending.id === request.id)).toBe(true)
+        controller.abort()
+        yield* completion
+        expect((yield* permission.list()).some((pending) => pending.id === request.id)).toBe(false)
+        expect(yield* Effect.promise(() => Bun.file(path.join(dir, "should-not-exist.txt")).exists())).toBe(false)
+      } finally {
+        off()
+        controller.abort()
+      }
+    }),
+    {
+      git: true,
+      config: (url) => ({
+        ...providerCfg(url),
+        model: "test/test-model",
+        command: { scoped: { template: "print a marker", agent: "build" } },
+      }),
+    },
+  ),
+)
+
+itActor.live(
+  "run approval explicitly follows new peers and subagents but never infers ownership from a parent session",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actors = yield* Effect.serviceOption(Actor.Service)
+        if (actors._tag === "None") throw new Error("real Actor service was not provided")
+        const actor = actors.value
+        const sessions = yield* Session.Service
+        const permission = yield* Permission.Service
+        const bus = yield* Bus.Service
+        const parent = yield* sessions.create({
+          title: "Run children",
+          permission: [{ permission: "bash", pattern: "*", action: "ask" }],
+        })
+        const seen: Permission.Request[] = []
+        const off = yield* bus.subscribeCallback(Permission.Event.Asked, (event) => {
+          seen.push(event.properties)
+          Effect.runFork(permission.reply({ requestID: event.properties.id, reply: "once" }))
+        })
+        try {
+          yield* Effect.gen(function* () {
+            for (const mode of ["subagent", "peer"] as const) {
+              for (const inherit of [true, false]) {
+                yield* llm.tool("bash", { command: "echo child", description: "Child marker" })
+                yield* llm.text("complete")
+                const child = yield* actor.spawn({
+                  mode,
+                  sessionID: parent.id,
+                  agentType: "build",
+                  task: "print a marker",
+                  context: "none",
+                  tools: ["bash"],
+                  model: ref,
+                  background: false,
+                  runApproval: inherit ? yield* RunApproval.current : undefined,
+                })
+                const result = yield* Deferred.await(child.outcome)
+                expect(result.status).toBe("success")
+                expect(seen.at(-1)?.runID).toBe(inherit ? "6dfb4578-326e-4af8-9db9-a8c2310ab1da" : undefined)
+                expect(seen.at(-1)?.sessionID).toBe(child.sessionID)
+                expect(child.sessionID === parent.id).toBe(mode === "subagent")
+              }
+            }
+          }).pipe(RunApproval.own("6dfb4578-326e-4af8-9db9-a8c2310ab1da"))
+          expect(seen).toHaveLength(4)
+        } finally {
+          off()
+        }
+      }),
+      { git: true, config: (url) => ({ ...providerCfg(url), permission: { bash: "ask" } }) },
+    ),
+)
+
+it.live("run approval does not authorize an unrelated user queued into its admitted runner", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const permission = yield* Permission.Service
+      const bus = yield* Bus.Service
+      const chat = yield* sessions.create({
+        title: "Unrelated queued input",
+        permission: [{ permission: "bash", pattern: "*", action: "ask" }],
+      })
+      const asked = yield* Deferred.make<Permission.Request>()
+      const off = yield* bus.subscribeCallback(Permission.Event.Asked, (event) => {
+        Effect.runFork(Deferred.succeed(asked, event.properties))
+      })
+      const release = defer<void>()
+      try {
+        yield* llm.hold("first run complete", release.promise)
+        yield* llm.tool("bash", { command: "echo queued > queued-result.txt", description: "Unrelated queued work" })
+        yield* llm.text("queued work complete")
+        const completion = yield* prompt.startPrompt({
+          sessionID: chat.id,
+          runID: "6dfb4578-326e-4af8-9db9-a8c2310ab1da",
+          model: ref,
+          parts: [{ type: "text", text: "first user" }],
+        })
+        yield* llm.wait(1)
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "different client queued user" }],
+        })
+        release.resolve()
+        const request = yield* Deferred.await(asked)
+        expect(request.runID).toBeUndefined()
+        yield* Effect.sleep("20 millis")
+        expect((yield* permission.list()).some((pending) => pending.id === request.id)).toBe(true)
+        expect(yield* Effect.promise(() => Bun.file(path.join(dir, "queued-result.txt")).exists())).toBe(false)
+        yield* permission.reply({ requestID: request.id, reply: "once" })
+        yield* completion
+        expect(yield* Effect.promise(() => Bun.file(path.join(dir, "queued-result.txt")).text())).toBe("queued\n")
+      } finally {
+        release.resolve()
+        off()
+      }
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("run approval reaches processor doom-loop asks without tool ownership metadata", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const permission = yield* Permission.Service
+      const bus = yield* Bus.Service
+      const chat = yield* sessions.create({ title: "Doom loop ownership" })
+      const seen: Permission.Request[] = []
+      const off = yield* bus.subscribeCallback(Permission.Event.Asked, (event) => {
+        seen.push(event.properties)
+        Effect.runFork(permission.reply({ requestID: event.properties.id, reply: "once" }))
+      })
+      try {
+        const input = { command: "echo repeated", description: "Repeated tool" }
+        yield* llm.push({
+          type: "sse",
+          head: [
+            {
+              choices: [
+                {
+                  delta: {
+                    role: "assistant",
+                    tool_calls: [0, 1, 2].map((index) => ({
+                      index,
+                      id: `repeat_${index}`,
+                      type: "function",
+                      function: { name: "bash", arguments: JSON.stringify(input) },
+                    })),
+                  },
+                },
+              ],
+            },
+          ],
+          tail: [{ choices: [{ delta: {}, finish_reason: "tool_calls" }] }],
+        })
+        yield* llm.text("done")
+        yield* yield* prompt.startPrompt({
+          sessionID: chat.id,
+          model: ref,
+          runID: "6dfb4578-326e-4af8-9db9-a8c2310ab1da",
+          parts: [{ type: "text", text: "three repeated tools" }],
+        })
+        const request = seen.find((request) => request.permission === "doom_loop")
+        expect(request).toBeDefined()
+        expect(request?.tool).toBeUndefined()
+        expect(request?.runID).toBe("6dfb4578-326e-4af8-9db9-a8c2310ab1da")
+      } finally {
+        off()
+      }
+    }),
+    { git: true, config: (url) => ({ ...providerCfg(url), permission: { bash: "allow", doom_loop: "ask" } }) },
+  ),
 )

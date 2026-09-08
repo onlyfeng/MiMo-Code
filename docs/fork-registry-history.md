@@ -2481,3 +2481,135 @@ capability or a new compat override.
   classification, and frozen actor/context behavior remain separate retained
   capabilities. Final compat validation and exact-SHA publication evidence
   are recorded by the propagation review, not asserted by this main entry.
+
+
+## 2026-09-08 POLICY-06 yolo deletion and invocation approval
+
+Specified behavior adoption, first in the approved order POLICY-06 → POLICY-01
+→ POLICY-04 → POLICY-03 → POLICY-02. The separately completed compaction policy
+is unchanged. This operation does not advance the overall upstream review
+baseline `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` or import unrelated commits.
+
+- Released upstream source: `2bff8074b572aee6dd0d0bc5e86fe5db9bff8013`, included
+  in v0.1.14 `2a0eb706e95a77cba34a319e9f11f33f26d4450c`.
+- Selected local upstream snapshot: `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`.
+- Previous main: `df9a263bdfa60f762b0c90b6126a774ef60737ed`.
+- Main runtime/tests and bundled permissions guidance: `6df77610eed88d86d674c6fd145852c5b4208289`.
+- Registry-only commits do not advance that source snapshot. Main and compat
+  PR head review, merge, and branch push CI are recorded separately after they
+  actually complete.
+
+| Capability | Result | Retained fork contract | Owners |
+| --- | --- | --- | --- |
+| POLICY-06 | Startup yolo includes deletion approval; local/attached CLI uses once replies for its own active invocation | Explicit bash/bash_delete/external-directory deny wins; no per-run shared Boolean flip or restoration; runtime delete and skip-all remain independent | FD-001, FC-001, FC-007 |
+
+The invocation UUID is optional correlation, never a credential or persisted
+permission grant. Scope ownership starts inside admitted prompt/command work.
+Successful atomic continuations and explicitly admitted children carry the same
+live scope. Selecting unrelated queued input closes the previous scope and
+cancels old pending asks, while the new input retains ordinary human approval.
+Captured bridges keep separate holders, so clearing the current holder cannot
+remove an old bridge's cancellation signal. Actor recovery/persistent wakes and
+server-initiated MCP sampling do not inherit a stale caller scope.
+
+CLI rejection uses optional `scope: "request"` to avoid the old session-wide
+rejection cascade affecting another invocation. Missing scope retains the human
+UI behavior; once/always remain unchanged. SDK/OpenAPI were generated from
+source, retaining the existing flattened reply call signature. Only synchronous
+prompt and command advertise runID; prompt_async does not silently accept an
+unsupported correlation field.
+
+A delete confirmation covers the whole command once, after explicit regular
+Bash and external-directory deny checks. The existing temporary-target exemption
+and protected project/worktree paths remain unchanged. See
+[Yolo and run approval](yolo-run-approval.md) for the entry-point contracts.
+
+### Validation at the source snapshot
+
+Bun 1.3.14, from package directories. Default-path commands remove ambient
+MIMOCODE_EXPERIMENTAL, MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
+MIMOCODE_CODEX_MODE, MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL,
+MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS, and MIMOCODE_AUTO_APPROVE_DELETE.
+Package preloads, including ORCHESTRATOR=true, remain the harness baseline.
+No ratio, max-context, or disable-checkpoint ambient override was present.
+
+| Matrix | Result |
+| --- | --- |
+| Bash deletion, isolated Git, conflict ownership, delete flag, TUI deletion prompt (6 files) | 73 pass / 0 fail |
+| Permission directory, HTTP reply scope, OpenAPI refs, CLI yolo/completion (18 files) | 198 pass / 0 fail |
+| MCP sampling permission, cancellation, and old-connection correlation | 14 pass / 0 fail |
+| Final real CLI attach, HTTP reply scope, and prompt/command/async admission (3 files) | 11 pass / 0 fail |
+| Run scope, real tool bridge, child scope, disconnect, queue, doom loop, and continuation (3 files) | Final corrected group: 12 pass / 0 fail |
+| Independent frozen-scope/queue/compaction review | 5 pass / 0 fail |
+| opencode and JavaScript SDK package typecheck | pass |
+| Repository lint | 0 errors; existing warnings remain |
+| Source-generated v2 SDK/OpenAPI and diff whitespace check | pass |
+
+The checkpoint fixture failure came from an independent checkpoint writer
+consuming the test's queued provider response. The corrected fixture provides a
+real existing checkpoint, still requiring two real permission events with the
+same runID and different assistant parents. No assertion was weakened. The
+per-group counts overlap and are not an aggregate suite total.
+
+Actual regressions were demonstrated before fixes: delete grants bypassing deny,
+foreign queued input receiving the old runID, MCP sampling inheriting a connection
+creator's runID, and request rejection cancelling another run's pending ask.
+The final CLI test launches real Bun subprocesses against the HTTP server and
+model fixture: yolo deletes once, a later strict invocation refuses deletion,
+and shared autoApproveDelete remains false with no pending asks.
+
+Active FD/FC owners were reviewed for all touched surfaces, including cleanly
+merging bridges. Relevant compat overlays are DC-ACTOR-001 and DC-CONTEXT-001;
+DC-MODEL-001, DC-NET-002, and DC-TUI-001 have adjacent consumers. Existing frozen
+contexts, chronology, model routing, network, and TUI overlays must be preserved
+when the accepted main commit is propagated. No unrelated or pre-existing dirty
+worktree is part of this operation.
+
+
+## 2026-09-08 — POLICY-06 mixed-command review correction
+
+PR #83 review found that independent delete auto-approval could bypass ordinary
+Bash/external-directory asks for a mixed command such as `rm victim && curl ...`.
+The same shared behavior was already on main, so the correction is reviewed on
+main before propagation into the pending compat PR.
+
+Runtime/tests and bundled guidance: `db2211ddbe0e064e4207583145e66c471deb73ab`. Prior accepted
+main: `bfa3c2466d07da01881b252a0337ac444b4ae927`. The selected upstream
+baseline is unchanged. FD-001 and FC-007 now distinguish an actual pending reply
+from an automatic grant. A request-local internal receipt preserves the complete
+command's single manual confirmation without a shared-switch reread; an automatic
+delete grant still reaches ordinary Bash and external-directory authorization.
+Explicit denies, temporary classification, and run-scoped approval remain intact.
+No HTTP or SDK shape changes.
+
+Validation: 4 real red regressions then 44 related permission/CLI tests and 15
+Bash scanning tests passed, with 183 and 33 assertions respectively. Mixed-command
+fixtures check untouched files and zero HTTP requests before approval, successful
+effects after once, and no effects after rejection. Automatic approval followed
+by a concurrent switch change still preserves ordinary asks. Manual/forwarded
+pending replies and real CLI yolo attach retain their expected behavior.
+Package typecheck passed; repository lint reported 0 errors and 4468 existing
+warnings. All six ambient experiment/yolo/delete selectors were cleared while
+preserving package preload. Runtime evidence is macOS zsh; PowerShell is not
+installed locally and was not claimed tested. Whitespace diff check passed.
+
+Compat inherits both shared production files unchanged; DC-ACTOR-001 and
+DC-CONTEXT-001 run-scope carriers remain as previously reviewed. Exact PR-head
+Codex review, CI, and final remote propagation are separate merge gates.
+
+
+### POLICY-06 forwarded approval follow-up
+
+PR #84 Codex review identified the explicit `session approve` path as a second
+completion producer that bypasses `Permission.reply`. Source `c7014557445832a97248ed7b0af568e51bfd291d`
+marks the original ask's receipt only inside the successful Deferred completion
+for that one-shot forwarded approval. Automatic pre-grants and denied or already
+settled requests cannot be relabelled. The original statement above referring
+only to a pending reply is superseded by this equivalent explicit approval path.
+
+New real SessionTool approve/deny/pregrant and late-completion regressions:
+4 passed. With the existing mixed Bash matrix, 22 tests / 151 assertions passed;
+20 forwarding/forward-ref/delete-control tests / 42 assertions passed separately.
+Package typecheck and whitespace checks passed. No HTTP/SDK changes; selected
+upstream unchanged. This correction requires a fresh current-head Codex review
+before main is merged and propagated to compat.

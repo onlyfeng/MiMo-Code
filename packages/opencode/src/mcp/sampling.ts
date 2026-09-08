@@ -7,6 +7,7 @@ import { Provider, ProviderTransform, ModelCapability } from "@/provider"
 import { InstallationVersion } from "@/installation/version"
 import { Log } from "@/util"
 import type { SessionID } from "@/session/schema"
+import * as RunApproval from "@/session/run-approval"
 
 const log = Log.create({ service: "mcp.sampling" })
 
@@ -997,7 +998,13 @@ export function serve(
       signal: extra?.signal,
       chunkTimeoutMs,
       liveness,
-    }).pipe(Effect.exit)
+    }).pipe(
+      // The connection bridge can outlive the CLI run that created it.
+      // A last-seen session is not proof that this server-initiated request
+      // belongs to that run; retain sampling's own approval and abort signal.
+      RunApproval.provide(undefined),
+      Effect.exit,
+    )
 
     let fibers = inFlight.get(client)
     if (!fibers) {

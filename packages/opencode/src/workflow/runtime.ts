@@ -1,3 +1,4 @@
+import * as RunApproval from "@/session/run-approval"
 import { Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import os from "node:os"
 import { createHash } from "node:crypto"
@@ -322,7 +323,7 @@ export const layer = Layer.effect(
     // lazily below — it reads the per-instance ALS context and returns Effect<Info>
     // with no requirement, so it stays out of the public method types.
     const config = yield* Config.Service
-    const hostBridge = yield* EffectBridge.make()
+    const hostBridge = yield* EffectBridge.make().pipe(RunApproval.capture)
     const fork = <A, E, R>(effect: Effect.Effect<A, E, R>) => hostBridge.fork(effect)
     const scope = yield* Scope.Scope
     const runs = new Map<string, RunEntry>()
@@ -602,7 +603,7 @@ export const layer = Layer.effect(
       // Capture the bridge BEFORE forking so it snapshots the caller's
       // Instance/Workspace context — the quickjs Promise boundary in agent()
       // would otherwise lose it.
-      const bridge = yield* EffectBridge.make()
+      const bridge = yield* EffectBridge.make().pipe(RunApproval.capture)
 
       // Resolve the process-wide ceiling NOW (under the live Instance context) so
       // its semaphore object exists before any spawn site closes over it. Sized
@@ -933,7 +934,7 @@ export const layer = Layer.effect(
           directory: info.directory,
           fn: () => Promise.resolve(Instance.current),
         })
-        const wtBridge = await bridge.promise(EffectBridge.make().pipe(Effect.provideService(InstanceRef, wtCtx)))
+        const wtBridge = await bridge.promise(EffectBridge.make().pipe(RunApproval.capture, Effect.provideService(InstanceRef, wtCtx)))
         // 3) Spawn + await INSIDE Instance.provide({worktree}) — AsyncLocalStorage
         //    propagates the worktree dir across the actor's forked work fiber, so the
         //    agent's read/write/bash resolve to the worktree, not the parent tree.

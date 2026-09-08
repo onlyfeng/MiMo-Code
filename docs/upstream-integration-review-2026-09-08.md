@@ -54,3 +54,5 @@ compat 工具与 sandbox 矩阵 168 项、MCP 矩阵 126 项、API/生成契约 
 开发分支已在 [#2336](https://github.com/XiaomiMiMo/MiMo-Code/pull/2336)（main `534f32d86f38e0a69f8804eb6e7f7a83674eed1d`，2026-09-07）删除 `/v1/audio/*` 和 voice design/clone。该调整尚未正式发布，既不能列为新发布能力，也不作为本次删除 fork 已适配音频功能的授权。
 
 以下是仍保留的已发布行为差异，需具体产品需求后才能重新评估：隐式额外监听、API 远程图片 URL/自由 provider_options、多模型或永久令牌、任意 agent/task 恢复、固定 90% 忽略 reserve、yolo 连带开启删除自动批准。它们有 FD/FC 对应记录，并非遗漏。Web/App/Desktop 按当前仓库范围不作为本轮融合目标。
+
+后续取舍说明：以上是本报告初次审计时的状态。用户已确认同步 yolo 的删除语义，具体实现和仍保留的运行隔离见 [Yolo and run approval](yolo-run-approval.md)。现行合同以 [偏离登记](upstream-deviations.md) 和 [能力登记](fork-capabilities.md) 为准，本文不回写当时的审计结论。

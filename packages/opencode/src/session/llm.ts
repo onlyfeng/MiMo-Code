@@ -1,3 +1,4 @@
+import * as RunApproval from "@/session/run-approval"
 import path from "path"
 import { Provider, ProviderError } from "@/provider"
 import { Log } from "@/util"
@@ -698,7 +699,7 @@ const live: Layer.Layer<
           return !match || match.action !== "ask"
         })
 
-        const bridge = yield* EffectBridge.make()
+        const bridge = yield* EffectBridge.make().pipe(RunApproval.capture)
         const approvedToolsForSession = new Set<string>()
         workflowModel.approvalHandler = Instance.bind(async (approvalTools) => {
           const uniqueNames = [...new Set(approvalTools.map((t: { name: string }) => t.name))] as string[]
