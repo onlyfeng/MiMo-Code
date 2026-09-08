@@ -2992,3 +2992,26 @@ A final focused Inbox/Actor delivery run passes 37 tests / 187 assertions across
 11 files (overlaps prior evidence); it includes unique durable row IDs and both
 single-row and 101-row queues. Typecheck and lint pass. The earlier 50-test Inbox
 run remains historical evidence, not a repeated full run at this source.
+
+### 2026-09-09 POLICY-02 cancellation and runtime-failure outcomes
+
+PR #94 follow-up identified plugin cancellation and true Effect failures as
+separate outcomes from provider errors carried in assistant values. Shared
+behavior/guidance `8788ba061d5e9f853c68813131b59c4e8a41db87` preserves the public UnknownError shape
+for session.pre cancellation while retaining an internal typed identity;
+session.userQuery.pre already supplies a cancelled assistant. A shared predicate
+recognizes these and fiber interruption in recovery rearming and queued wake
+handoffs. Plugin cancellation therefore cannot start unrelated inbox work.
+
+Main and persistent Actor wake owners capture the finish exit before checking
+the tracked tail. A runtime failure may continue remaining batches only when
+an earlier row was consumed; failure before any drain propagates without retry.
+A main follower may acquire its own turn after the joined non-cancelled run
+failed. Every successor still uses the existing generation/disposal gates.
+
+Before the fix, four Actor cases and three real configured-plugin main HTTP
+cases fail. The eight-case focused matrix passes after the fix, including a
+no-progress defect. Final validation: complete Actor/main HTTP 90 tests / 596
+assertions; ordinary main inbox/handoff 7 / 22; existing Inbox 50 / 125 across
+ten files. Package typecheck and repository lint pass (warnings remain). No
+public schema or SDK change is introduced by the internal cancellation identity.
