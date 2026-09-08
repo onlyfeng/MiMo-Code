@@ -1,3 +1,4 @@
+import { LLMServerScope } from "./scope"
 import { Effect } from "effect"
 import { AppRuntime } from "@/effect/app-runtime"
 import { Provider } from "@/provider"
@@ -80,11 +81,11 @@ export async function resolve(capability: Capability, abort = new AbortControlle
 /** Internal records only: scope precedes factories, HTTP callers must project refs. */
 export async function available(
   abort = new AbortController().signal,
-  models?: readonly string[],
+  scope: LLMServerScope.Scope,
 ): Promise<{ ref: string; model: Provider.Model }[]> {
   const found = await Promise.all(
     (await all(abort))
-      .filter((entry) => !models || models.includes(entry.ref))
+      .filter((entry) => LLMServerScope.allows(scope, entry.ref))
       .map(async (entry) => {
         const kind = Provider.modelKind(entry.model)
         if (kind === "language") {

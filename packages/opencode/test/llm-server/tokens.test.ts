@@ -46,11 +46,11 @@ describe("temporary model tokens", () => {
     expect(await api.verify({ directory: two.path, token: issued.token })).toEqual({ ok: false, reason: "unknown" })
   })
 
-  test("rejects unrestricted, multiple or malformed model scopes before writing", async () => {
+  test("rejects empty duplicate or malformed model scopes before writing", async () => {
     await using tmp = await tmpdir()
     for (const models of [
       [],
-      ["one/a", "two/b"],
+      ["one/a", "one/a"],
       ["no-provider"],
       ["provider/"],
       ["/model"],
@@ -61,7 +61,7 @@ describe("temporary model tokens", () => {
     expect(await fs.stat(file(tmp.path)).catch(() => undefined)).toBeUndefined()
   })
 
-  test("requires finite positive safe lifetimes without timestamp overflow", async () => {
+  test("requires finite positive safe numbers for enabled lifetimes without timestamp overflow", async () => {
     await using tmp = await tmpdir()
     for (const value of [0, -1, Infinity, NaN, 0.5, Number.MAX_SAFE_INTEGER]) {
       await expect(
@@ -186,9 +186,9 @@ describe("temporary model tokens", () => {
     const saved = JSON.parse(await fs.readFile(file(tmp.path), "utf8"))
     for (const extra of [
       { idle_ms: "broken" },
-      { models: [] },
-      { models: [1] },
-      { max_age_ms: null },
+      { scope: { type: "models", models: [] } },
+      { scope: { type: "models", models: [1] } },
+      { max_age_ms: "none" },
       { last_used: "yesterday" },
       { hash: "00" },
     ]) {
@@ -211,7 +211,7 @@ describe("temporary model tokens", () => {
     await fs.writeFile(
       file(tmp.path),
       JSON.stringify({
-        version: 1,
+        version: saved.version,
         tokens: Array.from({ length: 1024 }, (_, i) => ({ ...saved.tokens[0], id: `llmk_${i}` })),
       }),
     )
@@ -225,7 +225,7 @@ describe("temporary model tokens", () => {
     const issued = await api.issue({ directory: tmp.path, models: ["p/m"], expiry })
     const saved = JSON.parse(await fs.readFile(file(tmp.path), "utf8"))
     const original = JSON.stringify({
-      version: 1,
+      version: saved.version,
       tokens: [
         {
           ...saved.tokens[0],
@@ -237,7 +237,11 @@ describe("temporary model tokens", () => {
       ],
     })
     await fs.writeFile(file(tmp.path), original)
-    await expect(api.verify({ directory: tmp.path, token: issued.token })).rejects.toThrow("Invalid token store")
+    // The public expiry helper now rejects unsafe sums before mutate's final store validation.
+    await expect(api.verify({ directory: tmp.path, token: issued.token })).rejects.toMatchObject({
+      name: "ZodError",
+      issues: [expect.objectContaining({ code: "custom" })],
+    })
     expect(await fs.readFile(file(tmp.path), "utf8")).toBe(original)
   })
 })

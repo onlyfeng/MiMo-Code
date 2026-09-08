@@ -1,25 +1,17 @@
-import {
-  streamText,
-  wrapLanguageModel,
-  jsonSchema,
-  tool,
-  type ToolSet,
-  type FinishReason,
-  type LanguageModelUsage,
-} from "ai"
+import { LLMServerScope } from "./scope"
+import { type FinishReason, type LanguageModelUsage } from "ai"
 import { Effect } from "effect"
-import { mergeDeep, pipe } from "remeda"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { AppRuntime } from "../effect/app-runtime"
-import { Provider, ProviderTransform } from "../provider"
-import { Plugin } from "../plugin"
-import { SessionID, MessageID } from "../session/schema"
-import type { User } from "../session/message-v2"
+import { Provider } from "../provider"
+import * as SDK from "./sdk"
+import { ProviderOptionsError } from "./provider-options"
+import { ImageError, prepareImages, type ImageTransport } from "./images"
+import { audioRejection, inputAudio } from "../audio/input"
 import {
   ChatCompletionRequest,
   unsupported,
   toModelMessages,
-  toToolChoice,
   completionID,
   completion,
   chunk,
@@ -44,31 +36,17 @@ export class RequestError extends Error {
 function failed(error: unknown, abort: AbortSignal): never {
   abort.throwIfAborted()
   if (error instanceof RequestError) throw error
+  if (error instanceof SDK.SDKError || error instanceof ProviderOptionsError)
+    throw new RequestError(error.status, error.message)
+  if (error instanceof ImageError)
+    throw new RequestError(error.status, error.message, error.status === 502 ? "api_error" : "invalid_request_error")
   if (error instanceof Provider.ModelNotFoundError)
     throw new RequestError(404, "Model is not available in this instance", "invalid_request_error", "model_not_found")
   // Provider and plugin errors may contain credentials, prompts or response bodies.
   throw new RequestError(502, "Chat provider request failed", "api_error")
 }
 
-function variantFor(model: Provider.Model, effort: string) {
-  if (Object.hasOwn(model.variants ?? {}, effort)) return model.variants![effort]
-  throw new RequestError(400, "reasoning_effort is not available for this model")
-}
-
-function toolSet(tools: NonNullable<ChatCompletionRequest["tools"]>): ToolSet {
-  return Object.fromEntries(
-    tools.map((entry) => [
-      entry.function.name,
-      tool({
-        description: entry.function.description,
-        inputSchema: jsonSchema(entry.function.parameters ?? { type: "object", properties: {} }),
-        ...(entry.function.strict === undefined ? {} : { strict: entry.function.strict }),
-      }),
-    ]),
-  )
-}
-
-async function start(req: ChatCompletionRequest, abort: AbortSignal) {
+async function start(req: ChatCompletionRequest, abort: AbortSignal, imageTransport?: ImageTransport) {
   const parsed = Provider.parseModel(req.model)
   const resolved = await AppRuntime.runPromise(
     Effect.gen(function* () {
@@ -84,142 +62,56 @@ async function start(req: ChatCompletionRequest, abort: AbortSignal) {
     { signal: abort },
   )
   const model = resolved.model
+  const urls = req.messages.flatMap((message) =>
+    message.role === "user" && Array.isArray(message.content)
+      ? message.content.flatMap((part) => (part.type === "image_url" ? [part.image_url.url] : []))
+      : [],
+  )
+  if (urls.length && !model.capabilities.input.image)
+    throw new RequestError(400, "This model does not support image input")
+  const audio = req.messages.flatMap((message) =>
+    message.role === "user" && Array.isArray(message.content)
+      ? message.content.flatMap((part) => {
+          if (part.type !== "input_audio") return []
+          const value = inputAudio(part.input_audio)
+          if (!value) throw new RequestError(400, "Invalid input audio")
+          return [value]
+        })
+      : [],
+  )
+  const rejection = audioRejection(model, resolved.language, audio)
+  if (rejection) throw new RequestError(400, rejection)
   const id = completionID()
-  const sessionID = SessionID.descending()
-  const message: User = {
-    id: MessageID.ascending(),
-    sessionID,
-    role: "user",
-    time: { created: Date.now() },
-    agent: "llm-api",
-    model: { providerID: model.providerID, modelID: model.id, variant: req.reasoning_effort },
-  }
-  const options = pipe(
-    ProviderTransform.options({ model, sessionID, providerOptions: resolved.provider.options }),
-    mergeDeep(model.options),
-    mergeDeep(req.reasoning_effort ? variantFor(model, req.reasoning_effort) : {}),
-  )
-  const context = { sessionID, agent: "llm-api", model, provider: resolved.provider, message }
-  const hooked = await AppRuntime.runPromise(
-    Effect.gen(function* () {
-      const plugin = yield* Plugin.Service
-      const params = yield* plugin.trigger("chat.params", context, {
-        temperature: model.capabilities.temperature
-          ? (req.temperature ?? ProviderTransform.temperature(model))
-          : undefined,
-        topP: req.top_p ?? ProviderTransform.topP(model),
-        topK: req.top_k ?? ProviderTransform.topK(model),
-        maxOutputTokens: req.max_completion_tokens ?? req.max_tokens ?? ProviderTransform.maxOutputTokens(model),
-        options,
-      })
-      const headers = yield* plugin.trigger("chat.headers", context, { headers: {} as Record<string, string> })
-      return { params, headers: headers.headers }
-    }),
-    { signal: abort },
-  )
-  abort.throwIfAborted()
-  const headers = new Headers(model.headers)
-  new Headers(hooked.headers).forEach((value, name) => headers.set(name, value))
-  const tools = req.tools?.length ? ProviderTransform.tools(toolSet(req.tools), model) : undefined
   return {
     id,
     ref: req.model,
-    result: streamText({
-      model: wrapLanguageModel({
-        model: resolved.language,
-        middleware: {
-          specificationVersion: "v3",
-          async transformParams(args) {
-            // The shared transform accepts SDK prompts but exposes the wider ModelMessage return type.
-            // @ts-expect-error same SDK middleware boundary as session/llm.ts
-            args.params.prompt = ProviderTransform.message(args.params.prompt, model, hooked.params.options)
-            return args.params
-          },
-        },
-      }),
-      messages: toModelMessages(req.messages),
-      tools,
-      toolChoice: tools ? toToolChoice(req.tool_choice) : undefined,
-      temperature: hooked.params.temperature,
-      topP: hooked.params.topP,
-      topK: hooked.params.topK,
-      maxOutputTokens: hooked.params.maxOutputTokens,
-      stopSequences: typeof req.stop === "string" ? [req.stop] : req.stop,
-      seed: req.seed,
-      presencePenalty: req.presence_penalty,
-      frequencyPenalty: req.frequency_penalty,
-      providerOptions: ProviderTransform.providerOptions(model, hooked.params.options),
-      headers: Object.fromEntries(headers),
-      maxRetries: 0,
-      abortSignal: abort,
-      onError() {},
+    result: await SDK.start({
+      resolved,
+      settings: req,
+      abort,
+      messages: async () =>
+        toModelMessages(
+          req.messages,
+          await prepareImages(
+            urls,
+            abort,
+            imageTransport,
+            audio.reduce((total, part) => total + part.bytes, 0),
+          ),
+        ),
     }),
   }
 }
 
 type Started = Awaited<ReturnType<typeof start>>
 
-// fullStream tees its history internally. Limit accumulated output and read only
-// on demand; promise getters such as result.finishReason would create another
-// eager drain. The finish event already carries everything needed for the wire.
-async function* parts(started: Started, controller: AbortController, abort: AbortSignal) {
-  const reader = started.result.fullStream.getReader()
-  let ended = false
-  let bytes = 0
-  try {
-    while (true) {
-      const next = await reader.read()
-      if (next.done) {
-        ended = true
-        break
-      }
-      abort.throwIfAborted()
-      bytes += Buffer.byteLength(JSON.stringify(next.value))
-      if (bytes > 16 * 1024 * 1024) throw new Error("Provider output exceeded the proxy limit")
-      if (next.value.type === "error") throw next.value.error
-      if (next.value.type === "abort") throw new DOMException("Request aborted", "AbortError")
-      yield next.value
-    }
-  } finally {
-    if (!ended) {
-      controller.abort()
-      // Cancelling one SDK tee branch can wait for its retained sibling forever.
-      // Abort transport first, then drain this reader through SDK termination.
-      while (!(await reader.read().catch(() => ({ done: true }))).done) {
-        /* drain aborted SDK work */
-      }
-    }
-    reader.releaseLock()
-  }
-}
-
 async function collect(started: Started, controller: AbortController, abort: AbortSignal) {
-  const text: string[] = []
-  const reasoning: string[] = []
-  const toolCalls: EmittedToolCall[] = []
-  let reason: FinishReason | undefined
-  let usage: LanguageModelUsage | undefined
-  for await (const part of parts(started, controller, abort)) {
-    if (part.type === "text-delta") text.push(part.text)
-    if (part.type === "reasoning-delta") reasoning.push(part.text)
-    if (part.type === "tool-call") {
-      if (part.invalid) throw new Error("Invalid provider tool call")
-      toolCalls.push({ id: part.toolCallId, name: part.toolName, input: part.input })
-    }
-    if (part.type === "finish") {
-      reason = part.finishReason
-      usage = part.totalUsage
-    }
-  }
+  const output = await SDK.collect(started.result, controller, abort)
   return completion({
     id: started.id,
     model: started.ref,
     created: Math.floor(Date.now() / 1000),
-    text: text.join(""),
-    reasoning: reasoning.join("") || undefined,
-    toolCalls,
-    finishReason: reason,
-    usage,
+    ...output,
   })
 }
 
@@ -233,7 +125,7 @@ async function* stream(started: Started, controller: AbortController, abort: Abo
     opened = true
     return chunk({ ...base, delta: { role: "assistant", content: "" } })
   }
-  for await (const part of parts(started, controller, abort)) {
+  for await (const part of SDK.parts(started.result, controller, abort)) {
     if (part.type === "text-delta" || part.type === "reasoning-delta") {
       if (!opened) yield open()
       yield chunk({
@@ -294,11 +186,14 @@ async function* stream(started: Started, controller: AbortController, abort: Abo
 }
 
 /** Must run within the gateway's fixed Instance lease until response EOF/cancel. */
-export async function execute(input: {
-  req: ChatCompletionRequest
-  models: string[]
-  abort: AbortSignal
-}): Promise<Response> {
+export async function execute(
+  input: {
+    req: ChatCompletionRequest
+    scope: LLMServerScope.Scope
+    abort: AbortSignal
+  },
+  imageTransport?: ImageTransport,
+): Promise<Response> {
   input.abort.throwIfAborted()
   const parsed = ChatCompletionRequest.safeParse(input.req)
   if (!parsed.success) throw new RequestError(400, "Invalid chat completion request")
@@ -307,12 +202,12 @@ export async function execute(input: {
   const model = Provider.parseModel(parsed.data.model)
   if (!model.providerID || !model.modelID)
     throw new RequestError(400, "model must be an explicit provider/model identifier")
-  if (!input.models.includes(parsed.data.model))
+  if (!LLMServerScope.allows(input.scope, parsed.data.model))
     throw new RequestError(404, "Model is not available to this token", "invalid_request_error", "model_not_found")
   const controller = new AbortController()
   const abort = AbortSignal.any([input.abort, controller.signal])
   try {
-    const started = await start(parsed.data, abort)
+    const started = await start(parsed.data, abort, imageTransport)
     if (!parsed.data.stream) return Response.json(await collect(started, controller, abort))
     const iterator = stream(started, controller, abort, parsed.data.stream_options?.include_usage === true)
     const first = await iterator.next()

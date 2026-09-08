@@ -10,6 +10,14 @@ import { Global } from "../../src/global"
 import { Env } from "../../src/env"
 import { Auth } from "../../src/auth"
 import { makeRuntime } from "../../src/effect/run-service"
+import { imageBytes, imageFixture } from "./image-fixture"
+import type { AudioFormat } from "../../src/audio/input"
+import { audioRejection } from "../../src/audio/input"
+import { createAzure } from "@ai-sdk/azure"
+import { createOpenAI } from "@ai-sdk/openai"
+import { Effect } from "effect"
+import { AppRuntime } from "../../src/effect/app-runtime"
+import { Provider } from "../../src/provider"
 
 beforeAll(() => prepareConfigDependencies(Global.Path.config))
 afterEach(() => Instance.disposeAll())
@@ -28,7 +36,7 @@ const request = (
   req: Partial<ChatCompletionRequest> = {},
   models = ["local/chat"],
   abort = new AbortController().signal,
-) => execute({ req: { ...base, ...req }, models, abort })
+) => execute({ req: { ...base, ...req }, scope: { type: "models", models }, abort })
 const wireChunk = (delta: Record<string, unknown>, finish: string | null = null) => ({
   id: "vendor-id",
   object: "chat.completion.chunk",
@@ -55,12 +63,21 @@ async function fixture<T>(
     providerID?: string
     apiID?: string
     npm?: string
+    images?: boolean
+    audio?: boolean
+    providerOptions?: Record<string, unknown>
+    modelOptions?: Record<string, unknown>
+    variants?: Record<string, Record<string, unknown>>
+    output?: number
+    reasoning?: boolean
   } = {},
 ) {
   const seen: Seen[] = []
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
+    // The vendor fixture must accept base64 overhead on 25 MiB decoded media.
+    maxRequestBodySize: 64 * 1024 * 1024,
     async fetch(req) {
       const body = z.record(z.string(), z.unknown()).parse(await req.json())
       seen.push({ path: new URL(req.url).pathname, headers: req.headers, body })
@@ -76,20 +93,34 @@ async function fixture<T>(
         provider: {
           [options.providerID ?? "local"]: {
             npm: options.npm ?? "@ai-sdk/openai-compatible",
-            env: options.providerID === "xiaomi" ? ["XIAOMI_API_KEY"] : [],
+            env:
+              options.providerID === "xiaomi"
+                ? ["XIAOMI_API_KEY"]
+                : options.providerID === "azure"
+                  ? ["AZURE_API_KEY"]
+                  : [],
             options: {
               apiKey: "local-vendor-key",
               baseURL: `http://127.0.0.1:${server.port}/v1`,
               headers: { "x-provider": "provider" },
+              ...options.providerOptions,
             },
             models: {
               chat: {
                 id: options.apiID ?? "wire-model",
                 temperature: true,
-                reasoning: true,
-                modalities: { input: ["text", "image"], output: ["text"] },
-                options: { reasoningEffort: "low" },
-                variants: { high: { reasoningEffort: "high" } },
+                reasoning: options.reasoning ?? true,
+                limit: { context: 200_000, output: options.output ?? 65536 },
+                modalities: {
+                  input: [
+                    "text",
+                    ...(options.images === false ? [] : ["image" as const]),
+                    ...(options.audio ? ["audio" as const] : []),
+                  ],
+                  output: ["text"],
+                },
+                options: options.modelOptions ?? { reasoningEffort: "low" },
+                variants: options.variants ?? { high: { reasoningEffort: "high" } },
                 headers: { "x-model": "model", "X-Override": "model" },
               },
               speech: { modalities: { input: ["text"], output: ["audio"] } },
@@ -112,6 +143,7 @@ async function fixture<T>(
       directory: tmp.path,
       fn: async () => {
         if (options.providerID === "xiaomi") env.runSync((service) => service.set("XIAOMI_API_KEY", "local-vendor-key"))
+        if (options.providerID === "azure") env.runSync((service) => service.set("AZURE_API_KEY", "local-vendor-key"))
         return fn(seen)
       },
     })
@@ -494,6 +526,105 @@ test("inline images and historical tool results reach the actual provider", () =
     expect(messages[2]).toMatchObject({ role: "tool", tool_call_id: "history", content: "20C" })
   }))
 
+test("remote image bytes reach the real provider SDK without exposing its credentials to the image host", () =>
+  fixture(async (seen) =>
+    imageFixture(async ({ transport, seen: downloaded }) => {
+      const url = "http://images.example/picture.png"
+      const response = await execute(
+        {
+          req: ChatCompletionRequest.parse({
+            ...base,
+            messages: [{ role: "user", content: [{ type: "image_url", image_url: { url } }] }],
+          }),
+          scope: { type: "models", models: ["local/chat"] },
+          abort: new AbortController().signal,
+        },
+        transport,
+      )
+      expect(completionSchema.parse(await response.json()).choices[0].message.content).toBe("Hello.")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].body.messages).toMatchObject([
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: `data:image/png;base64,${imageBytes.toString("base64")}` } },
+          ],
+        },
+      ])
+      expect(seen[0].headers.get("authorization")).toBe("Bearer local-vendor-key")
+      expect(downloaded).toHaveLength(1)
+      expect(downloaded[0].headers.authorization).toBeUndefined()
+      expect(downloaded[0].headers["x-provider"]).toBeUndefined()
+      expect(downloaded[0].headers["x-model"]).toBeUndefined()
+      expect(JSON.stringify(seen[0].body)).not.toContain("images.example")
+    }),
+  ))
+
+test.each([
+  { extra: {}, models: [], status: 404 },
+  { extra: { model: "local/missing" }, models: ["local/missing"], status: 404 },
+  { extra: { model: "local/speech" }, models: ["local/speech"], status: 400 },
+  { extra: { reasoning_effort: "impossible" }, models: ["local/chat"], status: 400 },
+  { extra: { parallel_tool_calls: false }, models: ["local/chat"], status: 400 },
+])("validates model scope and options before image DNS or provider work: %j", ({ extra, models, status }) =>
+  fixture(async (seen) => {
+    let lookups = 0
+    await expect(
+      execute(
+        {
+          req: {
+            ...base,
+            ...extra,
+            messages: [
+              { role: "user", content: [{ type: "image_url", image_url: { url: "http://images.example/p.png" } }] },
+            ],
+          },
+          scope: { type: "models", models: [...models] },
+          abort: new AbortController().signal,
+        },
+        {
+          lookup: async () => {
+            lookups++
+            return [{ address: "127.0.0.1", family: 4 }]
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ status })
+    expect(lookups).toBe(0)
+    expect(seen).toHaveLength(0)
+  }),
+)
+
+test("rejects images for a text-only model before downloading or invoking the provider", () =>
+  fixture(
+    async (seen) => {
+      let lookups = 0
+      await expect(
+        execute(
+          {
+            req: {
+              ...base,
+              messages: [
+                { role: "user", content: [{ type: "image_url", image_url: { url: "http://images.example/p.png" } }] },
+              ],
+            },
+            scope: { type: "models", models: ["local/chat"] },
+            abort: new AbortController().signal,
+          },
+          {
+            lookup: async () => {
+              lookups++
+              return [{ address: "127.0.0.1", family: 4 }]
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ status: 400 })
+      expect(lookups).toBe(0)
+      expect(seen).toHaveLength(0)
+    },
+    { images: false },
+  ))
+
 test.each([
   ["mimo-v2.5", "/v1/chat/completions"],
   ["mimo-v2-flash-ptc", "/v1/responses"],
@@ -647,3 +778,1113 @@ test("configured plugin auth loaders supply provider-only credentials", async ()
     Auth.inject(undefined)
   }
 })
+
+const audioContent = (format: AudioFormat = "wav", data = "AQID") => [
+  { type: "input_audio" as const, input_audio: { data, format } },
+]
+const audioMessages = (format: AudioFormat = "wav", data = "AQID") => [
+  { role: "user" as const, content: audioContent(format, data) },
+]
+
+const googleBody = () =>
+  new Response(
+    frame({
+      candidates: [{ content: { parts: [{ text: "Heard." }], role: "model" }, finishReason: "STOP" }],
+      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  )
+
+test.each([false, true])("input audio reaches compatible SDK with ordered content and stream=%s", (stream) =>
+  fixture(
+    async (seen) => {
+      const response = await request({
+        stream,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Listen." },
+              ...audioContent("mpga"),
+              { type: "image_url", image_url: { url: `data:image/png;base64,${imageBytes.toString("base64")}` } },
+              { type: "text", text: "Answer." },
+            ],
+          },
+        ],
+      })
+      expect(await response.text()).toContain("Hello.")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].body.messages).toEqual([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Listen." },
+            { type: "input_audio", input_audio: { data: "AQID", format: "mp3" } },
+            { type: "image_url", image_url: { url: `data:image/png;base64,${imageBytes.toString("base64")}` } },
+            { type: "text", text: "Answer." },
+          ],
+        },
+      ])
+      expect(seen[0].headers.get("authorization")).toBe("Bearer local-vendor-key")
+      expect(seen[0].headers.get("x-model")).toBe("model")
+      expect(seen[0].headers.get("x-provider")).toBe("provider")
+    },
+    { audio: true },
+  ),
+)
+
+test.each(["wav", "mp3", "mpeg", "mpga", "m4a", "mp4", "flac", "ogg", "webm"] as const)(
+  "input audio reaches real Google SDK as inlineData for %s",
+  (format) =>
+    fixture(
+      async (seen) => {
+        const response = await request({ messages: audioMessages(format) })
+        expect(completionSchema.parse(await response.json()).choices[0].message.content).toBe("Heard.")
+        expect(seen).toHaveLength(1)
+        expect(seen[0].path).toBe("/v1/models/gemini-2.5-flash:streamGenerateContent")
+        const mime = ["mp3", "mpeg", "mpga"].includes(format)
+          ? "audio/mpeg"
+          : ["m4a", "mp4"].includes(format)
+            ? "audio/mp4"
+            : `audio/${format}`
+        expect(seen[0].body.contents).toEqual([
+          { role: "user", parts: [{ inlineData: { mimeType: mime, data: "AQID" } }] },
+        ])
+        expect(seen[0].headers.get("x-goog-api-key")).toBe("local-vendor-key")
+        expect(seen[0].headers.get("x-model")).toBe("model")
+      },
+      { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", audio: true, handle: googleBody },
+    ),
+)
+
+test.each([
+  { npm: "@ai-sdk/openai-compatible", audio: false, format: "wav" },
+  { npm: "@ai-sdk/openai-compatible", audio: true, format: "flac" },
+  { npm: "@ai-sdk/anthropic", audio: true, format: "wav" },
+  { npm: "@ai-sdk/openai", audio: true, format: "wav" },
+  { npm: "@ai-sdk/azure", audio: true, format: "wav" },
+] as const)("input audio rejects unsupported model or actual transport before image DNS: %j", (options) =>
+  fixture(async (seen) => {
+    let lookups = 0
+    await expect(
+      execute(
+        {
+          req: {
+            ...base,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "image_url", image_url: { url: "https://images.example/p.png" } },
+                  ...audioContent(options.format),
+                ],
+              },
+            ],
+          },
+          scope: { type: "models", models: ["local/chat"] },
+          abort: new AbortController().signal,
+        },
+        {
+          lookup: async () => {
+            lookups++
+            return [{ address: "127.0.0.1", family: 4 }]
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/audio/) })
+    expect(lookups).toBe(0)
+    expect(seen).toHaveLength(0)
+  }, options),
+)
+
+test.each(["@ai-sdk/openai", "@ai-sdk/azure"])(
+  "input audio validates the real %s chat factory independently of Responses",
+  (npm) =>
+    fixture(
+      async (seen) => {
+        const parsed = Provider.parseModel("local/chat")
+        const model = await AppRuntime.runPromise(
+          Effect.gen(function* () {
+            return yield* (yield* Provider.Service).getModel(parsed.providerID, parsed.modelID)
+          }),
+        )
+        const bodies: unknown[] = []
+        const sdk = (npm === "@ai-sdk/azure" ? createAzure : createOpenAI)({
+          apiKey: "local-vendor-key",
+          baseURL: "https://fixture.invalid/v1",
+          fetch: Object.assign(
+            async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+              bodies.push(JSON.parse(String(init?.body)))
+              return Response.json({
+                id: "c",
+                object: "chat.completion",
+                created: 1,
+                model: "wire-model",
+                choices: [{ index: 0, message: { role: "assistant", content: "Heard." }, finish_reason: "stop" }],
+              })
+            },
+            { preconnect: fetch.preconnect },
+          ),
+        })
+        const language = sdk.chat("wire-model")
+        expect(audioRejection(model, language, [{ mediaType: "audio/wav", bytes: 3 }])).toBeUndefined()
+        await language.doGenerate({
+          prompt: [{ role: "user", content: [{ type: "file", data: "AQID", mediaType: "audio/wav" }] }],
+        })
+        expect(bodies).toMatchObject([
+          {
+            messages: [
+              { role: "user", content: [{ type: "input_audio", input_audio: { data: "AQID", format: "wav" } }] },
+            ],
+          },
+        ])
+        expect(audioRejection(model, sdk.responses("wire-model"), [{ mediaType: "audio/wav", bytes: 3 }])).toMatch(
+          /audio/,
+        )
+        expect(audioRejection(model, language, [{ mediaType: "audio/flac", bytes: 3 }])).toMatch(/audio/)
+        for (const bytes of [0, -1, NaN, Infinity, 1.5, 20 * 1024 * 1024 + 1]) {
+          expect(audioRejection(model, language, [{ mediaType: "audio/wav", bytes }])).toBeDefined()
+        }
+        expect(
+          audioRejection({ ...model, api: { ...model.api, npm: "file://unknown-sdk" } }, language, [
+            { mediaType: "audio/wav", bytes: 3 },
+          ]),
+        ).toMatch(/audio/)
+        expect(seen).toHaveLength(0)
+      },
+      { npm, audio: true },
+    ),
+)
+
+test("input audio and inline images exhaust the shared media budget before downloading", () =>
+  fixture(
+    async (seen) =>
+      imageFixture(async ({ transport, seen: downloaded }) => {
+        await expect(
+          execute(
+            {
+              req: {
+                ...base,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      ...audioContent("wav", Buffer.alloc(20 * 1024 * 1024).toString("base64")),
+                      {
+                        type: "image_url",
+                        image_url: { url: `data:image/png;base64,${Buffer.alloc(5 * 1024 * 1024).toString("base64")}` },
+                      },
+                      { type: "image_url", image_url: { url: "http://images.example/extra.png" } },
+                    ],
+                  },
+                ],
+              },
+              scope: { type: "models", models: ["local/chat"] },
+              abort: new AbortController().signal,
+            },
+            transport,
+          ),
+        ).rejects.toMatchObject({ status: 413 })
+        expect(downloaded).toHaveLength(0)
+        expect(seen).toHaveLength(0)
+      }),
+    { audio: true },
+  ))
+
+test("input audio reduces the remaining remote-image download budget", () =>
+  fixture(
+    async (seen) =>
+      imageFixture(async ({ transport, seen: downloaded }) => {
+        await expect(
+          execute(
+            {
+              req: {
+                ...base,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      ...audioContent("wav", Buffer.alloc(20 * 1024 * 1024).toString("base64")),
+                      ...audioContent("wav", Buffer.alloc(5 * 1024 * 1024 - imageBytes.length + 1).toString("base64")),
+                      { type: "image_url", image_url: { url: "http://images.example/extra.png" } },
+                    ],
+                  },
+                ],
+              },
+              scope: { type: "models", models: ["local/chat"] },
+              abort: new AbortController().signal,
+            },
+            transport,
+          ),
+        ).rejects.toMatchObject({ status: 413 })
+        expect(downloaded).toHaveLength(1)
+        expect(seen).toHaveLength(0)
+      }),
+    { audio: true },
+  ))
+
+test("input audio-only occurrences cannot exceed the decoded request budget", () =>
+  fixture(
+    async (seen) => {
+      await expect(
+        request({
+          messages: [
+            {
+              role: "user",
+              content: [
+                ...audioContent("wav", Buffer.alloc(20 * 1024 * 1024).toString("base64")),
+                ...audioContent("wav", Buffer.alloc(5 * 1024 * 1024 + 1).toString("base64")),
+              ],
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({ status: 413 })
+      expect(seen).toHaveLength(0)
+    },
+    { audio: true },
+  ))
+
+test("input audio at the exact mixed-media boundary leaves room for its remote image", () =>
+  fixture(
+    async (seen) =>
+      imageFixture(async ({ transport, seen: downloaded }) => {
+        const response = await execute(
+          {
+            req: {
+              ...base,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    ...audioContent("wav", Buffer.alloc(20 * 1024 * 1024).toString("base64")),
+                    ...audioContent("wav", Buffer.alloc(5 * 1024 * 1024 - imageBytes.length).toString("base64")),
+                    { type: "image_url", image_url: { url: "http://images.example/extra.png" } },
+                  ],
+                },
+              ],
+            },
+            scope: { type: "models", models: ["local/chat"] },
+            abort: new AbortController().signal,
+          },
+          transport,
+        )
+        expect(await response.text()).toContain("Hello.")
+        expect(downloaded).toHaveLength(1)
+        expect(seen).toHaveLength(1)
+      }),
+    { audio: true },
+  ))
+
+test("input audio retains plugin headers and parameter precedence", () =>
+  fixture(
+    async (seen) => {
+      await (await request({ messages: audioMessages() })).text()
+      expect(seen[0].headers.get("x-audio-plugin")).toBe("active")
+      expect(seen[0].body.temperature).toBe(0.3)
+    },
+    {
+      audio: true,
+      plugin: `export default async () => ({
+    "chat.params": async (_input, output) => { output.temperature = 0.3 },
+    "chat.headers": async (_input, output) => { output.headers["x-audio-plugin"] = "active" },
+  })`,
+    },
+  ))
+
+test("input audio provider errors remain sanitized and are not retried", () =>
+  fixture(
+    async (seen) => {
+      await expect(request({ messages: audioMessages() })).rejects.toMatchObject({
+        status: 502,
+        message: "Chat provider request failed",
+      })
+      expect(seen).toHaveLength(1)
+    },
+    { audio: true, handle: () => Response.json({ error: { message: "private-audio-content" } }, { status: 500 }) },
+  ))
+
+test("input audio refuses an undeclared custom SDK before image DNS or generation", async () => {
+  await using sdk = await tmpdir({
+    init: (dir) =>
+      Bun.write(
+        path.join(dir, "sdk.mjs"),
+        `import { createOpenAICompatible } from ${JSON.stringify(import.meta.resolve("@ai-sdk/openai-compatible"))};
+    export function createSDK(options) { return createOpenAICompatible(options) }`,
+      ),
+  })
+  await fixture(
+    async (seen) => {
+      let lookups = 0
+      await expect(
+        execute(
+          {
+            req: {
+              ...base,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    ...audioContent(),
+                    { type: "image_url", image_url: { url: "http://images.example/a.png" } },
+                  ],
+                },
+              ],
+            },
+            scope: { type: "models", models: ["local/chat"] },
+            abort: new AbortController().signal,
+          },
+          {
+            lookup: async () => {
+              lookups++
+              return [{ address: "127.0.0.1", family: 4 }]
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/audio/) })
+      expect(lookups).toBe(0)
+      expect(seen).toHaveLength(0)
+    },
+    { npm: pathToFileURL(path.join(sdk.path, "sdk.mjs")).href, audio: true },
+  )
+})
+
+test("input audio cancellation retires a pending provider request", () => {
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  return fixture(
+    async (seen) => {
+      const controller = new AbortController()
+      const result = rejected(request({ messages: audioMessages() }, ["local/chat"], controller.signal))
+      try {
+        await deadline(started.promise)
+        controller.abort(new DOMException("Stopped", "AbortError"))
+        expect(await deadline(result)).toMatchObject({ name: "AbortError" })
+        expect(seen).toHaveLength(1)
+      } finally {
+        controller.abort()
+        release.resolve()
+        await result
+      }
+    },
+    {
+      audio: true,
+      handle: async () => {
+        started.resolve()
+        await release.promise
+        return new Response(vendorBody(), { headers: { "content-type": "text/event-stream" } })
+      },
+    },
+  )
+})
+
+test.each([true, false])("input audio follows the configured Azure API transport: chat=%s", (useCompletionUrls) =>
+  fixture(
+    async (seen) => {
+      const response = request({ model: "azure/chat", messages: audioMessages() }, ["azure/chat"])
+      if (!useCompletionUrls) {
+        await expect(response).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/audio/) })
+        expect(seen).toHaveLength(0)
+        return
+      }
+      expect(await (await response).text()).toContain("Hello.")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].path).toContain("/chat/completions")
+      expect(seen[0].body.messages).toEqual([
+        { role: "user", content: [{ type: "input_audio", input_audio: { data: "AQID", format: "wav" } }] },
+      ])
+    },
+    { npm: "@ai-sdk/azure", providerID: "azure", audio: true, providerOptions: { useCompletionUrls } },
+  ),
+)
+
+test("input audio uses Vertex GenerateContent with the real SDK and its MIME intact", () =>
+  fixture(
+    async (seen) => {
+      const response = await request({ messages: audioMessages("flac") })
+      expect(completionSchema.parse(await response.json()).choices[0].message.content).toBe("Heard.")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].path).toContain(":streamGenerateContent")
+      expect(seen[0].body.contents).toEqual([
+        { role: "user", parts: [{ inlineData: { mimeType: "audio/flac", data: "AQID" } }] },
+      ])
+      expect(seen[0].headers.get("x-goog-api-key")).toBe("local-vendor-key")
+    },
+    { npm: "@ai-sdk/google-vertex", apiID: "gemini-2.5-flash", audio: true, handle: googleBody },
+  ))
+
+test("input audio does not exempt generated text from the 16 MiB output budget", () =>
+  fixture(
+    async (seen) => {
+      await expect(request({ messages: audioMessages() })).rejects.toMatchObject({ status: 502 })
+      expect(seen).toHaveLength(1)
+    },
+    {
+      audio: true,
+      handle: () =>
+        new Response(vendorBody([wireChunk({ content: "x".repeat(16 * 1024 * 1024) }), wireChunk({}, "stop")]), {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    },
+  ))
+
+const responsesBody = () =>
+  new Response(
+    [
+      { type: "response.created", response: { id: "resp_fixture", created_at: 1, model: "gpt-5.2" } },
+      {
+        type: "response.output_item.added",
+        output_index: 0,
+        item: { type: "message", id: "msg_fixture", role: "assistant", content: [] },
+      },
+      {
+        type: "response.output_text.delta",
+        item_id: "msg_fixture",
+        output_index: 0,
+        content_index: 0,
+        delta: "Hello.",
+      },
+      {
+        type: "response.completed",
+        response: { id: "resp_fixture", status: "completed", output: [], usage: { input_tokens: 1, output_tokens: 1 } },
+      },
+    ]
+      .map(frame)
+      .join(""),
+    { headers: { "content-type": "text/event-stream" } },
+  )
+const anthropicBody = () =>
+  new Response(
+    [
+      {
+        type: "message_start",
+        message: {
+          id: "msg_fixture",
+          type: "message",
+          role: "assistant",
+          model: "claude-sonnet-4-5",
+          content: [],
+          usage: { input_tokens: 1, output_tokens: 0 },
+        },
+      },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello." } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 1 } },
+      { type: "message_stop" },
+    ]
+      .map((value) => `event: ${value.type}\n${frame(value)}`)
+      .join(""),
+    { headers: { "content-type": "text/event-stream" } },
+  )
+
+test.each([
+  {
+    npm: "@ai-sdk/openai",
+    apiID: "gpt-5.2",
+    options: { reasoningEffort: "xhigh", reasoningSummary: "detailed", textVerbosity: "low" },
+    expected: { reasoning: { effort: "xhigh", summary: "detailed" }, text: { verbosity: "low" } },
+    handle: responsesBody,
+  },
+  {
+    npm: "@ai-sdk/azure",
+    providerID: "azure",
+    apiID: "gpt-5.2",
+    options: { reasoningEffort: "none", reasoningSummary: "auto", textVerbosity: "high" },
+    expected: { reasoning: { effort: "none", summary: "auto" }, text: { verbosity: "high" } },
+    handle: responsesBody,
+  },
+  {
+    npm: "@ai-sdk/azure",
+    providerID: "azure",
+    apiID: "gpt-5.2",
+    providerOptions: { useCompletionUrls: true },
+    options: { reasoningEffort: "minimal", textVerbosity: "medium" },
+    expected: { reasoning_effort: "minimal", verbosity: "medium" },
+  },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-sonnet-4-5",
+    options: { thinking: { type: "enabled", budgetTokens: 1024 } },
+    expected: { thinking: { type: "enabled", budget_tokens: 1024 }, max_tokens: 5120 },
+    handle: anthropicBody,
+  },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-opus-4-6",
+    options: { thinking: { type: "adaptive", display: "omitted" }, effort: "max" },
+    expected: { thinking: { type: "adaptive", display: "omitted" }, output_config: { effort: "max" } },
+    handle: anthropicBody,
+  },
+  {
+    npm: "@ai-sdk/google",
+    apiID: "gemini-2.5-pro",
+    options: { thinkingConfig: { thinkingBudget: -1, includeThoughts: true } },
+    expected: { generationConfig: { thinkingConfig: { thinkingBudget: -1, includeThoughts: true } } },
+    handle: googleBody,
+  },
+  {
+    npm: "@ai-sdk/google-vertex",
+    apiID: "gemini-3.1-pro-preview",
+    options: { thinkingConfig: { thinkingLevel: "medium", includeThoughts: false } },
+    expected: { generationConfig: { thinkingConfig: { thinkingLevel: "medium", includeThoughts: false } } },
+    handle: googleBody,
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "xiaomi",
+    apiID: "mimo-v2.5-pro",
+    options: { thinking: { type: "disabled" } },
+    expected: { thinking: { type: "disabled" } },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "deepseek",
+    apiID: "deepseek-v4-pro",
+    options: { thinking: { type: "enabled" }, reasoningEffort: "max" },
+    expected: { thinking: { type: "enabled" }, reasoning_effort: "max" },
+  },
+])("provider options reach the real SDK wire: $npm $apiID", (row) =>
+  fixture(
+    async (seen) => {
+      const model = `${row.providerID ?? "local"}/chat`
+      const response = await request(
+        ChatCompletionRequest.parse({ ...base, model, max_tokens: 4096, provider_options: row.options }),
+        [model],
+      )
+      expect(response.status).toBe(200)
+      expect(await response.text()).toMatch(/Hello\.|Heard\./)
+      expect(seen).toHaveLength(1)
+      expect(seen[0].body).toMatchObject(row.expected)
+      expect(seen[0].body.model ?? seen[0].path).toContain(row.apiID)
+      expect(seen[0].headers.get("x-provider")).toBe("provider")
+      expect(seen[0].headers.get("x-model")).toBe("model")
+    },
+    { ...row, modelOptions: {} },
+  ),
+)
+
+test.each([undefined, {}])("provider options omitted or empty preserve legacy MiMo wire: %j", (provider_options) =>
+  fixture(
+    async (seen) => {
+      await (
+        await request({ model: "xiaomi/chat", reasoning_effort: "high", provider_options }, ["xiaomi/chat"])
+      ).text()
+      expect(seen[0].body.reasoning_effort).toBe("high")
+      expect(seen[0].body.thinking).toBeUndefined()
+    },
+    { providerID: "xiaomi", apiID: "mimo-v2.5" },
+  ),
+)
+
+test.each([
+  { npm: "@ai-sdk/openai", apiID: "gpt-5.2", options: { reasoningEffort: "maximum" } },
+  { npm: "@ai-sdk/openai", apiID: "gpt-4o", options: { reasoningEffort: "high" } },
+  { npm: "@ai-sdk/openai", apiID: "gpt-5.2", options: { thinking: { type: "enabled" } } },
+  { npm: "@ai-sdk/openai", apiID: "gpt-5.2", options: { reasoningSummary: "concise" } },
+  { npm: "@ai-sdk/openai", apiID: "gpt-5.2", options: { textVerbosity: 2 } },
+  { npm: "@ai-sdk/openai", apiID: "gpt-5.2", options: { forceReasoning: true } },
+  {
+    npm: "@ai-sdk/azure",
+    providerID: "azure",
+    apiID: "gpt-5.2",
+    providerOptions: { useCompletionUrls: true },
+    options: { reasoningSummary: "auto" },
+  },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-sonnet-4-5",
+    options: { thinking: { type: "enabled", budgetTokens: 1023 } },
+  },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-sonnet-4-5",
+    options: { thinking: { type: "enabled", budgetTokens: 32000 } },
+  },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-sonnet-4-5",
+    options: { thinking: { type: "enabled", budgetTokens: 1024.5 } },
+  },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-sonnet-4-5", options: { thinking: { type: "enabled" } } },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-sonnet-4-5",
+    options: { thinking: { type: "disabled", budgetTokens: 1024 } },
+  },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-sonnet-4-5", options: { thinking: { type: "adaptive" } } },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-opus-4-6",
+    options: { thinking: { type: "enabled", budgetTokens: 1024 } },
+  },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-opus-4-6", options: { effort: "xhigh" } },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-opus-4-7", options: { thinking: { type: "adaptive", display: "full" } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-pro", options: { thinkingConfig: { thinkingBudget: 0 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-pro", options: { thinkingConfig: { thinkingBudget: 127 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-pro", options: { thinkingConfig: { thinkingBudget: 32769 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", options: { thinkingConfig: { thinkingBudget: 24577 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash-lite", options: { thinkingConfig: { thinkingBudget: 511 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", options: { thinkingConfig: { thinkingBudget: -2 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", options: { thinkingConfig: { thinkingBudget: 1.5 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-3-pro-preview", options: { thinkingConfig: { thinkingLevel: "medium" } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-3.1-pro-preview", options: { thinkingConfig: { thinkingLevel: "minimal" } } },
+  {
+    npm: "@ai-sdk/google",
+    apiID: "gemini-3-flash-preview",
+    options: { thinkingConfig: { thinkingLevel: "low", thinkingBudget: 1024 } },
+  },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.0-flash", options: { thinkingConfig: { includeThoughts: true } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-pro", options: { thinkingConfig: { includeThoughts: "true" } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-pro", options: { thinkingConfig: { endpoint: "outside" } } },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "xiaomi",
+    apiID: "mimo-v2.5",
+    options: { thinking: { type: "enabled", budgetTokens: 1024 } },
+  },
+  { npm: "@ai-sdk/openai-compatible", providerID: "xiaomi", apiID: "mimo-v2.5", options: { reasoningEffort: "high" } },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "xiaomi",
+    apiID: "mimo-v2-flash-ptc",
+    options: { thinking: { type: "enabled" } },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "local",
+    apiID: "mimo-v2.5",
+    options: { thinking: { type: "enabled" } },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "xiaomi",
+    apiID: "gpt-5.2",
+    options: { thinking: { type: "enabled" } },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "deepseek",
+    apiID: "deepseek-v4-pro",
+    options: { reasoningEffort: "medium" },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "deepseek",
+    apiID: "deepseek-chat",
+    options: { reasoningEffort: "max" },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "deepseek",
+    apiID: "deepseek-v4-pro",
+    options: { thinking: { type: "disabled" }, reasoningEffort: "high" },
+  },
+])("provider options reject unsupported family, model or value before generation: $apiID $options", (row) =>
+  fixture(
+    async (seen) => {
+      const model = `${row.providerID ?? "local"}/chat`
+      expect(
+        await rejected(
+          request(ChatCompletionRequest.parse({ ...base, model, provider_options: row.options }), [model]),
+        ),
+      ).toMatchObject({ status: 400 })
+      expect(seen).toHaveLength(0)
+    },
+    { ...row, modelOptions: {} },
+  ),
+)
+
+test.each([
+  "model",
+  "messages",
+  "tools",
+  "headers",
+  "apiKey",
+  "baseURL",
+  "endpoint",
+  "authorization",
+  "reasoning_effort",
+  "__proto__",
+  "constructor",
+  "openai",
+])("provider options refuse the client override %s before image lookup", (key) =>
+  fixture(
+    async (seen) => {
+      let lookups = 0
+      expect(
+        await rejected(
+          execute(
+            {
+              req: {
+                ...base,
+                provider_options: { [key]: "outside" },
+                messages: [
+                  { role: "user", content: [{ type: "image_url", image_url: { url: "https://image.example/a.png" } }] },
+                ],
+              },
+              scope: { type: "models", models: ["local/chat"] },
+              abort: new AbortController().signal,
+            },
+            {
+              lookup: async () => {
+                lookups++
+                return []
+              },
+            },
+          ),
+        ),
+      ).toMatchObject({ status: 400 })
+      expect(lookups).toBe(0)
+      expect(seen).toHaveLength(0)
+    },
+    { npm: "@ai-sdk/openai", apiID: "gpt-5.2" },
+  ),
+)
+
+test("provider options top MiMo variant replaces client thinking and leaves the shared model unchanged", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request(
+          { model: "xiaomi/chat", provider_options: { thinking: { type: "disabled" } }, reasoning_effort: "high" },
+          ["xiaomi/chat"],
+        )
+      ).text()
+      expect(seen[0].body.thinking).toEqual({ type: "enabled" })
+      expect(seen[0].body.reasoning_effort).toBeUndefined()
+      await (await request({ model: "xiaomi/chat" }, ["xiaomi/chat"])).text()
+      expect(seen[1].body.reasoning_effort).toBe("low")
+      expect(seen[1].body.thinking).toBeUndefined()
+    },
+    { providerID: "xiaomi", apiID: "mimo-v2.5" },
+  ))
+
+test("provider options top variant retains its summary and trusted plugin runs last", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request({
+          provider_options: { reasoningEffort: "low", reasoningSummary: "detailed" },
+          reasoning_effort: "high",
+        })
+      ).text()
+      expect(seen[0].body.reasoning).toEqual({ effort: "minimal", summary: "auto" })
+      expect(seen[0].headers.get("x-options-plugin")).toBe("last")
+    },
+    {
+      npm: "@ai-sdk/openai",
+      apiID: "gpt-5.2",
+      handle: responsesBody,
+      variants: { high: { reasoningEffort: "high", reasoningSummary: "auto" } },
+      plugin: `export default async () => ({"chat.params": async (_input, output) => { if (output.options.reasoningEffort !== "high" || output.options.reasoningSummary !== "auto") throw new Error("wrong precedence"); output.options.reasoningEffort = "minimal" }, "chat.headers": async (_input, output) => { output.headers["x-options-plugin"] = "last" }})`,
+    },
+  ))
+
+test.each([undefined, 6000, 7168, 7169])(
+  "provider options Anthropic budget shares the model cap with output: %j",
+  (max_tokens) =>
+    fixture(
+      async (seen) => {
+        const result = request({ provider_options: { thinking: { type: "enabled", budgetTokens: 1024 } }, max_tokens })
+        if (max_tokens === 7169) {
+          expect(await rejected(result)).toMatchObject({ status: 400 })
+          expect(seen).toHaveLength(0)
+          return
+        }
+        await (await result).text()
+        expect(seen[0].body.max_tokens).toBe(max_tokens === 6000 ? 7024 : 8192)
+      },
+      { npm: "@ai-sdk/anthropic", apiID: "claude-sonnet-4-5", output: 8192, modelOptions: {}, handle: anthropicBody },
+    ),
+)
+
+test("provider options Google input audio uses the same validation and file transport", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request({
+          messages: audioMessages(),
+          provider_options: { thinkingConfig: { thinkingBudget: 0, includeThoughts: false } },
+        })
+      ).text()
+      expect(seen[0].body.generationConfig).toMatchObject({
+        thinkingConfig: { thinkingBudget: 0, includeThoughts: false },
+      })
+      expect(seen[0].body.contents).toEqual([
+        { role: "user", parts: [{ inlineData: { mimeType: "audio/wav", data: "AQID" } }] },
+      ])
+    },
+    { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", audio: true, handle: googleBody, modelOptions: {} },
+  ))
+
+test.each([
+  {
+    modelOptions: { thinkingConfig: { thinkingBudget: 2048, includeThoughts: true } },
+    client: { thinkingConfig: { includeThoughts: false } },
+    expected: { thinkingBudget: 2048, includeThoughts: false },
+  },
+  {
+    modelOptions: { thinkingConfig: { thinkingBudget: 2048, includeThoughts: true } },
+    client: { thinkingConfig: { thinkingBudget: 512 } },
+    expected: { thinkingBudget: 512, includeThoughts: true },
+  },
+])("provider options preserve independent Google defaults: $client", (row) =>
+  fixture(
+    async (seen) => {
+      await (await request(ChatCompletionRequest.parse({ ...base, provider_options: row.client }))).text()
+      expect(seen[0].body.generationConfig).toMatchObject({ thinkingConfig: row.expected })
+    },
+    { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", handle: googleBody, modelOptions: row.modelOptions },
+  ),
+)
+
+test("provider options top Google level removes the client budget but retains includeThoughts", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request({
+          provider_options: { thinkingConfig: { includeThoughts: false } },
+          reasoning_effort: "custom_level",
+        })
+      ).text()
+      expect(seen[0].body.generationConfig).toMatchObject({
+        thinkingConfig: { thinkingLevel: "high", includeThoughts: false },
+      })
+      expect(
+        z
+          .object({ generationConfig: z.object({ thinkingConfig: z.record(z.string(), z.unknown()) }) })
+          .parse(seen[0].body).generationConfig.thinkingConfig.thinkingBudget,
+      ).toBeUndefined()
+    },
+    {
+      npm: "@ai-sdk/google",
+      apiID: "gemini-3-pro-preview",
+      handle: googleBody,
+      modelOptions: { thinkingConfig: { thinkingBudget: 2048, includeThoughts: true } },
+      variants: { custom_level: { thinkingConfig: { thinkingLevel: "high" } } },
+    },
+  ))
+
+test("provider options disabled Anthropic replaces an enabled default without residual budget", () =>
+  fixture(
+    async (seen) => {
+      await (await request({ provider_options: { thinking: { type: "disabled" } }, max_tokens: 2048 })).text()
+      expect(seen[0].body.thinking).toBeUndefined()
+      expect(seen[0].body.max_tokens).toBe(2048)
+    },
+    {
+      npm: "@ai-sdk/anthropic",
+      apiID: "claude-sonnet-4-5",
+      handle: anthropicBody,
+      modelOptions: { thinking: { type: "enabled", budgetTokens: 4096 } },
+    },
+  ))
+
+test("provider options top Anthropic adaptive removes a client enabled budget", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request({
+          provider_options: { thinking: { type: "enabled", budgetTokens: 2048 } },
+          reasoning_effort: "high",
+          max_tokens: 4096,
+        })
+      ).text()
+      expect(seen[0].body.thinking).toEqual({ type: "adaptive" })
+      expect(seen[0].body.output_config).toMatchObject({ effort: "high" })
+      expect(seen[0].body.max_tokens).toBe(4096)
+    },
+    {
+      npm: "@ai-sdk/anthropic",
+      apiID: "claude-sonnet-4-6",
+      handle: anthropicBody,
+      modelOptions: {},
+      variants: { high: { thinking: { type: "adaptive" }, effort: "high" } },
+    },
+  ))
+
+test.each([0, 65536])("provider options Anthropic defaults respect the SDK cap with catalog output=%s", (output) =>
+  fixture(
+    async (seen) => {
+      await (await request({ provider_options: { thinking: { type: "enabled", budgetTokens: 1024 } } })).text()
+      expect(seen[0].body.max_tokens).toBe(64000)
+    },
+    { npm: "@ai-sdk/anthropic", apiID: "claude-sonnet-4-5", handle: anthropicBody, modelOptions: {}, output },
+  ),
+)
+
+test("provider options enforce the Anthropic combined cap after a trusted plugin changes the budget", () =>
+  fixture(
+    async (seen) => {
+      expect(
+        await rejected(
+          request({ provider_options: { thinking: { type: "enabled", budgetTokens: 1024 } }, max_tokens: 7168 }),
+        ),
+      ).toMatchObject({ status: 400 })
+      expect(seen).toHaveLength(0)
+    },
+    {
+      npm: "@ai-sdk/anthropic",
+      apiID: "claude-sonnet-4-5",
+      handle: anthropicBody,
+      modelOptions: {},
+      output: 8192,
+      plugin: `export default async () => ({"chat.params": async (_input, output) => { output.options.thinking.budgetTokens = 2048 }})`,
+    },
+  ))
+
+test.each([
+  { npm: "@ai-sdk/google", apiID: "gemini-3.1-flash", options: { thinkingConfig: { includeThoughts: true } } },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-haiku-4-6", options: { thinking: { type: "disabled" } } },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-sonnet-4-5", options: { thinking: { type: "disabled" }, effort: "high" } },
+])("provider options reject unverified model combinations: $apiID", (row) =>
+  fixture(
+    async (seen) => {
+      expect(
+        await rejected(request(ChatCompletionRequest.parse({ ...base, provider_options: row.options }))),
+      ).toMatchObject({ status: 400 })
+      expect(seen).toHaveLength(0)
+    },
+    { ...row, modelOptions: {} },
+  ),
+)
+
+test("provider options Azure deployment accepts an existing trusted forceReasoning option", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request(
+          { model: "azure/chat", provider_options: { reasoningEffort: "high", reasoningSummary: "detailed" } },
+          ["azure/chat"],
+        )
+      ).text()
+      expect(seen[0].body.reasoning).toEqual({ effort: "high", summary: "detailed" })
+      expect(seen[0].body.forceReasoning).toBeUndefined()
+    },
+    {
+      npm: "@ai-sdk/azure",
+      providerID: "azure",
+      apiID: "deployment",
+      modelOptions: { forceReasoning: true },
+      handle: responsesBody,
+    },
+  ))
+
+test.each([
+  { apiID: "gemini-2.5-pro", config: { thinkingBudget: 128 } },
+  { apiID: "gemini-2.5-pro", config: { thinkingBudget: 32768 } },
+  { apiID: "gemini-2.5-flash", config: { thinkingBudget: 24576 } },
+  { apiID: "gemini-2.5-flash-lite", config: { thinkingBudget: 0 } },
+  { apiID: "gemini-2.5-flash-lite", config: { thinkingBudget: 512 } },
+  { apiID: "gemini-2.5-flash-lite", config: { thinkingBudget: 24576 } },
+  { apiID: "gemini-3-flash-preview", config: { thinkingLevel: "minimal" } },
+  { apiID: "gemini-3-flash-preview", config: { thinkingLevel: "medium" } },
+  { apiID: "gemini-3-pro-preview", config: { thinkingLevel: "low" } },
+])("provider options Google accepts documented boundaries: $apiID $config", (row) =>
+  fixture(
+    async (seen) => {
+      await (
+        await request(ChatCompletionRequest.parse({ ...base, provider_options: { thinkingConfig: row.config } }))
+      ).text()
+      expect(seen[0].body.generationConfig).toMatchObject({ thinkingConfig: row.config })
+    },
+    { npm: "@ai-sdk/google", apiID: row.apiID, handle: googleBody, modelOptions: {} },
+  ),
+)
+
+test.each(["low", "high"])("provider options DeepSeek v4 flash emits canonical effort %s", (reasoningEffort) =>
+  fixture(
+    async (seen) => {
+      await (await request({ model: "deepseek/chat", provider_options: { reasoningEffort } }, ["deepseek/chat"])).text()
+      expect(seen[0].body.reasoning_effort).toBe(reasoningEffort)
+    },
+    { providerID: "deepseek", apiID: "deepseek-v4-flash", modelOptions: {} },
+  ),
+)
+
+test("provider options top DeepSeek effort overrides disabled client thinking", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request(
+          { model: "deepseek/chat", provider_options: { thinking: { type: "disabled" } }, reasoning_effort: "high" },
+          ["deepseek/chat"],
+        )
+      ).text()
+      expect(seen[0].body.thinking).toEqual({ type: "enabled" })
+      expect(seen[0].body.reasoning_effort).toBe("high")
+    },
+    { providerID: "deepseek", apiID: "deepseek-v4-pro" },
+  ))
+
+test.each([
+  {
+    apiID: "claude-sonnet-4-5",
+    client: { thinking: { type: "enabled", budgetTokens: 31999 } },
+    expected: { thinking: { type: "enabled", budget_tokens: 31999 }, max_tokens: 32000 },
+  },
+  {
+    apiID: "claude-opus-4-7",
+    client: { thinking: { type: "adaptive", display: "summarized" }, effort: "xhigh" },
+    expected: {
+      thinking: { type: "adaptive", display: "summarized" },
+      output_config: { effort: "xhigh" },
+      max_tokens: 1,
+    },
+  },
+])("provider options Anthropic supports the approved budget and adaptive limits: $apiID", (row) =>
+  fixture(
+    async (seen) => {
+      await (
+        await request(ChatCompletionRequest.parse({ ...base, provider_options: row.client, max_tokens: 1 }))
+      ).text()
+      expect(seen[0].body).toMatchObject(row.expected)
+    },
+    { npm: "@ai-sdk/anthropic", apiID: row.apiID, handle: anthropicBody, modelOptions: {} },
+  ),
+)
+
+test("provider options cannot create a missing top variant", () =>
+  fixture(
+    async (seen) => {
+      expect(
+        await rejected(
+          request(
+            { model: "xiaomi/chat", provider_options: { thinking: { type: "enabled" } }, reasoning_effort: "disabled" },
+            ["xiaomi/chat"],
+          ),
+        ),
+      ).toMatchObject({ status: 400 })
+      expect(seen).toHaveLength(0)
+    },
+    { providerID: "xiaomi", apiID: "mimo-v2.5" },
+  ))
+
+test("provider options isolate defaults and variant containers from plugin mutation", () =>
+  fixture(
+    async (seen) => {
+      const model = await AppRuntime.runPromise(
+        Effect.gen(function* () {
+          const ref = Provider.parseModel("local/chat")
+          return yield* (yield* Provider.Service).getModel(ref.providerID, ref.modelID)
+        }),
+      )
+      for (let index = 0; index < 2; index++) {
+        await (await request({ provider_options: { textVerbosity: "low" }, reasoning_effort: "isolated" })).text()
+        expect(model.options.audit).toEqual({ value: 1 })
+        expect(model.variants?.isolated.include).toEqual(["reasoning.encrypted_content"])
+      }
+      expect(seen).toHaveLength(2)
+    },
+    {
+      npm: "@ai-sdk/openai",
+      apiID: "gpt-5.2",
+      handle: responsesBody,
+      modelOptions: { audit: { value: 1 } },
+      variants: { isolated: { reasoningEffort: "high", include: ["reasoning.encrypted_content"] } },
+      plugin: `export default async () => ({"chat.params": async (input, output) => {
+    output.options.audit.value = 2
+    output.options.include.push("message.output_text.logprobs")
+  }})`,
+    },
+  ))

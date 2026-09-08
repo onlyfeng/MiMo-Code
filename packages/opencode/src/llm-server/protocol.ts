@@ -1,26 +1,35 @@
 import { randomUUID } from "node:crypto"
 import z from "zod"
 import type { FinishReason, LanguageModelUsage, ModelMessage } from "ai"
+import { acceptableImage, DATA_URL, type Image } from "./images"
+import { InputAudio, inputAudio } from "../audio/input"
 
-// Inline images only: the SDK may otherwise download remote URLs without the
-// request signal. Bound the decoded payload before any provider is initialized.
-const DATA_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/
-function acceptableImage(value: string) {
-  const match = DATA_URL.exec(value)
-  if (!match || match[2].length > Math.ceil((5 * 1024 * 1024) / 3) * 4) return false
-  const bytes = Buffer.from(match[2], "base64")
-  return bytes.length <= 5 * 1024 * 1024 && bytes.toString("base64") === match[2]
+// Zod's JSON record parser discards __proto__. Reject reserved keys before
+// parsing so an invalid options bag cannot become an accepted empty object.
+function reservedOptionKey(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Object.entries(value).some(
+      ([key, child]) => ["__proto__", "constructor", "prototype"].includes(key) || reservedOptionKey(child),
+    )
+  )
 }
+
 const TextPart = z.strictObject({ type: z.literal("text"), text: z.string() })
 const TextContent = z.union([z.string(), z.array(TextPart)])
 const ContentPart = z.discriminatedUnion("type", [
   TextPart,
+  z.strictObject({ type: z.literal("input_audio"), input_audio: InputAudio }),
   z.strictObject({
     type: z.literal("image_url"),
     image_url: z.strictObject({
       url: z
         .string()
-        .refine(acceptableImage, "requires a canonical base64 PNG, JPEG, WebP or GIF data URL of at most 5 MiB"),
+        .refine(
+          acceptableImage,
+          "requires an HTTP(S) URL without credentials or a canonical image data URL of at most 5 MiB",
+        ),
       detail: z.enum(["auto", "low", "high"]).optional(),
     }),
   }),
@@ -102,7 +111,11 @@ export const ChatCompletionRequest = z.strictObject({
   functions: z.unknown().optional(),
   function_call: z.unknown().optional(),
   web_search_options: z.unknown().optional(),
-  provider_options: z.record(z.string(), z.json()).optional(),
+  provider_options: z
+    .unknown()
+    .refine((value) => !reservedOptionKey(value), "Reserved provider option key")
+    .pipe(z.record(z.string(), z.json()))
+    .optional(),
 })
 export type ChatCompletionRequest = z.infer<typeof ChatCompletionRequest>
 
@@ -124,7 +137,6 @@ export function unsupported(req: ChatCompletionRequest): string | undefined {
     "functions",
     "function_call",
     "web_search_options",
-    "provider_options",
   ] as const) {
     if (req[key] != null) return `${key} is not supported`
   }
@@ -168,7 +180,10 @@ export function unsupported(req: ChatCompletionRequest): string | undefined {
 const toText = (content: string | Array<{ type: "text"; text: string }>) =>
   typeof content === "string" ? content : content.map((part) => part.text).join("")
 
-export function toModelMessages(messages: ChatCompletionRequest["messages"]): ModelMessage[] {
+export function toModelMessages(
+  messages: ChatCompletionRequest["messages"],
+  images: ReadonlyMap<string, Image> = new Map(),
+): ModelMessage[] {
   const names = new Map<string, string>()
   return messages.map((message): ModelMessage => {
     if (message.role === "system" || message.role === "developer")
@@ -179,8 +194,16 @@ export function toModelMessages(messages: ChatCompletionRequest["messages"]): Mo
         role: "user",
         content: message.content.map((part) => {
           if (part.type === "text") return { type: "text", text: part.text }
-          const match = DATA_URL.exec(part.image_url.url)!
-          return { type: "image", image: match[2], mediaType: match[1] }
+          if (part.type === "input_audio") {
+            const audio = inputAudio(part.input_audio)
+            if (!audio) throw new Error("Invalid input audio")
+            return { type: "file", data: audio.data, mediaType: audio.mediaType }
+          }
+          const match = DATA_URL.exec(part.image_url.url)
+          if (match) return { type: "image", image: match[2], mediaType: match[1] }
+          const image = images.get(part.image_url.url)
+          if (!image) throw new Error("Remote image has not been downloaded")
+          return { type: "image", image: image.bytes, mediaType: image.mediaType }
         }),
       }
     }

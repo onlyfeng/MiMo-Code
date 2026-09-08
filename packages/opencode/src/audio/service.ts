@@ -2,6 +2,8 @@ import { experimental_generateSpeech as generateSpeech } from "ai"
 import { Effect } from "effect"
 import { AppRuntime } from "../effect/app-runtime"
 import { Provider } from "../provider"
+import * as SDK from "../llm-server/sdk"
+import { audioRejection } from "./input"
 import { AudioChat, AudioChatError } from "./audio-chat"
 import {
   SpeechRequest,
@@ -9,6 +11,7 @@ import {
   speechContentType,
   speechUnsupported,
   transcriptionUnsupported,
+  transcriptionMediaType,
 } from "./protocol"
 
 export class RequestError extends Error {
@@ -82,6 +85,22 @@ export async function resolveTransport(model: Provider.Model, kind: "speech" | "
     if (speech) return { type: "native" as const, speech }
   }
   if (!["@ai-sdk/openai", "@ai-sdk/azure", "@ai-sdk/openai-compatible"].includes(model.api.npm)) {
+    if (
+      kind === "transcription" &&
+      Provider.modelKind(model) === "language" &&
+      model.capabilities.input.audio &&
+      model.capabilities.output.text &&
+      ["@ai-sdk/google", "@ai-sdk/google-vertex"].includes(model.api.npm)
+    ) {
+      const resolved = await SDK.resolve(model, abort).catch((error) => {
+        abort.throwIfAborted()
+        return failed(error)
+      })
+      // Probe only the factory/adapter, never a generation request. Actual MIME
+      // and byte limits are checked with the same gate during execution.
+      if (!audioRejection(model, resolved.language, [{ mediaType: "audio/wav", bytes: 1 }]))
+        return { type: "sdk" as const, resolved }
+    }
     throw new RequestError(
       501,
       `This provider does not support audio-over-chat ${kind}`,
@@ -138,6 +157,7 @@ export async function synthesize(input: {
     return { audio: result.audio, contentType: speechContentType({ requested: result.format }) }
   }
 
+  if (transport.type !== "native") throw new RequestError(501, "Unsupported speech transport")
   const result = await generateSpeech({
     model: transport.speech,
     text: parsed.data.input,
@@ -167,16 +187,55 @@ export async function transcribe(input: {
   if (rejection) throw new RequestError(400, rejection)
   input.abort.throwIfAborted()
   const model = await resolveModel(parsed.data.model, "transcription", input.abort)
-  await resolveTransport(model, "transcription", input.abort)
+  const transport = await resolveTransport(model, "transcription", input.abort)
   if (Provider.modelKind(model) === "language") {
     const language =
       parsed.data.language && parsed.data.language !== "auto" ? ` The audio is in ${parsed.data.language}.` : ""
+    const instruction = `Transcribe the audio verbatim.${language} Output only the transcript, with no commentary, labels, or quotation marks.`
+    if (transport.type === "sdk") {
+      const mediaType = transcriptionMediaType({ reported: input.mediaType })
+      if (!mediaType) throw new RequestError(400, "Unsupported transcription audio format")
+      const rejection = audioRejection(model, transport.resolved.language, [
+        { mediaType, bytes: input.audio.byteLength },
+      ])
+      if (rejection) throw new RequestError(400, rejection)
+      const controller = new AbortController()
+      const abort = AbortSignal.any([input.abort, controller.signal])
+      try {
+        const cap = Number.isSafeInteger(model.limit.output) && model.limit.output > 0 ? model.limit.output : 4096
+        const result = await SDK.start({
+          resolved: transport.resolved,
+          settings: { max_tokens: Math.min(4096, cap) },
+          outputCap: cap,
+          messages: () => [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: instruction },
+                { type: "file", data: input.audio, mediaType },
+              ],
+            },
+          ],
+          abort,
+        })
+        const output = await SDK.collect(result, controller, abort)
+        abort.throwIfAborted()
+        if (output.finishReason !== "stop" || !output.text.trim() || output.toolCalls.length)
+          throw new Error("Incomplete transcription")
+        return { text: output.text }
+      } catch (error) {
+        input.abort.throwIfAborted()
+        return failed(error)
+      } finally {
+        controller.abort()
+      }
+    }
     return AudioChat.transcribe({
       providerID: model.providerID,
       modelID: model.api.id,
       audio: input.audio,
       mediaType: input.mediaType,
-      instruction: `Transcribe the audio verbatim.${language} Output only the transcript, with no commentary, labels, or quotation marks.`,
+      instruction,
       disableThinking: true,
       headers: model.headers,
       abort: input.abort,
