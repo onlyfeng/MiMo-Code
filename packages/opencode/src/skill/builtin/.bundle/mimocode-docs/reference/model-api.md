@@ -65,6 +65,36 @@ store canonical `scope`; finite public library results also retain `models`.
 Consumers of a result that may be all-model scope must check `scope.type` before
 assuming a `models` array exists.
 
+## Token lifetime
+
+The default idle window is one hour and the absolute lifetime is one day.
+Successful token verification refreshes idle time; absolute time starts at issue.
+`--ttl` and `--max-age` accept positive, safe durations or independent `none`
+values. Zero, negative, invalid, and overflowing durations are rejected.
+
+| Issue flags | Expiry |
+| --- | --- |
+| Omit both, or `--ttl 1h --max-age 24h` | One hour idle or one day after issue, whichever comes first |
+| `--ttl none --max-age 24h` | One day after issue only |
+| `--ttl 1h --max-age none` | One hour idle only; use refreshes it |
+| `--ttl none --max-age none` | No expiry; revocation still works |
+
+```sh
+mimo llm-server issue --directory /absolute/project/path --all-models --ttl none --max-age none --json
+```
+
+Issue/list JSON exposes `idle_ms` and `max_age_ms` separately, using explicit
+`null` for each cancelled limit. `expires_at` is `null` only when both are
+cancelled. Terminal output uses `never` for no expiry and shows both limits.
+Renewal preserves each `none` independently. Request deadlines and resource
+limits still apply to permanent tokens.
+
+Embedding uses `expiry:{idleMs:null,maxAgeMs:null}`. Version 2 stores require
+both lifetime fields, each a positive safe integer or explicit `null`; missing
+fields never mean permanent. Legacy version 1 remains finite-only. Public
+`expiresAt`/`expires_at` values are numbers or explicit `null`, including the
+successful verification result, which also exposes both lifetime fields.
+
 ## Endpoints and media
 
 | Endpoint                        | Behavior                                                              |

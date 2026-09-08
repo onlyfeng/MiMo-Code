@@ -2,7 +2,7 @@
 
 `mimo serve --audio-api` 在现有服务端口上提供基础语音合成和转写。
 普通 TUI、ACP、嵌入式实例以及不带显式 API 参数的 `serve` 默认不开放音频接口。
-也可通过 [模型 API](model-api.md) 的 `--llm-server` 模式使用按模型授权的临时令牌；
+也可通过 [模型 API](model-api.md) 的 `--llm-server` 模式使用具有显式模型范围的访问令牌；
 它与这里的 `--audio-api` 静态密钥模式互斥。
 仅设置环境变量也不会开启接口。
 
@@ -22,7 +22,7 @@ Basic 认证规则。未设置服务器密码时，普通 API 的原有本机免
 
 调用方必须明确提供当前项目配置中的 `provider/model`。以下示例中的
 `audio/tts`、`audio/asr` 是占位模型名，需要替换为自己的配置。静态密钥模式不提供
-自动选模或聊天代理；能力发现、模型列表和临时令牌见 [模型 API](model-api.md)。
+自动选模或聊天代理；能力发现、模型列表和访问令牌见 [模型 API](model-api.md)。
 
 ```sh
 curl --fail-with-body http://127.0.0.1:4096/v1/audio/speech \

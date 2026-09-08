@@ -1,4 +1,4 @@
-# 显式模型 API 与临时令牌
+# 显式模型 API 与访问令牌
 
 在有供应商配置的项目目录中执行 `mimo serve --llm-server`，即可在现有服务端口
 提供模型列表、聊天补全以及基础音频接口。普通 TUI、ACP、嵌入式实例和不带显式 API 参数
@@ -67,13 +67,33 @@ provider 配置和聊天插件钩子，构造不持久化的请求上下文；�
 不执行 TUI 的工具、MaxMode、actor、checkpoint 或压缩工作流。
 
 现有 `serve --audio-api` 仍使用独立静态音频密钥。它与 `--llm-server` 互斥；
-静态音频密钥不能授权模型代理，临时模型令牌也不能授权静态密钥模式。两者均不代替
+静态音频密钥不能授权模型代理，模型令牌也不能授权静态密钥模式。两者均不代替
 普通服务 API 的 `MIMOCODE_SERVER_PASSWORD` Basic 认证。
 
 ## 有效期、查询与撤销
 
-默认闲置期限为一小时，绝对期限为一天。每次有效准入刷新闲置期限，但不能越过绝对
-期限。`--ttl` 和 `--max-age` 可调整为有限正时长，不接受 `none`、零或无限期限。
+默认闲置期限为一小时，绝对期限为一天。有效令牌验证会刷新闲置期限；绝对期限从签发
+时间计算，不随使用刷新。`--ttl` 和 `--max-age` 可设为正安全整数毫秒对应的时长，或
+分别使用 `none` 取消该期限。零、负值、无效时长及时间戳溢出仍会拒绝。
+
+| 签发参数 | 到期规则 |
+| --- | --- |
+| 省略两项，或 `--ttl 1h --max-age 24h` | 闲置一小时或签发一天，先到者生效 |
+| `--ttl none --max-age 24h` | 仅签发后一天到期 |
+| `--ttl 1h --max-age none` | 仅闲置一小时到期，使用会刷新 |
+| `--ttl none --max-age none` | 无到期时间，仍可撤销 |
+
+例如显式签发固定项目的永久全部模型令牌：
+
+```sh
+mimo llm-server issue --directory /absolute/project/path --all-models --ttl none --max-age none --json
+```
+
+签发和列表 JSON 分别用 `idle_ms`、`max_age_ms` 的 `null` 表示已取消的期限；只有两项
+都取消，`expires_at` 才为 `null`。终端用 `never` 显示无到期时间，并列出两项期限。
+`renew_argv` 分别保留每个 `none`。无到期时间不会取消每次请求的资源和超时限制。
+嵌入库对应 `expiry:{idleMs:null,maxAgeMs:null}`；v2 存储的两项期限必须存在且为正安全
+整数或显式 `null`，缺字段不代表永久，v1 记录仍只接受原来的有限期限。
 新签发令牌的明文仅在签发结果中返回，磁盘只保存 SHA-256 哈希；查询不返回明文。
 
 ```sh
@@ -175,5 +195,5 @@ summary 等默认值也会覆盖客户端字段；要独立组合推理强度和
 
 普通 OpenAPI 和生成 SDK 仍不包含这组可选接口；可使用兼容客户端或直接 HTTP
 调用。Node 入口导出 `LLMServerTokens` 供嵌入端显式管理令牌，只有传入
-`Server.listen({ ..., llm: { directory } })` 才开启代理。实现提取自 upstream `6203ea2e`，按 [FD-004](upstream-deviations.md)
+`Server.listen({ ..., llm: { directory } })` 才开启代理。接口按 [FD-004](upstream-deviations.md)
 保留显式开启、提前鉴权、固定目录与可取消关闭的要求。
