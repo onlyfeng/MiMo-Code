@@ -179,9 +179,9 @@ describe("instance capability discovery", () => {
     })
   })
 
-  test("plain chat and non-chat-shaped audio are not offered as transcription", () =>
+  test("Google offers its multimodal SDK fallback but not plain chat or dedicated ASR", () =>
     fixture(config({ chat, asr, multimodal }, { npm: "@ai-sdk/google" }), async () => {
-      expect(await LLMServerCapability.resolve("transcription")).toEqual([])
+      expect((await LLMServerCapability.resolve("transcription")).map((item) => item.ref)).toEqual(["p/multimodal"])
       expect((await LLMServerCapability.available()).map((entry) => entry.ref).sort()).toEqual([
         "p/chat",
         "p/multimodal",
