@@ -2812,6 +2812,14 @@ Combined focused evidence is 125 pass, 0 fail, 694 assertions across 14 files.
 Package typecheck passes. No product or timeout change was needed. New-head
 Codex completion and all CI remain required before merge.
 
+## 2026-09-08 POLICY-04 frozen non-catalog prefix follow-up
+
+- Runtime/tests source: `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`, following reviewed candidate `110222157896b16e7ba85bc3d5d3f5eef975a6e1`. Bundled guidance remains `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`; the overall upstream baseline and selected released source remain unchanged. This is a local follow-up, not a formal acceptance or compat propagation claim.
+- Codex identified that refreshing the directory rebuilt frozen instructions and plugin output. A verified optional internal catalog position now permits only that range to change; tool-schema rotation also preserves every non-catalog system byte. Legacy schema-3 rows infer only a unique complete match; ambiguous or invalid old positions retain the old pair and log the reason. Empty legacy and standalone-catalog transitions never introduce empty system entries. Temporary construction markers are fully materialized before pin or dispatch.
+- The failed shard-1 reopen test exited its child successfully but received a truncated long stdout JSON line. Child results now use an awaited JSON file read after child exit; the original bounded timeout and real persistent database/reopen paths remain.
+- Focused follow-up matrix: 33 passing tests / 180 assertions (24 catalog helpers plus 9 real prefix/capture/compaction/reopen cases). This overlaps the prior 125-test matrix and is not added to it. New behavior, cancellation-free empty transitions and stdout transport fixes each have their own reproduced RED; the current patch passed package typecheck, diff check and lint (4,487 warnings, zero errors). The last empty-catalog helper fix was verified by its helper cases and final typecheck; the nine provider cases were not redundantly rerun.
+- Main PR87 must receive a fresh Codex review and exact-head CI before merge. Compat must inherit this patch and retain its capped-history projection and current-turn split before its own review/publication gates.
+
 ## 2026-09-08 POLICY-03 default TUI model API local review
 
 - Selected upstream source: `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, released in v0.1.14 (`2a0eb706e95a77cba34a319e9f11f33f26d4450c`). The overall upstream review baseline remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; this is selected behavior adoption, not a full upstream merge.

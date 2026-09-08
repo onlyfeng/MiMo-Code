@@ -90,7 +90,7 @@ test("two non-test processes preserve the same user frozen catalog and refresh o
         const after = yield* sessions.messages({ sessionID });
         return { pid: process.pid, sessionID, captured, before, after, row: rows(sessionID)[0], response };
       })) });
-      console.log("CATALOG_REOPEN_RESULT=" + JSON.stringify(result));
+      await Bun.write(process.env.CATALOG_REOPEN_RESULT_FILE, JSON.stringify(result));
     } finally {
       await Instance.disposeAll();
       await AppRuntime.dispose();
@@ -114,6 +114,7 @@ test("two non-test processes preserve the same user frozen catalog and refresh o
         MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL: undefined,
         MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS: undefined,
         MIMOCODE_AUTO_APPROVE_DELETE: undefined,
+        CATALOG_REOPEN_RESULT_FILE: path.join(tmp.path, `${phase}-result.json`),
         CATALOG_REOPEN_PHASE: phase,
         CATALOG_REOPEN_SESSION: sessionID,
       },
@@ -122,15 +123,13 @@ test("two non-test processes preserve the same user frozen catalog and refresh o
     })
     const timer = setTimeout(() => child.kill("SIGKILL"), 25_000)
     try {
-      const [exit, stdout, stderr] = await Promise.all([
+      const [exit, _stdout, stderr] = await Promise.all([
         child.exited,
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
       ])
       expect({ exit, stderr: exit ? stderr : "" }).toEqual({ exit: 0, stderr: "" })
-      const result = stdout.split("\n").find((line) => line.startsWith("CATALOG_REOPEN_RESULT="))
-      expect(result).toBeDefined()
-      return JSON.parse(result!.slice("CATALOG_REOPEN_RESULT=".length))
+      return await Bun.file(path.join(tmp.path, `${phase}-result.json`)).json()
     } finally {
       clearTimeout(timer)
       if (child.exitCode === null) {
@@ -144,6 +143,8 @@ test("two non-test processes preserve the same user frozen catalog and refresh o
     const first = await run("first")
     expect(requests).toHaveLength(0)
     expect(first.captured.row.skill_catalog).toMatchObject({ schema: 3, turnID: first.userID })
+    expect(first.captured.row.skill_catalog.systemSlot).toBeDefined()
+    expect(first.captured.system.join("\n")).not.toContain("<mimocode-catalog-slot-")
     expect(first.captured.system.join("\n")).toContain(OLD)
     expect(
       first.captured.row.tools.find((tool: { name: string }) => tool.name === "actor").native_input_schema,
