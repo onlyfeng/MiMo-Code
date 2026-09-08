@@ -2939,3 +2939,20 @@ transaction regression run passes 29 tests / 145 assertions across three files.
 Package typecheck and repository lint pass (warnings remain). Tests clear the six
 ambient selectors and retain the package preload. No public schema change is
 introduced by the internal AbortSignal, so prior SDK generation remains valid.
+
+## 2026-09-09 POLICY-02 main recovery inbox provenance follow-up
+
+PR #92 review identified that main recovery committed the original task but
+omitted the recovery parent passed to the loop. Behavior/guidance source
+`afa6198588ba7f6e0a0c92623622c10da68837d7` makes the committed parent authoritative for every recovery,
+independently of Actor-only model identity validation. All resumed loop steps
+defer inbox draining and use the existing successful-continuation receipts;
+ordinary later runs still drain queued messages with their own task provenance.
+Settlement cleanup also checks the committed parent for main recovery.
+
+The real main HTTP/provider regression starts with a durable inbox row. Before
+the fix, the resumed length continuation lost the bound task. After the fix,
+both recovery requests retain the original task and exclude the notification;
+the next ordinary run consumes it without inheriting that task. Together with
+existing main recovery, cancellation and transaction cases, 29 tests / 153
+assertions across three files pass. Package typecheck and repository lint pass.
