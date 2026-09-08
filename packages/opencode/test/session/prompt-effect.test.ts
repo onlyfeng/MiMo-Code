@@ -915,7 +915,10 @@ function stalledForkRecoveryCfg(url: string) {
           ...base.provider.test.models,
           "test-model": {
             ...base.provider.test.models["test-model"],
-            limit: { context: 20_000, output: 1_000 },
+            // Summary replay is capped at 50 KiB (about 17K estimated tokens).
+            // Keep it above the 16.2K ratio threshold so repeated summaries
+            // still exercise recovery without progress after that cap applies.
+            limit: { context: 18_000, output: 1_000 },
           },
         },
       },

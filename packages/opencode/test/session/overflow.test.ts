@@ -638,7 +638,7 @@ describe("request preflight overflow tool filtering", () => {
   // Big enough that, on its own, the schema pushes a small-context model over
   // the preflight threshold; small enough to stay under the 80KB schema cap.
   const bigTool = () => ({
-    description: "d".repeat(20_000),
+    description: "d".repeat(30_000),
     inputSchema: { type: "object", properties: { path: { type: "string" } } },
   })
   const keepTool = () => ({
@@ -646,7 +646,7 @@ describe("request preflight overflow tool filtering", () => {
     inputSchema: { type: "object", properties: {} },
   })
   const messages = [{ role: "user", content: [{ type: "text", text: "hello" }] }] as any
-  // context 12K, input 8K, output 4K → usable 4K, trip threshold ~3.6K.
+  // The dedicated 8K input window has a 7.2K compaction threshold.
   const model = createModel({ context: 12_000, input: 8_000, output: 4_000 })
   const cfg = mockCfg()
 
@@ -704,7 +704,7 @@ describe("request preflight overflow tool filtering", () => {
   test("materializes the provider-visible schema without execute callbacks", async () => {
     const schema = {
       type: "object",
-      properties: { path: { type: "string", description: "d".repeat(20_000) } },
+      properties: { path: { type: "string", description: "d".repeat(30_000) } },
     } satisfies JSONSchema7
     const descriptors = await LLM.materializeWireToolDescriptors({
       bigTool: tool({
