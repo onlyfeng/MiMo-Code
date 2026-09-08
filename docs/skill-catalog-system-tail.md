@@ -41,6 +41,6 @@ This is POLICY-04 alone, selected from release
 `2a0eb706e95a77cba34a319e9f11f33f26d4450c` and upstream snapshot
 `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`. The overall upstream review baseline
 remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`. Runtime/test reference:
-`22c5a51099f460cb9b58c064c57c8632e2cd70be`. This description records the local implementation;
+`d9ed4dc480ddbe319d79e6ca655facc552e2cd35`. This description records the local implementation;
 publication, exact-head CI and compat propagation require their own evidence.
 Instruction enablement and the other selected policies are unchanged.

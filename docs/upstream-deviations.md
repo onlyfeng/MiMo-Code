@@ -17,7 +17,7 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `22c5a51099f460cb9b58c064c57c8632e2cd70be`
+- Main behavior (runtime/tests): `d9ed4dc480ddbe319d79e6ca655facc552e2cd35`
 - Bundled guidance content: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
 - Prior fork `main` tip: `d415822c29539a4b6eebeafb59de1b88da18b95c`
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -138,7 +138,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `22c5a51099f460cb9b58c064c57c8632e2cd70be`.
+  main behavior `d9ed4dc480ddbe319d79e6ca655facc552e2cd35`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
