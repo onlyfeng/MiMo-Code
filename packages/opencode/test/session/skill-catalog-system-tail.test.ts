@@ -206,6 +206,7 @@ it.live(
             parts: [{ type: "text", text: "A genuinely new direct user query" }],
           })
           const next = (yield* llm.inputs)[3]
+          expect(wire(next, "system")).toContain("LEGACY_FROZEN_SYSTEM_WITHOUT_CATALOG")
           expect(wire(next, "system")).toContain(NEW)
           expect(wire(next, "system").split(NEW)).toHaveLength(2)
           expect(wire(next, "conversation")).not.toContain(OLD)

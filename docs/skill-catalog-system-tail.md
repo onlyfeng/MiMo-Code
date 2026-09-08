@@ -21,6 +21,20 @@ key and tool-schema hash. Updating the message watermark does not update that
 turn ID. Tool-schema rotation retains the already selected catalog. This is
 internal database metadata, not an added public HTTP or SDK field.
 
+A refreshed directory replaces only its verified position inside the frozen
+system. Environment text, format instructions, instruction files and plugin
+system transformations retain their original bytes, including when tool schemas
+rotate. An optional internal position is persisted with the catalog; temporary
+construction markers are removed before either persistence or model dispatch.
+
+Older schema-3 rows without a position can infer it from one exact occurrence of
+the saved catalog. A legacy or empty catalog can append its first nonempty text
+to the frozen system. Clearing a standalone catalog removes that entry rather
+than sending an empty system message. If an old catalog occurs more than once,
+or its saved position no longer matches, the original system/catalog pair is
+retained and the reason logged; that turn may keep the old directory rather
+than guess which instruction text to replace. Loaded skill bodies are unaffected.
+
 An older row with SQL NULL represents the legacy system/history layout. When
 an interrupted old turn resumes, its system and generated catalog messages
 remain a pair. A new direct user turn migrates to system-tail layout. Model
