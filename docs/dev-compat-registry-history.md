@@ -2861,3 +2861,31 @@ specified propagation does not claim current-upstream parity.
 - Final branch publication is checked using remote-tip equality, exact-SHA
   test/typecheck/lint results and selected-upstream-to-main-to-compat ancestry.
   This specified integration does not claim alignment to newer upstream main.
+
+
+## 2026-09-08 Actor/MCP CI correction inheritance
+
+- Previous published compat `a03186c0` passed lint/typecheck but failed test
+  shard 4 on two obsolete actor exclusions and nine HTTP cases sharing a
+  captor overwritten by independent unit-test layers. That publication was
+  not accepted as complete.
+- Inherited main source/test behavior is
+  `224920e08eb3506214f540f1411cc7bd9f26a87e`; compat behavior and source
+  inheritance merge are `100abd923867627ac9de7998993b5d4e51e92d92`. Shared
+  audit commit is `2d90dfd732a95dc5e5e601e783994860abddde1f`.
+- Inheritance changes only three actor contract tests and shared FC-008 CI
+  process isolation. Runtime/SDK/OpenAPI source remains byte-identical to
+  compat behavior `972b3b31`; all seven DC overrides and the extra frozen
+  turnContext HTTP case remain intact. No compat-only runtime adaptation or
+  new capability is introduced.
+- The isolated HTTP suite passes all nine cases with 161 assertions and zero
+  failures/skips, including append/replace-agent and receiver variants. The
+  dedicated job retains per-case JUnit, expected-file and nonzero-execution
+  checks. Shared path-hash membership changes only by moving this file to its
+  own process. Owning package typecheck passes; default test environment clears
+  all seven selectors documented in the shared review and retains the package
+  preload baseline.
+- Final publication requires fresh remote-tip equality, successful exact-SHA
+  test/typecheck/lint, and the selected upstream to main to compat ancestry.
+  First-publication failures and earlier local matrices are not substituted
+  for those final remote checks.
