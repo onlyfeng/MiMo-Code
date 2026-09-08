@@ -17,9 +17,9 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `d5798519cd1227ab4061bd69ef9efc5f483b74d8`
-- Bundled guidance content: `3cb9d8df7d453d8995de22f3242eee4bc81f6e97`
-- Prior fork `main` tip: `85dfc3f2edbd1eca5cf92daa3521a7bcf2027cb5`
+- Main behavior (runtime/tests): `6df77610eed88d86d674c6fd145852c5b4208289`
+- Bundled guidance content: `6df77610eed88d86d674c6fd145852c5b4208289`
+- Prior fork `main` tip: `df9a263bdfa60f762b0c90b6126a774ef60737ed`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -31,39 +31,64 @@ capability audit is recorded in [the model API review](released-model-api-review
 
 | ID     | Watch surfaces                                                        | Upstream relationship                                                                                             | Required decision                                                                     |
 | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| FD-001 | yolo, permission, Bash delete                                         | Rejects shared mutable delete approval                                                                            | Preserve request/instance isolation                                                   |
+| FD-001 | yolo, permission, Bash delete                                         | Adopts startup delete approval; rejects run-driven shared switch mutation                                         | Preserve deny precedence and live invocation isolation                               |
 | FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries               | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
 | FD-004 | instance server, explicit model/audio APIs, `/v1`, SDK/OpenAPI        | Adopts capability discovery and token-scoped proxy behind explicit admission; rejects implicit capability service | Preserve opt-in, authentication-before-bootstrap, and bounded shutdown                |
 | FD-005 | model identity, prompt, discovery, tools, retry                       | Adapts inconsistent upstream classification                                                                       | Preserve one resolved identity                                                        |
 | FD-006 | compact Codex declarations and nested execution                       | Adopts released compact registration with direct actor/interactive exceptions                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
 | FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
 
-## FD-001 — `--yolo` must not mutate delete approval state
+## FD-001 — run approval must not toggle shared delete state
 
 - Status: active
 - Canonical owner: fork `main` permission and Bash authorization boundary
-- Observable contract: `run` and TUI skip-permission modes may auto-approve
-  ordinary requests, but they do not set `MIMOCODE_AUTO_APPROVE_DELETE`, mutate
-  the instance delete-approval switch, or install restoration callbacks for
-  shared state. Explicit environment and instance API controls remain separate.
-- Upstream relationship: rejects the shared-state helper introduced at
-  `2bff8074b572aee6dd0d0bc5e86fe5db9bff8013` and merged by `c8048b7c`.
+- Observable contract: dangerous TUI startup includes deletion approval,
+  initialized independently from the runtime skip-all toggle. Explicit
+  `bash_delete`, Bash, and external-directory denies still block execution.
+  `mimo run --yolo`, including `run --attach`, instead answers each approval
+  belonging to its own live invocation with `once`; it never enables the
+  server's shared delete switch, rewrites the environment, or installs a
+  restoration callback. Non-yolo run rejects only its target request and ignores
+  foreign asks, including other pending requests in the same session. A
+  correlation UUID is not authorization and is not persisted as a
+  grant. Admitted work and its current continuations/interactive children may
+  carry a live scope; completion, cancellation, client loss, or selecting an
+  unrelated queued user closes it and cancels its outstanding asks. Background
+  routing remains independent, and MCP server-initiated sampling clears any
+  scope captured by its long-lived connection before its own approval flow.
+- Upstream relationship: adopts startup yolo's inclusion of delete approval
+  while retaining the residual rejection of the shared-state helper introduced
+  at `2bff8074b572aee6dd0d0bc5e86fe5db9bff8013` and merged by `c8048b7c`.
+  Explicit environment and instance API delete controls remain supported;
+  invoking `run --yolo` does not change those controls. See
+  [Yolo and run approval](yolo-run-approval.md).
 - Watch surfaces: `packages/opencode/src/cli/cmd/run.ts`,
   `packages/opencode/src/cli/cmd/tui/thread.ts`,
+  `packages/opencode/src/cli/cmd/run-approval.ts`,
+  `packages/opencode/src/session/run-approval.ts`,
+  `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/permission/index.ts`,
+  `packages/opencode/src/mcp/sampling.ts`,
+  `packages/opencode/src/server/routes/instance/session.ts`,
   `packages/opencode/src/server/routes/instance/permission.ts`, and
-  `packages/opencode/src/tool/bash.ts`.
+  `packages/opencode/src/tool/bash.ts`; related actor/tool bridges and generated
+  SDK/OpenAPI run-correlation fields.
 - Tests/evidence: `packages/opencode/test/cli/yolo.test.ts`,
   `packages/opencode/test/permission/auto-approve-delete.test.ts`,
   `packages/opencode/test/permission/skip-all.test.ts`,
   `packages/opencode/test/tool/bash.test.ts`, and
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
-  split controls and deletion boundary.
+  split controls and deletion boundary. Focused run-correlation carriers are
+  `test/cli/run-approval.test.ts`, `test/session/run-approval.test.ts`,
+  `test/session/prompt-effect.test.ts`, `test/tool/bash-delete-permission.test.ts`,
+  `test/cli/run-yolo-attach.test.ts`, `test/server/permission-reply-scope.test.ts`,
+  and `test/mcp/sampling-e2e.test.ts` under `packages/opencode`.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
-- Retirement condition: delete authorization becomes request- or
-  session-scoped, ownership/restoration is linearizable, caller loss cannot
-  leave it enabled, and Bash evaluates the same immutable authorization state.
+  main behavior `6df77610eed88d86d674c6fd145852c5b4208289`.
+- Retirement condition: upstream supplies equivalent deny-first startup
+  semantics and live invocation correlation without toggling shared approval
+  state; queued users, child lifetimes, disconnects, and long-lived MCP bridges
+  cannot retain or borrow an earlier invocation's approval.
 
 ## FD-002 — reported instruction content reaches the model by default
 
