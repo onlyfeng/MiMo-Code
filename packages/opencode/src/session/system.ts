@@ -213,7 +213,7 @@ export const layer = Layer.effect(
 
         return [
           "Skills available in this session:",
-          // Keep the full permission-filtered catalog in the per-turn message;
+          // The prefix freezes the permission-filtered catalog in its system tail;
           // the skill tool schema is deliberately static for cache stability.
           Skill.fmt(list, { verbose: true }),
         ].join("\n")

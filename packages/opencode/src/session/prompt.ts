@@ -1,7 +1,6 @@
 import * as RunApproval from "./run-approval"
 import path from "path"
 import os from "os"
-import { createHash } from "node:crypto"
 import z from "zod"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
@@ -148,7 +147,7 @@ import {
 } from "@/tool/mcp-tool-search"
 import { isMcpToolSearchEnabled, resolveHarnessMode } from "@/tool/gpt"
 import { GPT_TOP_LEVEL_TOOLS, TOOL_SCRIPT_EXCLUDED } from "@/tool/tool-script-ref"
-import { canonicalSkillCatalog, isSkillCatalogSnapshot, skillCatalogSnapshotVersion } from "./skill-catalog"
+import { captureSkillCatalog } from "./skill-catalog"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
 import { isDeepStrictEqual } from "node:util"
 
@@ -561,6 +560,36 @@ export const layer = Layer.effect(
     // surface it once per primary session rather than on every run-loop turn.
     const instructionsNotified = new Set<SessionID>()
 
+    const selectSkillCatalog = Effect.fnUntraced(function* (input: {
+      frozen: SessionPrefixSnapshot.Info | undefined
+      user: MessageV2.User
+      parts: MessageV2.Part[]
+      agent: Agent.Info
+      permission: Permission.Ruleset
+    }) {
+      const direct = isDirectUserMessage({ info: input.user, parts: input.parts })
+      const catalog = input.frozen?.skill_catalog ?? undefined
+      if (catalog && (!direct || catalog.turnID === input.user.id)) return catalog
+      if (input.frozen && !catalog) {
+        // A legacy watermark can name an assistant from the middle of this
+        // user turn. Resolve its parent rather than mistaking it for a turn ID.
+        const watermarkMessageID = input.frozen.watermark_message_id
+        const boundary = yield* Effect.try({
+          try: () => MessageV2.get({ sessionID: input.user.sessionID, messageID: watermarkMessageID }),
+          catch: (error) => error,
+        }).pipe(Effect.orElseSucceed(() => undefined))
+        const turnID = boundary?.info.role === "assistant" ? boundary.info.parentID : boundary?.info.id
+        if (!direct || turnID === input.user.id) return
+        // Missing historical boundaries do not authorize a live refresh while
+        // recovering an old turn. A later newly-created direct input can migrate.
+        if (!turnID && input.user.time.created <= input.frozen.updated_at) return
+      }
+      return captureSkillCatalog(
+        yield* sys.skills({ ...input.agent, permission: input.permission }, { tools: input.user.tools }),
+        input.user.id,
+      )
+    })
+
     // Late-bind prefix-capture helper so SessionCheckpoint.tryStartCheckpointWriter
     // can call buildLLMRequestPrefix without forming a layer cycle
     // (ToolRegistry → SessionCheckpoint → ToolRegistry). See prefix-capture-ref.ts.
@@ -609,6 +638,12 @@ export const layer = Layer.effect(
         })
         const frozen = yield* SessionPrefixSnapshot.get(input.sessionID, key)
         const mcpTools = frozen ? undefined : yield* mcp.tools()
+        const catalog = frozen
+          ? frozen.skill_catalog ?? undefined
+          : captureSkillCatalog(
+              yield* sys.skills({ ...ag, permission: capturePermission }, { tools: captureUser.info.tools }),
+              captureUser.info.id,
+            )
         const additions = frozen
           ? []
           : yield* Effect.gen(function* () {
@@ -618,7 +653,14 @@ export const layer = Layer.effect(
                   : Effect.succeed([]),
                 instruction.system().pipe(Effect.orDie),
               ])
-              return [...env, ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content)]
+              return [
+                ...env,
+                ...(captureUser.info.role === "user" && captureUser.info.format?.type === "json_schema"
+                  ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT]
+                  : []),
+                ...(catalog?.text ? [catalog.text] : []),
+                ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
+              ]
             })
         const prefix = yield* buildLLMRequestPrefix({
           sessionID: input.sessionID,
@@ -637,23 +679,42 @@ export const layer = Layer.effect(
             model.harness_model,
           ),
           prebuiltSystem: frozen?.system,
+          skillCatalogInSystem: Boolean(catalog),
           prompt: capturePrompt,
         }).pipe(
           Effect.provideService(LLM.Service, llm),
           Effect.provideService(ToolRegistry.Service, registry),
           Effect.catch(() => Effect.succeed(empty)),
         )
-        if (prefixModelIdentity(model, capturePrompt.harness) !== modelIdentity) return empty
+        if (prefixModelIdentity(model, capturePrompt.harness) !== modelIdentity || !prefix.inheritedMessages.length)
+          return empty
+        // A cold capture owns a frozen generation too. Reuse the winning row
+        // if another capture or the normal loop pinned this profile first.
+        const snapshot =
+          frozen ??
+          (yield* SessionPrefixSnapshot.pin({
+            sessionID: input.sessionID,
+            profileKey: key,
+            system: prefix.system,
+            skillCatalog: catalog,
+            toolsHash: SessionPrefixSnapshot.toolsHash(prefix.tools, prefix.activeTools),
+            tools: yield* Effect.promise(() => SessionPrefixSnapshot.snapshotTools(prefix.tools, prefix.activeTools)),
+            loadedMcpTools: prefix.loadedMcpTools,
+            watermarkMessageID: captureUser.info.id,
+          }))
         return {
           ...prefix,
+          system: snapshot.system,
+          inheritedMessages:
+            Boolean(snapshot.skill_catalog) === Boolean(catalog)
+              ? prefix.inheritedMessages
+              : yield* MessageV2.toModelMessagesEffect(captureMessages, model, {
+                  skillCatalogInSystem: Boolean(snapshot.skill_catalog),
+                }),
           modelIdentity,
-          ...(frozen
-            ? {
-                tools: SessionPrefixSnapshot.restoreTools(frozen.tools ?? []),
-                activeTools: SessionPrefixSnapshot.restoreActiveTools(frozen.tools ?? []),
-                loadedMcpTools: frozen.loaded_mcp_tools ?? [],
-              }
-            : {}),
+          tools: SessionPrefixSnapshot.restoreTools(snapshot.tools ?? []),
+          activeTools: SessionPrefixSnapshot.restoreActiveTools(snapshot.tools ?? []),
+          loadedMcpTools: snapshot.loaded_mcp_tools ?? [],
           parentPermission: capturePermission,
         }
       })
@@ -1367,53 +1428,6 @@ export const layer = Layer.effect(
         ...input.agent,
         permission: Agent.runtimePermission(input.agent, input.session.permission),
       }
-      const actor = userMessage.info.agentID
-        ? yield* actorRegistry
-            .get(input.session.id, userMessage.info.agentID)
-            .pipe(Effect.orElseSucceed(() => undefined))
-        : undefined
-      const inheritsSkillCatalog = actor?.contextMode === "full" && (actor.mode === "subagent" || actor.mode === "peer")
-      // A full-context fork already receives the parent's frozen model-message prefix,
-      // including its authoritative skills snapshot. Injecting again into the fork's
-      // own task message duplicates the catalog and moves static content past the query.
-      const skills = inheritsSkillCatalog
-        ? undefined
-        : yield* sys.skills(runtimeAgent, {
-            tools: userMessage.info.role === "user" ? userMessage.info.tools : undefined,
-          })
-      if (skills) {
-        const canonicalCatalog = canonicalSkillCatalog(skills)
-        const catalogVersion = createHash("sha256").update(canonicalCatalog).digest("hex")
-        const latestVersion = input.messages
-          .flatMap((message) =>
-            message.parts.flatMap((part) => {
-              if (part.type !== "text" || !part.synthetic || part.ignored || !isSkillCatalogSnapshot(part.text))
-                return []
-              return skillCatalogSnapshotVersion(part.metadata) ?? []
-            }),
-          )
-          .at(-1)
-        if (latestVersion !== catalogVersion) {
-          const catalogText = [
-            "<system-reminder>",
-            "Authoritative skills catalog snapshot v2:",
-            "When multiple snapshots exist, the last one is authoritative.",
-            canonicalCatalog,
-            "</system-reminder>",
-          ].join("\n")
-          const part = yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: userMessage.info.id,
-            sessionID: userMessage.info.sessionID,
-            type: "text",
-            text: catalogText,
-            synthetic: true,
-            metadata: { skillCatalog: { schema: 2, version: catalogVersion } },
-          })
-          userMessage.parts.unshift(part)
-        }
-      }
-
       const composeModeMsg = input.messages.find((msg) => msg.info.role === "user" && msg.info.agent === "compose")
       const cfg = yield* config.get()
       if (composeModeMsg) {
@@ -5114,6 +5128,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               permission: runtimePermission,
             })
             const frozen = yield* SessionPrefixSnapshot.get(sessionID, prefixProfileKey)
+            const catalog = yield* selectSkillCatalog({
+              frozen,
+              user: lastUser,
+              parts: msgs.find((message) => message.info.id === lastUser.id)?.parts ?? [],
+              agent,
+              permission: runtimePermission,
+            })
+            const catalogChanged = Boolean(catalog && catalog.version !== frozen?.skill_catalog?.version)
+            const catalogTurnChanged = Boolean(catalog && catalog.turnID !== frozen?.skill_catalog?.turnID)
             const currentAdditions = Effect.fnUntraced(function* () {
               const [env, instructions] = yield* Effect.all([
                 Flag.MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT
@@ -5132,6 +5155,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return [
                 ...env,
                 ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
+                ...(catalog?.text ? [catalog.text] : []),
                 ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
               ]
             })
@@ -5152,8 +5176,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               model,
               msgs,
               permission: session.permission,
-              additions: frozen ? [] : yield* currentAdditions(),
-              prebuiltSystem: frozen?.system,
+              additions: frozen && !catalogChanged ? [] : yield* currentAdditions(),
+              prebuiltSystem: catalogChanged ? undefined : frozen?.system,
+              skillCatalogInSystem: Boolean(catalog),
               prompt: sessionPrompt,
               // Rebuild tails collapse into an activity log so hollow
               // tool_results never look like a live transcript (anti-hallucination).
@@ -5165,33 +5190,68 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             )
             const resolvedPrefix = yield* Effect.gen(function* () {
               if (!frozen) {
-                const snapshot = yield* SessionPrefixSnapshot.pin({
+                const pinned = yield* SessionPrefixSnapshot.pin({
                   sessionID,
                   profileKey: prefixProfileKey,
                   system: initialPrefix.system,
+                  skillCatalog: catalog,
                   toolsHash: currentToolsHash,
                   tools: currentTools,
                   loadedMcpTools: resolvedTools.loadedMcpTools,
                   watermarkMessageID: lastUser.id,
                 })
-                return { prefix: initialPrefix, snapshot }
+                // A concurrent cold capture may have pinned this profile first.
+                // Keep its system/catalog pair while retaining the live executable
+                // tool pool, just as an ordinary tools-only rotation does below.
+                const snapshot =
+                  pinned.tools && pinned.tools_hash === currentToolsHash
+                    ? pinned
+                    : yield* SessionPrefixSnapshot.rotate({
+                        sessionID,
+                        profileKey: prefixProfileKey,
+                        system: pinned.system,
+                        skillCatalog: pinned.skill_catalog ?? undefined,
+                        toolsHash: currentToolsHash,
+                        tools: currentTools,
+                        loadedMcpTools: resolvedTools.loadedMcpTools,
+                        watermarkMessageID: lastUser.id,
+                      })
+                return {
+                  snapshot,
+                  prefix: {
+                    ...initialPrefix,
+                    system: snapshot.system,
+                    inheritedMessages:
+                      Boolean(snapshot.skill_catalog) === Boolean(catalog)
+                        ? initialPrefix.inheritedMessages
+                        : yield* MessageV2.toModelMessagesEffect(msgs, model, {
+                            collapseCheckpointTail: true,
+                            skillCatalogInSystem: Boolean(snapshot.skill_catalog),
+                          }),
+                  },
+                }
               }
-              if (frozen.tools && frozen.tools_hash === currentToolsHash)
+              if (frozen.tools && frozen.tools_hash === currentToolsHash && !catalogChanged && !catalogTurnChanged)
                 return { prefix: initialPrefix, snapshot: frozen }
-              const prefix = yield* buildLLMRequestPrefix({
-                sessionID,
-                agent,
-                model,
-                msgs,
-                additions: yield* currentAdditions(),
-                permission: session.permission,
-                prompt: sessionPrompt,
-                collapseCheckpointTail: true,
-              }).pipe(Effect.provideService(LLM.Service, llm), Effect.provideService(ToolRegistry.Service, registry))
+              const prefix =
+                frozen.tools && frozen.tools_hash === currentToolsHash
+                  ? initialPrefix
+                  : yield* buildLLMRequestPrefix({
+                      sessionID,
+                      agent,
+                      model,
+                      msgs,
+                      additions: yield* currentAdditions(),
+                      skillCatalogInSystem: Boolean(catalog),
+                      permission: session.permission,
+                      prompt: sessionPrompt,
+                      collapseCheckpointTail: true,
+                    }).pipe(Effect.provideService(LLM.Service, llm), Effect.provideService(ToolRegistry.Service, registry))
               const snapshot = yield* SessionPrefixSnapshot.rotate({
                 sessionID,
                 profileKey: prefixProfileKey,
                 system: prefix.system,
+                skillCatalog: catalog,
                 toolsHash: currentToolsHash,
                 tools: currentTools,
                 loadedMcpTools: resolvedTools.loadedMcpTools,

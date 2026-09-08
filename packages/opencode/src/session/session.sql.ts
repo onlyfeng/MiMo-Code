@@ -6,6 +6,7 @@ import type { Permission } from "../permission"
 import type { ProjectID } from "../project/schema"
 import type { SessionID, MessageID, PartID } from "./schema"
 import type { WorkspaceID } from "../control-plane/schema"
+import type { SkillCatalogSnapshot } from "./skill-catalog"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { Timestamps } from "../storage/schema.sql"
 
@@ -77,6 +78,7 @@ export const SessionPrefixSnapshotTable = sqliteTable(
     tools_hash: text().notNull(),
     tools: text({ mode: "json" }).$type<SessionPrefixToolSnapshot[]>(),
     loaded_mcp_tools: text({ mode: "json" }).$type<string[]>(),
+    skill_catalog: text({ mode: "json" }).$type<SkillCatalogSnapshot>(),
     watermark_message_id: text().$type<MessageID>().notNull(),
     revision: integer().notNull(),
     created_at: integer().notNull(),
