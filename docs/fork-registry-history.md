@@ -2883,3 +2883,14 @@ Snapshot `f860c352f292d6d7aa0bf97cc282d4c3e5ef4fb4` inherits accepted POLICY-04 
 `69275c9cf4d772afe2167b82922e1dcebd9ab468` with a tree-identical merge.
 The inherited-format package typecheck passed. POLICY-03 publication retains
 its own exact-head CI and Codex review gates and waits for POLICY-04 compat acceptance.
+
+### 2026-09-09 POLICY-03 raw SDK fetch authentication correction
+
+Source `37bbc8229ca70a92b5eaaa7bafd725d070f3f271` addresses PR #89 review 3960269057. The SDK context
+now authenticates raw fetch as well as generated/scoped clients, preserving
+Request/init headers, body and cancellation, with credentials applied only to
+the configured server origin. Real worker listener and BashInteractive service
+prove a previously 401 raw reply now completes the pending deferred; the
+workspace adaptor route also succeeds. The four affected test files pass
+8 cases / 46 assertions after the correction. The existing 203-case source
+matrix remains separate evidence, not re-counted as this follow-up.
