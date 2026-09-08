@@ -109,12 +109,47 @@ OpenAI-compatible Chat 只接收 WAV/MP3；Google/Vertex GenerateContent 可承�
 OpenAI Responses、已知不支持音频的适配器及未经验证的适配器会提前拒绝。SDK 能编码
 音频不代表供应商当前在线或每个模型都能理解该音频。
 
-客户端 `provider_options` 整包返回 400，避免透传参数覆盖授权模型；
-项目配置中的模型选项和显式 `reasoning_effort` 变体仍然有效。其他影响行为但未支持
-的参数也明确拒绝。聊天累计 SDK 输出事件限制为 16 MiB（含事件字段，不重复计算
-SDK 回带的输入请求）。
-供应商错误脱敏；未收到
-有效结束事件的流不会被标成正常 `stop`。聊天和音频均不自动重试。
+聊天累计 SDK 输出事件限制为 16 MiB（含事件字段，不重复计算 SDK 回带的输入请求）。
+供应商错误脱敏；未收到有效结束事件的流不会被标成正常 `stop`。聊天和音频均不自动重试。
+
+## 客户端供应商选项
+
+聊天请求的 `provider_options` 接受下列按模型和实际 SDK 传输验证的白名单，字段直接
+放在该对象内，不再套 `openai` 等供应商命名空间。未知字段（包括嵌套对象中的未知键）、错误类型或
+不支持的模型/传输组合返回 400；校验发生在图片下载和生成之前。模型、消息、工具、
+URL、认证头及 `forceReasoning` 等保留字段不能由此覆盖。
+
+| 模型及传输                       | 可用字段与范围                                                                                                                                                                                        |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAI / Azure Chat 或 Responses | `reasoningEffort`: `none/minimal/low/medium/high/xhigh`；`textVerbosity`: `low/medium/high`。要求实际 SDK 能消费该模型的字段；Responses 另支持 `reasoningSummary`: `auto/detailed`，Chat 拒绝 summary |
+| 已支持的 Anthropic Claude        | `thinking`: `{type:"enabled",budgetTokens:N}`、`{type:"disabled"}`，或支持模型上的 `{type:"adaptive",display?:"omitted"\|"summarized"}`；`effort` 只能取该模型已有 adaptive 变体支持的值              |
+| Google / Vertex Gemini 2.5       | `thinkingConfig.thinkingBudget`：Pro 为 `-1` 或 `128..32768`；Flash 为 `-1` 或 `0..24576`；Flash-Lite 为 `-1`、`0` 或 `512..24576`。另支持布尔 `includeThoughts`                                      |
+| Google / Vertex Gemini 3 / 3.1   | `thinkingConfig.thinkingLevel`：3 Pro 为 `low/high`；3.1 Pro 为 `low/medium/high`；3 Flash 为 `minimal/low/medium/high`。另支持布尔 `includeThoughts`                                                 |
+| Xiaomi MiMo Chat                 | 实际 `xiaomi` 供应商的 `mimo-v2.5` / `mimo-v2.5-pro`：`thinking:{type:"enabled"\|"disabled"}`；本地 Responses 传输不在此白名单中                                                                      |
+| DeepSeek v4 Chat                 | 实际 `deepseek` 供应商的 `deepseek-v4-pro` / `deepseek-v4-flash`：`thinking` 开关及 `reasoningEffort:low/high/max`                                                                                    |
+
+例如支持推理的 OpenAI Responses 模型可以使用：
+
+```json
+{ "provider_options": { "reasoningEffort": "high", "reasoningSummary": "detailed" } }
+```
+
+Anthropic 显式思考预算为 `1024..31999`，还受模型可用输出容量限制。SDK 会把预算加进
+输出令牌上限，因此两者合计不能超过模型配置与 SDK 已知上限；显式输出超限返回 400，
+省略输出上限时为思考预算预留容量。Gemini 的 budget 与 level 互斥，切换时清除旧选择器，
+独立的 `includeThoughts` 设置会保留。
+
+非空选项的覆盖顺序为供应商默认 → 模型配置 → 已校验客户端选项 → 顶层
+`reasoning_effort` 对应的既有模型变体 → 可信项目插件。顶层变体仍需存在，其附带的
+summary 等默认值也会覆盖客户端字段；要独立组合推理强度和摘要，可只使用
+`provider_options`。切换 thinking 类型会替换旧类型的字段。MiMo 的顶层 low/medium/high
+在这条路径都表示开启 thinking，不承诺不同强度；DeepSeek 显式关闭 thinking 时不能
+同时指定 effort，若顶层变体开启 thinking 则按该变体处理。
+
+省略 `provider_options` 或传 `{}` 保持此前的配置和变体合并行为，不自动启用新参数。
+白名单证明本地 SDK 的编码和校验范围，不保证远端接受所有模型与参数组合。音频
+转写和语音合成端点仍拒绝客户端 `provider_options`。其他影响行为但未支持的参数也
+明确拒绝。
 
 音频后端、格式、预设音色及参数限制见 [音频 API](audio-api.md)。本轮未加入音色
 设计、克隆或 Whisper 原生转写供应商适配。

@@ -31,6 +31,7 @@ MiMoCode (CLI binary `mimo`) is an agentic coding tool with a terminal UI, built
 | **Skills / self-extension** | Add tools, hooks, skills under `.mimocode/` | see the `evolve` skill |
 | **Skill discovery** | `/skill-name` slash invocation (2+ in one message auto-load with an orchestration plan); `skill_search` tool matches by exact name/alias + BM25 and auto-loads high-confidence hits; some builtins (`claude-code`, `codex`) only appear when their CLI is installed | `/` autocomplete · automatic |
 | **MCP** | Local & remote Model Context Protocol servers | `mcp` config + `mimo mcp` |
+| **Model API** | Explicit project-scoped model discovery, chat with images/audio, and basic speech/transcription using configured providers | `mimo serve --llm-server` + `mimo llm-server issue` (see @reference/model-api.md) |
 
 ## Configuration Basics
 
@@ -59,6 +60,7 @@ Read only the reference needed for the request, but read it before changing file
 - CLI and slash commands: @reference/commands.md
 - Permission rules: @reference/permissions.md
 - MCP client-side sampling (servers borrowing your model, audio transcription): @reference/mcp-sampling.md
+- Serving configured models to API clients, model tokens, chat images/audio, or HTTP speech/transcription: @reference/model-api.md
 - Dynamic workflows: @reference/workflows.md
 
 ## How-To Guide
