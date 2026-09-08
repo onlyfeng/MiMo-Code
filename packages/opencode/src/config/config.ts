@@ -265,11 +265,11 @@ const InfoSchema = Schema.Struct({
       }),
       preserve_recent_tokens: Schema.optional(NonNegativeInt).annotate({
         description:
-          "Deprecated compatibility setting. Compression-time API rounds use at most 40000 tokens, capped by the reserve-safe effective window after frozen prefix and projection overhead.",
+          "Deprecated compatibility setting. Compression-time API rounds use at most 40000 tokens, capped by the ratio-based compaction trigger after frozen prefix and projection overhead.",
       }),
       reserved: Schema.optional(NonNegativeInt).annotate({
         description:
-          "Token buffer for compaction. Leaves enough window to avoid overflow during compaction (default: up to 33000, capped by the model's maximum output).",
+          "Compatibility buffer used to validate compaction.max_context, together with any output reservation. It is not subtracted from the ratio-based compaction trigger (default: up to 33000, capped by the model's maximum output).",
       }),
       max_context: Schema.optional(Schema.Union([TokenQuantity, Schema.Record(Schema.String, TokenQuantity)])).annotate(
         {

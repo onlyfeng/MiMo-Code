@@ -36,7 +36,6 @@ export function DialogContextLimit() {
     if (!selected) return
     const current = win()
     const key = `${selected.providerID}/${selected.modelID}`
-    const reserves = current ? current.effective - current.usable : 0
     if (value !== undefined && current && value >= current.hard) {
       toast.show({
         variant: "error",
@@ -45,10 +44,17 @@ export function DialogContextLimit() {
       })
       return
     }
-    if (value !== undefined && value <= reserves) {
+    if (
+      value !== undefined &&
+      !Model.contextBudget(
+        sync.data.config,
+        Model.get(sync.data.provider, selected.providerID, selected.modelID),
+        value,
+      )
+    ) {
       toast.show({
         variant: "error",
-        message: t("tui.context_limit.too_small", { reserved: Token.format(reserves) }),
+        message: t("tui.context_limit.invalid", { value: Token.format(value) }),
         duration: 4000,
       })
       return
@@ -65,16 +71,14 @@ export function DialogContextLimit() {
     // Write only this model's key: both config writers patch leaf paths, so sibling
     // entries survive. Reading the merged config instead would promote project-level
     // budgets into the user's global file.
-    // The generated SDK config type lags the server schema for this field; regenerating
-    // it is blocked by a pre-existing dangling $ref in the OpenAPI output.
-    const existing = (sync.data.config.compaction as { max_context?: unknown } | undefined)?.max_context
+    const existing = sync.data.config.compaction?.max_context
     if (existing !== undefined && typeof existing !== "object") {
       toast.show({ variant: "error", message: t("tui.context_limit.scalar_config"), duration: 6000 })
       return
     }
     const res = await sdk.client.global.config.update({
       // 0 restores the model default: a config merge cannot delete a key.
-      config: { compaction: { max_context: { [key]: value ?? 0 } } } as never,
+      config: { compaction: { max_context: { [key]: value ?? 0 } } },
     })
     if (res.error) {
       toast.show({ variant: "error", message: JSON.stringify(res.error) })
@@ -91,7 +95,11 @@ export function DialogContextLimit() {
       sync.data.config,
       Model.get(sync.data.provider, selected.providerID, selected.modelID),
     )
-    if (applied && applied.effective !== (value ?? applied.hard)) {
+    if (!applied) {
+      toast.show({ variant: "error", message: t("tui.context_limit.no_model"), duration: 3000 })
+      return
+    }
+    if (applied.effective !== (value ?? applied.hard)) {
       toast.show({
         variant: "error",
         message: t("tui.context_limit.shadowed", { value: Token.format(applied.effective) }),
@@ -104,7 +112,7 @@ export function DialogContextLimit() {
       message:
         value === undefined
           ? t("tui.context_limit.cleared", { model: key })
-          : t("tui.context_limit.saved", { model: key, value: Token.format(value - reserves) }),
+          : t("tui.context_limit.saved", { model: key, value: Token.format(applied.usable) }),
       duration: 3000,
     })
   }
@@ -117,22 +125,28 @@ export function DialogContextLimit() {
 
   const options = createMemo(() => {
     const current = win()!
-    // Reserves are the gap between the window in force and the trigger — deriving them
-    // from `hard` would double-count an already active budget.
-    const reserves = current.effective - current.usable
     return [
       {
         title: t("tui.context_limit.option.default", { value: Token.format(current.hard) }),
         value: "default" as Choice,
         description: t("tui.context_limit.option.default_description"),
       },
-      ...TIERS.filter((tier) => tier < current.hard).map((tier) => ({
-        title: Token.format(tier),
-        value: tier as Choice,
-        description: t("tui.context_limit.option.tier_description", {
-          value: Token.format(Math.max(0, tier - reserves)),
-        }),
-      })),
+      ...TIERS.flatMap((tier) => {
+        const preview = Model.contextBudget(
+          sync.data.config,
+          Model.get(sync.data.provider, selected.providerID, selected.modelID),
+          tier,
+        )
+        return preview
+          ? [
+              {
+                title: Token.format(tier),
+                value: tier as Choice,
+                description: t("tui.context_limit.option.tier_description", { value: Token.format(preview.usable) }),
+              },
+            ]
+          : []
+      }),
       {
         title: t("tui.context_limit.option.custom"),
         value: "custom" as Choice,

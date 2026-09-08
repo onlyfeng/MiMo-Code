@@ -497,7 +497,7 @@ Možete kontrolirati ponašanje sažimanja konteksta putem opcije `compaction`.
 
 - `auto` - Automatski sažimanje sesije kada je kontekst pun (podrazumevano: `true`).
 - `prune` - Uklonite stare izlaze alata da sačuvate tokene (podrazumevano: `true`).
-- `reserved` - Token buffer za sažimanje. Ostavlja dovoljno prostora da se izbjegne prelijevanje tokom sažimanja
+- `reserved` - Bafer za kompatibilnost koji se koristi za provjeru budžeta `max_context`; ne oduzima se od praga sažimanja izračunatog prema omjeru.
 
 ---
 

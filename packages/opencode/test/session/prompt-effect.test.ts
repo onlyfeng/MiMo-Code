@@ -5484,7 +5484,8 @@ mcpIt.live("degrades the MCP catalog to names at high context pressure", () =>
         model: mcpRef,
         harness: "default",
         noReply: true,
-        parts: [{ type: "text", text: `inspect available MCP tools ${"x".repeat(230_000)}` }],
+        // The catalog degrades at 70% of the 90K trigger, or 63K estimated tokens.
+        parts: [{ type: "text", text: `inspect available MCP tools ${"x".repeat(255_000)}` }],
       })
       yield* llm.text("done")
       yield* prompt.loop({ sessionID: session.id })
