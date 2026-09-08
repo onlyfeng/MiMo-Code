@@ -218,9 +218,8 @@ export const layer = Layer.effect(
 
         return [
           "Skills available in this session:",
-          // Keep the full permission-filtered catalog in the per-turn message;
-          // the skill tool schema is deliberately static for cache stability,
-          // while compat still caps model-visible catalog bytes.
+          // The prefix freezes the permission-filtered catalog in its system tail;
+          // compat also caps the model-visible catalog bytes.
           capAvailableSkills(Skill.fmt(list, { verbose: true })),
         ].join("\n")
       }),

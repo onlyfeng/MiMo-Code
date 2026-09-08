@@ -58,12 +58,14 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   mcpTools?: Record<string, AITool>
   useMcpToolSearch?: boolean
   /**
-   * Caller-built system-tail parts. Currently environment/format, then instruction
-   * files. Caller is responsible for the ordering and content.
+   * Caller-built system-tail parts. Currently environment/format, skill reminder,
+   * then instruction files. Caller is responsible for the ordering and content.
    */
   additions: string[]
   /** Frozen Session/Fork system; bypasses all system regeneration when present. */
   prebuiltSystem?: string[]
+  /** True only when this system already carries the frozen catalog. */
+  skillCatalogInSystem?: boolean
   prompt?: PromptConfig
   /**
    * Collapse post-checkpoint rebuild tails into an activity log. Enable for the
@@ -86,7 +88,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     input.msgs,
     input.model,
     input.currentUserID ?? lastUserMsg.info.id,
-    { collapseCheckpointTail: input.collapseCheckpointTail },
+    { collapseCheckpointTail: input.collapseCheckpointTail, skillCatalogInSystem: input.skillCatalogInSystem },
   )
   const inheritedMessages = converted.messages
   const lastUser = input.prompt
