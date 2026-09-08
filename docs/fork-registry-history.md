@@ -2829,3 +2829,22 @@ Codex completion and all CI remain required before merge.
 - Default-path validation cleared six ambient feature/approval selectors, preserved the package harness baseline, and ran from the package directory. Bun matrix: 203 passing tests, 629 assertions, 12 files, zero failures. This comprises worker-listener 8/55, thread wiring 12/51, real dual-worker lifecycle 1/7, workspace SDK auth 2/14, and existing model/media/TUI regression 180/502. The existing regression groups were run sequentially once; counts exclude exploratory RED runs.
 - Two standalone POSIX PTY scenarios separately launched ordinary TUI and attach without test preload; production Solid preload remained. Natural /exit returned zero; ordinary owned socket/discovery retired before process completion, while attach preserved the remote listener. Both exercised a real local HTTP chat through the SDK (two provider calls total). This is local controlled-provider evidence, not an external hosted-provider claim.
 - Package typecheck passed after the final SDK-header fix; repository lint passed with 4,485 warnings and zero errors; diff check passed. No public API schema changed, so no SDK generation was required by this policy. Current-head Codex review, exact PR/branch CI, formal inheritance and compat propagation remain pending.
+
+## 2026-09-08 POLICY-03 inheritance of the POLICY-04 review correction
+
+The TUI model API branch locally inherited POLICY-04 candidate
+`c1e391d184bb0a3efbf7a60a38f553c41d6c5935` (runtime `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`)
+through merge `bfb0c5e2c63fcad0b055c9e7bca58089268500d9`. This aggregate runtime/test basis
+contains both POLICY-03 and the frozen catalog slot correction; the subsequent
+registry audit adds no runtime change. Bundled guidance remains
+`0353965ea38ce3d963f123acb2f9a965bcbb98c3`. Individual FD/FC review bases remain
+with their respective reviewed policy sources, which are ancestors of this merge.
+
+Runtime files merged without conflicts. POLICY-03 package changes match its
+original source; the inherited POLICY-04 correction matches its candidate source.
+The three registry/history conflicts retain both policies and historical records.
+This local inheritance passes package typecheck and diff checks; provider tests
+are not repeated and the earlier 203-test/629-assertion POLICY-03 evidence is not
+relabelled as a new merged-tree test run. POLICY-04 current-head review, CI and
+formal main acceptance remain pending; this is neither publication nor compat
+propagation.
