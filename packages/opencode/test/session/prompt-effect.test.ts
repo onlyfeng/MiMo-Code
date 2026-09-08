@@ -3476,8 +3476,13 @@ it.live(
             .join("\n")
           expect(serialized).not.toContain("Working directory:")
           expect(system).toContain(marker)
-          expect(system).not.toContain("Skills available in this session:")
-          expect(serialized).toContain("Authoritative skills catalog snapshot v2:")
+          expect(system).toContain("Skills available in this session:")
+          expect(system.indexOf("Skills available in this session:")).toBeLessThan(system.indexOf(marker))
+          const conversation = ((inputs[0].messages ?? []) as { role: string; content: unknown }[]).filter(
+            (message) => message.role !== "system",
+          )
+          expect(JSON.stringify(conversation)).not.toContain("Skills available in this session:")
+          expect(serialized).not.toContain("Authoritative skills catalog snapshot v2:")
         }),
         { git: true, config: providerCfg },
       ),
@@ -3507,6 +3512,15 @@ it.live(
             model: ref,
             parts: [{ type: "text", text: "first query" }],
           })
+          const firstSnapshot = yield* Effect.sync(() =>
+            Database.use((db) =>
+              db
+                .select()
+                .from(SessionPrefixSnapshotTable)
+                .where(eq(SessionPrefixSnapshotTable.session_id, chat.id))
+                .get(),
+            ),
+          )
           yield* Effect.promise(() => Bun.write(file, "PREFIX_INSTRUCTION_V2"))
           yield* llm.text("second")
           yield* prompt.prompt({
@@ -3543,9 +3557,17 @@ it.live(
           const messages = yield* sessions.messages({ sessionID: chat.id })
           const lastAssistant = messages.findLast((message) => message.info.role === "assistant")
           expect(snapshots).toHaveLength(1)
+          expect(firstSnapshot?.revision).toBe(1)
+          expect(snapshots[0].skill_catalog?.turnID).not.toBe(firstSnapshot?.skill_catalog?.turnID)
           expect(snapshots[0]).toMatchObject({
-            revision: 1,
+            revision: 2,
             watermark_message_id: lastAssistant?.info.id,
+            skill_catalog: {
+              schema: 3,
+              turnID: messages.findLast((message) => message.info.role === "user")?.info.id,
+              text: firstSnapshot?.skill_catalog?.text,
+              version: firstSnapshot?.skill_catalog?.version,
+            },
           })
         }),
         { git: true, config: providerCfg },

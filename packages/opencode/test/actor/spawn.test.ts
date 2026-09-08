@@ -3387,7 +3387,21 @@ it.live(
           expect(yield* reg.listBySession(parent.id)).toEqual(before)
         }
         expect(yield* llm.calls).toBe(0)
-        yield* llm.error(400, { error: { message: "persistent tool actor interrupted" } })
+        const isActorRequest = (request: Record<string, unknown>) =>
+          (request.messages as { role: string; content: string | { type: string; text?: string }[] }[]).some(
+            (message) =>
+              message.role === "user" &&
+              (typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content).some(
+                (part) => part.type === "text" && part.text?.startsWith("original delegated recovery task"),
+              ),
+          )
+        // Parent notifications may request the same server concurrently. Bind
+        // both responses to the delegated user input, not the shared FIFO.
+        yield* llm.pushMatch((hit) => isActorRequest(hit.body), {
+          type: "http-error",
+          status: 400,
+          body: { error: { message: "persistent tool actor interrupted" } },
+        })
         const created = yield* tool.execute({ operation }, ctx)
         const actorID = created.metadata.actorId
         if (typeof actorID !== "string") return yield* Effect.die("spawn tool did not return actorId")
@@ -3417,7 +3431,7 @@ it.live(
             Deferred.doneUnsafe(finished, Effect.void)
         })
         yield* Effect.addFinalizer(() => Effect.sync(off))
-        yield* llm.text("recovered persistent tool result")
+        yield* llm.textMatch((hit) => isActorRequest(hit.body), "recovered persistent tool result")
         const resumed = yield* tool.execute({ operation: { action: "resume", actor_id: actorID } }, ctx)
         expect(JSON.parse(resumed.output)).toEqual({ actor_id: actorID, status: "running" })
         // Persistent success stays idle; wait keeps waiting for attention.
@@ -3435,15 +3449,7 @@ it.live(
         expect(yield* actor.getForkContext(parent.id, actorID)).toBe(frozen)
         // Parent notification wakes are separate requests. Match the actor's
         // original user text rather than counting every call on the provider.
-        const requests = (yield* llm.inputs).filter((request) =>
-          (request.messages as { role: string; content: string | { type: string; text?: string }[] }[]).some(
-            (message) =>
-              message.role === "user" &&
-              (typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content).some(
-                (part) => part.type === "text" && part.text?.startsWith("original delegated recovery task"),
-              ),
-          ),
-        )
+        const requests = (yield* llm.inputs).filter(isActorRequest)
         expect(requests).toHaveLength(2)
         expect(JSON.stringify(requests[1])).toContain("parent history inherited by the persistent actor")
         expect(JSON.stringify(requests[1])).toContain("original delegated recovery task")
