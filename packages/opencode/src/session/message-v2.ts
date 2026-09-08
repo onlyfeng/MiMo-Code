@@ -31,7 +31,7 @@ import {
   toolAttachmentFilename,
   toolAttachmentPlaceholder,
 } from "./tool-attachment"
-import { isLegacySkillCatalogReminder, isSkillCatalogSnapshot } from "./skill-catalog"
+import { isGeneratedSkillCatalog, isLegacySkillCatalogReminder, isSkillCatalogSnapshot } from "./skill-catalog"
 import { collapseCheckpointTail } from "./tail-digest"
 import { isDeepStrictEqual } from "node:util"
 
@@ -824,8 +824,10 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
    * When true, messages after the latest rebuild checkpoint are collapsed into
    * a single activity-log user message (see tail-digest.ts). Off by default so
    * checkpoint writers / compaction / title generation keep full fidelity.
+   * skillCatalogInSystem is internal: enable only when the paired frozen system
+   * already owns the catalog, including an explicitly empty catalog.
    */
-  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean },
+  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean; skillCatalogInSystem?: boolean },
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
@@ -937,17 +939,20 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
         parts: [],
       }
       result.push(userMessage)
-      const parts = msg.parts.toSorted((a, b) => {
-        const aSnapshot = a.type === "text" && a.synthetic === true && isSkillCatalogSnapshot(a.text)
-        const bSnapshot = b.type === "text" && b.synthetic === true && isSkillCatalogSnapshot(b.text)
-        if (aSnapshot !== bSnapshot) return Number(bSnapshot) - Number(aSnapshot)
-        const aLegacy = a.type === "text" && a.synthetic === true && isLegacySkillCatalogReminder(a.text)
-        const bLegacy = b.type === "text" && b.synthetic === true && isLegacySkillCatalogReminder(b.text)
-        return Number(aLegacy) - Number(bLegacy)
-      })
+      const parts = options?.skillCatalogInSystem
+        ? msg.parts
+        : msg.parts.toSorted((a, b) => {
+            const aSnapshot = a.type === "text" && a.synthetic === true && isSkillCatalogSnapshot(a.text)
+            const bSnapshot = b.type === "text" && b.synthetic === true && isSkillCatalogSnapshot(b.text)
+            if (aSnapshot !== bSnapshot) return Number(bSnapshot) - Number(aSnapshot)
+            const aLegacy = a.type === "text" && a.synthetic === true && isLegacySkillCatalogReminder(a.text)
+            const bLegacy = b.type === "text" && b.synthetic === true && isLegacySkillCatalogReminder(b.text)
+            return Number(aLegacy) - Number(bLegacy)
+          })
       for (const part of parts) {
         if (part.type === "text") {
-          if (part.synthetic && isLegacySkillCatalogReminder(part.text)) {
+          if (options?.skillCatalogInSystem && isGeneratedSkillCatalog(part)) continue
+          if (!options?.skillCatalogInSystem && part.synthetic && isLegacySkillCatalogReminder(part.text)) {
             if (legacySkillCatalogSeen || part.ignored) continue
             legacySkillCatalogSeen = true
           }
@@ -1223,7 +1228,7 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
 export const toModelMessagesEffect = Effect.fnUntraced(function* (
   input: WithParts[],
   model: Provider.Model,
-  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean },
+  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean; skillCatalogInSystem?: boolean },
 ) {
   return (yield* toModelMessagesWithCurrentTurnInternalEffect(input, model, undefined, options)).messages
 })
@@ -1232,7 +1237,7 @@ export const toModelMessagesWithCurrentTurnEffect = Effect.fnUntraced(function* 
   input: WithParts[],
   model: Provider.Model,
   currentUserID: MessageID,
-  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean },
+  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean; skillCatalogInSystem?: boolean },
 ) {
   return yield* toModelMessagesWithCurrentTurnInternalEffect(input, model, currentUserID, options)
 })
@@ -1240,7 +1245,7 @@ export const toModelMessagesWithCurrentTurnEffect = Effect.fnUntraced(function* 
 export function toModelMessages(
   input: WithParts[],
   model: Provider.Model,
-  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean },
+  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean; skillCatalogInSystem?: boolean },
 ): Promise<ModelMessage[]> {
   return Effect.runPromise(toModelMessagesEffect(input, model, options).pipe(Effect.provide(EffectLogger.layer)))
 }
@@ -1249,7 +1254,7 @@ export function toModelMessagesWithCurrentTurn(
   input: WithParts[],
   model: Provider.Model,
   currentUserID: MessageID,
-  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean },
+  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean; skillCatalogInSystem?: boolean },
 ) {
   return Effect.runPromise(
     toModelMessagesWithCurrentTurnEffect(input, model, currentUserID, options).pipe(Effect.provide(EffectLogger.layer)),
