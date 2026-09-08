@@ -2826,3 +2826,48 @@ Codex completion and all CI remain required before merge.
 - CI caught a real JSON-to-text format regression: freezing the entire non-catalog prefix retained the StructuredOutput instruction after its tool was removed. The managed range now records the caller-owned format prefix independently of the catalog content hash; format transitions change that prefix while instruction files, environment and plugin content remain frozen. A competing pin also preserves the winner's catalog while applying the current caller's format.
 - Old structured-tool snapshots prove the presence of their generated format instruction; migration adopts only its verified adjacent or unique position. Empty and ambiguous range behavior remains bounded. Cold capture persists the complete range metadata. The shared MockLLM fixture now preserves the caller-controlled system tail, matching the real builder's post-plugin append instead of discarding it and losing the slot token.
 - Verification: 39 tests /135 assertions across catalog helpers, actual Codex structured-schema transitions and text-loop fixtures; 9 prefix/capture/reopen/compaction tests /134 assertions; final expanded four-case pin/capture matrix /64 assertions overlaps the previous three captures. There are 49 distinct tests in these seven files. New provider assertions switch text to JSON and back after editing AGENTS/plugin data and prove frozen non-format bytes stay unchanged. Current source passes package typecheck, diff check and lint (4,487 warnings, zero errors). Fresh-head CI and Codex review remain required.
+
+## 2026-09-08 POLICY-03 default TUI model API local review
+
+- Selected upstream source: `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, released in v0.1.14 (`2a0eb706e95a77cba34a319e9f11f33f26d4450c`). The overall upstream review baseline remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; this is selected behavior adoption, not a full upstream merge.
+- Main runtime/tests and changed bundled guidance: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`; local development base `d415822c29539a4b6eebeafb59de1b88da18b95c`. Policy 04 must be inherited and accepted before publication/propagation is complete.
+- Ordinary TUI owns a loopback ephemeral model listener, isolated automatic credentials, startup directory scope, and shutdown. Explicit HTTP TUI transport carries Basic credentials through the workspace SDK factory. Model callers still require scoped Bearer tokens; attach reuses the existing listener. Operator-supplied password provenance alone can relax operator directory/bind limits. Existing model/media implementations remain the shared provider path.
+- Reviewed ownership: FD-004 and FC-007/008/011; adjacent authentication, media, permission and interaction consumers checked. Remaining entries retain their prior individually recorded review bases. Incremental implementation from the development base: 19 paths, 1,129 insertions, 87 deletions (includes focused tests, guide and plan).
+- Default-path validation cleared six ambient feature/approval selectors, preserved the package harness baseline, and ran from the package directory. Bun matrix: 203 passing tests, 629 assertions, 12 files, zero failures. This comprises worker-listener 8/55, thread wiring 12/51, real dual-worker lifecycle 1/7, workspace SDK auth 2/14, and existing model/media/TUI regression 180/502. The existing regression groups were run sequentially once; counts exclude exploratory RED runs.
+- Two standalone POSIX PTY scenarios separately launched ordinary TUI and attach without test preload; production Solid preload remained. Natural /exit returned zero; ordinary owned socket/discovery retired before process completion, while attach preserved the remote listener. Both exercised a real local HTTP chat through the SDK (two provider calls total). This is local controlled-provider evidence, not an external hosted-provider claim.
+- Package typecheck passed after the final SDK-header fix; repository lint passed with 4,485 warnings and zero errors; diff check passed. No public API schema changed, so no SDK generation was required by this policy. Current-head Codex review, exact PR/branch CI, formal inheritance and compat propagation remain pending.
+
+## 2026-09-08 POLICY-03 inheritance of the POLICY-04 review correction
+
+The TUI model API branch locally inherited POLICY-04 candidate
+`c1e391d184bb0a3efbf7a60a38f553c41d6c5935` (runtime `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`)
+through merge `bfb0c5e2c63fcad0b055c9e7bca58089268500d9`. This aggregate runtime/test basis
+contains both POLICY-03 and the frozen catalog slot correction; the subsequent
+registry audit adds no runtime change. Bundled guidance remains
+`0353965ea38ce3d963f123acb2f9a965bcbb98c3`. Individual FD/FC review bases remain
+with their respective reviewed policy sources, which are ancestors of this merge.
+
+Runtime files merged without conflicts. POLICY-03 package changes match its
+original source; the inherited POLICY-04 correction matches its candidate source.
+The three registry/history conflicts retain both policies and historical records.
+This local inheritance passes package typecheck and diff checks; provider tests
+are not repeated and the earlier 203-test/629-assertion POLICY-03 evidence is not
+relabelled as a new merged-tree test run. POLICY-04 current-head review, CI and
+formal main acceptance remain pending; this is neither publication nor compat
+propagation.
+
+## 2026-09-09 — POLICY-03 inherits final POLICY-04 format follow-up
+
+Runtime/test snapshot `9ef178175cb4707fb63e54f9313f97ec7363664f` inherits PR #87 candidate
+`32b01dcd828f692ea0656e53319cd48abf054c18`, including structured/text format
+refresh and the mock provider system-tail contract. Source merges were clean.
+Bundled guidance snapshot is `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
+Publication remains ordered after the preceding policy is accepted on both branches;
+this local inheritance is not evidence of remote acceptance.
+
+### POLICY-03 accepted predecessor ancestry
+
+Snapshot `f860c352f292d6d7aa0bf97cc282d4c3e5ef4fb4` inherits accepted POLICY-04 main
+`69275c9cf4d772afe2167b82922e1dcebd9ab468` with a tree-identical merge.
+The inherited-format package typecheck passed. POLICY-03 publication retains
+its own exact-head CI and Codex review gates and waits for POLICY-04 compat acceptance.
