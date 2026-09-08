@@ -2980,6 +2980,39 @@ it.live("persistent inbox does not retry a defect before consuming any row", () 
   }), { git: true, config: providerCfg }),
 15000)
 
+it.live("persistent inbox follower does not retry a joined failure without progress", () =>
+  provideTmpdirServer(Effect.fnUntraced(function* () {
+    const actor = yield* Actor.Service
+    const spawned = yield* interruptedActor("persistent", true)
+    const inboxID = crypto.randomUUID()
+    Database.use((db) => db.insert(InboxTable).values({
+      id: inboxID, receiver_session_id: spawned.sessionID, receiver_actor_id: spawned.actorID,
+      content: { text: "must remain queued" }, created_at: Date.now(),
+    }).run())
+    const entered = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
+    const attempts = { count: 0 }
+    if (!actor.runPersistentTurn) return yield* Effect.die("persistent turn missing")
+    const input = {
+      ...spawned, inboxID, notifyParentOnComplete: false,
+      work: Effect.sync(() => { attempts.count++ }).pipe(
+        Effect.andThen(Deferred.succeed(entered, undefined)), Effect.andThen(Deferred.await(release)),
+        Effect.andThen(Effect.die(new Error("failure before drain")))),
+      onInterrupt: Effect.succeed(spawned.messages.at(-1)!),
+    }
+    const owner = yield* actor.runPersistentTurn(input).pipe(Effect.forkChild)
+    yield* Deferred.await(entered)
+    const follower = yield* actor.runPersistentTurn(input).pipe(Effect.forkChild({ startImmediately: true }))
+    yield* Effect.sleep("50 millis")
+    yield* Deferred.succeed(release, undefined)
+    const results = yield* Effect.all([Fiber.await(owner), Fiber.await(follower)]).pipe(Effect.timeout("5 seconds"))
+    expect(results.map((result) => result._tag)).toEqual(["Failure", "Failure"])
+    expect(attempts.count).toBe(1)
+    expect(yield* inboxServiceRef.current!.has(inboxID)).toBe(true)
+  }), { git: true, config: providerCfg }),
+15_000)
+
 for (const hook of ["session.pre", "session.userQuery.pre"] as const) {
   pauseIt.live(`resume does not wake durable inbox after ${hook} cancels`, () =>
     provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
