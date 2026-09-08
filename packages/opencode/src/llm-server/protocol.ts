@@ -4,6 +4,18 @@ import type { FinishReason, LanguageModelUsage, ModelMessage } from "ai"
 import { acceptableImage, DATA_URL, type Image } from "./images"
 import { InputAudio, inputAudio } from "../audio/input"
 
+// Zod's JSON record parser discards __proto__. Reject reserved keys before
+// parsing so an invalid options bag cannot become an accepted empty object.
+function reservedOptionKey(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Object.entries(value).some(
+      ([key, child]) => ["__proto__", "constructor", "prototype"].includes(key) || reservedOptionKey(child),
+    )
+  )
+}
+
 const TextPart = z.strictObject({ type: z.literal("text"), text: z.string() })
 const TextContent = z.union([z.string(), z.array(TextPart)])
 const ContentPart = z.discriminatedUnion("type", [
@@ -99,7 +111,11 @@ export const ChatCompletionRequest = z.strictObject({
   functions: z.unknown().optional(),
   function_call: z.unknown().optional(),
   web_search_options: z.unknown().optional(),
-  provider_options: z.record(z.string(), z.json()).optional(),
+  provider_options: z
+    .unknown()
+    .refine((value) => !reservedOptionKey(value), "Reserved provider option key")
+    .pipe(z.record(z.string(), z.json()))
+    .optional(),
 })
 export type ChatCompletionRequest = z.infer<typeof ChatCompletionRequest>
 
@@ -121,7 +137,6 @@ export function unsupported(req: ChatCompletionRequest): string | undefined {
     "functions",
     "function_call",
     "web_search_options",
-    "provider_options",
   ] as const) {
     if (req[key] != null) return `${key} is not supported`
   }

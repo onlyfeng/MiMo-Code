@@ -126,9 +126,6 @@ test.each([
   { verbosity: "low" },
   { modalities: ["audio"] },
   { functions: [] },
-  { provider_options: {} },
-  { provider_options: { messages: [] } },
-  { provider_options: { tools: [], response_format: { type: "json_object" } } },
   { tool_choice: "required" },
 ])("refuses unsupported behavior instead of ignoring it: %j", (extra) => {
   expect(unsupported(ChatCompletionRequest.parse({ ...base, ...extra }))).toBeDefined()
@@ -247,4 +244,23 @@ test("reports provider usage including cache and reasoning details", () => {
     prompt_tokens_details: { cached_tokens: 4 },
     completion_tokens_details: { reasoning_tokens: 2 },
   })
+})
+
+test.each([
+  {},
+  { reasoningEffort: "high" },
+  { thinking: { type: "disabled" } },
+  { thinkingConfig: { thinkingBudget: 0 } },
+])("provider options defer supported shapes to the selected model: %j", (provider_options) => {
+  expect(unsupported(ChatCompletionRequest.parse({ ...base, provider_options }))).toBeUndefined()
+})
+
+test.each([
+  '{"__proto__":{"polluted":true}}',
+  '{"thinking":{"type":"enabled","__proto__":{"polluted":true}}}',
+  '{"thinkingConfig":{"includeThoughts":true,"constructor":{"prototype":{"polluted":true}}}}',
+  "null",
+  "[]",
+])("provider options reject unsafe JSON before parser key normalization: %s", (json) => {
+  expect(ChatCompletionRequest.safeParse({ ...base, provider_options: JSON.parse(json) }).success).toBe(false)
 })

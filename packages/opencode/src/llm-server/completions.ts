@@ -4,6 +4,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { AppRuntime } from "../effect/app-runtime"
 import { Provider } from "../provider"
 import * as SDK from "./sdk"
+import { ProviderOptionsError } from "./provider-options"
 import { ImageError, prepareImages, type ImageTransport } from "./images"
 import { audioRejection, inputAudio } from "../audio/input"
 import {
@@ -34,7 +35,8 @@ export class RequestError extends Error {
 function failed(error: unknown, abort: AbortSignal): never {
   abort.throwIfAborted()
   if (error instanceof RequestError) throw error
-  if (error instanceof SDK.SDKError) throw new RequestError(error.status, error.message)
+  if (error instanceof SDK.SDKError || error instanceof ProviderOptionsError)
+    throw new RequestError(error.status, error.message)
   if (error instanceof ImageError)
     throw new RequestError(error.status, error.message, error.status === 502 ? "api_error" : "invalid_request_error")
   if (error instanceof Provider.ModelNotFoundError)

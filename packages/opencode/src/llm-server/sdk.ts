@@ -16,6 +16,7 @@ import { Plugin } from "../plugin"
 import { SessionID, MessageID } from "../session/schema"
 import type { User } from "../session/message-v2"
 import { toToolChoice, type ChatCompletionRequest, type EmittedToolCall } from "./protocol"
+import * as ProviderOptions from "./provider-options"
 
 export class SDKError extends Error {
   constructor(
@@ -79,11 +80,24 @@ export async function start(input: {
     agent: "llm-api",
     model: { providerID: model.providerID, modelID: model.id, variant: req.reasoning_effort },
   }
-  const options = pipe(
+  const defaults = pipe(
     ProviderTransform.options({ model, sessionID, providerOptions: resolved.provider.options }),
     mergeDeep(model.options),
-    mergeDeep(req.reasoning_effort ? variantFor(model, req.reasoning_effort) : {}),
   )
+  const variant = req.reasoning_effort ? variantFor(model, req.reasoning_effort) : undefined
+  const max = req.max_completion_tokens ?? req.max_tokens ?? ProviderTransform.maxOutputTokens(model)
+  const prepared =
+    req.provider_options && Object.keys(req.provider_options).length
+      ? ProviderOptions.prepare({
+          model,
+          language: resolved.language,
+          defaults,
+          client: req.provider_options,
+          variant,
+          maxOutputTokens: max,
+          explicitOutput: req.max_completion_tokens != null || req.max_tokens != null,
+        })
+      : { options: mergeDeep(defaults, variant ?? {}), maxOutputTokens: max }
   const context = { sessionID, agent: "llm-api", model, provider: resolved.provider, message }
   const hooked = await AppRuntime.runPromise(
     Effect.gen(function* () {
@@ -94,8 +108,8 @@ export async function start(input: {
           : undefined,
         topP: req.top_p ?? ProviderTransform.topP(model),
         topK: req.top_k ?? ProviderTransform.topK(model),
-        maxOutputTokens: req.max_completion_tokens ?? req.max_tokens ?? ProviderTransform.maxOutputTokens(model),
-        options,
+        maxOutputTokens: prepared.maxOutputTokens,
+        options: prepared.options,
       })
       const headers = yield* plugin.trigger("chat.headers", context, { headers: {} as Record<string, string> })
       return { params, headers: headers.headers }
@@ -103,13 +117,19 @@ export async function start(input: {
     { signal: abort },
   )
   abort.throwIfAborted()
+  const output =
+    req.provider_options && Object.keys(req.provider_options).length
+      ? ProviderOptions.outputLimit(
+          model,
+          hooked.params.options,
+          hooked.params.maxOutputTokens,
+          req.max_completion_tokens != null || req.max_tokens != null,
+        )
+      : hooked.params.maxOutputTokens
   const headers = new Headers(model.headers)
   new Headers(hooked.headers).forEach((value, name) => headers.set(name, value))
   const tools = req.tools?.length ? ProviderTransform.tools(toolSet(req.tools), model) : undefined
-  const maxOutputTokens =
-    input.outputCap === undefined
-      ? hooked.params.maxOutputTokens
-      : Math.min(hooked.params.maxOutputTokens, input.outputCap)
+  const maxOutputTokens = input.outputCap === undefined ? output : Math.min(output, input.outputCap)
   if (input.outputCap !== undefined && (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0))
     throw new SDKError(400, "Invalid transcription output limit")
   const messages = await input.messages()

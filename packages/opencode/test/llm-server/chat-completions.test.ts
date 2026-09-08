@@ -66,6 +66,10 @@ async function fixture<T>(
     images?: boolean
     audio?: boolean
     providerOptions?: Record<string, unknown>
+    modelOptions?: Record<string, unknown>
+    variants?: Record<string, Record<string, unknown>>
+    output?: number
+    reasoning?: boolean
   } = {},
 ) {
   const seen: Seen[] = []
@@ -105,7 +109,8 @@ async function fixture<T>(
               chat: {
                 id: options.apiID ?? "wire-model",
                 temperature: true,
-                reasoning: true,
+                reasoning: options.reasoning ?? true,
+                limit: { context: 200_000, output: options.output ?? 65536 },
                 modalities: {
                   input: [
                     "text",
@@ -114,8 +119,8 @@ async function fixture<T>(
                   ],
                   output: ["text"],
                 },
-                options: { reasoningEffort: "low" },
-                variants: { high: { reasoningEffort: "high" } },
+                options: options.modelOptions ?? { reasoningEffort: "low" },
+                variants: options.variants ?? { high: { reasoningEffort: "high" } },
                 headers: { "x-model": "model", "X-Override": "model" },
               },
               speech: { modalities: { input: ["text"], output: ["audio"] } },
@@ -1219,5 +1224,667 @@ test("input audio does not exempt generated text from the 16 MiB output budget",
         new Response(vendorBody([wireChunk({ content: "x".repeat(16 * 1024 * 1024) }), wireChunk({}, "stop")]), {
           headers: { "content-type": "text/event-stream" },
         }),
+    },
+  ))
+
+const responsesBody = () =>
+  new Response(
+    [
+      { type: "response.created", response: { id: "resp_fixture", created_at: 1, model: "gpt-5.2" } },
+      {
+        type: "response.output_item.added",
+        output_index: 0,
+        item: { type: "message", id: "msg_fixture", role: "assistant", content: [] },
+      },
+      {
+        type: "response.output_text.delta",
+        item_id: "msg_fixture",
+        output_index: 0,
+        content_index: 0,
+        delta: "Hello.",
+      },
+      {
+        type: "response.completed",
+        response: { id: "resp_fixture", status: "completed", output: [], usage: { input_tokens: 1, output_tokens: 1 } },
+      },
+    ]
+      .map(frame)
+      .join(""),
+    { headers: { "content-type": "text/event-stream" } },
+  )
+const anthropicBody = () =>
+  new Response(
+    [
+      {
+        type: "message_start",
+        message: {
+          id: "msg_fixture",
+          type: "message",
+          role: "assistant",
+          model: "claude-sonnet-4-5",
+          content: [],
+          usage: { input_tokens: 1, output_tokens: 0 },
+        },
+      },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello." } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 1 } },
+      { type: "message_stop" },
+    ]
+      .map((value) => `event: ${value.type}\n${frame(value)}`)
+      .join(""),
+    { headers: { "content-type": "text/event-stream" } },
+  )
+
+test.each([
+  {
+    npm: "@ai-sdk/openai",
+    apiID: "gpt-5.2",
+    options: { reasoningEffort: "xhigh", reasoningSummary: "detailed", textVerbosity: "low" },
+    expected: { reasoning: { effort: "xhigh", summary: "detailed" }, text: { verbosity: "low" } },
+    handle: responsesBody,
+  },
+  {
+    npm: "@ai-sdk/azure",
+    providerID: "azure",
+    apiID: "gpt-5.2",
+    options: { reasoningEffort: "none", reasoningSummary: "auto", textVerbosity: "high" },
+    expected: { reasoning: { effort: "none", summary: "auto" }, text: { verbosity: "high" } },
+    handle: responsesBody,
+  },
+  {
+    npm: "@ai-sdk/azure",
+    providerID: "azure",
+    apiID: "gpt-5.2",
+    providerOptions: { useCompletionUrls: true },
+    options: { reasoningEffort: "minimal", textVerbosity: "medium" },
+    expected: { reasoning_effort: "minimal", verbosity: "medium" },
+  },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-sonnet-4-5",
+    options: { thinking: { type: "enabled", budgetTokens: 1024 } },
+    expected: { thinking: { type: "enabled", budget_tokens: 1024 }, max_tokens: 5120 },
+    handle: anthropicBody,
+  },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-opus-4-6",
+    options: { thinking: { type: "adaptive", display: "omitted" }, effort: "max" },
+    expected: { thinking: { type: "adaptive", display: "omitted" }, output_config: { effort: "max" } },
+    handle: anthropicBody,
+  },
+  {
+    npm: "@ai-sdk/google",
+    apiID: "gemini-2.5-pro",
+    options: { thinkingConfig: { thinkingBudget: -1, includeThoughts: true } },
+    expected: { generationConfig: { thinkingConfig: { thinkingBudget: -1, includeThoughts: true } } },
+    handle: googleBody,
+  },
+  {
+    npm: "@ai-sdk/google-vertex",
+    apiID: "gemini-3.1-pro-preview",
+    options: { thinkingConfig: { thinkingLevel: "medium", includeThoughts: false } },
+    expected: { generationConfig: { thinkingConfig: { thinkingLevel: "medium", includeThoughts: false } } },
+    handle: googleBody,
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "xiaomi",
+    apiID: "mimo-v2.5-pro",
+    options: { thinking: { type: "disabled" } },
+    expected: { thinking: { type: "disabled" } },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "deepseek",
+    apiID: "deepseek-v4-pro",
+    options: { thinking: { type: "enabled" }, reasoningEffort: "max" },
+    expected: { thinking: { type: "enabled" }, reasoning_effort: "max" },
+  },
+])("provider options reach the real SDK wire: $npm $apiID", (row) =>
+  fixture(
+    async (seen) => {
+      const model = `${row.providerID ?? "local"}/chat`
+      const response = await request(
+        ChatCompletionRequest.parse({ ...base, model, max_tokens: 4096, provider_options: row.options }),
+        [model],
+      )
+      expect(response.status).toBe(200)
+      expect(await response.text()).toMatch(/Hello\.|Heard\./)
+      expect(seen).toHaveLength(1)
+      expect(seen[0].body).toMatchObject(row.expected)
+      expect(seen[0].body.model ?? seen[0].path).toContain(row.apiID)
+      expect(seen[0].headers.get("x-provider")).toBe("provider")
+      expect(seen[0].headers.get("x-model")).toBe("model")
+    },
+    { ...row, modelOptions: {} },
+  ),
+)
+
+test.each([undefined, {}])("provider options omitted or empty preserve legacy MiMo wire: %j", (provider_options) =>
+  fixture(
+    async (seen) => {
+      await (
+        await request({ model: "xiaomi/chat", reasoning_effort: "high", provider_options }, ["xiaomi/chat"])
+      ).text()
+      expect(seen[0].body.reasoning_effort).toBe("high")
+      expect(seen[0].body.thinking).toBeUndefined()
+    },
+    { providerID: "xiaomi", apiID: "mimo-v2.5" },
+  ),
+)
+
+test.each([
+  { npm: "@ai-sdk/openai", apiID: "gpt-5.2", options: { reasoningEffort: "maximum" } },
+  { npm: "@ai-sdk/openai", apiID: "gpt-4o", options: { reasoningEffort: "high" } },
+  { npm: "@ai-sdk/openai", apiID: "gpt-5.2", options: { thinking: { type: "enabled" } } },
+  { npm: "@ai-sdk/openai", apiID: "gpt-5.2", options: { reasoningSummary: "concise" } },
+  { npm: "@ai-sdk/openai", apiID: "gpt-5.2", options: { textVerbosity: 2 } },
+  { npm: "@ai-sdk/openai", apiID: "gpt-5.2", options: { forceReasoning: true } },
+  {
+    npm: "@ai-sdk/azure",
+    providerID: "azure",
+    apiID: "gpt-5.2",
+    providerOptions: { useCompletionUrls: true },
+    options: { reasoningSummary: "auto" },
+  },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-sonnet-4-5",
+    options: { thinking: { type: "enabled", budgetTokens: 1023 } },
+  },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-sonnet-4-5",
+    options: { thinking: { type: "enabled", budgetTokens: 32000 } },
+  },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-sonnet-4-5",
+    options: { thinking: { type: "enabled", budgetTokens: 1024.5 } },
+  },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-sonnet-4-5", options: { thinking: { type: "enabled" } } },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-sonnet-4-5",
+    options: { thinking: { type: "disabled", budgetTokens: 1024 } },
+  },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-sonnet-4-5", options: { thinking: { type: "adaptive" } } },
+  {
+    npm: "@ai-sdk/anthropic",
+    apiID: "claude-opus-4-6",
+    options: { thinking: { type: "enabled", budgetTokens: 1024 } },
+  },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-opus-4-6", options: { effort: "xhigh" } },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-opus-4-7", options: { thinking: { type: "adaptive", display: "full" } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-pro", options: { thinkingConfig: { thinkingBudget: 0 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-pro", options: { thinkingConfig: { thinkingBudget: 127 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-pro", options: { thinkingConfig: { thinkingBudget: 32769 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", options: { thinkingConfig: { thinkingBudget: 24577 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash-lite", options: { thinkingConfig: { thinkingBudget: 511 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", options: { thinkingConfig: { thinkingBudget: -2 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", options: { thinkingConfig: { thinkingBudget: 1.5 } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-3-pro-preview", options: { thinkingConfig: { thinkingLevel: "medium" } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-3.1-pro-preview", options: { thinkingConfig: { thinkingLevel: "minimal" } } },
+  {
+    npm: "@ai-sdk/google",
+    apiID: "gemini-3-flash-preview",
+    options: { thinkingConfig: { thinkingLevel: "low", thinkingBudget: 1024 } },
+  },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.0-flash", options: { thinkingConfig: { includeThoughts: true } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-pro", options: { thinkingConfig: { includeThoughts: "true" } } },
+  { npm: "@ai-sdk/google", apiID: "gemini-2.5-pro", options: { thinkingConfig: { endpoint: "outside" } } },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "xiaomi",
+    apiID: "mimo-v2.5",
+    options: { thinking: { type: "enabled", budgetTokens: 1024 } },
+  },
+  { npm: "@ai-sdk/openai-compatible", providerID: "xiaomi", apiID: "mimo-v2.5", options: { reasoningEffort: "high" } },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "xiaomi",
+    apiID: "mimo-v2-flash-ptc",
+    options: { thinking: { type: "enabled" } },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "local",
+    apiID: "mimo-v2.5",
+    options: { thinking: { type: "enabled" } },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "xiaomi",
+    apiID: "gpt-5.2",
+    options: { thinking: { type: "enabled" } },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "deepseek",
+    apiID: "deepseek-v4-pro",
+    options: { reasoningEffort: "medium" },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "deepseek",
+    apiID: "deepseek-chat",
+    options: { reasoningEffort: "max" },
+  },
+  {
+    npm: "@ai-sdk/openai-compatible",
+    providerID: "deepseek",
+    apiID: "deepseek-v4-pro",
+    options: { thinking: { type: "disabled" }, reasoningEffort: "high" },
+  },
+])("provider options reject unsupported family, model or value before generation: $apiID $options", (row) =>
+  fixture(
+    async (seen) => {
+      const model = `${row.providerID ?? "local"}/chat`
+      expect(
+        await rejected(
+          request(ChatCompletionRequest.parse({ ...base, model, provider_options: row.options }), [model]),
+        ),
+      ).toMatchObject({ status: 400 })
+      expect(seen).toHaveLength(0)
+    },
+    { ...row, modelOptions: {} },
+  ),
+)
+
+test.each([
+  "model",
+  "messages",
+  "tools",
+  "headers",
+  "apiKey",
+  "baseURL",
+  "endpoint",
+  "authorization",
+  "reasoning_effort",
+  "__proto__",
+  "constructor",
+  "openai",
+])("provider options refuse the client override %s before image lookup", (key) =>
+  fixture(
+    async (seen) => {
+      let lookups = 0
+      expect(
+        await rejected(
+          execute(
+            {
+              req: {
+                ...base,
+                provider_options: { [key]: "outside" },
+                messages: [
+                  { role: "user", content: [{ type: "image_url", image_url: { url: "https://image.example/a.png" } }] },
+                ],
+              },
+              models: ["local/chat"],
+              abort: new AbortController().signal,
+            },
+            {
+              lookup: async () => {
+                lookups++
+                return []
+              },
+            },
+          ),
+        ),
+      ).toMatchObject({ status: 400 })
+      expect(lookups).toBe(0)
+      expect(seen).toHaveLength(0)
+    },
+    { npm: "@ai-sdk/openai", apiID: "gpt-5.2" },
+  ),
+)
+
+test("provider options top MiMo variant replaces client thinking and leaves the shared model unchanged", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request(
+          { model: "xiaomi/chat", provider_options: { thinking: { type: "disabled" } }, reasoning_effort: "high" },
+          ["xiaomi/chat"],
+        )
+      ).text()
+      expect(seen[0].body.thinking).toEqual({ type: "enabled" })
+      expect(seen[0].body.reasoning_effort).toBeUndefined()
+      await (await request({ model: "xiaomi/chat" }, ["xiaomi/chat"])).text()
+      expect(seen[1].body.reasoning_effort).toBe("low")
+      expect(seen[1].body.thinking).toBeUndefined()
+    },
+    { providerID: "xiaomi", apiID: "mimo-v2.5" },
+  ))
+
+test("provider options top variant retains its summary and trusted plugin runs last", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request({
+          provider_options: { reasoningEffort: "low", reasoningSummary: "detailed" },
+          reasoning_effort: "high",
+        })
+      ).text()
+      expect(seen[0].body.reasoning).toEqual({ effort: "minimal", summary: "auto" })
+      expect(seen[0].headers.get("x-options-plugin")).toBe("last")
+    },
+    {
+      npm: "@ai-sdk/openai",
+      apiID: "gpt-5.2",
+      handle: responsesBody,
+      variants: { high: { reasoningEffort: "high", reasoningSummary: "auto" } },
+      plugin: `export default async () => ({"chat.params": async (_input, output) => { if (output.options.reasoningEffort !== "high" || output.options.reasoningSummary !== "auto") throw new Error("wrong precedence"); output.options.reasoningEffort = "minimal" }, "chat.headers": async (_input, output) => { output.headers["x-options-plugin"] = "last" }})`,
+    },
+  ))
+
+test.each([undefined, 6000, 7168, 7169])(
+  "provider options Anthropic budget shares the model cap with output: %j",
+  (max_tokens) =>
+    fixture(
+      async (seen) => {
+        const result = request({ provider_options: { thinking: { type: "enabled", budgetTokens: 1024 } }, max_tokens })
+        if (max_tokens === 7169) {
+          expect(await rejected(result)).toMatchObject({ status: 400 })
+          expect(seen).toHaveLength(0)
+          return
+        }
+        await (await result).text()
+        expect(seen[0].body.max_tokens).toBe(max_tokens === 6000 ? 7024 : 8192)
+      },
+      { npm: "@ai-sdk/anthropic", apiID: "claude-sonnet-4-5", output: 8192, modelOptions: {}, handle: anthropicBody },
+    ),
+)
+
+test("provider options Google input audio uses the same validation and file transport", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request({
+          messages: audioMessages(),
+          provider_options: { thinkingConfig: { thinkingBudget: 0, includeThoughts: false } },
+        })
+      ).text()
+      expect(seen[0].body.generationConfig).toMatchObject({
+        thinkingConfig: { thinkingBudget: 0, includeThoughts: false },
+      })
+      expect(seen[0].body.contents).toEqual([
+        { role: "user", parts: [{ inlineData: { mimeType: "audio/wav", data: "AQID" } }] },
+      ])
+    },
+    { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", audio: true, handle: googleBody, modelOptions: {} },
+  ))
+
+test.each([
+  {
+    modelOptions: { thinkingConfig: { thinkingBudget: 2048, includeThoughts: true } },
+    client: { thinkingConfig: { includeThoughts: false } },
+    expected: { thinkingBudget: 2048, includeThoughts: false },
+  },
+  {
+    modelOptions: { thinkingConfig: { thinkingBudget: 2048, includeThoughts: true } },
+    client: { thinkingConfig: { thinkingBudget: 512 } },
+    expected: { thinkingBudget: 512, includeThoughts: true },
+  },
+])("provider options preserve independent Google defaults: $client", (row) =>
+  fixture(
+    async (seen) => {
+      await (await request(ChatCompletionRequest.parse({ ...base, provider_options: row.client }))).text()
+      expect(seen[0].body.generationConfig).toMatchObject({ thinkingConfig: row.expected })
+    },
+    { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", handle: googleBody, modelOptions: row.modelOptions },
+  ),
+)
+
+test("provider options top Google level removes the client budget but retains includeThoughts", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request({
+          provider_options: { thinkingConfig: { includeThoughts: false } },
+          reasoning_effort: "custom_level",
+        })
+      ).text()
+      expect(seen[0].body.generationConfig).toMatchObject({
+        thinkingConfig: { thinkingLevel: "high", includeThoughts: false },
+      })
+      expect(
+        z
+          .object({ generationConfig: z.object({ thinkingConfig: z.record(z.string(), z.unknown()) }) })
+          .parse(seen[0].body).generationConfig.thinkingConfig.thinkingBudget,
+      ).toBeUndefined()
+    },
+    {
+      npm: "@ai-sdk/google",
+      apiID: "gemini-3-pro-preview",
+      handle: googleBody,
+      modelOptions: { thinkingConfig: { thinkingBudget: 2048, includeThoughts: true } },
+      variants: { custom_level: { thinkingConfig: { thinkingLevel: "high" } } },
+    },
+  ))
+
+test("provider options disabled Anthropic replaces an enabled default without residual budget", () =>
+  fixture(
+    async (seen) => {
+      await (await request({ provider_options: { thinking: { type: "disabled" } }, max_tokens: 2048 })).text()
+      expect(seen[0].body.thinking).toBeUndefined()
+      expect(seen[0].body.max_tokens).toBe(2048)
+    },
+    {
+      npm: "@ai-sdk/anthropic",
+      apiID: "claude-sonnet-4-5",
+      handle: anthropicBody,
+      modelOptions: { thinking: { type: "enabled", budgetTokens: 4096 } },
+    },
+  ))
+
+test("provider options top Anthropic adaptive removes a client enabled budget", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request({
+          provider_options: { thinking: { type: "enabled", budgetTokens: 2048 } },
+          reasoning_effort: "high",
+          max_tokens: 4096,
+        })
+      ).text()
+      expect(seen[0].body.thinking).toEqual({ type: "adaptive" })
+      expect(seen[0].body.output_config).toMatchObject({ effort: "high" })
+      expect(seen[0].body.max_tokens).toBe(4096)
+    },
+    {
+      npm: "@ai-sdk/anthropic",
+      apiID: "claude-sonnet-4-6",
+      handle: anthropicBody,
+      modelOptions: {},
+      variants: { high: { thinking: { type: "adaptive" }, effort: "high" } },
+    },
+  ))
+
+test.each([0, 65536])("provider options Anthropic defaults respect the SDK cap with catalog output=%s", (output) =>
+  fixture(
+    async (seen) => {
+      await (await request({ provider_options: { thinking: { type: "enabled", budgetTokens: 1024 } } })).text()
+      expect(seen[0].body.max_tokens).toBe(64000)
+    },
+    { npm: "@ai-sdk/anthropic", apiID: "claude-sonnet-4-5", handle: anthropicBody, modelOptions: {}, output },
+  ),
+)
+
+test("provider options enforce the Anthropic combined cap after a trusted plugin changes the budget", () =>
+  fixture(
+    async (seen) => {
+      expect(
+        await rejected(
+          request({ provider_options: { thinking: { type: "enabled", budgetTokens: 1024 } }, max_tokens: 7168 }),
+        ),
+      ).toMatchObject({ status: 400 })
+      expect(seen).toHaveLength(0)
+    },
+    {
+      npm: "@ai-sdk/anthropic",
+      apiID: "claude-sonnet-4-5",
+      handle: anthropicBody,
+      modelOptions: {},
+      output: 8192,
+      plugin: `export default async () => ({"chat.params": async (_input, output) => { output.options.thinking.budgetTokens = 2048 }})`,
+    },
+  ))
+
+test.each([
+  { npm: "@ai-sdk/google", apiID: "gemini-3.1-flash", options: { thinkingConfig: { includeThoughts: true } } },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-haiku-4-6", options: { thinking: { type: "disabled" } } },
+  { npm: "@ai-sdk/anthropic", apiID: "claude-sonnet-4-5", options: { thinking: { type: "disabled" }, effort: "high" } },
+])("provider options reject unverified model combinations: $apiID", (row) =>
+  fixture(
+    async (seen) => {
+      expect(
+        await rejected(request(ChatCompletionRequest.parse({ ...base, provider_options: row.options }))),
+      ).toMatchObject({ status: 400 })
+      expect(seen).toHaveLength(0)
+    },
+    { ...row, modelOptions: {} },
+  ),
+)
+
+test("provider options Azure deployment accepts an existing trusted forceReasoning option", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request(
+          { model: "azure/chat", provider_options: { reasoningEffort: "high", reasoningSummary: "detailed" } },
+          ["azure/chat"],
+        )
+      ).text()
+      expect(seen[0].body.reasoning).toEqual({ effort: "high", summary: "detailed" })
+      expect(seen[0].body.forceReasoning).toBeUndefined()
+    },
+    {
+      npm: "@ai-sdk/azure",
+      providerID: "azure",
+      apiID: "deployment",
+      modelOptions: { forceReasoning: true },
+      handle: responsesBody,
+    },
+  ))
+
+test.each([
+  { apiID: "gemini-2.5-pro", config: { thinkingBudget: 128 } },
+  { apiID: "gemini-2.5-pro", config: { thinkingBudget: 32768 } },
+  { apiID: "gemini-2.5-flash", config: { thinkingBudget: 24576 } },
+  { apiID: "gemini-2.5-flash-lite", config: { thinkingBudget: 0 } },
+  { apiID: "gemini-2.5-flash-lite", config: { thinkingBudget: 512 } },
+  { apiID: "gemini-2.5-flash-lite", config: { thinkingBudget: 24576 } },
+  { apiID: "gemini-3-flash-preview", config: { thinkingLevel: "minimal" } },
+  { apiID: "gemini-3-flash-preview", config: { thinkingLevel: "medium" } },
+  { apiID: "gemini-3-pro-preview", config: { thinkingLevel: "low" } },
+])("provider options Google accepts documented boundaries: $apiID $config", (row) =>
+  fixture(
+    async (seen) => {
+      await (
+        await request(ChatCompletionRequest.parse({ ...base, provider_options: { thinkingConfig: row.config } }))
+      ).text()
+      expect(seen[0].body.generationConfig).toMatchObject({ thinkingConfig: row.config })
+    },
+    { npm: "@ai-sdk/google", apiID: row.apiID, handle: googleBody, modelOptions: {} },
+  ),
+)
+
+test.each(["low", "high"])("provider options DeepSeek v4 flash emits canonical effort %s", (reasoningEffort) =>
+  fixture(
+    async (seen) => {
+      await (await request({ model: "deepseek/chat", provider_options: { reasoningEffort } }, ["deepseek/chat"])).text()
+      expect(seen[0].body.reasoning_effort).toBe(reasoningEffort)
+    },
+    { providerID: "deepseek", apiID: "deepseek-v4-flash", modelOptions: {} },
+  ),
+)
+
+test("provider options top DeepSeek effort overrides disabled client thinking", () =>
+  fixture(
+    async (seen) => {
+      await (
+        await request(
+          { model: "deepseek/chat", provider_options: { thinking: { type: "disabled" } }, reasoning_effort: "high" },
+          ["deepseek/chat"],
+        )
+      ).text()
+      expect(seen[0].body.thinking).toEqual({ type: "enabled" })
+      expect(seen[0].body.reasoning_effort).toBe("high")
+    },
+    { providerID: "deepseek", apiID: "deepseek-v4-pro" },
+  ))
+
+test.each([
+  {
+    apiID: "claude-sonnet-4-5",
+    client: { thinking: { type: "enabled", budgetTokens: 31999 } },
+    expected: { thinking: { type: "enabled", budget_tokens: 31999 }, max_tokens: 32000 },
+  },
+  {
+    apiID: "claude-opus-4-7",
+    client: { thinking: { type: "adaptive", display: "summarized" }, effort: "xhigh" },
+    expected: {
+      thinking: { type: "adaptive", display: "summarized" },
+      output_config: { effort: "xhigh" },
+      max_tokens: 1,
+    },
+  },
+])("provider options Anthropic supports the approved budget and adaptive limits: $apiID", (row) =>
+  fixture(
+    async (seen) => {
+      await (
+        await request(ChatCompletionRequest.parse({ ...base, provider_options: row.client, max_tokens: 1 }))
+      ).text()
+      expect(seen[0].body).toMatchObject(row.expected)
+    },
+    { npm: "@ai-sdk/anthropic", apiID: row.apiID, handle: anthropicBody, modelOptions: {} },
+  ),
+)
+
+test("provider options cannot create a missing top variant", () =>
+  fixture(
+    async (seen) => {
+      expect(
+        await rejected(
+          request(
+            { model: "xiaomi/chat", provider_options: { thinking: { type: "enabled" } }, reasoning_effort: "disabled" },
+            ["xiaomi/chat"],
+          ),
+        ),
+      ).toMatchObject({ status: 400 })
+      expect(seen).toHaveLength(0)
+    },
+    { providerID: "xiaomi", apiID: "mimo-v2.5" },
+  ))
+
+test("provider options isolate defaults and variant containers from plugin mutation", () =>
+  fixture(
+    async (seen) => {
+      const model = await AppRuntime.runPromise(
+        Effect.gen(function* () {
+          const ref = Provider.parseModel("local/chat")
+          return yield* (yield* Provider.Service).getModel(ref.providerID, ref.modelID)
+        }),
+      )
+      for (let index = 0; index < 2; index++) {
+        await (await request({ provider_options: { textVerbosity: "low" }, reasoning_effort: "isolated" })).text()
+        expect(model.options.audit).toEqual({ value: 1 })
+        expect(model.variants?.isolated.include).toEqual(["reasoning.encrypted_content"])
+      }
+      expect(seen).toHaveLength(2)
+    },
+    {
+      npm: "@ai-sdk/openai",
+      apiID: "gpt-5.2",
+      handle: responsesBody,
+      modelOptions: { audit: { value: 1 } },
+      variants: { isolated: { reasoningEffort: "high", include: ["reasoning.encrypted_content"] } },
+      plugin: `export default async () => ({"chat.params": async (input, output) => {
+    output.options.audit.value = 2
+    output.options.include.push("message.output_text.logprobs")
+  }})`,
     },
   ))
