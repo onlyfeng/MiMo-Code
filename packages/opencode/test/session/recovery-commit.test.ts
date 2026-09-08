@@ -62,6 +62,25 @@ const taskRows = () =>
   Database.use((db) => ({ tasks: db.select().from(TaskTable).all(), events: db.select().from(TaskEventTable).all() }))
 
 describe("Session.commitRecoveryCandidate", () => {
+  it.live("compat recovery settlement preserves monotonic creation timestamps", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const f = yield* seed()
+        const future = Date.now() + 60_000
+        Database.use((db) => db.update(MessageTable).set({
+          time_created: future,
+          data: { ...f.assistant, time: { created: future } },
+        }).where(eq(MessageTable.id, f.assistant.id)).run())
+        yield* f.sessions.commitRecoveryCandidate(f.input)
+        const saved = stored(f.assistant.id)
+        expect(saved?.time_created).toBe(future)
+        expect(saved?.data.time.created).toBe(future)
+        if (!saved || !("completed" in saved.data.time)) throw new Error("Recovered assistant missing completion")
+        expect(saved.data.time.completed).toBeGreaterThanOrEqual(future)
+      }),
+    ),
+  )
+
   it.live("hands off the committed recovery before a synchronous postcommit publisher throws", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {

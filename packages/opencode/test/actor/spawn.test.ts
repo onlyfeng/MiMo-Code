@@ -2575,6 +2575,7 @@ it.live("resume binds a subagent task in its retained explicit parent namespace"
         forkContext: {
           modelIdentity: prefixModelIdentity(yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)),
           system: ["explicit parent recovery namespace"],
+          turnContext: undefined,
           tools: {},
           inheritedMessages: [],
           parentPermission: [],
