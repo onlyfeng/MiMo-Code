@@ -2976,3 +2976,19 @@ consumption. Existing inbox regressions pass 50 tests / 125 assertions across
 ten files. Package typecheck and repository lint pass; warnings remain. Tests
 clear the six ambient selectors and retain package preload. This internal
 helper does not change the public schema or generated SDK.
+
+### 2026-09-09 POLICY-02 durable inbox batch completion
+
+PR #94 follow-up review prompted a real 101-row queue test. Normal batches
+already drain in one loop; the reproduced failure is a provider error in the
+first batch, leaving the tail queued. Behavior/guidance source `e9addb0d5731ee08e5056c7fa420a72dd473b9b1`
+tracks the last durable row and makes persistent Actor owners check that row
+after their turn, as followers already do. The next iteration retains existing
+cancellation, generation and disposal checks. Main and Actor queues now finish
+remaining batches without an unrelated prompt or send after a first-batch error.
+
+The expanded main HTTP/Actor recovery run passes 42 tests / 381 assertions.
+A final focused Inbox/Actor delivery run passes 37 tests / 187 assertions across
+11 files (overlaps prior evidence); it includes unique durable row IDs and both
+single-row and 101-row queues. Typecheck and lint pass. The earlier 50-test Inbox
+run remains historical evidence, not a repeated full run at this source.
