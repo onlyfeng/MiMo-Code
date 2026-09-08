@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { describe, expect, test } from "bun:test"
 import { APICallError, RetryError } from "ai"
 import { convertToLanguageModelPrompt } from "ai/internal"
@@ -179,6 +180,30 @@ describe("session.message-v2.toModelMessage", () => {
       },
       { role: "user", content: [{ type: "text", text: "continue" }] },
     ])
+  })
+
+  test("system catalog projection removes only proven generated catalogs and preserves loaded text order", async () => {
+    const catalog = "Skills available in this session:\nNo skills are currently available."
+    const generated = `<system-reminder>\nAuthoritative skills catalog snapshot v2:\nWhen multiple snapshots exist, the last one is authoritative.\n${catalog}\n</system-reminder>`
+    const loaded = '<skill_content name="workflow">Skills available in this session: quoted instructions</skill_content>'
+    const quoted = "A normal synthetic reference to Authoritative skills catalog snapshot v2:"
+    const legacy = "<system-reminder>\nSkills available in this session:\nNo skills are currently available.\n</system-reminder>"
+    const texts = ["query", loaded, generated, quoted, legacy, loaded, generated]
+    const input: MessageV2.WithParts[] = [{
+      info: userInfo("catalog-system"),
+      parts: texts.map((text, index) => ({
+        ...basePart("catalog-system", `catalog-${index}`),
+        type: "text",
+        text,
+        synthetic: index !== 6,
+        ...(index === 2 ? { metadata: { skillCatalog: { schema: 2, version: createHash("sha256").update(catalog).digest("hex") } } } : {}),
+      })),
+    }]
+    expect(await MessageV2.toModelMessages(input, model, { skillCatalogInSystem: true })).toEqual([{
+      role: "user",
+      content: ["query", loaded, quoted, loaded, generated].map((text) => ({ type: "text", text })),
+    }])
+    expect(input[0].parts).toHaveLength(7)
   })
 
   test("keeps every authoritative skills snapshot before its user query", async () => {

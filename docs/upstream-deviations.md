@@ -115,6 +115,12 @@ capability audit is recorded in [the model API review](released-model-api-review
   event/payload parity, immutable retry-set, and unknown-identity fail-closed
   boundaries; upstream's actor-scoped `replace-agent` correction is adapted
   rather than copied because checkpoint ownership intentionally fails open.
+- POLICY-04 carrier review: the authorized skill catalog now occupies the
+  frozen system tail after environment/format and before instruction files.
+  FC-005 owns its schema-3 snapshot and legacy-pair migration; this placement
+  does not change instruction enablement, disable event/payload parity, or
+  actor identity. The separate instruction-delivery policy is not advanced by
+  this selection. See [skill catalog layout](skill-catalog-system-tail.md).
 - Watch surfaces: `packages/opencode/src/cli/cmd/tui/app.tsx`,
   `packages/opencode/src/session/instruction.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
@@ -132,7 +138,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `d9ed4dc480ddbe319d79e6ca655facc552e2cd35`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.

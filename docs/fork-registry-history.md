@@ -25,6 +25,8 @@ they are never used as an `upstream` or `main behavior` review basis.
 | 2026-08-27 | `6da12e0c98d9e2c4838896eac642c65179501f8e` | `d0acb856f1ec0edae6cce29ca44178af14d94293` | 6 | 15 | 252 paths; 24,541 insertions; 10,196 deletions | Adopted actor-scoped `replace-agent` for main/peer, but separated identity replacement from checkpoint's unknown-actor fail-open: only main and positively registered non-system peers inherit the session base; subagent, system, ephemeral, and unknown actors retain their own prompt. |
 | 2026-08-28 | `35bb2636a99b457940f1c12f2c8f5ec554369c57` | `64b4bdda6829ca697cecf4cf79eeec6a35ec2e57` | 6 | 15 | 256 paths; 24,605 insertions; 10,234 deletions | Classified all three incoming capabilities: removed the unimplemented actor spawn/run resume argument while preserving lifecycle and frozen-context failure boundaries; adapted PPTX sourcing to actual tool/WebFetch behavior; isolated the auto-overflow fixture while retaining its reserve-safe 25K sentinel. |
 | 2026-09-08 | `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` (unchanged; POLICY-01 selected source below) | `aa2dbe494fb5903f918d8d7cd8b6d04404acb031` | 6 | 16 | Incremental from accepted main: 47 paths; 2,715 insertions; 517 deletions | N=1 POLICY-01: adopt full authorized nested Actor/question/plan composition with canonical control identity, complete native-schema freezing, generation-owned admission cleanup, real interactive routing and atomic plan-to-build transition. Local validation only; publication and compat gates remain pending. |
+| 2026-09-08 | `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` (unchanged; POLICY-04 selected source below) | `22c5a51099f460cb9b58c064c57c8632e2cd70be` | 6 | 16 | Incremental runtime/tests/plan from accepted main: 18 paths; 1,589 insertions; 143 deletions | N=1 POLICY-04: move the authorized skill catalog to the frozen system tail, persist catalog version and originating turn, migrate legacy pairs only at a later direct input, and preserve loaded bodies plus native tool snapshots. Local validation only; publication and compat gates remain pending. |
+| 2026-09-08 | `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` (unchanged) | `d9ed4dc480ddbe319d79e6ca655facc552e2cd35` | 6 | 16 | Incremental runtime/tests/plan from accepted main: 20 paths; 1,631 insertions; 157 deletions | POLICY-04 CI follow-up: update two prior prefix-layout/turn-revision assertions and route persistent-Actor fixture responses to the delegated user request, preserving concurrent parent notifications. Product implementation unchanged; current-head review/CI must be repeated. |
 
 ## 2026-08-23 review details
 
@@ -2759,6 +2761,56 @@ actor/spawn turnContext alongside the new native-schema contract.
 
 Exact-head CI, current-head review feedback, main acceptance and subsequent
 compat propagation remain root-owned gates after this local registry update.
+
+## 2026-09-08 POLICY-04 frozen skill catalog system tail
+
+- Selected capability N=1: POLICY-04; selected upstream snapshot
+  `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, released source
+  `2a0eb706e95a77cba34a319e9f11f33f26d4450c`. Overall upstream review remains
+  `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; this is not a full sync.
+- Accepted prior main: `d415822c29539a4b6eebeafb59de1b88da18b95c`.
+  Runtime/tests/plan: `22c5a51099f460cb9b58c064c57c8632e2cd70be`, tree-identical to implementation
+  `3e2fca0e` after inheriting that formal main ancestor.
+- FC-005 owns the layout/version/migration contract. FC-002 and FC-015 retain
+  the captured pair across Actor/checkpoint and compaction consumers. FD-002
+  instruction enablement remains unchanged. POLICY-01 native contracts,
+  POLICY-06 approval ownership and the accepted pure 90% threshold are retained.
+- A nullable schema-3 catalog record stores canonical text, content hash and
+  originating user turn independently of the stable profile and tool hashes.
+  Cold capture pins and returns the winning pair. A normal loop losing the
+  initial pin uses that pair while retaining its live executable tool pool.
+  Legacy SQL NULL preserves history layout until a later direct user input;
+  projection suppresses only recognized generated parts and never rewrites DB
+  messages or moves loaded skill bodies.
+- Local focused validation: 122 pass, 0 fail, 653 assertions across 13 files.
+  This combines helper/projection, actual old-schema database migration and
+  reopen, existing skill command gates, real cold-capture competition, two
+  non-test session-reopen children, actual provider continuations/compaction,
+  native full-Actor contracts and prefix/checkpoint consumers. The 16-case
+  prefix/checkpoint subset includes recording fixtures and is not claimed as
+  full checkpoint E2E. Ambient experimental, MCP-search, Codex, workflow, yolo
+  and auto-delete selectors were removed; package-owned preloads were retained.
+- Package typecheck passed. Repository lint passed with 4,486 warnings and
+  zero errors; warnings are not classified as all pre-existing. No public
+  schema changed and no SDK/OpenAPI field carries the internal catalog column.
+  Exact-head remote CI, Codex review and compat propagation are later gates.
+
+## 2026-09-08 POLICY-04 CI test convergence
+
+PR #87 at `2f297184b9eb8b8cbc46f61604c900d291d48d4b` completed Codex review
+with a positive connector reaction. CI exposed two prior prefix tests still
+asserting history placement/revision 1, plus a pre-existing Actor fixture
+whose shared response FIFO let a parent-notification request consume the
+child's recovery response. A real parent-first probe reproduced the latter
+without modifying production code; routing responses by the delegated user
+input fixed the same ordering while keeping the real parent request.
+
+Corrected source/test basis: `d9ed4dc480ddbe319d79e6ca655facc552e2cd35`. The two prefix tests pass with 14
+assertions; the formal Actor recovery case passes with 27. The deterministic
+parent-first probe passes separately with 27 and is not double-counted.
+Combined focused evidence is 125 pass, 0 fail, 694 assertions across 14 files.
+Package typecheck passes. No product or timeout change was needed. New-head
+Codex completion and all CI remain required before merge.
 
 ## 2026-09-08 POLICY-03 default TUI model API local review
 
