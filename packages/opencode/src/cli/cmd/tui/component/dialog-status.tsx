@@ -41,7 +41,7 @@ export function DialogStatus() {
       model: `${target.providerID}/${target.modelID}`,
       window: Token.format(win.hard),
       budget: win.source === "config" ? Token.format(win.effective) : undefined,
-      reserved: Token.format(win.effective - win.usable),
+      headroom: Token.format(win.effective - win.usable),
       compact: Token.format(win.usable),
       used: tokens ? `${Locale.number(tokens)} (${Math.round((tokens / win.usable) * 100)}%)` : undefined,
     }
@@ -92,8 +92,8 @@ export function DialogStatus() {
             </text>
             <text fg={theme.textMuted}>
               {item().budget
-                ? `window ${item().window} · budget ${item().budget} (config) · reserved ${item().reserved} · compacts at ${item().compact}`
-                : `window ${item().window} (model) · reserved ${item().reserved} · compacts at ${item().compact}`}
+                ? `window ${item().window} · budget ${item().budget} (config) · headroom ${item().headroom} · compacts at ${item().compact}`
+                : `window ${item().window} (model) · headroom ${item().headroom} · compacts at ${item().compact}`}
             </text>
             <Show when={item().used}>{(used) => <text fg={theme.textMuted}>used {used()}</text>}</Show>
           </box>
