@@ -2864,3 +2864,10 @@ refresh and the mock provider system-tail contract. Source merges were clean.
 Bundled guidance snapshot is `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
 Publication remains ordered after the preceding policy is accepted on both branches;
 this local inheritance is not evidence of remote acceptance.
+
+### POLICY-03 accepted predecessor ancestry
+
+Snapshot `f860c352f292d6d7aa0bf97cc282d4c3e5ef4fb4` inherits accepted POLICY-04 main
+`69275c9cf4d772afe2167b82922e1dcebd9ab468` with a tree-identical merge.
+The inherited-format package typecheck passed. POLICY-03 publication retains
+its own exact-head CI and Codex review gates and waits for POLICY-04 compat acceptance.
