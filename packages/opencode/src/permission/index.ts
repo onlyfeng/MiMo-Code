@@ -181,7 +181,28 @@ export interface Interface {
   readonly setPermissionAskTimeout: (ms: number | null) => Effect.Effect<void>
 }
 
+interface ApprovalReceipt {
+  permission: string
+  replied: boolean
+}
+
+const approvalReceipt = Context.Reference<ApprovalReceipt | undefined>("@opencode/PermissionReplyReceipt", {
+  defaultValue: () => undefined,
+})
+
+// Internal result of this exact ask, without widening the public void contract.
+// Automatic grants never mark this receipt; only an explicit pending reply does.
+export const withReplyReceipt = <E, R>(permission: string, work: Effect.Effect<void, E, R>) =>
+  Effect.suspend(() => {
+    const receipt = { permission, replied: false }
+    return work.pipe(
+      Effect.provideService(approvalReceipt, receipt),
+      Effect.map(() => receipt.replied),
+    )
+  })
+
 interface PendingEntry {
+  receipt?: ApprovalReceipt
   info: Request
   deferred: Deferred.Deferred<void, RejectedError | CorrectedError>
 }
@@ -386,7 +407,8 @@ export const layer = Layer.effect(
       log.info("asking", { id, permission: info.permission, patterns: info.patterns })
 
       const deferred = yield* Deferred.make<void, RejectedError | CorrectedError>()
-      pending.set(id, { info, deferred })
+      const receipt = yield* approvalReceipt
+      pending.set(id, { info, deferred, receipt: receipt?.permission === request.permission ? receipt : undefined })
       yield* bus.publish(Event.Asked, info)
 
       // Orchestrator-peer forward mode: either the orchestrator holds a delegation
@@ -408,7 +430,15 @@ export const layer = Layer.effect(
             resolve: (decision) =>
               bridge.fork(
                 decision === "allow"
-                  ? Deferred.succeed(deferred, void 0)
+                  ? Deferred.completeWith(
+                      deferred,
+                      Effect.sync(() => {
+                        // Only the winning explicit one-shot completion marks this
+                        // ask's receipt. A late resolver cannot relabel an earlier
+                        // automatic grant, and pre-authorized grants never enter here.
+                        if (receipt?.permission === info.permission) receipt.replied = true
+                      }),
+                    )
                   : Deferred.fail(deferred, new RejectedError()),
               ),
           })
@@ -568,6 +598,7 @@ export const layer = Layer.effect(
         return
       }
 
+      if (existing.receipt) existing.receipt.replied = true
       yield* Deferred.succeed(existing.deferred, undefined)
       if (input.reply === "once") return
       // Forced-ask permissions never persist an approval — even if the caller

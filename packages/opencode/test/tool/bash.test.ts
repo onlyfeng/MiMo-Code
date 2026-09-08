@@ -422,7 +422,7 @@ describe("tool.bash permissions", () => {
     })
   })
 
-  each("asks for bash_delete only (no bash prompt) when running rm inside the project", async () => {
+  each("keeps ordinary asks when a custom delete handler supplies no explicit reply receipt", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
         await Bun.write(path.join(dir, "victim.txt"), "x")
@@ -446,9 +446,9 @@ describe("tool.bash permissions", () => {
         expect(deleteReq).toBeDefined()
         expect(deleteReq!.patterns).toContain("rm victim.txt")
         expect(deleteReq!.metadata.command).toBe("rm victim.txt")
-        // The delete UI shows the full command → a separate `bash` ask would
-        // just be a second confirmation of the same thing.
-        expect(requests.find((r) => r.permission === "bash")).toBeUndefined()
+        // This capture handler has no real Permission.reply, so it cannot
+        // claim that a user approved the full command.
+        expect(requests.find((r) => r.permission === "bash")).toBeDefined()
       },
     })
   })

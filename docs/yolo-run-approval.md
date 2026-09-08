@@ -28,8 +28,22 @@ optional reply field preserves the existing session-wide human rejection.
 For a command requiring deletion approval, Bash checks explicit denies for
 its ordinary Bash patterns and external-directory effects before requesting
 `bash_delete`. The Permission service then checks deletion denies before any
-automatic grant. A command receives one deletion confirmation rather than
-duplicated Bash, external-directory, and deletion prompts for the same action.
+automatic grant. An explicit reply to the deletion confirmation approves the
+full command shown there, so it replaces duplicate ordinary prompts. Automatic
+deletion approval covers only deletion: Bash still checks ordinary Bash and
+external-directory asks before executing any part of a mixed command. For
+example, with automatic deletion enabled and `bash: ask`, `rm victim && curl …`
+still waits for Bash approval; rejecting it leaves the victim untouched.
+
+This distinction uses the actual reply to that pending request, not a later
+read of the shared deletion switch. Changing the switch during an approval
+cannot widen what was approved. An invocation-owned CLI yolo `once` reply still
+approves the complete displayed command; ordinary skip-all continues to handle
+ordinary asks independently after deny checks. One-shot `session approve` for a
+forwarded deletion request also approves that complete displayed command. A
+`session grant-approval` pregrant remains automatic and does not replace the
+ordinary checks. A rejected or already settled forward cannot be relabeled as
+an explicit approval by a late resolver.
 
 The existing temporary-only exemption remains separate: every target must be
 provably temporary, and overlapping the active project/worktree excludes that
@@ -90,7 +104,8 @@ listener defaults, media handling, compaction, or other pending policy choices.
 FD-001 owns the shared-state residual, FC-001 owns runner and atomic-continuation
 lifetimes, and FC-007 owns Bash/path deletion checks.
 
-Focused coverage is in `test/cli/run-approval.test.ts`,
+Focused coverage includes `test/tool/bash-forwarded-approval.test.ts` for the
+real SessionTool forwarding path, alongside `test/cli/run-approval.test.ts`,
 `test/session/run-approval.test.ts`, `test/session/prompt-effect.test.ts`,
 `test/permission/auto-approve-delete.test.ts`,
 `test/tool/bash-delete-permission.test.ts`, and
