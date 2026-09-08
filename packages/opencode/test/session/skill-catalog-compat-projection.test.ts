@@ -62,7 +62,7 @@ function withCatalog(text: string): MessageV2.TextPart {
   }
 }
 
-test.each(["目录😀", "😀", "目录"])("compat recognizes the real UTF8 bounded producer for %s", (word) => {
+test.each(["目录😀", "😀", "目录", "<skill_content>"])("compat recognizes the real UTF8 bounded producer for %s", (word) => {
   const unicode = body.replace("Large description. ".repeat(5000), word.repeat(30000))
   const capped = capUtf8TextByBytes(unicode, MODEL_VISIBLE_TEXT_CAP_BYTES, "available skills")
   expect(Buffer.byteLength(capped)).toBeLessThanOrEqual(MODEL_VISIBLE_TEXT_CAP_BYTES)
@@ -77,7 +77,7 @@ test.each([
     "Skills available in this session:\n<available_skills>\n  <skill>\n    <name>tiny</name>\n    <description>tiny\n\n... 90000 bytes of available skills truncated before model injection ...",
   ],
   ["wrong producer prefix length", catalog.replace("Large description.", "x")],
-  ["loaded skill marker", catalog.replace("Large description.", '<skill_content name="loaded">')],
+  ["modified description without original producer budget", catalog.replace("Large description.", '<skill_content name="loaded">')],
 ])("compat does not remove %s even with a matching v2 hash", (_name, text) => {
   expect(isGeneratedSkillCatalog(withCatalog(text))).toBe(false)
 })
