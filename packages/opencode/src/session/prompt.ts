@@ -505,6 +505,7 @@ export interface RecoveryCandidate {
 }
 
 export interface ResumeTurnInput {
+  signal?: AbortSignal
   sessionID: SessionID
   assistantMessageID: MessageID
   task_id?: TaskID
@@ -6206,7 +6207,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     })
 
     const startResume = (input: ResumeTurnInput) =>
-      startResumeTurn({ ...input, actorID: "main", taskSessionID: input.sessionID })
+      startResumeTurn({
+        ...input,
+        actorID: "main",
+        taskSessionID: input.sessionID,
+        // The request owns admission only; committed recovery belongs to the runner.
+        shouldCommit: () => !input.signal?.aborted,
+      })
     const startActorResume: NonNullable<Interface["startActorResume"]> = (input) =>
       startResumeTurn({
         ...input,

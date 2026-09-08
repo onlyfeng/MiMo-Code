@@ -2,6 +2,7 @@ import { expect } from "bun:test"
 import { Effect, Layer, Schedule } from "effect"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { AppLayer } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Session } from "../../src/session"
@@ -41,12 +42,12 @@ const config = (url: string): Partial<Config.Info> => ({
     },
   },
 })
-const resume = (dir: string, sessionID: string, assistantID: string, taskID: string) =>
+const resume = (dir: string, sessionID: string, assistantID: string, taskID: string, signal?: AbortSignal) =>
   Effect.promise(() =>
     Promise.resolve(
       Server.Default().app.request(
         `/session/${sessionID}/turn/${assistantID}/resume?directory=${encodeURIComponent(dir)}&task_id=${encodeURIComponent(taskID)}`,
-        { method: "POST" },
+        { method: "POST", signal },
       ),
     ),
   )
@@ -303,3 +304,108 @@ it.live(
     ),
   30000,
 )
+
+for (const timing of ["before request", "before commit", "after commit"] as const) {
+  it.live(
+    `main HTTP request cancellation ${timing} respects the recovery ownership boundary`,
+    () =>
+      provideTmpdirServer(
+        ({ dir, llm }) =>
+          Effect.gen(function* () {
+            const sessions = yield* Session.Service
+            const tasks = yield* TaskRegistry.Service
+            const session = yield* sessions.create({ title: timing })
+            const user = yield* sessions.updateMessage({
+              id: MessageID.ascending(),
+              sessionID: session.id,
+              role: "user",
+              agent: "build",
+              model,
+              time: { created: 100 },
+            })
+            yield* sessions.updatePart({
+              id: PartID.ascending(),
+              sessionID: session.id,
+              messageID: user.id,
+              type: "text",
+              text: "Recover with cancellation ownership",
+            })
+            const assistant = yield* sessions.updateMessage({
+              id: MessageID.ascending(),
+              sessionID: session.id,
+              role: "assistant",
+              parentID: user.id,
+              agent: "build",
+              mode: "build",
+              providerID: model.providerID,
+              modelID: model.modelID,
+              path: { cwd: dir, root: dir },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              time: { created: 200 },
+            })
+            const task = yield* tasks.create({ session_id: session.id, summary: timing })
+            const before = yield* sessions.messages({ sessionID: session.id })
+            const controller = new AbortController()
+            const gate = Promise.withResolvers<void>()
+            yield* Effect.addFinalizer(() => Effect.sync(() => gate.resolve()))
+            yield* llm.hold("CANCEL_OWNERSHIP_FINISHED", gate.promise)
+            const onBusy = (event: GlobalEvent) => {
+              if (event.directory !== dir || event.payload.type !== "session.status") return
+              if (event.payload.properties.sessionID !== session.id || event.payload.properties.status.type !== "busy")
+                return
+              // Runner publishes busy before starting validation, so this cancels after admission begins.
+              controller.abort()
+            }
+            if (timing === "before commit") {
+              GlobalBus.on("event", onBusy)
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  GlobalBus.off("event", onBusy)
+                }),
+              )
+            }
+            if (timing === "before request") controller.abort()
+            const response = yield* resume(dir, session.id, assistant.id, task.id, controller.signal)
+            if (timing !== "after commit") {
+              expect(controller.signal.aborted).toBe(true)
+              expect(response.status).not.toBe(202)
+              expect(yield* sessions.messages({ sessionID: session.id })).toEqual(before)
+              expect(yield* tasks.get({ session_id: session.id, id: task.id })).toEqual(task)
+              expect(yield* llm.calls).toBe(0)
+              return
+            }
+            expect(response.status).toBe(202)
+            yield* llm.wait(1)
+            controller.abort()
+            gate.resolve()
+            const messages = yield* sessions.messages({ sessionID: session.id }).pipe(
+              Effect.repeat({
+                until: (messages) =>
+                  messages.some(
+                    (message) =>
+                      message.info.role === "assistant" &&
+                      message.info.id !== assistant.id &&
+                      message.info.time.completed !== undefined,
+                  ),
+                schedule: Schedule.spaced("20 millis"),
+              }),
+              Effect.timeout("10 seconds"),
+            )
+            expect(messages.find((message) => message.info.id === user.id)?.info).toMatchObject({ task_id: task.id })
+            expect(yield* tasks.get({ session_id: session.id, id: task.id })).toMatchObject({
+              owner: "main",
+              status: "in_progress",
+            })
+            expect(
+              messages
+                .flatMap((message) => message.parts)
+                .some((part) => part.type === "text" && part.text === "CANCEL_OWNERSHIP_FINISHED"),
+            ).toBe(true)
+            expect(yield* llm.calls).toBe(1)
+          }),
+        { git: true, root: "cwd", config },
+      ),
+    30000,
+  )
+}
