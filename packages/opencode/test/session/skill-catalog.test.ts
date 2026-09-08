@@ -147,3 +147,30 @@ describe("frozen catalog slot", () => {
     expect(result.reason).toBeDefined()
   })
 })
+
+
+test("managed format changes preserve frozen instructions and the catalog content version", () => {
+  const value = Catalog.captureSkillCatalog("directory", MessageID.make("format-turn"))
+  const token = Catalog.newSkillCatalogSlot()
+  const bound = Catalog.bindSkillCatalog([`ENV\n${token}\nINSTRUCTIONS`], value, token, "JSON FORMAT\n\n")
+  expect(bound.system).toEqual(["ENV\nJSON FORMAT\n\ndirectory\nINSTRUCTIONS"])
+  const plain = Catalog.refreshFrozenSkillCatalog(bound.system, bound.catalog, bound.catalog, { formatPrefix: "" })
+  expect(plain.system).toEqual(["ENV\ndirectory\nINSTRUCTIONS"])
+  expect(plain.catalog?.version).toBe(value.version)
+  const again = Catalog.refreshFrozenSkillCatalog(plain.system, plain.catalog, plain.catalog, { formatPrefix: "JSON FORMAT\n\n" })
+  expect(again.system).toEqual(bound.system)
+})
+
+test("legacy format provenance moves only the generated adjacent range", () => {
+  const old = Catalog.captureSkillCatalog("old", MessageID.make("old-format"))
+  const next = Catalog.captureSkillCatalog("new", MessageID.make("new-format"))
+  const system = ["ENV\nJSON FORMAT\n\nold\nINSTRUCTIONS"]
+  const result = Catalog.refreshFrozenSkillCatalog(system, { ...old, systemSlot: { message: 0, offset: 17 } }, next, {
+    formatPrefix: "", legacyFormatPrefix: "JSON FORMAT\n\n",
+  })
+  expect(result.system).toEqual(["ENV\nnew\nINSTRUCTIONS"])
+  const legacy = Catalog.refreshFrozenSkillCatalog(["ENV\nJSON FORMAT\n\nINSTRUCTIONS"], undefined, next, {
+    formatPrefix: "", legacyFormatPrefix: "JSON FORMAT\n\n",
+  })
+  expect(legacy.system).toEqual(["ENV\nnew\n\nINSTRUCTIONS"])
+})

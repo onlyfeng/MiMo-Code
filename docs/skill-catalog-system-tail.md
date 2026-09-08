@@ -22,9 +22,12 @@ turn ID. Tool-schema rotation retains the already selected catalog. This is
 internal database metadata, not an added public HTTP or SDK field.
 
 A refreshed directory replaces only its verified position inside the frozen
-system. Environment text, format instructions, instruction files and plugin
-system transformations retain their original bytes, including when tool schemas
-rotate. An optional internal position is persisted with the catalog; temporary
+system. Environment text, instruction files and plugin system transformations retain
+their original bytes, including when tool schemas rotate. The caller-owned
+structured-output instruction has its own recorded prefix inside the managed
+range: JSON-to-text transitions update it without refreshing other instructions
+or changing the directory content version. A legacy structured tool snapshot
+and a verified adjacent or unique instruction position identify its old range. An optional internal position is persisted with the catalog; temporary
 construction markers are removed before either persistence or model dispatch.
 
 Older schema-3 rows without a position can infer it from one exact occurrence of
