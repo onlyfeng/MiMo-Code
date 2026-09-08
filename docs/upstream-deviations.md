@@ -17,7 +17,7 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `bfb0c5e2c63fcad0b055c9e7bca58089268500d9`
+- Main behavior (runtime/tests): `9ef178175cb4707fb63e54f9313f97ec7363664f`
 - Bundled guidance content: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`
 - Prior fork `main` tip: `d415822c29539a4b6eebeafb59de1b88da18b95c`
 - History: [fork-registry-history.md](fork-registry-history.md)

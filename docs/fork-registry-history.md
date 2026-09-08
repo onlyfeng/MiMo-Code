@@ -2855,3 +2855,12 @@ are not repeated and the earlier 203-test/629-assertion POLICY-03 evidence is no
 relabelled as a new merged-tree test run. POLICY-04 current-head review, CI and
 formal main acceptance remain pending; this is neither publication nor compat
 propagation.
+
+## 2026-09-09 — POLICY-03 inherits final POLICY-04 format follow-up
+
+Runtime/test snapshot `9ef178175cb4707fb63e54f9313f97ec7363664f` inherits PR #87 candidate
+`32b01dcd828f692ea0656e53319cd48abf054c18`, including structured/text format
+refresh and the mock provider system-tail contract. Source merges were clean.
+Bundled guidance snapshot is `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
+Publication remains ordered after the preceding policy is accepted on both branches;
+this local inheritance is not evidence of remote acceptance.
