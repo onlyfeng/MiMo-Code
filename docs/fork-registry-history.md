@@ -2564,3 +2564,35 @@ DC-MODEL-001, DC-NET-002, and DC-TUI-001 have adjacent consumers. Existing froze
 contexts, chronology, model routing, network, and TUI overlays must be preserved
 when the accepted main commit is propagated. No unrelated or pre-existing dirty
 worktree is part of this operation.
+
+
+## 2026-09-08 — POLICY-06 mixed-command review correction
+
+PR #83 review found that independent delete auto-approval could bypass ordinary
+Bash/external-directory asks for a mixed command such as `rm victim && curl ...`.
+The same shared behavior was already on main, so the correction is reviewed on
+main before propagation into the pending compat PR.
+
+Runtime/tests and bundled guidance: `db2211ddbe0e064e4207583145e66c471deb73ab`. Prior accepted
+main: `bfa3c2466d07da01881b252a0337ac444b4ae927`. The selected upstream
+baseline is unchanged. FD-001 and FC-007 now distinguish an actual pending reply
+from an automatic grant. A request-local internal receipt preserves the complete
+command's single manual confirmation without a shared-switch reread; an automatic
+delete grant still reaches ordinary Bash and external-directory authorization.
+Explicit denies, temporary classification, and run-scoped approval remain intact.
+No HTTP or SDK shape changes.
+
+Validation: 4 real red regressions then 44 related permission/CLI tests and 15
+Bash scanning tests passed, with 183 and 33 assertions respectively. Mixed-command
+fixtures check untouched files and zero HTTP requests before approval, successful
+effects after once, and no effects after rejection. Automatic approval followed
+by a concurrent switch change still preserves ordinary asks. Manual/forwarded
+pending replies and real CLI yolo attach retain their expected behavior.
+Package typecheck passed; repository lint reported 0 errors and 4468 existing
+warnings. All six ambient experiment/yolo/delete selectors were cleared while
+preserving package preload. Runtime evidence is macOS zsh; PowerShell is not
+installed locally and was not claimed tested. Whitespace diff check passed.
+
+Compat inherits both shared production files unchanged; DC-ACTOR-001 and
+DC-CONTEXT-001 run-scope carriers remain as previously reviewed. Exact PR-head
+Codex review, CI, and final remote propagation are separate merge gates.
