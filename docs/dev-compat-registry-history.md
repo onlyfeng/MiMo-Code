@@ -3064,3 +3064,75 @@ specified propagation does not claim current-upstream parity.
   accepted behavior. Its numeric preflight threshold remains aligned with
   main, with no additional 5K/10% advance. Historical reserve decisions
   remain dated records.
+
+
+## 2026-09-08 POLICY-06 yolo approval inheritance
+
+This specified-change propagation inherits PR #82 after its current head
+`eca7be824261a773afae3acbd149a1271a687756` received Codex Completed with a +1 and no findings, all eight
+PR checks succeeded, and the PR merged into main `bfa3c2466d07da01881b252a0337ac444b4ae927`. The accepted main
+tree equals the reviewed PR tree. The overall upstream review baseline remains
+`6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; no unrelated upstream commit was merged.
+
+- Prior compat: `20c286a09324b8cb3a5d09e60feadf0e1b6572a0`.
+- Inherited main runtime/tests and bundled guidance: `6df77610eed88d86d674c6fd145852c5b4208289`.
+- Tested integration candidate: `b190bc6b`.
+- Accepted-main ancestry merge and compat behavior: `8b265508032ac27554ec71c54b1f49bebf10cbc8`.
+- Candidate and final ancestry merge have the identical tree
+  `9579b162f0773e3d24f73b1c2590e00162b6d6c0`. These are distinct provenance
+  references, not duplicate runtime test runs. Registry-only commits do not
+  advance either source reference.
+
+| Capability | Result on compat | Preserved owners |
+| --- | --- | --- |
+| POLICY-06 | Inherits startup yolo deletion, explicit deny priority, live CLI invocation correlation, isolated rejection and cancellation | FD-001 and FC-001/007 unchanged from main; DC-CONTEXT-001/DC-ACTOR-001 preserve chronology, atomic writes and frozen context |
+
+All 96 prior overlay paths remain present. The normalized added/deleted
+production text for all 43 source/migration overlay paths matches the prior
+main-to-compat delta. Of 36 incoming paths, 24 share the main blob and 12 retain
+existing compat intersections; generated SDK/OpenAPI are regenerated from the
+merged source and remain byte-identical to the resolved merge output. Shared
+FD/FC registries, history and bundled guidance inherit main unchanged.
+
+The merge was textually clean but typecheck found a duplicate checkpointPath
+import in the shared test file. Keeping the existing compat import resolves it;
+no production specialization was needed. The affected checkpoint run case was
+rechecked after that correction. CAS continuation registration still requires
+successful submission with an owned expected user ID. Normalized timestamps do
+not change the registered ID. Unrelated queued/inbox input, persistent wakes,
+retained resume, and independent MCP sampling cannot borrow an old CLI scope.
+
+### Active owner audit
+
+- DC-CONTEXT-001 and DC-ACTOR-001 directly intersect prompt/session/checkpoint,
+  Actor and HTTP paths. Atomic chronology, current-turn preflight, frozen
+  membership/system/tools/turnContext/cwd and static-prefix behavior remain.
+- DC-MODEL-001 intersects prompt/LLM and generated schemas; per-agent MaxMode
+  remains the same overlay and is independent of approval correlation.
+- DC-NET-002 is adjacent through MCP sampling; production MCP transport remains
+  inherited, and no new private-network or OAuth claim is made.
+- DC-NET-001, DC-PLATFORM-001 and DC-TUI-001 have no changed owned production
+  surface. Existing WebFetch policy, platform fallbacks and model metadata remain.
+
+### Local validation
+
+Bun 1.3.14, tests and typecheck from package directories. Clear ambient
+MIMOCODE_EXPERIMENTAL, MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH, MIMOCODE_CODEX_MODE,
+MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL, MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS and
+MIMOCODE_AUTO_APPROVE_DELETE; retain package preload including ORCHESTRATOR=true.
+
+| Matrix | Result |
+| --- | --- |
+| Run approval, real tool/child/queue/continuation/disconnect (3 files) | 12 pass / 0 fail |
+| Delete authorization and HTTP reply/admission (4 files) | 31 pass / 0 fail |
+| Compat atomic admission, frozen context and fresh preflight budget | 13 pass / 0 fail |
+| Real CLI attach, Actor recovery HTTP and OpenAPI contract (3 files) | 16 pass / 0 fail |
+| MCP independent approval | 3 pass / 0 fail |
+| Affected checkpoint case after duplicate import correction | 1 pass / 0 fail |
+| opencode and JavaScript SDK package typecheck | pass |
+| Source-generated SDK/OpenAPI, overlay/registry equality and diff checks | pass |
+| Repository lint | 0 errors; existing warnings remain |
+
+Groups overlap and are not an aggregate count. Remote compat PR head review,
+exact-head CI, merge and final branch push CI remain separate publication gates;
+this local validation does not claim those gates have already completed.
