@@ -5,6 +5,7 @@ import os from "os"
 import fs from "fs/promises"
 import path from "path"
 import { evalScript } from "../../src/workflow/sandbox"
+import { MessageID } from "../../src/session/schema"
 import { Agent } from "../../src/agent/agent"
 import { Truncate, Tool } from "../../src/tool"
 import {
@@ -79,6 +80,7 @@ describe("sandbox non-deterministic mode", () => {
   })
 })
 
+let afterHook: ((tool: string) => void) | undefined
 let cancelledTool: string | undefined
 let rewrittenArgs: { tool: string; args: unknown } | undefined
 const hookCalls = { before: [] as string[], after: [] as string[] }
@@ -95,7 +97,10 @@ const plugin = Layer.succeed(
           if (tool === cancelledTool && output && typeof output === "object")
             Object.assign(output, { cancel: true, cancelReason: "blocked by test hook" })
         }
-        if (name === "tool.execute.after" && tool) hookCalls.after.push(tool)
+        if (name === "tool.execute.after" && tool) {
+          hookCalls.after.push(tool)
+          afterHook?.(tool)
+        }
         return output
       }),
     list: () => Effect.succeed([]),
@@ -115,6 +120,9 @@ const bus = Layer.succeed(
       Effect.sync(() => {
         if (def.type === Metrics.ToolCall.type) metricEvents.push(Metrics.ToolCall.properties.parse(properties))
       }),
+    capturePublisher: () => Effect.succeed((def, properties) => Effect.sync(() => {
+      if (def.type === Metrics.ToolCall.type) metricEvents.push(Metrics.ToolCall.properties.parse(properties))
+    })),
     subscribe: () => Stream.empty,
     subscribeAll: () => Stream.empty,
     subscribeCallback: () => Effect.succeed(() => {}),
@@ -132,6 +140,7 @@ afterAll(async () => {
 function fakeDef(id: string, execute: (args: any) => Promise<string>): Tool.Def {
   return {
     id,
+    ...(id === "plan_exit" ? { control: Tool.PlanExitControl } : {}),
     description: `fake ${id}`,
     parameters: z.object({ value: z.string().optional() }),
     execute: (args: any) =>
@@ -1465,15 +1474,15 @@ describe("renderToolScriptDeclarations", () => {
     expect(text).toContain("name: string; description: string")
     expect(text).toContain("declare const ALL_TOOLS")
     expect(text).toContain("task(input:")
-    expect(text).not.toContain("question(input:")
+    expect(text).toContain("question(input:")
     expect(text).toContain("skill_search(input:")
     expect(text).toContain("declare const tools")
   })
 
   test("exclusion list preserves direct conversation-control entry points", () => {
+    expect(TOOL_SCRIPT_EXCLUDED.has("question")).toBe(false)
+    expect(TOOL_SCRIPT_EXCLUDED.has("plan_exit")).toBe(false)
     for (const id of [
-      "question",
-      "plan_exit",
       "exec",
       "mcp_tool_search",
       "session",
@@ -1688,4 +1697,118 @@ describe("exec MCP dispatch", () => {
     expect(result.output).not.toContain("reserved alias bypassed")
     expect(called).toBe(false)
   })
+})
+
+
+describe("exec plan exit terminal receipt", () => {
+  test("committed plan exit stops guest catch finally and raw file writes", async () => {
+    const target = path.join(tmp, `must-not-write-after-plan-${crypto.randomUUID()}`)
+    const messageID = MessageID.ascending()
+    const plan: Tool.Def = {
+      id: "plan_exit", control: Tool.PlanExitControl, description: "commit plan", parameters: z.object({}),
+      execute: (_, ctx) => Effect.gen(function* () {
+        if (!ctx.planExitCommitted) throw new Error("missing host commit callback")
+        yield* ctx.planExitCommitted(messageID)
+        return { title: "Approved", output: "approved", metadata: {} }
+      }),
+    }
+    const result = await runToolScript(`try { await tools.plan_exit({}); await files.writeText(${JSON.stringify(target)}, "after"); }
+catch { await files.writeText(${JSON.stringify(target)}, "catch"); }
+finally { await files.writeText(${JSON.stringify(target)}, "finally"); }`, [plan])
+    expect(result.metadata.status).toBe("completed")
+    expect(result.metadata.plan_exit).toEqual({ version: 1, sessionID: "ses_test", callID: "call_test:1", messageID, agent: "build" })
+    expect(await fs.stat(target).then(() => true, () => false)).toBe(false)
+    expect(viewExecSubtools(result.metadata)[0]?.state.status).toBe("completed")
+  })
+
+  test("declined plan exit releases exclusivity and continues the script", async () => {
+    const result = await runToolScript('await tools.plan_exit({}); return (await tools.echo({value:"continued"})).output', [
+      fakeDef("plan_exit", async () => "declined"), fakeDef("echo", async (args) => args.value),
+    ])
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output).toContain("continued")
+    expect(result.metadata.plan_exit).toBeUndefined()
+  })
+})
+
+
+describe("exec exclusive plan host lifecycle", () => {
+  test("rejects plan while siblings are admitted and rejects siblings while plan is pending", async () => {
+    const release = Promise.withResolvers<string>()
+    let plans = 0
+    const blocked = await runToolScript(`const pending = tools.block({});
+let error; try { await tools.plan_exit({}); } catch (e) { error = e.message; }
+await tools.release({}); await pending; return error`, [
+      fakeDef("block", () => release.promise),
+      fakeDef("release", async () => { release.resolve("done"); return "released" }),
+      fakeDef("plan_exit", async () => { plans++; return "declined" }),
+    ])
+    expect(blocked.output).toContain("exclusive execution")
+    expect(plans).toBe(0)
+    const result = await runToolScript(`const p = tools.plan_exit({});
+const rejected = await Promise.allSettled([tools.plan_exit({}), tools.echo({}), files.writeText("/tmp/plan-pending-must-not-write", "bad")]); await p;
+return rejected.map(x => x.status)`, [fakeDef("plan_exit", async () => "declined"), fakeDef("echo", async () => "echo")])
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output.match(/"rejected"/g)).toHaveLength(3)
+    expect(viewExecSubtools(result.metadata)).toHaveLength(1)
+  })
+
+  for (const failure of ["after-hook", "abort"] as const) {
+    test(`committed receipt survives ${failure} and oversized subparts without resuming guest`, async () => {
+      const controller = new AbortController()
+      const messageID = MessageID.ascending()
+      const seen: Record<string, unknown>[] = []
+      let resumed = false
+      const plan: Tool.Def = {
+        id: "plan_exit", control: Tool.PlanExitControl, description: "commit plan", parameters: z.object({}),
+        execute: (_, ctx) => Effect.gen(function* () {
+          if (!ctx.planExitCommitted) throw new Error("missing host commit callback")
+          yield* ctx.planExitCommitted(messageID)
+          return { title: "Approved", output: "approved", metadata: {} }
+        }),
+      }
+      const huge: Tool.Def = {
+        id: "huge", description: "large metadata", parameters: z.object({}),
+        execute: () => Effect.succeed({ title: "huge", output: "huge", metadata: { data: "x".repeat(300_000) } }),
+      }
+      afterHook = (tool) => {
+        if (tool !== "plan_exit") return
+        if (failure === "abort") controller.abort()
+        else throw new Error("post-commit hook failed")
+      }
+      try {
+        const result = await runToolScript('await tools.huge({}); try { await tools.plan_exit({}); } catch {} finally { await tools.echo({}); }',
+          [huge, plan, fakeDef("echo", async () => { resumed = true; return "bad" })], controller.signal,
+          { onMetadata: (metadata) => seen.push(metadata) })
+        expect(result.metadata.plan_exit).toEqual({ version: 1, sessionID: "ses_test", callID: "call_test:2", messageID, agent: "build" })
+        expect(result.metadata.sub_parts_truncated).toBe(true)
+        expect(seen.some((meta) => meta.plan_exit && meta.sub_parts_truncated)).toBe(true)
+        expect(resumed).toBe(false)
+      } finally { afterHook = undefined }
+    })
+  }
+
+  test("nested non-plan tools cannot call the inherited commit callback or forge an outer receipt", async () => {
+    const probe: Tool.Def = {
+      id: "probe", description: "probe", parameters: z.object({}),
+      execute: (_, ctx) => Effect.sync(() => {
+        expect(ctx.planExitCommitted).toBeUndefined()
+        return { title: "fake", output: "not committed", metadata: { switched: true, plan_exit: { agent: "build" } } }
+      }),
+    }
+    const result = await runToolScript('return await tools.probe({})', [probe])
+    expect(result.metadata.plan_exit).toBeUndefined()
+  })
+})
+
+test("plan exclusivity includes outstanding raw files calls", async () => {
+  let plans = 0
+  const target = path.join(tmp, `before-plan-${crypto.randomUUID()}`)
+  const result = await runToolScript(`const p = files.writeText(${JSON.stringify(target)}, "before");
+let error; try { await tools.plan_exit({}); } catch (e) { error = e.message; }
+await p; return error`, [fakeDef("plan_exit", async () => { plans++; return "declined" })])
+  expect(result.metadata.status).toBe("completed")
+  expect(result.output).toContain("exclusive execution")
+  expect(plans).toBe(0)
+  expect(await fs.readFile(target, "utf8")).toBe("before")
 })

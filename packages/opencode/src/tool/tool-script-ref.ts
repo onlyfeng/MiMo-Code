@@ -60,8 +60,6 @@ export const TOOL_SCRIPT_EXCLUDED = new Set([
   "exec",
   "mcp_tool_search",
   "invalid",
-  "question",
-  "plan_exit",
   "session",
   "workflow",
   "change_directory",

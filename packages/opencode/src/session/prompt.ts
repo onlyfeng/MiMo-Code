@@ -1843,6 +1843,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       const context = (args: any, options: ToolExecutionOptions): Tool.Context => ({
         runApproval,
+        interaction: askInteractive && ((input.agentID ?? "main") === "main" || askActor)
+          ? {
+              sessionID: SessionID.make(askForward?.parentSessionID ?? input.session.id),
+              planExit: !askForward && !input.session.parentID && (input.agentID ?? "main") === "main",
+            }
+          : undefined,
         sessionID: input.session.id,
         permission: effectivePermission,
         abort: options.abortSignal!,
@@ -1946,6 +1952,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             !isDeepStrictEqual(
               yield* Effect.promise(() => Promise.resolve(asSchema(frozen.inputSchema).jsonSchema)),
               ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters)),
+            ) ||
+            !isDeepStrictEqual(
+              SessionPrefixSnapshot.nativeSchema(frozen) ??
+                (item.nativeParameters
+                  ? yield* Effect.promise(() => Promise.resolve(asSchema(frozen.inputSchema).jsonSchema))
+                  : undefined),
+              item.nativeParameters ? z.toJSONSchema(item.nativeParameters) : undefined,
             )
           )
             disabledTools.add(item.id)
@@ -2073,6 +2086,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             )
           },
         })
+        if (item.nativeParameters)
+          Object.assign(tools[item.id], { nativeInputSchema: z.toJSONSchema(item.nativeParameters) })
         if (item.id !== MCP_TOOL_SEARCH_ID && (!useGPTTools || GPT_TOP_LEVEL_TOOLS.has(item.id)))
           activeTools.add(item.id)
       }
@@ -4908,7 +4923,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   if (structuredOutput && id === "StructuredOutput") return []
                   const live = tools[id]
                   if (!live) return []
-                  return [[id, { ...live, description: frozen.description, inputSchema: frozen.inputSchema } as AITool]]
+                  return [[id, { ...live, description: frozen.description, inputSchema: frozen.inputSchema, nativeInputSchema: SessionPrefixSnapshot.nativeSchema(frozen) } as SessionPrefixSnapshot.NativeTool]]
                 }),
               )
               if (structuredOutput) forkTools.StructuredOutput = structuredOutput

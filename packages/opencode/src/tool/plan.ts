@@ -5,26 +5,18 @@ import * as Tool from "./tool"
 import { Question } from "../question"
 import { Session } from "../session"
 import { MessageV2 } from "../session/message-v2"
-import { Provider } from "../provider"
 import { Instance } from "../project/instance"
-import { type SessionID, MessageID, PartID } from "../session/schema"
+import { MessageID, PartID } from "../session/schema"
 import EXIT_DESCRIPTION from "./plan-exit.txt"
-
-function getLastModel(sessionID: SessionID) {
-  for (const item of MessageV2.stream(sessionID, { agentID: "*" })) {
-    if (item.info.role === "user" && item.info.model) return item.info.model
-  }
-  return undefined
-}
 
 export const PlanExitTool = Tool.define(
   "plan_exit",
   Effect.gen(function* () {
     const session = yield* Session.Service
     const question = yield* Question.Service
-    const provider = yield* Provider.Service
 
     return {
+      control: Tool.PlanExitControl,
       description: EXIT_DESCRIPTION,
       parameters: z.object({}),
       execute: (_params: {}, ctx: Tool.Context) =>
@@ -38,6 +30,27 @@ export const PlanExitTool = Tool.define(
           }
 
           const info = yield* session.get(ctx.sessionID)
+          if (
+            !ctx.interaction?.planExit ||
+            ctx.interaction.sessionID !== ctx.sessionID ||
+            (ctx.actorID ?? "main") !== "main" ||
+            info.parentID ||
+            (yield* question.neverAsk())
+          ) {
+            return {
+              title: "Plan approval unavailable",
+              output: "Switching to build requires approval in the foreground plan session. Stay in plan mode until the user can approve the plan.",
+              metadata: { switched: false, feedback: "" },
+            }
+          }
+          const assistant = MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).info
+          if (assistant.role !== "assistant" || (assistant.agentID ?? "main") !== "main") {
+            throw new Error("Plan approval requires the current foreground assistant message")
+          }
+          const user = MessageV2.get({ sessionID: ctx.sessionID, messageID: assistant.parentID }).info
+          if (user.role !== "user" || (user.agentID ?? "main") !== "main") {
+            throw new Error("Plan approval requires the current foreground user turn")
+          }
           const plan = path.relative(Instance.worktree, Session.plan(info))
           const answers = yield* question.ask({
             sessionID: ctx.sessionID,
@@ -54,7 +67,7 @@ export const PlanExitTool = Tool.define(
               },
             ],
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
-          })
+          }, ctx.abort)
 
           const answer = answers[0]?.[0]
           if (answer === "No") {
@@ -74,27 +87,55 @@ export const PlanExitTool = Tool.define(
             }
           }
 
-          const model = getLastModel(ctx.sessionID) ?? (yield* provider.defaultModel())
-
           const msg: MessageV2.User = {
             id: MessageID.ascending(),
             sessionID: ctx.sessionID,
             role: "user",
             time: { created: Date.now() },
             agent: "build",
-            model,
-            task_id: ctx.taskId,
+            model: user.model,
+            task_id: ctx.taskId ?? user.task_id,
+            tools: user.tools,
+            format: user.format,
+            system: user.system,
+            systemMode: user.systemMode,
+            harness: user.harness,
+            provenance: user.provenance,
             source: "hook",
           }
-          yield* session.updateMessage(msg)
-          yield* session.updatePart({
-            id: PartID.ascending(),
-            messageID: msg.id,
-            sessionID: ctx.sessionID,
-            type: "text",
-            text: `The plan at ${plan} has been approved, you can now edit files. Execute the plan`,
-            synthetic: true,
-          } satisfies MessageV2.TextPart)
+          // Commit the complete continuation and its host receipt together. An
+          // interrupt may leave neither or both, never a half-written user turn.
+          const committed = yield* Effect.gen(function* () {
+            if (ctx.abort.aborted) return yield* Effect.interrupt
+            const committed = yield* session.commitUserMessageIfLatest({
+              expectedUserID: user.id,
+              message: msg,
+              parts: [{
+                id: PartID.ascending(),
+                messageID: msg.id,
+                sessionID: ctx.sessionID,
+                type: "text",
+                text: `The plan at ${plan} has been approved, you can now edit files. Execute the plan`,
+                synthetic: true,
+              } satisfies MessageV2.TextPart],
+            })
+            if (committed && ctx.planExitCommitted) yield* ctx.planExitCommitted(msg.id)
+            if (committed && !ctx.planExitCommitted && ctx.callID) {
+              yield* ctx.metadata({ metadata: {
+                switched: true,
+                feedback: "",
+                plan_exit: { version: 1, sessionID: ctx.sessionID, callID: ctx.callID, messageID: msg.id, agent: "build" },
+              } })
+            }
+            return committed
+          }).pipe(Effect.uninterruptible)
+          if (!committed) {
+            return {
+              title: "Plan approval superseded",
+              output: "A newer user turn arrived while plan approval was pending. Follow that turn; this approval did not switch agents.",
+              metadata: { switched: false, feedback: "" },
+            }
+          }
 
           return {
             title: "Switching to build agent",

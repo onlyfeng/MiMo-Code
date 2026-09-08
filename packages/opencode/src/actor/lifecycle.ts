@@ -108,7 +108,12 @@ export function createActorLifecycle<Result, ContextValue, NotificationTarget = 
   }
 
   const finishFork = (actorKey: string, owner: ForkGenerationOwner) =>
-    Effect.sync(() => finishGenerationState(actorKey, owner))
+    Effect.sync(() => {
+      // Admission cleanup can run again after this actor has a new generation.
+      // Its completed owner must not clear the successor's cancellation marker.
+      if (Deferred.isDoneUnsafe(owner.done)) return
+      finishGenerationState(actorKey, owner)
+    })
 
   const finishWake = (actorKey: string, owner: WakeGenerationOwner<Result>, result: Exit.Exit<Result>) =>
     Effect.sync(() => {
@@ -145,8 +150,12 @@ export function createActorLifecycle<Result, ContextValue, NotificationTarget = 
   const settleTerminal = (owner: GenerationOwner<Result>) =>
     Deferred.succeed(owner.terminalDone, undefined).pipe(Effect.ignore)
 
-  const acquireCancel = (actorKey: string): Effect.Effect<CancelOwnership<Result>> =>
+  const acquireCancel = (
+    actorKey: string,
+    expected?: GenerationOwner<Result>,
+  ): Effect.Effect<CancelOwnership<Result>> =>
     Effect.sync(() => {
+      if (expected && generationOwners.get(actorKey) !== expected) return { _tag: "noop" }
       if (deliveredActors.has(actorKey) && !persistentActors.has(actorKey)) return { _tag: "noop" }
       const activeEpisode = cancelEpisodes.get(actorKey)
       if (activeEpisode) return { _tag: "follower", episode: activeEpisode }

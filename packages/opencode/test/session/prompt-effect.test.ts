@@ -1,3 +1,5 @@
+import { viewExecSubtools } from "../../src/tool/tool-script"
+import { SessionPrefixSnapshot } from "../../src/session/prefix-snapshot"
 import { checkpointPath } from "../../src/session/checkpoint-paths"
 import * as RunApproval from "../../src/session/run-approval"
 import { Worktree } from "../../src/worktree"
@@ -6100,3 +6102,59 @@ it.live("run approval reaches processor doom-loop asks without tool ownership me
     { git: true, config: (url) => ({ ...providerCfg(url), permission: { bash: "allow", doom_loop: "ask" } }) },
   ),
 )
+
+
+for (const mode of ["matching", "changed", "legacy", "legacy-json"] as const) {
+  itActor.live(`frozen native Actor shell contract ${mode} cannot borrow a live enum`, () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const actors = yield* Effect.serviceOption(Actor.Service)
+        if (actors._tag === "None") throw new Error("real Actor service was not provided")
+        const model = { providerID: ref.providerID, modelID: ModelID.make("gpt-5-test") }
+        const parent = yield* sessions.create({ title: "Frozen native Actor", permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+        yield* prompt.prompt({ sessionID: parent.id, model, noReply: true, parts: [{ type: "text", text: "capture Actor native contract" }] })
+        const capture = prefixCaptureRef.current
+        if (!capture) throw new Error("prefix capture unavailable")
+        const messages = yield* sessions.messages({ sessionID: parent.id })
+        const prefix = yield* capture({ sessionID: parent.id, agentName: "build", providerID: model.providerID, modelID: model.modelID, msgs: messages })
+        const snapshot = yield* Effect.promise(() => SessionPrefixSnapshot.snapshotTools(prefix.tools, [...(prefix.activeTools ?? Object.keys(prefix.tools))]))
+        const actorSnapshot = snapshot.find((item) => item.name === "actor")
+        if (!actorSnapshot?.native_input_schema) throw new Error("missing captured native Actor schema")
+        expect(actorSnapshot.input_schema.properties).toHaveProperty(mode === "legacy-json" ? "operation" : "script")
+        expect(JSON.stringify(actorSnapshot.native_input_schema)).toContain('"general"')
+        if (mode === "changed") actorSnapshot.native_input_schema = JSON.parse(JSON.stringify(actorSnapshot.native_input_schema).replaceAll('"general"', '"retired-agent"'))
+        if (mode.startsWith("legacy")) delete actorSnapshot.native_input_schema
+        const tools = SessionPrefixSnapshot.restoreTools(JSON.parse(JSON.stringify(snapshot)))
+        const marker = `native-frozen-${mode}`
+        yield* llm.tool("exec", { code: `return await tools.actor({operation:{action:"send",to_actor_id:"main",content:${JSON.stringify(marker)}}})` })
+        yield* llm.text("done")
+        const spawned = yield* actors.value.spawn({
+          mode: "subagent", sessionID: parent.id, agentType: "build", task: "send parent update",
+          context: "full", tools: ["actor"], background: false, model,
+          forkContext: { ...prefix, tools, model, watermarkMsgID: messages.at(-1)!.info.id },
+        })
+        expect((yield* Deferred.await(spawned.outcome)).status).toBe("success")
+        const turns = yield* llm.inputs
+        expect(turns.length).toBeGreaterThanOrEqual(2)
+        expect(JSON.stringify(turns[0].tools)).not.toContain("nativeInputSchema")
+        const parts = (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).flatMap((message) => message.parts)
+        const exec = parts.find((part) => part.type === "tool" && part.tool === "exec")
+        if (exec?.type !== "tool" || exec.state.status !== "completed") throw new Error("missing settled exec")
+        if (mode === "matching" || mode === "legacy-json") {
+          expect(exec.state.metadata.status).toBe("completed")
+          expect(exec.state.output).toContain("inboxID")
+          const nested = viewExecSubtools(exec.state.metadata)
+          expect(nested).toHaveLength(1)
+          expect(nested[0].state.status).toBe("completed")
+          expect(nested[0].state.input).toEqual({ operation: { action: "send", to_actor_id: "main", content: marker } })
+          expect(nested[0].state.metadata).toMatchObject({ receiver_actor_id: "main" })
+        }
+        else expect(exec.state.metadata).toMatchObject({ rejected: true, reason: "tool-whitelist" })
+      }),
+      { git: true, config: (url) => ({ ...providerCfg(url), tool: { invocation_style_by_tool: { actor: mode === "legacy-json" ? "json" : "shell" } } }) },
+    ),
+    15000,
+  )
+}

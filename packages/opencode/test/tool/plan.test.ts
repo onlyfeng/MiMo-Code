@@ -28,16 +28,26 @@ const it = testEffect(
   ),
 )
 
-const ctx = (sessionID: SessionID, agent: string, taskId?: string) => ({
-  sessionID,
-  messageID: MessageID.ascending(),
-  callID: "test-call",
-  agent,
-  taskId,
-  abort: new AbortController().signal,
-  messages: [],
-  metadata: () => Effect.void,
-  ask: () => Effect.void,
+const ctx = (sessionID: SessionID, agent: string, taskId?: string) => Effect.gen(function* () {
+  const sessions = yield* Session.Service
+  const current = (yield* sessions.messages({ sessionID })).findLast(message => message.info.role === "user")?.info
+  const user = current?.role === "user" ? current : yield* sessions.updateMessage({
+    id: MessageID.ascending(), sessionID, role: "user", agent,
+    model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+    time: { created: Date.now() },
+  })
+  const assistant = yield* sessions.updateMessage({
+    id: MessageID.ascending(), sessionID, role: "assistant", parentID: user.id, agent, mode: agent,
+    path: { cwd: Instance.directory, root: Instance.worktree }, providerID: user.model.providerID,
+    modelID: user.model.modelID, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: Date.now() },
+  })
+  return {
+    sessionID, messageID: assistant.id, callID: "test-call", agent, taskId,
+    interaction: { sessionID, planExit: true }, actorID: "main",
+    abort: new AbortController().signal, messages: [],
+    metadata: () => Effect.void, ask: () => Effect.void,
+  }
 })
 
 const pending = Effect.fn("PlanToolTest.pending")(function* (question: Question.Interface) {
@@ -66,7 +76,7 @@ describe("tool.plan", () => {
         })
         const tool = yield* (yield* PlanExitTool).init()
 
-        const fiber = yield* tool.execute({}, ctx(info.id, "plan", "T7")).pipe(Effect.forkScoped)
+        const fiber = yield* tool.execute({}, yield* ctx(info.id, "plan", "T7")).pipe(Effect.forkScoped)
         const item = yield* pending(question)
         yield* question.reply({ requestID: item.id, answers: [["Yes"]] })
 
@@ -88,7 +98,7 @@ describe("tool.plan", () => {
         const info = yield* sessions.create({ title: "Test" })
         const tool = yield* (yield* PlanExitTool).init()
 
-        const fiber = yield* tool.execute({}, ctx(info.id, "plan")).pipe(Effect.forkScoped)
+        const fiber = yield* tool.execute({}, yield* ctx(info.id, "plan")).pipe(Effect.forkScoped)
         const item = yield* pending(question)
         yield* question.reply({ requestID: item.id, answers: [["No"]] })
 
@@ -109,7 +119,7 @@ describe("tool.plan", () => {
         const info = yield* sessions.create({ title: "Test" })
         const tool = yield* (yield* PlanExitTool).init()
 
-        const fiber = yield* tool.execute({}, ctx(info.id, "plan")).pipe(Effect.forkScoped)
+        const fiber = yield* tool.execute({}, yield* ctx(info.id, "plan")).pipe(Effect.forkScoped)
         const item = yield* pending(question)
         yield* question.reply({ requestID: item.id, answers: [["please add tests to the plan"]] })
 
@@ -129,7 +139,7 @@ describe("tool.plan", () => {
         const info = yield* sessions.create({ title: "Test" })
         const tool = yield* (yield* PlanExitTool).init()
 
-        const fiber = yield* tool.execute({}, ctx(info.id, "plan")).pipe(Effect.forkScoped)
+        const fiber = yield* tool.execute({}, yield* ctx(info.id, "plan")).pipe(Effect.forkScoped)
         const item = yield* pending(question)
         yield* question.reject(item.id)
 
