@@ -3010,3 +3010,42 @@ specified propagation does not claim current-upstream parity.
   running at this checkpoint, and the compat PR and push CI were pending.
   Final remote-SHA publication and ancestry verification remain separate gates.
   Pure compat registry/history changes do not advance the runtime/content bases.
+
+## 2026-09-08 specified compaction-trigger alignment
+
+- Scope: COMPACTION-01. Inherits main source
+  `fd285d92a3779b583a9ca82842516c863eb743bf` and its shared audit, from
+  original compat `f0a4e9b8735ef4f27f2361bc8194adf957c976b1`.
+  Final compat source/test behavior is
+  `cd203928f9e8cae7353607233cfe89d3dae15a4b`; later documentation merges do
+  not advance that behavior basis. The overall upstream review baseline
+  remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`.
+- DC-CONTEXT-001 now uses the shared ratio trigger directly for request
+  preflight, removing the extra 5K (or 10% on small windows) advance. It keeps
+  real wire estimation, active tool schema selection, current-turn content,
+  recovery-floor classification, and bounded recovery. Full request estimates
+  and previous provider usage remain distinct observations of the same
+  numeric threshold.
+- All seven owners were reviewed for this selected behavior: CONTEXT-001 has
+  direct implementation changes; ACTOR-001 retains frozen-prefix and stalled
+  recovery behavior; TUI-001 retains its provider/model/variant metadata while
+  inheriting truthful budget previews; MODEL-001 has shared configuration and
+  schema adjacency without a routing change. NET-001, NET-002 and PLATFORM-001
+  have no changed owned implementation. No eighth override is introduced.
+- The two merge conflicts were test-only: TUI model tests retain the compat
+  metadata/variant groups plus the shared budget-preview group; projection
+  tests retain mandatory external-user/spawn tails and the shared ratio-window
+  check. Shared code and generated descriptions inherit semantically, while
+  compat request estimation remains an intentional branch difference.
+- Local validation: 85 overflow cases, 84 related cases across seven files,
+  and 14 request/frozen-preflight/MCP-pressure/recovery-budget cases all pass
+  (183 total, zero failures, 512 assertions). Package typecheck and diff check
+  pass. Two schema fixtures were enlarged to remain over the new threshold;
+  the stalled-summary fixture now uses an 18K window so its 50KiB-capped
+  replay still exceeds 16.2K. Recovery assertions and limits were preserved.
+- Tests unset the three required ambient selectors plus
+  `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`, `MIMOCODE_COMPACTION_TRIGGER_RATIO`,
+  `MIMOCODE_COMPACTION_MAX_CONTEXT`, and `MIMOCODE_DISABLE_CHECKPOINT`.
+  Package preload, including `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`, was
+  retained. Actual remote tips, PR review and exact-SHA CI are separate
+  publication gates and are not established by these local results.
