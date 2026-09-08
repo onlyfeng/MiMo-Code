@@ -2858,11 +2858,11 @@ it.live("resume rejects changed model harness identity before settling the old a
   ),
 )
 
-for (const { outcome, delivery } of (["success", "failure"] as const).flatMap((outcome) =>
-  (["durable", "live"] as const).map((delivery) => ({ outcome, delivery })),
+for (const { outcome, delivery, backlog } of (["success", "failure"] as const).flatMap((outcome) =>
+  ([{ delivery: "durable", backlog: 1 }, { delivery: "durable", backlog: 101 }, { delivery: "live", backlog: 1 }] as const).map((item) => ({ outcome, ...item })),
 )) {
   pauseIt.live(
-    `resume drains ${delivery} inbox once after ${outcome}`,
+    `resume drains ${backlog} ${delivery} inbox rows once after ${outcome}`,
     () =>
       provideTmpdirServer(
         Effect.fnUntraced(function* ({ dir, llm }) {
@@ -2883,18 +2883,22 @@ for (const { outcome, delivery } of (["success", "failure"] as const).flatMap((o
           )
           if (outcome === "success") yield* llm.text("original recovery complete")
           else yield* llm.error(400, { error: { message: "second recovery step failed" } })
+          const batches = Math.ceil(backlog / 100)
+          if (backlog > 100) yield* llm.error(400, { error: { message: "first inbox batch failed" } })
           yield* llm.text("queued followup complete")
           if (!actor.resume) return yield* Effect.die("resume missing")
-          const queued: { inboxID: string } = { inboxID: crypto.randomUUID() }
-          if (delivery === "durable") Database.use((db) => db.insert(InboxTable).values({
-            id: queued.inboxID,
+          const prefix = crypto.randomUUID()
+          const rows = Array.from({ length: backlog }, (_, index) => ({
+            id: `${prefix}-${String(index).padStart(3, "0")}`,
             receiver_session_id: spawned.sessionID,
             receiver_actor_id: spawned.actorID,
             sender_session_id: spawned.sessionID,
             sender_actor_id: "main",
             content: { text: "queued-after-recovery" },
             created_at: Date.now(),
-          }).run())
+          }))
+          const queued = { inboxID: rows.at(-1)!.id }
+          if (delivery === "durable") Database.use((db) => db.insert(InboxTable).values(rows).run())
           const completion = yield* actor.resume(spawned)
           yield* llm.wait(2)
           if (delivery === "live") {
@@ -2914,14 +2918,14 @@ for (const { outcome, delivery } of (["success", "failure"] as const).flatMap((o
           release.resolve()
           const resumed = yield* completion.pipe(Effect.timeout("8 seconds"))
           expect(resumed.info.role === "assistant" && resumed.info.parentID).toBe(original.info.id)
-          yield* llm.wait(4).pipe(Effect.timeout("8 seconds"))
+          yield* llm.wait(3 + batches).pipe(Effect.timeout("8 seconds"))
           const inputs = yield* llm.inputs
           expect(JSON.stringify(inputs[1])).not.toContain("queued-after-recovery")
           expect(JSON.stringify(inputs[2])).not.toContain("queued-after-recovery")
           expect(JSON.stringify(inputs[3])).toContain("queued-after-recovery")
           expect(yield* inbox.has(queued.inboxID)).toBe(false)
           const messages = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
-          expect(messages.filter((m) => m.info.role === "user")).toHaveLength(2)
+          expect(messages.filter((m) => m.info.role === "user")).toHaveLength(1 + batches)
           expect(messages.find((m) => m.info.id === original.info.id)?.info).toMatchObject({ task_id: "T7" })
           const recovery = messages.filter(
             (m) =>
@@ -2932,7 +2936,8 @@ for (const { outcome, delivery } of (["success", "failure"] as const).flatMap((o
           expect(recovery).toHaveLength(2)
           expect(recoveryHooks.pre[0]).toBe("T7")
           expect(recoveryHooks.post[0]).toBe("T7")
-          expect(recoveryHooks.pre).toEqual(["T7", undefined])
+          expect(recoveryHooks.pre).toEqual(["T7", ...Array.from({ length: batches }, () => undefined)])
+          expect(yield* llm.calls).toBe(3 + batches)
         }),
         { git: true, config: providerCfg },
       ),

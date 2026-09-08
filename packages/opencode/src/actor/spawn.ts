@@ -1392,7 +1392,11 @@ export const layer = Layer.effect(
             const result = yield* state
               .ensureRunning(input.sessionID, input.actorID, input.onInterrupt, guardedWork)
               .pipe(Effect.interruptible, Effect.exit)
-            return yield* finishPersistentTurn(input, actor, owner, result)
+            const finished = yield* finishPersistentTurn(input, actor, owner, result)
+            // An owner must cover its tracked inbox row just like a follower;
+            // one failed batch may leave the durable tail for a successor turn.
+            if (input.inboxID && (yield* inbox.has(input.inboxID))) continue
+            return finished
           }
         }),
       )
