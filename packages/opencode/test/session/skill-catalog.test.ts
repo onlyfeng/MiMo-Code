@@ -63,3 +63,87 @@ describe("system tail skill catalog", () => {
     expect(Catalog.isGeneratedSkillCatalog({ type: "tool", text: v2, synthetic: true, metadata })).toBe(false)
   })
 })
+
+describe("frozen catalog slot", () => {
+  const turn = MessageID.make("slot-turn")
+  test("materializes one token and refreshes only the recorded range including empty catalogs", () => {
+    const old = Catalog.captureSkillCatalog("old catalog", turn)
+    const token = Catalog.newSkillCatalogSlot()
+    const bound = Catalog.bindSkillCatalog([`ENV\n${token}\nFORMAT\nINSTRUCTIONS\nPLUGIN`], old, token)
+    expect(bound.system).toEqual(["ENV\nold catalog\nFORMAT\nINSTRUCTIONS\nPLUGIN"])
+    expect(bound.catalog.version).toBe(old.version)
+    const empty = Catalog.refreshFrozenSkillCatalog(bound.system, bound.catalog, Catalog.captureSkillCatalog("", turn))
+    expect(empty.system).toEqual(["ENV\n\nFORMAT\nINSTRUCTIONS\nPLUGIN"])
+    const next = Catalog.refreshFrozenSkillCatalog(
+      empty.system,
+      empty.catalog,
+      Catalog.captureSkillCatalog("new", turn),
+    )
+    expect(next.system).toEqual(["ENV\nnew\nFORMAT\nINSTRUCTIONS\nPLUGIN"])
+  })
+  test("rejects removed or duplicated producer tokens before materializing metadata", () => {
+    const token = Catalog.newSkillCatalogSlot()
+    const value = Catalog.captureSkillCatalog("catalog", turn)
+    expect(() => Catalog.bindSkillCatalog(["removed"], value, token)).toThrow()
+    expect(() => Catalog.bindSkillCatalog([token, token], value, token)).toThrow()
+  })
+  test("migrates unique old schema3 text and legacy empty slots without touching other bytes", () => {
+    const old = Catalog.captureSkillCatalog("old", turn)
+    const next = Catalog.captureSkillCatalog("new", turn)
+    expect(Catalog.refreshFrozenSkillCatalog(["ENV old PLUGIN"], old, next).system).toEqual(["ENV new PLUGIN"])
+    expect(Catalog.refreshFrozenSkillCatalog(["LEGACY ENV"], undefined, next).system).toEqual(["LEGACY ENV", "new"])
+    expect(
+      Catalog.refreshFrozenSkillCatalog(["EMPTY ENV"], Catalog.captureSkillCatalog("", turn), next).system,
+    ).toEqual(["EMPTY ENV", "new"])
+  })
+  test("empty legacy migration never introduces an empty system message", () => {
+    const next = Catalog.captureSkillCatalog("", MessageID.make("empty-next"))
+    for (const system of [[], ["FROZEN ENV"]]) {
+      for (const old of [undefined, Catalog.captureSkillCatalog("", turn)]) {
+        const result = Catalog.refreshFrozenSkillCatalog(system, old, next)
+        expect(result.system).toEqual(system)
+        expect(result.catalog).toEqual(next)
+      }
+    }
+  })
+  test("removes only a catalog-only message when its catalog becomes empty", () => {
+    const old = Catalog.captureSkillCatalog("old", turn)
+    const next = Catalog.captureSkillCatalog("", MessageID.make("empty-next"))
+    const standalone = Catalog.refreshFrozenSkillCatalog(
+      ["ENV", "old", "PLUGIN"],
+      { ...old, systemSlot: { message: 1, offset: 0 } },
+      next,
+    )
+    expect(standalone.system).toEqual(["ENV", "PLUGIN"])
+    expect(standalone.catalog).toEqual(next)
+    const restored = Catalog.refreshFrozenSkillCatalog(
+      standalone.system,
+      standalone.catalog,
+      Catalog.captureSkillCatalog("new", turn),
+    )
+    expect(restored.system).toEqual(["ENV", "PLUGIN", "new"])
+    const embedded = Catalog.refreshFrozenSkillCatalog(
+      ["ENV old PLUGIN"],
+      { ...old, systemSlot: { message: 0, offset: 4 } },
+      next,
+    )
+    expect(embedded.system).toEqual(["ENV  PLUGIN"])
+    const token = Catalog.newSkillCatalogSlot()
+    const cold = Catalog.bindSkillCatalog(["ENV", token, "PLUGIN"], next, token)
+    expect(cold.system).toEqual(["ENV", "PLUGIN"])
+    expect(cold.catalog).toEqual(next)
+  })
+  test("ambiguous legacy matches and invalid persisted slots preserve the old pair", () => {
+    const old = Catalog.captureSkillCatalog("old", turn)
+    const next = Catalog.captureSkillCatalog("new", MessageID.make("next-turn"))
+    const ambiguous = Catalog.refreshFrozenSkillCatalog(["old old"], old, next)
+    expect(ambiguous.system).toEqual(["old old"])
+    expect(ambiguous.catalog).toEqual(old)
+    expect(ambiguous.reason).toBeDefined()
+    const invalid = { ...old, systemSlot: { message: 0, offset: 1 } }
+    const result = Catalog.refreshFrozenSkillCatalog(["old"], invalid, next)
+    expect(result.catalog).toEqual(invalid)
+    expect(result.system).toEqual(["old"])
+    expect(result.reason).toBeDefined()
+  })
+})

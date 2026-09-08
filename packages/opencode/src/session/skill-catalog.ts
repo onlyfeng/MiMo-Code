@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import type { MessageID } from "./schema"
 
 export const SKILL_CATALOG_REMINDER_MARKER = "Skills available in this session:"
@@ -29,11 +29,100 @@ export function isLegacySkillCatalogReminder(text: string) {
   return isSkillCatalogReminder(text) && !isSkillCatalogSnapshot(text)
 }
 
-export type SkillCatalogSnapshot = { schema: 3; text: string; version: string; turnID: MessageID }
+export type SkillCatalogSnapshot = {
+  schema: 3
+  text: string
+  version: string
+  turnID: MessageID
+  // Position in the frozen system, independent of the catalog content hash.
+  systemSlot?: { message: number; offset: number }
+}
 
 export function captureSkillCatalog(text: string | undefined, turnID: MessageID): SkillCatalogSnapshot {
   const canonical = canonicalSkillCatalog(text ?? "")
   return { schema: 3, text: canonical, version: createHash("sha256").update(canonical).digest("hex"), turnID }
+}
+
+export function newSkillCatalogSlot() {
+  return `<mimocode-catalog-slot-${randomUUID()}>`
+}
+
+function occurrences(system: string[], text: string) {
+  return system.flatMap((part, message) => {
+    const offsets: { message: number; offset: number }[] = []
+    for (let offset = part.indexOf(text); offset !== -1; offset = part.indexOf(text, offset + 1))
+      offsets.push({ message, offset })
+    return offsets
+  })
+}
+
+function withoutSystemSlot(catalog: SkillCatalogSnapshot) {
+  const { systemSlot: _slot, ...snapshot } = catalog
+  return snapshot
+}
+
+// The marker is transient: validate and materialize before persistence or dispatch.
+export function bindSkillCatalog(system: string[], catalog: SkillCatalogSnapshot, token: string) {
+  if (!/^<mimocode-catalog-slot-[0-9a-f-]{36}>$/.test(token)) throw new Error("Invalid skill catalog slot token")
+  const slots = occurrences(system, token)
+  if (slots.length !== 1) throw new Error("Skill catalog slot must occur exactly once")
+  const slot = slots[0]
+  if (!catalog.text && system[slot.message] === token)
+    return { system: system.filter((_, index) => index !== slot.message), catalog: withoutSystemSlot(catalog) }
+  return {
+    system: system.map((text, index) =>
+      index === slot.message
+        ? text.slice(0, slot.offset) + catalog.text + text.slice(slot.offset + token.length)
+        : text,
+    ),
+    catalog: { ...catalog, systemSlot: slot },
+  }
+}
+
+export function refreshFrozenSkillCatalog(
+  system: string[],
+  previous: SkillCatalogSnapshot | undefined,
+  next: SkillCatalogSnapshot | undefined,
+): { system: string[]; catalog: SkillCatalogSnapshot | undefined; reason?: string } {
+  if (!next || previous === next) return { system, catalog: previous }
+  // Old empty/legacy prefixes have no catalog bytes to remove. Append without
+  // normalizing or rebuilding their frozen environment, instructions or plugin text.
+  if (!previous?.text && !previous?.systemSlot) {
+    // An old empty catalog has no insertion anchor. Keep it that way until
+    // actual catalog text is available, rather than sending an empty message.
+    if (!next.text) return { system, catalog: withoutSystemSlot(next) }
+    return { system: [...system, next.text], catalog: { ...next, systemSlot: { message: system.length, offset: 0 } } }
+  }
+  const slots = previous.systemSlot ? [previous.systemSlot] : occurrences(system, previous.text)
+  const slot = slots[0]
+  if (
+    slots.length !== 1 ||
+    !slot ||
+    !Number.isInteger(slot.message) ||
+    !Number.isInteger(slot.offset) ||
+    slot.message < 0 ||
+    slot.offset < 0 ||
+    typeof system[slot.message] !== "string" ||
+    slot.offset > system[slot.message].length ||
+    system[slot.message].slice(slot.offset, slot.offset + previous.text.length) !== previous.text
+  )
+    return {
+      system,
+      catalog: previous,
+      reason: "Frozen catalog position is missing, invalid or ambiguous; preserving its original system/catalog pair",
+    }
+  // Legacy migrations may have appended a standalone catalog message. Drop
+  // that message when clearing it, but never trim surrounding frozen content.
+  if (!next.text && slot.offset === 0 && system[slot.message] === previous.text)
+    return { system: system.filter((_, index) => index !== slot.message), catalog: withoutSystemSlot(next) }
+  return {
+    system: system.map((text, index) =>
+      index === slot.message
+        ? text.slice(0, slot.offset) + next.text + text.slice(slot.offset + previous.text.length)
+        : text,
+    ),
+    catalog: { ...next, systemSlot: slot },
+  }
 }
 
 const legacyLoadIntro = [
