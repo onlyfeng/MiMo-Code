@@ -2889,3 +2889,72 @@ specified propagation does not claim current-upstream parity.
   test/typecheck/lint, and the selected upstream to main to compat ancestry.
   First-publication failures and earlier local matrices are not substituted
   for those final remote checks.
+
+
+## 2026-09-08 released model API capability inheritance
+
+- Previous compat tip: `3737e4d32a3cfd61a843ef55fd11c6b8dbc35d12`.
+- Accepted main tip: `85dfc3f2edbd1eca5cf92daa3521a7bcf2027cb5` (PR #76).
+- Inherited main runtime/test behavior:
+  `07ca6cea1ac8a3231701d4ec07b489b713741cd7`; shared audit commit:
+  `128a527bdb25f9846a7c85b61b81ed435772acb2`.
+- Compat runtime/test behavior and actual inheritance merge:
+  `8c73cc2b19b50724a17f8a6d9d77aa300c40d9ff`. Inherited bundled guidance content:
+  `3cb9d8df7d453d8995de22f3242eee4bc81f6e97`. Pure compat registry/history
+  changes do not advance these implementation or content snapshots.
+- All six selected capabilities are inherited, with main as canonical owner:
+  MEDIA-01, AUDIO-02, ASR-03, OPTIONS-05, SCOPE-06, EXPIRY-07. See the
+  [shared six-row inventory](released-model-api-review-2026-09-08.md). User
+  item 4 voice design/cloning remains excluded. The overall upstream review
+  baseline remains `6203ea2e`; this is not a full upstream sync.
+- The actual merge has no conflicts. The complete binary diff for
+  `2d90dfd7 -> 3737e4d3` is byte-identical to `85dfc3f2 -> 8c73cc2b`:
+  SHA-256 `97278c8d3f1f6bdf806a4e99bce535a91836cebc3a8d2e610072b7d8fd7b4cf1`.
+  All 96 existing overlay paths retain their original blob pairs; all 38
+  incoming paths equal accepted main. Separately, all 44 existing production,
+  migration and generated overlay paths retain their original blob pairs,
+  including the existing SDK/OpenAPI differences.
+- All seven active DC were reviewed on that actual merge. DC-PLATFORM-001
+  has no incoming adjacency; the two network, model, context, actor and TUI
+  owners have semantic adjacency but no incoming path overlap or new override.
+  Per-agent MaxMode, frozen full-context/preflight, display metadata and
+  restricted-network/platform fallbacks remain intact.
+- DC-NET-001 still removes exactly WebFetch's classifier import and two calls.
+  The separate image downloader inherits main byte-for-byte and still checks
+  public DNS addresses and redirects. Shared SSRF and MCP production source
+  also equal main. DC-NET-002's private-address sentinel covers mocked client
+  construction, not a live private-server connection or image permission.
+- The shared FD/FC registries, shared history and builtin guidance inherit main
+  unchanged. Only this compat registry/history is updated after the source merge.
+  SDK/OpenAPI producer inputs remain unchanged; no copied or hand-edited
+  generated output is introduced.
+- Final compat affected API matrix: **734 pass, 0 fail, 0 skip and 2,272
+  assertions across 21 files**, 268.24 seconds. JUnit verifies exactly the
+  expected 21 files and 734 executions. Compared with main's 732-case matrix,
+  the two additional cases are existing compat OpenAPI contract tests; no
+  new compat-only feature test is introduced by this merge.
+- Owning opencode typecheck passes; repository lint reports 4,507 warnings and
+  zero errors. Frozen bun ci preserves bun.lock. The same seven default
+  selectors as the shared review are removed, retaining package preload flags.
+- Complete compat Node build and actual bundle smoke pass on Node v24.16.0,
+  including finite/multi/all scope, four lifetime combinations, permanent
+  revocation, default-off four routes with a valid token, and runtime/published
+  OpenAPI omission. It uses a new isolated home and fixed local model catalog,
+  removes orchestrator in addition to the four primary selectors, and loads no
+  Bun test preload. Main's seven Node image probes are not counted as a second
+  compat run; identical image source plus compat's full Bun image suite verify
+  inheritance separately.
+- Targeted compat owner checks, reported separately: approved private WebFetch
+  1 pass; isolated RFC1918 MCP client sentinel 1; platform fallback/archive 12;
+  MaxMode unit file 15 and actual prompt retry/final-step sentinels 2; context
+  preflight/overflow 16; full-context actor/checkpoint 11; TUI model metadata
+  and mapping 20. Every group has zero failures and skips. The MCP check is
+  client-construction evidence; macOS platform checks do not claim Windows
+  host end-to-end coverage. These focused results are not a complete rerun of
+  all historical DC evidence.
+- Independent actual-tree and registry review found no new override or scope
+  expansion. Final publication still requires successful test/typecheck/lint
+  for both exact remote branch tips, fresh remote equality and ancestry from
+  the selected baseline through main to compat. Only this operation's clean,
+  integrated worktrees/branches are eligible for cleanup; earlier Agent work
+  remains protected by the saved HEAD/status/diff/untracked hashes.

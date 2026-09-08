@@ -16,6 +16,8 @@ Invoked from the shell. `mimo` with no command opens the TUI.
 | `mimo upgrade` | Update to the latest version |
 | `mimo uninstall` | Uninstall MiMoCode |
 | `mimo serve` | Run the server |
+| `mimo serve --llm-server` | Explicitly enable the model API on the existing server socket; see @model-api.md |
+| `mimo llm-server issue` / `list` / `revoke` | Issue, inspect, or revoke project-scoped model API tokens; see @model-api.md |
 | `mimo stats` | Usage statistics |
 | `mimo export` / `mimo import` | Export / import sessions |
 | `mimo session` | Manage sessions |

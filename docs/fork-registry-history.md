@@ -2327,3 +2327,56 @@ requires successful CI for the new exact branch tips and fresh remote/ancestry p
 - Final branch tips still require fresh remote equality, successful exact-SHA
   test/typecheck/lint, and selected-upstream-to-main-to-compat ancestry. Prior
   failed runs are not reused as successful publication evidence.
+
+
+## 2026-09-08 selected released model API capabilities
+
+- Specified-change scope: user items 1, 2, 3, 5, 6, 7, in that order; item 4
+  voice design/cloning remains excluded. The six-row inventory, exact source
+  boundaries and complete FD/FC/DC classification are recorded in the
+  [model API review](released-model-api-review-2026-09-08.md).
+- Released capability source: v0.1.14
+  `2a0eb706e95a77cba34a319e9f11f33f26d4450c`; prior main tip
+  `2d90dfd732a95dc5e5e601e783994860abddde1f`. The overall upstream review baseline
+  remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; it was not fetched forward.
+- Final runtime/test implementation:
+  `07ca6cea1ac8a3231701d4ec07b489b713741cd7`. Bundled guidance content:
+  `3cb9d8df7d453d8995de22f3242eee4bc81f6e97`. Pure registry/history changes do
+  not advance either source or content reference.
+- FD-004 now owns bounded public image URLs, inline chat audio, verified
+  Google/Vertex SDK transcription, model/transport-aware provider options,
+  explicit finite/all-model scope, and independently nullable token lifetimes.
+  Finite defaults remain 1h idle / 24h absolute; only two explicit nulls mean
+  no expiry. Legacy v1 remains finite and exact-scope, with atomic migration
+  only on real mutation. Revocation and all request limits still apply.
+- All six active FD and sixteen FC were reviewed for this final delta.
+  FC-007 includes an existing changed API evidence file; FC-008 records API
+  cleanup and bounded CLI child execution; FC-009 reviews ephemeral hook
+  context and zero SDK retries; FC-010 keeps WebFetch rules independent;
+  FC-011 directly owns the bundled API guidance. Unchanged owners receive
+  an incremental static review basis, not a claim of complete runtime retesting.
+  Seven compat DC were pre-reviewed against `3737e4d3`; final propagation
+  and overlay validation are still separate publication steps at this snapshot.
+- Final main affected matrix: **732 pass, 0 fail, 0 skip, 2,261 assertions
+  across 21 files**, 354.54 seconds. JUnit discovery independently verifies
+  exactly 21 expected files and 732 executed cases. This includes every
+  llm-server/audio suite, optional model/audio HTTP admission and bootstrap
+  cancellation, OpenAPI contracts, real CLI issuance/renewal, builtin guidance,
+  and provider transformations. Earlier focused and independent results overlap
+  this matrix and are not added to its unique count.
+- The seven named default selectors in the review are removed before the Bun
+  run; package-owned preload flags and isolation remain. Package typecheck
+  passes. Repository lint reports 4,457 warnings and zero errors.
+- Complete Node build and actual bundle smoke pass on Node v24.16.0; four
+  optional routes remain 404 despite a valid issued credential. Scope, four
+  expiry combinations, permanent revocation, and runtime/published OpenAPI
+  omission pass. Seven real Node HTTP/TLS/image cancellation probes also pass.
+  These use isolated local fixtures and a fixed model catalog; no remote model
+  generation is claimed. Default-off Node runs do not use Bun test preload.
+- SDK/OpenAPI generation inputs did not change; runtime and published schemas
+  retain the existing optional-route omission. Actor/task authority, session
+  MaxMode, and unrelated upstream changes remain outside this operation.
+- Each capability received independent review. Publication completion still
+  requires the final fork branch tips, successful test/typecheck/lint on each
+  exact SHA, selected-baseline ancestry through main to compat, and preservation
+  of prior worktrees. Local green runs do not substitute for that proof.
