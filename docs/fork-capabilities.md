@@ -46,7 +46,7 @@ capability audit is recorded in [the model API review](released-model-api-review
 | FC-012 | publication, contribution, security | Fork-specific process | Preserve fork routing |
 | FC-013 | MaxMode final step and bounded retry | Shared retry plus fork hardening | Preserve tool-free terminal step and status isolation |
 | FC-014 | `.cursor/environment.json` Cloud Agent dev environment | Fork-only infra absent from upstream | Preserve Bun bootstrap and read-only `upstream` remote; never send to upstream |
-| FC-015 | compaction context budget, projection, frozen prefix, and trigger ratio | Upstream controls plus fork safety adaptation | Preserve reserve headroom, no-tool summaries, and config precedence |
+| FC-015 | compaction context budget, projection, frozen prefix, and trigger ratio | Upstream trigger plus bounded fork projection | Preserve ratio parity, no-tool summaries, and config precedence |
 | FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets | Upstream voice protocol plus fork lifecycle/editor hardening | Preserve owner identity, drain-before-idle, and grapheme boundaries |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
@@ -770,18 +770,21 @@ capability audit is recorded in [the model API review](released-model-api-review
   Keep the `bun-v<version>` in `install` aligned with `packageManager` in
   `package.json`.
 
-## FC-015 — bounded compaction context and reserve-safe trigger
+## FC-015 — bounded compaction context and upstream ratio trigger
 
 - Status: active
 - Canonical owner: shared `main` overflow and compaction boundary
 - Observable contract: `compaction.max_context` has precedence over
   `MIMOCODE_COMPACTION_MAX_CONTEXT`; valid absolute, shorthand, percentage, and
   per-model wildcard values may lower the effective context window but cannot
-  exceed the provider cap or consume required reserve/output headroom. A zero
-  per-model value restores the provider window. The trigger ratio accepts a
-  decimal or percentage in `(0, 1]`, defaults to `0.9`, and may trigger only
-  earlier: `usable` is the minimum of the ratio boundary and the non-negative
-  existing reserve boundary. Compression-time projection retains its summary,
+  exceed the provider cap. As in upstream, a configured budget must exceed the
+  legacy compaction/output reserves to be accepted; those reserves are not
+  subtracted from the trigger. A zero per-model value restores the provider
+  window. The trigger ratio accepts a decimal or percentage in `(0, 1]`,
+  defaults to `0.9`, and sets `usable = floor(effective * ratio)` without an
+  additional fixed-reserve ceiling. The TUI budget picker validates and previews
+  each candidate through the same resolver and reports the applied trigger.
+  Compression-time projection retains its summary,
   file manifest, and complete API rounds, but its tail budget is the smaller of
   40K tokens and the remaining usable window after the frozen system/tools and
   fixed projection content. Compaction reuses the frozen request prefix and
@@ -791,36 +794,50 @@ capability audit is recorded in [the model API review](released-model-api-review
   advertised subset. Its file manifest includes retained validated terminal
   nested exec effects within the snapshot budget; these read-only views never
   create tool-execution authority.
-- Upstream relationship: adopts upstream's max-context and ratio controls while
-  adapting the flat ratio so it cannot replace the reserve safety contract.
+- Upstream relationship: adopts upstream's max-context controls and ratio-only
+  trigger. The retained fork adaptations concern bounded projection, frozen
+  request identity, and no-tool summaries, not extra trigger headroom.
 - Watch surfaces: `packages/opencode/src/config/config.ts`,
   `packages/opencode/src/flag/flag.ts`,
   `packages/opencode/src/session/overflow.ts`,
   `packages/opencode/src/session/compaction.ts`,
   `packages/opencode/src/session/prefix-snapshot.ts`,
   `packages/opencode/src/session/observed-tool-parts.ts`, and bundled configuration
-  guidance in `mimocode-docs/reference/config.md`.
+  guidance in `mimocode-docs/reference/config.md`; TUI
+  `component/dialog-context-limit.tsx` and `util/model.ts` consume the same
+  resolver, and SDK/OpenAPI plus configuration reference translations publish
+  the current buffer semantics.
 - Tests/evidence: `packages/opencode/test/session/overflow.test.ts` covers value
   grammar, invalid values, config/environment precedence, provider/input caps,
-  reserve invariants, zero restoration, and ratio parsing/composition at the
+  legacy budget validity, zero restoration, and exact ratio boundaries at the
   reviewed main behavior. `auto-overflow-writer-first.test.ts` disables the
-  proactive checkpoint ladder and keeps a 25K usage sentinel where the
-  reserve-safe boundary has fired but a flat 90% boundary has not.
+  proactive checkpoint ladder and proves a 25K turn does not rebuild under a
+  40K budget, while a 50K turn rebuilds exactly once. TUI `model.test.ts` rejects
+  invalid small budgets and checks candidate triggers against the real resolver.
   `compaction-projection.test.ts` and prompt-effect regressions bind the
   projection budget, frozen system/tool bytes, and no-tool summary policy.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `fd285d92a3779b583a9ca82842516c863eb743bf`. The selected trigger
+  was additionally compared with release `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
+  and upstream `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`; this named-behavior
+  adoption does not advance the overall upstream review baseline.
 - 2026-08-28 review: adopted the explicit empty checkpoint threshold ladder
   from upstream's fixture retune, but rejected its 50K usage and flat-ratio
   explanation because both would hide removal of the reserve boundary.
 - 2026-09-02 generated-contract review: adopted the missing published
   `CompactionPart.projection` schema and the deprecated `tail_turns` description
   by regenerating from fork source. The `preserve_recent_tokens` description
-  retains the stronger at-most-40K plus reserve-safe effective-window bound.
+  retained the then-current at-most-40K plus reserve-safe effective-window bound.
+- 2026-09-08 policy adjustment: supersedes the retained reserve trigger from
+  the 2026-08-27/28 reviews at the user's request. The 33K and 20K constants
+  came from upstream; the fork had retained the old cutoff when upstream moved
+  to the ratio. No fork feature was identified as requiring that extra cutoff.
+  The projection description now refers to the ratio trigger, and the buffer
+  description explicitly limits its role to configured-budget validation.
 - Retirement condition: upstream preserves equivalent configuration precedence,
-  value grammar, provider caps, zero restoration, and the invariant that a
-  ratio can only move compaction earlier without consuming reserve/output
-  headroom, with behavior-focused regressions.
+  value grammar, provider caps, zero restoration, ratio triggers, bounded
+  frozen-prefix projection, and no-tool summaries, with behavior-focused
+  regressions.
 
 ## FC-016 — owned voice results and grapheme-safe Prompt editing
 
