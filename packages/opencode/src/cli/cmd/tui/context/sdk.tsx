@@ -23,12 +23,23 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
 
     let currentDirectory = props.directory
 
+    const authenticatedFetch: typeof fetch = Object.assign(
+      (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init)
+        if (new URL(request.url).origin !== new URL(props.url).origin) return (props.fetch ?? fetch)(request)
+        const headers = new Headers(props.headers)
+        request.headers.forEach((value, key) => headers.set(key, value))
+        return (props.fetch ?? fetch)(new Request(request, { headers }))
+      },
+      { preconnect: fetch.preconnect },
+    )
+
     function createSDK(directory?: string) {
       return createOpencodeClient({
         baseUrl: props.url,
         signal: abort.signal,
         directory,
-        fetch: props.fetch,
+        fetch: authenticatedFetch,
         headers: props.headers,
       })
     }
@@ -143,7 +154,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         sdk = createSDK(next)
       },
       event: emitter,
-      fetch: props.fetch ?? fetch,
+      fetch: authenticatedFetch,
       ...(props.headers ? { headers: props.headers } : {}),
       url: props.url,
     }

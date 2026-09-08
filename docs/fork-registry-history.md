@@ -2827,6 +2827,18 @@ Codex completion and all CI remain required before merge.
 - Old structured-tool snapshots prove the presence of their generated format instruction; migration adopts only its verified adjacent or unique position. Empty and ambiguous range behavior remains bounded. Cold capture persists the complete range metadata. The shared MockLLM fixture now preserves the caller-controlled system tail, matching the real builder's post-plugin append instead of discarding it and losing the slot token.
 - Verification: 39 tests /135 assertions across catalog helpers, actual Codex structured-schema transitions and text-loop fixtures; 9 prefix/capture/reopen/compaction tests /134 assertions; final expanded four-case pin/capture matrix /64 assertions overlaps the previous three captures. There are 49 distinct tests in these seven files. New provider assertions switch text to JSON and back after editing AGENTS/plugin data and prove frozen non-format bytes stay unchanged. Current source passes package typecheck, diff check and lint (4,487 warnings, zero errors). Fresh-head CI and Codex review remain required.
 
+### 2026-09-09 POLICY-04 authenticated legacy description correction
+
+Source `0b665c7e681e44cac6f1a6acf18732015fb2bf86` addresses PR #88 review 3960268908 in the shared main owner.
+A valid hash/schema-authenticated v2 catalog may contain `<skill_content>` in a
+description; recognition now validates that form before the substring guard for
+metadata-free legacy content. Loaded bodies and malformed metadata remain
+preserved. A failing recognition regression was reproduced before correction;
+31 tests / 110 assertions then passed, including real legacy prefix migration
+with the description token. Package typecheck and repository lint passed with
+zero errors. This correction requires its own main PR and subsequent compat
+inheritance before POLICY-04 completion.
+
 ## 2026-09-08 POLICY-03 default TUI model API local review
 
 - Selected upstream source: `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, released in v0.1.14 (`2a0eb706e95a77cba34a319e9f11f33f26d4450c`). The overall upstream review baseline remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; this is selected behavior adoption, not a full upstream merge.
@@ -2871,3 +2883,14 @@ Snapshot `f860c352f292d6d7aa0bf97cc282d4c3e5ef4fb4` inherits accepted POLICY-04 
 `69275c9cf4d772afe2167b82922e1dcebd9ab468` with a tree-identical merge.
 The inherited-format package typecheck passed. POLICY-03 publication retains
 its own exact-head CI and Codex review gates and waits for POLICY-04 compat acceptance.
+
+### 2026-09-09 POLICY-03 raw SDK fetch authentication correction
+
+Source `37bbc8229ca70a92b5eaaa7bafd725d070f3f271` addresses PR #89 review 3960269057. The SDK context
+now authenticates raw fetch as well as generated/scoped clients, preserving
+Request/init headers, body and cancellation, with credentials applied only to
+the configured server origin. Real worker listener and BashInteractive service
+prove a previously 401 raw reply now completes the pending deferred; the
+workspace adaptor route also succeeds. The four affected test files pass
+8 cases / 46 assertions after the correction. The existing 203-case source
+matrix remains separate evidence, not re-counted as this follow-up.
