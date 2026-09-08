@@ -122,16 +122,21 @@ interface State {
   // the tool returns a [Never-Ask] directive so the model re-picks the best
   // option for headless execution itself. Toggleable at runtime.
   neverAsk: boolean
+  closed: boolean
+  publish: Bus.Interface["publish"]
 }
 
 // Service
 
 export interface Interface {
-  readonly ask: (input: {
-    sessionID: SessionID
-    questions: ReadonlyArray<Info>
-    tool?: Tool
-  }) => Effect.Effect<ReadonlyArray<Answer>, RejectedError>
+  readonly ask: (
+    input: {
+      sessionID: SessionID
+      questions: ReadonlyArray<Info>
+      tool?: Tool
+    },
+    signal?: AbortSignal,
+  ) => Effect.Effect<ReadonlyArray<Answer>, RejectedError>
   readonly reply: (input: { requestID: QuestionID; answers: ReadonlyArray<Answer> }) => Effect.Effect<void>
   readonly reject: (requestID: QuestionID) => Effect.Effect<void>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
@@ -150,14 +155,19 @@ export const layer = Layer.effect(
         const state = {
           pending: new Map<QuestionID, PendingEntry>(),
           neverAsk: false,
+          closed: false,
+          publish: yield* bus.capturePublisher(),
         }
 
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
+            state.closed = true
             for (const item of state.pending.values()) {
-              yield* Deferred.fail(item.deferred, new RejectedError())
+              yield* dismiss(state, item.info.id)
             }
             state.pending.clear()
+            // Let event consumers observe terminal events before the late Bus shutdown.
+            yield* Effect.yieldNow
           }),
         )
 
@@ -165,15 +175,30 @@ export const layer = Layer.effect(
       }),
     )
 
-    const ask = Effect.fn("Question.ask")(function* (input: {
-      sessionID: SessionID
-      questions: ReadonlyArray<Info>
-      tool?: Tool
-    }) {
-      const pending = (yield* InstanceState.get(state)).pending
+    const dismiss = Effect.fn("Question.dismiss")(function* (state: State, id: QuestionID) {
+      const existing = state.pending.get(id)
+      if (!existing) return
+      state.pending.delete(id)
+      yield* state
+        .publish(Event.Rejected, {
+          sessionID: existing.info.sessionID,
+          requestID: id,
+        })
+        .pipe(Effect.ensuring(Deferred.fail(existing.deferred, new RejectedError())))
+    })
+
+    const ask = Effect.fn("Question.ask")(function* (
+      input: {
+        sessionID: SessionID
+        questions: ReadonlyArray<Info>
+        tool?: Tool
+      },
+      signal?: AbortSignal,
+    ) {
+      if (signal?.aborted) return yield* Effect.fail(new RejectedError())
+      const current = yield* InstanceState.get(state)
       const id = QuestionID.ascending()
       log.info("asking", { id, questions: input.questions.length })
-
       const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
       const info = Schema.decodeUnknownSync(Request)({
         id,
@@ -181,14 +206,28 @@ export const layer = Layer.effect(
         questions: input.questions,
         tool: input.tool,
       })
-      pending.set(id, { info, deferred })
-      yield* bus.publish(Event.Asked, info)
-
-      return yield* Effect.ensuring(
-        Deferred.await(deferred),
-        Effect.sync(() => {
-          pending.delete(id)
+      return yield* Effect.acquireUseRelease(
+        Effect.suspend(() => {
+          // The instance may have retired after get(state) returned. Admission
+          // must not append a waiter to a generation whose finalizer already ran.
+          if (current.closed) return Effect.fail(new RejectedError())
+          current.pending.set(id, { info, deferred })
+          return Effect.void
         }),
+        () => {
+          const waiting = bus.publish(Event.Asked, info).pipe(Effect.andThen(Deferred.await(deferred)))
+          if (!signal) return waiting
+          return Effect.raceFirst(
+            waiting,
+            Effect.callback<never, RejectedError>((resume) => {
+              const abort = () => resume(Effect.fail(new RejectedError()))
+              if (signal.aborted) return abort()
+              signal.addEventListener("abort", abort, { once: true })
+              return Effect.sync(() => signal.removeEventListener("abort", abort))
+            }),
+          )
+        },
+        () => dismiss(current, id),
       )
     })
 
@@ -196,7 +235,8 @@ export const layer = Layer.effect(
       requestID: QuestionID
       answers: ReadonlyArray<Answer>
     }) {
-      const pending = (yield* InstanceState.get(state)).pending
+      const current = yield* InstanceState.get(state)
+      const pending = current.pending
       const existing = pending.get(input.requestID)
       if (!existing) {
         log.warn("reply for unknown request", { requestID: input.requestID })
@@ -204,29 +244,18 @@ export const layer = Layer.effect(
       }
       pending.delete(input.requestID)
       log.info("replied", { requestID: input.requestID, answers: input.answers })
-      yield* bus.publish(Event.Replied, {
-        sessionID: existing.info.sessionID,
-        requestID: existing.info.id,
-        answers: input.answers,
-      })
-      yield* Deferred.succeed(existing.deferred, input.answers)
-    })
+      yield* current
+        .publish(Event.Replied, {
+          sessionID: existing.info.sessionID,
+          requestID: existing.info.id,
+          answers: input.answers,
+        })
+        .pipe(Effect.ensuring(Deferred.succeed(existing.deferred, input.answers)))
+    }, Effect.uninterruptible)
 
     const reject = Effect.fn("Question.reject")(function* (requestID: QuestionID) {
-      const pending = (yield* InstanceState.get(state)).pending
-      const existing = pending.get(requestID)
-      if (!existing) {
-        log.warn("reject for unknown request", { requestID })
-        return
-      }
-      pending.delete(requestID)
-      log.info("rejected", { requestID })
-      yield* bus.publish(Event.Rejected, {
-        sessionID: existing.info.sessionID,
-        requestID: existing.info.id,
-      })
-      yield* Deferred.fail(existing.deferred, new RejectedError())
-    })
+      yield* dismiss(yield* InstanceState.get(state), requestID)
+    }, Effect.uninterruptible)
 
     const list = Effect.fn("Question.list")(function* () {
       const pending = (yield* InstanceState.get(state)).pending

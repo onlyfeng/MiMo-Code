@@ -39,8 +39,7 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
           .find((line) => line.trimStart().startsWith("actor(input:"))
         expect(actorDeclaration).toBeDefined()
         expect([...actorDeclaration!.matchAll(/action: "([^"]+)"/g)].map((match) => match[1])).toEqual([
-          "send",
-          "status",
+          "spawn", "run", "status", "wait", "cancel", "resume", "send", "models",
         ])
         const actor = advertised.find((tool) => tool.id === "actor")
         for (const operation of [

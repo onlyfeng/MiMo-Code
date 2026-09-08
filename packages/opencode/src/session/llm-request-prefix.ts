@@ -130,6 +130,8 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
       description: item.description,
       inputSchema: jsonSchema(schema),
     })
+    if (item.nativeParameters)
+      Object.assign(rawTools[item.id], { nativeInputSchema: z.toJSONSchema(item.nativeParameters) })
   }
   const localToolNames = new Set(Object.keys(rawTools))
   const compact =

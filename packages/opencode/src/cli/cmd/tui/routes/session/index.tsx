@@ -105,7 +105,7 @@ import { SessionRetry } from "@/session/retry"
 import { getRevertDiffFiles } from "../../util/revert-diff"
 import * as Collapse from "../../util/collapse"
 import { shouldHideTool } from "../../util/tool-visibility"
-import { planSwitchTarget } from "./plan-switch"
+import { bindPlanSwitch } from "./plan-switch"
 import {
   createFreeApiSunsetSignal,
   freeApiModelNameKey,
@@ -320,18 +320,7 @@ export function Session() {
     if (scroll) scroll.scrollBy(100_000)
   })
 
-  let lastSwitch: string | undefined = undefined
-  event.on("message.part.updated", (evt) => {
-    const part = evt.properties.part
-    if (part.type !== "tool") return
-    if (part.sessionID !== route.sessionID) return
-    if (part.id === lastSwitch) return
-
-    const agent = planSwitchTarget(part)
-    if (!agent) return
-    local.agent.set(agent)
-    lastSwitch = part.id
-  })
+  bindPlanSwitch(event, () => route.sessionID, (agent) => local.agent.set(agent))
 
   let seeded = false
   let scroll: ScrollBoxRenderable

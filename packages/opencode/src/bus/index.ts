@@ -31,6 +31,8 @@ export interface Interface {
     def: D,
     properties: z.output<D["properties"]>,
   ) => Effect.Effect<void>
+  // Captures this generation for terminal events during normal-phase disposal.
+  readonly capturePublisher: () => Effect.Effect<Interface["publish"]>
   readonly subscribe: <D extends BusEvent.Definition>(def: D) => Stream.Stream<Payload<D>>
   readonly subscribeAll: () => Stream.Stream<Payload>
   readonly subscribeCallback: <D extends BusEvent.Definition>(
@@ -80,27 +82,31 @@ export const layer = Layer.effect(
       })
     }
 
+    const capturePublisher = Effect.fn("Bus.capturePublisher")(function* () {
+      const s = yield* InstanceState.get(state)
+      const context = yield* InstanceState.context
+      const workspace = yield* InstanceState.workspaceID
+      return <D extends BusEvent.Definition>(def: D, properties: z.output<D["properties"]>) =>
+        Effect.gen(function* () {
+          const payload: Payload = { type: def.type, properties }
+          log.debug("publishing", { type: def.type })
+          const ps = s.typed.get(def.type)
+          if (ps) yield* PubSub.publish(ps, payload)
+          yield* PubSub.publish(s.wildcard, payload)
+          GlobalBus.emit("event", {
+            directory: context.directory,
+            project: context.project.id,
+            workspace,
+            payload,
+          })
+        })
+    })
+
     function publish<D extends BusEvent.Definition>(def: D, properties: z.output<D["properties"]>) {
       return Effect.gen(function* () {
         if ((yield* InstanceState.context).disposing) return
-        const s = yield* InstanceState.get(state)
-        const payload: Payload = { type: def.type, properties }
-        log.debug("publishing", { type: def.type })
-
-        const ps = s.typed.get(def.type)
-        if (ps) yield* PubSub.publish(ps, payload)
-        yield* PubSub.publish(s.wildcard, payload)
-
-        const dir = yield* InstanceState.directory
-        const context = yield* InstanceState.context
-        const workspace = yield* InstanceState.workspaceID
-
-        GlobalBus.emit("event", {
-          directory: dir,
-          project: context.project.id,
-          workspace,
-          payload,
-        })
+        const publish = yield* capturePublisher()
+        yield* publish(def, properties)
       })
     }
 
@@ -167,7 +173,7 @@ export const layer = Layer.effect(
       return yield* on(s.wildcard, "*", callback)
     })
 
-    return Service.of({ publish, subscribe, subscribeAll, subscribeCallback, subscribeAllCallback })
+    return Service.of({ publish, capturePublisher, subscribe, subscribeAll, subscribeCallback, subscribeAllCallback })
   }),
 )
 

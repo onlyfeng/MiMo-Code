@@ -1,3 +1,4 @@
+import type { JSONSchema7 } from "@ai-sdk/provider"
 import { createHash } from "node:crypto"
 import { jsonSchema, tool, type Tool as AITool } from "ai"
 import { asSchema } from "@ai-sdk/provider-utils"
@@ -6,6 +7,10 @@ import { and, Database, eq } from "@/storage"
 import type { Permission } from "@/permission"
 import type { MessageID, SessionID } from "./schema"
 import { SessionPrefixSnapshotTable, type SessionPrefixToolSnapshot } from "./session.sql"
+
+export type NativeTool = AITool & { nativeInputSchema?: JSONSchema7 }
+
+export const nativeSchema = (tool: AITool) => (tool as NativeTool).nativeInputSchema
 
 export type Info = typeof SessionPrefixSnapshotTable.$inferSelect
 
@@ -62,6 +67,7 @@ export function toolsHash(tools: Record<string, AITool>, activeTools: string[], 
           name,
           description: item.description,
           inputSchema: item.inputSchema,
+          nativeInputSchema: nativeSchema(item),
           active: activeTools.includes(name),
         }
       }),
@@ -77,6 +83,7 @@ export async function snapshotTools(tools: Record<string, AITool>, activeTools: 
           name,
           description: item.description,
           input_schema,
+          ...(nativeSchema(item) ? { native_input_schema: nativeSchema(item) } : {}),
           active: activeTools.includes(name),
         }),
       ),
@@ -103,10 +110,10 @@ export function restoreTools(items: SessionPrefixToolSnapshot[], activeTools?: s
         : [
             [
               item.name,
-              tool({
-                description: item.description,
-                inputSchema: jsonSchema(item.input_schema),
-              }),
+              {
+                ...tool({ description: item.description, inputSchema: jsonSchema(item.input_schema) }),
+                ...(item.native_input_schema ? { nativeInputSchema: item.native_input_schema } : {}),
+              },
             ],
           ],
     ),

@@ -16,7 +16,6 @@ import { MessageV2 } from "../session/message-v2"
 import { normalizeResult } from "../session/try-best-detector"
 import { evalScript, type HostFn } from "../workflow/sandbox"
 import { toolScriptRegistry, TOOL_SCRIPT_ALIASES, TOOL_SCRIPT_EXCLUDED } from "./tool-script-ref"
-import { ActorExecParameters } from "./actor"
 import type { HarnessMode } from "./gpt"
 import DESCRIPTION from "./tool-script.txt"
 import * as Tool from "./tool"
@@ -44,7 +43,9 @@ const EXEC_PROGRESS_DEBOUNCE_MS = 150
 const TRACE_TAIL_ENTRIES = 20
 const EXEC_COMMAND_DEFAULT_YIELD_TIME_MS = 10_000
 const EXEC_COMMAND_DEFAULT_MAX_OUTPUT_TOKENS = 10_000
-const ACTOR_EXEC_DESCRIPTION = "Send messages or inspect actor status. All other actor operations use the direct actor tool."
+const nativeParameters = (def: Tool.Def) => def.nativeParameters ?? def.parameters
+const controls = new Map([["actor", Tool.ActorControl], ["plan_exit", Tool.PlanExitControl]])
+const canNest = (def: Tool.Def) => !controls.has(def.id) || def.control === controls.get(def.id)
 
 const ExecCommandParameters = z.strictObject({
   cmd: z.string().describe("Shell command to execute."),
@@ -113,10 +114,10 @@ function schemaToTs(schema: any): string {
 export function renderToolScriptDeclarations(defs: Tool.Def[]): string {
   const aliases = new Set(Object.keys(TOOL_SCRIPT_ALIASES))
   const lines = defs
-    .filter((def) => !TOOL_SCRIPT_EXCLUDED.has(def.id) && !aliases.has(def.id))
+    .filter((def) => !TOOL_SCRIPT_EXCLUDED.has(def.id) && !aliases.has(def.id) && canNest(def))
     .map((def) => {
-      const summary = def.id === "actor" ? ACTOR_EXEC_DESCRIPTION : def.description.split("\n").find((l) => l.trim()) ?? ""
-      const input = schemaToTs(z.toJSONSchema(def.id === "actor" ? ActorExecParameters : def.parameters))
+      const summary = def.description.split("\n").find((l) => l.trim()) ?? ""
+      const input = schemaToTs(z.toJSONSchema(def.id === "actor" ? nativeParameters(def) : def.parameters))
       return `  /** ${summary.trim().slice(0, 200)} */\n  ${def.id}(input: ${input}): Promise<ToolResult>`
     })
   const aliasLines = Object.entries(TOOL_SCRIPT_ALIASES).flatMap(([alias, target]) => {
@@ -640,6 +641,10 @@ export const ToolScriptTool = Tool.define(
         Effect.gen(function* () {
           const maxToolCalls = params.max_tool_calls ?? MAX_TOOL_CALLS_DEFAULT
           const activeDeadlineMs = (params.timeout_seconds ?? ACTIVE_DEADLINE_S_DEFAULT) * 1000
+          const plan = {
+            pending: false,
+            receipt: undefined as { version: 1; sessionID: string; callID: string; messageID: string; agent: "build" } | undefined,
+          }
           const trace: TraceEntry[] = []
           const subParts: ExecSubPartSnapshot[] = []
           const attachments: ExecAttachment[] = []
@@ -711,6 +716,7 @@ export const ToolScriptTool = Tool.define(
           const subPartMetadata = () => {
             const snapshot = snapshotSubParts()
             return {
+              ...(plan.receipt ? { plan_exit: { ...plan.receipt } } : {}),
               exec_schema: EXEC_METADATA_SCHEMA,
               sub_parts: snapshot.subParts,
               ...(snapshot.truncated
@@ -817,6 +823,7 @@ export const ToolScriptTool = Tool.define(
           const defs = candidates.filter(
             (def) =>
               !TOOL_SCRIPT_EXCLUDED.has(def.id) &&
+              canNest(def) &&
               !Object.hasOwn(TOOL_SCRIPT_ALIASES, def.id) &&
               (!toolWhitelist || toolWhitelist.has(def.id)) &&
               !disabledTools?.has(def.id),
@@ -833,7 +840,7 @@ export const ToolScriptTool = Tool.define(
             Object.entries(mcpTools).filter(
               ([id]) =>
                 !byId.has(id) &&
-                ToolCompat.canonical(id) !== "actor" &&
+                !controls.has(ToolCompat.canonical(id)) &&
                 !TOOL_SCRIPT_EXCLUDED.has(id) &&
                 !Object.hasOwn(TOOL_SCRIPT_ALIASES, id) &&
                 (!toolWhitelist || toolWhitelist.has(id)) &&
@@ -843,7 +850,7 @@ export const ToolScriptTool = Tool.define(
           const allTools = [
             ...[...byId.values()].map((def) => ({
               name: def.id,
-              description: def.id === "actor" ? ACTOR_EXEC_DESCRIPTION : def.description,
+              description: def.description,
             })),
             ...Object.entries(TOOL_SCRIPT_ALIASES).flatMap(([name, target]) => {
               const def = byId.get(target)
@@ -915,6 +922,7 @@ export const ToolScriptTool = Tool.define(
           let logBytes = 0
           let calls = 0
           const withSlot = makeSemaphore(MAX_CONCURRENT)
+          const guestController = new AbortController()
           const nestedController = new AbortController()
           const nestedAbort = AbortSignal.any([ctx.abort, nestedController.signal])
           const interrupted = Effect.callback<never>((resume) => {
@@ -1034,10 +1042,13 @@ export const ToolScriptTool = Tool.define(
             const mcpID = def ? undefined : ToolCompat.resolveName(id, [...mcpById.keys()])
             const mcpDef = mcpID ? mcpById.get(mcpID) : undefined
             if (!def && !mcpDef) return Promise.reject(new Error(`unknown tool: ${id}`))
-            const toolArgs = id === "exec_command" ? execCommandArgs(args) : id === "actor" ? ActorExecParameters.parse(args) : args
+            if (plan.pending || (def?.id === "plan_exit" && admittedCalls.size > 0))
+              return Promise.reject(new Error("plan_exit requires exclusive execution; await all other tool calls first"))
+            const toolArgs = id === "exec_command" ? execCommandArgs(args) : id === "actor" ? nativeParameters(def!).parse(args) : args
             calls++
             if (calls > maxToolCalls)
               return Promise.reject(new Error(`tool call budget exceeded (${maxToolCalls} per execution)`))
+            if (def?.id === "plan_exit") plan.pending = true
             const seq = calls
             const start = Date.now()
             const callID = `${ctx.callID ?? "exec"}:${seq}`
@@ -1060,6 +1071,17 @@ export const ToolScriptTool = Tool.define(
               extra: { ...ctx.extra, fromExec: true },
               callID,
               abort: nestedAbort,
+              // Only the canonical host plan tool receives the commit callback.
+              planExitCommitted: def?.control === Tool.PlanExitControl
+                ? (messageID: Parameters<NonNullable<Tool.Context["planExitCommitted"]>>[0]) => Effect.gen(function* () {
+                    if (plan.receipt) return
+                    plan.receipt = { version: 1, sessionID: ctx.sessionID, callID, messageID, agent: "build" }
+                    lifecycleClosed = true
+                    withSlot.close()
+                    publishProgress({ immediate: true })
+                    yield* Effect.promise(() => progress.pending)
+                  })
+                : undefined,
               // Capture nested metadata in its own record. Forwarding it to the
               // outer context would replace exec's title and lose sibling calls.
               metadata: (value: { title?: string; metadata?: Record<string, unknown> }) =>
@@ -1105,7 +1127,7 @@ export const ToolScriptTool = Tool.define(
                 subPart.state.input = beforeOutput.args
                 if (def?.id === "actor") {
                   yield* Effect.try({
-                    try: () => ActorExecParameters.parse(beforeOutput.args),
+                    try: () => nativeParameters(def).parse(beforeOutput.args),
                     catch: (error) => new Error(Tool.validationErrorMessage("actor", error)),
                   })
                 }
@@ -1269,7 +1291,13 @@ export const ToolScriptTool = Tool.define(
                       publishProgress()
                       throw new Error(`${id}: ${message}`)
                     },
-                  ),
+                  ).finally(() => {
+                    if (def?.id !== "plan_exit") return
+                    plan.pending = false
+                    // Finish host hooks/records first, then stop the VM before its
+                    // promise bridge can deliver either a result or a rejection.
+                    if (plan.receipt) guestController.abort(new Error("plan committed"))
+                  }),
               ),
             )
           }
@@ -1287,7 +1315,12 @@ export const ToolScriptTool = Tool.define(
           // jailed to worktree + OS tmp; writes to OS tmp ONLY (project writes must
           // carry permissions → tools.apply_patch). Read side also caps size so a
           // giant file can't blow the guest memory limit.
-          const readText: HostFn = async (p: unknown) => {
+          const fileCall = <T>(work: () => Promise<T>) => {
+            if (lifecycleClosed || nestedAbort.aborted) return Promise.reject(new Error("exec terminated before file call started"))
+            if (plan.pending) return Promise.reject(new Error("plan_exit requires exclusive execution; await it before file calls"))
+            return trackCall(work())
+          }
+          const readText: HostFn = (p: unknown) => fileCall(async () => {
             const abs = resolveJailed(jailRoots, String(p), "read")
             const file = Bun.file(abs)
             if (!(await file.exists())) return null
@@ -1304,15 +1337,15 @@ export const ToolScriptTool = Tool.define(
                 `file is not valid UTF-8 text (binary content cannot cross the sandbox string boundary): ${String(p)}`,
               )
             }
-          }
-          const writeText: HostFn = async (p: unknown, content: unknown) => {
+          })
+          const writeText: HostFn = (p: unknown, content: unknown) => fileCall(async () => {
             const abs = resolveJailed(tmpRoots, String(p), "write")
             const text = String(content)
             if (Buffer.byteLength(text, "utf8") > MAX_FILE_BYTES)
               throw new Error(`content exceeds ${MAX_FILE_BYTES} bytes`)
             await Filesystem.write(abs, text)
             return undefined
-          }
+          })
 
           const outcome = yield* Effect.tryPromise({
             try: () =>
@@ -1339,8 +1372,8 @@ return { __undef: __out.value === undefined, json: __out.value === undefined ? "
                   deterministic: false,
                   deadlineMs: WALL_DEADLINE_MS,
                   activeDeadlineMs,
-                  signal: nestedAbort,
-                  interrupt: () => nestedAbort.aborted,
+                  signal: AbortSignal.any([nestedAbort, guestController.signal]),
+                  interrupt: () => nestedAbort.aborted || Boolean(plan.receipt),
                 },
               ),
             catch: (err) => (err instanceof Error ? err : new Error(String(err))),
@@ -1351,6 +1384,16 @@ return { __undef: __out.value === undefined, json: __out.value === undefined ? "
           )
           const logBlock = logs.length ? `<logs>\n${logs.join("\n")}\n</logs>\n` : ""
           const traceBlock = trace.length ? `<trace count="${trace.length}">\n${traceLines.join("\n")}\n</trace>\n` : ""
+
+          if (plan.receipt) {
+            yield* flushProgress()
+            return {
+              title: "Plan approved",
+              metadata: terminalMetadata("completed"),
+              ...(attachments.length ? { attachments } : {}),
+              output: `<exec status="completed">\nPlan approved; build continuation committed and script terminated.\n${logBlock}${traceBlock}${attachmentNotice()}</exec>`,
+            }
+          }
 
           if (outcome._tag === "Failure") {
             const message = outcome.failure instanceof Error ? outcome.failure.message : String(outcome.failure)

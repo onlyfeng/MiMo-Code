@@ -41,8 +41,9 @@ test("agent prompts use runtime tool names and GPT generation guidance", () => {
   expect(PROMPT_GENERATE_GPT).toContain("`tools.apply_patch`")
   expect(PROMPT_GENERATE_GPT).toContain("`tools.view_image` inside `exec`")
   expect(PROMPT_GENERATE_GPT).toContain("`actor`")
-  expect(PROMPT_GENERATE_GPT).toContain("Actor delegation/recovery and interactive controls remain direct when listed")
-  expect(PROMPT_GENERATE_GPT).toContain("task and skill operations use the declared nested methods")
+  expect(PROMPT_GENERATE_GPT).toContain("Direct `actor`, `question`, and `plan_exit` remain available when listed")
+  expect(PROMPT_GENERATE_GPT).toContain("full declared `tools.actor({operation: ...})` inside `exec`")
+  expect(PROMPT_GENERATE_GPT).toContain("Task and skill operations use the declared nested methods")
 })
 
 test("returns default native agents when no config", async () => {
@@ -1055,7 +1056,7 @@ itTool.live("compose's tool list swaps GPT-specific file tools", () =>
       expect(gptDeclarations).not.toContain("edit(input:")
       expect(gptDeclarations).not.toContain("write(input:")
       expect(gptDeclarations).not.toContain("read(input:")
-      expect(gptDeclarations).not.toContain("question(input:")
+      expect(gptDeclarations).toContain("question(input:")
 
       const claudeTools = yield* registry.tools({
         modelID: ModelID.make("claude-opus-4-7"),
@@ -1093,9 +1094,8 @@ itTool.live("compose's tool list swaps GPT-specific file tools", () =>
           ?.description.split("\n")
           .find((line) => line.trimStart().startsWith("actor(input:"))
         expect(actorDeclaration).toBeDefined()
-        expect([...actorDeclaration!.matchAll(/action: "([^"]+)"/g)].map((match) => match[1])).toEqual([
-          "send",
-          "status",
+        expect([...actorDeclaration!.matchAll(/action: "([^"]+)"/g)].map((match) => match[1]).sort()).toEqual([
+          "cancel", "models", "resume", "run", "send", "spawn", "status", "wait",
         ])
         const actor = tools.find((tool) => tool.id === "actor")
         for (const operation of [

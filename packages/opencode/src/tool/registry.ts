@@ -497,6 +497,8 @@ export const layer = Layer.effect(
               .filter(Boolean)
               .join("\n"),
             parameters: useShell ? effective.parameters : output.parameters,
+            ...(tool.control === Tool.ActorControl ? { nativeParameters: tool.parameters } : {}),
+            ...(tool.control ? { control: tool.control } : {}),
             execute: effective.execute,
             formatValidationError: effective.formatValidationError,
           }

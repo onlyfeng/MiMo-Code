@@ -7,6 +7,47 @@ import { testEffect } from "../lib/effect"
 const it = testEffect(Layer.empty)
 
 describe("actor lifecycle coordinator", () => {
+  it.effect(
+    "owned cancellation cannot claim a successor generation",
+    Effect.gen(function* () {
+      const lifecycle = createActorLifecycle<string, string>()
+      const key = lifecycle.key(SessionID.make("session"), "actor")
+      yield* lifecycle.retainPersistent(key)
+      const old = yield* lifecycle.startFork(key)
+      yield* lifecycle.finishFork(key, old)
+      const next = yield* lifecycle.startFork(key)
+      expect((yield* lifecycle.acquireCancel(key, old))._tag).toBe("noop")
+      expect(yield* lifecycle.isCurrentOpen(key, next)).toBe(true)
+      expect(yield* lifecycle.isCancelled(key)).toBe(false)
+      const current = yield* lifecycle.acquireCancel(key, next)
+      expect(current._tag).toBe("owner")
+      if (current._tag !== "owner") throw new Error("Expected current cancel owner")
+      expect(current.generation).toBe(next)
+      expect(current.claimed).toBe(true)
+      yield* lifecycle.releaseCancel(key, current.episode)
+    }),
+  )
+
+  it.effect(
+    "repeated admission cleanup cannot clear a successor cancellation",
+    Effect.gen(function* () {
+      const lifecycle = createActorLifecycle<string, string>()
+      const key = lifecycle.key(SessionID.make("session"), "actor")
+      yield* lifecycle.retainPersistent(key)
+      const old = yield* lifecycle.startFork(key)
+      yield* lifecycle.claimTerminal(key, old, "cancelled", "cancel")
+      yield* lifecycle.finishFork(key, old)
+      const next = yield* lifecycle.startFork(key)
+      yield* lifecycle.claimTerminal(key, next, "cancelled", "cancel")
+      yield* lifecycle.finishFork(key, old)
+      expect(yield* lifecycle.isCancelled(key)).toBe(true)
+      expect(yield* lifecycle.currentGeneration(key)).toBe(next)
+      expect(yield* Deferred.isDone(next.done)).toBe(false)
+      yield* lifecycle.finishFork(key, next)
+      expect(yield* lifecycle.isCancelled(key)).toBe(false)
+    }),
+  )
+
   test("keys include both the session and actor identity", () => {
     const lifecycle = createActorLifecycle<string, string>()
     const first = lifecycle.key(SessionID.make("session-a"), "actor")
