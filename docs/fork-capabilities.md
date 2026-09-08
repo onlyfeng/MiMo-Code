@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `d9ed4dc480ddbe319d79e6ca655facc552e2cd35`
+- Main behavior (runtime/tests): `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`
 - Bundled guidance content: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
 - Prior fork `main` tip: `d415822c29539a4b6eebeafb59de1b88da18b95c`
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -267,7 +267,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   system-prompt suites plus `memory-path-template.test.ts` at the reviewed main
   behavior.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d9ed4dc480ddbe319d79e6ca655facc552e2cd35`.
+  main behavior `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`.
 - Retirement condition: upstream exposes the same canonical writer, isolated
   child, mode-specific prefix ownership, aligned delta, disabled-checkpoint
   guidance behavior, and stable placeholder resolution only at filesystem-tool
@@ -406,7 +406,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   old-database migration. Session tests are under `packages/opencode/test/session/`.
   Local evidence does not assert publication, exact-head CI or compat acceptance.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d9ed4dc480ddbe319d79e6ca655facc552e2cd35`.
+  main behavior `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`.
 - Retirement condition: upstream uses one effective permission/tool decision
   across discovery and invocation and provides equivalent retryable,
   generation-aware producer behavior plus versioned system-tail snapshots,
@@ -933,7 +933,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   `compaction-projection.test.ts` and prompt-effect regressions bind the
   projection budget, frozen system/tool bytes, and no-tool summary policy.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d9ed4dc480ddbe319d79e6ca655facc552e2cd35`. The selected trigger
+  main behavior `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`. The selected trigger
   was additionally compared with release `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
   and upstream `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`; this named-behavior
   adoption does not advance the overall upstream review baseline.
