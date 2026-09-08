@@ -1,6 +1,6 @@
 import { Context, Effect, Fiber, Layer, Scope, Schema, Option } from "effect"
 import { ulid } from "ulid"
-import { Database, eq, and, lte, inArray } from "@/storage"
+import { Database, eq, and, lte, inArray, desc } from "@/storage"
 import { Bus } from "@/bus"
 import { ActorRegistry } from "@/actor/registry"
 import type { Actor } from "@/actor/schema"
@@ -16,7 +16,7 @@ import type { ProviderID, ModelID } from "@/provider/schema"
 import { Instance } from "@/project/instance"
 import { InstanceRef } from "@/effect/instance-ref"
 import { EffectBridge } from "@/effect"
-import { RunDisposal } from "@/session/run-disposal"
+import { isRunDisposing, RunDisposal } from "@/session/run-disposal"
 import { WakeSourceDisposal } from "./wake-source"
 
 const log = Log.create({ service: "inbox" })
@@ -129,6 +129,8 @@ export interface Interface {
   readonly send: (input: SendInput) => Effect.Effect<SendResult, InboxReceiverNotFound>
   readonly drain: (sessionID: SessionID, actorID: string) => Effect.Effect<number>
   readonly has: (inboxID: string) => Effect.Effect<boolean>
+  readonly head: (sessionID: SessionID, actorID: string) => Effect.Effect<string | undefined>
+  readonly wakePending: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
   /** Internal cycle-breaker: binds this inbox layer to its owning prompt layer. */
   readonly bindPrompt?: (
     prompt: NonNullable<typeof sessionPromptRef.current>,
@@ -165,6 +167,81 @@ export const layer: Layer.Layer<
     // 7-day GC at init. Idempotent: deletes any rows older than now-7d.
     yield* gcInboxRows(Date.now() - GC_TTL_MS)
     log.info("inbox gc-on-init complete")
+
+    const wake = Effect.fn("Inbox.wake")(function* (sessionID: SessionID, actorID: string, inboxID: string) {
+      // Fork-and-forget wake (B2). Sender returns after fork is scheduled;
+      // wake fiber lives in the service scope, so sender lifecycle does
+      // not affect delivery.
+      const promptRef = boundPrompt ?? sessionPromptRef.current
+      if (promptRef) {
+        const wakeSource = yield* RunDisposal
+        const receiver = yield* sessions.get(sessionID)
+        const currentInstance = yield* InstanceRef
+        // Reusing the active context avoids a second Instance.provide, but keep
+        // its former async handoff so InboxArrived subscribers run promptly.
+        if (currentInstance?.directory === receiver.directory) yield* Effect.yieldNow
+        const receiverInstance =
+          currentInstance?.directory === receiver.directory
+            ? currentInstance
+            : yield* Effect.promise(() =>
+                Instance.provide({ directory: receiver.directory, fn: () => Instance.current }),
+              )
+        const receiverDisposal =
+          wakeSource.instance?.directory === receiver.directory ? wakeSource : { disposing: false as const }
+        const bridge = yield* EffectBridge.make().pipe(
+          Effect.provideService(InstanceRef, receiverInstance),
+          // The receiver owns its run lifetime. The sender generation is only
+          // provenance across directories; same-directory delivery keeps the
+          // shared marker so disposal cannot re-arm the receiver generation.
+          Effect.provideService(RunDisposal, receiverDisposal),
+          Effect.provideService(WakeSourceDisposal, wakeSource),
+        )
+        yield* Effect.acquireUseRelease(
+          Effect.sync(() => bridge.fork(promptRef.loop({
+            sessionID,
+            agentID: actorID,
+            // Woken turns notify their parent on completion. The spawn turn goes
+            // through SessionPrompt.prompt (no flag) so forkWork.notify remains
+            // the sole notifier for turn 1 — no double-notify.
+            notifyParentOnComplete: true,
+            inboxID,
+          }))),
+          Fiber.await,
+          Fiber.interrupt,
+        ).pipe(Effect.ignore, Effect.forkIn(scope))
+      } else {
+        // Test fixtures / renderer-only paths can run without SessionPrompt.
+        // Row is durable; will be drained on next runLoop iteration.
+        log.warn("inbox.wake: sessionPromptRef.current undefined — wake skipped", {
+          receiverActorID: actorID,
+        })
+      }
+    })
+
+    const head = Effect.fn("Inbox.head")(function* (sessionID: SessionID, actorID: string) {
+      return Database.use((db) =>
+        db
+          .select({ id: InboxTable.id })
+          .from(InboxTable)
+          .where(and(eq(InboxTable.receiver_session_id, sessionID), eq(InboxTable.receiver_actor_id, actorID)))
+          .orderBy(InboxTable.id)
+          .limit(1)
+          .get()?.id,
+      )
+    })
+
+    const wakePending = Effect.fn("Inbox.wakePending")(function* (sessionID: SessionID, actorID: string) {
+      if (isRunDisposing(yield* RunDisposal)) return
+      const receiver = yield* reg.get(sessionID, actorID)
+      if (!receiver || isRetiredPersistent(receiver)) return
+      // Track the tail so a failed first batch cannot end this wake early.
+      const row = Database.use((db) =>
+        db.select({ id: InboxTable.id }).from(InboxTable)
+          .where(and(eq(InboxTable.receiver_session_id, sessionID), eq(InboxTable.receiver_actor_id, actorID)))
+          .orderBy(desc(InboxTable.id)).limit(1).get(),
+      )
+      if (row) yield* wake(sessionID, actorID, row.id)
+    })
 
     const send = Effect.fn("Inbox.send")(function* (input: SendInput) {
       // ESRCH check (B3). receiver row must exist.
@@ -209,53 +286,7 @@ export const layer: Layer.Layer<
         type: row.type,
       })
 
-      // Fork-and-forget wake (B2). Sender returns after fork is scheduled;
-      // wake fiber lives in the service scope, so sender lifecycle does
-      // not affect delivery.
-      const promptRef = boundPrompt ?? sessionPromptRef.current
-      if (promptRef) {
-        const wakeSource = yield* RunDisposal
-        const receiver = yield* sessions.get(input.receiverSessionID)
-        const currentInstance = yield* InstanceRef
-        // Reusing the active context avoids a second Instance.provide, but keep
-        // its former async handoff so InboxArrived subscribers run promptly.
-        if (currentInstance?.directory === receiver.directory) yield* Effect.yieldNow
-        const receiverInstance =
-          currentInstance?.directory === receiver.directory
-            ? currentInstance
-            : yield* Effect.promise(() =>
-                Instance.provide({ directory: receiver.directory, fn: () => Instance.current }),
-              )
-        const receiverDisposal =
-          wakeSource.instance?.directory === receiver.directory ? wakeSource : { disposing: false as const }
-        const bridge = yield* EffectBridge.make().pipe(
-          Effect.provideService(InstanceRef, receiverInstance),
-          // The receiver owns its run lifetime. The sender generation is only
-          // provenance across directories; same-directory delivery keeps the
-          // shared marker so disposal cannot re-arm the receiver generation.
-          Effect.provideService(RunDisposal, receiverDisposal),
-          Effect.provideService(WakeSourceDisposal, wakeSource),
-        )
-        yield* Effect.acquireUseRelease(
-          Effect.sync(() => bridge.fork(promptRef.loop({
-            sessionID: input.receiverSessionID,
-            agentID: input.receiverActorID,
-            // Woken turns notify their parent on completion. The spawn turn goes
-            // through SessionPrompt.prompt (no flag) so forkWork.notify remains
-            // the sole notifier for turn 1 — no double-notify.
-            notifyParentOnComplete: true,
-            inboxID: row.id,
-          }))),
-          Fiber.await,
-          Fiber.interrupt,
-        ).pipe(Effect.ignore, Effect.forkIn(scope))
-      } else {
-        // Test fixtures / renderer-only paths can run without SessionPrompt.
-        // Row is durable; will be drained on next runLoop iteration.
-        log.warn("inbox.send: sessionPromptRef.current undefined — wake skipped", {
-          receiverActorID: input.receiverActorID,
-        })
-      }
+      yield* wake(input.receiverSessionID, input.receiverActorID, row.id)
 
       return { inboxID: row.id }
     })
@@ -416,7 +447,7 @@ export const layer: Layer.Layer<
       return rendered.length
     })
 
-    const impl = Service.of({ send, drain, has, bindPrompt })
+    const impl = Service.of({ send, drain, has, head, wakePending, bindPrompt })
     inboxServiceRef.current = impl
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {

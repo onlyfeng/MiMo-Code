@@ -3,7 +3,6 @@ import { Effect, Layer, Schedule } from "effect"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { InboxTable } from "../../src/inbox"
-import { SessionStatus } from "../../src/session/status"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { AppLayer } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -54,29 +53,60 @@ const resume = (dir: string, sessionID: string, assistantID: string, taskID: str
     ),
   )
 
-it.live(
-  "main HTTP recovery preserves its task and defers queued inbox through actual length continuation",
-  () =>
-    Effect.gen(function* () {
-      const key = `recovery-task-${crypto.randomUUID()}`
-      const state = {
-        pre: [] as (string | undefined)[],
-        params: [] as (string | undefined)[],
-        post: [] as (string | undefined)[],
-        done: Promise.withResolvers<void>(),
-      }
-      Reflect.set(globalThis, key, state)
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          Reflect.deleteProperty(globalThis, key)
-        }),
-      )
-      const plugin = path.join(yield* tmpdirScoped(), "recovery-witness.ts")
-      yield* Effect.promise(() =>
-        Bun.write(
-          plugin,
-          `export default async () => ({
-    "session.pre": async (input) => { Reflect.get(globalThis, ${JSON.stringify(key)})?.pre.push(input.task_id) },
+for (const scenario of [
+  { backlog: 1, failure: "provider", cancelHook: undefined },
+  { backlog: 101, failure: "provider", cancelHook: undefined },
+  { backlog: 101, failure: "defect", cancelHook: undefined },
+  { backlog: 1, failure: "provider", cancelHook: "session.pre" },
+  { backlog: 1, failure: "provider", cancelHook: "session.userQuery.pre" },
+  { backlog: 1, failure: "provider", cancelHook: "session.userQuery.pre", postDefect: true },
+]) {
+  const backlog = scenario.backlog
+  const postDefect = "postDefect" in scenario && scenario.postDefect
+  it.live(
+    `main HTTP recovery preserves its task and drains ${backlog} queued rows after length continuation with ${scenario.cancelHook ?? scenario.failure}${postDefect ? " and post defect" : ""}`,
+    () =>
+      Effect.gen(function* () {
+        const key = `recovery-task-${crypto.randomUUID()}`
+        const state = {
+          pre: [] as (string | undefined)[],
+          params: [] as (string | undefined)[],
+          post: [] as (string | undefined)[],
+          done: Promise.withResolvers<void>(),
+          queuedDone: Promise.withResolvers<void>(),
+          cancelledDone: Promise.withResolvers<void>(),
+          armed: false,
+          postDefect,
+          mode: scenario.cancelHook ? "cancel" : scenario.failure,
+          hook: scenario.cancelHook ?? "session.pre",
+        }
+        Reflect.set(globalThis, key, state)
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            Reflect.deleteProperty(globalThis, key)
+          }),
+        )
+        const plugin = path.join(yield* tmpdirScoped(), "recovery-witness.ts")
+        yield* Effect.promise(() =>
+          Bun.write(
+            plugin,
+            `export default async () => ({
+    "session.pre": async (input, output) => {
+      const state = Reflect.get(globalThis, ${JSON.stringify(key)})
+      state?.pre.push(input.task_id)
+      if (!state?.armed || state.hook !== "session.pre" || (state.mode === "defect" && input.task_id)) return
+      state.armed = false
+      if (state.mode === "defect") throw new Error("actual configured inbox hook defect")
+      output.cancel = true
+      output.cancelReason = "one-shot main recovery cancellation"
+    },
+    "session.userQuery.pre": async (_, output) => {
+      const state = Reflect.get(globalThis, ${JSON.stringify(key)})
+      if (!state?.armed || state.hook !== "session.userQuery.pre") return
+      state.armed = false
+      output.cancel = true
+      output.cancelReason = "one-shot main recovery cancellation"
+    },
     "chat.params": async (input) => { Reflect.get(globalThis, ${JSON.stringify(key)})?.params.push(input.message.task_id) },
     "experimental.chat.messages.transform": async (_, output) => {
       const user = output.messages.findLast(message => message.info.role === "user")
@@ -87,129 +117,165 @@ it.live(
       const state = Reflect.get(globalThis, ${JSON.stringify(key)})
       state?.post.push(input.task_id)
       if (input.finalText === "RECOVERY_TASK_FINISHED") state?.done.resolve()
+      if (input.finalText === "QUEUED_NOTIFICATION_FINISHED") state?.queuedDone.resolve()
+      if (input.outcome === "cancelled") {
+        state?.cancelledDone.resolve()
+        if (state?.postDefect) throw new Error("post hook failed after cancellation")
+      }
     },
   })`,
-        ),
-      )
-      yield* provideTmpdirServer(
-        ({ dir, llm }) =>
-          Effect.gen(function* () {
-            const sessions = yield* Session.Service
-            const prompt = yield* SessionPrompt.Service
-            const tasks = yield* TaskRegistry.Service
-            const session = yield* sessions.create({ title: "Recovery task producer" })
-            yield* llm.error(400, { error: { message: "Deliberate terminal provider rejection" } })
-            yield* prompt
-              .prompt({
-                sessionID: session.id,
-                agent: "build",
-                model,
-                harness: "codex",
-                parts: [{ type: "text", text: "ORIGINAL_RECOVERY_TASK_SOURCE" }],
-              })
-              .pipe(Effect.exit)
-            const candidates = yield* prompt.recovery({ sessionID: session.id })
-            expect(candidates).toHaveLength(1)
-            const before = yield* sessions.messages({ sessionID: session.id })
-            const original = before.find((message) => message.info.id === candidates[0].parentMessageID)
-            if (!original || original.info.role !== "user") throw new Error("Missing interrupted original user")
-            const task = yield* tasks.create({ session_id: session.id, summary: "Bind the interrupted source" })
-            // A notification can already be durable when an interrupted main turn is recovered.
-            const queued = crypto.randomUUID()
-            Database.use((db) =>
-              db
-                .insert(InboxTable)
-                .values({
-                  id: queued,
-                  receiver_session_id: session.id,
-                  receiver_actor_id: "main",
-                  sender_session_id: session.id,
-                  sender_actor_id: "notification-sender",
-                  content: { text: "QUEUED_UNRELATED_NOTIFICATION" },
-                  created_at: Date.now(),
+          ),
+        )
+        yield* provideTmpdirServer(
+          ({ dir, llm }) =>
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const tasks = yield* TaskRegistry.Service
+              const session = yield* sessions.create({ title: "Recovery task producer" })
+              yield* llm.error(400, { error: { message: "Deliberate terminal provider rejection" } })
+              yield* prompt
+                .prompt({
+                  sessionID: session.id,
+                  agent: "build",
+                  model,
+                  harness: "codex",
+                  parts: [{ type: "text", text: "ORIGINAL_RECOVERY_TASK_SOURCE" }],
                 })
-                .run(),
-            )
-            state.pre.length = 0
-            state.params.length = 0
-            state.post.length = 0
-            yield* llm.push({
-              type: "sse",
-              head: [],
-              tail: [
-                {
-                  id: "chatcmpl-length",
-                  object: "chat.completion.chunk",
-                  choices: [
-                    {
-                      index: 0,
-                      delta: { role: "assistant", content: "Partial recovery output" },
-                      finish_reason: "length",
-                    },
-                  ],
-                },
-              ],
-            })
-            yield* llm.text("RECOVERY_TASK_FINISHED")
-            const response = yield* resume(dir, session.id, candidates[0].assistantMessageID, task.id)
-            expect(response.status).toBe(202)
-            yield* Effect.promise(() => state.done.promise).pipe(Effect.timeout("20 seconds"))
-            const messages = yield* sessions.messages({ sessionID: session.id })
-            const user = messages.find((message) => message.info.id === original.info.id)
-            expect(user?.info).toEqual({ ...original.info, task_id: task.id })
-            expect(user?.parts).toEqual(original.parts)
-            const continuation = messages.find(
-              (message) => message.info.role === "user" && message.info.source === "hook",
-            )
-            expect(continuation?.info).toMatchObject({
-              task_id: task.id,
-              agent: original.info.agent,
-              model: original.info.model,
-            })
-            expect(
-              messages.find((message) => message.info.id === candidates[0].assistantMessageID)?.info.time,
-            ).toHaveProperty("completed")
-            expect(yield* tasks.get({ session_id: session.id, id: task.id })).toMatchObject({
-              status: "in_progress",
-              owner: "main",
-            })
-            expect(state.pre).toEqual([task.id])
-            expect(state.params).toEqual([task.id, task.id])
-            expect(state.post).toEqual([task.id])
-            const requests = yield* llm.inputs
-            expect(requests).toHaveLength(3)
-            expect(
-              Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, queued)).get()),
-            ).toBeDefined()
-            for (const request of requests.slice(1)) {
-              expect(JSON.stringify(request.messages)).toContain("ORIGINAL_RECOVERY_TASK_SOURCE")
-              expect(JSON.stringify(request.messages)).toContain(`RECOVERY_BOUND_TASK=${task.id}`)
-              expect(JSON.stringify(request.messages)).not.toContain("QUEUED_UNRELATED_NOTIFICATION")
-            }
-            const status = yield* SessionStatus.Service
-            yield* status
-              .get(session.id)
-              .pipe(
-                Effect.repeat({ until: (value) => value.type === "idle", schedule: Schedule.spaced("20 millis") }),
-                Effect.timeout("10 seconds"),
+                .pipe(Effect.exit)
+              const candidates = yield* prompt.recovery({ sessionID: session.id })
+              expect(candidates).toHaveLength(1)
+              const before = yield* sessions.messages({ sessionID: session.id })
+              const original = before.find((message) => message.info.id === candidates[0].parentMessageID)
+              if (!original || original.info.role !== "user") throw new Error("Missing interrupted original user")
+              const task = yield* tasks.create({ session_id: session.id, summary: "Bind the interrupted source" })
+              // A notification can already be durable when an interrupted main turn is recovered.
+              const queued = crypto.randomUUID()
+              Database.use((db) =>
+                db
+                  .insert(InboxTable)
+                  .values(
+                    Array.from({ length: backlog }, (_, index) => ({
+                      id: `${queued}-${String(index).padStart(3, "0")}`,
+                      receiver_session_id: session.id,
+                      receiver_actor_id: "main",
+                      sender_session_id: session.id,
+                      sender_actor_id: "notification-sender",
+                      content: { text: `QUEUED_UNRELATED_NOTIFICATION-${index}` },
+                      created_at: Date.now(),
+                    })),
+                  )
+                  .run(),
               )
-            yield* llm.text("QUEUED_NOTIFICATION_FINISHED")
-            yield* prompt.loop({ sessionID: session.id })
-            expect(
-              Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, queued)).get()),
-            ).toBeUndefined()
-            const after = yield* sessions.messages({ sessionID: session.id })
-            const inboxUser = after.findLast((message) => message.info.role === "user")
-            expect(inboxUser?.info.id).not.toBe(original.info.id)
-            expect(inboxUser?.info).not.toHaveProperty("task_id")
-            expect(state.pre).toEqual([task.id, undefined])
-            expect(JSON.stringify((yield* llm.inputs)[3].messages)).toContain("QUEUED_UNRELATED_NOTIFICATION")
-          }),
-        { git: true, root: "cwd", config: (url) => ({ ...config(url), plugin: [pathToFileURL(plugin).href] }) },
-      )
-    }),
-  30000,
-)
+              state.pre.length = 0
+              state.params.length = 0
+              state.post.length = 0
+              state.armed = !!scenario.cancelHook || scenario.failure === "defect"
+              yield* llm.push({
+                type: "sse",
+                head: [],
+                tail: [
+                  {
+                    id: "chatcmpl-length",
+                    object: "chat.completion.chunk",
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { role: "assistant", content: "Partial recovery output" },
+                        finish_reason: "length",
+                      },
+                    ],
+                  },
+                ],
+              })
+              const release = Promise.withResolvers<void>()
+              yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+              yield* llm.hold("RECOVERY_TASK_FINISHED", release.promise)
+              const batches = Math.ceil(backlog / 100)
+              for (const batch of Array.from({ length: batches }, (_, index) => index)) {
+                if (scenario.failure === "defect" && batch < batches - 1) continue
+                yield* batch === batches - 1
+                  ? llm.text("QUEUED_NOTIFICATION_FINISHED")
+                  : llm.error(400, { error: { message: "Queued first batch failed" } })
+              }
+              const response = yield* resume(dir, session.id, candidates[0].assistantMessageID, task.id)
+              expect(response.status).toBe(202)
+              if (scenario.cancelHook) {
+                yield* Effect.promise(() => state.cancelledDone.promise).pipe(Effect.timeout("10 seconds"))
+                yield* Effect.sleep("50 millis")
+                expect(state.armed).toBe(false)
+                expect(yield* llm.calls).toBe(1)
+                expect(
+                  Database.use((db) =>
+                    db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, session.id)).all(),
+                  ),
+                ).toHaveLength(backlog)
+                return
+              }
+              yield* llm.wait(3).pipe(Effect.timeout("10 seconds"))
+              expect(
+                Database.use((db) =>
+                  db
+                    .select()
+                    .from(InboxTable)
+                    .where(eq(InboxTable.id, `${queued}-${String(backlog - 1).padStart(3, "0")}`))
+                    .get(),
+                ),
+              ).toBeDefined()
+              release.resolve()
+              yield* Effect.promise(() => state.done.promise).pipe(Effect.timeout("20 seconds"))
+              const messages = yield* sessions.messages({ sessionID: session.id })
+              const user = messages.find((message) => message.info.id === original.info.id)
+              expect(user?.info).toEqual({ ...original.info, task_id: task.id })
+              expect(user?.parts).toEqual(original.parts)
+              const continuation = messages.find(
+                (message) => message.info.role === "user" && message.info.source === "hook",
+              )
+              expect(continuation?.info).toMatchObject({
+                task_id: task.id,
+                agent: original.info.agent,
+                model: original.info.model,
+              })
+              expect(
+                messages.find((message) => message.info.id === candidates[0].assistantMessageID)?.info.time,
+              ).toHaveProperty("completed")
+              expect(yield* tasks.get({ session_id: session.id, id: task.id })).toMatchObject({
+                status: "in_progress",
+                owner: "main",
+              })
+              expect(state.pre.slice(0, 1)).toEqual([task.id])
+              expect(state.params.slice(0, 2)).toEqual([task.id, task.id])
+              expect(state.post.slice(0, 1)).toEqual([task.id])
+              const requests = yield* llm.inputs
+              for (const request of requests.slice(1, 3)) {
+                expect(JSON.stringify(request.messages)).toContain("ORIGINAL_RECOVERY_TASK_SOURCE")
+                expect(JSON.stringify(request.messages)).toContain(`RECOVERY_BOUND_TASK=${task.id}`)
+                expect(JSON.stringify(request.messages)).not.toContain("QUEUED_UNRELATED_NOTIFICATION")
+              }
+              yield* Effect.promise(() => state.queuedDone.promise).pipe(Effect.timeout("10 seconds"))
+              expect(
+                Database.use((db) =>
+                  db
+                    .select()
+                    .from(InboxTable)
+                    .where(eq(InboxTable.id, `${queued}-${String(backlog - 1).padStart(3, "0")}`))
+                    .get(),
+                ),
+              ).toBeUndefined()
+              const after = yield* sessions.messages({ sessionID: session.id })
+              const inboxUser = after.findLast((message) => message.info.role === "user")
+              expect(inboxUser?.info.id).not.toBe(original.info.id)
+              expect(inboxUser?.info).not.toHaveProperty("task_id")
+              expect(state.pre).toEqual([task.id, ...Array.from({ length: batches }, () => undefined)])
+              expect(yield* llm.calls).toBe(3 + batches - (scenario.failure === "defect" ? 1 : 0))
+              expect(JSON.stringify((yield* llm.inputs)[3].messages)).toContain("QUEUED_UNRELATED_NOTIFICATION")
+            }),
+          { git: true, root: "cwd", config: (url) => ({ ...config(url), plugin: [pathToFileURL(plugin).href] }) },
+        )
+      }),
+    30000,
+  )
+}
 
 it.live(
   "main HTTP task rejects conflicts and missing namespace tasks before provider or settlement",

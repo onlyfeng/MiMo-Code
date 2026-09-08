@@ -4609,6 +4609,39 @@ itActor.live(
   15_000,
 )
 
+itActor.live("a main inbox follower does not retry a joined failure without progress", () =>
+  provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
+    const prompt = yield* SessionPrompt.Service
+    const state = yield* SessionRunState.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "joined inbox failure" })
+    yield* seed(chat.id)
+    const inboxID = crypto.randomUUID()
+    Database.use((db) => db.insert(InboxTable).values({
+      id: inboxID, receiver_session_id: chat.id, receiver_actor_id: "main",
+      content: { text: "must remain queued" }, created_at: Date.now(),
+    }).run())
+    const release = yield* Deferred.make<void>()
+    const attached = yield* Deferred.make<void>()
+    yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
+    lateRunGate = {
+      sessionID: chat.id, actorID: "main", ownerArmed: false, followerArmed: true,
+      ownerExit: yield* Deferred.make<void>(), releaseOwner: release, followerAttached: attached,
+    }
+    const owner = yield* state.startRunning(chat.id, "main", Effect.die("unexpected interrupt"),
+      Deferred.await(release).pipe(Effect.andThen(Effect.die(new Error("failure before drain")))))
+    yield* llm.text("unexpected follower retry")
+    const follower = yield* prompt.loop({ sessionID: chat.id, inboxID }).pipe(Effect.forkChild)
+    yield* Deferred.await(attached)
+    yield* Deferred.succeed(release, undefined)
+    const result = yield* Fiber.await(follower).pipe(Effect.timeout("5 seconds"))
+    yield* owner.pipe(Effect.exit)
+    expect(result._tag).toBe("Failure")
+    expect(yield* llm.calls).toBe(0)
+    expect(yield* inboxServiceRef.current!.has(inboxID)).toBe(true)
+  }), { git: true, config: providerCfg }),
+15_000)
+
 // Queue semantics
 
 it.live("concurrent loop callers get same result", () =>

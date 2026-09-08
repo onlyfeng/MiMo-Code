@@ -2956,3 +2956,89 @@ both recovery requests retain the original task and exclude the notification;
 the next ordinary run consumes it without inheriting that task. Together with
 existing main recovery, cancellation and transaction cases, 29 tests / 153
 assertions across three files pass. Package typecheck and repository lint pass.
+
+## 2026-09-09 POLICY-02 durable inbox wake follow-up
+
+Compat PR #93 review found that protecting the recovered user left durable
+inbox rows waiting if their original wake fiber had disappeared. Shared main
+behavior/guidance `1363aad1c358495625abd0909577b2ad08c4da83` rearms pending rows after successful or
+failed recovery through the existing Inbox wake, runner and Actor lifecycle.
+It neither inserts a duplicate row nor republishes InboxArrived. Interrupted
+recovery, disposing instances and retired receivers do not rearm execution.
+
+The real main HTTP and Actor success/failure tests insert durable rows without
+calling Inbox.send; all three timed out before the fix and pass afterwards.
+The main HTTP/Actor recovery matrix passes 37 tests / 295 assertions, including
+pending rows during forced cancellation and receiver disposal. A further
+four-case delivery matrix covers durable and live sender wakes after success
+and failure (overlaps two earlier tests), with 56 assertions and no duplicate
+consumption. Existing inbox regressions pass 50 tests / 125 assertions across
+ten files. Package typecheck and repository lint pass; warnings remain. Tests
+clear the six ambient selectors and retain package preload. This internal
+helper does not change the public schema or generated SDK.
+
+### 2026-09-09 POLICY-02 durable inbox batch completion
+
+PR #94 follow-up review prompted a real 101-row queue test. Normal batches
+already drain in one loop; the reproduced failure is a provider error in the
+first batch, leaving the tail queued. Behavior/guidance source `e9addb0d5731ee08e5056c7fa420a72dd473b9b1`
+tracks the last durable row and makes persistent Actor owners check that row
+after their turn, as followers already do. The next iteration retains existing
+cancellation, generation and disposal checks. Main and Actor queues now finish
+remaining batches without an unrelated prompt or send after a first-batch error.
+
+The expanded main HTTP/Actor recovery run passes 42 tests / 381 assertions.
+A final focused Inbox/Actor delivery run passes 37 tests / 187 assertions across
+11 files (overlaps prior evidence); it includes unique durable row IDs and both
+single-row and 101-row queues. Typecheck and lint pass. The earlier 50-test Inbox
+run remains historical evidence, not a repeated full run at this source.
+
+### 2026-09-09 POLICY-02 cancellation and runtime-failure outcomes
+
+PR #94 follow-up identified plugin cancellation and true Effect failures as
+separate outcomes from provider errors carried in assistant values. Shared
+behavior/guidance `8788ba061d5e9f853c68813131b59c4e8a41db87` preserves the public UnknownError shape
+for session.pre cancellation while retaining an internal typed identity;
+session.userQuery.pre already supplies a cancelled assistant. A shared predicate
+recognizes these and fiber interruption in recovery rearming and queued wake
+handoffs. Plugin cancellation therefore cannot start unrelated inbox work.
+
+Main and persistent Actor wake owners capture the finish exit before checking
+the tracked tail. A runtime failure may continue remaining batches only when
+an earlier row was consumed; failure before any drain propagates without retry.
+A main follower may acquire its own turn after the joined non-cancelled run
+failed. Every successor still uses the existing generation/disposal gates.
+
+Before the fix, four Actor cases and three real configured-plugin main HTTP
+cases fail. The eight-case focused matrix passes after the fix, including a
+no-progress defect. Final validation: complete Actor/main HTTP 90 tests / 596
+assertions; ordinary main inbox/handoff 7 / 22; existing Inbox 50 / 125 across
+ten files. Package typecheck and repository lint pass (warnings remain). No
+public schema or SDK change is introduced by the internal cancellation identity.
+
+### 2026-09-09 POLICY-02 cancellation survives post-hook failure
+
+Source `273b72f1191c786412486d0a597048ed8f567b66` preserves an earlier cancellation decision when the subsequent
+session.post hook fails, retaining both the original failure and an internal
+cancellation marker. A real configured-plugin regression failed before the fix
+and passes afterward; targeted main HTTP/Actor tests pass 19 / 192 assertions.
+Typecheck and lint pass. The earlier complete 90 / 596 matrix is overlapping
+evidence on the preceding source, not a new full-suite run.
+
+Three existing real-provider/context-retirement fixtures now have an explicit
+15-second timeout with unchanged assertions. Compat previously exceeded its
+default five seconds in one fixture; the same-source isolated run passed in
+4.9 seconds. This budget change does not claim to eliminate timing variance.
+
+### 2026-09-09 POLICY-02 joined wake failure progress guard
+
+PR #94 feedback on the preceding audit head exposed an owner-only no-progress
+guard. Source `996ba09e92b9506ce0b09a34525851ffd85af3ec` captures the queue head before joining either a main
+runner or an Actor wake. Failed owners and followers both require observed
+consumption before retrying the tracked tail. Successful joins still hand off
+late rows, and cancellation still stops processing.
+
+Both concurrent regressions failed before the fix (main follower executed the
+notification; Actor follower ran twice). The combined main HTTP, Actor inbox
+and prompt handoff matrix passes 34 tests / 311 assertions afterward. Package
+typecheck and lint pass. Earlier full matrices remain source-specific evidence.
