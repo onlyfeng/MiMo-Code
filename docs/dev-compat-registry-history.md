@@ -2818,3 +2818,46 @@ Shared FD/FC registries and main history inherit final main byte-for-byte.
 Exact final remote-tip equality, test/typecheck/lint CI and selected-source
 ancestry through main to compat are checked separately at publication. This
 specified propagation does not claim current-upstream parity.
+
+
+## 2026-09-08 selected Actor/MCP completion
+
+- Previous compat tip: `9d076e1bd1ec13d6a5f1a62459d13585c25f2b55`.
+- Inherited main source/test behavior: `cedd542f215424ccde54d0a779b6747dc2b34d28`.
+- Compat source/test behavior and inheritance merge:
+  `972b3b3195e1ef3b9cba7ab4e3989046164c7aad`.
+- Shared audit commit: `9b3823b7a40c716ed8f2adcd58af56a90d63c692`.
+- All 3/3 selected capabilities are inherited with main as canonical owner;
+  see [the shared capability results](upstream-integration-review-2026-09-08.md).
+  The six FD, sixteen FC and seven DC owners remain active.
+- Ten of the 95 pre-existing main-to-compat delta paths overlapped incoming
+  implementation/contracts. Before this registry update, the other 85 paths
+  retained their original compat blobs. The only conflict was the OpenAPI test:
+  keep compat's generatedOpenapi producer, checkpoint coverage and callable-v2
+  samples while adding the controlled actor selector/no-task-override assertions.
+  Both generated artifacts reproduce the merge result from compat source.
+- DC-CONTEXT-001 and DC-ACTOR-001 retain required turnContext, request preflight,
+  current-turn floor, pending-external guards, continuation receipts and UTF-8
+  state caps. The added HTTP seam regression changes live parent and receiver
+  prompt data after capture and verifies the original Unicode context exactly
+  once in both append and replace-agent modes. It introduces no production
+  override. The same HTTP-to-Actor-to-startResumeTurn-to-runLoop path reaches
+  existing frozen preflight, whose oversized-static/history/no-progress cases
+  run in the complete matrix.
+- DC-MODEL-001 retains per-agent MaxMode and main-only status publication;
+  DC-NET-002 retains RFC1918 MCP behavior alongside explicit auto_connect;
+  the other network, platform and TUI owners have no incoming implementation
+  overlap. Shared sandbox active cancellation and exec cleanup are inherited
+  unchanged from main.
+- Final local validation: tools/sandbox 168 pass; config/MCP 126 pass; public
+  contracts 16 pass; HTTP actor recovery 9 pass; context/actor/checkpoint
+  303 pass, 2 pre-existing skips, 0 fail. Those skips are the existing Bash
+  cancellation timing fixtures; this operation added no skip. Owning opencode
+  and SDK package typechecks pass; lint reports zero errors (4,462 warnings).
+  Frozen bun ci leaves bun.lock unchanged. Every final matrix clears the four
+  ambient selectors listed in the shared review; context matrices also clear
+  checkpoint/max-context/ratio selectors, preserving package ORCHESTRATOR
+  preload and test isolation. Generated OpenAPI/SDK match the merged artifacts.
+- Final branch publication is checked using remote-tip equality, exact-SHA
+  test/typecheck/lint results and selected-upstream-to-main-to-compat ancestry.
+  This specified integration does not claim alignment to newer upstream main.
