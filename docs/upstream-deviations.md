@@ -17,9 +17,9 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `c7014557445832a97248ed7b0af568e51bfd291d`
-- Bundled guidance content: `c7014557445832a97248ed7b0af568e51bfd291d`
-- Prior fork `main` tip: `bfa3c2466d07da01881b252a0337ac444b4ae927`
+- Main behavior (runtime/tests): `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
+- Bundled guidance content: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
+- Prior fork `main` tip: `3350f0f2ce17501d4d925f5e293f07d809f29f22`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -35,7 +35,7 @@ capability audit is recorded in [the model API review](released-model-api-review
 | FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries               | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
 | FD-004 | instance server, explicit model/audio APIs, `/v1`, SDK/OpenAPI        | Adopts capability discovery and token-scoped proxy behind explicit admission; rejects implicit capability service | Preserve opt-in, authentication-before-bootstrap, and bounded shutdown                |
 | FD-005 | model identity, prompt, discovery, tools, retry                       | Adapts inconsistent upstream classification                                                                       | Preserve one resolved identity                                                        |
-| FD-006 | compact Codex declarations and nested execution                       | Adopts released compact registration with direct actor/interactive exceptions                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
+| FD-006 | compact Codex declarations and nested execution                       | Adopts compact registration and full authorized nested Actor/interactive composition                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
 | FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
 
 ## FD-001 — run approval must not toggle shared delete state
@@ -344,16 +344,35 @@ capability audit is recorded in [the model API review](released-model-api-review
   effective permissions, user toggles and agent/actor/frozen allowlists. Hidden
   direct calls retain the same gates. Codex MCP calls need no redundant search
   load; non-Codex explicit search retains its load-before-direct contract.
-  Nested actor composition exposes only `send` and `status` through a narrowed
-  schema, validated again after tool hooks. The registered caller identity,
-  target ownership and existing subagent send-only restriction still apply;
-  actor creation, wait, cancellation and recovery retain their direct entries.
+  Nested execution may compose all currently authorized canonical Actor
+  operations, question and plan_exit; their direct entries remain available.
+  JSON and shell declarations, entry validation and post-hook validation use
+  the initialized native Actor schema, including its actual agent choices.
+  Registered caller identity, target ownership and ordinary subagent send-only
+  restrictions still apply. Internal definition identity carries canonical
+  Actor and plan-exit authority: same-named custom or MCP tools cannot inherit
+  it or obtain the host plan-commit callback.
   Each nested built-in permission receipt identifies the actual post-hook input and
   inherits the parent permission routing, while using the child abort signal.
   Termination closes intake, aborts and joins nested effects/finalizers and the
   script VM, including guest-only pending promises and outer Effect interruption. Frozen
   captures preserve the full pool and active subset separately; changed hidden
-  schemas fail closed before execution. The existing resolver precedence,
+  or native Actor schemas fail closed before execution. Actor admission hands
+  off its generation-bound cancellation handle before releasing service
+  ownership. Cancellation before handoff reclaims and joins the child; a
+  successful background handoff or foreground timeout preserves supervised
+  work and its discoverable actor ID. Observer cancellation only stops waiting.
+  Prompt-owned interactive routing sends eligible peer questions to the parent
+  while preserving the original tool/message reference. Missing interaction
+  authority and Never-Ask create no pending question. Plan approval is limited
+  to the foreground root main plan turn: Yes atomically commits a complete
+  build continuation only while its actual parent user is still latest. No,
+  rejection and a superseding user do not switch agents. A committed nested
+  transition records a trusted host receipt, closes tool/file admission and
+  terminates the old guest before delivering its result; guest catch/finally
+  code cannot continue. Pending raw-file and tool calls share this exclusion
+  boundary. Question terminal cleanup is owned by FC-008; durable plan and
+  Actor lifecycle settlement by FC-001. The existing resolver precedence,
   actor task source and recovery admission remain unchanged.
   The public compute budget remains `timeout_seconds` in seconds. The strict
   `exec_command` adapter uses `yield_time_ms` as a command timeout in milliseconds,
@@ -374,12 +393,18 @@ capability audit is recorded in [the model API review](released-model-api-review
 - Upstream relationship: adapts released v0.1.14 compact registration from
   `1a0ffba7842af3f11edcb456688bbdf067407c08`, as present in the selected
   `6203ea2e` baseline. It adopts hidden tools, compact declarations and the
-  nested shell adapter, while retaining direct actor and interactive/lifecycle
-  controls. Released upstream permits broader nested operations for primary/peer
-  callers and restricts only subagents to `send`; the fork adapts nested
-  `send/status` without exposing other actor operations through exec.
+  nested shell adapter. POLICY-01 adopts broader nested Actor and interactive
+  composition while retaining direct entries and the fork's pinned authority,
+  native-schema freezing, owned cancellation and atomic plan transitions.
+  Earlier dated direct-only/narrowed-Actor decisions below are superseded only
+  for this selected scope.
   Existing normalization, fixed cwd, deletion approval and code/unit limits
   remain; broader upstream source and selectors are not restored.
+- POLICY-01 watch additions: `packages/opencode/src/actor/spawn.ts`,
+  `packages/opencode/src/actor/lifecycle.ts`, `packages/opencode/src/tool/actor.ts`,
+  `packages/opencode/src/tool/tool.ts`, `packages/opencode/src/tool/plan.ts`,
+  `packages/opencode/src/tool/question.ts`, and
+  `packages/opencode/src/cli/cmd/tui/routes/session/plan-switch.ts`.
 - Watch surfaces: `packages/opencode/src/agent/prompt/generate-gpt.txt`,
   `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/tool/registry.ts`,
@@ -407,7 +432,17 @@ capability audit is recorded in [the model API review](released-model-api-review
   negative execution; registry, prefix, checkpoint, skill, TUI permission and
   `test/session/exec-effect-carriers.test.ts` cover the other carriers.
   Experiment-only tests retain their independent evidence attribution.
-- 2026-09-08 actor composition: `test/tool/actor-exec.test.ts` exercises
+- 2026-09-08 POLICY-01: the selected single capability (N=1) aligns nested
+  Actor/question/plan composition with source
+  `0abfeba186191c1a361cf3f27b802e9d29bf0fdc` and released v0.1.14
+  `2a0eb706e95a77cba34a319e9f11f33f26d4450c`, without advancing the overall
+  upstream baseline. Runtime/tests and guidance: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
+  `test/tool/actor-owned-lifecycle.test.ts`, `actor-exec-lifecycle.test.ts`,
+  `control-origin.test.ts`, `plan-approval.test.ts`, real
+  `test/session/exec-interaction.test.ts`, and TUI plan-switch event tests
+  cover the new boundaries. Local evidence and pending publication gates are
+  recorded in [the history](fork-registry-history.md#2026-09-08-policy-01-full-authorized-exec-composition).
+- 2026-09-08 actor composition (earlier narrowed policy): `test/tool/actor-exec.test.ts` exercises
   real inbox/status calls in JSON and shell invocation modes, trusted sender
   identity, subagent parent routing, post-hook action rejection, MCP-name
   fallback rejection and cancellation without a late send. The live Codex
@@ -422,7 +457,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   output path. This changes direct Bash output only; nested shell exclusions,
   permission attribution, code-size gates, and timeout units remain intact.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
 - 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
   resolved identity. The compact single-exec authority model remains rejected;
   direct permission-visible tools and nested actor/shell/control exclusions are
@@ -444,7 +479,8 @@ capability audit is recorded in [the model API review](released-model-api-review
   repair because they cross the authority boundary. The raw code size gate is
   retained before and after normalization.
 - Retirement condition: upstream preserves equivalent request-pinned authority,
-  full-pool/active-schema freezing, direct actor/interactive functionality,
+  full-pool/native/active-schema freezing, direct and nested Actor/interactive
+  functionality,
   child permission attribution, close-abort-join, media delivery and budget/unit
   compatibility. Fork implementation of these conditions alone does not retire
   the residual upstream difference.
@@ -463,8 +499,16 @@ capability audit is recorded in [the model API review](released-model-api-review
   The complete authorized tool pool is frozen separately from its advertised
   names, so compact tools remain executable without gaining newly registered
   or parent-disabled members. Rebinding a hidden tool requires its frozen input
-  schema to match; changed schemas fail closed. Warm capture and cold checkpoint
-  writers carry the model identity produced by their corresponding prefix capture.
+  schema to match; changed schemas fail closed. Canonical Actor definitions
+  retain the complete native input contract separately from provider wire
+  schemas. Warm and cold capture serialize and hash it; rebinding requires
+  equality. A legacy JSON snapshot may prove this contract only through an
+  exact match between saved wire and current canonical native schemas. A
+  legacy shell script wrapper cannot prove it and fails closed; existing
+  full-context actors/resume do not repair it from a live registry. Internal
+  native metadata is not appended to provider request schemas. Warm capture
+  and cold checkpoint writers carry the model identity produced by their
+  corresponding prefix capture.
   Explicit `actor resume <actor-id>` requires a controllable registered
   persistent actor retaining its full context in the original receiver Instance
   and undisposed run scope. A changed API/family/harness identity, released
@@ -490,14 +534,23 @@ capability audit is recorded in [the model API review](released-model-api-review
   `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/tool/actor.ts`, and
   `packages/opencode/src/tool/session.ts`.
+- POLICY-01 watch additions: `packages/opencode/src/tool/tool.ts`,
+  `packages/opencode/src/tool/registry.ts`, `packages/opencode/src/tool/tool-script.ts`,
+  and `packages/opencode/src/session/session.sql.ts` (optional internal snapshot
+  JSON metadata, not a new public API or database-column migration).
 - Tests/evidence: `packages/opencode/test/actor/spawn.test.ts`, checkpoint
   child-session/fork-mode/main-slice/prefix-capture/watermark tests, and
   `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
   The actor spawn suite also exercises owned compaction and invalid-output
   continuations, a same-source foreign hook user, and a lost compaction write.
+- 2026-09-08 POLICY-01: real cold capture, JSON roundtrip, full-context Actor
+  and SDK execution cover matching native schemas, changed agent enums,
+  legacy shell rejection and exact legacy JSON compatibility. The request
+  wire excludes nativeInputSchema. Existing full/active membership and model
+  identity checks remain independent of the new native contract.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
 - 2026-08-28 review: adopted removal of the unimplemented `actor_id` resume
   argument from actor `spawn` and `run`. Follow-up work uses `send` only while
   the actor remains reusable. A completed ephemeral `context: "full"` actor has
