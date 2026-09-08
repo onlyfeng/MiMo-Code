@@ -2956,3 +2956,23 @@ both recovery requests retain the original task and exclude the notification;
 the next ordinary run consumes it without inheriting that task. Together with
 existing main recovery, cancellation and transaction cases, 29 tests / 153
 assertions across three files pass. Package typecheck and repository lint pass.
+
+## 2026-09-09 POLICY-02 durable inbox wake follow-up
+
+Compat PR #93 review found that protecting the recovered user left durable
+inbox rows waiting if their original wake fiber had disappeared. Shared main
+behavior/guidance `1363aad1c358495625abd0909577b2ad08c4da83` rearms pending rows after successful or
+failed recovery through the existing Inbox wake, runner and Actor lifecycle.
+It neither inserts a duplicate row nor republishes InboxArrived. Interrupted
+recovery, disposing instances and retired receivers do not rearm execution.
+
+The real main HTTP and Actor success/failure tests insert durable rows without
+calling Inbox.send; all three timed out before the fix and pass afterwards.
+The main HTTP/Actor recovery matrix passes 37 tests / 295 assertions, including
+pending rows during forced cancellation and receiver disposal. A further
+four-case delivery matrix covers durable and live sender wakes after success
+and failure (overlaps two earlier tests), with 56 assertions and no duplicate
+consumption. Existing inbox regressions pass 50 tests / 125 assertions across
+ten files. Package typecheck and repository lint pass; warnings remain. Tests
+clear the six ambient selectors and retain package preload. This internal
+helper does not change the public schema or generated SDK.
