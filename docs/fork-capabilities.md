@@ -18,9 +18,9 @@ authority.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `c7014557445832a97248ed7b0af568e51bfd291d`
-- Bundled guidance content: `c7014557445832a97248ed7b0af568e51bfd291d`
-- Prior fork `main` tip: `bfa3c2466d07da01881b252a0337ac444b4ae927`
+- Main behavior (runtime/tests): `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
+- Bundled guidance content: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
+- Prior fork `main` tip: `3350f0f2ce17501d4d925f5e293f07d809f29f22`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -128,6 +128,24 @@ capability audit is recorded in [the model API review](released-model-api-review
   silently remove that choice. Same-session subagent ask routing may inherit a
   persisted parent grant, but peers, explicit deny, and non-interactive
   boundaries do not.
+- POLICY-01 lifecycle extension: Actor admission creates the generation and
+  registers work inside one masked acquisition, then hands off its exact
+  cancellation handle while the service still owns the resource. Cancellation
+  before handoff joins cleanup, including post-stop work, and settles a work
+  fiber that never started. Repeated old cancellation cannot act on a successor
+  generation. Foreground timeout returns the still-running actor's ID; wait
+  cancellation withdraws only that observer. Background notifications target
+  the registered parent actor.
+  Foreground main plan approval uses the actual assistant parent user in the
+  existing conditional user-message transaction, committing the continuation
+  and its parts together. Only a successful commit produces the trusted control
+  receipt and registers the owned continuation. A newer queued user supersedes
+  stale approval. The next turn selects build; the previous exec guest cannot
+  continue. This receipt grants no general permission or lifecycle authority.
+  Watch `src/tool/plan.ts`, `src/session/session.ts`, `src/session/prompt.ts`,
+  and TUI `routes/session/{plan-switch.ts,index.tsx}` under `packages/opencode`.
+  Tests include actor-owned-lifecycle, actor-exec-lifecycle, plan-approval,
+  exec-interaction and real TUI plan-switch events.
 - Upstream relationship: selectively adopts upstream typed Runner admission and
   busy failures plus actor-scoped `replace-agent`, while retaining the stronger
   fork generation, cancellation, disposal, persistent-peer, fail-closed identity
@@ -175,7 +193,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   remain unchanged. Prompt queue admission, task binding, and atomic derived
   user creation remain unchanged.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `6df77610eed88d86d674c6fd145852c5b4208289`.
+  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
 - 2026-08-28 review: adopted strict spawn/run argument rejection and the
   existing `send` follow-up path while preserving caller-resolution,
   generation, persistent wake, and frozen-context fail-closed contracts.
@@ -229,8 +247,9 @@ capability audit is recorded in [the model API review](released-model-api-review
   checkpoint-only clauses while retaining durable project/global memory and
   notes guidance. FD-009 exclusively owns the fail-closed capture admission
   decision. Complete authorized definitions and advertised names are captured
-  separately for both writer modes; explicit non-fork writers also retain their
-  own resolved model identity when no warm prefix exists.
+  separately for both writer modes, including independently frozen native
+  Actor input contracts in warm and cold capture; explicit non-fork writers
+  also retain their own resolved model identity when no warm prefix exists.
 - Upstream relationship: fork extension plus adapted request construction.
 - Watch surfaces: `packages/opencode/src/session/checkpoint.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
@@ -244,7 +263,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   system-prompt suites plus `memory-path-template.test.ts` at the reviewed main
   behavior.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
 - Retirement condition: upstream exposes the same canonical writer, isolated
   child, mode-specific prefix ownership, aligned delta, disabled-checkpoint
   guidance behavior, and stable placeholder resolution only at filesystem-tool
@@ -289,6 +308,9 @@ capability audit is recorded in [the model API review](released-model-api-review
   compatible hidden direct calls, without requiring an invisible search call.
   Request-disabled tools never enter a warm frozen executable pool. Other
   harnesses retain explicit search/load gating when that feature is enabled.
+- POLICY-01 carrier review: request-pinned MCP membership remains unchanged;
+  same-named MCP tools cannot acquire canonical Actor/plan control identity or
+  its commit callback. Imported-server and transport policies are unchanged.
 - Upstream relationship: adapts released automatic connection through explicit
   per-entry configuration; retains fork validation and lifecycle hardening.
 - Watch surfaces: `packages/opencode/src/mcp/index.ts`,
@@ -312,7 +334,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   unrelated suites' process-wide MCP SDK mocks. Usage and source precedence
   are documented in [Claude MCP auto-connect](claude-mcp-autoconnect.md).
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
 - 2026-09-01 OAuth branding review: adopted upstream's MiMoCode callback-page
   and dynamic-registration literals. This is a clean carrier overlap only;
   URL validation, pending-import state, request isolation, bounded diagnostics,
@@ -335,6 +357,10 @@ capability audit is recorded in [the model API review](released-model-api-review
   Codex routes skill/search invocation through exec with the same validators
   and permission gates. Completed nested skill loads identifiable in retained
   validated records protect the containing exec result from pruning.
+- POLICY-01 carrier review: skill/custom registry entries and definition hooks
+  cannot acquire canonical Actor/plan authority by name or expand the frozen
+  native Actor contract. FD-006 owns this control boundary; skill matching,
+  catalog placement and activation policy are unchanged by this selection.
 - Upstream relationship: upstream discovery is retained with stronger shared
   permission and producer-lifetime gates.
 - Watch surfaces: `packages/opencode/src/skill/index.ts`,
@@ -351,7 +377,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   suites, and versioned prompt skill-command snapshot tests at the reviewed main
   behavior.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
 - Retirement condition: upstream uses one effective permission/tool decision
   across discovery and invocation and provides equivalent retryable,
   generation-aware producer behavior plus immutable hash-versioned snapshots
@@ -503,6 +529,18 @@ capability audit is recorded in [the model API review](released-model-api-review
   The explicit Linux zero-case inputs are still loaded by Bun and excluded only
   from the expected suite set, so a future registered case fails as unexpected
   until the allowlist is retired.
+- POLICY-01 Question lifecycle: registration, Asked publication and answer
+  waiting share one resource lifetime. Abort, interruption, publication failure
+  and instance disposal remove only a still-owned pending question and publish
+  its existing Rejected terminal once; replied/rejected questions are not
+  rejected again. Registration refuses a closed instance generation. Cleanup
+  uses a publisher captured from that generation, reaching typed and wildcard
+  subscribers without recreating the disposed instance or clearing a new
+  generation's question. Ordinary late Bus publication still rejects disposal.
+  Watch `packages/opencode/src/{question,bus}/index.ts` and
+  `packages/opencode/src/tool/question.ts`;
+  `test/question/lifecycle.test.ts` and real
+  `test/cli/tui/question-lifecycle.test.tsx` cover these consumers.
 - Upstream relationship: stronger runtime cleanup plus a narrower quarantine
   than the reviewed upstream workflow; adopts its package-scoped enterprise
   storage fixture.
@@ -554,7 +592,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   cases declare their total 60-second budget. Image/SDK cancellation and Node
   checks cover adjacent API resources, not a rerun of all workflow lifecycle tests.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
 - 2026-08-25 publication companion: the `AGENTS.md` default-environment rule is
   a process-only registry companion and does not advance the frozen main
   behavior or its changed-path calculation.
@@ -583,6 +621,11 @@ capability audit is recorded in [the model API review](released-model-api-review
   repeated assistant messages only at request construction, records the span on
   the existing parent user as ignored synthetic metadata, and never deletes the
   persisted trajectory or fabricates a new user turn.
+- POLICY-01 synthetic producer: an approved plan continuation remains
+  `source: "hook"` with a synthetic text part and the actual user's model,
+  tools, format, system, harness, provenance and task binding. Failed conditional
+  commits write neither message nor parts; approval does not masquerade as a
+  new direct-user request. FC-001 owns the atomic transition.
 - Upstream relationship: upstream text-part deferral and centralized retry are
   adapted to fork hook, skill-activation, and side-effect-boundary rules.
 - Watch surfaces: `packages/opencode/src/session/message-v2.ts`,
@@ -597,7 +640,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   after one completed tool side effect without a second model/tool execution,
   plus retry isolation for ephemeral title requests.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
 - Retirement condition: upstream provides equivalent provenance and complete
   hook/retry text-part lifecycle, no-side-effect-replay behavior, and local-only
   retry publication for ephemeral or non-main requests, and regenerated
@@ -645,8 +688,11 @@ capability audit is recorded in [the model API review](released-model-api-review
   lifecycle, delegate through `actor` with background `spawn` as the default
   and blocking `run` as the exception, and parallelize only independent calls.
   Codex guidance routes hidden calls, including single operations, through exec
-  while keeping actor and interactive control tools direct. This guidance does
-  not widen runtime authority. Model-visible CI reminders
+  and permits authorized Actor, question and plan composition through exec,
+  while retaining direct entries. Successful plan approval ends the current
+  guest before the next build turn. Ordinary subagent restrictions and the
+  current request pool still constrain these calls; guidance grants no tools
+  outside that pool. Model-visible CI reminders
   include `dev/compat`; built-in skill keys match `mimocode-docs`; actor heredoc
   errors explain flag placement; PDF CJK guidance uses project-controlled
   fonts, explicit TTC face indexes, and language-matched runtime-supported CID
@@ -670,6 +716,14 @@ capability audit is recorded in [the model API review](released-model-api-review
   `packages/opencode/src/skill/builtin/.bundle/mimocode-docs/`,
   MiniMax/GPT prompt text, actor shell tokenizer/help, TUI skill i18n, and
   bundled `pdf-official` and `mimocode-docs` content.
+- POLICY-01 content carriers: `docs/codex-compact-tools.md`,
+  `packages/opencode/src/agent/prompt/generate-gpt.txt`,
+  `packages/opencode/src/session/prompt/gpt.txt`,
+  `packages/opencode/src/tool/tool-script.txt`,
+  `packages/opencode/src/tool/plan-exit.txt`, and
+  bundled `mimocode-docs/reference/config.md` under `packages/opencode`.
+  Content snapshot: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
+  Other selected policies and existing native task/Actor guidance are unchanged.
 - Tests/evidence: session system, including the actionable task/actor guidance
   regression, actor-shell, skill-description,
   `packages/opencode/test/skill/mimocode-docs.test.ts` at the main runtime/test
@@ -677,7 +731,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   `packages/opencode/test/skill/builtin.test.ts`
   binds the shipped PPTX guidance to the available-tool and WebFetch facts.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
 - 2026-08-28 review: adapted upstream PPTX image-sourcing guidance instead of
   shipping unconditional `image_gen`, text-only WebFetch, or unchecked curl
   claims. Actor help also distinguishes reusable actors from completed

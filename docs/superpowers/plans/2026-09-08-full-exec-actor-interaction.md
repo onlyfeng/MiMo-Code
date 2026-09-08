@@ -23,10 +23,11 @@ ordinary subagent send-only/real-parent gating and the positive Actor identity
 checks. Expose existing resume without changing its eligibility.
 
 Separate spawn admission from foreground waiting for ActorTool callers while
-preserving other callers' defaults. Acquire cancellation ownership before
-registration, record admitted IDs through onActorID, and pass the actual
-ctx.actorID as parentActorID. Foreground interruption cancels and joins the
-owned child; wait interruption only stops the waiter. Preserve the existing
+preserving other callers' defaults. Create the generation and register work in
+one masked admission resource; hand the complete generation-bound cancellation
+handle to ActorTool through onAdmitted before releasing service ownership.
+Keep onReady interruptible and pass the actual ctx.actorID as parentActorID.
+Foreground interruption cancels and joins the owned child; wait interruption only stops the waiter. Preserve the existing
 explicit run timeout result and discoverable actor ID. Background actors belong
 to the supervisor after handoff, including when exec's VM closes.
 
@@ -68,7 +69,9 @@ Receipts must survive truncated subparts and post-commit failures.
 Run package tests and bun typecheck with default-path ambient selectors removed;
 preserve the package preload baseline. Generate SDK/OpenAPI only if the final
 public contract changes. Update FD/FC and model guidance together. On compat,
-preserve createMessage chronology and frozen turnContext rather than copying
-whole files. Both PRs require current-head Codex Completed with all feedback
-handled and exact-head CI success before merge. Verify final branch push CI,
+retain the new commitUserMessageIfLatest plan transition while preserving the
+compat transaction helper's schema/duplicate admission and monotonic chronology,
+plus committed-only run correlation and frozen turnContext. Do not restore the
+old createMessage/updatePart pair or copy whole files over compat overrides.
+Both PRs require current-head Codex Completed with all feedback handled and exact-head CI success before merge. Verify final branch push CI,
 ancestry, remote tips and protected worktrees, then proceed to POLICY-04.
