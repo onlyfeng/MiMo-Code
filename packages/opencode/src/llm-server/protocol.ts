@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto"
 import z from "zod"
 import type { FinishReason, LanguageModelUsage, ModelMessage } from "ai"
 import { acceptableImage, DATA_URL, type Image } from "./images"
+import { InputAudio, inputAudio } from "../audio/input"
 
 const TextPart = z.strictObject({ type: z.literal("text"), text: z.string() })
 const TextContent = z.union([z.string(), z.array(TextPart)])
 const ContentPart = z.discriminatedUnion("type", [
   TextPart,
+  z.strictObject({ type: z.literal("input_audio"), input_audio: InputAudio }),
   z.strictObject({
     type: z.literal("image_url"),
     image_url: z.strictObject({
@@ -177,6 +179,11 @@ export function toModelMessages(
         role: "user",
         content: message.content.map((part) => {
           if (part.type === "text") return { type: "text", text: part.text }
+          if (part.type === "input_audio") {
+            const audio = inputAudio(part.input_audio)
+            if (!audio) throw new Error("Invalid input audio")
+            return { type: "file", data: audio.data, mediaType: audio.mediaType }
+          }
           const match = DATA_URL.exec(part.image_url.url)
           if (match) return { type: "image", image: match[2], mediaType: match[1] }
           const image = images.get(part.image_url.url)

@@ -11,6 +11,13 @@ import { Env } from "../../src/env"
 import { Auth } from "../../src/auth"
 import { makeRuntime } from "../../src/effect/run-service"
 import { imageBytes, imageFixture } from "./image-fixture"
+import type { AudioFormat } from "../../src/audio/input"
+import { audioRejection } from "../../src/audio/input"
+import { createAzure } from "@ai-sdk/azure"
+import { createOpenAI } from "@ai-sdk/openai"
+import { Effect } from "effect"
+import { AppRuntime } from "../../src/effect/app-runtime"
+import { Provider } from "../../src/provider"
 
 beforeAll(() => prepareConfigDependencies(Global.Path.config))
 afterEach(() => Instance.disposeAll())
@@ -57,12 +64,16 @@ async function fixture<T>(
     apiID?: string
     npm?: string
     images?: boolean
+    audio?: boolean
+    providerOptions?: Record<string, unknown>
   } = {},
 ) {
   const seen: Seen[] = []
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
+    // The vendor fixture must accept base64 overhead on 25 MiB decoded media.
+    maxRequestBodySize: 64 * 1024 * 1024,
     async fetch(req) {
       const body = z.record(z.string(), z.unknown()).parse(await req.json())
       seen.push({ path: new URL(req.url).pathname, headers: req.headers, body })
@@ -78,18 +89,31 @@ async function fixture<T>(
         provider: {
           [options.providerID ?? "local"]: {
             npm: options.npm ?? "@ai-sdk/openai-compatible",
-            env: options.providerID === "xiaomi" ? ["XIAOMI_API_KEY"] : [],
+            env:
+              options.providerID === "xiaomi"
+                ? ["XIAOMI_API_KEY"]
+                : options.providerID === "azure"
+                  ? ["AZURE_API_KEY"]
+                  : [],
             options: {
               apiKey: "local-vendor-key",
               baseURL: `http://127.0.0.1:${server.port}/v1`,
               headers: { "x-provider": "provider" },
+              ...options.providerOptions,
             },
             models: {
               chat: {
                 id: options.apiID ?? "wire-model",
                 temperature: true,
                 reasoning: true,
-                modalities: { input: options.images === false ? ["text"] : ["text", "image"], output: ["text"] },
+                modalities: {
+                  input: [
+                    "text",
+                    ...(options.images === false ? [] : ["image" as const]),
+                    ...(options.audio ? ["audio" as const] : []),
+                  ],
+                  output: ["text"],
+                },
                 options: { reasoningEffort: "low" },
                 variants: { high: { reasoningEffort: "high" } },
                 headers: { "x-model": "model", "X-Override": "model" },
@@ -114,6 +138,7 @@ async function fixture<T>(
       directory: tmp.path,
       fn: async () => {
         if (options.providerID === "xiaomi") env.runSync((service) => service.set("XIAOMI_API_KEY", "local-vendor-key"))
+        if (options.providerID === "azure") env.runSync((service) => service.set("AZURE_API_KEY", "local-vendor-key"))
         return fn(seen)
       },
     })
@@ -748,3 +773,451 @@ test("configured plugin auth loaders supply provider-only credentials", async ()
     Auth.inject(undefined)
   }
 })
+
+const audioContent = (format: AudioFormat = "wav", data = "AQID") => [
+  { type: "input_audio" as const, input_audio: { data, format } },
+]
+const audioMessages = (format: AudioFormat = "wav", data = "AQID") => [
+  { role: "user" as const, content: audioContent(format, data) },
+]
+
+const googleBody = () =>
+  new Response(
+    frame({
+      candidates: [{ content: { parts: [{ text: "Heard." }], role: "model" }, finishReason: "STOP" }],
+      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  )
+
+test.each([false, true])("input audio reaches compatible SDK with ordered content and stream=%s", (stream) =>
+  fixture(
+    async (seen) => {
+      const response = await request({
+        stream,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Listen." },
+              ...audioContent("mpga"),
+              { type: "image_url", image_url: { url: `data:image/png;base64,${imageBytes.toString("base64")}` } },
+              { type: "text", text: "Answer." },
+            ],
+          },
+        ],
+      })
+      expect(await response.text()).toContain("Hello.")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].body.messages).toEqual([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Listen." },
+            { type: "input_audio", input_audio: { data: "AQID", format: "mp3" } },
+            { type: "image_url", image_url: { url: `data:image/png;base64,${imageBytes.toString("base64")}` } },
+            { type: "text", text: "Answer." },
+          ],
+        },
+      ])
+      expect(seen[0].headers.get("authorization")).toBe("Bearer local-vendor-key")
+      expect(seen[0].headers.get("x-model")).toBe("model")
+      expect(seen[0].headers.get("x-provider")).toBe("provider")
+    },
+    { audio: true },
+  ),
+)
+
+test.each(["wav", "mp3", "mpeg", "mpga", "m4a", "mp4", "flac", "ogg", "webm"] as const)(
+  "input audio reaches real Google SDK as inlineData for %s",
+  (format) =>
+    fixture(
+      async (seen) => {
+        const response = await request({ messages: audioMessages(format) })
+        expect(completionSchema.parse(await response.json()).choices[0].message.content).toBe("Heard.")
+        expect(seen).toHaveLength(1)
+        expect(seen[0].path).toBe("/v1/models/gemini-2.5-flash:streamGenerateContent")
+        const mime = ["mp3", "mpeg", "mpga"].includes(format)
+          ? "audio/mpeg"
+          : ["m4a", "mp4"].includes(format)
+            ? "audio/mp4"
+            : `audio/${format}`
+        expect(seen[0].body.contents).toEqual([
+          { role: "user", parts: [{ inlineData: { mimeType: mime, data: "AQID" } }] },
+        ])
+        expect(seen[0].headers.get("x-goog-api-key")).toBe("local-vendor-key")
+        expect(seen[0].headers.get("x-model")).toBe("model")
+      },
+      { npm: "@ai-sdk/google", apiID: "gemini-2.5-flash", audio: true, handle: googleBody },
+    ),
+)
+
+test.each([
+  { npm: "@ai-sdk/openai-compatible", audio: false, format: "wav" },
+  { npm: "@ai-sdk/openai-compatible", audio: true, format: "flac" },
+  { npm: "@ai-sdk/anthropic", audio: true, format: "wav" },
+  { npm: "@ai-sdk/openai", audio: true, format: "wav" },
+  { npm: "@ai-sdk/azure", audio: true, format: "wav" },
+] as const)("input audio rejects unsupported model or actual transport before image DNS: %j", (options) =>
+  fixture(async (seen) => {
+    let lookups = 0
+    await expect(
+      execute(
+        {
+          req: {
+            ...base,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "image_url", image_url: { url: "https://images.example/p.png" } },
+                  ...audioContent(options.format),
+                ],
+              },
+            ],
+          },
+          models: ["local/chat"],
+          abort: new AbortController().signal,
+        },
+        {
+          lookup: async () => {
+            lookups++
+            return [{ address: "127.0.0.1", family: 4 }]
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/audio/) })
+    expect(lookups).toBe(0)
+    expect(seen).toHaveLength(0)
+  }, options),
+)
+
+test.each(["@ai-sdk/openai", "@ai-sdk/azure"])(
+  "input audio validates the real %s chat factory independently of Responses",
+  (npm) =>
+    fixture(
+      async (seen) => {
+        const parsed = Provider.parseModel("local/chat")
+        const model = await AppRuntime.runPromise(
+          Effect.gen(function* () {
+            return yield* (yield* Provider.Service).getModel(parsed.providerID, parsed.modelID)
+          }),
+        )
+        const bodies: unknown[] = []
+        const sdk = (npm === "@ai-sdk/azure" ? createAzure : createOpenAI)({
+          apiKey: "local-vendor-key",
+          baseURL: "https://fixture.invalid/v1",
+          fetch: Object.assign(
+            async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+              bodies.push(JSON.parse(String(init?.body)))
+              return Response.json({
+                id: "c",
+                object: "chat.completion",
+                created: 1,
+                model: "wire-model",
+                choices: [{ index: 0, message: { role: "assistant", content: "Heard." }, finish_reason: "stop" }],
+              })
+            },
+            { preconnect: fetch.preconnect },
+          ),
+        })
+        const language = sdk.chat("wire-model")
+        expect(audioRejection(model, language, [{ mediaType: "audio/wav", bytes: 3 }])).toBeUndefined()
+        await language.doGenerate({
+          prompt: [{ role: "user", content: [{ type: "file", data: "AQID", mediaType: "audio/wav" }] }],
+        })
+        expect(bodies).toMatchObject([
+          {
+            messages: [
+              { role: "user", content: [{ type: "input_audio", input_audio: { data: "AQID", format: "wav" } }] },
+            ],
+          },
+        ])
+        expect(audioRejection(model, sdk.responses("wire-model"), [{ mediaType: "audio/wav", bytes: 3 }])).toMatch(
+          /audio/,
+        )
+        expect(audioRejection(model, language, [{ mediaType: "audio/flac", bytes: 3 }])).toMatch(/audio/)
+        for (const bytes of [0, -1, NaN, Infinity, 1.5, 20 * 1024 * 1024 + 1]) {
+          expect(audioRejection(model, language, [{ mediaType: "audio/wav", bytes }])).toBeDefined()
+        }
+        expect(
+          audioRejection({ ...model, api: { ...model.api, npm: "file://unknown-sdk" } }, language, [
+            { mediaType: "audio/wav", bytes: 3 },
+          ]),
+        ).toMatch(/audio/)
+        expect(seen).toHaveLength(0)
+      },
+      { npm, audio: true },
+    ),
+)
+
+test("input audio and inline images exhaust the shared media budget before downloading", () =>
+  fixture(
+    async (seen) =>
+      imageFixture(async ({ transport, seen: downloaded }) => {
+        await expect(
+          execute(
+            {
+              req: {
+                ...base,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      ...audioContent("wav", Buffer.alloc(20 * 1024 * 1024).toString("base64")),
+                      {
+                        type: "image_url",
+                        image_url: { url: `data:image/png;base64,${Buffer.alloc(5 * 1024 * 1024).toString("base64")}` },
+                      },
+                      { type: "image_url", image_url: { url: "http://images.example/extra.png" } },
+                    ],
+                  },
+                ],
+              },
+              models: ["local/chat"],
+              abort: new AbortController().signal,
+            },
+            transport,
+          ),
+        ).rejects.toMatchObject({ status: 413 })
+        expect(downloaded).toHaveLength(0)
+        expect(seen).toHaveLength(0)
+      }),
+    { audio: true },
+  ))
+
+test("input audio reduces the remaining remote-image download budget", () =>
+  fixture(
+    async (seen) =>
+      imageFixture(async ({ transport, seen: downloaded }) => {
+        await expect(
+          execute(
+            {
+              req: {
+                ...base,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      ...audioContent("wav", Buffer.alloc(20 * 1024 * 1024).toString("base64")),
+                      ...audioContent("wav", Buffer.alloc(5 * 1024 * 1024 - imageBytes.length + 1).toString("base64")),
+                      { type: "image_url", image_url: { url: "http://images.example/extra.png" } },
+                    ],
+                  },
+                ],
+              },
+              models: ["local/chat"],
+              abort: new AbortController().signal,
+            },
+            transport,
+          ),
+        ).rejects.toMatchObject({ status: 413 })
+        expect(downloaded).toHaveLength(1)
+        expect(seen).toHaveLength(0)
+      }),
+    { audio: true },
+  ))
+
+test("input audio-only occurrences cannot exceed the decoded request budget", () =>
+  fixture(
+    async (seen) => {
+      await expect(
+        request({
+          messages: [
+            {
+              role: "user",
+              content: [
+                ...audioContent("wav", Buffer.alloc(20 * 1024 * 1024).toString("base64")),
+                ...audioContent("wav", Buffer.alloc(5 * 1024 * 1024 + 1).toString("base64")),
+              ],
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({ status: 413 })
+      expect(seen).toHaveLength(0)
+    },
+    { audio: true },
+  ))
+
+test("input audio at the exact mixed-media boundary leaves room for its remote image", () =>
+  fixture(
+    async (seen) =>
+      imageFixture(async ({ transport, seen: downloaded }) => {
+        const response = await execute(
+          {
+            req: {
+              ...base,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    ...audioContent("wav", Buffer.alloc(20 * 1024 * 1024).toString("base64")),
+                    ...audioContent("wav", Buffer.alloc(5 * 1024 * 1024 - imageBytes.length).toString("base64")),
+                    { type: "image_url", image_url: { url: "http://images.example/extra.png" } },
+                  ],
+                },
+              ],
+            },
+            models: ["local/chat"],
+            abort: new AbortController().signal,
+          },
+          transport,
+        )
+        expect(await response.text()).toContain("Hello.")
+        expect(downloaded).toHaveLength(1)
+        expect(seen).toHaveLength(1)
+      }),
+    { audio: true },
+  ))
+
+test("input audio retains plugin headers and parameter precedence", () =>
+  fixture(
+    async (seen) => {
+      await (await request({ messages: audioMessages() })).text()
+      expect(seen[0].headers.get("x-audio-plugin")).toBe("active")
+      expect(seen[0].body.temperature).toBe(0.3)
+    },
+    {
+      audio: true,
+      plugin: `export default async () => ({
+    "chat.params": async (_input, output) => { output.temperature = 0.3 },
+    "chat.headers": async (_input, output) => { output.headers["x-audio-plugin"] = "active" },
+  })`,
+    },
+  ))
+
+test("input audio provider errors remain sanitized and are not retried", () =>
+  fixture(
+    async (seen) => {
+      await expect(request({ messages: audioMessages() })).rejects.toMatchObject({
+        status: 502,
+        message: "Chat provider request failed",
+      })
+      expect(seen).toHaveLength(1)
+    },
+    { audio: true, handle: () => Response.json({ error: { message: "private-audio-content" } }, { status: 500 }) },
+  ))
+
+test("input audio refuses an undeclared custom SDK before image DNS or generation", async () => {
+  await using sdk = await tmpdir({
+    init: (dir) =>
+      Bun.write(
+        path.join(dir, "sdk.mjs"),
+        `import { createOpenAICompatible } from ${JSON.stringify(import.meta.resolve("@ai-sdk/openai-compatible"))};
+    export function createSDK(options) { return createOpenAICompatible(options) }`,
+      ),
+  })
+  await fixture(
+    async (seen) => {
+      let lookups = 0
+      await expect(
+        execute(
+          {
+            req: {
+              ...base,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    ...audioContent(),
+                    { type: "image_url", image_url: { url: "http://images.example/a.png" } },
+                  ],
+                },
+              ],
+            },
+            models: ["local/chat"],
+            abort: new AbortController().signal,
+          },
+          {
+            lookup: async () => {
+              lookups++
+              return [{ address: "127.0.0.1", family: 4 }]
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/audio/) })
+      expect(lookups).toBe(0)
+      expect(seen).toHaveLength(0)
+    },
+    { npm: pathToFileURL(path.join(sdk.path, "sdk.mjs")).href, audio: true },
+  )
+})
+
+test("input audio cancellation retires a pending provider request", () => {
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  return fixture(
+    async (seen) => {
+      const controller = new AbortController()
+      const result = rejected(request({ messages: audioMessages() }, ["local/chat"], controller.signal))
+      try {
+        await deadline(started.promise)
+        controller.abort(new DOMException("Stopped", "AbortError"))
+        expect(await deadline(result)).toMatchObject({ name: "AbortError" })
+        expect(seen).toHaveLength(1)
+      } finally {
+        controller.abort()
+        release.resolve()
+        await result
+      }
+    },
+    {
+      audio: true,
+      handle: async () => {
+        started.resolve()
+        await release.promise
+        return new Response(vendorBody(), { headers: { "content-type": "text/event-stream" } })
+      },
+    },
+  )
+})
+
+test.each([true, false])("input audio follows the configured Azure API transport: chat=%s", (useCompletionUrls) =>
+  fixture(
+    async (seen) => {
+      const response = request({ model: "azure/chat", messages: audioMessages() }, ["azure/chat"])
+      if (!useCompletionUrls) {
+        await expect(response).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/audio/) })
+        expect(seen).toHaveLength(0)
+        return
+      }
+      expect(await (await response).text()).toContain("Hello.")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].path).toContain("/chat/completions")
+      expect(seen[0].body.messages).toEqual([
+        { role: "user", content: [{ type: "input_audio", input_audio: { data: "AQID", format: "wav" } }] },
+      ])
+    },
+    { npm: "@ai-sdk/azure", providerID: "azure", audio: true, providerOptions: { useCompletionUrls } },
+  ),
+)
+
+test("input audio uses Vertex GenerateContent with the real SDK and its MIME intact", () =>
+  fixture(
+    async (seen) => {
+      const response = await request({ messages: audioMessages("flac") })
+      expect(completionSchema.parse(await response.json()).choices[0].message.content).toBe("Heard.")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].path).toContain(":streamGenerateContent")
+      expect(seen[0].body.contents).toEqual([
+        { role: "user", parts: [{ inlineData: { mimeType: "audio/flac", data: "AQID" } }] },
+      ])
+      expect(seen[0].headers.get("x-goog-api-key")).toBe("local-vendor-key")
+    },
+    { npm: "@ai-sdk/google-vertex", apiID: "gemini-2.5-flash", audio: true, handle: googleBody },
+  ))
+
+test("input audio does not exempt generated text from the 16 MiB output budget", () =>
+  fixture(
+    async (seen) => {
+      await expect(request({ messages: audioMessages() })).rejects.toMatchObject({ status: 502 })
+      expect(seen).toHaveLength(1)
+    },
+    {
+      audio: true,
+      handle: () =>
+        new Response(vendorBody([wireChunk({ content: "x".repeat(16 * 1024 * 1024) }), wireChunk({}, "stop")]), {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    },
+  ))

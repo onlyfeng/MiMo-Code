@@ -28,7 +28,11 @@ async function harness(
     token: string
     issue: (model: string) => Promise<string>
   }) => Promise<void>,
-  input: { enabled?: boolean; vendor?: (request: Request, body: Record<string, unknown>) => Promise<Response> } = {},
+  input: {
+    enabled?: boolean
+    audio?: boolean
+    vendor?: (request: Request, body: Record<string, unknown>) => Promise<Response>
+  } = {},
 ) {
   const seen: Seen[] = []
   const vendor = Bun.serve({
@@ -77,7 +81,10 @@ async function harness(
             npm: "@ai-sdk/openai-compatible",
             options: { apiKey: "provider-only-secret", baseURL: `http://127.0.0.1:${vendor.port}/v1` },
             models: {
-              chat: { name: "Chat", modalities: { input: ["text"], output: ["text"] } },
+              chat: {
+                name: "Chat",
+                modalities: { input: input.audio ? ["text", "audio"] : ["text"], output: ["text"] },
+              },
               other: { name: "Other", modalities: { input: ["text"], output: ["text"] } },
               tts: { name: "TTS", modalities: { input: ["text"], output: ["audio"] } },
               asr: { name: "ASR", modalities: { input: ["audio"], output: ["text"] } },
@@ -271,8 +278,11 @@ describe("explicit model API", () => {
     await harness(async ({ url, token, directory, seen }) => {
       const outside = await chat(url, token, { model: "local/other" })
       expect(outside.status).toBe(403)
+      expect(await Instance.peek(directory)).toBeUndefined()
       const remoteImage = await chat(url, token, {
-        messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "http://127.0.0.1/private" } }] }],
+        messages: [
+          { role: "user", content: [{ type: "image_url", image_url: { url: "ftp://images.example/private" } }] },
+        ],
       })
       expect(remoteImage.status).toBe(400)
       expect(await Instance.peek(directory)).toBeUndefined()
@@ -419,3 +429,30 @@ describe("explicit model API", () => {
     )
   })
 })
+
+test("input audio is authenticated and scoped before chat generation", () =>
+  harness(
+    async ({ url, token, issue, seen }) => {
+      const messages = [
+        {
+          role: "user",
+          content: [{ type: "input_audio", input_audio: { data: "data:audio/x-wav;base64,AQID", format: "wav" } }],
+        },
+      ]
+      expect((await chat(url, "invalid-token", { messages })).status).toBe(401)
+      expect((await chat(url, await issue("local/other"), { messages })).status).toBe(403)
+      const invalid = await chat(url, token, {
+        messages: [{ role: "user", content: [{ type: "input_audio", input_audio: { data: "AQI", format: "wav" } }] }],
+      })
+      expect(invalid.status).toBe(400)
+      expect(seen).toHaveLength(0)
+      const response = await chat(url, token, { messages })
+      expect(response.status).toBe(200)
+      expect(await response.text()).toContain("本地模型回复")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].body.messages).toEqual([
+        { role: "user", content: [{ type: "input_audio", input_audio: { data: "AQID", format: "wav" } }] },
+      ])
+    },
+    { audio: true },
+  ))

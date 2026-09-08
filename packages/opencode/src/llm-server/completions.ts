@@ -8,7 +8,7 @@ import {
   type LanguageModelUsage,
 } from "ai"
 import { Effect } from "effect"
-import { mergeDeep, pipe } from "remeda"
+import { mergeDeep, omit, pipe } from "remeda"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { AppRuntime } from "../effect/app-runtime"
 import { Provider, ProviderTransform } from "../provider"
@@ -16,6 +16,7 @@ import { Plugin } from "../plugin"
 import { SessionID, MessageID } from "../session/schema"
 import type { User } from "../session/message-v2"
 import { ImageError, prepareImages, type ImageTransport } from "./images"
+import { audioRejection, inputAudio } from "../audio/input"
 import {
   ChatCompletionRequest,
   unsupported,
@@ -94,6 +95,18 @@ async function start(req: ChatCompletionRequest, abort: AbortSignal, imageTransp
   )
   if (urls.length && !model.capabilities.input.image)
     throw new RequestError(400, "This model does not support image input")
+  const audio = req.messages.flatMap((message) =>
+    message.role === "user" && Array.isArray(message.content)
+      ? message.content.flatMap((part) => {
+          if (part.type !== "input_audio") return []
+          const value = inputAudio(part.input_audio)
+          if (!value) throw new RequestError(400, "Invalid input audio")
+          return [value]
+        })
+      : [],
+  )
+  const rejection = audioRejection(model, resolved.language, audio)
+  if (rejection) throw new RequestError(400, rejection)
   const id = completionID()
   const sessionID = SessionID.descending()
   const message: User = {
@@ -131,7 +144,12 @@ async function start(req: ChatCompletionRequest, abort: AbortSignal, imageTransp
   const headers = new Headers(model.headers)
   new Headers(hooked.headers).forEach((value, name) => headers.set(name, value))
   const tools = req.tools?.length ? ProviderTransform.tools(toolSet(req.tools), model) : undefined
-  const images = await prepareImages(urls, abort, imageTransport)
+  const images = await prepareImages(
+    urls,
+    abort,
+    imageTransport,
+    audio.reduce((total, part) => total + part.bytes, 0),
+  )
   abort.throwIfAborted()
   return {
     id,
@@ -186,7 +204,11 @@ async function* parts(started: Started, controller: AbortController, abort: Abor
         break
       }
       abort.throwIfAborted()
-      bytes += Buffer.byteLength(JSON.stringify(next.value))
+      // start-step echoes the serialized request, including input media. That
+      // data already has its own bound and must not consume the output budget.
+      bytes += Buffer.byteLength(
+        JSON.stringify(next.value.type === "start-step" ? omit(next.value, ["request"]) : next.value),
+      )
       if (bytes > 16 * 1024 * 1024) throw new Error("Provider output exceeded the proxy limit")
       if (next.value.type === "error") throw next.value.error
       if (next.value.type === "abort") throw new DOMException("Request aborted", "AbortError")

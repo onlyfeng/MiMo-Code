@@ -194,9 +194,14 @@ async function download(
 }
 
 /** Resolve remote references to bytes before the SDK can see any image URL. */
-export async function prepareImages(urls: string[], abort: AbortSignal, transport: ImageTransport = {}) {
+export async function prepareImages(
+  urls: string[],
+  abort: AbortSignal,
+  transport: ImageTransport = {},
+  audioBytes = 0,
+) {
   const images = new Map<string, Image>()
-  let total = 0
+  let total = audioBytes
   try {
     abort.throwIfAborted()
     // Account for every inline occurrence before starting any external request.

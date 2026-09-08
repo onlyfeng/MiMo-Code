@@ -3,6 +3,74 @@ import { ChatCompletionRequest, unsupported, toModelMessages, finishReason, usag
 
 const base = { model: "local/chat", messages: [{ role: "user", content: "hello" }] }
 
+const audioRequest = (input_audio: unknown) => ({
+  ...base,
+  messages: [{ role: "user", content: [{ type: "input_audio", input_audio }] }],
+})
+
+test.each([
+  ["wav", "audio/wav"],
+  ["mp3", "audio/mpeg"],
+  ["mpeg", "audio/mpeg"],
+  ["mpga", "audio/mpeg"],
+  ["m4a", "audio/mp4"],
+  ["mp4", "audio/mp4"],
+  ["flac", "audio/flac"],
+  ["ogg", "audio/ogg"],
+  ["webm", "audio/webm"],
+])("input audio normalizes raw %s to an SDK file with %s", (format, mediaType) => {
+  const req = ChatCompletionRequest.parse(audioRequest({ data: "AQID", format }))
+  expect(unsupported(req)).toBeUndefined()
+  expect(toModelMessages(req.messages)).toEqual([
+    { role: "user", content: [{ type: "file", data: "AQID", mediaType }] },
+  ])
+})
+
+test.each([
+  { data: "data:audio/x-wav;base64,AQID", format: "wav" },
+  { data: "data:audio/mp3;base64,AQID", format: "mpga" },
+  { data: "data:audio/mpeg;base64,AQID" },
+  { data: "data:audio/x-m4a;base64,AQID", format: "mp4" },
+])("input audio accepts an explicit or inferred matching MIME: %j", (input) => {
+  expect(ChatCompletionRequest.safeParse(audioRequest(input)).success).toBe(true)
+})
+
+test.each([
+  { data: "AQID" },
+  { data: "", format: "wav" },
+  { data: "AQI", format: "wav" },
+  { data: "AR==", format: "wav" },
+  { data: "AQID!", format: "wav" },
+  { data: "AQID\n", format: "wav" },
+  { data: "https://audio.example/a.wav", format: "wav" },
+  { data: "data:audio/wav;base64,AQID", format: "mp3" },
+  { data: "data:image/png;base64,AQID", format: "wav" },
+  { data: "data:audio/unknown;base64,AQID" },
+  { data: "data:audio/wav;base64,", format: "wav" },
+  { data: "AQID", format: "pcm" },
+  { data: "AQID", format: "wav", url: "https://audio.example/a.wav" },
+])("input audio rejects ambiguous or invalid payloads: %j", (input) => {
+  expect(ChatCompletionRequest.safeParse(audioRequest(input)).success).toBe(false)
+})
+
+test("input audio bounds decoded payloads at 20 MiB and only permits user messages", () => {
+  const data = Buffer.alloc(20 * 1024 * 1024).toString("base64")
+  expect(ChatCompletionRequest.safeParse(audioRequest({ data, format: "wav" })).success).toBe(true)
+  expect(
+    ChatCompletionRequest.safeParse(
+      audioRequest({ data: Buffer.alloc(20 * 1024 * 1024 + 1).toString("base64"), format: "wav" }),
+    ).success,
+  ).toBe(false)
+  for (const role of ["system", "developer", "assistant", "tool"]) {
+    expect(
+      ChatCompletionRequest.safeParse({
+        ...base,
+        messages: [{ role, content: [{ type: "input_audio", input_audio: { data: "AQID", format: "wav" } }] }],
+      }).success,
+    ).toBe(false)
+  }
+})
+
 test.each([
   { model: "", messages: [] },
   { ...base, temperature: 3 },
