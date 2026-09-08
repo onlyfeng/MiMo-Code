@@ -1,6 +1,6 @@
 import { Context, Effect, Fiber, Layer, Scope, Schema, Option } from "effect"
 import { ulid } from "ulid"
-import { Database, eq, and, lte, inArray } from "@/storage"
+import { Database, eq, and, lte, inArray, desc } from "@/storage"
 import { Bus } from "@/bus"
 import { ActorRegistry } from "@/actor/registry"
 import type { Actor } from "@/actor/schema"
@@ -221,10 +221,11 @@ export const layer: Layer.Layer<
       if (isRunDisposing(yield* RunDisposal)) return
       const receiver = yield* reg.get(sessionID, actorID)
       if (!receiver || isRetiredPersistent(receiver)) return
+      // Track the tail so a failed first batch cannot end this wake early.
       const row = Database.use((db) =>
         db.select({ id: InboxTable.id }).from(InboxTable)
           .where(and(eq(InboxTable.receiver_session_id, sessionID), eq(InboxTable.receiver_actor_id, actorID)))
-          .orderBy(InboxTable.id).limit(1).get(),
+          .orderBy(desc(InboxTable.id)).limit(1).get(),
       )
       if (row) yield* wake(sessionID, actorID, row.id)
     })
