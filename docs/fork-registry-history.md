@@ -2865,3 +2865,12 @@ propagation.
 - Validation by affected surface: Actor suite 71/358; resolver/native/shell entry suite 51/136; real Actor HTTP/SDK/tool 13/175; real main HTTP 3/47; runtime/published OpenAPI and existing main recovery 9/48; transaction, summary and setmode 22/79. These are 169 distinct tests and 843 assertions, grouped across 12 files; overlapping exploratory RED and later single-case repeats are excluded. The 16 HTTP cases were freshly repeated after metadata patching; unchanged Actor paths reuse their completed full-suite evidence.
 - Standard JavaScript SDK build and OpenAPI generation completed. Semantic OpenAPI comparison changes only resume parameters/description; task_id is serialized exactly once by the actual callable SDK, and published 409 remains present. Package typecheck, diff check and lint (4,494 warnings, zero errors) pass.
 - Formal main/compat PRs, current-head Codex review, exact remote CI and accepted-source ancestry remain pending. This entry records local implementation evidence, not completion of propagation.
+
+## 2026-09-09 — POLICY-02 inherits final POLICY-04 format follow-up
+
+Runtime/test snapshot `85ce2094506417608777ff1c410a3dd070f42551` inherits PR #87 candidate
+`32b01dcd828f692ea0656e53319cd48abf054c18`, including structured/text format
+refresh and the mock provider system-tail contract. Source merges were clean.
+Bundled guidance snapshot is `85ce2094506417608777ff1c410a3dd070f42551`.
+Publication remains ordered after the preceding policy is accepted on both branches;
+this local inheritance is not evidence of remote acceptance.
