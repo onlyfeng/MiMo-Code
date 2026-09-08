@@ -2496,6 +2496,7 @@ export class Session2 extends HeyApiClient {
       sessionID: string
       directory?: string
       workspace?: string
+      runID?: string
       messageID?: string
       model?: {
         providerID: string
@@ -2529,6 +2530,7 @@ export class Session2 extends HeyApiClient {
             { in: "path", key: "sessionID" },
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "body", key: "runID" },
             { in: "body", key: "messageID" },
             { in: "body", key: "model" },
             { in: "body", key: "modelRef" },
@@ -2792,6 +2794,7 @@ export class Session2 extends HeyApiClient {
       sessionID: string
       directory?: string
       workspace?: string
+      runID?: string
       messageID?: string
       agent?: string
       model?: string
@@ -2821,6 +2824,7 @@ export class Session2 extends HeyApiClient {
             { in: "path", key: "sessionID" },
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "body", key: "runID" },
             { in: "body", key: "messageID" },
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
@@ -3169,6 +3173,7 @@ export class Permission extends HeyApiClient {
       workspace?: string
       reply?: "once" | "always" | "reject"
       message?: string
+      scope?: "request"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3182,6 +3187,7 @@ export class Permission extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "body", key: "reply" },
             { in: "body", key: "message" },
+            { in: "body", key: "scope" },
           ],
         },
       ],
@@ -3302,7 +3308,7 @@ export class Permission extends HeyApiClient {
   /**
    * Get auto-approve-delete state
    *
-   * Whether irreversible deletes skip the extra bash_delete confirmation. Instance-scoped; defaults to the MIMOCODE_AUTO_APPROVE_DELETE env var.
+   * Whether irreversible deletes skip human confirmation after explicit deny checks. Instance-scoped; initialized from MIMOCODE_AUTO_APPROVE_DELETE or dangerous startup mode.
    */
   public autoApproveDelete<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -3332,7 +3338,7 @@ export class Permission extends HeyApiClient {
   /**
    * Set auto-approve-delete state
    *
-   * Trust the model with irreversible deletes, skipping the extra bash_delete confirmation. Distinct from skip-all, which deliberately does NOT cover forced-ask permissions. Applies to this directory instance: same-directory subagents share it, while isolated worktrees and other directories do not. Explicit `bash: deny` rules still block. Already-pending delete asks are left for a human — the command they guard is irreversible.
+   * Trust the model with irreversible deletes after explicit deny checks. This runtime control is independent of skip-all. Applies to this directory instance: same-directory subagents share it, while isolated worktrees and other directories do not. Explicit bash, bash_delete, and external_directory denies still block. Already-pending delete asks are left for a human.
    */
   public setAutoApproveDelete<ThrowOnError extends boolean = false>(
     parameters?: {

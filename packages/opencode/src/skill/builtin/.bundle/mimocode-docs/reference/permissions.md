@@ -84,12 +84,13 @@ For trusted, disposable environments (containers, sandboxes, CI) you can auto-ap
 | Headless (`mimo run`) | `mimo run --dangerously-skip-permissions "<prompt>"` or `mimo run --yolo "<prompt>"` |
 | Any surface (env) | `MIMOCODE_PERMISSION='"allow"'` or `MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1` |
 
-The `/skip-permissions` toggle auto-allows permission asks but keeps `deny` rules in force; forced-ask operations (e.g. destructive bash) still prompt and auto-reject after 60s (`MIMOCODE_SKIP_ALL_FORCED_ASK_TIMEOUT_MS`) with feedback the model can act on, so unattended runs don't hang.
+Startup `--yolo` / `--dangerously-skip-permissions` includes deletion confirmation. Bash still checks explicit `bash`, `bash_delete`, and external-directory denies before execution. `MIMOCODE_AUTO_APPROVE_DELETE=1` can enable deletion approval independently; it also preserves explicit denies.
 
-Semantics: an **allow-all base is injected UNDER your config**, so a tool with *no* rule auto-approves. Because the injected `*: allow` sits before your rules and the last matching rule wins, **any explicit rule you wrote still takes precedence** — a `deny` blocks, and a leftover `ask` will still prompt. Two consequences worth knowing:
+The TUI startup flag injects an **allow-all base UNDER your config** for ordinary tools. A matching explicit `ask` still prompts for an ordinary operation, and a `deny` still blocks. Deletion confirmation uses the separate startup grant after deny checks, so an ordinary `*: ask` is not a way to turn that deletion grant off.
 
-- A top-level catch-all like `"permission": { "*": "ask" }` makes the TUI/env form a no-op (your `*: ask` outranks the injected `*: allow`). Remove it, or use `mimo run --dangerously-skip-permissions`, which auto-replies at the event layer and overrides `ask` too.
-- A tool disabled via the `tools` key (`"tools": { "codesearch": false }`) is re-enabled by allow-all, since that toggle is weaker than a real `permission` rule. Use `permission: { codesearch: "deny" }` if you need it to stay off.
+`mimo run --yolo` and `mimo run --attach <url> --yolo` answer approval requests from their own active invocation with a one-time reply. They do not change the server's shared delete-approval switch. Current continuations and newly created interactive child actors retain the invocation identity; an unrelated run, an old actor generation, an already pending unowned ask, or a disconnected client cannot borrow it. Existing system/background non-interactive routing still applies. Run correlation is not a persisted permission grant.
+
+The runtime `/skip-permissions` toggle remains independent of deletion approval: it auto-allows ordinary asks after deny checks, while forced deletion asks still require confirmation unless deletion approval was separately enabled. Permission-ask timeout is configured independently; without a timeout, an ask can wait indefinitely. The legacy `MIMOCODE_SKIP_ALL_FORCED_ASK_TIMEOUT_MS` initializes that timeout when set.
 
 In the TUI the flag is gated by a one-time red confirmation on startup (you must explicitly accept the risk); the prompt is skipped when there is no TTY, so in CI / piped-stdin the dangerous mode activates with no confirmation. This is dangerous — a malicious prompt, file, or plugin can then run arbitrary commands without confirmation. Only use it where you fully trust the workspace.
 

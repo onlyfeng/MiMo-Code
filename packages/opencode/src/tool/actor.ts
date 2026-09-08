@@ -958,6 +958,7 @@ export const ActorTool = Tool.define(
         // the legacy session.create + manual fork path that lived here pre-Task-29.
         const actor = yield* requireActor()
         const spawnResult = yield* actor.spawn({
+          runApproval: ctx.runApproval,
           mode: "subagent",
           sessionID: ctx.sessionID,
           agentType: next.name,

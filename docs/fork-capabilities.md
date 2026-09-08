@@ -18,9 +18,9 @@ authority.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `d5798519cd1227ab4061bd69ef9efc5f483b74d8`
-- Bundled guidance content: `3cb9d8df7d453d8995de22f3242eee4bc81f6e97`
-- Prior fork `main` tip: `85dfc3f2edbd1eca5cf92daa3521a7bcf2027cb5`
+- Main behavior (runtime/tests): `6df77610eed88d86d674c6fd145852c5b4208289`
+- Bundled guidance content: `6df77610eed88d86d674c6fd145852c5b4208289`
+- Prior fork `main` tip: `df9a263bdfa60f762b0c90b6126a774ef60737ed`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -69,6 +69,17 @@ capability audit is recorded in [the model API review](released-model-api-review
   which had already taken its final snapshot, the caller checks whether the
   returned assistant covers its user row in the same actor transcript and
   starts or joins the successor run when it does not.
+  CLI permission correlation is owned inside that admitted runner work, never
+  by a waiter that merely joins it. A live in-memory run scope follows its
+  initial user, successfully committed atomic continuations, and current
+  interactive child work. It is not persisted on messages or actor records.
+  Selecting an unrelated queued user closes the previous scope, including
+  outstanding asks held by old children or captured bridges; completion,
+  cancellation, and client loss also close it. Persistent inbox wakes and
+  recovered actor generations do not inherit it. These correlation rules do
+  not override existing system/background non-interactive permission routing.
+  FD-001 owns the approval policy; [Yolo and run approval](yolo-run-approval.md)
+  records the consumer and cancellation boundaries.
   Each persisted user row owns its optional `task_id`: `session.pre` uses the
   first actor-scoped user selected for the run, each loop iteration gives tools
   the task binding of its actual last user, and `session.post` reports the final
@@ -164,7 +175,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   remain unchanged. Prompt queue admission, task binding, and atomic derived
   user creation remain unchanged.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `6df77610eed88d86d674c6fd145852c5b4208289`.
 - 2026-08-28 review: adopted strict spawn/run argument rejection and the
   existing `send` follow-up path while preserving caller-resolution,
   generation, persistent wake, and frozen-context fail-closed contracts.
@@ -385,6 +396,14 @@ capability audit is recorded in [the model API review](released-model-api-review
   `workdir`. Filesystem root and protected system directories cannot become
   project instances. A deletion target containing, equaling, or lying inside the active
   project/worktree cannot receive the temporary-file no-confirmation exemption.
+  A non-temporary deletion uses one `bash_delete` confirmation for the full
+  command, after checking explicit denies for its Bash and external-directory
+  effects. Delete auto-approval, including dangerous startup, is evaluated in
+  the Permission service after explicit `bash_delete` denies; it cannot skip
+  those earlier Bash/path deny checks. Broad ordinary allow rules do not
+  silently grant deletion, and a matching deny is not bypassed by a one-time
+  CLI run reply. The existing temporary-only path remains separate and still
+  passes through ordinary Bash/external-directory authorization.
   Optional context lookup supports pre-install state without weakening the
   throwing accessor used by ordinary runtime paths. When explicitly enabled,
   Auto-Worktree guidance is emitted only after a successful main-worktree
@@ -396,7 +415,8 @@ capability audit is recorded in [the model API review](released-model-api-review
   is normalized to Bash and never bypasses its success/path checks.
 - Upstream relationship: adopts the shared fixed-instance-cwd simplification
   and inert SDK event compatibility while retaining fork root and deletion
-  safety hardening; FD-001 separately owns yolo delete-approval state.
+  safety hardening; FD-001 separately owns startup delete approval and the
+  residual prohibition on run-driven shared approval mutation.
 - Watch surfaces: `packages/opencode/src/project/instance.ts`,
   `packages/opencode/src/util/local-context.ts`,
   `packages/opencode/src/tool/bash.ts`,
@@ -423,6 +443,10 @@ capability audit is recorded in [the model API review](released-model-api-review
   Auto-Worktree config, notice, Bash-write, and path-scan regressions cover the
   explicit toggle, one-shot notice, real mutations, negative cache, and
   completed apply-patch metadata.
+  `test/tool/bash-delete-permission.test.ts` and
+  `test/permission/auto-approve-delete.test.ts` under `packages/opencode` cover
+  the deny-first deletion path, dangerous-startup grant, and single deletion
+  confirmation; run lifecycle evidence belongs to FC-001/FD-001.
 - 2026-09-05 Bash-output review: accepted token-budget truncation while
   retaining `pathsOverlap`, `tmpOnlyDelete`, explicit delete approval, and
   immutable instance-cwd handling. Full output remains archived independently
@@ -433,7 +457,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   functionality. FD-004 remains the canonical listener/auth owner. Coverage:
   `test/server/model-api.test.ts`, shared `server/api-request.ts`, and CLI tests.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `6df77610eed88d86d674c6fd145852c5b4208289`.
 - Retirement condition: upstream retains fixed instance cwd and supplies
   equivalent inert compatibility schema, protected-root, project/worktree
   containment, fixed-cwd relative file-tool resolution, MultiEdit normalization,

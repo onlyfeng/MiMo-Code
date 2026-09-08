@@ -19,6 +19,7 @@ import { forwardRef } from "./permission-forward-ref"
 import { inboxServiceRef } from "@/inbox/inbox-ref"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import { EffectBridge } from "@/effect"
+import * as RunApproval from "@/session/run-approval"
 
 // A forwarded ask (orchestrator peer) that no one ever approves resolves DENY
 // after this bound rather than hanging — preserving the hang-safety the old
@@ -55,6 +56,9 @@ export type Ruleset = Schema.Schema.Type<typeof Ruleset>
 export class Request extends Schema.Class<Request>("PermissionRequest")({
   id: PermissionID,
   sessionID: SessionID,
+  runID: Schema.optional(Schema.String.check(Schema.isUUID())).annotate({
+    description: "Correlation identifier for the requesting CLI run; it does not grant permission.",
+  }),
   permission: Schema.String,
   patterns: Schema.Array(Schema.String),
   metadata: Schema.Record(Schema.String, Schema.Unknown),
@@ -75,10 +79,12 @@ export type Reply = Schema.Schema.Type<typeof Reply>
 const reply = {
   reply: Reply,
   message: Schema.optional(Schema.String),
+  scope: Schema.optional(Schema.Literal("request")).annotate({
+    description: "Limit rejection to this request. When omitted, rejection also cancels other pending requests in the session. Does not change once or always approvals.",
+  }),
 }
 
 export const ReplyBody = Schema.Struct(reply)
-  .annotate({ identifier: "PermissionReplyBody" })
   .pipe(withStatics((s) => ({ zod: zod(s) })))
 export type ReplyBody = Schema.Schema.Type<typeof ReplyBody>
 
@@ -188,16 +194,15 @@ interface State {
   // Runtime-only, directory-instance-scoped: subagents sharing this directory
   // observe it; isolated worktrees and other directories have separate state.
   skipAll: boolean
-  // When true, the bash tool skips the extra bash_delete confirmation for
-  // irreversible deletes. Separate from skipAll because forced-ask permissions
-  // deliberately survive it (see FORCED_ASK) — trusting the model with deletes
-  // is its own, louder decision.
+  // When true, delete asks skip human confirmation after explicit denies have
+  // been checked. Runtime skipAll remains independent; dangerous startup mode
+  // includes this grant.
   // Instance-scoped for the same reason every other approval state is: one
   // server process serves many directories, each with independent permission
   // state, so a process-global carrier (e.g. an env var) would let a permissive
   // directory silently auto-approve deletes in a strict one.
-  // Defaults to the MIMOCODE_AUTO_APPROVE_DELETE env var so the CLI/TUI keeps
-  // its documented opt-out; an embedder can override it per instance at runtime.
+  // Initialized from MIMOCODE_AUTO_APPROVE_DELETE or dangerous startup mode;
+  // an embedder can still change it for this instance at runtime.
   autoApproveDelete: boolean
   // Timeout in ms for permission asks that require human confirmation.
   // null = no timeout (wait indefinitely). When set, any ask (normal or
@@ -212,13 +217,11 @@ export function evaluate(permission: string, pattern: string, ...rulesets: Rules
   return evalRule(permission, pattern, ...rulesets)
 }
 
-// Permissions whose "allow" outcome must ALWAYS come from an explicit human ask.
+// Permissions that broad "allow" rules cannot exempt from human confirmation.
 // A wildcard rule like `permissions.allow: ["*"]` (or a stored `{permission:"*",
 // pattern:"*", action:"allow"}` approval) MUST NOT be able to pre-authorize
-// these — the whole point of a forced-ask permission is that the intent to
-// perform an irreversible action must be recorded in-band, not inherited from
-// a broad blanket rule. Explicit deny still wins; the tool-side env opt-out
-// (e.g. MIMOCODE_AUTO_APPROVE_DELETE for bash_delete) is the only bypass.
+// these. Explicit deny still wins; the instance's separate delete exemption
+// (including dangerous startup mode) is checked after those denies.
 const FORCED_ASK = new Set(["bash_delete"])
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Permission") {}
@@ -237,7 +240,7 @@ export const layer = Layer.effect(
           pending: new Map<PermissionID, PendingEntry>(),
           approved: row?.data ?? [],
           skipAll: false,
-          autoApproveDelete: Flag.MIMOCODE_AUTO_APPROVE_DELETE,
+          autoApproveDelete: Flag.MIMOCODE_AUTO_APPROVE_DELETE || Flag.MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS,
           permissionAskTimeoutMs: envInitialAskTimeoutMs(),
         }
 
@@ -255,9 +258,12 @@ export const layer = Layer.effect(
     )
 
     const ask = Effect.fn("Permission.ask")(function* (input: AskInput, abortSignal?: AbortSignal) {
+      const runApproval = yield* RunApproval.current
+      const signal = RunApproval.signal(runApproval, abortSignal)
       const s = yield* InstanceState.get(state)
       const { approved, pending } = s
-      const { ruleset, ...request } = input
+      const { ruleset, ...args } = input
+      const request = { ...args, runID: RunApproval.id(runApproval) }
       let needsAsk = false
 
       // Publish this session's effective grant snapshot so background children
@@ -290,6 +296,14 @@ export const layer = Layer.effect(
         if (ruleAction === "allow") continue
         if (evaluate(request.permission, pattern, approved).action === "allow") continue
         needsAsk = true
+      }
+
+      if (needsAsk && request.permission === "bash_delete" && s.autoApproveDelete) {
+        log.info("auto-approve-delete active, auto-allowing", {
+          permission: request.permission,
+          patterns: request.patterns,
+        })
+        return
       }
 
       // Runtime skip-all: auto-allow anything that would block for approval.
@@ -443,7 +457,7 @@ export const layer = Layer.effect(
       // rather than being flattened into a plain failure, which is why
       // this is not done by wrapping a side in Effect.exit.
       const deferredAwait = Deferred.await(deferred)
-      const main = abortSignal
+      const main = signal
         ? Effect.raceFirst(
             deferredAwait,
             Effect.callback<never, RejectedError>((resume) => {
@@ -451,13 +465,13 @@ export const layer = Layer.effect(
                 Effect.runPromise(Deferred.fail(deferred, new RejectedError())).catch(() => {})
                 resume(Effect.fail(new RejectedError()))
               }
-              if (abortSignal.aborted) {
+              if (signal.aborted) {
                 onAbort()
                 return
               }
-              abortSignal.addEventListener("abort", onAbort, { once: true })
+              signal.addEventListener("abort", onAbort, { once: true })
               return Effect.sync(() => {
-                abortSignal.removeEventListener("abort", onAbort)
+                signal.removeEventListener("abort", onAbort)
               })
             }),
           )
@@ -538,6 +552,8 @@ export const layer = Layer.effect(
           existing.deferred,
           input.message ? new CorrectedError({ feedback: input.message }) : new RejectedError(),
         )
+
+        if (input.scope === "request") return
 
         for (const [id, item] of pending.entries()) {
           if (item.info.sessionID !== existing.info.sessionID) continue

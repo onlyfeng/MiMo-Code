@@ -20,6 +20,7 @@ import { SessionCwd } from "./session-cwd"
 import * as IsolatedGit from "./isolated-git-guard"
 import * as MergeConflict from "./merge-conflict-notice"
 import { BashArity } from "@/permission/arity"
+import { Permission } from "@/permission"
 import * as Truncate from "./truncate"
 import { Plugin } from "@/plugin"
 import { Git } from "@/git"
@@ -739,6 +740,26 @@ const ask = Effect.fn("BashTool.ask")(function* (ctx: Tool.Context, scan: Scan) 
 // the regular bash/external_directory prompts when it fires (see the caller
 // below) — deletion is authorized in a single, unambiguous confirmation.
 const askDelete = Effect.fn("BashTool.askDelete")(function* (ctx: Tool.Context, scan: Scan, command: string) {
+  // A single delete confirmation covers the complete command, but cannot
+  // override explicit rules for its other Bash or external-directory effects.
+  for (const request of [
+    { permission: "bash", patterns: Array.from(scan.patterns) },
+    {
+      permission: "external_directory",
+      patterns: Array.from(scan.dirs).map((dir) =>
+        process.platform === "win32" ? AppFileSystem.normalizePathPattern(path.join(dir, "*")) : path.join(dir, "*"),
+      ),
+    },
+  ]) {
+    if (
+      !request.patterns.some(
+        (pattern) => Permission.evaluate(request.permission, pattern, ctx.permission ?? []).action === "deny",
+      )
+    ) continue
+    throw new Permission.DeniedError({
+      ruleset: (ctx.permission ?? []).filter((rule) => rule.action === "deny"),
+    })
+  }
   const patterns = Array.from(scan.deletes)
   yield* ctx.ask({
     permission: "bash_delete",
@@ -1277,21 +1298,9 @@ export const BashTool = Tool.define(
               // the delete UI shows the full command (including any external
               // paths it touches), so a separate bash/external_directory
               // prompt would just be a second confirmation of the same thing.
-              // Two bypasses fall back to the regular ask (where a `bash: deny`
-              // rule still blocks): the instance's auto-approve-delete state
-              // trusts every delete (defaults to MIMOCODE_AUTO_APPROVE_DELETE,
-              // and an embedder may flip it per instance at runtime), and
-              // `tmpOnlyDelete` trusts one whose every target is provably inside
-              // a temp root — scratch space holds no durable user work, and that
-              // check fails closed on anything it cannot resolve.
-              // Instance-scoped, NOT a process-global: one server process serves
-              // many directories with independent permission state, so a global
-              // carrier would let a permissive directory silently auto-approve
-              // deletes in a strict one. Absent accessor ⇒ not exempt (ask).
-              const skipDeleteAsk =
-                scan.deletes.size === 0 ||
-                (ctx.autoApproveDelete ? yield* ctx.autoApproveDelete() : false) ||
-                (yield* tmpOnlyDelete(root, cwd, ps, shell))
+              // Only provably temporary targets bypass the delete ask. The
+              // Permission service handles automatic approval after deny checks.
+              const skipDeleteAsk = scan.deletes.size === 0 || (yield* tmpOnlyDelete(root, cwd, ps, shell))
               if (!skipDeleteAsk) {
                 yield* askDelete(ctx, scan, params.command)
               } else {

@@ -426,6 +426,10 @@ export type EventMessagePartDelta = {
 export type PermissionRequest = {
   id: string
   sessionID: string
+  /**
+   * Correlation identifier for the requesting CLI run; it does not grant permission.
+   */
+  runID?: string
   permission: string
   patterns: Array<string>
   metadata: {
@@ -5284,6 +5288,10 @@ export type SessionMessagesResponse = SessionMessagesResponses[keyof SessionMess
 
 export type SessionPromptData = {
   body?: {
+    /**
+     * Opaque CLI invocation identifier for permission events; does not grant authorization.
+     */
+    runID?: string
     messageID?: string
     model?: {
       providerID: string
@@ -5673,6 +5681,10 @@ export type SessionPromptAsyncResponse = SessionPromptAsyncResponses[keyof Sessi
 
 export type SessionCommandData = {
   body?: {
+    /**
+     * Opaque CLI invocation identifier for permission events; does not grant authorization.
+     */
+    runID?: string
     messageID?: string
     agent?: string
     model?: string
@@ -5976,6 +5988,10 @@ export type PermissionReplyData = {
   body?: {
     reply: "once" | "always" | "reject"
     message?: string
+    /**
+     * Limit rejection to this request. When omitted, rejection also cancels other pending requests in the session. Does not change once or always approvals.
+     */
+    scope?: "request"
   }
   path: {
     requestID: string

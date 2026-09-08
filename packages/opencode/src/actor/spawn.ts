@@ -1,3 +1,4 @@
+import * as RunApproval from "@/session/run-approval"
 import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit, Schedule } from "effect"
 import type { SessionID, MessageID } from "@/session/schema"
 import type { ProviderID, ModelID } from "@/provider/schema"
@@ -236,6 +237,7 @@ class AssistantSettledError extends Error {
 }
 
 export interface SpawnInput {
+  runApproval?: RunApproval.Scope
   mode: SpawnMode
   sessionID: SessionID
   /**
@@ -462,6 +464,7 @@ export const layer = Layer.effect(
     })
 
     const forkWork = (input: {
+      runApproval?: RunApproval.Scope
       sessionID: SessionID
       parentSessionID: SessionID
       parentActorID?: string
@@ -908,7 +911,8 @@ export const layer = Layer.effect(
           }),
           Effect.ensuring(lifecycleState.finishForkWork(key, input.generation, input.lifecycle)),
         )
-        const boundWork = input.instanceRef ? work.pipe(Effect.provideService(InstanceRef, input.instanceRef)) : work
+        const correlatedWork = work.pipe(RunApproval.provide(input.runApproval))
+        const boundWork = input.instanceRef ? correlatedWork.pipe(Effect.provideService(InstanceRef, input.instanceRef)) : correlatedWork
         // The child inherits this receiver-generation marker when forked, so a
         // terminal continuation that outlives disposal cannot re-arm the instance.
         const fork = Effect.gen(function* () {
@@ -996,6 +1000,7 @@ export const layer = Layer.effect(
         })
         if (input.forkContext) yield* retainForkContext(key, input.forkContext, instanceRef)
         return yield* forkWork({
+          runApproval: input.runApproval,
           sessionID: child.id,
           parentSessionID: input.sessionID,
           parentActorID: input.parentActorID,
@@ -1057,6 +1062,7 @@ export const layer = Layer.effect(
           agentInfo?.mode === "subagent" &&
           (agentInfo.completionGate === true || (!agentInfo.prompt && input.agentType !== "checkpoint-writer"))
         return yield* forkWork({
+          runApproval: input.runApproval,
           sessionID: input.sessionID,
           parentSessionID: input.parentSessionID ?? input.sessionID,
           parentActorID: input.parentActorID,
@@ -1337,7 +1343,7 @@ export const layer = Layer.effect(
       input: Parameters<typeof runPersistentTurnImpl>[0],
     ) {
       const wakeSource = yield* WakeSourceDisposal
-      return yield* runPersistentTurnImpl(input, wakeSource).pipe(state.withRunDisposal)
+      return yield* runPersistentTurnImpl(input, wakeSource).pipe(state.withRunDisposal, RunApproval.provide(undefined))
     })
 
     const recoveryUnavailable = () =>
@@ -1494,6 +1500,7 @@ export const layer = Layer.effect(
         state.withRunDisposal,
         Effect.provideService(InstanceRef, frozen.instance),
         Effect.provideService(RunDisposal, frozen.disposal),
+        RunApproval.provide(undefined),
       )
     })
 

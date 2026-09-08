@@ -1,3 +1,4 @@
+import * as RunApproval from "@/session/run-approval"
 import { Hono } from "hono"
 import { stream } from "hono/streaming"
 import { describeRoute, validator, resolver } from "hono-openapi"
@@ -1162,7 +1163,9 @@ export const SessionRoutes = lazy(() =>
         const completion = await runRequest(
           "SessionRoutes.prompt.start",
           c,
-          SessionPrompt.Service.use((svc) => svc.startPrompt({ ...c.req.valid("json"), sessionID })),
+          SessionPrompt.Service.use((svc) => svc.startPrompt({ ...c.req.valid("json"), sessionID })).pipe(
+            Effect.provideService(RunApproval.RequestSignal, c.req.raw.signal),
+          ),
         )
 
         c.status(200)
@@ -1240,7 +1243,7 @@ export const SessionRoutes = lazy(() =>
           sessionID: SessionID.zod,
         }),
       ),
-      validator("json", SessionPrompt.PromptInput.omit({ sessionID: true })),
+      validator("json", SessionPrompt.PromptInput.omit({ sessionID: true, runID: true })),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
@@ -1306,7 +1309,9 @@ export const SessionRoutes = lazy(() =>
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
           const svc = yield* SessionPrompt.Service
-          return yield* yield* svc.startCommand({ ...body, sessionID })
+          return yield* yield* svc.startCommand({ ...body, sessionID }).pipe(
+            Effect.provideService(RunApproval.RequestSignal, c.req.raw.signal),
+          )
         }),
     )
     .post(
