@@ -1,7 +1,7 @@
 ---
 feature: context-budget-control
 status: in-progress
-updated: 2026-08-22
+updated: 2026-09-08
 branch: investigate/context-limit-double-rebuild
 commits: 028f3178..3b15062d
 ---
@@ -17,15 +17,19 @@ commits: 028f3178..3b15062d
 
 ## Report
 
-**What was built** — `compaction.max_context` lets a user compact earlier than the model's own window, expressed as a token count, a `"300K"` / `"1M"` / `"50%"` shorthand, or a map keyed by `"<providerID>/<modelID>"` with wildcards. `Overflow.contextWindow()` is the single place that resolves the provider cap (`limit.input || limit.context`), applies the budget as a clamp, and subtracts the reserves; `usable()` is now a thin wrapper over it, so the compaction trigger, checkpoint thresholds, and pruning all follow the budget without further plumbing. With no budget configured the arithmetic reduces to the previous expression for both model shapes.
+**Current rule update (2026-09-08, PR #80 review):** The current design and acceptance criteria below use the upstream-aligned ratio trigger, `floor(effective * ratio)`, with a default ratio of 0.9. `reserved` remains only a minimum-budget validation input in the window resolver; it is not subtracted from the trigger. The historical implementation commits in the frontmatter and the dated measurements below are not verification of this update.
 
-The prompt and subagent footers divide usage by the internal trigger and mark a configured budget with `↓`; the sidebar instead shows usage against the user-controlled active limit and compares that setting with the provider cap. `/status` gained a diagnostic Context block (window, budget + source, reserved, compact-at, used), and `mimocode models <provider>` prints the same underlying values without `--verbose`. `/context-limit` opens a preset picker (Model default / 200K / 300K / 500K / 1M / Custom…) that writes only the current model's key into the global config, refusing while a session is busy because a config write disposes the instance and cancels in-flight runners.
+**What was built** — `compaction.max_context` lets a user compact earlier than the model's own window, expressed as a token count, a `"300K"` / `"1M"` / `"50%"` shorthand, or a map keyed by `"<providerID>/<modelID>"` with wildcards. `Overflow.contextWindow()` is the single place that resolves the provider cap (`limit.input || limit.context`), applies the budget as a clamp, and computes `floor(effective * MIMOCODE_COMPACTION_TRIGGER_RATIO)` (default 90%); `usable()` is now a thin wrapper over it, so the compaction trigger, checkpoint thresholds, and pruning all follow the budget without further plumbing. With no budget configured, the effective window is the provider cap and the same ratio applies to both model shapes. Existing reserve calculations only reject invalid or too-small configured budgets.
 
-The 2026-07-31 follow-up makes `usable()` the only automatic context-switch boundary. Checkpoint thresholds continue to keep the checkpoint fresh, but their final 80%/90% rung no longer triggers an early rebuild. The sidebar presents the user-controlled limit relative to the provider cap, so a 300K budget on a 922K model renders `limit 300K of 922K`; the reserve-adjusted trigger remains an internal detail available in `/status`.
+The prompt and subagent footers divide usage by the internal trigger and mark a configured budget with `↓`; the sidebar instead shows usage against the user-controlled active limit and compares that setting with the provider cap. `/status` gained a diagnostic Context block (window, budget + source, headroom, compact-at, used), and `mimocode models <provider>` prints the same underlying values without `--verbose`. `/context-limit` opens a preset picker (Model default / 200K / 300K / 500K / 1M / Custom…) that writes only the current model's key into the global config, refusing while a session is busy because a config write disposes the instance and cancels in-flight runners.
+
+The 2026-07-31 follow-up makes `usable()` the only automatic context-switch boundary. Checkpoint thresholds continue to keep the checkpoint fresh, but their final 80%/90% rung no longer triggers an early rebuild. The sidebar presents the user-controlled limit relative to the provider cap, so a 300K budget on a 922K model renders `limit 300K of 922K`; the ratio-based trigger remains an internal detail available in `/status`.
 
 Separately, the merged PR #1926 was corrected: it assigned `limit.context = 300_000` for every `gpt-*` model under Codex OAuth, which *raised* the window for gpt-4o (128K) and gpt-3.5-turbo (16K), broke the `limit.context === 0` sentinel for image models, and never moved the compaction trigger for the 1M-class models it targeted because `usable()` reads `limit.input` when the catalog publishes one. The 2026-07-27 correction temporarily replaced that assignment with a clamp on both fields at **372,000**. Upstream #2149 later superseded the fixed provider cap, so Codex OAuth now keeps catalog-reported limits unchanged. The 272K billing boundary remains a documented `compaction.max_context` recipe (see S2.5).
 
-**Verification**
+**Historical verification (2026-07-27 / 2026-07-31 implementation)**
+
+These results and live measurements were collected under the earlier reserve-based rule. They are retained unchanged as historical evidence, not rerun results for the 2026-09-08 ratio rule. Values such as 300K → 260K/280K and 372K → 352K below are superseded for current trigger calculations.
 
 - `bun typecheck` (packages/opencode) — PASS, post-rebase.
 - `bun typecheck` (packages/opencode) — PASS for the 2026-07-31 follow-up.
@@ -36,7 +40,9 @@ Separately, the merged PR #1926 was corrected: it assigned `limit.context = 300_
 - CLI: `MIMOCODE_CONFIG_CONTENT='{"compaction":{"max_context":{"openai/gpt-5*":"300K","openai/gpt-5.6":200000}}}' bun run src/index.ts models openai` → `gpt-5.6` window 922K / budget 200K / compacts at 180K; `gpt-5.6-sol` budget 300K / 280K; `gpt-5.3-codex` (272K cap) shows no budget because 300K clamps away; `gpt-4o` and `o3` unchanged.
 - Live TUI (tmux, isolated `MIMOCODE_HOME`, `xiaomi/mimo-v2.5`): picking 300K wrote `"xiaomi/mimo-v2.5": 300000` to the global `mimocode.jsonc`, footer became `33.0K/260K↓ (13%)`, and `/status` showed `window 1.05M · budget 300K · compacts at 260K`. The sidebar follow-up renders the user setting against the model limit (`limit 300K of 1.05M`) and covers it with a TUI render test. Custom `"50%"` wrote 524288 (`compacts at 484K`). "Model default" wrote `0` and restored `compacts at 1.01M`. Selecting a tier mid-stream left the config untouched and kept the dialog open; the same action once idle wrote 200000.
 
-**Journey log**
+**Historical journey log (2026-07-27 / 2026-07-31)**
+
+The observations below describe that implementation period. In particular, reserve-driven zero triggers and the then-broken SDK generation are historical observations, not current guarantees or current tooling status.
 
 1. PR #1926's real defect was not "insufficient" but inert: `usable()` prefers `limit.input`, which every 1M-class GPT model publishes (922K), so the 300K assignment only changed the display denominator and the MCP tool budget. Any future provider-cap correction must set `limit.input`, not just `limit.context`.
 2. `Instance.dispose()` — which every config write triggers — cancels all runners via the `SessionRunState` scope finalizer. Any TUI feature that persists config mid-session needs a busy guard; `sync.data.session_status` is the server-authoritative signal (message-derived status can stay "working" forever after a crash).
@@ -45,7 +51,9 @@ Separately, the merged PR #1926 was corrected: it assigned `limit.context = 300_
 5. `usable()` can be 0 for a positive window (window smaller than the reserves, or a large `compaction.reserved`), which would have rendered `Infinity%` in three footers. Any UI that divides by it needs the guard now in `tui/util/model.contextWindow`.
 6. Provider "context window" numbers in the wild are frequently a *billing* tier or a client's conservative default, not capacity. The 2026-07-27 investigation found 372K served capacity, a 95% effective window, a 90% auto-compact default, and a 272K price boundary, all four called "the context window" somewhere. Upstream #2149 later removed the fixed route cap; the current implementation trusts catalog limits and keeps cost policy in `compaction.max_context`.
 
-## [S1] Problem
+## [S1] Historical problem record (2026-07-27 / 2026-07-31)
+
+This section preserves the original investigation, formulas and measurements. Its reserve-based trigger examples are superseded by the current S2 ratio rule as of 2026-09-08; they are not current acceptance criteria.
 
 ### S1.1 Three different quantities are conflated into `model.limit.context`
 
@@ -122,74 +130,50 @@ For a configured 372K budget with the default 20K reserve, the first trigger is 
 
 ### S2.1 Vocabulary
 
-- `hardCap(model)` = `model.limit.input || model.limit.context` — the largest prompt the API accepts. `0` keeps its current meaning: unknown/not applicable, overflow handling disabled.
+- `hardCap(model)` = `model.limit.context === 0 ? 0 : model.limit.input || model.limit.context` — the provider-reported prompt cap. The zero-context sentinel keeps overflow handling disabled.
 - `budget(cfg, model, …)` = user-requested working budget, or `undefined`.
 - `effectiveCap` = `hardCap === 0 ? 0 : min(hardCap, budget ?? hardCap)`.
-- `usable()` keeps its current meaning: `effectiveCap` minus reserves. It stays the single source of truth for "when do we compact".
+- `usable()` = `floor(effectiveCap * ratio)`, where `ratio` is `MIMOCODE_COMPACTION_TRIGGER_RATIO` (default 0.9). It remains the single source of truth for "when do we compact".
+- `headroom` = `effectiveCap - usable()`. It is the ratio-derived gap shown by `/status`, not `compaction.reserved` or an automatically imposed output-token cap.
 - Checkpoint thresholds only schedule checkpoint writers. Crossing the final threshold does not rebuild or compact; `usable()` remains the only automatic context-switch boundary.
 
-### S2.2 `Overflow.usable()` becomes budget-aware
+### S2.2 Current `Overflow.contextWindow()` arithmetic
 
-`packages/opencode/src/session/overflow.ts:13-24` is the only place the arithmetic changes:
+`packages/opencode/src/session/overflow.ts` resolves the window and exports `usable()` as a thin wrapper:
 
 ```ts
-export function usable(input: { cfg: Config.Info; model: Provider.Model; budget?: number }) {
-  const hard = input.model.limit.input || input.model.limit.context
-  if (hard === 0) return 0
-  const cap = Math.min(hard, resolveBudget(input) ?? hard)
-  const reserved = input.cfg.compaction?.reserved ?? Math.min(COMPACTION_BUFFER, ProviderTransform.maxOutputTokens(input.model))
-  const outputReserve = input.model.limit.input ? 0 : Math.min(ProviderTransform.maxOutputTokens(input.model), OUTPUT_CAP)
-  return Math.max(0, cap - outputReserve - reserved)
+const hard = model.limit.context === 0 ? 0 : model.limit.input || model.limit.context
+if (hard === 0) return { hard: 0, effective: 0, usable: 0, source: "model" }
+const reserved = reserves({ cfg, model })
+const configured = budget({ cfg, model }, hard, reserved)
+const effective = configured ?? hard
+return {
+  hard,
+  effective,
+  usable: Math.floor(effective * Flag.MIMOCODE_COMPACTION_TRIGGER_RATIO),
+  source: configured === undefined ? "model" : "config",
 }
 ```
 
 Invariants:
 
-- With no budget configured, the returned value is **byte-identical to today** for every model (the `limit.input` branch keeps `outputReserve = 0`; changing that is PR #1265's scope, not ours).
-- A budget larger than `hardCap` is silently clamped, never applied upward.
-- A budget below `reserved + outputReserve` yields `0`; `isOverflow` then fires on the first turn. Reject such values at the *write* boundary (S2.4) rather than letting the session brick.
-- `pressureLevel` / `contextPressureLevel` inherit the new denominator for free, so checkpoint thresholds (`prune.ts:274-292`) and `preserveRecentBudget` (`compaction.ts:49-54`) follow the budget automatically.
+- With no budget, both an independent-input-cap model and a context-only model use the ratio of their effective provider window. The old reserve subtraction is not a second trigger.
+- A budget at or above the provider cap is a no-op; it never raises the window.
+- Invalid budgets and budgets at or below `reserved + outputReserve` are ignored with a model-specific warning. The TUI writer refuses such values. They do not create a zero trigger by subtracting reserves from a valid window.
+- The reserve helper retains its existing configured/default buffer and independent-input-cap handling **only for budget validation**. Ratio headroom does not cap actual SDK output tokens.
+- Checkpoint, pruning and recovery consumers continue to use the shared `usable` value; no second checkpoint-percentage rebuild boundary is introduced.
 
-New exported helper for callers that need the numbers without the reserves:
+The exported `contextWindow()` result is `{ hard, effective, usable, source }`, with `source: "model" | "config"`. No session/plugin source or new `window()` API is introduced by this update.
 
-```ts
-export function window(input: { cfg: Config.Info; model: Provider.Model; budget?: number }): {
-  hard: number        // provider cap
-  effective: number   // after budget clamp
-  usable: number      // compaction trigger
-  source: "model" | "config" | "session" | "plugin"
-}
-```
+### S2.3 Current budget resolution
 
-`source` exists so the UI and CLI can explain *why* the number is what it is (fixes Defect 3's opacity).
-
-### S2.3 Budget resolution order
-
-Highest priority wins; each layer is optional:
-
-1. session override (only if Route C is chosen)
-2. `compaction.max_context` keyed by `"<providerID>/<modelID>"`, longest-match glob allowed (`"openai/gpt-5*"`)
-3. `compaction.max_context` scalar (all models)
-4. none → `hardCap`
+An explicit `compaction.max_context` scalar or keyed map takes precedence over `MIMOCODE_COMPACTION_MAX_CONTEXT`. For a map, matching uses the current `providerID/modelID` and longest-match wildcard rule. Missing, reset (`0`), invalid, too-small, or no-op-at-cap selections fall back to the model window. Percentages are relative to the provider cap. A per-session override remains the deferred Route C design, not a current input.
 
 ### S2.4 Config schema
 
-Added to the existing `compaction` struct (`packages/opencode/src/config/config.ts:239-258`):
+`compaction.max_context` in `packages/opencode/src/config/config.ts` accepts a `TokenQuantity` (number or string), or a record of model patterns to token quantities. `Token.parseQuantity()` handles absolute counts, shorthand units and percentages; `%` is relative to the provider cap.
 
-```ts
-max_context: Schema.optional(
-  Schema.Union(TokenBudget, Schema.Record(Schema.String, TokenBudget)),
-).annotate({
-  description:
-    'Compact earlier than the model window. Number of tokens or a string ("300K", "1M", "50%"). ' +
-    'Either one value for all models, or a map keyed by "<providerID>/<modelID>" (globs allowed). ' +
-    "Always clamped to the model's real window; never raises it.",
-})
-```
-
-`TokenBudget` = number | string. String parsing reuses the existing grammar of `prune.parseThreshold` (`packages/opencode/src/session/prune.ts:65-80`: `"40%"`, `"100K"`, `"1.5M"`, plain digits) — extract it into a shared helper rather than writing a second parser. `%` is relative to `hardCap`.
-
-Validation at write time (config load warns, slash command refuses): value must leave at least `reserved + outputReserve + 1` tokens, else it is ignored with a `log.warn` naming the model.
+The resolver warns on first use of an invalid model-specific budget, and the TUI writer refuses it. A valid configured budget must strictly exceed the combined legacy buffer and output reserve and be below the provider cap. This validates the budget; the accepted budget's trigger still uses only the ratio.
 
 ### S2.5 Provider-layer fix for Codex (independent of the user-facing knob)
 
@@ -216,21 +200,19 @@ The cap value, resolved during implementation (2026-07-27):
 
 Those are the two quantities S1.1 separates, so the provider layer takes 372K and the 272K line is documented as a `compaction.max_context` recipe rather than baked into the cap. Users on plans with a smaller served catalog window (openai/codex#33069 reports 272K for Pro Lite) can lower it the same way; the clamp form can only reduce, so a stale literal never produces an over-long prompt.
 
-### S2.6 Display / "how do I see my context window"
+### S2.6 Current display / "how do I see my context window"
 
-Three surfaces compute `%` independently against raw `limit.context` today, and none of them matches the trigger. All three switch to `Overflow.contextWindow()`:
+The TUI calls `Model.contextWindow(config, model)` from `src/cli/cmd/tui/util/model.ts`, which delegates to the engine's `Overflow.contextWindow()` resolver. It does not maintain a separate reserve formula or import a nonexistent `Overflow.window` helper. No new server route is required.
 
-| Surface | Today | After |
-| --- | --- | --- |
-| prompt footer `packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx:469-486` | `162,000 (15%)` vs raw context | `162.0K/300K (54%)` vs `usable`, with a `↓` marker when a budget is active |
-| sidebar context widget `.../feature-plugins/sidebar/context.tsx:67-95` | `% used` vs raw context | `% used` vs active limit + `limit 300K of 922K` when a 300K budget is active on a 922K model |
-| subagent footer `.../routes/session/subagent-footer.tsx:54-63` | raw context | usage vs internal `usable` trigger, matching the prompt footer |
-| `/status` dialog `.../component/dialog-status.tsx` | no context info at all | new **Context** block: model, provider window, budget + its source, reserved, compact-at, current tokens + `%` |
-| CLI | `mimo models openai --verbose` dumps the whole model JSON | add a `context` column to non-verbose output, or a `--context` flag printing `hard / effective / usable` |
+| Surface | Current value |
+| --- | --- |
+| Prompt footer `src/cli/cmd/tui/component/prompt/index.tsx` | Usage against `usable`, with a `↓` marker for a configured budget |
+| Sidebar `src/cli/cmd/tui/feature-plugins/sidebar/context.tsx` | Usage against the active limit, with e.g. `limit 300K of 922K` |
+| Subagent footer `src/cli/cmd/tui/routes/session/subagent-footer.tsx` | Usage against `usable`, matching the prompt footer |
+| `/status` `src/cli/cmd/tui/component/dialog-status.tsx` | Provider window, budget/source, **headroom** (`effective - usable`), compact-at (`usable`), usage and percentage |
+| `models` CLI | Provider window, configured budget where applicable, and compact-at from the same engine resolver |
 
-The TUI may import `Overflow.window` directly — TUI modules already import from `@/session/*` (`app.tsx:55`, `routes/session/index.tsx:100`) — and it already holds `sync.data.config` plus `sync.data.provider[i].models[id].limit`. No new server route is needed for display.
-
-Note this intentionally changes an existing user-visible number: the footer `%` will read higher than before for models whose reserves are large, because it is now measured against the value that actually triggers compaction. That is the point of the change and must be called out in the PR description.
+For a valid 300K budget at the default 0.9 ratio, compact-at is 270K and headroom is 30K. The footer denominator is 270K, while the sidebar active limit remains 300K. This is a calculated acceptance example, not a new live measurement. `/status` must not label the ratio-derived gap as the configured `reserved` value. Compared with the previous reserve-limited rule, some models will compact later and show a lower footer usage percentage for the same token count.
 
 ### S2.7 One recovery per assistant usage record
 
@@ -240,9 +222,9 @@ The next iteration or user turn may call the model on the rebuilt or compacted c
 
 The invariant is behavioral, not time-based: no cooldown or percentage margin is introduced. A later assistant turn with newly measured high usage may still trigger its own recovery.
 
-## [S3] Routes — decision required
+## [S3] Historical route decision (2026-07-27)
 
-Storage location for the user's budget. All routes share S2.1–S2.2 and S2.6; they differ in where the value lives and therefore in scope, persistence, and cost.
+These alternatives record the original storage decision. Route B is implemented; Route C remains deferred. Route D was superseded on 2026-08-22 as noted in S2.5. Their historical implementation details do not override the current S2 resolver.
 
 ### Route A — config only (`compaction.max_context`), no UI writer
 
@@ -288,7 +270,7 @@ Rejected alternatives:
 
 ## [S4] Out of scope
 
-- Per-session budget override (Route C) — deferred by the 2026-07-27 decision; layers on top of S2.3 priority 1 when demanded.
+- Per-session budget override (Route C) — deferred by the 2026-07-27 decision; would take precedence over the current S2.3 config/environment inputs when demanded.
 - Multi-pass compaction when history already exceeds the target window (issue #1840). A budget makes that state *rarer*, it does not resolve it.
 - Changing the `limit.input` output-reserve semantics (open PR #1265).
 - Lowering `DEFAULT_CONTEXT_WINDOW` (`provider.ts:35`), repeatedly proposed and closed (#1863, #648, #626).
@@ -298,7 +280,7 @@ Rejected alternatives:
 
 ## Tasks
 
-Route D (do first, independent):
+Route D (historical completion, superseded 2026-08-22):
 
 - [x] T1: Replace the assignment in `plugin/codex.ts` with a clamp, including `limit.input` and the `limit.context === 0` guard — acceptance: `bun test test/plugin/codex.test.ts` asserts `gpt-5.6-sol` → `{context: 372K, input: 372K}`, `gpt-5.3-codex` → `{context: 372K, input: 272K}`, `gpt-4o` → `{context: 128K}` unchanged and no `input` introduced, `gpt-image-1` → `{context: 0}` unchanged, `o3` → `{context: 200K}` unchanged (covers: S2.5)
 - [x] T2: Confirm the real Codex prompt cap and either keep the literal or make it plan-derived — acceptance: the chosen value is documented in a code comment with its source (covers: S2.5; depends: T1). Resolved to **372,000** with sources in the comment: OpenAI's Codex model registry declares `context_window = max_context_window = 372000` for the gpt-5.6 variants (openai/codex#31860 quotes the served catalog), and a direct Codex request with 350,317 input tokens completes (can1357/oh-my-pi#5705). The 272,000 figure that Codex's bundled metadata was lowered to (openai/codex#33972) is the >272K 2x-input / 1.5x-output billing boundary, i.e. a spending policy — documented as a `compaction.max_context` recipe instead of baked into the cap.
@@ -307,7 +289,7 @@ Route A (substrate):
 
 - [x] T3: Extract the threshold grammar from `prune.ts` into `Token.parseQuantity` and unit-test `"300K"` / `"1.5M"` / `"50%"` / plain number / invalid input — acceptance: `bun test` covers all five, `prune.ts` behaviour and error messages unchanged (covers: S2.4)
 - [x] T4: Add `compaction.max_context` to the config schema with scalar + keyed-map forms and a validation warning — acceptance: a config with `{"compaction":{"max_context":{"openai/gpt-5*":"300K"}}}` type-checks and parses; a value below the reserves logs a warning and is ignored (covers: S2.3, S2.4; depends: T3). The warning fires on first use rather than at load, so it names the model it applies to.
-- [x] T5: Make `Overflow.usable()` budget-aware and add `Overflow.contextWindow()` per S2.2 — acceptance: unit tests show (a) no budget → identical numbers to `main` for a `limit.input` model and a context-only model, (b) budget above the cap is clamped, (c) budget `300K` on a 1.05M/922K model yields `usable = 280K` and `isOverflow` fires there (covers: S2.2; depends: T4)
+- [x] T5 current-rule revalidation (2026-09-08): Keep the implemented budget resolver and verify upstream ratio semantics — acceptance: (a) no budget uses `floor(hard * ratio)` for independent-input-cap and context-only models, (b) budgets cannot raise the provider cap and too-small budgets are ignored, (c) valid `300K` yields `usable = 270K` at default ratio 0.9, and (d) a custom ratio controls the trigger without subtracting reserves (covers: S2.2; depends: T4). Verified by the current overflow and TUI model tests; this records local validation, not PR approval.
 - [x] T6: Document `compaction.max_context` wherever `compaction.*` is documented — acceptance: the doc states the clamp rule and the `"<providerID>/<modelID>"` key form (covers: S2.4; depends: T4)
 
 Route B (UI writer):
@@ -317,10 +299,10 @@ Route B (UI writer):
 
 Display (needed by any route):
 
-- [x] T9: Switch the prompt footer, sidebar context widget, and subagent footer to `Overflow.contextWindow()` — acceptance: prompt/subagent usage uses the internal trigger, while sidebar usage uses the active setting and compares it with the provider cap (covers: S2.6; depends: T5)
-- [x] T10: Add a Context block to the `/status` dialog showing provider window, budget + source, reserved, compact-at, current tokens and `%` — acceptance: with and without a configured budget the block renders correct numbers and the correct `source` label (covers: S2.6; depends: T5)
+- [x] T9: Route the prompt footer, sidebar context widget, and subagent footer through `Model.contextWindow()`, delegating to `Overflow.contextWindow()` — acceptance: prompt/subagent usage uses the internal trigger, while sidebar usage uses the active setting and compares it with the provider cap (covers: S2.6; depends: T5)
+- [x] T10 current-rule revalidation (2026-09-08): The existing `/status` Context block must label `effective - usable` as headroom, alongside provider window, budget/source, compact-at and usage — acceptance: default/custom ratios and configured/model windows show correct values; `headroom` is not labelled `reserved` (covers: S2.6; depends: T5). The resolver values are covered by overflow/TUI model tests; both display branches were inspected and package typecheck passed. No new live TUI measurement is claimed.
 - [x] T11: Surface the context window in the `models` CLI command without `--verbose` — acceptance: `mimocode models openai` prints each model's provider window and compact-at (covers: S2.6; depends: T5)
 - [x] T12: Decouple the final checkpoint threshold from the prompt-loop rebuild condition — acceptance: crossing the final checkpoint threshold below `usable()` writes a checkpoint but inserts no rebuild or compaction boundary; reaching `usable()` still follows the existing rebuild path (covers: S1.3, S2.1; depends: T5)
-- [x] T13: Show the configured active limit relative to the provider hard cap in the sidebar — acceptance: a 300K budget on a 922K model renders `limit 300K of 922K`, while the reserve-adjusted trigger remains internal and available in `/status` (covers: S2.6; depends: T5)
+- [x] T13: Show the configured active limit relative to the provider hard cap in the sidebar — acceptance: a 300K budget on a 922K model renders `limit 300K of 922K`, while the ratio-based trigger remains internal and available in `/status` (covers: S2.6; depends: T5)
 - [x] T14: Consume each assistant usage at most once during overflow recovery — acceptance: post-process recovery sets the current-loop skip guard; across user turns, a newer boundary prevents the recovered assistant from driving checkpoint scheduling, preflight overflow, or exit-time pruning; equivalent subagent/fork recovery paths set the same guard (covers: S1.6, S2.7; depends: T12)
 - [x] T15: Add regression coverage for duplicate recovery — acceptance: a low-usage initialization turn, a successful high-usage turn, and a following user turn produce two distinct checkpoint boundaries on current `main`, but exactly one boundary and one writer after T14; existing preflight and provider-overflow fallback tests remain green (covers: S1.6, S2.7; depends: T14)

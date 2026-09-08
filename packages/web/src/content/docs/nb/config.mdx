@@ -499,7 +499,7 @@ Du kan styre kontekstkomprimering gjennom alternativet `compaction`.
 
 - `auto` - Komprimer økten automatisk når konteksten er full (standard: `true`).
 - `prune` - Fjern gamle verktøyutdata for å spare tokens (standard: `true`).
-- `reserved` - Token-buffer for komprimering. Etterlater nok vindu til å unngå overflyt under komprimering
+- `reserved` - Kompatibilitetsbuffer som brukes til å validere `max_context`-budsjettet; trekkes ikke fra komprimeringsterskelen som beregnes ut fra forholdstallet.
 
 ---
 

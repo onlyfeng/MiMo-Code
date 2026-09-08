@@ -146,9 +146,16 @@ export function initial(
 export function contextWindow(config: Config | undefined, model: Model | undefined) {
   if (!model || !config) return undefined
   const result = overflowWindow({ cfg: config as never, model: model as never })
-  // usable can legitimately reach 0 (window smaller than the reserves, or a large
-  // compaction.reserved). Callers divide by it, so treat that as "unknown window".
+  // Flooring the ratio-based trigger can produce 0 for a tiny window.
+  // Callers divide by it, so treat that as "unknown window".
   return result.hard === 0 || result.usable === 0 ? undefined : result
+}
+
+/** Preview a budget only when the shared resolver actually adopts it. */
+export function contextBudget(config: Config | undefined, model: Model | undefined, value: number) {
+  if (!config || !Number.isSafeInteger(value) || value <= 0) return undefined
+  const result = contextWindow({ ...config, compaction: { ...config.compaction, max_context: value } }, model)
+  return result?.source === "config" && result.effective === value ? result : undefined
 }
 
 /** Window shape from `contextWindow` / the server's overflow arithmetic. */

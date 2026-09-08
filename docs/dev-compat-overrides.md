@@ -535,13 +535,13 @@ with no new DC. Current validation and publication limits are in the appended
 - Status: active
 - Canonical owner: `dev/compat` model-request safety boundary
 - Base: inherited main behavior
-  `d5798519cd1227ab4061bd69ef9efc5f483b74d8` retains FD-002 instruction
+  `df9a263bdfa60f762b0c90b6126a774ef60737ed` retains FD-002 instruction
   delivery, shared retry/title construction, versioned skill snapshots, stable
   per-session memory-path templates, FC-007's fixed `Instance.directory`, and
   FC-015's effective compaction window without this complete compat cap,
   serialization, and preflight set.
 - Overrides: compat behavior
-  `76685956e50b49605b92b681fae8e647512078c4` bounds model-visible content and
+  `4f7a82b89d43248f3396820dff5fc015356d4d2e` bounds model-visible content and
   estimates the effective request before dispatch. DC-ACTOR-001 separately owns
   the full-context/static-prefix actor extension.
 - Delta: instruction, inbox, replayed tool input/output, synthetic error media,
@@ -553,7 +553,10 @@ with no new DC. Current validation and publication limits are in the appended
   Request preflight accounts for system/messages, treats current-turn context
   as unshrinkable, includes only active tool schemas, and uses the inherited
   effective window, including `MIMOCODE_COMPACTION_MAX_CONTEXT` and the
-  reserve-safe trigger ratio. It routes recoverable overflow to existing
+  upstream ratio trigger. Preflight compares the estimate directly with that
+  trigger, without its former additional 5K/10% advance. Estimation can still
+  observe a larger current request than the previous provider usage record;
+  shared thresholds do not imply identical trigger timing. It routes recoverable overflow to existing
   recovery and distinguishes an unrecoverable static prefix. Preflight does not
   restore a mutable cwd store, setter, clear path, `Event.Changed` publisher,
   or `change_directory` tool; cross-directory calls continue to use absolute
@@ -627,8 +630,8 @@ with no new DC. Current validation and publication limits are in the appended
   and the published compat contract remain unchanged.
 - 2026-09-07 explicit model API propagation: Proxy body/output/concurrency bounds are shared FD-004 behavior; existing request preflight, content caps and generated contracts remain unchanged.
 - Review basis: inherited main
-  `d5798519cd1227ab4061bd69ef9efc5f483b74d8`; compat behavior
-  `76685956e50b49605b92b681fae8e647512078c4`.
+  `df9a263bdfa60f762b0c90b6126a774ef60737ed`; compat behavior
+  `4f7a82b89d43248f3396820dff5fc015356d4d2e`.
 - Evidence: focused tests at the compat behavior tree cover oversized
   instructions, structured provider/tool replay, unserializable inputs,
   synthetic media, UTF-8/surrogate limits, active-tool filtering, recoverable

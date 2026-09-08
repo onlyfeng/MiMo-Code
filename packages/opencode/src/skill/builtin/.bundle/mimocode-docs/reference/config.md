@@ -114,15 +114,15 @@ Prefer a markdown file (`.mimocode/agent/<name>.md`, body = system prompt) for d
 
 As context fills, MiMoCode auto-checkpoints (a background writer distills the conversation into `checkpoint.md`) and, near the limit, **rebuilds**: it inserts a boundary at the last successful checkpoint so earlier messages collapse to the checkpoint summary while recent messages are kept verbatim. If a checkpoint writer is still running when a rebuild is needed, the rebuild waits for it (with a visible "Preparing conversation context…" status) — briefly when a usable checkpoint already exists, longer for the very first one — then proceeds; if no checkpoint can be produced it falls back to lossy compaction. You can trigger a rebuild yourself any time with the `/rebuild` slash command.
 
-The trigger is the model's prompt capacity (`limit.input` when the provider publishes one, else `limit.context`) minus the reserves, optionally lowered by `compaction.max_context`. `mimo models <provider>` prints the resolved window and the trigger per model, and `/status` shows both plus the current usage. Two things users hit here: a model's usable window depends on the route (ChatGPT/Codex subscription vs direct API key vs a reseller like OpenRouter can all differ for the same model name, and a 1M catalog figure does not mean the route serves 1M), and providers may price very long prompts higher (OpenAI charges 2x input / 1.5x output for GPT-5.6 requests above 272K input) — `compaction.max_context` is the knob for both.
+The trigger is `floor(effective window × ratio)`, with a default ratio of 90%, configurable through `MIMOCODE_COMPACTION_TRIGGER_RATIO`. The effective window is the model's prompt capacity (`limit.input` when the provider publishes one, else `limit.context`), optionally lowered by a valid `compaction.max_context` budget. Reserves still validate that budget but are not subtracted from the trigger. `mimo models <provider>` prints the resolved window and the trigger per model, and `/status` shows both plus the current usage. Two things users hit here: a model's usable window depends on the route (ChatGPT/Codex subscription vs direct API key vs a reseller like OpenRouter can all differ for the same model name, and a 1M catalog figure does not mean the route serves 1M), and providers may price very long prompts higher (OpenAI charges 2x input / 1.5x output for GPT-5.6 requests above 272K input) — `compaction.max_context` is the knob for both.
 
 | Key | Purpose |
 |-----|---------|
 | `compaction.auto` | Auto-compact when context full (default true) |
 | `compaction.prune` | Prune old tool outputs (default true) |
-| `compaction.tail_turns` | Recent user turns kept verbatim (default 2) |
-| `compaction.preserve_recent_tokens` | Max recent tokens kept verbatim |
-| `compaction.reserved` | Token buffer to avoid overflow |
+| `compaction.tail_turns` | Deprecated compatibility setting; projected compaction keeps whole API rounds arriving during compression |
+| `compaction.preserve_recent_tokens` | Deprecated compatibility setting; compression-time API rounds use at most 40000 tokens, also capped by the ratio-based trigger after frozen prefix and projection overhead |
+| `compaction.reserved` | Compatibility buffer for validating `compaction.max_context`, together with any output reservation; not subtracted from the ratio-based trigger |
 | `compaction.max_context` | Compact earlier than the model window. One value for all models, or a map keyed `"<providerID>/<modelID>"` (wildcards allowed, longest pattern wins). Values: token count, `"300K"`, `"1M"`, or `"50%"` of the window. Always clamped to the provider cap — can only lower the trigger, never raise it. `0` = no budget. Set it from the TUI with `/context-limit` |
 | `checkpoint.thresholds` | Context-fill triggers, e.g. `["40%","60%","80%"]` |
 | `checkpoint.reserved` | Token buffer for checkpoint ops (default 20000) |

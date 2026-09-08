@@ -499,7 +499,7 @@ Bağlam sıkıştırma davranışını `compaction` seçeneği aracılığıyla 
 
 - `auto` - Bağlam dolduğunda oturumu otomatik olarak sıkıştırır (varsayılan: `true`).
 - `prune` - Belirteçleri kaydetmek için eski araç çıktılarını kaldırın (varsayılan: `true`).
-- `reserved` - Sıkıştırma için belirteç tamponu. Sıkıştırma sırasında taşmayı önlemek için yeterli pencere bırakır.
+- `reserved` - `max_context` bütçesini doğrulamak için kullanılan uyumluluk tamponu; orana göre hesaplanan sıkıştırma eşiğinden çıkarılmaz.
 
 ---
 

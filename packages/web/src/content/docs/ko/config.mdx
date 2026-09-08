@@ -497,7 +497,7 @@ OpenCode는 시작 시 새 업데이트를 자동으로 다운로드합니다. `
 
 - `auto` - context가 가득 찼을 때 세션을 자동 compact합니다(기본값: `true`).
 - `prune` - token 절약을 위해 오래된 tool 출력을 제거합니다(기본값: `true`).
-- `reserved` - compaction용 token buffer입니다. compaction 중 overflow가 나지 않도록 충분한 window를 남깁니다.
+- `reserved` - `max_context` 예산을 검증하는 데 사용하는 호환성 버퍼입니다. 비율로 계산한 압축 임계값에서는 차감하지 않습니다.
 
 ---
 
