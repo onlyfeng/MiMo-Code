@@ -1,3 +1,4 @@
+import { isTurnCancelled } from "../session/turn-cancellation"
 import * as RunApproval from "@/session/run-approval"
 import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit, Schedule } from "effect"
 import type { SessionID, MessageID } from "@/session/schema"
@@ -10,6 +11,7 @@ import { isRunDisposing, RunDisposal, type RunDisposalState } from "@/session/ru
 import { ActorRegistry } from "@/actor/registry"
 import { createActorLifecycle, type ForkGenerationOwner, type WakeGenerationOwner, type TerminalStatus } from "@/actor/lifecycle"
 import { TaskRegistry } from "@/task/registry"
+import type { TaskID } from "@/task/schema"
 import { TaskGate, MAX_TASK_GATE_SUBAGENT_REACT } from "@/task/gate"
 import { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
@@ -328,8 +330,9 @@ export interface Interface {
     sessionID: SessionID
     actorID: string
     assistantMessageID?: MessageID
+    task_id?: TaskID
     signal?: AbortSignal
-  }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError>
+  }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>
   readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
   readonly getForkContext: (sessionID: SessionID, actorID: string) => Effect.Effect<ForkContext | undefined>
   readonly runPersistentTurn?: (input: {
@@ -404,14 +407,24 @@ export const layer = Layer.effect(
           Effect.map((exit) => (Exit.isSuccess(exit) ? exit.value : undefined)),
         )
 
-    type FrozenContext = { context: ForkContext; instance: InstanceContext; disposal: RunDisposalState }
+    type FrozenContext = {
+      context: ForkContext
+      instance: InstanceContext
+      disposal: RunDisposalState
+      taskSessionID: SessionID
+    }
     const lifecycleState = createActorLifecycle<MessageV2.WithParts, FrozenContext, NotificationTarget>()
-    const retainForkContext = (key: string, context: ForkContext, receiver?: InstanceContext) => {
+    const retainForkContext = (
+      key: string,
+      context: ForkContext,
+      taskSessionID: SessionID,
+      receiver?: InstanceContext,
+    ) => {
       const capture = state.withRunDisposal(
         Effect.gen(function* () {
           const instance = yield* InstanceState.context
           const disposal = yield* RunDisposal
-          yield* lifecycleState.setForkContext(key, { context, instance, disposal })
+          yield* lifecycleState.setForkContext(key, { context, instance, disposal, taskSessionID })
         }),
       )
       return receiver ? capture.pipe(Effect.provideService(InstanceRef, receiver)) : capture
@@ -1057,7 +1070,7 @@ export const layer = Layer.effect(
             lifecycle,
             tools: input.tools,
           })
-          if (input.forkContext) yield* retainForkContext(key, input.forkContext, instanceRef)
+          if (input.forkContext) yield* retainForkContext(key, input.forkContext, input.sessionID, instanceRef)
           return yield* forkWork({
             runApproval: input.runApproval,
             sessionID: child.id,
@@ -1105,7 +1118,7 @@ export const layer = Layer.effect(
           // work fiber detaches below, so a concurrent reclaim can see it (MR104 #2).
           // Synchronous + best-effort: a throwing callback must not fail the spawn.
           if (input.onActorID) yield* Effect.sync(() => input.onActorID!(actorID)).pipe(Effect.ignore)
-          if (input.forkContext) yield* retainForkContext(key, input.forkContext)
+          if (input.forkContext) yield* retainForkContext(key, input.forkContext, input.parentSessionID ?? input.sessionID)
 
           // Auto-inject return-format instruction for lifecycle-managed subagents.
           // Agents with an explicit completionGate keep this behavior even when
@@ -1350,6 +1363,7 @@ export const layer = Layer.effect(
       return yield* Effect.uninterruptible(
         Effect.gen(function* () {
           while (true) {
+            const head = input.inboxID ? yield* inbox.head(input.sessionID, input.actorID) : undefined
             const ownership = yield* lifecycleState.acquireWake(key)
 
             if (ownership._tag === "blocked") return yield* Effect.interrupt
@@ -1364,7 +1378,8 @@ export const layer = Layer.effect(
             }
             if (ownership._tag === "follower") {
               const result = yield* Deferred.await(ownership.active.result)
-              if (input.inboxID && (yield* inbox.has(input.inboxID))) continue
+              const stalled = Exit.isFailure(result) && (!head || (yield* inbox.has(head)))
+              if (input.inboxID && !isTurnCancelled(result) && !stalled && (yield* inbox.has(input.inboxID))) continue
               if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
               return result.value
             }
@@ -1380,7 +1395,19 @@ export const layer = Layer.effect(
             const result = yield* state
               .ensureRunning(input.sessionID, input.actorID, input.onInterrupt, guardedWork)
               .pipe(Effect.interruptible, Effect.exit)
-            return yield* finishPersistentTurn(input, actor, owner, result)
+            const finished = yield* finishPersistentTurn(input, actor, owner, result).pipe(Effect.exit)
+            // Retry an unconsumed tail after progress, including a failed finish;
+            // cancellation and failures before any drain must not restart work.
+            const stalled = Exit.isFailure(finished) && (!head || (yield* inbox.has(head)))
+            if (
+              input.inboxID &&
+              !isTurnCancelled(result) &&
+              !isTurnCancelled(finished) &&
+              !stalled &&
+              (yield* inbox.has(input.inboxID))
+            ) continue
+            if (Exit.isFailure(finished)) return yield* Effect.failCause(finished.cause)
+            return finished.value
           }
         }),
       )
@@ -1458,7 +1485,7 @@ export const layer = Layer.effect(
           if (ownership._tag === "blocked") return yield* Effect.fail(recoveryUnavailable())
           if (ownership._tag !== "owner") return yield* Effect.fail(new Session.BusyError(input.sessionID))
           const owner = ownership.owner
-          const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError> | Session.BusyError>()
+          const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>()
           const accepted = { value: false, withdrawn: false }
           // This supervisor owns the actor generation until the actual Runner has
           // settled. Interrupting the admission caller/completion waiter cannot
@@ -1467,6 +1494,7 @@ export const layer = Layer.effect(
             const completion = yield* startActorResume({
               ...input,
               modelIdentity: frozen.context.modelIdentity,
+              taskSessionID: frozen.taskSessionID,
               validate: validate.pipe(
                 Effect.andThen(
                   Effect.gen(function* () {
@@ -1479,11 +1507,20 @@ export const layer = Layer.effect(
                   }),
                 ),
               ),
-              onAdmitted: Effect.gen(function* () {
-                if (input.signal?.aborted || accepted.withdrawn || !(yield* lifecycleState.isCurrentOpen(key, owner)))
-                  return yield* Effect.interrupt
-                // Ownership transfers here, immediately before old-message settlement.
+              // The synchronous transaction transfers ownership only after the
+              // task binding and old assistant settlement have actually committed.
+              onCommitted: () => {
                 accepted.value = true
+              },
+              shouldCommit: () =>
+                !input.signal?.aborted &&
+                !accepted.withdrawn &&
+                !owner.terminal &&
+                !frozen.instance.disposing &&
+                !isRunDisposing(frozen.disposal),
+              onAdmitted: Effect.gen(function* () {
+                if (!(yield* lifecycleState.isCurrentOpen(key, owner))) return yield* Effect.interrupt
+                yield* validate.pipe(Effect.catch(() => Effect.interrupt))
                 yield* actorReg
                   .updateStatus(input.sessionID, input.actorID, { status: "running" })
                   .pipe(Effect.ignoreCause)

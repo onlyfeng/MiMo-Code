@@ -4,7 +4,7 @@ import { Bus } from "../bus"
 import { Config } from "../config"
 import type { SessionID } from "../session/schema"
 import { TaskTable, TaskEventTable } from "./task.sql"
-import type { Task, TaskEvent } from "./schema"
+import { TaskID, type Task, type TaskEvent } from "./schema"
 import { Created as TaskCreated, Updated as TaskUpdated, type UpdatedKind } from "./events"
 import { RecoverableError } from "@/tool/recoverable"
 import { EffectBridge } from "@/effect"
@@ -55,6 +55,40 @@ function nextChildId(parentId: string | undefined, siblings: string[]): string {
     })
   const next = used.length > 0 ? Math.max(...used) + 1 : 1
   return `${prefix}${next}`
+}
+
+/** Internal synchronous claim; the recovery caller owns the enclosing transaction. */
+export function claimRecoveryTask(
+  tx: Database.TxOrDb,
+  input: { sessionID: SessionID; taskID: string; actorID: string; summary: string },
+): { error: "missing" | "conflict" } | { task: Task; changed: boolean } {
+  if (!TaskID.safeParse(input.taskID).success) return { error: "missing" }
+  const row = tx
+    .select()
+    .from(TaskTable)
+    .where(and(eq(TaskTable.session_id, input.sessionID), eq(TaskTable.id, input.taskID)))
+    .get()
+  if (!row) return { error: "missing" }
+  if ((row.status !== "open" && row.status !== "in_progress") || (row.owner != null && row.owner !== input.actorID))
+    return { error: "conflict" }
+  if (row.status === "in_progress" && row.owner === input.actorID) return { task: fromTaskRow(row), changed: false }
+  const now = Date.now()
+  const updated = tx
+    .update(TaskTable)
+    .set({ status: "in_progress", owner: input.actorID, last_event_at: now })
+    .where(and(eq(TaskTable.session_id, input.sessionID), eq(TaskTable.id, input.taskID)))
+    .returning()
+    .get()!
+  tx.insert(TaskEventTable)
+    .values({
+      session_id: input.sessionID,
+      task_id: input.taskID,
+      at: now,
+      kind: "started",
+      summary: input.summary,
+    })
+    .run()
+  return { task: fromTaskRow(updated), changed: true }
 }
 
 export interface Interface {

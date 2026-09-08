@@ -124,8 +124,11 @@ export const layer = Layer.effect(
       const target = messages.find((m) => m.info.id === input.messageID)
       if (!target || target.info.role !== "user") return
       const msgDiffs = yield* computeDiff({ messages })
-      target.info.summary = { ...target.info.summary, diffs: msgDiffs }
-      yield* sessions.updateMessage(target.info)
+      yield* sessions.patchMessageMetadata({
+        sessionID: input.sessionID,
+        messageID: input.messageID,
+        summaryDiffs: msgDiffs,
+      })
     })
 
     const diff = Effect.fn("SessionSummary.diff")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {

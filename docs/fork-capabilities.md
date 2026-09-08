@@ -18,8 +18,8 @@ authority.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `37bbc8229ca70a92b5eaaa7bafd725d070f3f271`
-- Bundled guidance content: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`
+- Main behavior (runtime/tests): `996ba09e92b9506ce0b09a34525851ffd85af3ec`
+- Bundled guidance content: `996ba09e92b9506ce0b09a34525851ffd85af3ec`
 - Prior fork `main` tip: `d415822c29539a4b6eebeafb59de1b88da18b95c`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
@@ -87,7 +87,13 @@ capability audit is recorded in [the model API review](released-model-api-review
   that binding; the caller that happens to win runner admission is not authority.
   Public session recovery and resume default to main. An explicit `agentID`
   selects only a controllable registered persistent full-context actor through
-  the existing actor recovery lifecycle; it cannot replace the persisted task.
+  the existing actor recovery lifecycle. Same-session registered targets may
+  have another registered controller, and a peer can be addressed through its
+  own session or original parent. Optional POST/tool `task_id` validates an
+  existing value or atomically fills a missing binding from the trusted spawn
+  task namespace. Missing tasks return 404; different bindings, blocked/terminal
+  tasks and another owner return 409. Omitted/same-value inputs preserve the
+  original task state, including historical archived bindings. GET stays read-only.
   No detached `resumeBackground` path is introduced. Unknown or ambiguous
   lifecycle callers fail closed.
   Only `actor spawn --context full --lifecycle persistent` explicitly selects
@@ -108,8 +114,12 @@ capability audit is recorded in [the model API review](released-model-api-review
   caller cannot release the running actor's generation early. FD-009 owns the
   frozen-context and resolved-model/harness identity checks.
   Resume settles the selected old assistant after atomic runner admission and
-  successful candidate validation, before completing the `admitted` signal or
-  entering the new `runLoop`. Runner ownership and busy publication precede
+  successful candidate validation. Optional task claim, started event, User
+  binding and old assistant settlement share one immediate transaction; a
+  synchronous commit callback transfers Actor ownership before another Effect
+  can yield. Withdrawing before commit writes nothing; cancellation afterwards
+  belongs to the accepted generation. This precedes the `admitted` signal and
+  the new `runLoop`. Runner ownership and busy publication precede
   this work; the guarantee concerns successful admission, not every status
   event. Busy rejection, a stale-candidate `NotFoundError`, and cancellation
   before admitted work starts leave persisted messages unchanged. The existing
@@ -161,6 +171,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   `packages/opencode/src/session/message-v2.ts`,
   `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/session/run-state.ts`,
+  `packages/opencode/src/session/session.ts`, `packages/opencode/src/task/registry.ts`,
   `packages/opencode/src/tool/actor.ts`, `packages/opencode/src/tool/plan.ts`,
   `packages/opencode/src/tool/session.ts`,
   `packages/sdk/openapi.json`, and `packages/sdk/js/src/v2/gen/`.
@@ -232,6 +243,13 @@ capability audit is recorded in [the model API review](released-model-api-review
   stale-idle exclusion, persistent-peer wake, tombstone, and parent-notice
   guarantees plus positive known-peer evidence for parent identity replacement,
   with behavior-focused regressions.
+
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-002 — canonical checkpoint writer and mode-specific frozen context
 
@@ -528,6 +546,13 @@ capability audit is recorded in [the model API review](released-model-api-review
   deletion, and optional-context semantics without forbidding legitimate
   temporary projects.
 
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
+
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
 - Status: active process/runtime contract
@@ -806,6 +831,13 @@ capability audit is recorded in [the model API review](released-model-api-review
   upstream guidance is factually equivalent for fork branch names, keys,
   runtime support, and user-facing errors.
 
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
+
 ## FC-012 — fork publication, contribution, and security routing
 
 - Status: active process contract
@@ -979,6 +1011,13 @@ capability audit is recorded in [the model API review](released-model-api-review
   value grammar, provider caps, zero restoration, ratio triggers, bounded
   frozen-prefix projection, and no-tool summaries, with behavior-focused
   regressions.
+
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-016 — owned voice results and grapheme-safe Prompt editing
 

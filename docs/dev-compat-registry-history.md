@@ -3384,3 +3384,75 @@ there are 49 distinct tests / 271 assertions across the combined evidence,
 not 55 tests. Six ambient selectors were cleared and package preload retained.
 Final package typecheck passed. Source-only merges after these runs changed no
 runtime/test content. Final PR review, CI and remote push CI remain gates.
+
+## 2026-09-09 POLICY-02 registered recovery and task inheritance
+
+| Capability inventory (N=1) | Main result | Compat result |
+| --- | --- | --- |
+| POLICY-02 | Broader live registered recovery, task consistency and validated missing binding | Same behavior with retained chronology and frozen-context extensions |
+
+Accepted main `540dad7493235cc5c0ce800ed49dfe1cb3a6e2b3` is inherited by source `ade6a56b2f6a5ab0725077c772db32138edbc89e`.
+Prior compat is `f38eecbf31fad26a8ff03dd2a90970be52fa71e5`, whose POLICY-03
+exact-tip CI and main ancestry are verified. Runtime/guidance is `afa6198588ba7f6e0a0c92623622c10da68837d7`; shared audit is `e9b426595c67b269c8fafa0555145f6da21fc1dd`.
+All seven active DC owners were reviewed; shared FD/FC/history match main.
+
+The POLICY-02 review inherits registered/live-context recovery and validated
+optional task binding. The task namespace comes from the original spawn;
+claim, original-user binding and interrupted-assistant settlement commit
+atomically. Main HTTP cancellation is checked before commit; after commit the
+runner retains ownership. Every recovered loop pins the committed original user
+and defers queued inbox until a later ordinary run. Metadata-only summary/setmode updates preserve
+concurrent recovery state and cannot resurrect deleted messages.
+
+Compat retains createMessage/commitUserMessage/commitUserMessageIfLatest,
+monotonic chronology and completed >= created during recovery settlement.
+Frozen turnContext, active/native tools, three-dimensional tool hashes, content
+caps, current-turn preflight and MaxMode remain intact. The same registry
+exclusions give 97 -> 98 overlay paths, retaining all prior paths and 42 package
+src paths. Only the recovery-commit test is new; 94 prior normalized deltas are
+unchanged. Session chronology and two Actor fixtures are the three adapted
+existing deltas. Shared FD/FC/history are byte-identical to accepted main.
+
+Local evidence: core/entry/stale writers 26 tests / 131 assertions; real
+HTTP/SDK/OpenAPI 28 / 339; Actor lifecycle 71 / 362. The cancellation follow-up
+runs main HTTP, existing recovery and commit tests: 30 / 156, overlapping prior
+evidence and not added wholesale. The shared Actor resume follow-up also passes
+31 cases / 226 assertions. Package typecheck and repository lint pass;
+standard SDK/OpenAPI regeneration from resolved sources adds no difference.
+Six ambient selectors are cleared; package preload remains the harness baseline.
+Cross-restart recovery is outside this change.
+
+Final compat current-head Codex review, all eight PR CI checks and merged-tip
+push CI are publication gates. These references do not rewrite older evidence.
+
+### 2026-09-09 POLICY-02 accepted durable inbox wake correction
+
+PR #93 review exposed a shared wake gap after preserving the recovered user.
+Main correction PR #94 accepts source `996ba09e92b9506ce0b09a34525851ffd85af3ec`, audit `c5e1a04fa43ad53ba489a79b5418ad2e4fa01f68`, formal main `9d26949e36c178d723a60b5664f7b31162ad64d8` and is inherited by compat source `a21254e9482785426bbe3ad58c895f83b2b764b8`.
+The ancestry merge preserves the tested preview tree exactly. Existing 98
+non-registry overlay paths (42 package src) remain; the incoming wake helper
+introduces no new compat difference. Shared FD/FC/history match main.
+
+The POLICY-02 durable-inbox follow-up rearms pending rows after successful or
+failed recovery through the existing Inbox/Runner/Actor lifecycle. It preserves
+the recovered user during execution and does not depend on a live sender wake
+or a manual later prompt. Plugin cancellation (including a subsequent post-hook failure), interruption, disposal and retired receivers do not
+restart execution. Both live and durable wake variants consume each row once. The wake tracks the
+queue tail, and persistent owners recheck it after settling each turn, so a
+provider or runtime failure in the first 100-row batch does not strand later rows.
+Both owners and concurrent followers require observed queue consumption before
+retrying after failure; a failure before consumption does not trigger extra work.
+Compat keeps its inherited Inbox content cap and all existing instance/context
+boundaries. No additional compat delta is introduced by this shared correction.
+
+The preceding compat main HTTP/Actor matrix passes 91 tests / 605 assertions;
+Inbox tests pass 54 / 133 across eleven files, and inbox/handoff tests pass
+8 / 30. The final joined-failure correction passes 35 tests / 319 assertions across
+main HTTP, Actor inbox and prompt handoff; the above earlier groups overlap. The preceding five-second retirement-fixture timeout is recorded in
+shared history; this complete run passes with explicit fixture budgets. Earlier matrices are
+historical, overlapping evidence. Package typecheck and repository lint pass;
+this internal helper changes no public schema or generated SDK. Shared registry
+files remain byte-identical to the accepted main correction.
+
+Current compat HEAD review, all eight CI checks and merged-tip push CI remain
+the final publication gates. Prior main/compat evidence is not re-dated.

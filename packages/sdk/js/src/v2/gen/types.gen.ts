@@ -18,6 +18,45 @@ export type EventGlobalDisposed = {
   }
 }
 
+export type EventTaskCreated = {
+  type: "task.created"
+  properties: {
+    sessionID: string
+    task: {
+      id: string
+      session_id: string
+      parent_task_id?: string
+      status: "open" | "in_progress" | "blocked" | "done" | "abandoned"
+      summary: string
+      owner?: string
+      created_at: number
+      last_event_at: number
+      ended_at?: number
+      cleanup_after?: number
+    }
+  }
+}
+
+export type EventTaskUpdated = {
+  type: "task.updated"
+  properties: {
+    sessionID: string
+    task: {
+      id: string
+      session_id: string
+      parent_task_id?: string
+      status: "open" | "in_progress" | "blocked" | "done" | "abandoned"
+      summary: string
+      owner?: string
+      created_at: number
+      last_event_at: number
+      ended_at?: number
+      cleanup_after?: number
+    }
+    kind: "started" | "unstarted" | "blocked" | "unblocked" | "done" | "abandoned" | "renamed"
+  }
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -153,45 +192,6 @@ export type EventInboxArrived = {
     senderActorID?: string
     inboxID: string
     type: string
-  }
-}
-
-export type EventTaskCreated = {
-  type: "task.created"
-  properties: {
-    sessionID: string
-    task: {
-      id: string
-      session_id: string
-      parent_task_id?: string
-      status: "open" | "in_progress" | "blocked" | "done" | "abandoned"
-      summary: string
-      owner?: string
-      created_at: number
-      last_event_at: number
-      ended_at?: number
-      cleanup_after?: number
-    }
-  }
-}
-
-export type EventTaskUpdated = {
-  type: "task.updated"
-  properties: {
-    sessionID: string
-    task: {
-      id: string
-      session_id: string
-      parent_task_id?: string
-      status: "open" | "in_progress" | "blocked" | "done" | "abandoned"
-      summary: string
-      owner?: string
-      created_at: number
-      last_event_at: number
-      ended_at?: number
-      cleanup_after?: number
-    }
-    kind: "started" | "unstarted" | "blocked" | "unblocked" | "done" | "abandoned" | "renamed"
   }
 }
 
@@ -1603,6 +1603,8 @@ export type GlobalEvent = {
   payload:
     | EventServerConnected
     | EventGlobalDisposed
+    | EventTaskCreated
+    | EventTaskUpdated
     | EventTuiPromptAppend
     | EventTuiCommandExecute
     | EventTuiToastShow
@@ -1614,8 +1616,6 @@ export type GlobalEvent = {
     | EventActorStalled
     | EventWriterCachePerf
     | EventInboxArrived
-    | EventTaskCreated
-    | EventTaskUpdated
     | EventMetricsModelCall
     | EventMetricsToolCall
     | EventMetricsAgentRequest
@@ -3261,6 +3261,8 @@ export type File = {
 export type Event =
   | EventServerConnected
   | EventGlobalDisposed
+  | EventTaskCreated
+  | EventTaskUpdated
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
@@ -3272,8 +3274,6 @@ export type Event =
   | EventActorStalled
   | EventWriterCachePerf
   | EventInboxArrived
-  | EventTaskCreated
-  | EventTaskUpdated
   | EventMetricsModelCall
   | EventMetricsToolCall
   | EventMetricsAgentRequest
@@ -5635,6 +5635,10 @@ export type SessionResumeData = {
      */
     titleLocale?: string
     agentID?: string
+    /**
+     * Validate the original task or bind an unbound interrupted user; never replace an existing task
+     */
+    task_id?: string
   }
   url: "/session/{sessionID}/turn/{assistantMessageID}/resume"
 }
