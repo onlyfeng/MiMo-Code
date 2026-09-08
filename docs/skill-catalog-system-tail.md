@@ -43,7 +43,9 @@ an interrupted old turn resumes, its system and generated catalog messages
 remain a pair. A new direct user turn migrates to system-tail layout. Model
 projection then omits only known generated catalog parts: historical wrapper,
 synthetic status and, for v2, matching version metadata must agree. Stored
-messages are not rewritten or deleted. Loaded `<skill_content>` bodies and
+messages are not rewritten or deleted. A valid v2 catalog description may itself
+mention `<skill_content>`; its schema/hash is verified before the loaded-content
+substring safeguard used for metadata-free legacy candidates. Loaded `<skill_content>` bodies and
 ordinary user quotations of catalog markers remain visible.
 
 Cold prefix capture constructs and pins a complete pair. Warm capture uses the
@@ -58,6 +60,6 @@ This is POLICY-04 alone, selected from release
 `2a0eb706e95a77cba34a319e9f11f33f26d4450c` and upstream snapshot
 `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`. The overall upstream review baseline
 remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`. Runtime/test reference:
-`b948ef02e6a44aa8eb8cdf67662d69335f58f6df`. This description records the local implementation;
+`0b665c7e681e44cac6f1a6acf18732015fb2bf86`. This description records the local implementation;
 publication, exact-head CI and compat propagation require their own evidence.
 Instruction enablement and the other selected policies are unchanged.
