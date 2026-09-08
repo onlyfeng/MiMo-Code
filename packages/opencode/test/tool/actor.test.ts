@@ -75,10 +75,15 @@ describe("Actor tool fromExec guard", () => {
     ),
   )
 
-  it.live("subagent calling send via exec is allowed", () =>
+  it.live("registered subagent calling send to its parent via exec is allowed", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const { chat, assistant } = yield* seed()
+        const registry = yield* ActorRegistry.Service
+        yield* registry.register({
+          sessionID: chat.id, actorID: "general-1", mode: "subagent", agent: "general",
+          description: "Registered sender", contextMode: "none", background: true, lifecycle: "ephemeral",
+        })
         const tool = yield* ActorTool
         const def = yield* tool.init()
 
@@ -86,7 +91,7 @@ describe("Actor tool fromExec guard", () => {
           {
             operation: {
               action: "send",
-              to_actor_id: "ses_nonexistent",
+              to_actor_id: "main",
               content: "hello",
             },
           },
@@ -94,6 +99,7 @@ describe("Actor tool fromExec guard", () => {
             sessionID: chat.id,
             messageID: assistant.id,
             agent: "general",
+            actorID: "general-1",
             abort: new AbortController().signal,
             extra: { fromExec: true },
             messages: [],
@@ -102,14 +108,14 @@ describe("Actor tool fromExec guard", () => {
           },
         ).pipe(Effect.provide(Inbox.defaultLayer))
 
-        expect(result.title).toBe("Send failed: receiver not found")
-        expect(result.metadata.error).toBe("receiver not found")
-        expect(result.metadata.receiver_actor_id).toBe("ses_nonexistent")
+        expect(result.title).toBe("Sent to main")
+        expect(result.metadata.inboxID).toBeTruthy()
+        expect(result.metadata.receiver_actor_id).toBe("main")
       }),
     ),
   )
 
-  it.live("primary agent calling spawn via exec is not blocked", () =>
+  it.live("primary agent calling spawn directly is not blocked", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         yield* installMockSpawn()
@@ -131,7 +137,7 @@ describe("Actor tool fromExec guard", () => {
             messageID: assistant.id,
             agent: "build",
             abort: new AbortController().signal,
-            extra: { fromExec: true },
+            extra: {},
             messages: [],
             metadata: () => Effect.void,
             ask: () => Effect.void,

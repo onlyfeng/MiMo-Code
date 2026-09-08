@@ -741,7 +741,10 @@ export const layer = Layer.effect(
                 return
               }
 
-              if (cfg.mcp_origins?.[key]?.type === "claude") {
+              if (
+                mcp.auto_connect === false ||
+                (cfg.mcp_origins?.[key]?.type === "claude" && mcp.auto_connect !== true)
+              ) {
                 s.status[key] = { status: "pending" }
                 return
               }

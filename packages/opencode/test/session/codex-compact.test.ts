@@ -3,6 +3,10 @@ import { dynamicTool, jsonSchema } from "ai"
 import { Deferred, Effect, Fiber, Layer } from "effect"
 import path from "path"
 import { Bus } from "../../src/bus"
+import { ActorRegistry } from "../../src/actor/registry"
+import { InboxArrived } from "../../src/actor/events"
+import { GlobalBus } from "../../src/bus/global"
+import { InboxTable } from "../../src/inbox/inbox.sql"
 import { permissionToolInput } from "../../src/cli/cmd/tui/routes/session/permission"
 import type { Config } from "../../src/config"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -17,6 +21,7 @@ import { Database, eq } from "../../src/storage"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
+import { viewExecSubtools } from "../../src/tool/tool-script"
 
 const calls: string[] = []
 const mcp = Layer.succeed(
@@ -62,6 +67,7 @@ const it = testEffect(
     Session.defaultLayer,
     Permission.defaultLayer,
     Bus.layer,
+    ActorRegistry.defaultLayer,
     CrossSpawnSpawner.defaultLayer,
     TestLLMServer.layer,
   ),
@@ -93,6 +99,86 @@ function config(url: string): Partial<Config.Info> {
 function wireTools(input: Record<string, unknown>) {
   return (input.tools as Array<{ type: string; function: { name: string; description: string } }>).map(
     (tool) => tool.function,
+  )
+}
+
+for (const restriction of ["none", "tool", "permission"] as const) {
+  const denied = restriction !== "none"
+  it.live(`Codex compact request-pinned actor ${denied ? `honors ${restriction} denial` : "sends and reads status"}`, () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const sessions = yield* Session.Service
+        const registry = yield* ActorRegistry.Service
+        const prompt = yield* SessionPrompt.Service
+        const session = yield* sessions.create({
+          title: "Request-pinned actor composition",
+          permission: [
+            { permission: "*", pattern: "*", action: "allow" },
+            ...(restriction === "permission" ? [{ permission: "actor", pattern: "*", action: "deny" as const }] : []),
+          ],
+        })
+        const arrived: Array<{ inboxID: string; senderActorID?: string }> = []
+        const onEvent = (event: { payload: { type: string; properties?: unknown } }) => {
+          if (event.payload.type !== InboxArrived.type) return
+          const parsed = InboxArrived.properties.safeParse(event.payload.properties)
+          if (parsed.success && parsed.data.receiverSessionID === session.id && parsed.data.receiverActorID === "general-1")
+            arrived.push(parsed.data)
+        }
+        GlobalBus.on("event", onEvent)
+        yield* Effect.addFinalizer(() => Effect.sync(() => { GlobalBus.off("event", onEvent) }))
+        yield* registry.register({
+          sessionID: session.id, actorID: "general-1", mode: "subagent", agent: "general",
+          description: "Real compact actor receiver", contextMode: "none", background: true, lifecycle: "ephemeral",
+        })
+        yield* registry.updateStatus(session.id, "general-1", { status: "running" })
+        yield* llm.tool("exec", { code: `try {
+await tools.actor({ operation: { action: "send", to_actor_id: "general-1", content: "wire actor message" } });
+return await tools.actor({ operation: { action: "status", actor_id: "general-1" } });
+} catch (error) { return error.message; }` })
+        yield* llm.text("actor composition finished")
+        yield* prompt.prompt({
+          sessionID: session.id, agent: "build", model,
+          ...(restriction === "tool" ? { tools: { actor: false } } : {}),
+          parts: [{ type: "text", text: "Send the receiver a message and inspect its status" }],
+        })
+        const advertised = wireTools((yield* llm.inputs)[0])
+        const declaration = advertised.find((tool) => tool.name === "exec")!.description
+        expect(advertised.some((tool) => tool.name === "actor")).toBe(!denied)
+        expect(declaration.includes("actor(input:")).toBe(!denied)
+        const messages = yield* sessions.messages({ sessionID: session.id })
+        const execution = messages.flatMap((message) => message.parts).find((part) => part.type === "tool" && part.tool === "exec")
+        expect(execution?.type === "tool" && execution.state.status === "completed").toBe(true)
+        if (execution?.type === "tool" && execution.state.status === "completed") {
+          expect(execution.state.output).toContain(denied ? "unknown tool: actor" : "Real compact actor receiver")
+          if (!denied) {
+            const sent = viewExecSubtools(execution.state.metadata)[0]
+            expect(sent?.state.output).toContain("inboxID")
+            expect(sent?.state.output).not.toContain("receiver not found")
+            expect(arrived).toHaveLength(1)
+            expect(arrived[0].senderActorID).toBe("main")
+            if (sent?.state.status === "completed" && typeof sent.state.output === "string")
+              expect(JSON.parse(sent.state.output).inboxID).toBe(arrived[0].inboxID)
+            expect(sent?.state.input).toEqual({
+              operation: { action: "send", to_actor_id: "general-1", content: "wire actor message" },
+            })
+          }
+          if (denied) expect(arrived).toHaveLength(0)
+        }
+        const rows = yield* Effect.sync(() =>
+          Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, session.id)).all()),
+        )
+        if (denied) expect(rows).toHaveLength(0)
+        if (!denied) {
+          const signature = declaration.split("\n").find((line) => line.includes("actor(input:"))!
+          expect(signature).toContain('action: "send"')
+          expect(signature).toContain('action: "status"')
+          expect(signature).not.toContain('action: "cancel"')
+        }
+
+      }),
+      { git: true, config },
+    ),
+    30000,
   )
 }
 
@@ -193,7 +279,11 @@ it.live("Codex compact production wire retains control tools and nests ordinary 
       expect(exec.description).toContain("exec_command(input:")
       expect(exec.description).toContain("task(input:")
       expect(exec.description).toContain("skill(input:")
-      expect(exec.description).not.toContain("actor(input:")
+      expect(exec.description).toContain("actor(input:")
+      const actorDeclaration = exec.description.split("\n").find((line) => line.includes("actor(input:"))!
+      expect(actorDeclaration).toContain('action: "send"')
+      expect(actorDeclaration).toContain('action: "status"')
+      expect(actorDeclaration).not.toContain('action: "spawn"')
     }),
     { git: true, config },
   ),

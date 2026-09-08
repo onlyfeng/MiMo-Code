@@ -58,7 +58,7 @@ test("every $ref in the generated OpenAPI document resolves", async () => {
   expect(dangling).toEqual([])
 })
 
-test("published OpenAPI keeps recovery and resume main-only", async () => {
+test("published OpenAPI exposes controlled actor recovery without task overrides", async () => {
   const docs = [await Server.openapi(), await Bun.file(new URL("../../../sdk/openapi.json", import.meta.url)).json()]
 
   for (const doc of docs) {
@@ -66,11 +66,14 @@ test("published OpenAPI keeps recovery and resume main-only", async () => {
     const resume = operation(doc, "/session/{sessionID}/turn/{assistantMessageID}/resume", "post")
     expect(recovery).toBeDefined()
     expect(resume).toBeDefined()
-    expect(parameterNames(recovery)).not.toContain("agentID")
-    expect(parameterNames(resume)).not.toContain("agentID")
+    expect(parameterNames(recovery)).toContain("agentID")
+    expect(parameterNames(resume)).toContain("agentID")
+    expect(parameterNames(recovery)).not.toContain("task_id")
     expect(parameterNames(resume)).not.toContain("task_id")
-    expect(recovery?.description).toContain("main-agent")
-    expect(resume?.description).toContain("main-agent")
+    expect(recovery?.description).toContain("main agent by default")
+    expect(resume?.description).toContain("main agent by default")
+    expect(recovery?.description).toContain("controllable persistent full-context actor")
+    expect(resume?.description).toContain("controllable persistent full-context actor")
   }
 })
 

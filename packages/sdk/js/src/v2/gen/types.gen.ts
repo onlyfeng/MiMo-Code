@@ -2129,6 +2129,10 @@ export type McpLocalConfig = {
    */
   enabled?: boolean
   /**
+   * Connect automatically when the instance starts. Defaults to false for Claude-imported servers and true for native servers. enabled: false takes precedence.
+   */
+  auto_connect?: boolean
+  /**
    * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
    */
   timeout?: number
@@ -2167,6 +2171,10 @@ export type McpRemoteConfig = {
    * Enable or disable the MCP server on startup
    */
   enabled?: boolean
+  /**
+   * Connect automatically when the instance starts. Defaults to false for Claude-imported servers and true for native servers. enabled: false takes precedence.
+   */
+  auto_connect?: boolean
   /**
    * Headers to send with the request
    */
@@ -2515,6 +2523,11 @@ export type Config = {
       | McpRemoteConfig
       | {
           enabled: boolean
+          auto_connect?: boolean
+        }
+      | {
+          auto_connect: boolean
+          enabled?: boolean
         }
   }
   formatter?:
@@ -5507,6 +5520,7 @@ export type SessionRecoveryData = {
   query?: {
     directory?: string
     workspace?: string
+    agentID?: string
   }
   url: "/session/{sessionID}/recovery"
 }
@@ -5546,7 +5560,11 @@ export type SessionResumeData = {
   query?: {
     directory?: string
     workspace?: string
+    /**
+     * Title locale for main-agent recovery only
+     */
     titleLocale?: string
+    agentID?: string
   }
   url: "/session/{sessionID}/turn/{assistantMessageID}/resume"
 }

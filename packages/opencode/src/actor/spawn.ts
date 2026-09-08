@@ -28,7 +28,7 @@ import { Plugin, HookEvent } from "@/plugin"
 import { parseReturnHeader, type ReturnStatus } from "./return-header"
 import { assistantFinalText, sessionErrorText } from "@/session/trajectory"
 import { Log } from "@/util"
-import { NotFoundError } from "@/storage/db"
+import { NotFoundError } from "@/storage"
 import { Instance, type InstanceContext } from "@/project/instance"
 import { InstanceState } from "@/effect"
 import { InstanceRef } from "@/effect/instance-ref"
@@ -306,9 +306,14 @@ export interface SpawnResult {
 
 export interface Interface {
   readonly spawn: (input: SpawnInput) => Effect.Effect<SpawnResult>
+  readonly recovery?: (input: {
+    sessionID: SessionID
+    actorID: string
+  }) => Effect.Effect<SessionPrompt.RecoveryCandidate[], InstanceType<typeof NotFoundError>>
   readonly resume?: (input: {
     sessionID: SessionID
     actorID: string
+    assistantMessageID?: MessageID
     signal?: AbortSignal
   }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError>
   readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
@@ -1335,12 +1340,14 @@ export const layer = Layer.effect(
       return yield* runPersistentTurnImpl(input, wakeSource).pipe(state.withRunDisposal)
     })
 
-    const resume: NonNullable<Interface["resume"]> = Effect.fn("Actor.resume")(function* (input) {
-      if (input.signal?.aborted || isRunDisposing(yield* RunDisposal)) return yield* Effect.interrupt
+    const recoveryUnavailable = () =>
+      new NotFoundError({ message: "Actor has no resumable turn with retained current-instance context" })
+    const recoveryActor = Effect.fn("Actor.recoveryActor")(function* (input: {
+      sessionID: SessionID
+      actorID: string
+    }) {
       const key = actorKey(input.sessionID, input.actorID)
       const frozen = yield* lifecycleState.getForkContext(key)
-      const unavailable = () =>
-        new NotFoundError({ message: "Actor has no resumable turn with retained current-instance context" })
       const actor = yield* actorReg.get(input.sessionID, input.actorID)
       if (
         !actor ||
@@ -1353,8 +1360,7 @@ export const layer = Layer.effect(
         frozen.instance.disposing ||
         !sessionPrompt.startActorResume
       )
-        return yield* Effect.fail(unavailable())
-      const startActorResume = sessionPrompt.startActorResume
+        return yield* Effect.fail(recoveryUnavailable())
       const validate = Effect.gen(function* () {
         const current = yield* lifecycleState.getForkContext(key)
         const instance = yield* InstanceState.context
@@ -1365,13 +1371,38 @@ export const layer = Layer.effect(
           disposal !== frozen.disposal ||
           isRunDisposing(frozen.disposal)
         )
-          return yield* Effect.fail(unavailable())
+          return yield* Effect.fail(recoveryUnavailable())
       })
+      return { key, actor, frozen, validate }
+    })
+
+    const recovery: NonNullable<Interface["recovery"]> = Effect.fn("Actor.recovery")(function* (input) {
+      const target = yield* recoveryActor(input)
+      return yield* Effect.gen(function* () {
+        yield* target.validate
+        const candidates = yield* sessionPrompt.recovery({
+          sessionID: input.sessionID,
+          agentID: input.actorID,
+          modelIdentity: target.frozen.context.modelIdentity,
+        })
+        yield* target.validate
+        return candidates
+      }).pipe(
+        state.withRunDisposal,
+        Effect.provideService(InstanceRef, target.frozen.instance),
+        Effect.provideService(RunDisposal, target.frozen.disposal),
+      )
+    })
+
+    const resume: NonNullable<Interface["resume"]> = Effect.fn("Actor.resume")(function* (input) {
+      if (input.signal?.aborted || isRunDisposing(yield* RunDisposal)) return yield* Effect.interrupt
+      const { key, actor, frozen, validate } = yield* recoveryActor(input)
+      const startActorResume = sessionPrompt.startActorResume!
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           yield* validate
           const ownership = yield* lifecycleState.acquireWake(key)
-          if (ownership._tag === "blocked") return yield* Effect.fail(unavailable())
+          if (ownership._tag === "blocked") return yield* Effect.fail(recoveryUnavailable())
           if (ownership._tag !== "owner") return yield* Effect.fail(new Session.BusyError(input.sessionID))
           const owner = ownership.owner
           const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError> | Session.BusyError>()
@@ -1766,7 +1797,7 @@ export const layer = Layer.effect(
         if (!instance.disposing) yield* captureNotificationTarget(instance)
         yield* scanRememberedTargets
       })
-    const impl = Service.of({ spawn, resume, cancel, getForkContext, runPersistentTurn, scanStalledOnce })
+    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it

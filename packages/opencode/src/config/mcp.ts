@@ -13,6 +13,11 @@ const samplingField = Schema.optional(Sampling).annotate({
     "Policy for MCP client-side sampling (`sampling/createMessage`) from this server: deny, ask (default), or allow.",
 })
 
+const autoConnectField = Schema.optional(Schema.Boolean).annotate({
+  description:
+    "Connect automatically when the instance starts. Defaults to false for Claude-imported servers and true for native servers. enabled: false takes precedence.",
+})
+
 export class Local extends Schema.Class<Local>("McpLocalConfig")({
   type: Schema.Literal("local").annotate({ description: "Type of MCP server connection" }),
   command: Schema.mutable(Schema.Array(Schema.String)).annotate({
@@ -24,6 +29,7 @@ export class Local extends Schema.Class<Local>("McpLocalConfig")({
   enabled: Schema.optional(Schema.Boolean).annotate({
     description: "Enable or disable the MCP server on startup",
   }),
+  auto_connect: autoConnectField,
   timeout: Schema.optional(Schema.Number).annotate({
     description: "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
   }),
@@ -53,6 +59,7 @@ export class Remote extends Schema.Class<Remote>("McpRemoteConfig")({
   enabled: Schema.optional(Schema.Boolean).annotate({
     description: "Enable or disable the MCP server on startup",
   }),
+  auto_connect: autoConnectField,
   headers: Schema.optional(Schema.Record(Schema.String, Schema.String)).annotate({
     description: "Headers to send with the request",
   }),

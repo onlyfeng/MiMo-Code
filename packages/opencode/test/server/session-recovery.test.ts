@@ -18,7 +18,7 @@ afterEach(async () => {
 })
 
 describe("session turn recovery routes", () => {
-  test("does not expose or resume interrupted actor turns", async () => {
+  test("does not expose or resume unregistered actor turns", async () => {
     await using tmp = await tmpdir({ git: true, root: "cwd" })
     const result = await Instance.provide({
       directory: tmp.path,
@@ -50,17 +50,18 @@ describe("session turn recovery routes", () => {
           time: { created: Date.now() },
         })
         const app = Server.Default().app
-        const query = `?directory=${encodeURIComponent(tmp.path)}&agentID=peer-1&task_id=T1`
+        const query = `?directory=${encodeURIComponent(tmp.path)}`
         const listed = yield* Effect.promise(() => Promise.resolve(app.request(`/session/${session.id}/recovery${query}`)))
         const candidates = yield* Effect.promise(() => listed.json())
         const resumed = yield* Effect.promise(() =>
-          Promise.resolve(app.request(`/session/${session.id}/turn/${assistant.id}/resume${query}`, { method: "POST" })),
+          Promise.resolve(app.request(`/session/${session.id}/turn/${assistant.id}/resume${query}&agentID=peer-1`, { method: "POST" })),
         )
-        return { listed: listed.status, candidates, resumed: resumed.status }
+        const actorListed = yield* Effect.promise(() => Promise.resolve(app.request(`/session/${session.id}/recovery${query}&agentID=peer-1`)))
+        return { listed: listed.status, candidates, resumed: resumed.status, actorListed: actorListed.status }
       })),
     })
 
-    expect(result).toEqual({ listed: 200, candidates: [], resumed: 404 })
+    expect(result).toEqual({ listed: 200, candidates: [], resumed: 404, actorListed: 404 })
   })
 
   test("lists the latest incomplete assistant and accepts resume without a new prompt", async () => {
@@ -106,6 +107,19 @@ describe("session turn recovery routes", () => {
         })
         const query = `?directory=${encodeURIComponent(tmp.path)}`
         const resumeQuery = `${query}&titleLocale=fr-FR`
+        const before = yield* sessions.messages({ sessionID: session.id, agentID: "main" })
+        for (const selector of ["", "&agentID=main"]) {
+          const rejected = yield* Effect.promise(() =>
+            Promise.all([
+              app.request(`/session/${session.id}/recovery${query}${selector}&task_id=other`),
+              app.request(`/session/${session.id}/turn/${assistant.id}/resume${query}${selector}&task_id=other`, {
+                method: "POST",
+              }),
+            ]),
+          )
+          expect(rejected.map((response) => response.status)).toEqual([400, 400])
+        }
+        expect(yield* sessions.messages({ sessionID: session.id, agentID: "main" })).toEqual(before)
         const listed = yield* Effect.promise(() => Promise.resolve(app.request(`/session/${session.id}/recovery${query}`)))
         const candidates: unknown = yield* Effect.promise(() => listed.json())
         const missing = yield* Effect.promise(() =>

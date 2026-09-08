@@ -1,5 +1,91 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { evalScript } from "../../src/workflow/sandbox"
+
+function sandboxResources() {
+  const controller = new AbortController()
+  const timers = new Set<unknown>()
+  const listeners = new Set<unknown>()
+  const schedule = globalThis.setTimeout
+  const clear = globalThis.clearTimeout
+  const add = controller.signal.addEventListener.bind(controller.signal)
+  const remove = controller.signal.removeEventListener.bind(controller.signal)
+  const spies = [
+    spyOn(globalThis, "setTimeout").mockImplementation(((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+      const timer = schedule(() => {
+        timers.delete(timer)
+        fn(...args)
+      }, ms)
+      timers.add(timer)
+      return timer
+    }) as typeof setTimeout),
+    spyOn(globalThis, "clearTimeout").mockImplementation((timer) => {
+      timers.delete(timer)
+      clear(timer as ReturnType<typeof setTimeout>)
+    }),
+    spyOn(controller.signal, "addEventListener").mockImplementation((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+      if (type === "abort") listeners.add(listener)
+      add(type, listener, options)
+    }),
+    spyOn(controller.signal, "removeEventListener").mockImplementation((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => {
+      if (type === "abort") listeners.delete(listener)
+      remove(type, listener, options)
+    }),
+  ]
+  return {
+    controller,
+    timers,
+    listeners,
+    [Symbol.dispose]() {
+      spies.forEach((spy) => spy.mockRestore())
+    },
+  }
+}
+
+describe("Sandbox active cancellation", () => {
+  test("aborts a parked guest before its wall deadline and releases timers and listener", async () => {
+    using resources = sandboxResources()
+    const entered = Promise.withResolvers<void>()
+    const reason = new Error("cancel parked guest")
+    const result = evalScript("entered(); await new Promise(() => {})", { entered: () => entered.resolve() }, {
+      signal: resources.controller.signal,
+      deadlineMs: 5_000,
+    })
+    await entered.promise
+    resources.controller.abort(reason)
+    await expect(result).rejects.toBe(reason)
+    expect(resources.timers.size).toBe(0)
+    expect(resources.listeners.size).toBe(0)
+    expect(await evalScript("return 'after abort'", {})).toBe("after abort")
+  }, 10_000)
+
+  test("rejects a pre-aborted signal without entering any host hook", async () => {
+    using resources = sandboxResources()
+    const calls: string[] = []
+    const reason = new Error("cancel before initialization")
+    resources.controller.abort(reason)
+    await expect(evalScript("mark(); return 1", { mark: () => calls.push("entered") }, {
+      signal: resources.controller.signal,
+    })).rejects.toBe(reason)
+    expect(calls).toEqual([])
+    expect(resources.timers.size).toBe(0)
+    expect(resources.listeners.size).toBe(0)
+  })
+
+  for (const outcome of ["success", "error"] as const) {
+    test(`releases cancellation resources after guest ${outcome}`, async () => {
+      using resources = sandboxResources()
+      const result = evalScript(outcome === "success" ? "return 42" : "throw new Error('guest failed')", {}, {
+        signal: resources.controller.signal,
+      })
+      if (outcome === "success") expect(await result).toBe(42)
+      else await expect(result).rejects.toThrow("guest failed")
+      expect(resources.timers.size).toBe(0)
+      expect(resources.listeners.size).toBe(0)
+      resources.controller.abort()
+      expect(await evalScript("return 7", {})).toBe(7)
+    })
+  }
+})
 
 describe("Sandbox basic eval", () => {
   test("runs a script body and returns the value", async () => {
