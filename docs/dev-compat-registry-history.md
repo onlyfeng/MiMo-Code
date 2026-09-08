@@ -3384,3 +3384,43 @@ there are 49 distinct tests / 271 assertions across the combined evidence,
 not 55 tests. Six ambient selectors were cleared and package preload retained.
 Final package typecheck passed. Source-only merges after these runs changed no
 runtime/test content. Final PR review, CI and remote push CI remain gates.
+
+## 2026-09-09 POLICY-02 registered recovery and task inheritance
+
+| Capability inventory (N=1) | Main result | Compat result |
+| --- | --- | --- |
+| POLICY-02 | Broader live registered recovery, task consistency and validated missing binding | Same behavior with retained chronology and frozen-context extensions |
+
+Accepted main `540dad7493235cc5c0ce800ed49dfe1cb3a6e2b3` is inherited by source `ade6a56b2f6a5ab0725077c772db32138edbc89e`.
+Prior compat is `f38eecbf31fad26a8ff03dd2a90970be52fa71e5`, whose POLICY-03
+exact-tip CI and main ancestry are verified. Runtime/guidance is `afa6198588ba7f6e0a0c92623622c10da68837d7`; shared audit is `e9b426595c67b269c8fafa0555145f6da21fc1dd`.
+All seven active DC owners were reviewed; shared FD/FC/history match main.
+
+The POLICY-02 review inherits registered/live-context recovery and validated
+optional task binding. The task namespace comes from the original spawn;
+claim, original-user binding and interrupted-assistant settlement commit
+atomically. Main HTTP cancellation is checked before commit; after commit the
+runner retains ownership. Every recovered loop pins the committed original user
+and defers queued inbox until a later ordinary run. Metadata-only summary/setmode updates preserve
+concurrent recovery state and cannot resurrect deleted messages.
+
+Compat retains createMessage/commitUserMessage/commitUserMessageIfLatest,
+monotonic chronology and completed >= created during recovery settlement.
+Frozen turnContext, active/native tools, three-dimensional tool hashes, content
+caps, current-turn preflight and MaxMode remain intact. The same registry
+exclusions give 97 -> 98 overlay paths, retaining all prior paths and 42 package
+src paths. Only the recovery-commit test is new; 94 prior normalized deltas are
+unchanged. Session chronology and two Actor fixtures are the three adapted
+existing deltas. Shared FD/FC/history are byte-identical to accepted main.
+
+Local evidence: core/entry/stale writers 26 tests / 131 assertions; real
+HTTP/SDK/OpenAPI 28 / 339; Actor lifecycle 71 / 362. The cancellation follow-up
+runs main HTTP, existing recovery and commit tests: 30 / 156, overlapping prior
+evidence and not added wholesale. The shared Actor resume follow-up also passes
+31 cases / 226 assertions. Package typecheck and repository lint pass;
+standard SDK/OpenAPI regeneration from resolved sources adds no difference.
+Six ambient selectors are cleared; package preload remains the harness baseline.
+Cross-restart recovery is outside this change.
+
+Final compat current-head Codex review, all eight PR CI checks and merged-tip
+push CI are publication gates. These references do not rewrite older evidence.

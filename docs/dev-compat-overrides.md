@@ -12,17 +12,17 @@ registry/history commit does not advance either behavior reference below.
 
 - Status: active
 - Canonical owner: fork `dev/compat`
-- Last reviewed: 2026-09-08
+- Last reviewed: 2026-09-09
 - Reviewed upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
-- Accepted `main` tip: `6e4ed8d3f859bd1355789748ae7a5f385cf0fbb1`
-- Inherited main behavior: `37bbc8229ca70a92b5eaaa7bafd725d070f3f271`
-- Compat behavior: `ec963d93abcc41a41aff9a65a6fd8f4b5aabfdef`
-- Prior compat tip: `823e21d2fd7c3a2603d14bf15289351a6c555f81`
-- Main source inheritance merge: `ec963d93abcc41a41aff9a65a6fd8f4b5aabfdef`
-- Shared audit commit: `e44e926c2cf9dff4f3fc04cb4f3f5493af194d87`
-- Inherited bundled guidance content: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`
-- Tested local preview: `bec0038cea1e33ca3059cd176927442742b87963` (raw-fetch follow-up; later changes are documentation/ancestry only)
-- Publication state: POLICY-03 main PR #89 accepted after current-head Codex review and all eight CI checks; compat inherits the formal merge and awaits its own review and CI.
+- Accepted `main` tip: `540dad7493235cc5c0ce800ed49dfe1cb3a6e2b3`
+- Inherited main behavior: `afa6198588ba7f6e0a0c92623622c10da68837d7`
+- Compat behavior: `ade6a56b2f6a5ab0725077c772db32138edbc89e`
+- Prior compat tip: `f38eecbf31fad26a8ff03dd2a90970be52fa71e5`
+- Main source inheritance merge: `ade6a56b2f6a5ab0725077c772db32138edbc89e`
+- Shared audit commit: `e9b426595c67b269c8fafa0555145f6da21fc1dd`
+- Inherited bundled guidance content: `afa6198588ba7f6e0a0c92623622c10da68837d7`
+- Tested local preview: `c754793e2bab87cf8f84e1322ce98beded80689c` (inbox provenance correction; later changes are documentation/ancestry only)
+- Publication state: POLICY-02 main PR #92 accepted after current-head Codex review and all eight CI checks; compat inherits the formal merge and awaits its own review and CI.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -330,8 +330,33 @@ MaxMode, frozen context and request metadata contracts remain unchanged.
 Local validation groups: worker/listener/thread/scoped SDK 23 tests / 127
 assertions; HTTP/bootstrap/TUI events 24 / 131; the raw-fetch correction matrix
 8 / 46 overlaps six earlier cases and is not added wholesale. Package typecheck
-passed. Prior whole-repository lint had zero errors; the final branch CI remains
-a publication gate. Shared registries and the layout guide match accepted main.
+passed. POLICY-03 publication is complete: main `6e4ed8d3f859bd1355789748ae7a5f385cf0fbb1` and compat `f38eecbf31fad26a8ff03dd2a90970be52fa71e5` passed exact-tip push CI and ancestry verification. Shared registries and the layout guide matched that accepted main.
+
+The POLICY-02 review inherits registered/live-context recovery and validated
+optional task binding. The task namespace comes from the original spawn;
+claim, original-user binding and interrupted-assistant settlement commit
+atomically. Main HTTP cancellation is checked before commit; after commit the
+runner retains ownership. Every recovered loop pins the committed original user
+and defers queued inbox until a later ordinary run. Metadata-only summary/setmode updates preserve
+concurrent recovery state and cannot resurrect deleted messages.
+
+Compat retains createMessage/commitUserMessage/commitUserMessageIfLatest,
+monotonic chronology and completed >= created during recovery settlement.
+Frozen turnContext, active/native tools, three-dimensional tool hashes, content
+caps, current-turn preflight and MaxMode remain intact. The same registry
+exclusions give 97 -> 98 overlay paths, retaining all prior paths and 42 package
+src paths. Only the recovery-commit test is new; 94 prior normalized deltas are
+unchanged. Session chronology and two Actor fixtures are the three adapted
+existing deltas. Shared FD/FC/history are byte-identical to accepted main.
+
+Local evidence: core/entry/stale writers 26 tests / 131 assertions; real
+HTTP/SDK/OpenAPI 28 / 339; Actor lifecycle 71 / 362. The cancellation follow-up
+runs main HTTP, existing recovery and commit tests: 30 / 156, overlapping prior
+evidence and not added wholesale. The shared Actor resume follow-up also passes
+31 cases / 226 assertions. Package typecheck and repository lint pass;
+standard SDK/OpenAPI regeneration from resolved sources adds no difference.
+Six ambient selectors are cleared; package preload remains the harness baseline.
+Cross-restart recovery is outside this change.
 
 ## Sync index
 
@@ -346,6 +371,8 @@ a publication gate. Shared registries and the layout guide match accepted main.
 | DC-TUI-001 | Prompt/footer model metadata and title locale | Request-metadata display override alongside shared locale propagation | Preserve provider/model/variant truth, locale submission, and known-limit disclosure |
 
 ## DC-NET-001 — approved private-network WebFetch
+
+- POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
 
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
 - Status: active
@@ -425,6 +452,8 @@ a publication gate. Shared registries and the layout guide match accepted main.
 
 ## DC-NET-002 — RFC1918 remote HTTP(S) MCP reachability
 
+- POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
+
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
 - Status: active
 - Canonical owner: `dev/compat` remote-MCP compatibility guarantee
@@ -489,6 +518,8 @@ a publication gate. Shared registries and the layout guide match accepted main.
 
 ## DC-PLATFORM-001 — restricted-network and Windows ripgrep/archive fallback
 
+- POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
+
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
 - Status: active
 - Canonical owner: `dev/compat` platform and restricted-network adaptation
@@ -552,6 +583,8 @@ a publication gate. Shared registries and the layout guide match accepted main.
   fail-closed boundaries.
 
 ## DC-MODEL-001 — per-agent MaxMode
+
+- POLICY-02 review: Inherited recovery query/schema and Session changes preserve MaxMode, retry/status isolation and generated compat APIs. Fresh standard SDK/OpenAPI generation matches the resolved artifacts.
 
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
 - Status: active
@@ -650,6 +683,8 @@ a publication gate. Shared registries and the layout guide match accepted main.
   exists.
 
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
+
+- POLICY-02 review: Preserve monotonic message producers and completed >= created in atomic recovery settlement, alongside metadata-only stale-writer fixes. Frozen catalog, current-turn preflight, checkpoint coverage and continuation provenance remain unchanged.
 
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
 - Status: active
@@ -847,6 +882,8 @@ a publication gate. Shared registries and the layout guide match accepted main.
 
 ## DC-ACTOR-001 — full-context actor and static-prefix overflow extensions
 
+- POLICY-02 review: Retain full frozen turnContext and native/active tool snapshots while inheriting broader registered targets, trusted task namespaces and commit ownership. Real actor and HTTP fixtures retain isolated append/replace context coverage.
+
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
 - Status: active
 - Canonical owner: `dev/compat` actor request/context integration
@@ -970,6 +1007,8 @@ a publication gate. Shared registries and the layout guide match accepted main.
   or are retired independently.
 
 ## DC-TUI-001 — request provider/model/variant display
+
+- POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
 
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
 - Status: active
