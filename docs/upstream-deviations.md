@@ -17,8 +17,8 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `db2211ddbe0e064e4207583145e66c471deb73ab`
-- Bundled guidance content: `db2211ddbe0e064e4207583145e66c471deb73ab`
+- Main behavior (runtime/tests): `c7014557445832a97248ed7b0af568e51bfd291d`
+- Bundled guidance content: `c7014557445832a97248ed7b0af568e51bfd291d`
 - Prior fork `main` tip: `bfa3c2466d07da01881b252a0337ac444b4ae927`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
@@ -46,7 +46,8 @@ capability audit is recorded in [the model API review](released-model-api-review
   initialized independently from the runtime skip-all toggle. Explicit
   `bash_delete`, Bash, and external-directory denies still block execution.
   Automatic deletion approval preserves ordinary Bash/external-directory asks;
-  only an actual reply to the full-command deletion request replaces them.
+  only an actual reply or explicit forwarded one-shot approval of the full
+  deletion command replaces them.
   `mimo run --yolo`, including `run --attach`, instead answers each approval
   belonging to its own live invocation with `once`; it never enables the
   server's shared delete switch, rewrites the environment, or installs a
@@ -86,7 +87,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   `test/cli/run-yolo-attach.test.ts`, `test/server/permission-reply-scope.test.ts`,
   and `test/mcp/sampling-e2e.test.ts` under `packages/opencode`.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `db2211ddbe0e064e4207583145e66c471deb73ab`.
+  main behavior `c7014557445832a97248ed7b0af568e51bfd291d`.
 - Retirement condition: upstream supplies equivalent deny-first startup
   semantics and live invocation correlation without toggling shared approval
   state; queued users, child lifetimes, disconnects, and long-lived MCP bridges

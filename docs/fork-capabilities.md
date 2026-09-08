@@ -18,8 +18,8 @@ authority.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `db2211ddbe0e064e4207583145e66c471deb73ab`
-- Bundled guidance content: `db2211ddbe0e064e4207583145e66c471deb73ab`
+- Main behavior (runtime/tests): `c7014557445832a97248ed7b0af568e51bfd291d`
+- Bundled guidance content: `c7014557445832a97248ed7b0af568e51bfd291d`
 - Prior fork `main` tip: `bfa3c2466d07da01881b252a0337ac444b4ae927`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
@@ -398,8 +398,8 @@ capability audit is recorded in [the model API review](released-model-api-review
   project/worktree cannot receive the temporary-file no-confirmation exemption.
   A non-temporary deletion uses one `bash_delete` confirmation for the full
   command, after checking explicit denies for its Bash and external-directory
-  effects. Only an actual reply to that full-command request replaces ordinary
-  asks; automatic deletion approval still runs ordinary Bash/path authorization.
+  effects. Only an actual reply or explicit forwarded one-shot approval of
+  that full-command request replaces ordinary asks; automatic deletion approval still runs ordinary Bash/path authorization.
   Delete auto-approval, including dangerous startup, is evaluated in
   the Permission service after explicit `bash_delete` denies; it cannot skip
   those earlier Bash/path deny checks. Broad ordinary allow rules do not
@@ -459,7 +459,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   functionality. FD-004 remains the canonical listener/auth owner. Coverage:
   `test/server/model-api.test.ts`, shared `server/api-request.ts`, and CLI tests.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `db2211ddbe0e064e4207583145e66c471deb73ab`.
+  main behavior `c7014557445832a97248ed7b0af568e51bfd291d`.
 - Retirement condition: upstream retains fixed instance cwd and supplies
   equivalent inert compatibility schema, protected-root, project/worktree
   containment, fixed-cwd relative file-tool resolution, MultiEdit normalization,

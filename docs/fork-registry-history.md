@@ -2596,3 +2596,20 @@ installed locally and was not claimed tested. Whitespace diff check passed.
 Compat inherits both shared production files unchanged; DC-ACTOR-001 and
 DC-CONTEXT-001 run-scope carriers remain as previously reviewed. Exact PR-head
 Codex review, CI, and final remote propagation are separate merge gates.
+
+
+### POLICY-06 forwarded approval follow-up
+
+PR #84 Codex review identified the explicit `session approve` path as a second
+completion producer that bypasses `Permission.reply`. Source `c7014557445832a97248ed7b0af568e51bfd291d`
+marks the original ask's receipt only inside the successful Deferred completion
+for that one-shot forwarded approval. Automatic pre-grants and denied or already
+settled requests cannot be relabelled. The original statement above referring
+only to a pending reply is superseded by this equivalent explicit approval path.
+
+New real SessionTool approve/deny/pregrant and late-completion regressions:
+4 passed. With the existing mixed Bash matrix, 22 tests / 151 assertions passed;
+20 forwarding/forward-ref/delete-control tests / 42 assertions passed separately.
+Package typecheck and whitespace checks passed. No HTTP/SDK changes; selected
+upstream unchanged. This correction requires a fresh current-head Codex review
+before main is merged and propagated to compat.
