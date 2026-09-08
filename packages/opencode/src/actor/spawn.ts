@@ -1360,6 +1360,7 @@ export const layer = Layer.effect(
       return yield* Effect.uninterruptible(
         Effect.gen(function* () {
           while (true) {
+            const head = input.inboxID ? yield* inbox.head(input.sessionID, input.actorID) : undefined
             const ownership = yield* lifecycleState.acquireWake(key)
 
             if (ownership._tag === "blocked") return yield* Effect.interrupt
@@ -1374,13 +1375,13 @@ export const layer = Layer.effect(
             }
             if (ownership._tag === "follower") {
               const result = yield* Deferred.await(ownership.active.result)
-              if (input.inboxID && !isTurnCancelled(result) && (yield* inbox.has(input.inboxID))) continue
+              const stalled = Exit.isFailure(result) && (!head || (yield* inbox.has(head)))
+              if (input.inboxID && !isTurnCancelled(result) && !stalled && (yield* inbox.has(input.inboxID))) continue
               if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
               return result.value
             }
 
             const owner = ownership.owner
-            const head = input.inboxID ? yield* inbox.head(input.sessionID, input.actorID) : undefined
             const guardedWork = Effect.gen(function* () {
               if (!(yield* lifecycleState.isCurrentOpen(key, owner))) return yield* Effect.interrupt
               yield* actorReg
