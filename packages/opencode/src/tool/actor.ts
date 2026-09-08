@@ -16,6 +16,7 @@ import { sortVisionModels } from "../provider/provider"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "../config"
 import { ActorRegistry } from "@/actor/registry"
+import { ActorRecoveryTarget } from "@/actor/recovery-target"
 import { ActorWaiter } from "@/actor/waiter"
 import { spawnRef } from "@/actor/spawn-ref"
 import type { ForkContext, SpawnResult } from "@/actor/spawn"
@@ -104,7 +105,7 @@ type ActorShellArgs =
   | { operation: { action: "status"; actor_id: string } }
   | { operation: { action: "wait"; actor_id: string; timeout_ms?: number } }
   | { operation: { action: "cancel"; actor_id: string } }
-  | { operation: { action: "resume"; actor_id: string } }
+  | { operation: { action: "resume"; actor_id: string; task_id?: string } }
   | { operation: { action: "send"; to_actor_id: string; content: string; to_session_id?: string; type?: string } }
   | { operation: { action: "models"; vision?: boolean; limit?: number } }
 
@@ -228,9 +229,17 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
         },
       } as ActorShellArgs
     }
-    case "resume":
-      if (args.length !== 1) return yield* actorArityError("resume", "<actor_id>", args, line)
-      return { operation: { action: "resume" as const, actor_id: args[0] } } as ActorShellArgs
+    case "resume": {
+      const { flags, rest } = yield* extractNamedFlags(args, ["task"], line)
+      if (rest.length !== 1) return yield* actorArityError("resume", "<actor_id> [--task <TID>]", rest, line)
+      return {
+        operation: {
+          action: "resume" as const,
+          actor_id: rest[0],
+          ...(flags.task ? { task_id: flags.task } : {}),
+        },
+      } as ActorShellArgs
+    }
     case "cancel":
       if (args.length !== 1) return yield* actorArityError("cancel", "<actor_id>", args, line)
       return { operation: { action: "cancel" as const, actor_id: args[0] } } as ActorShellArgs
@@ -515,6 +524,9 @@ export const ActorTool = Tool.define(
       const resumeSchema = z.strictObject({
         action: z.literal("resume"),
         actor_id: actorIdRequiredField,
+        task_id: TaskID.optional().describe(
+          "(optional) Validate the original task, or bind an unbound interrupted user to an eligible task in the actor's original task session. An existing task binding cannot be replaced.",
+        ),
       })
 
       const cancelSchema = z.strictObject({
@@ -636,14 +648,18 @@ export const ActorTool = Tool.define(
             (ctx.actorID && ctx.actorID !== "main" && caller?.mode !== "peer")
           )
             return yield* Effect.fail(new RecoverableError("Only a primary agent or registered peer can resume actors"))
-          const found = yield* findActor(op.actor_id)
-          if (!found || found.entry.mode === "main") return unknownResponse("resume", op.actor_id)
-          if (found.sessionID !== ctx.sessionID && (yield* sessions.get(found.sessionID)).parentID !== ctx.sessionID)
-            return unknownResponse("resume", op.actor_id)
+          const target = yield* ActorRecoveryTarget.resolve({ sessionID: ctx.sessionID, actorID: op.actor_id }).pipe(
+            Effect.provideService(Session.Service, sessions),
+            Effect.provideService(ActorRegistry.Service, actorRegistry),
+            Effect.catch((error) =>
+              NotFoundError.isInstance(error) ? Effect.succeed(undefined) : Effect.fail(error),
+            ),
+          )
+          if (!target) return unknownResponse("resume", op.actor_id)
           const actor = yield* requireActor()
           if (!actor.resume) return yield* Effect.fail(new RecoverableError("Actor recovery is unavailable"))
           yield* actor
-            .resume({ sessionID: found.sessionID, actorID: found.entry.actorID, signal: ctx.abort })
+            .resume({ ...target, task_id: op.task_id, signal: ctx.abort })
             .pipe(
               Effect.catch((error) =>
                 Effect.fail(
@@ -659,8 +675,8 @@ export const ActorTool = Tool.define(
             )
           return {
             title: "Actor resume: running",
-            output: JSON.stringify({ status: "running", actor_id: found.entry.actorID }),
-            metadata: { actor_id: found.entry.actorID, status: "running" },
+            output: JSON.stringify({ status: "running", actor_id: target.actorID }),
+            metadata: { actor_id: target.actorID, status: "running" },
           }
         }
 

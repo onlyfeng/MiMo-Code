@@ -58,7 +58,7 @@ test("every $ref in the generated OpenAPI document resolves", async () => {
   expect(dangling).toEqual([])
 })
 
-test("published OpenAPI exposes controlled actor recovery without task overrides", async () => {
+test("published OpenAPI exposes controlled actor recovery and validated task binding", async () => {
   const docs = [await Server.openapi(), await Bun.file(new URL("../../../sdk/openapi.json", import.meta.url)).json()]
 
   for (const doc of docs) {
@@ -69,7 +69,9 @@ test("published OpenAPI exposes controlled actor recovery without task overrides
     expect(parameterNames(recovery)).toContain("agentID")
     expect(parameterNames(resume)).toContain("agentID")
     expect(parameterNames(recovery)).not.toContain("task_id")
-    expect(parameterNames(resume)).not.toContain("task_id")
+    expect(parameterNames(resume)).toContain("task_id")
+    expect(resume?.responses).toHaveProperty("409")
+    expect(resume?.description).toContain("atomic task validation or binding")
     expect(recovery?.description).toContain("main agent by default")
     expect(resume?.description).toContain("main agent by default")
     expect(recovery?.description).toContain("controllable persistent full-context actor")

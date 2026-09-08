@@ -39,9 +39,12 @@ appends them at request time per-agent).
 # inspect / control:
     actor status <actor_id>     # current state without blocking
     actor cancel <actor_id>     # graceful stop
-    actor resume <actor_id>     # retry the original interrupted user/task of a persistent full-context actor
+    actor resume <actor_id> [--task <TID>] # retry a persistent full-context actor's original interrupted user
     # resume requires retained original instance/model identity; busy, cancelled,
-    # completed, or released actors are rejected. No --task/model/prompt overrides.
+    # completed, or released actors are rejected. No model/prompt overrides.
+    # --task validates the original task, or binds an unbound user to an eligible
+    # task in the original task session. Existing bindings cannot be replaced.
+    # Omit --task to retain the persisted task. Unrelated sessions are unavailable.
     # Returns after admission; queued messages wait until recovery completes.
 
 # opt into interrupted-work recovery when creating an actor (spawn only):
@@ -58,7 +61,7 @@ appends them at request time per-agent).
     actor send <to_actor_id> "<content>" [--session <id>] [--type <t>]
     # to_actor_id: 'main' for a session's main agent, or a subagent id like 'explore-1'
     # --session: target session id (defaults to current); --type: 'text' (default) or 'actor_notification'
-    # (--task is NOT valid here — it applies only to spawn/run for tying a subagent to a task_id)
+    # (--task is NOT valid here — use it on spawn/run for initial binding or resume for recovery binding)
 
 # list available models (optionally vision-only) to pick a --model value:
     actor models [--vision] [--limit <n>]

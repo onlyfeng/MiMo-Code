@@ -121,6 +121,7 @@ import { ActorTool, type ActorPromptOps } from "@/tool/actor"
 import { SessionRunState } from "./run-state"
 import { Goal } from "./goal"
 import { TaskRegistry } from "@/task/registry"
+import type { TaskID } from "@/task/schema"
 import { EffectBridge } from "@/effect"
 import { Team } from "@/team"
 import { ActorRegistry } from "@/actor/registry"
@@ -456,19 +457,23 @@ export interface Interface {
   }) => Effect.Effect<RecoveryCandidate[], InstanceType<typeof NotFoundError>>
   readonly startResume: (
     input: ResumeTurnInput,
-  ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError>
+  ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>
   readonly resume: (
     input: ResumeTurnInput,
-  ) => Effect.Effect<MessageV2.WithParts, InstanceType<typeof NotFoundError> | Session.BusyError>
+  ) => Effect.Effect<MessageV2.WithParts, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>
   /** Internal mechanism; HTTP and tools enter through the owning Actor lifecycle. */
   readonly startActorResume?: (input: {
     sessionID: SessionID
     actorID: string
     assistantMessageID?: MessageID
     modelIdentity?: string
+    task_id?: TaskID
+    taskSessionID?: SessionID
     validate: Effect.Effect<void, InstanceType<typeof NotFoundError>>
+    onCommitted: () => void
+    shouldCommit: () => boolean
     onAdmitted: Effect.Effect<void>
-  }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError>
+  }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>
   readonly startSummarize: (
     input: SummarizeInput,
   ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, Session.BusyError>
@@ -502,6 +507,7 @@ export interface RecoveryCandidate {
 export interface ResumeTurnInput {
   sessionID: SessionID
   assistantMessageID: MessageID
+  task_id?: TaskID
   titleLocale?: string
 }
 
@@ -6052,11 +6058,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       actorID: string
       assistantMessageID?: MessageID
       titleLocale?: string
+      task_id?: TaskID
+      taskSessionID?: SessionID
       validate?: Effect.Effect<void, InstanceType<typeof NotFoundError>>
+      onCommitted?: () => void
+      shouldCommit?: () => boolean
       onAdmitted?: Effect.Effect<void>
       resumeIdentity?: string
     }) {
-      const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError>>()
+      const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError> | Session.RecoveryConflictError>()
       const recovered: { id?: MessageID; parentID?: MessageID } = {}
       const abandon = Effect.suspend(() =>
         recovered.id
@@ -6093,12 +6103,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               new NotFoundError({ message: "Actor recovery candidate changed during validation" }),
             )
         }
-        recovered.id = candidate.assistantMessageID
-        recovered.parentID = candidate.parentMessageID
-        // Runner owns the actor before validation and settlement. Inbox messages
-        // stay queued for the entire recovered turn, preserving its original user.
+        // Runner owns the actor before the synchronous commit. Validation,
+        // optional task binding, settlement and ownership handoff cannot yield.
+        yield* sessions.commitRecoveryCandidate({
+          sessionID: input.sessionID,
+          actorID: input.actorID,
+          assistantMessageID: candidate.assistantMessageID,
+          parentMessageID: candidate.parentMessageID,
+          taskID: input.task_id,
+          taskSessionID: input.taskSessionID,
+          shouldCommit: input.shouldCommit,
+          onCommitted: () => {
+            recovered.id = candidate.assistantMessageID
+            recovered.parentID = candidate.parentMessageID
+            input.onCommitted?.()
+          },
+        })
         if (input.onAdmitted) yield* input.onAdmitted
-        yield* abandon
       })
       const completion = yield* state.startRunning(
         input.sessionID,
@@ -6141,7 +6162,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return yield* Effect.failCause(admission.cause)
     })
 
-    const startResume = (input: ResumeTurnInput) => startResumeTurn({ ...input, actorID: "main" })
+    const startResume = (input: ResumeTurnInput) =>
+      startResumeTurn({ ...input, actorID: "main", taskSessionID: input.sessionID })
     const startActorResume: NonNullable<Interface["startActorResume"]> = (input) =>
       startResumeTurn({
         ...input,

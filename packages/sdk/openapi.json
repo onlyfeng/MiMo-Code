@@ -4770,10 +4770,19 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "schema": {
+              "type": "string",
+              "pattern": "^T\\d+(\\.\\d+)*$"
+            },
+            "description": "Validate the original task or bind an unbound interrupted user; never replace an existing task"
           }
         ],
         "summary": "Resume an interrupted turn",
-        "description": "Resume the specified incomplete turn for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Admission and old-turn settlement finish before 202; the persisted user and task remain authoritative.",
+        "description": "Resume the specified incomplete turn for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Admission and atomic task validation or binding finish before 202. The original user and any existing task binding remain authoritative.",
         "responses": {
           "202": {
             "description": "Resume accepted"
@@ -9478,6 +9487,130 @@
         },
         "required": ["type", "properties"]
       },
+      "Event.task.created": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "task.created"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "task": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^T\\d+(\\.\\d+)*$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^ses.*"
+                  },
+                  "parent_task_id": {
+                    "type": "string",
+                    "pattern": "^T\\d+(\\.\\d+)*$"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["open", "in_progress", "blocked", "done", "abandoned"]
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "created_at": {
+                    "type": "number"
+                  },
+                  "last_event_at": {
+                    "type": "number"
+                  },
+                  "ended_at": {
+                    "type": "number"
+                  },
+                  "cleanup_after": {
+                    "type": "number"
+                  }
+                },
+                "required": ["id", "session_id", "status", "summary", "created_at", "last_event_at"]
+              }
+            },
+            "required": ["sessionID", "task"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.task.updated": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "task.updated"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "task": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^T\\d+(\\.\\d+)*$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^ses.*"
+                  },
+                  "parent_task_id": {
+                    "type": "string",
+                    "pattern": "^T\\d+(\\.\\d+)*$"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["open", "in_progress", "blocked", "done", "abandoned"]
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "created_at": {
+                    "type": "number"
+                  },
+                  "last_event_at": {
+                    "type": "number"
+                  },
+                  "ended_at": {
+                    "type": "number"
+                  },
+                  "cleanup_after": {
+                    "type": "number"
+                  }
+                },
+                "required": ["id", "session_id", "status", "summary", "created_at", "last_event_at"]
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["started", "unstarted", "blocked", "unblocked", "done", "abandoned", "renamed"]
+              }
+            },
+            "required": ["sessionID", "task", "kind"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
       "Event.tui.prompt.append": {
         "type": "object",
         "properties": {
@@ -9842,130 +9975,6 @@
               }
             },
             "required": ["receiverSessionID", "receiverActorID", "inboxID", "type"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.task.created": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "task.created"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "task": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^T\\d+(\\.\\d+)*$"
-                  },
-                  "session_id": {
-                    "type": "string",
-                    "pattern": "^ses.*"
-                  },
-                  "parent_task_id": {
-                    "type": "string",
-                    "pattern": "^T\\d+(\\.\\d+)*$"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": ["open", "in_progress", "blocked", "done", "abandoned"]
-                  },
-                  "summary": {
-                    "type": "string"
-                  },
-                  "owner": {
-                    "type": "string"
-                  },
-                  "created_at": {
-                    "type": "number"
-                  },
-                  "last_event_at": {
-                    "type": "number"
-                  },
-                  "ended_at": {
-                    "type": "number"
-                  },
-                  "cleanup_after": {
-                    "type": "number"
-                  }
-                },
-                "required": ["id", "session_id", "status", "summary", "created_at", "last_event_at"]
-              }
-            },
-            "required": ["sessionID", "task"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.task.updated": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "task.updated"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "task": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^T\\d+(\\.\\d+)*$"
-                  },
-                  "session_id": {
-                    "type": "string",
-                    "pattern": "^ses.*"
-                  },
-                  "parent_task_id": {
-                    "type": "string",
-                    "pattern": "^T\\d+(\\.\\d+)*$"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": ["open", "in_progress", "blocked", "done", "abandoned"]
-                  },
-                  "summary": {
-                    "type": "string"
-                  },
-                  "owner": {
-                    "type": "string"
-                  },
-                  "created_at": {
-                    "type": "number"
-                  },
-                  "last_event_at": {
-                    "type": "number"
-                  },
-                  "ended_at": {
-                    "type": "number"
-                  },
-                  "cleanup_after": {
-                    "type": "number"
-                  }
-                },
-                "required": ["id", "session_id", "status", "summary", "created_at", "last_event_at"]
-              },
-              "kind": {
-                "type": "string",
-                "enum": ["started", "unstarted", "blocked", "unblocked", "done", "abandoned", "renamed"]
-              }
-            },
-            "required": ["sessionID", "task", "kind"]
           }
         },
         "required": ["type", "properties"]
@@ -14284,6 +14293,12 @@
                 "$ref": "#/components/schemas/Event.global.disposed"
               },
               {
+                "$ref": "#/components/schemas/Event.task.created"
+              },
+              {
+                "$ref": "#/components/schemas/Event.task.updated"
+              },
+              {
                 "$ref": "#/components/schemas/Event.tui.prompt.append"
               },
               {
@@ -14315,12 +14330,6 @@
               },
               {
                 "$ref": "#/components/schemas/Event.inbox.arrived"
-              },
-              {
-                "$ref": "#/components/schemas/Event.task.created"
-              },
-              {
-                "$ref": "#/components/schemas/Event.task.updated"
               },
               {
                 "$ref": "#/components/schemas/Event.metrics.model_call"
@@ -17815,6 +17824,12 @@
             "$ref": "#/components/schemas/Event.global.disposed"
           },
           {
+            "$ref": "#/components/schemas/Event.task.created"
+          },
+          {
+            "$ref": "#/components/schemas/Event.task.updated"
+          },
+          {
             "$ref": "#/components/schemas/Event.tui.prompt.append"
           },
           {
@@ -17846,12 +17861,6 @@
           },
           {
             "$ref": "#/components/schemas/Event.inbox.arrived"
-          },
-          {
-            "$ref": "#/components/schemas/Event.task.created"
-          },
-          {
-            "$ref": "#/components/schemas/Event.task.updated"
           },
           {
             "$ref": "#/components/schemas/Event.metrics.model_call"
