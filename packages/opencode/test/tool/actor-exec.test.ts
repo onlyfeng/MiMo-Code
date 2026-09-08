@@ -69,7 +69,7 @@ for (const style of ["json", "shell"] as const) {
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const fixture = yield* setup
-        const actor = style === "shell" ? shellWrap(fixture.actor) : fixture.actor
+        const actor = style === "shell" ? { ...shellWrap(fixture.actor), nativeParameters: fixture.actor.parameters } : fixture.actor
         const result = yield* fixture.exec.execute(
           {
             code: `const sent = await tools.actor({ operation: { action: "send", to_actor_id: "general-1", content: "nested hello" } });
@@ -92,7 +92,7 @@ return { sent: JSON.parse(sent.output), status: JSON.parse(status.output) }`,
         const declaration = renderToolScriptDeclarations([actor])
         expect(declaration).toContain('action: "send"')
         expect(declaration).toContain('action: "status"')
-        expect(declaration).not.toContain('action: "spawn"')
+        expect(declaration).toContain('action: "spawn"')
         expect(declaration).not.toContain("script: string")
         expect(fixture.actor.parameters.safeParse({ operation: { action: "cancel", actor_id: "general-1" } }).success).toBe(true)
       }),
@@ -100,14 +100,14 @@ return { sent: JSON.parse(sent.output), status: JSON.parse(status.output) }`,
   )
 }
 
-it.live("nested actor rejects lifecycle actions and shell-shaped bypasses without changing the receiver", () =>
+it.live("nested actor rejects invalid native actions and shell-shaped bypasses without changing the receiver", () =>
   provideTmpdirInstance(() =>
     Effect.gen(function* () {
       const fixture = yield* setup
       const result = yield* fixture.exec.execute(
         {
           code: `const errors = []; for (const input of [
-{ operation: { action: "cancel", actor_id: "general-1" } },
+{ operation: { action: "unsupported", actor_id: "general-1" } },
 { script: "cancel general-1" },
 { operation: { action: "send", to_actor_id: "general-1", content: "hidden", script: "cancel general-1" } }
 ]) { try { await tools["actor"](input); } catch (error) { errors.push(error.message); } }
@@ -160,7 +160,7 @@ it.live("nested actor rechecks hook rewrites before a lifecycle side effect", ()
               return plugin.trigger(name, input, output)
             return Effect.sync(() => {
               if (output && typeof output === "object")
-                Object.assign(output, { args: { operation: { action: "cancel", actor_id: "general-1" } } })
+                Object.assign(output, { args: { operation: { action: "spawn", subagent_type: "not-in-captured-enum", description: "invalid", prompt: "invalid" } } })
               return output
             })
           },
@@ -173,7 +173,7 @@ it.live("nested actor rechecks hook rewrites before a lifecycle side effect", ()
       expect(result.metadata.status).toBe("code_error")
       expect((yield* fixture.registry.get(fixture.session.id, "general-1"))?.status).toBe("running")
       expect(viewExecSubtools(result.metadata)[0]?.state.input).toEqual({
-        operation: { action: "cancel", actor_id: "general-1" },
+        operation: { action: "spawn", subagent_type: "not-in-captured-enum", description: "invalid", prompt: "invalid" },
       })
     }),
   ),

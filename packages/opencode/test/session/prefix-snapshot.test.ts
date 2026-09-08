@@ -51,6 +51,20 @@ describe("session prefix snapshot", () => {
     expect(before).not.toBe(SessionPrefixSnapshot.toolsHash({ exec, hidden }, ["exec", "hidden"]))
   })
 
+  test("freezes native Actor schemas independently of identical shell wire schemas", async () => {
+    const wire = tool({ inputSchema: jsonSchema({ type: "object", properties: { script: { type: "string" } } }) })
+    const original = { ...wire, nativeInputSchema: { type: "object" as const, properties: { agent: { enum: ["general"] } } } }
+    const changed = { ...wire, nativeInputSchema: { type: "object" as const, properties: { agent: { enum: ["general", "new-agent"] } } } }
+    expect(SessionPrefixSnapshot.toolsHash({ actor: original }, ["actor"])).not.toBe(
+      SessionPrefixSnapshot.toolsHash({ actor: changed }, ["actor"]),
+    )
+    const snapshot = JSON.parse(JSON.stringify(await SessionPrefixSnapshot.snapshotTools({ actor: original }, ["actor"])))
+    expect(snapshot[0].native_input_schema).toEqual(original.nativeInputSchema)
+    expect(SessionPrefixSnapshot.restoreTools(snapshot).actor).toHaveProperty("nativeInputSchema", original.nativeInputSchema)
+    expect(SessionPrefixSnapshot.restoreTools([{ name: "actor", input_schema: { type: "object" } }]).actor)
+      .not.toHaveProperty("nativeInputSchema")
+  })
+
   test("pins, rotates, advances, and cascades with its session", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({

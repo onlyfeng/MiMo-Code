@@ -58,6 +58,8 @@ export type SessionPrefixToolSnapshot = {
   name: string
   description?: string
   input_schema: JSONSchema7
+  /** Internal nested contract; never appended to the provider wire schema. */
+  native_input_schema?: JSONSchema7
   /** Legacy snapshots only stored advertised tools. */
   active?: boolean
 }

@@ -4,6 +4,7 @@ import { Instance } from "../../src/project/instance"
 import { QuestionID } from "../../src/question/schema"
 import { tmpdir } from "../fixture/fixture"
 import { SessionID } from "../../src/session/schema"
+import { Bus } from "../../src/bus"
 import { AppRuntime } from "../../src/effect/app-runtime"
 
 const ask = (input: { sessionID: SessionID; questions: ReadonlyArray<Question.Info>; tool?: Question.Tool }) =>
@@ -462,3 +463,52 @@ test("pending question rejects on instance reload", async () => {
 
   expect(await result).toBeInstanceOf(Question.RejectedError)
 })
+
+for (const action of ["dispose", "reload"] as const) {
+  test(`question ${action} publishes one rejected event before retiring the old bus`, async () => {
+    await using tmp = await tmpdir({ git: true })
+    const events: string[] = []
+    const wildcard: string[] = []
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const off = await AppRuntime.runPromise(
+          Bus.Service.use((bus) =>
+            bus.subscribeCallback(Question.Event.Rejected, (event) => {
+              events.push(String(event.properties.requestID))
+            }),
+          ),
+        )
+        const offAll = await AppRuntime.runPromise(
+          Bus.Service.use((bus) =>
+            bus.subscribeAllCallback((event) => {
+              if (event.type === "question.rejected") wildcard.push(String(event.properties.requestID))
+            }),
+          ),
+        )
+        const promise = ask({ sessionID: SessionID.make("ses_old"), questions: [] }).catch((error) => error)
+        const [old] = await list()
+        if (action === "dispose") await Instance.dispose()
+        else await Instance.reload({ directory: tmp.path })
+        expect(await promise).toBeInstanceOf(Question.RejectedError)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(events).toEqual([String(old.id)])
+        expect(wildcard).toEqual([String(old.id)])
+        offAll()
+        off()
+        if (action === "dispose") expect(await Instance.peek(tmp.path)).toBeUndefined()
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const promise = ask({ sessionID: SessionID.make("ses_new"), questions: [] })
+        const [item] = await list()
+        expect(item.sessionID).toBe(SessionID.make("ses_new"))
+        await reply({ requestID: item.id, answers: [] })
+        expect(await promise).toEqual([])
+        expect(events).toHaveLength(1)
+      },
+    })
+  })
+}

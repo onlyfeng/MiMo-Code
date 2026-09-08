@@ -18,12 +18,11 @@ import { Config } from "../config"
 import { ActorRegistry } from "@/actor/registry"
 import { ActorWaiter } from "@/actor/waiter"
 import { spawnRef } from "@/actor/spawn-ref"
-import type { ForkContext } from "@/actor/spawn"
+import type { ForkContext, SpawnResult } from "@/actor/spawn"
 import { TaskRegistry } from "@/task/registry"
 import { TaskID } from "@/task/schema"
 import { SessionCheckpoint } from "@/session/checkpoint"
 import { prefixCaptureRef } from "@/session/prefix-capture-ref"
-import { EffectBridge } from "@/effect"
 import { inboxServiceRef } from "@/inbox/inbox-ref"
 import { Effect, Deferred } from "effect"
 
@@ -67,10 +66,6 @@ const sendSchema = z.strictObject({
     .describe(
       "(optional) Message type. Default 'text' is wrapped in <inbox>...</inbox>. 'actor_notification' is passed through verbatim (sender pre-renders).",
     ),
-})
-
-export const ActorExecParameters = z.strictObject({
-  operation: z.discriminatedUnion("action", [sendSchema, statusSchema]).meta({ type: "object" }),
 })
 
 const MODEL_PARAM_DESCRIPTION =
@@ -559,10 +554,18 @@ export const ActorTool = Tool.define(
 
       const run = Effect.fn("ActorTool.execute")(function* (input: z.infer<typeof parameters>, ctx: Tool.Context) {
         const op = input.operation
-        const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
+        const aborted = Effect.callback<never>((resume) => {
+          const abort = () => resume(Effect.interrupt)
+          if (ctx.abort.aborted) {
+            abort()
+            return
+          }
+          ctx.abort.addEventListener("abort", abort, { once: true })
+          return Effect.sync(() => ctx.abort.removeEventListener("abort", abort))
+        })
 
-        // Exec exposes only send/status. Resolve the trusted caller independently
+        // Resolve the trusted caller independently
         // of script arguments; a stale agent name cannot become a primary caller.
         if (ctx.extra?.fromExec) {
           const callers = (yield* agent.list()).filter((item) => item.name === ctx.agent)
@@ -585,15 +588,16 @@ export const ActorTool = Tool.define(
               ),
             )
           }
-          if (op.action !== "send" && op.action !== "status")
-            return yield* Effect.fail(new RecoverableError("Only actor send/status are available inside exec"))
-          if (subagent && (
-            !callerActor ||
-            op.action !== "send" ||
-            op.to_actor_id !== (callerActor.parentActorID ?? "main") ||
-            (op.to_session_id !== undefined && op.to_session_id !== ctx.sessionID)
-          ))
-            return yield* Effect.fail(new RecoverableError("Nested subagent sends require its registered parent target"))
+          if (
+            subagent &&
+            (!callerActor ||
+              op.action !== "send" ||
+              op.to_actor_id !== (callerActor.parentActorID ?? "main") ||
+              (op.to_session_id !== undefined && op.to_session_id !== ctx.sessionID))
+          )
+            return yield* Effect.fail(
+              new RecoverableError("Nested subagent sends require its registered parent target"),
+            )
         }
 
         // Helper: "actor belongs to another session OR doesn't exist" response.
@@ -729,11 +733,13 @@ export const ActorTool = Tool.define(
         if (op.action ==="wait") {
           const found = yield* findActor(op.actor_id)
           if (!found) return unknownResponse("wait", op.actor_id)
-          const snap = yield* waiter.wait({
-            sessionID: found.sessionID,
-            actor_id: op.actor_id,
-            timeout_ms: op.timeout_ms,
-          })
+          const snap = yield* waiter
+            .wait({
+              sessionID: found.sessionID,
+              actor_id: op.actor_id,
+              timeout_ms: op.timeout_ms,
+            })
+            .pipe(Effect.raceFirst(aborted))
           return {
             title: `Actor wait: ${snap.status}${snap.lastOutcome ? "/" + snap.lastOutcome : ""}`,
             output: JSON.stringify(snap),
@@ -957,100 +963,115 @@ export const ActorTool = Tool.define(
         // the agent loop, and sending inbox notifications on terminal — replacing
         // the legacy session.create + manual fork path that lived here pre-Task-29.
         const actor = yield* requireActor()
-        const spawnResult = yield* actor.spawn({
-          runApproval: ctx.runApproval,
-          mode: "subagent",
-          sessionID: ctx.sessionID,
-          agentType: next.name,
-          description: op.description,
-          task: prompt,
-          context: op.context ?? "none",
-          tools: next.toolAllowlist ? [...next.toolAllowlist] : "INHERIT",
-          model,
-          background,
-          ...(op.action === "spawn" && op.lifecycle ? { lifecycle: op.lifecycle } : {}),
-          ...(forkContext ? { forkContext } : {}),
-          task_id: effectiveTaskId,
-          onReady: ({ actorID, sessionID }) =>
-            ctx.metadata({
-              title: op.description,
-              metadata: { sessionId: sessionID, actorId: actorID, model },
-            }),
-          ...(op.output_schema
-            ? { format: { type: "json_schema" as const, schema: op.output_schema, retryCount: 2 } }
-            : {}),
-        })
-
-        if (op.action ==="spawn") {
-          return {
-            title: op.description,
-            metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, model },
-            output:
-              (taskNotice ? taskNotice + "\n" : "") +
-              `Background sub-session started. actor_id: ${spawnResult.actorID}\nThe result will be delivered as a notification when complete.`,
-          }
-        }
-
-        // op.action ==="run": blocking path — await the authoritative
-        // `outcome` Deferred. It is resolved in spawn's onSuccess AFTER the
-        // preStop loop AND the completion gate (but before the fire-and-forget
-        // postStop loop), so the parent sees the reconciled status/summary —
-        // unlike ActorWaiter, which resolves on the row's first `idle` and would
-        // miss the gate's downgrade.
-        function cancelHandler() {
-          bridge.fork(actor.cancel(spawnResult.sessionID, spawnResult.actorID, "graceful"))
-        }
-        const outcome = yield* Effect.acquireUseRelease(
-          Effect.sync(() => {
-            ctx.abort.addEventListener("abort", cancelHandler)
-          }),
+        const ownership: { result?: SpawnResult; handedOff: boolean } = { handedOff: false }
+        return yield* Effect.acquireUseRelease(
+          Effect.void,
           () =>
-            Deferred.await(spawnResult.outcome).pipe(
-              Effect.timeout(op.timeout_ms ?? 600_000),
-              Effect.catchTag("TimeoutError", () => Effect.succeed({ status: "timeout" as const })),
-            ),
-          () =>
-            Effect.sync(() => {
-              ctx.abort.removeEventListener("abort", cancelHandler)
-            }),
+            Effect.gen(function* () {
+              if (ctx.abort.aborted) return yield* Effect.interrupt
+              const spawnResult = yield* actor.spawn({
+                runApproval: ctx.runApproval,
+                mode: "subagent",
+                sessionID: ctx.sessionID,
+                parentActorID: ctx.actorID ?? "main",
+                agentType: next.name,
+                description: op.description,
+                task: prompt,
+                context: op.context ?? "none",
+                tools: next.toolAllowlist ? [...next.toolAllowlist] : "INHERIT",
+                model,
+                background,
+                awaitCompletion: false,
+                onAdmitted: (result) => {
+                  ownership.result = result
+                },
+                ...(op.action === "spawn" && op.lifecycle ? { lifecycle: op.lifecycle } : {}),
+                ...(forkContext ? { forkContext } : {}),
+                task_id: effectiveTaskId,
+                onReady: ({ actorID, sessionID }) =>
+                  ctx.metadata({
+                    title: op.description,
+                    metadata: { sessionId: sessionID, actorId: actorID, model },
+                  }),
+                ...(op.output_schema
+                  ? { format: { type: "json_schema" as const, schema: op.output_schema, retryCount: 2 } }
+                  : {}),
+              })
+              ownership.result = spawnResult
+              if (ctx.abort.aborted) return yield* Effect.interrupt
+
+              if (op.action === "spawn") {
+                ownership.handedOff = true
+                return {
+                  title: op.description,
+                  metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, model },
+                  output:
+                    (taskNotice ? taskNotice + "\n" : "") +
+                    `Background sub-session started. actor_id: ${spawnResult.actorID}\nThe result will be delivered as a notification when complete.`,
+                }
+              }
+
+              // op.action ==="run": blocking path — await the authoritative
+              // `outcome` Deferred. It is resolved in spawn's onSuccess AFTER the
+              // preStop loop AND the completion gate (but before the fire-and-forget
+              // postStop loop), so the parent sees the reconciled status/summary —
+              // unlike ActorWaiter, which resolves on the row's first `idle` and would
+              // miss the gate's downgrade.
+              const outcome = yield* Deferred.await(spawnResult.outcome).pipe(
+                Effect.timeout(op.timeout_ms ?? 600_000),
+                Effect.catchTag("TimeoutError", () => Effect.succeed({ status: "timeout" as const })),
+              )
+
+              // Blocking run preserves the pre-unification contract: tool call fails
+              // when the child fails. The LLM sees a tool error, not a "success with
+              // error in output." (The explicit action="wait" returns the structured
+              // snapshot as a regular tool result — that's a different contract.)
+              if (outcome.status === "failure") {
+                return yield* Effect.fail(new Error(`Tool execution failed: ${outcome.error ?? "unknown"}`))
+              }
+
+              const resultText =
+                outcome.status === "success"
+                  ? outcome.structured !== undefined
+                    ? JSON.stringify(outcome.structured)
+                    : (outcome.finalText ?? "(no output)")
+                  : outcome.status === "timeout"
+                    ? "<timeout>task did not complete within timeout</timeout>"
+                    : "<cancelled>task was cancelled</cancelled>"
+              const statusAttr = outcome.status === "success" ? (outcome.reportedStatus ?? "unknown") : outcome.status
+              const summaryAttr =
+                outcome.status === "success" && outcome.reportedSummary
+                  ? ` summary="${outcome.reportedSummary.replace(/\s+/g, " ").replace(/"/g, "'").trim()}"`
+                  : ""
+              if (ctx.abort.aborted) return yield* Effect.interrupt
+              ownership.handedOff = true
+              return {
+                title: op.description,
+                metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, model } as Record<
+                  string,
+                  any
+                >,
+                output: [
+                  ...(taskNotice ? [taskNotice, ""] : []),
+                  `actor_id: ${spawnResult.actorID} (use \`send\` for follow-up while reusable; a completed ephemeral \`context: "full"\` actor needs a fresh spawn)`,
+                  "",
+                  `<actor_result status="${statusAttr}"${summaryAttr}>`,
+                  resultText,
+                  "</actor_result>",
+                ].join("\n"),
+              }
+            }).pipe(Effect.raceFirst(aborted)),
+          () => {
+            if (ownership.handedOff || !ownership.result) return Effect.void
+            return (
+              ownership.result.cancel ?? actor.cancel(ownership.result.sessionID, ownership.result.actorID, "forced")
+            )
+          },
         )
-
-        // Blocking run preserves the pre-unification contract: tool call fails
-        // when the child fails. The LLM sees a tool error, not a "success with
-        // error in output." (The explicit action="wait" returns the structured
-        // snapshot as a regular tool result — that's a different contract.)
-        if (outcome.status === "failure") {
-          return yield* Effect.fail(new Error(`Tool execution failed: ${outcome.error ?? "unknown"}`))
-        }
-
-        const resultText =
-          outcome.status === "success"
-            ? outcome.structured !== undefined
-              ? JSON.stringify(outcome.structured)
-              : (outcome.finalText ?? "(no output)")
-            : outcome.status === "timeout"
-              ? "<timeout>task did not complete within timeout</timeout>"
-              : "<cancelled>task was cancelled</cancelled>"
-        const statusAttr = outcome.status === "success" ? (outcome.reportedStatus ?? "unknown") : outcome.status
-        const summaryAttr =
-          outcome.status === "success" && outcome.reportedSummary
-            ? ` summary="${outcome.reportedSummary.replace(/\s+/g, " ").replace(/"/g, "'").trim()}"`
-            : ""
-        return {
-          title: op.description,
-          metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, model } as Record<string, any>,
-          output: [
-            ...(taskNotice ? [taskNotice, ""] : []),
-            `actor_id: ${spawnResult.actorID} (use \`send\` for follow-up while reusable; a completed ephemeral \`context: "full"\` actor needs a fresh spawn)`,
-            "",
-            `<actor_result status="${statusAttr}"${summaryAttr}>`,
-            resultText,
-            "</actor_result>",
-          ].join("\n"),
-        }
       })
 
       return {
+        control: Tool.ActorControl,
         description: withCheckpointDescription(DESCRIPTION, DESCRIPTION_CHECKPOINT),
         parameters,
         execute: (input: z.infer<typeof parameters>, ctx: Tool.Context) => run(input, ctx).pipe(Effect.orDie),

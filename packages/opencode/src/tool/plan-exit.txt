@@ -2,6 +2,10 @@ Request to exit plan mode and switch to build agent for implementation.
 
 This tool is always present regardless of current mode. It is only effective in plan mode — calling it from any other mode will return an error.
 
+Approval requires a human in the foreground plan session. Background, forwarded, and never-ask execution cannot approve this transition automatically.
+
+Inside exec, await every other tool call before invoking plan_exit. While approval is pending, no other calls can start. If the user approves, the host ends the script and the next turn uses the build agent; no code after the call, including catch or finally blocks, runs. A decline or feedback lets the script continue in plan mode.
+
 Call this tool:
 - After you have written a complete plan to the plan file
 - After you have clarified any questions with the user

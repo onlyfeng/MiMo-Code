@@ -27,6 +27,8 @@ export function shellWrap<P extends z.ZodType, M extends Tool.Metadata>(
   const shell = def.shell
   return {
     id: def.id,
+    ...(def.control ? { control: def.control } : {}),
+    ...(def.control === Tool.ActorControl ? { nativeParameters: def.nativeParameters ?? def.parameters } : {}),
     description: shell.description,
     parameters: shellInputSchema,
     execute: (args: ShellInput, ctx) =>

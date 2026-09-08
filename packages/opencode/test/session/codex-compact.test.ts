@@ -170,9 +170,9 @@ return await tools.actor({ operation: { action: "status", actor_id: "general-1" 
         if (denied) expect(rows).toHaveLength(0)
         if (!denied) {
           const signature = declaration.split("\n").find((line) => line.includes("actor(input:"))!
-          expect(signature).toContain('action: "send"')
-          expect(signature).toContain('action: "status"')
-          expect(signature).not.toContain('action: "cancel"')
+          expect([...signature.matchAll(/action: "([^"]+)"/g)].map(match => match[1]).sort()).toEqual([
+            "cancel", "models", "resume", "run", "send", "spawn", "status", "wait",
+          ])
         }
 
       }),
@@ -281,9 +281,11 @@ it.live("Codex compact production wire retains control tools and nests ordinary 
       expect(exec.description).toContain("skill(input:")
       expect(exec.description).toContain("actor(input:")
       const actorDeclaration = exec.description.split("\n").find((line) => line.includes("actor(input:"))!
-      expect(actorDeclaration).toContain('action: "send"')
-      expect(actorDeclaration).toContain('action: "status"')
-      expect(actorDeclaration).not.toContain('action: "spawn"')
+      expect([...actorDeclaration.matchAll(/action: "([^"]+)"/g)].map(match => match[1]).sort()).toEqual([
+        "cancel", "models", "resume", "run", "send", "spawn", "status", "wait",
+      ])
+      expect(exec.description).toContain("question(input:")
+      expect(exec.description).toContain("plan_exit(input:")
     }),
     { git: true, config },
   ),
