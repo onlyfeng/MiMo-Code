@@ -3049,3 +3049,18 @@ specified propagation does not claim current-upstream parity.
   Package preload, including `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`, was
   retained. Actual remote tips, PR review and exact-SHA CI are separate
   publication gates and are not established by these local results.
+
+### 2026-09-08 PR #80 review propagation
+
+- Accepted main `df9a263bdfa60f762b0c90b6126a774ef60737ed` is inherited at compat behavior
+  `4f7a82b89d43248f3396820dff5fc015356d4d2e`. Main Codex review completed on PR head
+  `cf1e00be3279b97589fe6ffa58e40cc06f6dc46b` with no new findings after
+  the two P2 corrections. This records main review only; compat review and
+  exact-head CI remain independent publication gates.
+- `/status` inherits the `headroom` label for `effective - usable`; the active
+  Compose specification uses the ratio formula and marks previous formulas
+  and measurements as historical. FC-015 is inherited unchanged.
+- DC-CONTEXT-001's Base, Overrides and Review basis now identify the same
+  accepted behavior. Its numeric preflight threshold remains aligned with
+  main, with no additional 5K/10% advance. Historical reserve decisions
+  remain dated records.
