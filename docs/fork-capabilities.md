@@ -804,9 +804,11 @@ capability audit is recorded in [the model API review](released-model-api-review
   `packages/opencode/src/session/prefix-snapshot.ts`,
   `packages/opencode/src/session/observed-tool-parts.ts`, and bundled configuration
   guidance in `mimocode-docs/reference/config.md`; TUI
-  `component/dialog-context-limit.tsx` and `util/model.ts` consume the same
+  `component/dialog-context-limit.tsx`, `component/dialog-status.tsx`, and `util/model.ts` consume the same
   resolver, and SDK/OpenAPI plus configuration reference translations publish
-  the current buffer semantics.
+  the current buffer semantics. The active Compose specification in
+  `docs/compose/spec/context-budget-control.md` distinguishes this ratio rule
+  from historical reserve-based measurements.
 - Tests/evidence: `packages/opencode/test/session/overflow.test.ts` covers value
   grammar, invalid values, config/environment precedence, provider/input caps,
   legacy budget validity, zero restoration, and exact ratio boundaries at the
@@ -817,7 +819,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   `compaction-projection.test.ts` and prompt-effect regressions bind the
   projection budget, frozen system/tool bytes, and no-tool summary policy.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `fd285d92a3779b583a9ca82842516c863eb743bf`. The selected trigger
+  main behavior `f10c0d83291da9d7721be0e1bceea9925a4d27e5`. The selected trigger
   was additionally compared with release `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
   and upstream `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`; this named-behavior
   adoption does not advance the overall upstream review baseline.
@@ -834,6 +836,9 @@ capability audit is recorded in [the model API review](released-model-api-review
   to the ratio. No fork feature was identified as requiring that extra cutoff.
   The projection description now refers to the ratio trigger, and the buffer
   description explicitly limits its role to configured-budget validation.
+- 2026-09-08 PR #80 review follow-up: `/status` labels the ratio gap as
+  `headroom`, while the active Compose specification records the ratio formula
+  and marks former reserve formulas and live measurements as historical.
 - Retirement condition: upstream preserves equivalent configuration precedence,
   value grammar, provider caps, zero restoration, ratio triggers, bounded
   frozen-prefix projection, and no-tool summaries, with behavior-focused
