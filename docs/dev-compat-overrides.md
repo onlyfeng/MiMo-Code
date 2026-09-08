@@ -21,7 +21,7 @@ registry/history commit does not advance either behavior reference below.
 - Main source inheritance merge: `a3ed4d703767db5b130a6b38ce3e38317b2ece36`
 - Shared audit commit: `e136aa2ae24e13ec0f988a1a261d3af127b8eeda`
 - Inherited bundled guidance content: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
-- Tested local preview: `25dad8230a4313dcfbdaf520ff87c95244c50c07`
+- Tested local preview: `37e01f3ab239e94dba1e78bcad122ac4e4f90d16` (43-case authenticated-description follow-up; later merges changed documentation or ancestry only)
 - Publication state: POLICY-04 main PR #87 and correction PR #90 accepted after current-head Codex review and all eight CI checks; compat inherits the formal merge and awaits its own review and CI.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
