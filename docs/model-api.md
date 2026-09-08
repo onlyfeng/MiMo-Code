@@ -37,7 +37,7 @@ mimo llm-server issue --directory /absolute/project/path --model provider/model 
 | 接口                            | 行为                                             |
 | ------------------------------- | ------------------------------------------------ |
 | `GET /v1/models`                | 返回该令牌授权且当前配置可服务的模型             |
-| `POST /v1/chat/completions`     | 非流式 JSON 或 SSE，支持文本和客户端工具调用协议 |
+| `POST /v1/chat/completions`     | 非流式 JSON 或 SSE，支持文本、图片、输入音频和客户端工具调用协议 |
 | `POST /v1/audio/speech`         | 使用已融合的基础语音合成实现，返回完整音频       |
 | `POST /v1/audio/transcriptions` | 使用已融合的标准 multipart 转写入口              |
 
@@ -80,16 +80,39 @@ mimo llm-server revoke TOKEN_ID --directory /absolute/project/path
 SIGINT/SIGTERM 后再清理项目实例；嵌入宿主调用 `Server.stop()` 后仍负责实例生命周期。
 
 聊天图片支持请求体内的 `data:image/...;base64,...` 和 HTTP(S) `image_url`，每张
-解码后最多 5 MiB，支持 PNG、JPEG、WebP、GIF；全部图片合计最多 25 MiB。
+解码后最多 5 MiB，支持 PNG、JPEG、WebP、GIF；全部图片与音频合计最多 25 MiB。
 远程图片在认证、模型范围、图片能力和参数校验之后下载，逐跳检查所有 DNS 结果并
 固定连接到已校验的公网 IP，保留原 Host 与 TLS 主机名校验。最多五次重定向，拒绝
 URL 用户凭据、私网/回环/特殊地址、压缩响应及图片类型不匹配；取消后清理连接。
 下载请求不携带客户端或供应商凭据，SDK 只收到下载后的图片数据。此限制同样适用于
 dev/compat，独立于它的 WebFetch 私网规则。
 
+聊天的用户消息还可包含音频，与文字、图片按原顺序交给模型：
+
+```json
+{
+  "model": "provider/audio-capable-chat-model",
+  "messages": [{ "role": "user", "content": [
+    { "type": "text", "text": "请说明这段音频的内容。" },
+    { "type": "input_audio", "input_audio": { "data": "<WAV 文件的 Base64>", "format": "wav" } }
+  ] }]
+}
+```
+
+`data` 接受规范 Base64；裸 Base64 必须提供 `format`，`data:audio/...;base64,...`
+可以推断格式，同时提供 `format` 时两者必须一致。不接受远程音频 URL。格式集合为
+`wav/mp3/mpeg/mpga/m4a/mp4/flac/ogg/webm`，其中别名会归一化。单个音频解码后最多
+20 MiB，所有媒体共用上述 25 MiB 总额；HTTP 请求体的 25 MiB 额度另计 Base64 开销。
+模型必须声明音频输入能力，且实际 SDK 传输支持该格式：OpenAI/Azure Chat 和
+OpenAI-compatible Chat 只接收 WAV/MP3；Google/Vertex GenerateContent 可承载上述容器。
+这里要求配置实际选中 Chat 传输，仅使用 OpenAI/Azure 包名并不代表启用了 Chat。
+OpenAI Responses、已知不支持音频的适配器及未经验证的适配器会提前拒绝。SDK 能编码
+音频不代表供应商当前在线或每个模型都能理解该音频。
+
 客户端 `provider_options` 整包返回 400，避免透传参数覆盖授权模型；
 项目配置中的模型选项和显式 `reasoning_effort` 变体仍然有效。其他影响行为但未支持
-的参数也明确拒绝。聊天处理累计 SDK 事件限制为 16 MiB（含事件字段）。
+的参数也明确拒绝。聊天累计 SDK 输出事件限制为 16 MiB（含事件字段，不重复计算
+SDK 回带的输入请求）。
 供应商错误脱敏；未收到
 有效结束事件的流不会被标成正常 `stop`。聊天和音频均不自动重试。
 
