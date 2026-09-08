@@ -3210,3 +3210,136 @@ Groups overlap and are not summed. This source snapshot is validated locally;
 new compat HEAD Codex review, CI, merge and final remote push CI remain separate
 required gates. The overall upstream baseline remains 6203ea2e; this is selected
 capability propagation, not a full upstream sync.
+
+
+## 2026-09-08 POLICY-04 system-tail catalog local integration
+
+| Capability inventory (N=1) | Main candidate | Compat result |
+| --- | --- | --- |
+| POLICY-04 | Frozen system-tail catalog; loaded skill bodies stay in messages; legacy recovery retains its paired layout | Same behavior with existing catalog byte cap, current-turn/preflight and frozen actor context preserved; strict historical capped-v2 migration |
+
+Runtime/tests: `d9ed4dc480ddbe319d79e6ca655facc552e2cd35`; shared audit:
+`110222157896b16e7ba85bc3d5d3f5eef975a6e1`. Prior compat:
+`f9123761f62de7457f5eb2152afba02889927b8d`; tested local preview:
+`cb8523163ec41e376be3ad1a6d0c998e3227b811`. Accepted formal main:
+`69275c9cf4d772afe2167b82922e1dcebd9ab468`; final compat source/inheritance merge:
+`8944fa9da062b4848c976e346cc01e8c3b71a90f`. These final references were filled after PR #87 acceptance and a tree-identical
+formal ancestry merge; the following paragraphs retain the earlier preview evidence. The overall upstream reference stays
+`6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; bundled guidance content stays
+`aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
+
+The three conflicts in system.ts, llm-request-prefix.ts and prompt.ts combine
+shared catalog placement with compat caps, source-ID-aware current-turn
+messages and frozen turnContext. Both cold capture and runLoop pin losers use
+the winner's system/catalog and recompute full and current-turn projections
+together. Active/native fields and the loaded-MCP hash dimension remain.
+Shared prefix/capture tests gain required activeTools arguments and matching
+loaded-MCP hash input, retaining their original assertions.
+
+Independent review reproduced a real legacy compatibility gap: the historical
+50 KiB head cap could truncate catalog XML before its closing tag, preventing
+the shared strict recognizer from removing the generated v2 part after layout
+migration. The compat recognizer additionally verifies the original v2 schema
+and hash, exact known truncation marker, producer byte budget and UTF-8 boundary.
+It does not widen metadata-free legacy recognition or remove loaded skill
+bodies. This correction remains DC-CONTEXT-001, not a new capability or owner.
+
+All seven active DC entries were reviewed. CONTEXT/MODEL/ACTOR have real
+production overlap; NET-001/NET-002/PLATFORM/TUI have no incoming production
+intersection and retain their prior source delta. Existing historical evidence
+is not re-dated as newly executed coverage.
+
+Using the same five standard registry exclusions on both sides, the canonical
+comparison is accepted old main `d415822c29539a4b6eebeafb59de1b88da18b95c` to prior
+compat (93 paths) versus new main audit `110222157896b16e7ba85bc3d5d3f5eef975a6e1`
+to preview (97 paths). Raw counts are 95 and 99; production counts are 41 and 42.
+No old overlay path disappears. The four additions are skill-catalog.ts,
+skill-catalog-capture.test.ts and the two skill-catalog-compat tests. Of the 93
+existing paths, 87 normalized diffs are unchanged; six reconcile layout options,
+pin winners, retained caps and shared test fixtures. Comparing runtime source
+d9ed4dc4 instead of its later audit yields 98 non-registry paths solely because
+the shared guide's source reference was subsequently updated; that extra guide
+diff is not a compat override. Shared FD/FC/history and the catalog guide are
+byte-identical to the main audit. No public schema changes or SDK regeneration
+were required. Reproducible path/hash evidence is recorded in the operation
+artifact `policy04-compat-overlay-proof.json`.
+
+| Local validation | Result |
+| --- | --- |
+| Existing message/prefix/migration/request-prefix/fork tests, five files | 71 pass, 224 assertions |
+| Compat capped-v2 and pin-winner projection tests | 11 pass, 36 assertions |
+| System-tail/capture/real two-process reopen tests | 8 pass, 118 assertions |
+| Native contract and current-turn/preflight/MaxMode cases | 8 pass, 58 assertions |
+| Inherited two-test-file CI correction, targeted follow-up | 3 pass, 43 assertions |
+| Package typecheck | pass |
+| Recorded repository lint before the final CI test correction | 0 errors, 4536 warnings; final recheck pending |
+
+The distinct groups total 101 pass / 0 fail and 479 assertions. Tests ran from
+packages/opencode with the six ambient experimental/Codex/workflow/permission
+selectors cleared and package preload retained, using 60-second budgets.
+The final source/lint recheck, accepted-main ancestry, compat PR Codex review,
+exact-head CI, merge and remote push CI remain separate pending gates; this
+entry records local integration only.
+
+
+### POLICY-04 follow-up: frozen catalog slot and CI result transport
+
+The updated candidate runtime/tests are `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`;
+shared audit/guidance are `c1e391d184bb0a3efbf7a60a38f553c41d6c5935`. Local merge
+`66ee9b2dcc0caa9089bf180f0b031f5248fcd97f` inherits that candidate from prior preview
+`cb8523163ec41e376be3ad1a6d0c998e3227b811`. Accepted formal main remains
+`69275c9cf4d772afe2167b82922e1dcebd9ab468` and final compat source/inheritance remains
+`8944fa9da062b4848c976e346cc01e8c3b71a90f`; no formal ancestry or remote CI completion
+is claimed here.
+
+The slot refresh preserves every non-catalog frozen byte, with conservative
+old-snapshot migration and empty-message handling. Cross-process test results
+now use awaited JSON files instead of a potentially truncated stdout line.
+Two source conflicts retain compat's capped-v2 recognizer and combine the new
+materialized catalog pair with currentUserID, active_tools and the third
+loaded-MCP hash dimension. Cold/runLoop pin winners retain synchronized full
+and current-turn projections; actor turnContext is unchanged. The new shared
+frozen-refresh test needs no compat adaptation and matches main byte-for-byte.
+
+All seven DC owners remain reviewed: CONTEXT/MODEL/ACTOR are production-adjacent
+or overlapping for the inherited prompt changes; NET-001/NET-002/PLATFORM/TUI
+have no production intersection in this follow-up. No owner or overlay path
+is removed or added relative to the preceding preview. Canonical overlay
+remains 93 old / 97 new paths (raw 95 / 99), production 41 / 42. New comparison
+uses main audit c1e391d1, not runtime 8ed2c580. Shared FD/FC/history and the
+catalog guide match that main audit byte-for-byte; source-only guide-reference
+differences are not counted as compat ownership. The operation overlay proof
+records each path, blob and normalized diff.
+
+Final specified matrix: 44 pass / 0 fail / 216 assertions across seven files,
+54.66 seconds; package typecheck exit0; root `bun lint` reports 4537 warnings
+and zero errors; diffcheck passes. All six ambient selectors were cleared,
+package preload retained and each test has an explicit 60-second budget.
+The initial integration attempt had one legacy resume assertion failure and
+a conflict-resolution omission of the third tool-hash input; after restoring
+that input, the single case and the entire unchanged-assertion matrix passed.
+This record does not claim the initial failure independently proves causation.
+The earlier 101-case matrix is not rerun or added to this count. No public
+schema or generated SDK changed. Formal PR87 acceptance, final ancestry,
+compat PR review/CI and final remote push remain separate publication gates.
+
+### POLICY-04 final format fix and accepted-main inheritance
+
+PR #87 head `32b01dcd828f692ea0656e53319cd48abf054c18` passed all eight CI checks and Codex completed
+with no major issues at 2026-09-08T16:41:14Z. Accepted main `69275c9cf4d772afe2167b82922e1dcebd9ab468`
+is an ancestor of compat source `8944fa9da062b4848c976e346cc01e8c3b71a90f`. The latter has the same
+tree as tested preview `25dad8230a4313dcfbdaf520ff87c95244c50c07`; only merge ancestry changed.
+
+The inherited follow-up keeps current-request structured/text format instructions
+inside their managed slot while preserving frozen non-catalog bytes and directory
+version. The provider test double now honors the real post-plugin system tail.
+Compat retains the strict truncated-v2 recognizer, current-turn projections,
+active/native snapshots and loaded-MCP hash dimension. Shared registries and
+the catalog guide match the accepted main audit byte-for-byte.
+
+Final affected matrix: 55 pass / 0 fail / 251 assertions across seven files
+(60.95 seconds), six ambient selectors cleared and package preload retained.
+Package typecheck passed; repository lint has 4537 warnings / 0 errors.
+The prior 44-case and 101-case runs are separate historical evidence, not added
+to this matrix. Compat PR review, exact-head CI and post-merge push CI remain
+publication gates. No public API schema or SDK output changed.
