@@ -186,6 +186,24 @@ function within<T>(promise: Promise<T>) {
 }
 
 describe("explicit model API", () => {
+  test("explicit permanent credentials serve requests and revocation rejects later admission before bootstrap", async () => {
+    await harness(async ({ url, directory, seen }) => {
+      const issued = await LLMServerTokens.issue({
+        directory,
+        models: ["local/chat"],
+        expiry: { idleMs: null, maxAgeMs: null },
+      })
+      const response = await chat(url, issued.token)
+      expect(response.status).toBe(200)
+      await response.arrayBuffer()
+      expect(await LLMServerTokens.revoke({ directory, id: issued.record.id })).toBe(true)
+      await Instance.disposeAll()
+      expect((await chat(url, issued.token)).status).toBe(401)
+      expect(await Instance.peek(directory)).toBeUndefined()
+      expect(seen).toHaveLength(1)
+    })
+  })
+
   test("multi-model scope admits each exact member and rejects all other endpoints before bootstrap", async () => {
     await harness(async ({ url, directory, seen }) => {
       const issued = await LLMServerTokens.issue({
@@ -227,7 +245,7 @@ describe("explicit model API", () => {
       const issued = await LLMServerTokens.issue({
         directory,
         allModels: true,
-        expiry: { idleMs: 60_000, maxAgeMs: 120_000 },
+        expiry: { idleMs: null, maxAgeMs: null },
       })
       expect((await request(url, "/v1/models?directory=/", issued.token)).status).toBe(403)
       await using other = await tmpdir()

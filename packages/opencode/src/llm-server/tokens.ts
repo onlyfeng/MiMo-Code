@@ -13,22 +13,35 @@ const MAX_FILE = 1024 * 1024
 const MAX_TOKENS = 1024
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
 const timestamp = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+const time = {
+  created: timestamp,
+  last_used: timestamp.optional(),
+  idle_ms: positive.nullable(),
+  max_age_ms: positive.nullable(),
+}
 const fields = {
   id: z.string().min(1).max(128),
   hash: z.string().regex(/^[a-f0-9]{64}$/),
   label: z.string().max(256).optional(),
   created: timestamp,
   last_used: timestamp.optional(),
-  idle_ms: positive,
-  max_age_ms: positive,
 }
-const lifetimes = (value: z.infer<z.ZodObject<typeof fields>>) =>
+const lifetimes = (value: z.infer<z.ZodObject<typeof time>>) =>
   (value.last_used === undefined || value.last_used >= value.created) &&
-  Number.isSafeInteger(value.created + value.max_age_ms) &&
-  Number.isSafeInteger((value.last_used ?? value.created) + value.idle_ms)
-const legacyRecord = z.strictObject({ ...fields, models: z.array(LLMServerScope.ModelRef).length(1) }).refine(lifetimes)
+  (value.max_age_ms === null || Number.isSafeInteger(value.created + value.max_age_ms)) &&
+  (value.idle_ms === null || Number.isSafeInteger((value.last_used ?? value.created) + value.idle_ms))
+const lifetime = z.object(time).refine(lifetimes)
+// Historical v1 null/missing limits were invalid, so reading must never grant them new authority.
+const legacyRecord = z
+  .strictObject({
+    ...fields,
+    models: z.array(LLMServerScope.ModelRef).length(1),
+    idle_ms: positive,
+    max_age_ms: positive,
+  })
+  .refine(lifetimes)
 const legacySchema = z.strictObject({ version: z.literal(1), tokens: z.array(legacyRecord).max(MAX_TOKENS) })
-const record = z.strictObject({ ...fields, scope: LLMServerScope.Schema }).refine(lifetimes)
+const record = z.strictObject({ ...fields, ...time, scope: LLMServerScope.Schema }).refine(lifetimes)
 const schema = z.strictObject({ version: z.literal(2), tokens: z.array(record).max(MAX_TOKENS) })
 type StoredRecord = z.infer<typeof record>
 type Store = z.infer<typeof schema>
@@ -37,8 +50,8 @@ type PublicScope =
   | { scope: Extract<LLMServerScope.Scope, { type: "all" }>; models?: never }
 export type PublicRecord = Omit<StoredRecord, "hash" | "scope"> & PublicScope
 type FiniteRecord = Omit<StoredRecord, "hash" | "scope"> & Extract<PublicScope, { models: string[] }>
-export type Expiry = { idleMs: number; maxAgeMs: number }
-type Lifetime = Pick<StoredRecord, "created" | "last_used" | "idle_ms" | "max_age_ms">
+export type Expiry = { idleMs: number | null; maxAgeMs: number | null }
+type Lifetime = z.infer<typeof lifetime>
 
 function bucket(directory: string) {
   return path.join(Global.Path.state, "llm-server", Hash.fast(Filesystem.resolve(directory)))
@@ -132,11 +145,17 @@ function publicScope(scope: LLMServerScope.Scope): PublicScope {
 }
 
 export function expiresAt(value: Lifetime) {
-  return Math.min(value.created + value.max_age_ms, (value.last_used ?? value.created) + value.idle_ms)
+  const parsed = lifetime.parse(value)
+  const absolute = parsed.max_age_ms === null ? null : parsed.created + parsed.max_age_ms
+  const idle = parsed.idle_ms === null ? null : (parsed.last_used ?? parsed.created) + parsed.idle_ms
+  if (absolute === null) return idle
+  if (idle === null) return absolute
+  return Math.min(absolute, idle)
 }
 
 export function expired(value: Lifetime, now = Date.now()) {
-  return now >= expiresAt(value)
+  const end = expiresAt(value)
+  return end !== null && now >= end
 }
 
 type IssueOptions = {
@@ -176,7 +195,7 @@ export async function issue(input: IssueOptions & IssueScope) {
     max_age_ms: input.expiry.maxAgeMs,
   })
   if (!parsed.success)
-    throw new Error("Invalid token request: specify a valid scope and finite positive safe lifetimes")
+    throw new Error("Invalid token request: specify a valid scope and explicit null or finite positive safe lifetimes")
   await mutate(input.directory, input.signal, (store) => {
     const live = store.tokens.filter((value) => !expired(value))
     if (live.length >= MAX_TOKENS) throw new Error("Token registry reached its record limit")
@@ -186,7 +205,13 @@ export async function issue(input: IssueOptions & IssueScope) {
 }
 
 export type Verdict =
-  | ({ ok: true; id: string; expiresAt: number } & PublicScope)
+  | ({
+      ok: true
+      id: string
+      expiresAt: number | null
+      idle_ms: number | null
+      max_age_ms: number | null
+    } & PublicScope)
   | { ok: false; reason: "unknown" | "expired" }
 
 export async function verify(input: { directory: string; token: string; signal?: AbortSignal }): Promise<Verdict> {
@@ -205,7 +230,14 @@ export async function verify(input: { directory: string; token: string; signal?:
       return { ok: false, reason: "expired" }
     }
     found.last_used = Math.max(Date.now(), found.last_used ?? found.created)
-    return { ok: true, id: found.id, ...publicScope(found.scope), expiresAt: expiresAt(found) }
+    return {
+      ok: true,
+      id: found.id,
+      ...publicScope(found.scope),
+      expiresAt: expiresAt(found),
+      idle_ms: found.idle_ms,
+      max_age_ms: found.max_age_ms,
+    }
   })
 }
 

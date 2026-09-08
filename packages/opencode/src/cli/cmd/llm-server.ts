@@ -8,16 +8,22 @@ import { LLMServerTokens } from "../../llm-server/tokens"
 import { LLMServerScope } from "../../llm-server/scope"
 import { LLMServerCapability } from "../../llm-server/capability"
 
-/** Both the idle window and absolute lifetime must be finite. */
-export function duration(input: string | undefined, fallback: string): number {
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec((input ?? fallback).trim().toLowerCase())
-  if (!match) throw new Error("Invalid duration; use a finite positive value such as 30m, 12h or 7d")
+/** Only explicit none disables a limit; omitted CLI options keep their finite defaults. */
+export function duration(input: string | undefined, fallback: string): number | null {
+  const text = (input === undefined ? fallback : input).trim().toLowerCase()
+  if (text === "none") return null
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec(text)
+  if (!match) throw new Error("Invalid duration; use none or a finite positive value such as 30m, 12h or 7d")
   const scale = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[match[2] ?? "ms"]!
   const value = Number(match[1]) * scale
   if (value <= 0 || !Number.isSafeInteger(value) || !Number.isSafeInteger(Date.now() + value)) {
     throw new Error("Duration must be positive whole milliseconds within the safe timestamp range")
   }
   return value
+}
+
+function limit(value: number | null) {
+  return value === null ? "none" : `${value}ms`
 }
 
 function directoryOption(yargs: Argv) {
@@ -55,11 +61,11 @@ function invocation(args: string[]) {
 
 const issue = cmd({
   command: "issue",
-  describe: "mint a temporary credential for selected models or all models without starting a server",
+  describe: "mint a credential for selected models or all models without starting a server",
   builder: (yargs: Argv) =>
     directoryOption(yargs)
-      .option("ttl", { type: "string", describe: "idle lifetime from last use (default 1h)" })
-      .option("max-age", { type: "string", describe: "absolute lifetime from issue (default 24h)" })
+      .option("ttl", { type: "string", describe: "idle lifetime from last use; none disables it (default 1h)" })
+      .option("max-age", { type: "string", describe: "absolute lifetime from issue; none disables it (default 24h)" })
       .option("model", {
         type: "string",
         array: true,
@@ -120,6 +126,8 @@ const issue = cmd({
         id: issued.record.id,
         base_url: address ? `${address.url}/v1` : null,
         expires_at: LLMServerTokens.expiresAt(issued.record),
+        idle_ms: issued.record.idle_ms,
+        max_age_ms: issued.record.max_age_ms,
         scope: issued.record.scope,
         ...(issued.record.scope.type === "models"
           ? {
@@ -144,9 +152,9 @@ const issue = cmd({
             ? issued.record.scope.models.flatMap((model) => ["--model", model])
             : ["--all-models"]),
           "--ttl",
-          `${expiry.idleMs}ms`,
+          limit(expiry.idleMs),
           "--max-age",
-          `${expiry.maxAgeMs}ms`,
+          limit(expiry.maxAgeMs),
           ...(args.label ? ["--label", args.label] : []),
           "--json",
         ]),
@@ -156,7 +164,7 @@ const issue = cmd({
         return
       }
       process.stdout.write(
-        `token issued\n  api_key   ${output.api_key}\n  id        ${output.id}\n  base_url  ${output.base_url ?? "(no verified loopback listener for this directory)"}\n  expires   ${output.expires_at}\n  scope     ${issued.record.scope.type === "all" ? "all models" : issued.record.scope.models.join(", ")}\n`,
+        `token issued\n  api_key   ${output.api_key}\n  id        ${output.id}\n  base_url  ${output.base_url ?? "(no verified loopback listener for this directory)"}\n  expires   ${output.expires_at === null ? "never" : output.expires_at}\n  idle      ${limit(output.idle_ms)}\n  max_age   ${limit(output.max_age_ms)}\n  scope     ${issued.record.scope.type === "all" ? "all models" : issued.record.scope.models.join(", ")}\n`,
       )
       process.stdout.write("The plaintext token is shown once; only its hash is stored.\n")
       if (!address)
@@ -189,7 +197,7 @@ const list = cmd({
         ? tokens
             .map(
               (token) =>
-                `${token.id}  ${token.expired ? "EXPIRED" : `expires ${token.expires_at}`}  ${token.scope.type === "all" ? "all models" : token.scope.models.join(",")}${token.label ? `  (${token.label})` : ""}\n`,
+                `${token.id}  ${token.expired ? "EXPIRED" : token.expires_at === null ? "never" : `expires ${token.expires_at}`}  idle ${limit(token.idle_ms)}  max_age ${limit(token.max_age_ms)}  ${token.scope.type === "all" ? "all models" : token.scope.models.join(",")}${token.label ? `  (${token.label})` : ""}\n`,
             )
             .join("")
         : "tokens    none\n",
@@ -216,7 +224,7 @@ const revoke = cmd({
 
 export const LlmServerCommand = cmd({
   command: "llm-server",
-  describe: "issue and manage directory-scoped temporary model credentials",
+  describe: "issue and manage directory-scoped model credentials",
   builder: (yargs: Argv) => yargs.command(issue).command(list).command(revoke).demandCommand(1),
   handler: () => {},
 })

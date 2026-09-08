@@ -61,7 +61,7 @@ describe("temporary model tokens", () => {
     expect(await fs.stat(file(tmp.path)).catch(() => undefined)).toBeUndefined()
   })
 
-  test("requires finite positive safe lifetimes without timestamp overflow", async () => {
+  test("requires finite positive safe numbers for enabled lifetimes without timestamp overflow", async () => {
     await using tmp = await tmpdir()
     for (const value of [0, -1, Infinity, NaN, 0.5, Number.MAX_SAFE_INTEGER]) {
       await expect(
@@ -188,7 +188,7 @@ describe("temporary model tokens", () => {
       { idle_ms: "broken" },
       { scope: { type: "models", models: [] } },
       { scope: { type: "models", models: [1] } },
-      { max_age_ms: null },
+      { max_age_ms: "none" },
       { last_used: "yesterday" },
       { hash: "00" },
     ]) {
@@ -237,7 +237,11 @@ describe("temporary model tokens", () => {
       ],
     })
     await fs.writeFile(file(tmp.path), original)
-    await expect(api.verify({ directory: tmp.path, token: issued.token })).rejects.toThrow("Invalid token store")
+    // The public expiry helper now rejects unsafe sums before mutate's final store validation.
+    await expect(api.verify({ directory: tmp.path, token: issued.token })).rejects.toMatchObject({
+      name: "ZodError",
+      issues: [expect.objectContaining({ code: "custom" })],
+    })
     expect(await fs.readFile(file(tmp.path), "utf8")).toBe(original)
   })
 })

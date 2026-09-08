@@ -97,14 +97,87 @@ describe("llm-server CLI", () => {
     }, 60_000)
   }
 
-  test("parses finite positive durations and rejects unlimited or overflowing values", async () => {
+  test("parses explicit none or finite positive durations and rejects malformed values", async () => {
     expect(duration(undefined, "1h")).toBe(3_600_000)
     expect(duration("24h", "1h")).toBe(86_400_000)
     expect(duration("0.5s", "1h")).toBe(500)
-    for (const value of ["none", "never", "0", "0ms", "-1s", "0.1ms", "9".repeat(400) + "d", "1w"]) {
+    expect(duration("none", "1h")).toBeNull()
+    expect(duration(" NONE ", "1h")).toBeNull()
+    for (const value of ["", "never", "Infinity", "NaN", "0", "0ms", "-1s", "0.1ms", "9".repeat(400) + "d", "1w"]) {
       expect(() => duration(value, "1h")).toThrow()
     }
   })
+
+  for (const entry of [
+    { ttl: "none", max: "24h", idle: null, age: 86_400_000, renewedAge: "86400000ms" },
+    { ttl: "1h", max: "none", idle: 3_600_000, age: null, renewedAge: "none" },
+    { ttl: "none", max: "none", idle: null, age: null, renewedAge: "none" },
+  ]) {
+    test(`replays explicit none with idle ${entry.ttl} and absolute ${entry.max} from another cwd`, async () => {
+      await using tmp = await tmpdir({ config: { enabled_providers: [] } })
+      const issued = await execute(
+        [
+          process.execPath,
+          "--conditions=browser",
+          path.resolve("src/index.ts"),
+          "--pure",
+          "llm-server",
+          "issue",
+          "--directory",
+          tmp.path,
+          "--all-models",
+          "--ttl",
+          entry.ttl,
+          "--max-age",
+          entry.max,
+          "--json",
+        ],
+        process.cwd(),
+      )
+      expect(issued.code, issued.stderr).toBe(0)
+      const original = JSON.parse(issued.stdout)
+      expect(original).toMatchObject({ scope: { type: "all" }, idle_ms: entry.idle, max_age_ms: entry.age })
+      expect(original.renew_argv.slice(-5)).toEqual([
+        "--ttl",
+        entry.idle === null ? "none" : "3600000ms",
+        "--max-age",
+        entry.renewedAge,
+        "--json",
+      ])
+      const renewed = await execute(original.renew_argv, tmp.path)
+      expect(renewed.code, renewed.stderr).toBe(0)
+      const output = JSON.parse(renewed.stdout)
+      expect(output).toMatchObject({ scope: { type: "all" }, idle_ms: entry.idle, max_age_ms: entry.age })
+      expect(output.api_key).not.toBe(original.api_key)
+      expect(output.renew_argv).toEqual(original.renew_argv)
+      if (entry.idle === null && entry.age === null) {
+        expect(original.expires_at).toBeNull()
+        expect(output.expires_at).toBeNull()
+      } else {
+        expect(Number.isSafeInteger(original.expires_at)).toBe(true)
+        expect(output.expires_at).toBeGreaterThan(Date.now())
+      }
+      if (entry.idle !== null || entry.age !== null) return
+      const listed = await run(["list", "--directory", tmp.path, "--json"], tmp.path)
+      expect(listed.code, listed.stderr).toBe(0)
+      expect(
+        JSON.parse(listed.stdout).tokens.filter((entry: { expires_at: number | null }) => entry.expires_at === null),
+      ).toHaveLength(2)
+      const human = await run(
+        ["issue", "--directory", tmp.path, "--all-models", "--ttl", "none", "--max-age", "none"],
+        tmp.path,
+      )
+      expect(human.code, human.stderr).toBe(0)
+      expect(human.stdout).toMatch(/expires\s+never/)
+      expect(human.stdout).toMatch(/idle\s+none/)
+      expect(human.stdout).toMatch(/max_age\s+none/)
+      const summary = await run(["list", "--directory", tmp.path], tmp.path)
+      expect(summary.code, summary.stderr).toBe(0)
+      expect(summary.stdout).toContain("never")
+      expect(summary.stdout).toContain("idle none")
+      expect(summary.stdout).toContain("max_age none")
+    }, 60_000)
+  }
 
   test("issues one explicit model without starting a listener and pins renewal arguments", async () => {
     await using tmp = await tmpdir({ config })
@@ -116,6 +189,7 @@ describe("llm-server CLI", () => {
     expect(output.model).toBe("cli/preferred")
     expect(output.api_key).toMatch(/^[A-Za-z0-9_-]{43}$/)
     expect(output.expires_at).toBeGreaterThan(Date.now())
+    expect(output).toMatchObject({ idle_ms: 3_600_000, max_age_ms: 86_400_000 })
     expect(output.renew_argv.slice(-9)).toEqual([
       "--directory",
       tmp.path,
