@@ -9,9 +9,7 @@ import { testEffect } from "../lib/effect"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 
-const it = testEffect(
-  Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer),
-)
+const it = testEffect(Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -35,8 +33,8 @@ const get = (name: string) =>
     return agent
   })
 
-// `actor` is the only tool that spawns child agents, so no `mode: "subagent"`
-// agent may see it — otherwise a subagent recursively delegates its own work.
+// `actor` is the only tool that spawns child agents, so ordinary `mode: "subagent"`
+// agents cannot acquire it through direct tools or compact exec declarations.
 // The gate is on mode, not name, so a user-config subagent (which defaults to
 // `"*": "allow"`) cannot opt itself back in.
 describe("ToolRegistry.tools: actor tool subagent gating", () => {
@@ -71,6 +69,30 @@ describe("ToolRegistry.tools: actor tool subagent gating", () => {
           expect(tools).toContain("bash")
         }),
       { config: { agent: { helper: { description: "Helper", mode: "subagent" } } } },
+    ),
+  )
+
+  it.live("ordinary Codex subagents cannot acquire actor through compact declarations", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const registry = yield* ToolRegistry.Service
+          for (const name of ["general", "explore", "helper"]) {
+            const input = {
+              providerID: ProviderID.opencode,
+              modelID: ModelID.make("gpt-5.4"),
+              agent: yield* get(name),
+            }
+            const advertised = yield* registry.tools(input)
+            const registered = yield* registry.registered(input)
+            expect(advertised.map((tool) => tool.id)).not.toContain("actor")
+            expect(registered.map((tool) => tool.id)).not.toContain("actor")
+            const exec = advertised.find((tool) => tool.id === "exec")
+            expect(exec).toBeDefined()
+            expect(exec?.description).not.toContain("actor(input:")
+          }
+        }),
+      { config: { agent: { helper: { description: "Helper", mode: "subagent", permission: { actor: "allow" } } } } },
     ),
   )
 

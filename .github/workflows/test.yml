@@ -38,6 +38,9 @@ jobs:
       # ObservingStdioTransport. lifecycle.test.ts mock.module's that path
       # process-wide, so sharing a bun test process with it always breaks
       # these tests. It runs in the dedicated job below.
+      # session-actor-recovery.test.ts also needs a dedicated process: it
+      # exercises the real AppRuntime prefix captor, while focused prompt
+      # layers in unit tests replace and dispose that process-wide reference.
       #
       # Sharding is path-hash, NOT list position: `NR % n` on the sorted file
       # list reassigns every later file when one is added/removed, which
@@ -46,7 +49,7 @@ jobs:
       # independent of its neighbors.
       #
       # Scope: this stabilizes shard membership and isolates the file that
-      # actually broke. It is NOT a general mock.module isolation scheme —
+      # actually broke. It is NOT a general process-state isolation scheme —
       # other files that mock.module still share a bun test process with their
       # shard neighbors. If a new mock lands on the same hash bucket as a test
       # that needs the real implementation, isolate that file the same way as
@@ -73,6 +76,7 @@ jobs:
           has_tsx=0
           has_runtime=0
           has_stdio=0
+          has_actor_recovery=0
           files=()
           reported_files=()
 
@@ -98,6 +102,10 @@ jobs:
               has_stdio=1
               continue
             fi
+            if [[ "$f" == test/server/session-actor-recovery.test.ts ]]; then
+              has_actor_recovery=1
+              continue
+            fi
 
             h="$(printf '%s' "$f" | cksum | awk '{print $1}')"
             if (( h % n == idx - 1 )); then
@@ -111,8 +119,8 @@ jobs:
             fi
           done
 
-          if (( !has_tsx || !has_runtime || !has_stdio )); then
-            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio"
+          if (( !has_tsx || !has_runtime || !has_stdio || !has_actor_recovery )); then
+            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio actor_recovery=$has_actor_recovery"
             exit 1
           fi
 
@@ -173,5 +181,37 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: junit-stdio-exit-observe
+          path: packages/opencode/.artifacts/unit/junit.xml
+          if-no-files-found: error
+
+  session-actor-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Run HTTP actor recovery tests with the real application runtime
+        shell: bash
+        working-directory: packages/opencode
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/unit
+          report=.artifacts/unit/junit.xml
+          rm -f -- "$report"
+          bun test test/server/session-actor-recovery.test.ts --timeout 120000 \
+            --reporter=junit --reporter-outfile="$report"
+          test -s "$report"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" \
+            "$report" test/server/session-actor-recovery.test.ts
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-session-actor-recovery
           path: packages/opencode/.artifacts/unit/junit.xml
           if-no-files-found: error

@@ -34,7 +34,26 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
         expect(exec?.description).toContain("exec_command(input:")
         expect(exec?.description).toContain("apply_patch(input:")
         expect(exec?.description).toContain("task(input:")
-        expect(exec?.description).not.toContain("actor(input:")
+        const actorDeclaration = exec?.description
+          .split("\n")
+          .find((line) => line.trimStart().startsWith("actor(input:"))
+        expect(actorDeclaration).toBeDefined()
+        expect([...actorDeclaration!.matchAll(/action: "([^"]+)"/g)].map((match) => match[1])).toEqual([
+          "send",
+          "status",
+        ])
+        const actor = advertised.find((tool) => tool.id === "actor")
+        for (const operation of [
+          { action: "spawn", subagent_type: "general", description: "delegate", prompt: "inspect" },
+          { action: "run", subagent_type: "general", description: "delegate", prompt: "inspect" },
+          { action: "send", to_actor_id: "general-1", content: "progress" },
+          { action: "status", actor_id: "general-1" },
+          { action: "wait", actor_id: "general-1" },
+          { action: "cancel", actor_id: "general-1" },
+          { action: "resume", actor_id: "general-1" },
+          { action: "models" },
+        ])
+          expect(actor?.parameters.safeParse({ operation }).success).toBe(true)
         const normal = yield* reg.tools({ ...input, harness: "default" })
         expect(normal.map((tool) => tool.id)).toContain("bash")
         expect(normal.map((tool) => tool.id)).not.toContain("exec")

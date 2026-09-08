@@ -1055,7 +1055,6 @@ itTool.live("compose's tool list swaps GPT-specific file tools", () =>
       expect(gptDeclarations).not.toContain("edit(input:")
       expect(gptDeclarations).not.toContain("write(input:")
       expect(gptDeclarations).not.toContain("read(input:")
-      expect(gptDeclarations).not.toContain("actor(input:")
       expect(gptDeclarations).not.toContain("question(input:")
 
       const claudeTools = yield* registry.tools({
@@ -1088,6 +1087,29 @@ itTool.live("compose's tool list swaps GPT-specific file tools", () =>
       expect(claudeCodexDeclarations).toContain("view_image(input:")
       expect(claudeCodexDeclarations).toContain("exec_command(input:")
       expect(claudeCodexDeclarations).not.toContain("read(input:")
+      for (const tools of [gptTools, claudeCodexTools]) {
+        const actorDeclaration = tools
+          .find((tool) => tool.id === "exec")
+          ?.description.split("\n")
+          .find((line) => line.trimStart().startsWith("actor(input:"))
+        expect(actorDeclaration).toBeDefined()
+        expect([...actorDeclaration!.matchAll(/action: "([^"]+)"/g)].map((match) => match[1])).toEqual([
+          "send",
+          "status",
+        ])
+        const actor = tools.find((tool) => tool.id === "actor")
+        for (const operation of [
+          { action: "spawn", subagent_type: "general", description: "delegate", prompt: "inspect" },
+          { action: "run", subagent_type: "general", description: "delegate", prompt: "inspect" },
+          { action: "send", to_actor_id: "general-1", content: "progress" },
+          { action: "status", actor_id: "general-1" },
+          { action: "wait", actor_id: "general-1" },
+          { action: "cancel", actor_id: "general-1" },
+          { action: "resume", actor_id: "general-1" },
+          { action: "models" },
+        ])
+          expect(actor?.parameters.safeParse({ operation }).success).toBe(true)
+      }
     }),
   ),
 )
