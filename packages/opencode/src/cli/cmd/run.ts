@@ -1,3 +1,4 @@
+import { createRunApproval } from "./run-approval"
 import type { Argv } from "yargs"
 import path from "path"
 import { pathToFileURL } from "url"
@@ -427,7 +428,10 @@ export const RunCommand = cmd({
         return false
       }
 
-      const events = await sdk.event.subscribe()
+      const approval = createRunApproval(Boolean(args["dangerously-skip-permissions"]))
+      const eventAbort = new AbortController()
+      const requestAbort = new AbortController()
+      const events = await sdk.event.subscribe(undefined, { signal: eventAbort.signal })
       let error: string | undefined
 
       async function loop(tracker: CompletionTracker) {
@@ -440,8 +444,11 @@ export const RunCommand = cmd({
         try {
           while (true) {
             const next = await Promise.race([iter.next(), doneSignal])
-            if (next === "DONE") break
-            if (next.done) break
+            if (next === "DONE" || tracker.done) break
+            if (next.done) {
+              requestAbort.abort()
+              break
+            }
             const event = next.value
             tracker.onEvent(event)
 
@@ -538,28 +545,30 @@ export const RunCommand = cmd({
 
             if (event.type === "permission.asked") {
               const permission = event.properties
-              if (permission.sessionID !== sessionID) continue
-
-              if (args["dangerously-skip-permissions"]) {
-                await sdk.permission.reply({
-                  requestID: permission.id,
-                  reply: "once",
-                })
-              } else {
+              const reply = tracker.done ? undefined : approval.reply(permission)
+              if (!reply) continue
+              if (reply === "reject") {
                 UI.println(
                   UI.Style.TEXT_WARNING_BOLD + "!",
                   UI.Style.TEXT_NORMAL +
                     `permission requested: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting`,
                 )
-                await sdk.permission.reply({
-                  requestID: permission.id,
-                  reply: "reject",
-                })
               }
+              await sdk.permission.reply(
+                { requestID: permission.id, reply, ...(reply === "reject" ? { scope: "request" as const } : {}) },
+                { signal: approval.signal },
+              )
             }
           }
+        } catch (error) {
+          if (!approval.signal.aborted) {
+            requestAbort.abort()
+            throw error
+          }
         } finally {
+          approval.stop()
           tracker.stop()
+          eventAbort.abort()
           await iter.return?.(undefined).catch(() => {})
         }
       }
@@ -649,33 +658,46 @@ export const RunCommand = cmd({
         },
       })
 
-      loop(tracker).catch(async (e) => {
+      const listening = loop(tracker).catch(async (e) => {
         console.error(e)
         await Log.exit(1)
       })
 
-      if (args.command) {
-        await sdk.session.command({
-          sessionID,
-          agent,
-          model: args.model,
-          command: args.command,
-          arguments: message,
-          variant: args.variant,
-        })
-      } else {
-        const model = args.model ? Provider.parseModel(args.model) : undefined
-        const params = {
-          sessionID,
-          agent,
-          model,
-          variant: args.variant,
-          role: args.role as "user" | "assistant" | undefined,
-          parts: [...files, { type: "text" as const, text: message }],
+      approval.start()
+      try {
+        if (args.command) {
+          await sdk.session.command({
+            sessionID,
+            runID: approval.runID,
+            agent,
+            model: args.model,
+            command: args.command,
+            arguments: message,
+            variant: args.variant,
+          }, { signal: requestAbort.signal, throwOnError: true })
+        } else {
+          const model = args.model ? Provider.parseModel(args.model) : undefined
+          const params = {
+            sessionID,
+            runID: approval.runID,
+            agent,
+            model,
+            variant: args.variant,
+            role: args.role as "user" | "assistant" | undefined,
+            parts: [...files, { type: "text" as const, text: message }],
+          }
+          await sdk.session.prompt(params as typeof params & Record<string, unknown>, { signal: requestAbort.signal, throwOnError: true })
         }
-        await sdk.session.prompt(params as typeof params & Record<string, unknown>)
+        // Permission replies end with this request, even while output drains.
+        approval.stop()
+        tracker.markStarted()
+        await listening
+      } finally {
+        approval.stop()
+        tracker.stop()
+        eventAbort.abort()
+        requestAbort.abort()
       }
-      tracker.markStarted()
     }
 
     if (args.attach) {

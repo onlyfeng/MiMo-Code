@@ -1,3 +1,4 @@
+import * as RunApproval from "./run-approval"
 import path from "path"
 import os from "os"
 import { createHash } from "node:crypto"
@@ -664,7 +665,7 @@ export const layer = Layer.effect(
     )
 
     const runner = Effect.fn("SessionPrompt.runner")(function* () {
-      return yield* EffectBridge.make()
+      return yield* EffectBridge.make().pipe(RunApproval.capture)
     })
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       const run = yield* runner()
@@ -1769,6 +1770,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input.model.harness_model,
       )
       const run = yield* runner()
+      const runApproval = yield* RunApproval.current
       const promptOps = yield* ops()
       const effectivePermission = Agent.runtimePermission(input.agent, input.permission ?? input.session.permission)
 
@@ -1840,6 +1842,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
 
       const context = (args: any, options: ToolExecutionOptions): Tool.Context => ({
+        runApproval,
         sessionID: input.session.id,
         permission: effectivePermission,
         abort: options.abortSignal!,
@@ -1903,11 +1906,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               },
               nested?.abort ?? options.abortSignal,
             )
-            .pipe(Effect.orDie),
-        // Instance-scoped delete exemption (see Tool.Context.autoApproveDelete):
-        // read through the Permission service the caller already holds, so it can
-        // never be confused across the directories one process serves.
-        autoApproveDelete: () => permission.autoApproveDelete(),
+            .pipe(RunApproval.provide(runApproval), Effect.orDie),
       })
 
       const mcpTools = Object.entries(yield* mcp.tools(input.mcpContext)).toSorted(([a], [b]) => a.localeCompare(b))
@@ -2434,8 +2433,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       let error: Error | undefined
       const taskAbort = new AbortController()
+      const runApproval = yield* RunApproval.current
       const result = yield* actorTool
         .execute(taskArgs, {
+          runApproval,
           agent: task.agent,
           messageID: assistantMessage.id,
           sessionID,
@@ -2459,7 +2460,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 sessionID,
                 ruleset: Agent.runtimePermission(taskAgent, session.permission),
               })
-              .pipe(Effect.orDie),
+              .pipe(RunApproval.provide(runApproval), Effect.orDie),
         })
         .pipe(
           Effect.catchCause((cause) => {
@@ -3368,6 +3369,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         yield* sweepOrphanToolParts(input.sessionID, idleAtAdmission)
       }
       const message = yield* createUserMessage(input)
+      if (message.parts.length > 0) RunApproval.register(yield* RunApproval.current, message.info.id)
       yield* sessions.touch(input.sessionID)
 
       const permissions: Permission.Ruleset = []
@@ -3490,7 +3492,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               Effect.map((exit) => ({ started: true, exit })),
             ),
           idle,
-        ),
+        ).pipe(RunApproval.own(input.runID)),
       )
     })
 
@@ -4262,6 +4264,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+          yield* RunApproval.select(lastUser.id)
           if (recovery) {
             if (lastUser.id !== recovery.currentUserID)
               return yield* Effect.die(new Error("Actor recovery user changed during the resumed turn"))
@@ -5940,7 +5943,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               idle,
             ),
           true,
-        ),
+        ).pipe(RunApproval.own(input.runID)),
       )
     })
 
@@ -6173,6 +6176,7 @@ export function hasSubstantiveContent(parts: readonly MessageV2.Part[]): boolean
 }
 
 export const PromptInput = z.object({
+  runID: z.uuid().optional().describe("Opaque CLI invocation identifier for permission events; does not grant authorization."),
   sessionID: SessionID.zod,
   messageID: MessageID.zod.optional(),
   model: z
@@ -6302,6 +6306,7 @@ export const ShellInput = z.object({
 export type ShellInput = z.infer<typeof ShellInput>
 
 export const CommandInput = z.object({
+  runID: z.uuid().optional().describe("Opaque CLI invocation identifier for permission events; does not grant authorization."),
   messageID: MessageID.zod.optional(),
   sessionID: SessionID.zod,
   agent: z.string().optional(),

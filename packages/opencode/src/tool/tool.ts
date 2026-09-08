@@ -1,3 +1,4 @@
+import type * as RunApproval from "@/session/run-approval"
 import z from "zod"
 import { Effect } from "effect"
 import type { MessageV2 } from "../session/message-v2"
@@ -15,6 +16,7 @@ export interface Metadata {
 export type DynamicDescription = (agent: Agent.Info) => Effect.Effect<string>
 
 export type Context<M extends Metadata = Metadata> = {
+  runApproval?: RunApproval.Scope
   sessionID: SessionID
   permission?: Permission.Ruleset
   messageID: MessageID
@@ -30,15 +32,6 @@ export type Context<M extends Metadata = Metadata> = {
     input: Omit<Permission.Request, "id" | "sessionID" | "tool">,
     invocation?: { callID: string; abort: AbortSignal; input: unknown },
   ): Effect.Effect<void>
-  // Whether this instance currently exempts irreversible deletes from the extra
-  // bash_delete confirmation. Supplied by the caller (which holds the Permission
-  // service) instead of read from a process-global, so it stays instance-scoped:
-  // one server process serves many directories with independent permission state,
-  // and a global carrier would let a permissive directory silently auto-approve
-  // deletes in a strict one.
-  // Optional so the handful of synthetic contexts need not care; absent means
-  // "not exempt" — i.e. keep asking, which is the fail-closed direction.
-  autoApproveDelete?(): Effect.Effect<boolean>
 }
 
 export interface ExecuteResult<M extends Metadata = Metadata> {

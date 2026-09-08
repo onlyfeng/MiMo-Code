@@ -84,7 +84,8 @@ export const Flag = {
   // extra permission prompt with permission="bash_delete" — separate from the
   // normal bash-permission ask so it can't be silently pre-approved by a broad
   // `bash: allow` rule. Set MIMOCODE_AUTO_APPROVE_DELETE=true to trust the
-  // model with deletes and skip the second confirmation.
+  // model with deletes and skip human confirmation. Dangerous TUI startup
+  // mode includes this setting; explicit bash/bash_delete denies still win.
   // Read lazily (getter, not an eagerly-evaluated literal) so an embedder can
   // flip it at runtime: the desktop app runs the server in-process, so its
   // approval mode — switchable mid-session, like the TUI's /skip-permissions —
@@ -95,7 +96,8 @@ export const Flag = {
   },
   // Set by the TUI's --dangerously-skip-permissions flag. When truthy, an
   // allow-all base ruleset is injected UNDER the user's config permission so
-  // every tool auto-approves unless the user explicitly denied it.
+  // ordinary tools follow that ruleset, and delete confirmation is separately
+  // auto-approved after explicit denies have been checked.
   MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS: truthy("MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS"),
   MIMOCODE_DISABLE_DEFAULT_PLUGINS: truthy("MIMOCODE_DISABLE_DEFAULT_PLUGINS"),
   MIMOCODE_DISABLE_LSP_DOWNLOAD: truthy("MIMOCODE_DISABLE_LSP_DOWNLOAD"),
