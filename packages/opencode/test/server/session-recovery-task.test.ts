@@ -59,10 +59,12 @@ for (const scenario of [
   { backlog: 101, failure: "defect", cancelHook: undefined },
   { backlog: 1, failure: "provider", cancelHook: "session.pre" },
   { backlog: 1, failure: "provider", cancelHook: "session.userQuery.pre" },
+  { backlog: 1, failure: "provider", cancelHook: "session.userQuery.pre", postDefect: true },
 ]) {
   const backlog = scenario.backlog
+  const postDefect = "postDefect" in scenario && scenario.postDefect
   it.live(
-    `main HTTP recovery preserves its task and drains ${backlog} queued rows after length continuation with ${scenario.cancelHook ?? scenario.failure}`,
+    `main HTTP recovery preserves its task and drains ${backlog} queued rows after length continuation with ${scenario.cancelHook ?? scenario.failure}${postDefect ? " and post defect" : ""}`,
     () =>
       Effect.gen(function* () {
         const key = `recovery-task-${crypto.randomUUID()}`
@@ -74,6 +76,7 @@ for (const scenario of [
           queuedDone: Promise.withResolvers<void>(),
           cancelledDone: Promise.withResolvers<void>(),
           armed: false,
+          postDefect,
           mode: scenario.cancelHook ? "cancel" : scenario.failure,
           hook: scenario.cancelHook ?? "session.pre",
         }
@@ -115,7 +118,10 @@ for (const scenario of [
       state?.post.push(input.task_id)
       if (input.finalText === "RECOVERY_TASK_FINISHED") state?.done.resolve()
       if (input.finalText === "QUEUED_NOTIFICATION_FINISHED") state?.queuedDone.resolve()
-      if (input.outcome === "cancelled") state?.cancelledDone.resolve()
+      if (input.outcome === "cancelled") {
+        state?.cancelledDone.resolve()
+        if (state?.postDefect) throw new Error("post hook failed after cancellation")
+      }
     },
   })`,
           ),

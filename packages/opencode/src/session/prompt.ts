@@ -5681,7 +5681,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           Option.isSome(lastUserForMetrics) ? lastUserForMetrics.value.info.agent : final.info.agent,
         )
         return final
-      }).pipe(Effect.onExit(firePostSession), Effect.orDie)
+      }).pipe(
+        Effect.onExit(firePostSession),
+        Effect.catchCause((cause) =>
+          // A failing post hook must not erase an earlier cancellation decision.
+          Effect.failCause(cancelled && !isTurnCancelled(Exit.failCause(cause))
+            ? Cause.fromReasons([
+                ...cause.reasons,
+                ...Cause.fail(new PluginCancelledError({ message: cancelReason ?? "Session cancelled by plugin" })).reasons,
+              ])
+            : cause),
+        ),
+        Effect.orDie,
+      )
     })
 
     const runSharedLoop = Effect.fn("SessionPrompt.runSharedLoop")(function* (input: z.infer<typeof LoopInput>) {

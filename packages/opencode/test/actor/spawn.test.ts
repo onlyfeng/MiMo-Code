@@ -2764,6 +2764,7 @@ for (const phase of ["owned continuation", "compaction CAS"] as const) {
   )
 }
 
+// These integration fixtures include real provider startup and receiver disposal.
 for (const retirement of ["ephemeral", "cancelled", "disposed"] as const) {
   it.live(`resume rejects ${retirement} context without rewriting interrupted messages`, () =>
     provideTmpdirServer(
@@ -2793,6 +2794,7 @@ for (const retirement of ["ephemeral", "cancelled", "disposed"] as const) {
       }),
       { git: true, config: providerCfg },
     ),
+    15_000,
   )
 }
 
