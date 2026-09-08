@@ -2922,3 +2922,20 @@ and raw TUI authentication corrections. Source inheritance was conflict-free;
 only shared review/history references required reconciliation. The prior
 POLICY-02 runtime validation remains attached to its tested source; inherited
 corrections have their own producer and transport regression evidence.
+
+## 2026-09-09 POLICY-02 main HTTP cancellation follow-up
+
+PR #92 review identified that main recovery did not carry the request signal to
+its transaction boundary. Behavior and guidance source `228ceb6cd2a32f42ab8ac60bae2984ee1d30af6f` forwards
+that signal through the internal ResumeTurnInput and checks it via the existing
+commit predicate. A cancelled request cannot claim a task, bind the user or settle
+the interrupted assistant before commit. After commit, the runner owns recovery;
+request cancellation does not terminate it. Actor admission remains unchanged.
+
+The real Hono HTTP regression failed both pre-request and pre-commit cancellation
+cases before this fix. All three cancellation timings now pass; the six-case main
+HTTP file passes 62 assertions. The combined main HTTP, existing recovery and
+transaction regression run passes 29 tests / 145 assertions across three files.
+Package typecheck and repository lint pass (warnings remain). Tests clear the six
+ambient selectors and retain the package preload. No public schema change is
+introduced by the internal AbortSignal, so prior SDK generation remains valid.
