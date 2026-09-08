@@ -14,8 +14,10 @@ mimo serve --llm-server --port 4096
 mimo llm-server issue --directory /absolute/project/path --capability chat --json
 ```
 
-The JSON result contains `api_key`, the selected `model`, `base_url`, and
-`renew_argv`. Use the key as `Authorization: Bearer ...`; the base URL already
+The JSON result contains `api_key`, `scope`, `base_url`, and `renew_argv`. A finite
+scope also has `models`, and a single-model scope has `model`. An all-model scope
+is explicitly `{"type":"all"}` and does not invent an empty `models` list.
+Use the key as `Authorization: Bearer ...`; the base URL already
 ends in `/v1`. A `null` base URL means a matching local listener was not found;
 issuing a token does not start one. Use the exact `provider/model` identifier.
 Renewal issues a new token and does not revoke the old token.
@@ -26,6 +28,25 @@ its supported API operations. Discovery checks configuration and supported
 transports without sending a generation request; it cannot prove availability,
 credit, or remote acceptance of every parameter.
 
+Choose exactly one selection mode: repeat `--model` for a finite list, use
+`--all-models`, or use `--capability`. Finite lists contain 1–64 unique, explicit
+`provider/model` identifiers checked for availability at issue time. Empty
+lists and wildcard authorization are rejected.
+
+```sh
+mimo llm-server issue --directory /absolute/project/path --model provider/chat --model provider/asr --json
+mimo llm-server issue --directory /absolute/project/path --all-models --json
+```
+
+All-model scope applies to serviceable models in this project's effective
+configuration, including later additions; removals cease to be serviceable.
+It is not expanded into a snapshot when issued and never grants another
+directory. Query `GET /v1/models` to discover the currently available selection.
+Renewal preserves all repeated models or `--all-models`. Capability selection
+freezes the selected model in `renew_argv`, so renewal does not select a different
+model after configuration changes. Alternatives in the issue output are not
+additional authorized models.
+
 ```sh
 mimo llm-server list --directory /absolute/project/path --json
 mimo llm-server revoke TOKEN_ID --directory /absolute/project/path
@@ -34,6 +55,15 @@ mimo llm-server revoke TOKEN_ID --directory /absolute/project/path
 List and revoke do not initialize the project or its plugins. Revocation blocks
 later admission; requests already admitted keep their request lifecycle.
 Client credentials are never forwarded as provider authorization headers.
+
+Legacy v1 single-model records retain their exact scope and expiry. Reading a
+record does not migrate the file; a real mutation validates and atomically
+writes v2 under the existing lock. Queries, unknown tokens, and no-op revocation
+do not rewrite a file merely to upgrade it. Legacy literal `*` characters remain
+exact identifiers, never wildcards; new issue requests reject them. Disk records
+store canonical `scope`; finite public library results also retain `models`.
+Consumers of a result that may be all-model scope must check `scope.type` before
+assuming a `models` array exists.
 
 ## Endpoints and media
 

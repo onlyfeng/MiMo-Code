@@ -15,6 +15,12 @@ mimo llm-server issue --directory /absolute/project/path --capability chat --jso
 
 # 也可明确选择自己的 provider/model
 mimo llm-server issue --directory /absolute/project/path --model provider/model --ttl 1h --max-age 24h --json
+
+# 有限模型列表：重复 --model
+mimo llm-server issue --directory /absolute/project/path --model provider/chat --model provider/asr --json
+
+# 显式授权该项目当前及后续生效配置中可服务的全部模型
+mimo llm-server issue --directory /absolute/project/path --all-models --json
 ```
 
 `--capability` 接受 `chat`、`speech` 或 `transcription`。候选来自该项目当前生效
@@ -22,10 +28,15 @@ mimo llm-server issue --directory /absolute/project/path --model provider/model 
 其后优先配置的默认模型，再按模型标识稳定排序。发现不会发送生成请求，因此不证明
 供应商当前在线、账户余额或具体模型支持的所有参数。
 
-`--model` 与 `--capability` 必须且只能选择一个。`--json` 签发结果包含 `api_key`、选定的
-`model`、`base_url` 和固定目录/模型/期限的 `renew_argv`；按能力签发时还返回
-备选模型。调用方应使用
-结果中的完整 `provider/model`，不把备选模型自动当作已授权模型。找不到该目录对应的
+重复 `--model`、`--all-models` 与 `--capability` 三种选择方式必须且只能使用一种。
+有限列表接受 1 至 64 个不重复的完整 `provider/model`，签发时逐个检查是否可用，
+拒绝空列表和通配符。`--all-models` 使用显式全部范围，不把当前目录的模型展开成快照。
+
+`--json` 签发结果包含 `api_key`、`scope`、`base_url` 和固定目录/范围/期限的
+`renew_argv`。有限范围继续返回 `models`，仅单模型时返回 `model`；全部范围使用
+`scope:{"type":"all"}`，不伪造空 `models`。按能力签发时还返回备选模型，但它们不自动
+获得授权；续签始终保留实际选中的模型，不重新按能力选模。调用方应使用完整
+`provider/model`；全部范围可从 `GET /v1/models` 查询当前可用列表。找不到该目录对应的
 存活监听器时，`base_url` 为 `null`；命令不会自动启动监听器。
 
 地址发现只探测本机地址，使用不携带令牌的监听器身份检查，拒绝旧登记和重定向。
@@ -45,9 +56,11 @@ mimo llm-server issue --directory /absolute/project/path --model provider/model 
 配置为客户端的 API 基址（已经包含 `/v1`）。例如将签发结果保存在调用方的秘密配置
 中，再传入客户端；不要提交令牌到项目文件。
 
-令牌只授权**固定项目目录和一个明确模型**。`--capability` 是选模条件，不是端点
-权限：如果选中的多模态模型同时支持聊天与转写，同一令牌可调用这两种接口。空模型
-范围不表示全部模型，不支持通配授权。HTTP 参数不能切换目录或 workspace。
+令牌授权**固定项目目录及显式模型范围**。有限范围精确匹配模型标识；全部范围只包含
+该目录当前生效配置中可服务的模型，后续增加或删除模型也随有效配置变化，不扩大到
+其他目录。`--capability` 是选模条件，不是端点权限：如果选中的多模态模型同时支持
+聊天与转写，同一令牌可调用这两种接口。空范围和通配符都不表示全部模型。
+HTTP 参数不能切换目录或 workspace。
 
 代理使用项目已有供应商凭据；客户端令牌不会成为供应商请求的认证头。聊天路径沿用
 provider 配置和聊天插件钩子，构造不持久化的请求上下文；只把工具调用返回给客户端，
@@ -71,6 +84,12 @@ mimo llm-server revoke TOKEN_ID --directory /absolute/project/path
 撤销阻止之后的请求准入，已经授权的在途请求由请求取消/期限/服务关闭管理。重新
 签发产生新的令牌，旧令牌不会自动撤销。列表与撤销直接操作该目录的令牌存储，
 不初始化项目或插件。
+
+旧 v1 单模型令牌可等价读取，范围与期限不变；只有真正修改记录时才在同一文件锁内
+原子写成 v2。查询、未知令牌及无变化的撤销不会仅因版本旧而改写存储。旧记录中合法的
+字面 `*` 模型标识仍按原字符串精确匹配，不变成通配授权；新签发不接受该字符。
+磁盘只保存 canonical `scope`，有限范围的公共库结果保留旧 `models` 投影；读取可能是
+全部范围的结果时，应按 `scope.type` 区分，不能假设始终存在 `models` 数组。
 
 ## 协议范围与资源限制
 
