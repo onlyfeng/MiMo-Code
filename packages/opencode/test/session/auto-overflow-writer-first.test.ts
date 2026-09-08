@@ -200,15 +200,11 @@ function writerThatFails(): SpawnImpl {
 }
 
 // Shrink the usable window so a seeded token count trips
-// SessionOverflow.isOverflow deterministically. The trigger preserves both the
-// ratio and reserve boundaries: `usable = min(floor(max_context * ratio),
-// max_context - reserves)`, where ratio is MIMOCODE_COMPACTION_TRIGGER_RATIO
-// (default 0.9) and reserves() is compaction.reserved (100) plus a 20_000 output
-// reservation (this model publishes no limit.input). max_context must exceed
-// those reserves or budget() ignores it and the model's million-token window
-// applies. 40_000 therefore puts the trigger at min(36_000, 19_900) = 19_900.
-// The 25_000-token sentinel below sits above that reserve boundary but below
-// the ratio boundary, so the test proves the reserve-safe minimum is retained.
+// SessionOverflow.isOverflow deterministically. Like upstream, the trigger is
+// floor(max_context * ratio), with a default ratio of 0.9. The configured
+// budget must still exceed compaction.reserved (100) plus the 20_000 legacy
+// output reserve to be accepted. A 40_000 budget therefore triggers at 36_000:
+// the 25_000-token case must not rebuild, while the 50_000-token case must.
 //
 // The empty checkpoint ladder is declared rather than inferred: SessionPrune
 // only consults defaultThresholdsFor when `thresholds` is absent, so passing []
@@ -351,9 +347,7 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
                     message.parts.some((part) => part.type === "text" && part.text === "context that must survive"),
                   ),
                 ).toBe(true)
-                expect(
-                  MessageV2.filterCompacted(after).some((message) => message.info.id === first.id),
-                ).toBe(true)
+                expect(MessageV2.filterCompacted(after).some((message) => message.info.id === first.id)).toBe(true)
               }),
             ),
         })
@@ -366,12 +360,15 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
     { timeout: 60_000 },
   )
 
-  test(
-    "a completed high-usage turn is rebuilt exactly once",
-    async () => {
+  test.each([
+    { usage: 25_000, rebuilds: 0 },
+    { usage: 50_000, rebuilds: 1 },
+  ])(
+    "a completed turn with $usage tokens produces $rebuilds rebuilds at the ratio boundary",
+    async ({ usage, rebuilds }) => {
       const llm = startUsageLLM([
         { text: "initialized", promptTokens: 1_000 },
-        { text: "high-usage reply", promptTokens: 25_000 },
+        { text: "high-usage reply", promptTokens: usage },
         { text: "reply after rebuild", promptTokens: 1_000 },
       ])
       let writerCalls = 0
@@ -424,9 +421,9 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
 
                 const after = yield* sessions.messages({ sessionID: info.id })
                 const checkpoints = after.filter((m) => m.parts.some((p) => p.type === "checkpoint"))
-                expect(checkpoints).toHaveLength(1)
-                expect(new Set(checkpoints.map((m) => m.info.id)).size).toBe(1)
-                expect(writerCalls).toBe(1)
+                expect(checkpoints).toHaveLength(rebuilds)
+                expect(new Set(checkpoints.map((m) => m.info.id)).size).toBe(rebuilds)
+                expect(writerCalls).toBe(rebuilds)
                 expect(llm.calls).toBe(3)
                 expect(
                   after.some((m) => m.parts.some((p) => p.type === "text" && p.text === "reply after rebuild")),
@@ -474,9 +471,9 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
                   agent: "build",
                 })
 
-                // usable = min(floor(50K * 0.9), 50K - 20.1K reserves) = 29.9K.
+                // usable = floor(50K * 0.9) = 45K.
                 // The single 24K checkpoint threshold is below it, so 25K must
-                // write a checkpoint without rebuilding before the 29.9K trigger.
+                // write a checkpoint without rebuilding before the 45K trigger.
                 const first = yield* Effect.promise(() => seedUserMessage(info.id, "earlier question"))
                 yield* Effect.promise(() => seedFinishedAssistant(info.id, first.id, 25_000))
 
