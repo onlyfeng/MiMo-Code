@@ -2958,3 +2958,55 @@ specified propagation does not claim current-upstream parity.
   the selected baseline through main to compat. Only this operation's clean,
   integrated worktrees/branches are eligible for cleanup; earlier Agent work
   remains protected by the saved HEAD/status/diff/untracked hashes.
+
+
+## 2026-09-08 MEDIA-DNS-01 inheritance
+
+| Inventory (N=1) | Main accepted | Compat inheritance |
+| --- | --- | --- |
+| MEDIA-DNS-01: validated image-address connection fallback, a repair to MEDIA-01 | PR #78, `1f88fded9402ebcb2f6379477d77f7d8d15549a2`; source/tests `d5798519cd1227ab4061bd69ef9efc5f483b74d8` | Tested candidate `76685956e50b49605b92b681fae8e647512078c4`; actual-main ancestry merge `cdf6820c4fd151ad4b55fd9f7540c89f32ad1dbd` |
+
+- Prior compat is `14716fe320c6271b3c0157bbccf686efd3fc2ace`. Candidate
+  `76685956` first inherited main candidate/audit `f11b25e8e7ecdb1351cb10af8200253ea7f3920a`.
+  Actual main `1f88fded` has exactly that candidate's tree. The later compat
+  ancestry merge `cdf6820c` has exactly `76685956`'s tree, so the local results
+  below describe one tested runtime/test tree, not a second run on the ancestry
+  merge. Shared audit is `f11b25e8`; bundled guidance remains
+  `3cb9d8df7d453d8995de22f3242eee4bc81f6e97`, and overall upstream review remains
+  `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`.
+- Before this compat-only documentation update, the complete binary diff
+  `85dfc3f2 -> 14716fe3` equals `f11b25e8 -> 76685956`, with 96 overlay paths
+  and SHA-256 `70ffad2aa5aba24646ab2cd45f5366e3d7d5532bcfe9f550ee962dda1d4e26aa`.
+  The two tree equalities also establish the same overlay at actual main and
+  its compat ancestry merge. Image implementation, tests and fixture, and the
+  shared FD/FC/history documents are byte-identical to accepted main. Existing
+  SDK/OpenAPI differences are preserved; no additional generated delta or DC
+  is introduced. This entry does not rewrite the previous six-capability audit.
+- All seven active DC were reviewed. NET-001, NET-002 and CONTEXT-001 have
+  semantic adjacency but no changed overlay carrier; PLATFORM-001, MODEL-001,
+  ACTOR-001 and TUI-001 have no relevant changed carrier. Images retain the
+  shared connection-error whitelist, fully validated public DNS candidates,
+  pinned addresses, original Host/SNI/TLS identity, cancellation, and existing
+  request/media bounds. TLS, HTTP and body failures do not retry another address.
+  WebFetch's private-target exception stays confined to its existing call seam;
+  MCP production and its private-address characterization are unchanged.
+- Final local compat validation: 277 pass, zero fail, zero skip, 703 assertions
+  across five files in 48.27 seconds; the coordinator independently checked
+  JUnit counts. Package typecheck passed; repository lint reported 4,512
+  warnings and zero errors. The run unset `MIMOCODE_EXPERIMENTAL`,
+  `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`,
+  `MIMOCODE_CODEX_MODE`, `MIMOCODE_COMPACTION_MAX_CONTEXT`,
+  `MIMOCODE_COMPACTION_TRIGGER_RATIO`, and `MIMOCODE_DISABLE_CHECKPOINT`, while
+  preserving package-owned preload flags. The WebFetch RFC1918 regression uses
+  a controlled HttpClient; it is not a live private-network or MCP test.
+- Independent network probes on the shared main source passed the same ten
+  cases on Node v24.16.0 and Bun 1.3.14, ten passes and zero failures each.
+  These were not rerun on compat. Equal image blobs establish source inheritance;
+  the probes map validated public numeric candidates to real local temporary
+  sockets, not live public/IPv6 routes. They do not establish Happy Eyeballs.
+- PR #78's main candidate `f11b25e8` passed three workflows/eight jobs before
+  merge. Codex completed at 2026-09-08T07:14:39Z with zero review threads at that
+  candidate. These are pre-merge candidate results: final-main push CI was still
+  running at this checkpoint, and the compat PR and push CI were pending.
+  Final remote-SHA publication and ancestry verification remain separate gates.
+  Pure compat registry/history changes do not advance the runtime/content bases.
