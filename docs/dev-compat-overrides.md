@@ -317,7 +317,7 @@ projection and three-dimensional tool hash remain intact. The follow-up matrix
 has 43 passing cases / 148 assertions, with no failures; package typecheck
 passed and repository lint reports 4537 warnings / zero errors. The prior
 preview's 101 cases / 479 assertions remain prior evidence, not repeated runs.
-Formal main acceptance and inheritance are complete; compat publication awaits its own review and CI. See [the POLICY-04 history](dev-compat-registry-history.md#2026-09-08-policy-04-system-tail-catalog-local-integration).
+POLICY-04 publication is complete: main `fb16a8fd5a7b916421e7a04ca31f06559e086298` and compat `823e21d2fd7c3a2603d14bf15289351a6c555f81` passed exact-tip push CI and ancestry verification. See [the POLICY-04 history](dev-compat-registry-history.md#2026-09-08-policy-04-system-tail-catalog-local-integration).
 These current review references do not re-date or claim to rerun older evidence.
 
 The POLICY-03 review inherits default TUI model API startup and origin-scoped
