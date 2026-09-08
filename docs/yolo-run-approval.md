@@ -39,7 +39,11 @@ This distinction uses the actual reply to that pending request, not a later
 read of the shared deletion switch. Changing the switch during an approval
 cannot widen what was approved. An invocation-owned CLI yolo `once` reply still
 approves the complete displayed command; ordinary skip-all continues to handle
-ordinary asks independently after deny checks.
+ordinary asks independently after deny checks. One-shot `session approve` for a
+forwarded deletion request also approves that complete displayed command. A
+`session grant-approval` pregrant remains automatic and does not replace the
+ordinary checks. A rejected or already settled forward cannot be relabeled as
+an explicit approval by a late resolver.
 
 The existing temporary-only exemption remains separate: every target must be
 provably temporary, and overlapping the active project/worktree excludes that
@@ -100,7 +104,8 @@ listener defaults, media handling, compaction, or other pending policy choices.
 FD-001 owns the shared-state residual, FC-001 owns runner and atomic-continuation
 lifetimes, and FC-007 owns Bash/path deletion checks.
 
-Focused coverage is in `test/cli/run-approval.test.ts`,
+Focused coverage includes `test/tool/bash-forwarded-approval.test.ts` for the
+real SessionTool forwarding path, alongside `test/cli/run-approval.test.ts`,
 `test/session/run-approval.test.ts`, `test/session/prompt-effect.test.ts`,
 `test/permission/auto-approve-delete.test.ts`,
 `test/tool/bash-delete-permission.test.ts`, and

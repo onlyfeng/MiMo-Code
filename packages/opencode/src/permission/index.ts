@@ -430,7 +430,15 @@ export const layer = Layer.effect(
             resolve: (decision) =>
               bridge.fork(
                 decision === "allow"
-                  ? Deferred.succeed(deferred, void 0)
+                  ? Deferred.completeWith(
+                      deferred,
+                      Effect.sync(() => {
+                        // Only the winning explicit one-shot completion marks this
+                        // ask's receipt. A late resolver cannot relabel an earlier
+                        // automatic grant, and pre-authorized grants never enter here.
+                        if (receipt?.permission === info.permission) receipt.replied = true
+                      }),
+                    )
                   : Deferred.fail(deferred, new RejectedError()),
               ),
           })
