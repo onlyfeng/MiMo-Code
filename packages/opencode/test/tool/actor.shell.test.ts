@@ -396,8 +396,15 @@ describe("actor.shell.parse: resume", () => {
   test("resume selects one registered actor without a task selector", async () => {
     expect(await parse("actor resume explore-1")).toEqual([{ operation: { action: "resume", actor_id: "explore-1" } }])
   })
-  test("resume rejects missing target and extra task selector", async () => {
-    for (const script of ["actor resume", "actor resume explore-1 --task T1", "actor resume explore-1 other"]) {
+  test("resume preserves an optional task selector for executor validation", async () => {
+    for (const selector of ["--task T2.1", "--task=T2.1"]) {
+      expect(await parse(`actor resume explore-1 ${selector}`)).toEqual([
+        { operation: { action: "resume", actor_id: "explore-1", task_id: "T2.1" } },
+      ])
+    }
+  })
+  test("resume rejects missing target or task value and extra positional arguments", async () => {
+    for (const script of ["actor resume", "actor resume --task T1", "actor resume explore-1 --task", "actor resume explore-1 other"]) {
       expect((await Effect.runPromise(Effect.exit(parseActorScript(script))))._tag).toBe("Failure")
     }
   })

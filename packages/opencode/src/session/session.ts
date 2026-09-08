@@ -20,7 +20,9 @@ import { Log } from "../util"
 import { updateSchema } from "../util/update-schema"
 import { MessageV2 } from "./message-v2"
 import { Instance } from "../project/instance"
-import { InstanceState } from "@/effect"
+import { EffectBridge, InstanceState } from "@/effect"
+import { claimRecoveryTask } from "../task/registry"
+import { Updated as TaskUpdated } from "../task/events"
 import { Snapshot } from "@/snapshot"
 import { ProjectID } from "../project/schema"
 import { WorkspaceID } from "../control-plane/schema"
@@ -404,6 +406,13 @@ export class BusyError extends Error {
   }
 }
 
+export class RecoveryConflictError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "RecoveryConflictError"
+  }
+}
+
 export interface Interface {
   readonly create: (input?: {
     parentID?: SessionID
@@ -454,6 +463,24 @@ export interface Interface {
   readonly children: (parentID: SessionID, options?: { visible?: boolean }) => Effect.Effect<Info[]>
   readonly remove: (sessionID: SessionID) => Effect.Effect<void>
   readonly updateMessage: <T extends MessageV2.Info>(msg: T) => Effect.Effect<T>
+  /** Patch only live message metadata; never overwrite task/source fields from an old read. */
+  readonly patchMessageMetadata: (input: {
+    sessionID: SessionID
+    messageID: MessageID
+    agent?: string
+    summaryDiffs?: Snapshot.FileDiff[]
+  }) => Effect.Effect<void>
+  /** Runner-admitted recovery only; no enclosing transaction or throwing ownership callback. */
+  readonly commitRecoveryCandidate: (input: {
+    sessionID: SessionID
+    actorID: string
+    assistantMessageID: MessageID
+    parentMessageID: MessageID
+    taskID?: string
+    taskSessionID?: SessionID
+    shouldCommit?: () => boolean
+    onCommitted?: () => void
+  }) => Effect.Effect<MessageV2.User, InstanceType<typeof NotFoundError> | RecoveryConflictError>
   readonly commitUserMessageIfLatest: (input: {
     expectedUserID: MessageID | undefined
     message: MessageV2.User
@@ -669,6 +696,135 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         yield* Effect.sync(() => SyncEvent.run(MessageV2.Event.Updated, { sessionID: msg.sessionID, info: msg }))
         return msg
       }).pipe(Effect.withSpan("Session.updateMessage"))
+
+    const patchMessageMetadata: Interface["patchMessageMetadata"] = Effect.fn("Session.patchMessageMetadata")((input) =>
+      Effect.sync(() => {
+        Database.transaction(
+          (tx) => {
+            const row = tx
+              .select()
+              .from(MessageTable)
+              .where(and(eq(MessageTable.session_id, input.sessionID), eq(MessageTable.id, input.messageID)))
+              .get()
+            if (!row) return
+            const info = { ...row.data, id: row.id, sessionID: row.session_id, agentID: row.agent_id } as MessageV2.Info
+            if (input.agent === undefined && (input.summaryDiffs === undefined || info.role !== "user")) return
+            const next = { ...info, ...(input.agent !== undefined ? { agent: input.agent } : {}) }
+            if (next.role === "user" && input.summaryDiffs !== undefined)
+              next.summary = { ...next.summary, diffs: input.summaryDiffs }
+            SyncEvent.run(MessageV2.Event.Updated, { sessionID: input.sessionID, info: next })
+          },
+          { behavior: "immediate" },
+        )
+      }),
+    )
+
+    const commitRecoveryCandidate: Interface["commitRecoveryCandidate"] = Effect.fn("Session.commitRecoveryCandidate")(
+      function* (input) {
+        const bridge = yield* EffectBridge.make()
+        return yield* Effect.suspend(() => {
+          if (input.shouldCommit && !input.shouldCommit()) return Effect.interrupt
+          // No Effect yield separates the actual commit from supervisor ownership.
+          try {
+            const user = Database.transaction(
+              (tx) => {
+                // First postcommit effect: a publisher may throw after SQLite
+                // commits, but must not prevent supervisor ownership transfer.
+                Database.effect(() => input.onCommitted?.())
+                const latest = tx
+                  .select()
+                  .from(MessageTable)
+                  .where(
+                    and(
+                      eq(MessageTable.session_id, input.sessionID),
+                      eq(MessageTable.agent_id, input.actorID),
+                      sql`json_extract(${MessageTable.data}, '$.role') IN ('user', 'assistant')`,
+                    ),
+                  )
+                  .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+                  .limit(1)
+                  .get()
+                const parent = tx
+                  .select()
+                  .from(MessageTable)
+                  .where(
+                    and(
+                      eq(MessageTable.session_id, input.sessionID),
+                      eq(MessageTable.agent_id, input.actorID),
+                      sql`json_extract(${MessageTable.data}, '$.role') = 'user'`,
+                    ),
+                  )
+                  .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+                  .limit(1)
+                  .get()
+                if (!latest || latest.id !== input.assistantMessageID || !parent || parent.id !== input.parentMessageID)
+                  throw new NotFoundError({ message: "Recovery candidate changed before settlement" })
+                // Same persisted-message hydration as MessageV2; preserve all stored fields.
+                const assistant = {
+                  ...latest.data,
+                  id: latest.id,
+                  sessionID: latest.session_id,
+                  agentID: latest.agent_id,
+                } as MessageV2.Info
+                const original = {
+                  ...parent.data,
+                  id: parent.id,
+                  sessionID: parent.session_id,
+                  agentID: parent.agent_id,
+                } as MessageV2.Info
+                if (
+                  assistant.role !== "assistant" ||
+                  "completed" in assistant.time ||
+                  assistant.parentID !== input.parentMessageID ||
+                  original.role !== "user"
+                )
+                  throw new NotFoundError({ message: "Recovery candidate changed before settlement" })
+                if (input.taskID !== undefined && original.task_id !== undefined && input.taskID !== original.task_id)
+                  throw new RecoveryConflictError("Recovery task conflicts with the original user task")
+                const user =
+                  input.taskID !== undefined && original.task_id === undefined
+                    ? { ...original, task_id: input.taskID }
+                    : original
+                if (user !== original) {
+                  if (!input.taskSessionID) throw new NotFoundError({ message: "Recovery task namespace is unavailable" })
+                  const claim = claimRecoveryTask(tx, {
+                    sessionID: input.taskSessionID,
+                    taskID: input.taskID!,
+                    actorID: input.actorID,
+                    summary: `Recovery of ${input.sessionID}/${input.assistantMessageID} from user ${input.parentMessageID}`,
+                  })
+                  if ("error" in claim) {
+                    if (claim.error === "missing") throw new NotFoundError({ message: "Recovery task is unavailable" })
+                    throw new RecoveryConflictError("Recovery task is not claimable by this actor")
+                  }
+                  SyncEvent.run(MessageV2.Event.Updated, { sessionID: input.sessionID, info: user })
+                  if (claim.changed)
+                    Database.effect(() => {
+                      bridge.fork(
+                        bus.publish(TaskUpdated, { sessionID: claim.task.session_id, task: claim.task, kind: "started" }),
+                      )
+                    })
+                }
+                SyncEvent.run(MessageV2.Event.Updated, {
+                  sessionID: input.sessionID,
+                  info: {
+                    ...assistant,
+                    time: { ...assistant.time, completed: Date.now() },
+                    error: new MessageV2.AbortedError({ message: "Abandoned: resumed as a new assistant turn" }).toObject(),
+                  },
+                })
+                return user
+              },
+              { behavior: "immediate" },
+            )
+            return Effect.succeed(user)
+          } catch (error) {
+            if (error instanceof NotFoundError || error instanceof RecoveryConflictError) return Effect.fail(error)
+            return Effect.die(error)
+          }
+        })
+      },
+    )
 
     const commitUserMessageIfLatest: Interface["commitUserMessageIfLatest"] = Effect.fn(
       "Session.commitUserMessageIfLatest",
@@ -1020,6 +1176,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       remove,
       updateMessage,
       commitUserMessageIfLatest,
+      commitRecoveryCandidate,
+      patchMessageMetadata,
       removeMessage,
       removePart,
       updatePart,

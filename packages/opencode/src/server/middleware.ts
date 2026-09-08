@@ -27,7 +27,7 @@ export const ErrorMiddleware: ErrorHandler = (err, c) => {
     else status = 500
     return c.json(err.toObject(), { status })
   }
-  if (err instanceof Session.BusyError) {
+  if (err instanceof Session.BusyError || err instanceof Session.RecoveryConflictError) {
     return c.json(new NamedError.Unknown({ message: err.message }).toObject(), { status: 409 })
   }
   if (err instanceof HTTPException) return err.getResponse()

@@ -2894,3 +2894,65 @@ prove a previously 401 raw reply now completes the pending deferred; the
 workspace adaptor route also succeeds. The four affected test files pass
 8 cases / 46 assertions after the correction. The existing 203-case source
 matrix remains separate evidence, not re-counted as this follow-up.
+
+## 2026-09-09 POLICY-02 registered recovery and task binding
+
+- Runtime/tests and changed bundled guidance: `6ff976a97026610335dc367d8875a87d1d91d1a7`. Development base is POLICY-04 preview `110222157896b16e7ba85bc3d5d3f5eef975a6e1`; POLICY-03 and final POLICY-04 inheritance must follow before publication. Selected upstream `0abfeba186191c1a361cf3f27b802e9d29bf0fdc` and overall baseline `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` remain unchanged.
+- One canonical resolver accepts registered non-main targets in the addressed session and peers through their own/original parent sessions. Actor retains persistent/full/current receiver checks and task namespace from real spawn inputs. POST/tool resume accepts TaskID: omitted/same value preserve original state; a different binding conflicts; missing values bind only a valid open/in-progress unowned/self-owned task in its trusted namespace. GET remains read-only.
+- Candidate revalidation, task claim/event, User binding and old Assistant settlement share an immediate transaction. The first postcommit callback transfers ownership before any publisher can throw. The synchronous precommit check rejects request withdrawal, a claimed cancel, and disposed receiver/run scopes. Existing supervisor generation and run-approval isolation remain intact.
+- Existing asynchronous summary and setmode writers now patch only current summary/agent metadata. Real producer gates reproduced loss of the new task and resurrection of a deleted User; the fix preserves current fields and does not recreate missing rows. No arbitrary task-patch API was introduced.
+- Validation by affected surface: Actor suite 71/358; resolver/native/shell entry suite 51/136; real Actor HTTP/SDK/tool 13/175; real main HTTP 3/47; runtime/published OpenAPI and existing main recovery 9/48; transaction, summary and setmode 22/79. These are 169 distinct tests and 843 assertions, grouped across 12 files; overlapping exploratory RED and later single-case repeats are excluded. The 16 HTTP cases were freshly repeated after metadata patching; unchanged Actor paths reuse their completed full-suite evidence.
+- Standard JavaScript SDK build and OpenAPI generation completed. Semantic OpenAPI comparison changes only resume parameters/description; task_id is serialized exactly once by the actual callable SDK, and published 409 remains present. Package typecheck, diff check and lint (4,494 warnings, zero errors) pass.
+- Formal main/compat PRs, current-head Codex review, exact remote CI and accepted-source ancestry remain pending. This entry records local implementation evidence, not completion of propagation.
+
+## 2026-09-09 — POLICY-02 inherits final POLICY-04 format follow-up
+
+Runtime/test snapshot `85ce2094506417608777ff1c410a3dd070f42551` inherits PR #87 candidate
+`32b01dcd828f692ea0656e53319cd48abf054c18`, including structured/text format
+refresh and the mock provider system-tail contract. Source merges were clean.
+Bundled guidance snapshot is `85ce2094506417608777ff1c410a3dd070f42551`.
+Publication remains ordered after the preceding policy is accepted on both branches;
+this local inheritance is not evidence of remote acceptance.
+
+### 2026-09-09 POLICY-02 combined correction inheritance
+
+Runtime/test and combined bundled guidance snapshot `47570681da036ca98237f5e06f79f69a1afbf039` contains
+the POLICY-02 recovery/task implementation and the subsequent shared catalog
+and raw TUI authentication corrections. Source inheritance was conflict-free;
+only shared review/history references required reconciliation. The prior
+POLICY-02 runtime validation remains attached to its tested source; inherited
+corrections have their own producer and transport regression evidence.
+
+## 2026-09-09 POLICY-02 main HTTP cancellation follow-up
+
+PR #92 review identified that main recovery did not carry the request signal to
+its transaction boundary. Behavior and guidance source `228ceb6cd2a32f42ab8ac60bae2984ee1d30af6f` forwards
+that signal through the internal ResumeTurnInput and checks it via the existing
+commit predicate. A cancelled request cannot claim a task, bind the user or settle
+the interrupted assistant before commit. After commit, the runner owns recovery;
+request cancellation does not terminate it. Actor admission remains unchanged.
+
+The real Hono HTTP regression failed both pre-request and pre-commit cancellation
+cases before this fix. All three cancellation timings now pass; the six-case main
+HTTP file passes 62 assertions. The combined main HTTP, existing recovery and
+transaction regression run passes 29 tests / 145 assertions across three files.
+Package typecheck and repository lint pass (warnings remain). Tests clear the six
+ambient selectors and retain the package preload. No public schema change is
+introduced by the internal AbortSignal, so prior SDK generation remains valid.
+
+## 2026-09-09 POLICY-02 main recovery inbox provenance follow-up
+
+PR #92 review identified that main recovery committed the original task but
+omitted the recovery parent passed to the loop. Behavior/guidance source
+`afa6198588ba7f6e0a0c92623622c10da68837d7` makes the committed parent authoritative for every recovery,
+independently of Actor-only model identity validation. All resumed loop steps
+defer inbox draining and use the existing successful-continuation receipts;
+ordinary later runs still drain queued messages with their own task provenance.
+Settlement cleanup also checks the committed parent for main recovery.
+
+The real main HTTP/provider regression starts with a durable inbox row. Before
+the fix, the resumed length continuation lost the bound task. After the fix,
+both recovery requests retain the original task and exclude the notification;
+the next ordinary run consumes it without inheriting that task. Together with
+existing main recovery, cancellation and transaction cases, 29 tests / 153
+assertions across three files pass. Package typecheck and repository lint pass.
