@@ -3029,3 +3029,16 @@ Three existing real-provider/context-retirement fixtures now have an explicit
 15-second timeout with unchanged assertions. Compat previously exceeded its
 default five seconds in one fixture; the same-source isolated run passed in
 4.9 seconds. This budget change does not claim to eliminate timing variance.
+
+### 2026-09-09 POLICY-02 joined wake failure progress guard
+
+PR #94 feedback on the preceding audit head exposed an owner-only no-progress
+guard. Source `996ba09e92b9506ce0b09a34525851ffd85af3ec` captures the queue head before joining either a main
+runner or an Actor wake. Failed owners and followers both require observed
+consumption before retrying the tracked tail. Successful joins still hand off
+late rows, and cancellation still stops processing.
+
+Both concurrent regressions failed before the fix (main follower executed the
+notification; Actor follower ran twice). The combined main HTTP, Actor inbox
+and prompt handoff matrix passes 34 tests / 311 assertions afterward. Package
+typecheck and lint pass. Earlier full matrices remain source-specific evidence.
