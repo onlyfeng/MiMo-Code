@@ -104,7 +104,7 @@ async function download(
   transport: ImageTransport,
 ): Promise<Image> {
   let url = new URL(value)
-  for (let redirects = 0; redirects <= 5; redirects++) {
+  redirect: for (let redirects = 0; redirects <= 5; redirects++) {
     abort.throwIfAborted()
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password)
       throw new ImageError(400, "Image URLs require HTTP(S) without credentials")
@@ -113,82 +113,100 @@ async function download(
     abort.throwIfAborted()
     if (!found.length || !found.every(publicAddress))
       throw new ImageError(400, "Image URL must resolve to public addresses")
-    // Use the numeric address as the actual request target: Bun's node:http
-    // ignores Agent.createConnection, so an agent override cannot pin its dial.
-    const request = (transport.request ?? (url.protocol === "https:" ? httpsRequest : httpRequest))({
-      protocol: url.protocol,
-      hostname: found[0].address,
-      port: url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80,
-      path: url.pathname + url.search,
-      agent: false,
-      method: "GET",
-      servername: isIP(hostname) ? undefined : hostname,
-      rejectUnauthorized: true,
-      headers: {
-        host: url.host,
-        accept: "image/png,image/jpeg,image/webp,image/gif",
-        "accept-encoding": "identity",
-        connection: "close",
-      },
-    })
-    const closed = new Promise<void>((resolve) => request.once("close", resolve))
-    const response = Promise.withResolvers<IncomingMessage>()
-    // An abort can win before we await this promise; retain an error consumer.
-    void response.promise.catch(() => {})
-    request.once("response", response.resolve)
-    request.on("error", response.reject)
-    let incoming: IncomingMessage | undefined
-    let sent = false
-    const cancel = () => {
-      response.reject(abort.reason)
-      incoming?.destroy(new Error("Image request cancelled"))
-      request.destroy(new Error("Image request cancelled"))
-    }
-    abort.addEventListener("abort", cancel, { once: true })
-    try {
+    for (const address of found) {
       abort.throwIfAborted()
-      sent = true
-      request.end()
-      incoming = await response.promise
+      // Use the numeric address as the actual request target: Bun's node:http
+      // ignores Agent.createConnection, so an agent override cannot pin its dial.
+      const request = (transport.request ?? (url.protocol === "https:" ? httpsRequest : httpRequest))({
+        protocol: url.protocol,
+        hostname: address.address,
+        port: url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80,
+        path: url.pathname + url.search,
+        agent: false,
+        method: "GET",
+        servername: isIP(hostname) ? undefined : hostname,
+        rejectUnauthorized: true,
+        headers: {
+          host: url.host,
+          accept: "image/png,image/jpeg,image/webp,image/gif",
+          "accept-encoding": "identity",
+          connection: "close",
+        },
+      })
+      const closed = new Promise<void>((resolve) => request.once("close", resolve))
+      const response = Promise.withResolvers<IncomingMessage>()
+      // An abort can win before we await this promise; retain an error consumer.
+      void response.promise.catch(() => {})
+      request.once("response", response.resolve)
+      request.on("error", response.reject)
+      let incoming: IncomingMessage | undefined
+      let sent = false
+      const cancel = () => {
+        response.reject(abort.reason)
+        incoming?.destroy(new Error("Image request cancelled"))
+        request.destroy(new Error("Image request cancelled"))
+      }
+      abort.addEventListener("abort", cancel, { once: true })
       try {
         abort.throwIfAborted()
-        if ([301, 302, 303, 307, 308].includes(incoming.statusCode ?? 0)) {
-          if (!incoming.headers.location || redirects === 5)
-            throw new ImageError(400, "Image redirect limit or invalid location")
-          url = new URL(incoming.headers.location, url)
-          continue
-        }
-        if (incoming.statusCode !== 200) throw new ImageError(502, "Image download failed")
-        if (incoming.headers["content-encoding"] && incoming.headers["content-encoding"] !== "identity")
-          throw new ImageError(400, "Encoded image responses are not supported")
-        const mediaType = incoming.headers["content-type"]?.split(";")[0].trim().toLowerCase()
-        if (!mediaType || !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mediaType))
-          throw new ImageError(400, "Unsupported image content type")
-        const limit = Math.min(MAX_IMAGE, remaining)
-        if (Number(incoming.headers["content-length"]) > limit) throw new ImageError(413, "Image media limit exceeded")
-        const chunks: Buffer[] = []
-        let size = 0
-        for await (const chunk of incoming) {
+        sent = true
+        request.end()
+        incoming = await response.promise.catch((error: unknown) => {
           abort.throwIfAborted()
-          size += chunk.length
-          if (size > limit) throw new ImageError(413, "Image media limit exceeded")
-          chunks.push(chunk)
+          // Only advance on explicit dial failures. Bun omits syscall, including
+          // on post-send resets, so an arbitrary pre-response error is not safe.
+          if (
+            error instanceof Error &&
+            "code" in error &&
+            ["ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "EADDRNOTAVAIL"].includes(String(error.code)) &&
+            (!("syscall" in error) || error.syscall === "connect")
+          )
+            return undefined
+          throw error
+        })
+        if (!incoming) continue
+        try {
+          abort.throwIfAborted()
+          if ([301, 302, 303, 307, 308].includes(incoming.statusCode ?? 0)) {
+            if (!incoming.headers.location || redirects === 5)
+              throw new ImageError(400, "Image redirect limit or invalid location")
+            url = new URL(incoming.headers.location, url)
+            continue redirect
+          }
+          if (incoming.statusCode !== 200) throw new ImageError(502, "Image download failed")
+          if (incoming.headers["content-encoding"] && incoming.headers["content-encoding"] !== "identity")
+            throw new ImageError(400, "Encoded image responses are not supported")
+          const mediaType = incoming.headers["content-type"]?.split(";")[0].trim().toLowerCase()
+          if (!mediaType || !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mediaType))
+            throw new ImageError(400, "Unsupported image content type")
+          const limit = Math.min(MAX_IMAGE, remaining)
+          if (Number(incoming.headers["content-length"]) > limit)
+            throw new ImageError(413, "Image media limit exceeded")
+          const chunks: Buffer[] = []
+          let size = 0
+          for await (const chunk of incoming) {
+            abort.throwIfAborted()
+            size += chunk.length
+            if (size > limit) throw new ImageError(413, "Image media limit exceeded")
+            chunks.push(chunk)
+          }
+          abort.throwIfAborted()
+          const bytes = Buffer.concat(chunks, size)
+          if (!signature(bytes, mediaType)) throw new ImageError(400, "Image content does not match its type")
+          return { bytes, mediaType }
+        } finally {
+          request.destroy()
+          incoming.destroy()
         }
-        abort.throwIfAborted()
-        const bytes = Buffer.concat(chunks, size)
-        if (!signature(bytes, mediaType)) throw new ImageError(400, "Image content does not match its type")
-        return { bytes, mediaType }
       } finally {
+        abort.removeEventListener("abort", cancel)
         request.destroy()
-        incoming.destroy()
+        // Bun allocates its real transport at end() and emits no close event for
+        // a request destroyed before then. Node may already own a socket here.
+        if (sent || !process.versions.bun) await closed
       }
-    } finally {
-      abort.removeEventListener("abort", cancel)
-      request.destroy()
-      // Bun allocates its real transport at end() and emits no close event for
-      // a request destroyed before then. Node may already own a socket here.
-      if (sent || !process.versions.bun) await closed
     }
+    throw new ImageError(502, "Image download failed")
   }
   throw new ImageError(400, "Image redirect limit exceeded")
 }

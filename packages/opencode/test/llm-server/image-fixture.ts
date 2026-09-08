@@ -8,6 +8,18 @@ export const imageBytes = Buffer.from(
   "base64",
 )
 
+export async function closedImagePort() {
+  const server = createSocketServer()
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  try {
+    const address = server.address()
+    if (!address || typeof address === "string") throw new Error("Missing closed image fixture port")
+    return address.port
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+}
+
 export async function imageFixture<T>(
   fn: (input: { transport: ImageTransport; seen: IncomingMessage[]; dialed: RequestOptions[] }) => Promise<T>,
   handle: (request: IncomingMessage, response: ServerResponse) => void = (_, response) => {
