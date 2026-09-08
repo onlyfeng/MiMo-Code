@@ -2826,3 +2826,15 @@ Codex completion and all CI remain required before merge.
 - CI caught a real JSON-to-text format regression: freezing the entire non-catalog prefix retained the StructuredOutput instruction after its tool was removed. The managed range now records the caller-owned format prefix independently of the catalog content hash; format transitions change that prefix while instruction files, environment and plugin content remain frozen. A competing pin also preserves the winner's catalog while applying the current caller's format.
 - Old structured-tool snapshots prove the presence of their generated format instruction; migration adopts only its verified adjacent or unique position. Empty and ambiguous range behavior remains bounded. Cold capture persists the complete range metadata. The shared MockLLM fixture now preserves the caller-controlled system tail, matching the real builder's post-plugin append instead of discarding it and losing the slot token.
 - Verification: 39 tests /135 assertions across catalog helpers, actual Codex structured-schema transitions and text-loop fixtures; 9 prefix/capture/reopen/compaction tests /134 assertions; final expanded four-case pin/capture matrix /64 assertions overlaps the previous three captures. There are 49 distinct tests in these seven files. New provider assertions switch text to JSON and back after editing AGENTS/plugin data and prove frozen non-format bytes stay unchanged. Current source passes package typecheck, diff check and lint (4,487 warnings, zero errors). Fresh-head CI and Codex review remain required.
+
+### 2026-09-09 POLICY-04 authenticated legacy description correction
+
+Source `0b665c7e681e44cac6f1a6acf18732015fb2bf86` addresses PR #88 review 3960268908 in the shared main owner.
+A valid hash/schema-authenticated v2 catalog may contain `<skill_content>` in a
+description; recognition now validates that form before the substring guard for
+metadata-free legacy content. Loaded bodies and malformed metadata remain
+preserved. A failing recognition regression was reproduced before correction;
+31 tests / 110 assertions then passed, including real legacy prefix migration
+with the description token. Package typecheck and repository lint passed with
+zero errors. This correction requires its own main PR and subsequent compat
+inheritance before POLICY-04 completion.
