@@ -1277,6 +1277,51 @@ describe("Actor forkContext lifecycle", () => {
     ),
   )
 
+  pauseIt.live("foreground admission interruption joins a child paused in postStop", () =>
+    Effect.gen(function* () {
+      const hit = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const admitted = yield* Deferred.make<string>()
+      postStopPause = { hit, release }
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(release, undefined)
+          postStopPause = undefined
+        }),
+      )
+      yield* provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const actor = yield* Actor.Service
+          const registry = yield* ActorRegistry.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({ title: "owned postStop cancellation" })
+          yield* llm.text("done")
+          const pending = yield* actor.spawn({
+            mode: "subagent",
+            sessionID: parent.id,
+            agentType: "explore",
+            task: "noop",
+            context: "none",
+            tools: [],
+            background: false,
+            model: ref,
+            onReady: ({ actorID }) => Deferred.succeed(admitted, actorID).pipe(Effect.asVoid),
+          }).pipe(Effect.forkScoped)
+          const actorID = yield* Deferred.await(admitted)
+          yield* Deferred.await(hit).pipe(Effect.timeout("3 seconds"))
+          yield* Fiber.interrupt(pending).pipe(Effect.timeout("2 seconds"))
+          expect(yield* Deferred.isDone(release)).toBe(false)
+          // Delivery already committed; interruption joins the postStop work
+          // without rewriting its terminal result or leaving cancel followers stuck.
+          expect((yield* registry.get(parent.id, actorID))?.lastOutcome).toBe("success")
+          yield* actor.cancel(parent.id, actorID, "forced").pipe(Effect.timeout("2 seconds"))
+        }),
+        { git: true, config: providerCfg },
+      )
+    }),
+    15000,
+  )
+
   pauseIt.live("delivered no-op cancel preserves forkContext while postStop is still running", () =>
     Effect.gen(function* () {
       const hit = yield* Deferred.make<void>()

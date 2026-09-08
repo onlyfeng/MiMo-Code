@@ -26,12 +26,12 @@ export const QuestionTool = Tool.define<typeof parameters, Metadata, Question.Se
           // every decision through it, but instead of blocking for a human we
           // hand the decision back to the model — it knows which option fits
           // headless execution better than a hardcoded pick would.
-          if (yield* question.neverAsk()) {
+          if (!ctx.interaction || (yield* question.neverAsk())) {
             const autoAnswer = "[Never-Ask] The model will decide autonomously"
             return {
               title: `Auto-resolved ${params.questions.length} question${params.questions.length > 1 ? "s" : ""}`,
               output:
-                "[Never-Ask] No user is available to answer (never-ask mode is on). " +
+                "[Never-Ask] No user is available to answer this question. " +
                 "Re-evaluate the options you just proposed for unattended/headless execution — " +
                 "prefer text-only, non-interactive, minimal-scope paths and avoid anything that needs a GUI or the user to be present. " +
                 "Pick the best option yourself and continue. " +
@@ -44,11 +44,14 @@ export const QuestionTool = Tool.define<typeof parameters, Metadata, Question.Se
             }
           }
 
-          const answers = yield* question.ask({
-            sessionID: ctx.sessionID,
-            questions: params.questions,
-            tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
-          })
+          const answers = yield* question.ask(
+            {
+              sessionID: ctx.interaction.sessionID,
+              questions: params.questions,
+              tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+            },
+            ctx.abort,
+          )
 
           const formatted = params.questions
             .map((q, i) => `"${q.question}"="${answers[i]?.length ? answers[i].join(", ") : "Unanswered"}"`)

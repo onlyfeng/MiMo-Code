@@ -3164,3 +3164,49 @@ timeout (211 assertions). The same real CLI test passed in isolation with 15
 assertions; package typecheck passed. The preview and formal ancestry merge
 have identical trees. Final compat HEAD Codex review, PR CI, and post-merge push
 CI remain required; this entry records local validation and main acceptance.
+
+
+## 2026-09-08 POLICY-01 full exec Actor and interaction inheritance
+
+| Capability inventory (N=1) | Accepted main | Compat result |
+| --- | --- | --- |
+| POLICY-01 | Full authorized native Actor, question and atomic plan_exit through exec; direct entries retained | Same capability with active-tool filtering, loaded MCP hashing, frozen turnContext and chronological message transactions preserved |
+
+Main `d415822c29539a4b6eebeafb59de1b88da18b95c` accepted PR #85 head `eb4ab66ee85cda01ad2e543a0a70ef14a4f78023` after
+Codex Completed, a connector thumbs-up, no findings, and all eight CI checks
+successful. Runtime/tests and content source: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
+Prior accepted compat: `852681e69d8a78e172a0f602b295380ed93b91e8`; integration source:
+`5946f3c26b089adb412c6cee07d8129a09cfbfe3`. Formal ancestry merges leave the tested preview
+`9e8d2d247a2f59d863966717599e315136580140` tree unchanged.
+
+The four conflicts are resolved by combining native metadata with compat
+prefix filtering, adopting the shared CAS plan producer, and preserving both
+test contracts without duplicate imports. The plan producer becomes identical
+to main while the called compat transaction still enforces ownership, atomic
+parts and monotonic time. Overlay paths change from 96 to 95 and production
+paths from 43 to 42, solely because this obsolete producer override disappears.
+No other overlay path is added or removed. Shared registries remain identical.
+
+All seven DC owners were reviewed for semantic as well as textual intersections:
+CONTEXT/ACTOR retain caps, preflight, frozen turnContext and live run-approval
+ownership; MODEL retains MaxMode/final gates; TUI retains provider/model/variant
+and consumes the new terminal controls. NET-001/002 and PLATFORM source
+contracts are unchanged by this delta and were checked by diff.
+
+| Validation group | Result |
+| --- | --- |
+| Prefix and plan conflict cases, 3 files | 21 pass, 80 assertions |
+| Real frozen native Actor cases | 4 pass, 34 assertions |
+| Actual provider/exec Actor and interaction paths | 20 pass, 121 assertions |
+| Compat atomic admission, chronology and checkpoint membership | 4 pass, 20 assertions |
+| Retained Actor resume and frozen turnContext | 1 pass, 11 assertions |
+| TUI plan/Question and model metadata, 4 files | 15 pass, 43 assertions |
+| Package typecheck | pass |
+| Repository lint | 0 errors, 4526 warnings |
+
+Tests ran from packages/opencode with all six ambient experimental, Codex,
+workflow and permission selectors cleared, retaining the package preload.
+Groups overlap and are not summed. This source snapshot is validated locally;
+new compat HEAD Codex review, CI, merge and final remote push CI remain separate
+required gates. The overall upstream baseline remains 6203ea2e; this is selected
+capability propagation, not a full upstream sync.

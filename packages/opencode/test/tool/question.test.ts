@@ -11,6 +11,7 @@ import { testEffect } from "../lib/effect"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-session"),
+  interaction: { sessionID: SessionID.make("ses_test-session"), planExit: false },
   messageID: MessageID.make("test-message"),
   callID: "test-call",
   agent: "test-agent",
@@ -120,6 +121,64 @@ describe("tool.question", () => {
         // One auto-answer per question so the UI shows it instead of "(no answer)".
         expect(result.metadata.answers).toHaveLength(2)
         expect(result.metadata.answers[0]).toEqual(["[Never-Ask] The model will decide autonomously"])
+      }),
+    ),
+  )
+
+  it.live(
+    "returns autonomous guidance without an interaction target",
+    () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const question = yield* Question.Service
+          const tool = yield* (yield* QuestionTool).init()
+          const result = yield* tool.execute(
+            { questions: [{ question: "Choose?", header: "Choice", options: [] }] },
+            { ...ctx, interaction: undefined },
+          )
+          expect(result.output).toContain("[Never-Ask]")
+          expect(yield* question.list()).toEqual([])
+        }),
+      ),
+    2000,
+  )
+
+  it.live("routes interactive peer questions to the parent while preserving the original tool reference", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const question = yield* Question.Service
+        const tool = yield* (yield* QuestionTool).init()
+        const fiber = yield* tool
+          .execute(
+            { questions: [{ question: "Choose?", header: "Choice", options: [] }] },
+            { ...ctx, callID: "exec:2", interaction: { sessionID: SessionID.make("ses_parent"), planExit: false } },
+          )
+          .pipe(Effect.forkScoped)
+        const item = yield* pending(question)
+        expect(item.sessionID).toBe(SessionID.make("ses_parent"))
+        expect(item.tool).toEqual({ messageID: ctx.messageID, callID: "exec:2" })
+        yield* question.reply({ requestID: item.id, answers: [["Choice"]] })
+        expect((yield* Fiber.join(fiber)).metadata.answers).toEqual([["Choice"]])
+      }),
+    ),
+  )
+
+  it.live("cancels an interactive question through the tool AbortSignal", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const question = yield* Question.Service
+        const tool = yield* (yield* QuestionTool).init()
+        const controller = new AbortController()
+        const fiber = yield* tool
+          .execute(
+            { questions: [{ question: "Choose?", header: "Choice", options: [] }] },
+            { ...ctx, abort: controller.signal },
+          )
+          .pipe(Effect.forkScoped)
+        yield* pending(question)
+        controller.abort()
+        expect((yield* Fiber.await(fiber))._tag).toBe("Failure")
+        expect(yield* question.list()).toEqual([])
       }),
     ),
   )

@@ -12,11 +12,22 @@ export interface Metadata {
   [key: string]: any
 }
 
+// Internal builtin identities survive invocation wrappers. A custom tool with
+// the same name must not acquire lifecycle or plan-commit authority.
+export const ActorControl = Symbol("ActorTool")
+export const PlanExitControl = Symbol("PlanExitTool")
+
 // TODO: remove this hack
 export type DynamicDescription = (agent: Agent.Info) => Effect.Effect<string>
 
 export type Context<M extends Metadata = Metadata> = {
   runApproval?: RunApproval.Scope
+  // Resolved by the current Actor's request producer. Missing means no human
+  // interaction target; a forwarded question cannot switch its parent's agent.
+  interaction?: { sessionID: SessionID; planExit: boolean }
+  // Installed only by the exec host on plan_exit. Called after the build user
+  // is committed, inside that commit's uninterruptible completion boundary.
+  planExitCommitted?(messageID: MessageID): Effect.Effect<void>
   sessionID: SessionID
   permission?: Permission.Ruleset
   messageID: MessageID
@@ -45,6 +56,9 @@ export interface Def<Parameters extends z.ZodType = z.ZodType, M extends Metadat
   id: string
   description: string
   parameters: Parameters
+  /** Internal native invocation schema, retained separately from shell wire parameters. */
+  nativeParameters?: z.ZodType
+  control?: symbol
   execute(args: z.infer<Parameters>, ctx: Context): Effect.Effect<ExecuteResult<M>>
   formatValidationError?(error: z.ZodError): string
   shell?: {

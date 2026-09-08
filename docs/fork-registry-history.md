@@ -24,6 +24,7 @@ they are never used as an `upstream` or `main behavior` review basis.
 | 2026-08-27 | `1fc2daac07b5936f4dcba75143bc7d9af971caa1` | `07d16a5f757377b816a1979297ec1cce80b7c9bd` | 6 | 15 | 251 paths; 24,431 insertions; 10,181 deletions | Classified 12 incoming capabilities; adopted reliable localized titles, relative paths, versioned skill snapshots, checkpoint fork default, actor isolation, and compaction controls; adapted model identity, stable memory paths, retry publication, and reserve-safe compaction while retaining all six FD contracts and adding FC-015 as the sole compaction-boundary owner. |
 | 2026-08-27 | `6da12e0c98d9e2c4838896eac642c65179501f8e` | `d0acb856f1ec0edae6cce29ca44178af14d94293` | 6 | 15 | 252 paths; 24,541 insertions; 10,196 deletions | Adopted actor-scoped `replace-agent` for main/peer, but separated identity replacement from checkpoint's unknown-actor fail-open: only main and positively registered non-system peers inherit the session base; subagent, system, ephemeral, and unknown actors retain their own prompt. |
 | 2026-08-28 | `35bb2636a99b457940f1c12f2c8f5ec554369c57` | `64b4bdda6829ca697cecf4cf79eeec6a35ec2e57` | 6 | 15 | 256 paths; 24,605 insertions; 10,234 deletions | Classified all three incoming capabilities: removed the unimplemented actor spawn/run resume argument while preserving lifecycle and frozen-context failure boundaries; adapted PPTX sourcing to actual tool/WebFetch behavior; isolated the auto-overflow fixture while retaining its reserve-safe 25K sentinel. |
+| 2026-09-08 | `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` (unchanged; POLICY-01 selected source below) | `aa2dbe494fb5903f918d8d7cd8b6d04404acb031` | 6 | 16 | Incremental from accepted main: 47 paths; 2,715 insertions; 517 deletions | N=1 POLICY-01: adopt full authorized nested Actor/question/plan composition with canonical control identity, complete native-schema freezing, generation-owned admission cleanup, real interactive routing and atomic plan-to-build transition. Local validation only; publication and compat gates remain pending. |
 
 ## 2026-08-23 review details
 
@@ -2613,3 +2614,148 @@ New real SessionTool approve/deny/pregrant and late-completion regressions:
 Package typecheck and whitespace checks passed. No HTTP/SDK changes; selected
 upstream unchanged. This correction requires a fresh current-head Codex review
 before main is merged and propagated to compat.
+
+
+## 2026-09-08 POLICY-01 full authorized exec composition
+
+- Selected capability count: **N=1**, POLICY-01. The user-approved selection
+  adopts broader nested Actor operations and interactive question/plan controls.
+  Selected source: `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`; released v0.1.14
+  reference: `2a0eb706e95a77cba34a319e9f11f33f26d4450c`. The overall reviewed
+  upstream remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; no upstream ref
+  advancement is claimed.
+- Prior accepted main: `3350f0f2ce17501d4d925f5e293f07d809f29f22`.
+  Implementation source: `5626738d6ee8ee6d40b0068d4221ed0a2066c1eb`; final
+  runtime/tests and guidance after
+  merging accepted main:
+  `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`. This snapshot retains the
+  accepted POLICY-06 deletion and forwarded-approval corrections; this review
+  does not revise FD-001 or FC-007 policy.
+- Incremental source/content delta from the accepted main baseline: 47 files,
+  2,715 insertions and 517 deletions, excluding the five registry/history paths.
+  This is an incremental POLICY-01 measurement, not the full upstream-to-fork
+  path universe. Pure registry updates remain outside the source basis.
+
+### Contracts and review findings
+
+FD-006 now permits full authorized nested canonical Actor operations and
+question/plan_exit while retaining their direct entries. Canonical definition
+identity prevents same-named custom/MCP tools from acquiring Actor/plan control
+privileges or the trusted plan-commit callback. FD-009 freezes the complete
+native Actor input schema separately from wire schemas, through warm/cold
+capture, hashing, JSON storage and rebinding. A legacy JSON wire schema may
+prove native authority only by exact equality; legacy shell wrappers cannot
+prove it and fail closed. No live native schema is injected to repair a frozen
+actor, and this metadata does not change public HTTP/SDK or provider schemas.
+
+FC-001 owns generation-bound admission handoff and child cleanup. Independent
+review reproduced a service-return/tool-assignment cancellation window that
+left a pending child. The final implementation transfers the cancellation
+handle through onAdmitted while the service still owns the resource; the same
+probe then observed an idle cancelled child with a settled outcome. Generation
+creation also moved into masked admission, closing the earlier static
+pre-acquire boundary without labelling it a separately reproduced failure.
+Cancellation joins actual work/post-stop cleanup, including unstarted fibers;
+old handles cannot cancel successor generations. Timeout preserves supervised
+work and its visible actor ID; observer cancellation does not cancel the actor.
+Nested exec metadata preserves actor IDs, including background work whose guest
+call was not awaited, and real terminal inbox notifications reach the parent.
+
+Prompt-owned interaction routes ordinary eligible peer questions to the parent
+without changing the originating message/tool identity. Background/system,
+unknown actors, missing authority and Never-Ask do not acquire an interactive
+pending question. FC-008 owns atomic Question registration/publication/waiting,
+exactly-once terminal cleanup and generation-captured Bus publication without
+recreating a disposed instance. The closed-state registration guard covers the
+capture-to-registration disposal boundary.
+
+Only the foreground root main plan turn may approve the build transition.
+The actual assistant parent user anchors a conditional transaction that writes
+user and parts together; a newer user supersedes approval. Successful commit
+records a trusted receipt and ends the old exec guest before result delivery,
+including its catch/finally paths. Raw-file and tool calls share admission
+exclusion, and receipts survive bounded nested records and post-commit failures.
+The real next provider request selects build after Yes; No retains plan.
+FC-009 retains hook/synthetic provenance, FC-011 updates only matching guidance.
+FC-002/004/005 retain checkpoint, MCP and skill authority across the changed
+prefix/registry carriers. FD-005 identity, FC-007 path/deletion and FC-013 final
+step/retry contracts remain separate and unchanged.
+
+### Local validation and evidence limits
+
+The final sequential package matrix comprised five files:
+
+| File under packages/opencode | Passed | Failed | Assertions |
+| --- | ---: | ---: | ---: |
+| test/tool/actor-exec-lifecycle.test.ts | 4 | 0 | 34 |
+| test/session/exec-interaction.test.ts | 6 | 0 | 59 |
+| test/tool/tool-script.test.ts | 95 | 0 | 314 |
+| test/tool/actor-owned-lifecycle.test.ts | 10 | 0 | 28 |
+| test/tool/control-origin.test.ts | 2 | 0 | 12 |
+| This non-overlapping matrix only | 117 | 0 | 447 |
+
+Each file ran separately from `packages/opencode` using
+`bun test --timeout 60000 <file>`. The runs cleared
+`MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`,
+`MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`, `MIMOCODE_CODEX_MODE`,
+`MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS` and `MIMOCODE_AUTO_APPROVE_DELETE`.
+Package preloads `@opentui/solid/preload` and `./test/preload.ts`, including the
+latter's ORCHESTRATOR setting, remained in force. This is package-harness
+coverage, not proof of production feature activation with all selectors absent.
+
+Package `bun typecheck` exited 0. Repository `bun lint` exited 0 with
+**4477 warnings and 0 errors**; no claim is made that every warning predates
+this change or that lint proves formatting. The evidence is recorded in
+`/tmp/mimocode-policy-align-20260908/policy01-final-verification.md`, the
+adjacent `policy01-final-results.json`, and the seven
+`policy01-final-*.log` files. Separate recorded groups comprise plan/Question (51 passed, 0 failed, 154
+assertions across seven files; `plan-question-root-final.log`), native/control
+(46 passed, 0 failed, 247 assertions across five files;
+`control-wrapper-final.log`), and cold frozen capture (4 passed, 0 failed,
+34 assertions, 116 filtered cases; `native-freeze-root-final.log`). These
+groups overlap other coverage and are not added to the matrix total.
+This registry-edit pass reviewed those recorded results rather than rerunning
+runtime tests.
+
+A subsequent coexistence check ran against exact HEAD
+`aa2dbe494fb5903f918d8d7cd8b6d04404acb031` after accepting the POLICY-06
+correction. The Bash delete/forwarded-approval pair passed 22 tests with
+151 assertions; actual exec interaction plus run-scope tests passed nine with
+72 assertions. This separate affected-surface matrix totals **31 passed,
+0 failed, 223 assertions**, and package typecheck exited 0. It used the same
+six cleared ambient selectors and preserved package preload. Evidence:
+`policy01-inherited-verification.md`, `policy01-inherited-results.json`, and
+`policy01-inherited-{bash,interaction,typecheck}.log` in the same temporary
+evidence directory. The interaction cases overlap the earlier matrix; these
+31 tests are not added to its 117-test total and do not claim all Actor or
+permission coverage. No repeat lint or remote CI result is implied.
+
+### Compat propagation watch and pending gates
+
+This entry records a reviewed local source tree, not a published POLICY-01 PR,
+remote CI success or completed compat propagation. At this review point the
+prior POLICY-06 compat PR #83 remained under review. POLICY-01 must inherit
+its final accepted state before propagating.
+
+All seven compat owners were reviewed for clean as well as conflicting overlap:
+DC-NET-001 keeps approved private WebFetch and the separate public-only image
+transport; DC-NET-002 keeps the isolated RFC1918 MCP sentinel; DC-PLATFORM-001
+keeps ripgrep/archive fallbacks. DC-MODEL-001 retains per-agent MaxMode,
+structured-output exclusion and main-only retry status. DC-CONTEXT-001 retains
+caps, current-turn/active-tool preflight, loaded MCP hash membership and
+chronological admission. DC-ACTOR-001 retains frozen turnContext/system/cwd,
+actor-scoped messages and static-prefix overflow handling. DC-TUI-001 retains
+provider/model/variant and locale display alongside the new plan receipt
+consumer. These are required propagation checks, not completed compat tests.
+
+The inspected compat commitUserMessageIfLatest already performs its latest-user
+check in the same immediate transaction as validated message/part insertion,
+with ownership, duplicate-ID and monotonic actor chronology guards. Preserve
+that helper and the new plan CAS producer, then layer the accepted shared
+committed-only run correlation. Restoring the old createMessage/updatePart pair
+would lose atomic plan approval; copying main's helper wholesale would lose
+compat admission hardening. Preserve prompt frozen preprocessing and
+actor/spawn turnContext alongside the new native-schema contract.
+
+Exact-head CI, current-head review feedback, main acceptance and subsequent
+compat propagation remain root-owned gates after this local registry update.

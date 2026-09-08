@@ -221,9 +221,12 @@ describe("session.system", () => {
     expect(prompt).toContain("the `command` argument")
     expect(prompt).toContain('exact string "We need" or "Need"')
     expect(prompt).toContain(
-      "Actor delegation/recovery, questions, plan confirmation, session control, and workflows keep their direct tools when exposed",
+      "Direct `actor`, `question`, and `plan_exit` entry points remain available when exposed",
     )
-    expect(prompt).toContain("They are unavailable inside `exec`")
+    expect(prompt).toContain("Session control and workflows stay direct and are unavailable inside `exec`")
+    expect(prompt).toContain("full Actor operations, including existing resume")
+    expect(prompt).toContain("`question` and `plan_exit` are also callable inside `exec`")
+    expect(prompt).toContain("including catch/finally")
     expect(prompt).not.toContain("the `cmd` argument")
     expect(prompt).toContain("Task tracking, skills, and scheduled jobs use their declared nested methods")
     expect(prompt).not.toContain("When possible, prefer parallelization over sequential tool calls")
