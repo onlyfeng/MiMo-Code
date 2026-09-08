@@ -4277,7 +4277,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // must not touch session-level status (Runner.onBusy is Effect.void
           // for non-main actors per F47).
           if (!agentID || agentID === "main") yield* status.set(sessionID, { type: "busy" })
-          if (!resumeIdentity) yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
+          // Every recovery owns its original user, including main without an Actor model identity.
+          if (!recovery) yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
           yield* slog.info("loop", { step })
 
           // F37: filter by agentID so subagent slices stay isolated from the
@@ -6118,7 +6119,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               sessionID: input.sessionID,
               assistantMessageID: recovered.id,
               agentID: input.actorID,
-              expectedParentID: input.resumeIdentity ? recovered.parentID : undefined,
+              expectedParentID: recovered.parentID,
             })
           : Effect.void,
       )
@@ -6179,7 +6180,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 input.actorID,
                 input.titleLocale,
                 input.resumeIdentity,
-                input.resumeIdentity ? recovered.parentID : undefined,
+                recovered.parentID,
               ),
             ).pipe(
               Effect.ensuring(

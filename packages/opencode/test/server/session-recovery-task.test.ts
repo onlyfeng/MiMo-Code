@@ -2,6 +2,8 @@ import { expect } from "bun:test"
 import { Effect, Layer, Schedule } from "effect"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import { InboxTable } from "../../src/inbox"
+import { SessionStatus } from "../../src/session/status"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { AppLayer } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -53,7 +55,7 @@ const resume = (dir: string, sessionID: string, assistantID: string, taskID: str
   )
 
 it.live(
-  "main HTTP recovery binds a real task before hooks and preserves it through actual length continuation",
+  "main HTTP recovery preserves its task and defers queued inbox through actual length continuation",
   () =>
     Effect.gen(function* () {
       const key = `recovery-task-${crypto.randomUUID()}`
@@ -112,6 +114,22 @@ it.live(
             const original = before.find((message) => message.info.id === candidates[0].parentMessageID)
             if (!original || original.info.role !== "user") throw new Error("Missing interrupted original user")
             const task = yield* tasks.create({ session_id: session.id, summary: "Bind the interrupted source" })
+            // A notification can already be durable when an interrupted main turn is recovered.
+            const queued = crypto.randomUUID()
+            Database.use((db) =>
+              db
+                .insert(InboxTable)
+                .values({
+                  id: queued,
+                  receiver_session_id: session.id,
+                  receiver_actor_id: "main",
+                  sender_session_id: session.id,
+                  sender_actor_id: "notification-sender",
+                  content: { text: "QUEUED_UNRELATED_NOTIFICATION" },
+                  created_at: Date.now(),
+                })
+                .run(),
+            )
             state.pre.length = 0
             state.params.length = 0
             state.post.length = 0
@@ -160,10 +178,32 @@ it.live(
             expect(state.post).toEqual([task.id])
             const requests = yield* llm.inputs
             expect(requests).toHaveLength(3)
+            expect(
+              Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, queued)).get()),
+            ).toBeDefined()
             for (const request of requests.slice(1)) {
               expect(JSON.stringify(request.messages)).toContain("ORIGINAL_RECOVERY_TASK_SOURCE")
               expect(JSON.stringify(request.messages)).toContain(`RECOVERY_BOUND_TASK=${task.id}`)
+              expect(JSON.stringify(request.messages)).not.toContain("QUEUED_UNRELATED_NOTIFICATION")
             }
+            const status = yield* SessionStatus.Service
+            yield* status
+              .get(session.id)
+              .pipe(
+                Effect.repeat({ until: (value) => value.type === "idle", schedule: Schedule.spaced("20 millis") }),
+                Effect.timeout("10 seconds"),
+              )
+            yield* llm.text("QUEUED_NOTIFICATION_FINISHED")
+            yield* prompt.loop({ sessionID: session.id })
+            expect(
+              Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, queued)).get()),
+            ).toBeUndefined()
+            const after = yield* sessions.messages({ sessionID: session.id })
+            const inboxUser = after.findLast((message) => message.info.role === "user")
+            expect(inboxUser?.info.id).not.toBe(original.info.id)
+            expect(inboxUser?.info).not.toHaveProperty("task_id")
+            expect(state.pre).toEqual([task.id, undefined])
+            expect(JSON.stringify((yield* llm.inputs)[3].messages)).toContain("QUEUED_UNRELATED_NOTIFICATION")
           }),
         { git: true, root: "cwd", config: (url) => ({ ...config(url), plugin: [pathToFileURL(plugin).href] }) },
       )
