@@ -17,12 +17,15 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior: `224920e08eb3506214f540f1411cc7bd9f26a87e`
-- Prior fork `main` tip: `588d183d5e8b944fa613205e55b41d805d7d5231`
+- Main behavior (runtime/tests): `07ca6cea1ac8a3231701d4ec07b489b713741cd7`
+- Bundled guidance content: `3cb9d8df7d453d8995de22f3242eee4bc81f6e97`
+- Prior fork `main` tip: `2d90dfd732a95dc5e5e601e783994860abddde1f`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
-`Upstream` and `main behavior` name the source/test trees reviewed here. A pure
-registry or history commit does not advance either behavior reference.
+`Upstream` remains the overall upstream review baseline. `Main behavior` names
+the reviewed runtime/test tree; bundled guidance has a separate content snapshot.
+Pure registry/history commits advance neither reference. The selected released
+capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
 ## Sync index
 
@@ -57,7 +60,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `224920e08eb3506214f540f1411cc7bd9f26a87e`.
+  main behavior `07ca6cea1ac8a3231701d4ec07b489b713741cd7`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -101,7 +104,7 @@ registry or history commit does not advance either behavior reference.
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `224920e08eb3506214f540f1411cc7bd9f26a87e`.
+  main behavior `07ca6cea1ac8a3231701d4ec07b489b713741cd7`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
@@ -123,7 +126,10 @@ registry or history commit does not advance either behavior reference.
   merely because provider credentials or issued tokens exist. Fork SDK/OpenAPI
   artifacts are generated from that default-off source behavior. Explicit
   `mimo serve --llm-server` enables model discovery, chat completions, and basic
-  audio on its existing socket using temporary directory/model-scoped tokens.
+  audio on its existing socket using directory-bound tokens with explicit single,
+  multiple, or all-model scope. Defaults remain one-hour idle and one-day absolute
+  lifetime; either limit may be explicitly disabled, and only disabling both
+  produces no expiry. Missing stored lifetime fields never grant permanence.
   `mimo serve --audio-api` remains the mutually exclusive static-key audio mode.
   Both authenticate before body/bootstrap, fix the startup directory, bound
   bodies/concurrency, propagate cancellation, and close intake before retirement.
@@ -132,9 +138,22 @@ registry or history commit does not advance either behavior reference.
 - Upstream relationship: rejects the implicit listener and unsafe admission
   ordering anchored at `b4bbe81c67f215d32bdbf1b7984928dea80b7c92`. Independently
   adopts capability discovery, explicit token management, standard chat proxy,
-  and basic audio from `6203ea2e`. Tokens require a finite absolute lifetime;
-  empty model scopes do not grant all models. Discovery shares audio transport
-  validation with execution. Voice design and cloning remain absent.
+  and basic audio from `6203ea2e`. The selected `v0.1.14` capability set additionally
+  supplies public HTTP(S) image inputs, inline chat audio, Google/Vertex language
+  model SDK transcription, constrained client `provider_options`, explicit
+  multi/all-model scope, and independent lifetime disabling. Empty model lists
+  never mean all; legacy v1 keeps its exact scope and finite deadlines on read
+  and migrates atomically only with a real mutation. Discovery and execution
+  share the actual SDK audio transport gate. Voice design and cloning remain absent.
+- Media/options boundary: image downloads validate every DNS answer and redirect,
+  pin the destination while preserving native TLS hostname checks, and enforce
+  5 MiB per image / 25 MiB combined media limits. They do not inherit WebFetch
+  private-network exceptions. Inline audio requires validated bytes, format and
+  SDK transport. Client options use a model/transport-aware whitelist; existing
+  provider defaults, selected variant, trusted hooks and zero SDK retries remain.
+  SDK transcription requires a complete, nonempty text result without tool calls.
+  Request deadlines, output limits, cancellation and revocation apply even when
+  token expiry is disabled.
 - Watch surfaces: `packages/opencode/src/cli/cmd/tui/thread.ts`,
   `packages/opencode/src/cli/cmd/tui/worker.ts`,
   `packages/opencode/src/cli/cmd/llm-server.ts`, `packages/opencode/src/index.ts`,
@@ -174,7 +193,7 @@ registry or history commit does not advance either behavior reference.
   records its historical absence; the Node entry now restores the functional
   LLMServerTokens export for explicit embedding alongside Server.listen.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `224920e08eb3506214f540f1411cc7bd9f26a87e`.
+  main behavior `07ca6cea1ac8a3231701d4ec07b489b713741cd7`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -241,7 +260,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/websearch.test.ts` regression binds the Xiaomi
   sidecar request to the resolved API model ID.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `224920e08eb3506214f540f1411cc7bd9f26a87e`.
+  main behavior `07ca6cea1ac8a3231701d4ec07b489b713741cd7`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
   complete resolved identity while keeping transport and harness/toolset as
   separate decisions. MiMo v2.5 precedence remains authoritative even when an
@@ -369,7 +388,7 @@ registry or history commit does not advance either behavior reference.
   output path. This changes direct Bash output only; nested shell exclusions,
   permission attribution, code-size gates, and timeout units remain intact.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `224920e08eb3506214f540f1411cc7bd9f26a87e`.
+  main behavior `07ca6cea1ac8a3231701d4ec07b489b713741cd7`.
 - 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
   resolved identity. The compact single-exec authority model remains rejected;
   direct permission-visible tools and nested actor/shell/control exclusions are
@@ -444,7 +463,7 @@ registry or history commit does not advance either behavior reference.
   The actor spawn suite also exercises owned compaction and invalid-output
   continuations, a same-source foreign hook user, and a lost compaction write.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `224920e08eb3506214f540f1411cc7bd9f26a87e`.
+  main behavior `07ca6cea1ac8a3231701d4ec07b489b713741cd7`.
 - 2026-08-28 review: adopted removal of the unimplemented `actor_id` resume
   argument from actor `spawn` and `run`. Follow-up work uses `send` only while
   the actor remains reusable. A completed ephemeral `context: "full"` actor has

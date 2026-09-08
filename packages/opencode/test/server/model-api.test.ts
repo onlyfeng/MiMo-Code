@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createConnection } from "node:net"
+import fs from "node:fs/promises"
+import path from "node:path"
 import { Flag } from "../../src/flag/flag"
 import { Instance } from "../../src/project/instance"
 import { LLMServerTokens } from "../../src/llm-server/tokens"
@@ -28,7 +30,11 @@ async function harness(
     token: string
     issue: (model: string) => Promise<string>
   }) => Promise<void>,
-  input: { enabled?: boolean; vendor?: (request: Request, body: Record<string, unknown>) => Promise<Response> } = {},
+  input: {
+    enabled?: boolean
+    audio?: boolean
+    vendor?: (request: Request, body: Record<string, unknown>) => Promise<Response>
+  } = {},
 ) {
   const seen: Seen[] = []
   const vendor = Bun.serve({
@@ -72,12 +78,16 @@ async function harness(
     await using tmp = await tmpdir({
       root: "cwd",
       config: {
+        enabled_providers: ["local"],
         provider: {
           local: {
             npm: "@ai-sdk/openai-compatible",
             options: { apiKey: "provider-only-secret", baseURL: `http://127.0.0.1:${vendor.port}/v1` },
             models: {
-              chat: { name: "Chat", modalities: { input: ["text"], output: ["text"] } },
+              chat: {
+                name: "Chat",
+                modalities: { input: input.audio ? ["text", "audio"] : ["text"], output: ["text"] },
+              },
               other: { name: "Other", modalities: { input: ["text"], output: ["text"] } },
               tts: { name: "TTS", modalities: { input: ["text"], output: ["audio"] } },
               asr: { name: "ASR", modalities: { input: ["audio"], output: ["text"] } },
@@ -176,6 +186,147 @@ function within<T>(promise: Promise<T>) {
 }
 
 describe("explicit model API", () => {
+  test("explicit permanent credentials serve requests and revocation rejects later admission before bootstrap", async () => {
+    await harness(async ({ url, directory, seen }) => {
+      const issued = await LLMServerTokens.issue({
+        directory,
+        models: ["local/chat"],
+        expiry: { idleMs: null, maxAgeMs: null },
+      })
+      const response = await chat(url, issued.token)
+      expect(response.status).toBe(200)
+      await response.arrayBuffer()
+      expect(await LLMServerTokens.revoke({ directory, id: issued.record.id })).toBe(true)
+      await Instance.disposeAll()
+      expect((await chat(url, issued.token)).status).toBe(401)
+      expect(await Instance.peek(directory)).toBeUndefined()
+      expect(seen).toHaveLength(1)
+    })
+  })
+
+  test("multi-model scope admits each exact member and rejects all other endpoints before bootstrap", async () => {
+    await harness(async ({ url, directory, seen }) => {
+      const issued = await LLMServerTokens.issue({
+        directory,
+        models: ["local/chat", "local/other"],
+        expiry: { idleMs: 60_000, maxAgeMs: 120_000 },
+      })
+      expect(
+        (await request(url, "/v1/audio/speech", issued.token, { model: "local/tts", input: "hello" })).status,
+      ).toBe(403)
+      const form = new FormData()
+      form.set("model", "local/asr")
+      form.set("file", new File([audio], "test.wav", { type: "audio/wav" }))
+      expect(
+        (
+          await fetch(new URL("/v1/audio/transcriptions", url), {
+            method: "POST",
+            headers: { authorization: `Bearer ${issued.token}` },
+            body: form,
+          })
+        ).status,
+      ).toBe(403)
+      expect((await chat(url, issued.token, { model: "secret/hidden" })).status).toBe(403)
+      expect(await Instance.peek(directory)).toBeUndefined()
+      expect(seen).toEqual([])
+      const listed = await request(url, "/v1/models", issued.token)
+      expect((await listed.json()).data.map((entry: { id: string }) => entry.id)).toEqual(["local/chat", "local/other"])
+      for (const model of ["local/chat", "local/other"]) {
+        const response = await chat(url, issued.token, { model })
+        expect(response.status).toBe(200)
+        await response.arrayBuffer()
+      }
+      expect(seen).toHaveLength(2)
+    })
+  })
+
+  test("explicit all scope serves chat speech and transcription without escaping its directory", async () => {
+    await harness(async ({ url, directory, seen }) => {
+      const issued = await LLMServerTokens.issue({
+        directory,
+        allModels: true,
+        expiry: { idleMs: null, maxAgeMs: null },
+      })
+      expect((await request(url, "/v1/models?directory=/", issued.token)).status).toBe(403)
+      await using other = await tmpdir()
+      const foreign = await LLMServerTokens.issue({
+        directory: other.path,
+        allModels: true,
+        expiry: { idleMs: 60_000, maxAgeMs: 120_000 },
+      })
+      expect((await request(url, "/v1/models", foreign.token)).status).toBe(401)
+      expect(await Instance.peek(directory)).toBeUndefined()
+      const listed = await request(url, "/v1/models", issued.token)
+      expect(listed.status).toBe(200)
+      expect((await listed.json()).data.map((entry: { id: string }) => entry.id)).toEqual([
+        "local/asr",
+        "local/chat",
+        "local/other",
+        "local/tts",
+      ])
+      const response = await chat(url, issued.token)
+      expect(response.status).toBe(200)
+      await response.arrayBuffer()
+      const speech = await request(url, "/v1/audio/speech", issued.token, { model: "local/tts", input: "hello" })
+      expect(speech.status).toBe(200)
+      expect(Buffer.from(await speech.arrayBuffer())).toEqual(audio)
+      const form = new FormData()
+      form.set("model", "local/asr")
+      form.set("file", new File([audio], "test.wav", { type: "audio/wav" }))
+      const transcription = await fetch(new URL("/v1/audio/transcriptions", url), {
+        method: "POST",
+        headers: { authorization: `Bearer ${issued.token}` },
+        body: form,
+      })
+      expect(transcription.status).toBe(200)
+      expect(await transcription.json()).toEqual({ text: "本地模型回复" })
+      expect((await chat(url, issued.token, { model: "local/missing" })).status).toBe(404)
+      expect(seen).toHaveLength(3)
+    })
+  })
+
+  test("all issued against an empty registry follows later configured additions and removals", async () => {
+    await harness(async ({ url, directory }) => {
+      const target = path.join(directory, "mimocode.json")
+      const configured = JSON.parse(await fs.readFile(target, "utf8"))
+      await fs.writeFile(target, JSON.stringify({ ...configured, enabled_providers: [] }))
+      const issued = await LLMServerTokens.issue({
+        directory,
+        allModels: true,
+        expiry: { idleMs: 60_000, maxAgeMs: 120_000 },
+      })
+      const refs = async () => {
+        const response = await request(url, "/v1/models", issued.token)
+        expect(response.status).toBe(200)
+        return (await response.json()).data.map((entry: { id: string }) => entry.id)
+      }
+      expect(await refs()).toEqual([])
+      await Instance.disposeAll()
+      await fs.writeFile(
+        target,
+        JSON.stringify({
+          ...configured,
+          enabled_providers: ["local"],
+          provider: {
+            local: {
+              ...configured.provider.local,
+              models: { fresh: { name: "Fresh", modalities: { input: ["text"], output: ["text"] } } },
+              whitelist: ["fresh"],
+            },
+          },
+        }),
+      )
+      expect(await refs()).toEqual(["local/fresh"])
+      const response = await chat(url, issued.token, { model: "local/fresh" })
+      expect(response.status).toBe(200)
+      await response.arrayBuffer()
+      await Instance.disposeAll()
+      await fs.writeFile(target, JSON.stringify({ ...configured, enabled_providers: [] }))
+      expect(await refs()).toEqual([])
+      expect((await chat(url, issued.token, { model: "local/fresh" })).status).toBe(404)
+    })
+  })
+
   test("explicit listener identity is available without initializing a project", async () => {
     await harness(async ({ url, directory }) => {
       const response = await request(url, "/v1/_mimocode")
@@ -271,8 +422,11 @@ describe("explicit model API", () => {
     await harness(async ({ url, token, directory, seen }) => {
       const outside = await chat(url, token, { model: "local/other" })
       expect(outside.status).toBe(403)
+      expect(await Instance.peek(directory)).toBeUndefined()
       const remoteImage = await chat(url, token, {
-        messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "http://127.0.0.1/private" } }] }],
+        messages: [
+          { role: "user", content: [{ type: "image_url", image_url: { url: "ftp://images.example/private" } }] },
+        ],
       })
       expect(remoteImage.status).toBe(400)
       expect(await Instance.peek(directory)).toBeUndefined()
@@ -419,3 +573,30 @@ describe("explicit model API", () => {
     )
   })
 })
+
+test("input audio is authenticated and scoped before chat generation", () =>
+  harness(
+    async ({ url, token, issue, seen }) => {
+      const messages = [
+        {
+          role: "user",
+          content: [{ type: "input_audio", input_audio: { data: "data:audio/x-wav;base64,AQID", format: "wav" } }],
+        },
+      ]
+      expect((await chat(url, "invalid-token", { messages })).status).toBe(401)
+      expect((await chat(url, await issue("local/other"), { messages })).status).toBe(403)
+      const invalid = await chat(url, token, {
+        messages: [{ role: "user", content: [{ type: "input_audio", input_audio: { data: "AQI", format: "wav" } }] }],
+      })
+      expect(invalid.status).toBe(400)
+      expect(seen).toHaveLength(0)
+      const response = await chat(url, token, { messages })
+      expect(response.status).toBe(200)
+      expect(await response.text()).toContain("本地模型回复")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].body.messages).toEqual([
+        { role: "user", content: [{ type: "input_audio", input_audio: { data: "AQID", format: "wav" } }] },
+      ])
+    },
+    { audio: true },
+  ))

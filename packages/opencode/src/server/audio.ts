@@ -1,3 +1,4 @@
+import { LLMServerScope } from "@/llm-server/scope"
 import { createHash, timingSafeEqual } from "node:crypto"
 import path from "node:path"
 import { Hono } from "hono"
@@ -24,7 +25,8 @@ function failure(c: Context, status: ContentfulStatusCode, message: string, type
   return c.json({ error: { message, type, param: null, code: null } }, status)
 }
 
-export async function prepareAudio(c: Context, signal: AbortSignal, models?: string[]) {
+// The standalone Audio API authenticates its static key separately; its caller must explicitly select that mode.
+export async function prepareAudio(c: Context, signal: AbortSignal, scope: LLMServerScope.Scope | "static") {
   const contentType = c.req.header("content-type") ?? ""
   if (c.req.path.endsWith("/speech")) {
     if (contentType.split(";")[0].trim().toLowerCase() !== "application/json")
@@ -33,7 +35,8 @@ export async function prepareAudio(c: Context, signal: AbortSignal, models?: str
     const value: unknown = await new Response(bytes).json().catch(() => undefined)
     const parsed = SpeechRequest.safeParse(value)
     if (!parsed.success) return failure(c, 400, "Invalid speech request; specify model and input (1–4096 characters)")
-    if (models && !models.includes(parsed.data.model)) return failure(c, 403, "Model is outside token scope")
+    if (scope !== "static" && !LLMServerScope.allows(scope, parsed.data.model))
+      return failure(c, 403, "Model is outside token scope")
     const unsupported = speechUnsupported(parsed.data)
     if (unsupported) return failure(c, 400, unsupported)
     return async () => {
@@ -57,7 +60,8 @@ export async function prepareAudio(c: Context, signal: AbortSignal, models?: str
   if (!(file instanceof File) || !file.size) return failure(c, 400, "A nonempty audio file is required")
   const parsed = TranscriptionRequest.safeParse(Object.fromEntries(fields.filter(([key]) => key !== "file")))
   if (!parsed.success) return failure(c, 400, "Invalid transcription request fields")
-  if (models && !models.includes(parsed.data.model)) return failure(c, 403, "Model is outside token scope")
+  if (scope !== "static" && !LLMServerScope.allows(scope, parsed.data.model))
+    return failure(c, 403, "Model is outside token scope")
   const unsupported = transcriptionUnsupported(parsed.data)
   if (unsupported) return failure(c, 400, unsupported)
   const mediaType = transcriptionMediaType({ reported: file.type, filename: file.name })
@@ -123,7 +127,7 @@ export function createAudio(opts?: AudioOptions) {
       TIMEOUT,
     )
     try {
-      const run = await prepareAudio(c, signal)
+      const run = await prepareAudio(c, signal, "static")
       if (run instanceof Response) return run
       return await inInstance(directory, signal, run)
     } catch (error) {

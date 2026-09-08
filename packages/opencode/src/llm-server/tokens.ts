@@ -7,37 +7,51 @@ import { Hash } from "@mimo-ai/shared/util/hash"
 import { Flock } from "@mimo-ai/shared/util/flock"
 import { Global } from "@/global"
 import { Filesystem } from "@/util"
+import { LLMServerScope } from "./scope"
 
 const MAX_FILE = 1024 * 1024
 const MAX_TOKENS = 1024
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
 const timestamp = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-const model = z
-  .string()
-  .max(512)
-  .regex(/^[^/\s]+\/\S+$/)
-const record = z
+const time = {
+  created: timestamp,
+  last_used: timestamp.optional(),
+  idle_ms: positive.nullable(),
+  max_age_ms: positive.nullable(),
+}
+const fields = {
+  id: z.string().min(1).max(128),
+  hash: z.string().regex(/^[a-f0-9]{64}$/),
+  label: z.string().max(256).optional(),
+  created: timestamp,
+  last_used: timestamp.optional(),
+}
+const lifetimes = (value: z.infer<z.ZodObject<typeof time>>) =>
+  (value.last_used === undefined || value.last_used >= value.created) &&
+  (value.max_age_ms === null || Number.isSafeInteger(value.created + value.max_age_ms)) &&
+  (value.idle_ms === null || Number.isSafeInteger((value.last_used ?? value.created) + value.idle_ms))
+const lifetime = z.object(time).refine(lifetimes)
+// Historical v1 null/missing limits were invalid, so reading must never grant them new authority.
+const legacyRecord = z
   .strictObject({
-    id: z.string().min(1).max(128),
-    hash: z.string().regex(/^[a-f0-9]{64}$/),
-    label: z.string().max(256).optional(),
-    models: z.array(model).length(1),
-    created: timestamp,
-    last_used: timestamp.optional(),
+    ...fields,
+    models: z.array(LLMServerScope.ModelRef).length(1),
     idle_ms: positive,
     max_age_ms: positive,
   })
-  .refine(
-    (value) =>
-      (value.last_used === undefined || value.last_used >= value.created) &&
-      Number.isSafeInteger(value.created + value.max_age_ms) &&
-      Number.isSafeInteger((value.last_used ?? value.created) + value.idle_ms),
-  )
-const schema = z.strictObject({ version: z.literal(1), tokens: z.array(record).max(MAX_TOKENS) })
+  .refine(lifetimes)
+const legacySchema = z.strictObject({ version: z.literal(1), tokens: z.array(legacyRecord).max(MAX_TOKENS) })
+const record = z.strictObject({ ...fields, ...time, scope: LLMServerScope.Schema }).refine(lifetimes)
+const schema = z.strictObject({ version: z.literal(2), tokens: z.array(record).max(MAX_TOKENS) })
 type StoredRecord = z.infer<typeof record>
 type Store = z.infer<typeof schema>
-export type PublicRecord = Omit<StoredRecord, "hash">
-export type Expiry = { idleMs: number; maxAgeMs: number }
+type PublicScope =
+  | { scope: Extract<LLMServerScope.Scope, { type: "models" }>; models: string[] }
+  | { scope: Extract<LLMServerScope.Scope, { type: "all" }>; models?: never }
+export type PublicRecord = Omit<StoredRecord, "hash" | "scope"> & PublicScope
+type FiniteRecord = Omit<StoredRecord, "hash" | "scope"> & Extract<PublicScope, { models: string[] }>
+export type Expiry = { idleMs: number | null; maxAgeMs: number | null }
+type Lifetime = z.infer<typeof lifetime>
 
 function bucket(directory: string) {
   return path.join(Global.Path.state, "llm-server", Hash.fast(Filesystem.resolve(directory)))
@@ -69,13 +83,17 @@ async function readSmall(target: string, limit: number) {
 
 async function read(directory: string): Promise<Store> {
   const text = await readSmall(file(directory), MAX_FILE)
-  if (text === undefined) return { version: 1, tokens: [] }
+  if (text === undefined) return { version: 2, tokens: [] }
   const raw: unknown = await Promise.resolve()
     .then(() => JSON.parse(text))
     .catch(() => undefined)
-  const parsed = schema.safeParse(raw)
+  const parsed = z.union([schema, legacySchema]).safeParse(raw)
   if (!parsed.success) throw new Error("Invalid token store")
-  return parsed.data
+  if (parsed.data.version === 2) return parsed.data
+  return {
+    version: 2,
+    tokens: parsed.data.tokens.map(({ models, ...value }) => ({ ...value, scope: { type: "models", models } })),
+  }
 }
 
 async function atomic(target: string, text: string) {
@@ -113,7 +131,7 @@ function mutate<T>(directory: string, signal: AbortSignal | undefined, fn: (stor
 function publicRecord(value: StoredRecord): PublicRecord {
   return {
     id: value.id,
-    models: value.models,
+    ...publicScope(value.scope),
     label: value.label,
     created: value.created,
     last_used: value.last_used,
@@ -122,33 +140,62 @@ function publicRecord(value: StoredRecord): PublicRecord {
   }
 }
 
-export function expiresAt(value: PublicRecord) {
-  return Math.min(value.created + value.max_age_ms, (value.last_used ?? value.created) + value.idle_ms)
+function publicScope(scope: LLMServerScope.Scope): PublicScope {
+  return scope.type === "models" ? { scope, models: scope.models } : { scope }
 }
 
-export function expired(value: PublicRecord, now = Date.now()) {
-  return now >= expiresAt(value)
+export function expiresAt(value: Lifetime) {
+  const parsed = lifetime.parse(value)
+  const absolute = parsed.max_age_ms === null ? null : parsed.created + parsed.max_age_ms
+  const idle = parsed.idle_ms === null ? null : (parsed.last_used ?? parsed.created) + parsed.idle_ms
+  if (absolute === null) return idle
+  if (idle === null) return absolute
+  return Math.min(absolute, idle)
 }
 
-export async function issue(input: {
+export function expired(value: Lifetime, now = Date.now()) {
+  const end = expiresAt(value)
+  return end !== null && now >= end
+}
+
+type IssueOptions = {
   directory: string
-  models: readonly string[]
   expiry: Expiry
   label?: string
   signal?: AbortSignal
-}) {
+}
+type IssueScope = { models: readonly string[]; allModels?: never } | { allModels: true; models?: never }
+export function issue(
+  input: IssueOptions & { models: readonly string[]; allModels?: never },
+): Promise<{ token: string; record: FiniteRecord }>
+export function issue(
+  input: IssueOptions & { allModels: true; models?: never },
+): Promise<{ token: string; record: PublicRecord }>
+export function issue(input: IssueOptions & IssueScope): Promise<{ token: string; record: PublicRecord }>
+export async function issue(input: IssueOptions & IssueScope) {
   input.signal?.throwIfAborted()
+  const selection = z
+    .union([
+      z.strictObject({
+        models: LLMServerScope.Models.refine((models) => models.every((model) => !model.includes("*"))),
+        allModels: z.never().optional(),
+      }),
+      z.strictObject({ allModels: z.literal(true), models: z.never().optional() }),
+    ])
+    .safeParse({ models: input.models, allModels: input.allModels })
+  if (!selection.success) throw new Error("Invalid token scope: specify 1–64 unique models or allModels: true")
   const token = randomBytes(32).toString("base64url")
   const parsed = record.safeParse({
     id: `llmk_${randomUUID().replaceAll("-", "")}`,
     hash: createHash("sha256").update(token).digest("hex"),
-    models: input.models,
+    scope: selection.data.models ? { type: "models", models: selection.data.models } : { type: "all" },
     label: input.label,
     created: Date.now(),
     idle_ms: input.expiry.idleMs,
     max_age_ms: input.expiry.maxAgeMs,
   })
-  if (!parsed.success) throw new Error("Invalid token request: specify one model and finite positive safe lifetimes")
+  if (!parsed.success)
+    throw new Error("Invalid token request: specify a valid scope and explicit null or finite positive safe lifetimes")
   await mutate(input.directory, input.signal, (store) => {
     const live = store.tokens.filter((value) => !expired(value))
     if (live.length >= MAX_TOKENS) throw new Error("Token registry reached its record limit")
@@ -158,7 +205,13 @@ export async function issue(input: {
 }
 
 export type Verdict =
-  | { ok: true; id: string; models: string[]; expiresAt: number }
+  | ({
+      ok: true
+      id: string
+      expiresAt: number | null
+      idle_ms: number | null
+      max_age_ms: number | null
+    } & PublicScope)
   | { ok: false; reason: "unknown" | "expired" }
 
 export async function verify(input: { directory: string; token: string; signal?: AbortSignal }): Promise<Verdict> {
@@ -177,7 +230,14 @@ export async function verify(input: { directory: string; token: string; signal?:
       return { ok: false, reason: "expired" }
     }
     found.last_used = Math.max(Date.now(), found.last_used ?? found.created)
-    return { ok: true, id: found.id, models: found.models, expiresAt: expiresAt(found) }
+    return {
+      ok: true,
+      id: found.id,
+      ...publicScope(found.scope),
+      expiresAt: expiresAt(found),
+      idle_ms: found.idle_ms,
+      max_age_ms: found.max_age_ms,
+    }
   })
 }
 

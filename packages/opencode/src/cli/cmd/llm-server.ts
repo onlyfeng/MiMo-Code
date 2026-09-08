@@ -5,18 +5,25 @@ import { cmd } from "./cmd"
 import { Instance } from "@/project/instance"
 import { Filesystem } from "@/util"
 import { LLMServerTokens } from "../../llm-server/tokens"
+import { LLMServerScope } from "../../llm-server/scope"
 import { LLMServerCapability } from "../../llm-server/capability"
 
-/** Both the idle window and absolute lifetime must be finite. */
-export function duration(input: string | undefined, fallback: string): number {
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec((input ?? fallback).trim().toLowerCase())
-  if (!match) throw new Error("Invalid duration; use a finite positive value such as 30m, 12h or 7d")
+/** Only explicit none disables a limit; omitted CLI options keep their finite defaults. */
+export function duration(input: string | undefined, fallback: string): number | null {
+  const text = (input === undefined ? fallback : input).trim().toLowerCase()
+  if (text === "none") return null
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec(text)
+  if (!match) throw new Error("Invalid duration; use none or a finite positive value such as 30m, 12h or 7d")
   const scale = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[match[2] ?? "ms"]!
   const value = Number(match[1]) * scale
   if (value <= 0 || !Number.isSafeInteger(value) || !Number.isSafeInteger(Date.now() + value)) {
     throw new Error("Duration must be positive whole milliseconds within the safe timestamp range")
   }
   return value
+}
+
+function limit(value: number | null) {
+  return value === null ? "none" : `${value}ms`
 }
 
 function directoryOption(yargs: Argv) {
@@ -54,12 +61,20 @@ function invocation(args: string[]) {
 
 const issue = cmd({
   command: "issue",
-  describe: "mint a temporary credential for one configured model without starting a server",
+  describe: "mint a credential for selected models or all models without starting a server",
   builder: (yargs: Argv) =>
     directoryOption(yargs)
-      .option("ttl", { type: "string", describe: "idle lifetime from last use (default 1h)" })
-      .option("max-age", { type: "string", describe: "absolute lifetime from issue (default 24h)" })
-      .option("model", { type: "string", describe: "one explicit provider/model to authorize" })
+      .option("ttl", { type: "string", describe: "idle lifetime from last use; none disables it (default 1h)" })
+      .option("max-age", { type: "string", describe: "absolute lifetime from issue; none disables it (default 24h)" })
+      .option("model", {
+        type: "string",
+        array: true,
+        describe: "explicit provider/model to authorize (repeat for multiple models)",
+      })
+      .option("all-models", {
+        type: "boolean",
+        describe: "authorize all current and future available models in this directory",
+      })
       .option("capability", {
         type: "string",
         choices: ["chat", "speech", "transcription"] as const,
@@ -69,80 +84,95 @@ const issue = cmd({
       .option("json", { type: "boolean", default: false, describe: "print connection details as JSON" }),
   handler: async (args) => {
     if (
-      (args.model === undefined) === (args.capability === undefined) ||
-      (args.model !== undefined && typeof args.model !== "string")
-    ) {
-      throw new Error("Specify exactly one --model provider/model or --capability")
-    }
+      [args.model !== undefined, args["all-models"] !== undefined, args.capability !== undefined].filter(Boolean)
+        .length !== 1 ||
+      (args["all-models"] !== undefined && args["all-models"] !== true) ||
+      (args.capability !== undefined && typeof args.capability !== "string")
+    )
+      throw new Error("Specify exactly one of --model provider/model (repeatable), --all-models or --capability")
+    if (
+      args.model &&
+      (!LLMServerScope.Models.safeParse(args.model).success || args.model.some((model) => model.includes("*")))
+    )
+      throw new Error("Specify 1–64 unique explicit models without wildcards")
     const expiry = { idleMs: duration(args.ttl, "1h"), maxAgeMs: duration(args["max-age"], "24h") }
     const target = await directory(args.directory)
-    await Instance.provide({
-      directory: target,
-      fn: async () => {
-        const chosen = await (async () => {
-          if (!args.capability) return undefined
-          const matches = await LLMServerCapability.resolve(args.capability)
-          if (!matches[0])
-            throw new Error(LLMServerCapability.explain(args.capability, await LLMServerCapability.all()))
-          return {
-            capability: args.capability,
-            best: matches[0],
-            alternatives: matches.slice(1).map((entry) => entry.ref),
-          }
-        })()
-        const model = chosen?.best.ref ?? args.model!
-        if (
-          !chosen &&
-          !(await LLMServerCapability.available(undefined, [model])).some((entry) => entry.ref === model)
-        ) {
-          throw new Error(`Model is not available: ${model}`)
+    const run = async () => {
+      const chosen = await (async () => {
+        if (!args.capability) return undefined
+        const matches = await LLMServerCapability.resolve(args.capability)
+        if (!matches[0]) throw new Error(LLMServerCapability.explain(args.capability, await LLMServerCapability.all()))
+        return {
+          capability: args.capability,
+          best: matches[0],
+          alternatives: matches.slice(1).map((entry) => entry.ref),
         }
-        const issued = await LLMServerTokens.issue({ directory: target, models: [model], expiry, label: args.label })
-        const address = (await LLMServerTokens.addresses(target))[0]
-        const output = {
-          api_key: issued.token,
-          id: issued.record.id,
-          base_url: address ? `${address.url}/v1` : null,
-          expires_at: LLMServerTokens.expiresAt(issued.record),
-          models: issued.record.models,
-          model,
-          ...(chosen
-            ? {
-                capability: chosen.capability,
-                fallback: !chosen.best.dedicated,
-                alternatives: chosen.alternatives.slice(0, 5),
-                alternatives_total: chosen.alternatives.length,
-              }
-            : {}),
-          renew_argv: invocation([
-            "llm-server",
-            "issue",
-            "--directory",
-            target,
-            "--model",
-            model,
-            "--ttl",
-            `${expiry.idleMs}ms`,
-            "--max-age",
-            `${expiry.maxAgeMs}ms`,
-            ...(args.label ? ["--label", args.label] : []),
-            "--json",
-          ]),
-        }
-        if (args.json) {
-          process.stdout.write(JSON.stringify(output) + "\n")
-          return
-        }
-        process.stdout.write(
-          `token issued\n  api_key   ${output.api_key}\n  id        ${output.id}\n  base_url  ${output.base_url ?? "(no verified loopback listener for this directory)"}\n  expires   ${output.expires_at}\n  model     ${model}\n`,
-        )
-        process.stdout.write("The plaintext token is shown once; only its hash is stored.\n")
-        if (!address)
-          process.stdout.write(
-            "Run mimo serve --llm-server from this project directory to start an explicit listener.\n",
-          )
-      },
-    })
+      })()
+      const models = chosen ? [chosen.best.ref] : args.model
+      if (!chosen && models) {
+        const available = await LLMServerCapability.available(undefined, { type: "models", models })
+        const missing = models.filter((model) => !available.some((entry) => entry.ref === model))
+        if (missing.length) throw new Error(`Model is not available: ${missing.join(", ")}`)
+      }
+      const issued = await LLMServerTokens.issue({
+        directory: target,
+        ...(models ? { models } : { allModels: true }),
+        expiry,
+        label: args.label,
+      })
+      const address = (await LLMServerTokens.addresses(target))[0]
+      const output = {
+        api_key: issued.token,
+        id: issued.record.id,
+        base_url: address ? `${address.url}/v1` : null,
+        expires_at: LLMServerTokens.expiresAt(issued.record),
+        idle_ms: issued.record.idle_ms,
+        max_age_ms: issued.record.max_age_ms,
+        scope: issued.record.scope,
+        ...(issued.record.scope.type === "models"
+          ? {
+              models: issued.record.scope.models,
+              ...(issued.record.scope.models.length === 1 ? { model: issued.record.scope.models[0] } : {}),
+            }
+          : {}),
+        ...(chosen
+          ? {
+              capability: chosen.capability,
+              fallback: !chosen.best.dedicated,
+              alternatives: chosen.alternatives.slice(0, 5),
+              alternatives_total: chosen.alternatives.length,
+            }
+          : {}),
+        renew_argv: invocation([
+          "llm-server",
+          "issue",
+          "--directory",
+          target,
+          ...(issued.record.scope.type === "models"
+            ? issued.record.scope.models.flatMap((model) => ["--model", model])
+            : ["--all-models"]),
+          "--ttl",
+          limit(expiry.idleMs),
+          "--max-age",
+          limit(expiry.maxAgeMs),
+          ...(args.label ? ["--label", args.label] : []),
+          "--json",
+        ]),
+      }
+      if (args.json) {
+        process.stdout.write(JSON.stringify(output) + "\n")
+        return
+      }
+      process.stdout.write(
+        `token issued\n  api_key   ${output.api_key}\n  id        ${output.id}\n  base_url  ${output.base_url ?? "(no verified loopback listener for this directory)"}\n  expires   ${output.expires_at === null ? "never" : output.expires_at}\n  idle      ${limit(output.idle_ms)}\n  max_age   ${limit(output.max_age_ms)}\n  scope     ${issued.record.scope.type === "all" ? "all models" : issued.record.scope.models.join(", ")}\n`,
+      )
+      process.stdout.write("The plaintext token is shown once; only its hash is stored.\n")
+      if (!address)
+        process.stdout.write("Run mimo serve --llm-server from this project directory to start an explicit listener.\n")
+    }
+    // An explicit all grant does not enumerate models or need provider factories at issuance.
+    if (args["all-models"]) return run()
+    await Instance.provide({ directory: target, fn: run })
   },
 })
 
@@ -167,7 +197,7 @@ const list = cmd({
         ? tokens
             .map(
               (token) =>
-                `${token.id}  ${token.expired ? "EXPIRED" : `expires ${token.expires_at}`}  ${token.models.join(",")}${token.label ? `  (${token.label})` : ""}\n`,
+                `${token.id}  ${token.expired ? "EXPIRED" : token.expires_at === null ? "never" : `expires ${token.expires_at}`}  idle ${limit(token.idle_ms)}  max_age ${limit(token.max_age_ms)}  ${token.scope.type === "all" ? "all models" : token.scope.models.join(",")}${token.label ? `  (${token.label})` : ""}\n`,
             )
             .join("")
         : "tokens    none\n",
@@ -194,7 +224,7 @@ const revoke = cmd({
 
 export const LlmServerCommand = cmd({
   command: "llm-server",
-  describe: "issue and manage directory-scoped temporary model credentials",
+  describe: "issue and manage directory-scoped model credentials",
   builder: (yargs: Argv) => yargs.command(issue).command(list).command(revoke).demandCommand(1),
   handler: () => {},
 })

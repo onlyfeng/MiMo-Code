@@ -3,13 +3,81 @@ import { ChatCompletionRequest, unsupported, toModelMessages, finishReason, usag
 
 const base = { model: "local/chat", messages: [{ role: "user", content: "hello" }] }
 
+const audioRequest = (input_audio: unknown) => ({
+  ...base,
+  messages: [{ role: "user", content: [{ type: "input_audio", input_audio }] }],
+})
+
+test.each([
+  ["wav", "audio/wav"],
+  ["mp3", "audio/mpeg"],
+  ["mpeg", "audio/mpeg"],
+  ["mpga", "audio/mpeg"],
+  ["m4a", "audio/mp4"],
+  ["mp4", "audio/mp4"],
+  ["flac", "audio/flac"],
+  ["ogg", "audio/ogg"],
+  ["webm", "audio/webm"],
+])("input audio normalizes raw %s to an SDK file with %s", (format, mediaType) => {
+  const req = ChatCompletionRequest.parse(audioRequest({ data: "AQID", format }))
+  expect(unsupported(req)).toBeUndefined()
+  expect(toModelMessages(req.messages)).toEqual([
+    { role: "user", content: [{ type: "file", data: "AQID", mediaType }] },
+  ])
+})
+
+test.each([
+  { data: "data:audio/x-wav;base64,AQID", format: "wav" },
+  { data: "data:audio/mp3;base64,AQID", format: "mpga" },
+  { data: "data:audio/mpeg;base64,AQID" },
+  { data: "data:audio/x-m4a;base64,AQID", format: "mp4" },
+])("input audio accepts an explicit or inferred matching MIME: %j", (input) => {
+  expect(ChatCompletionRequest.safeParse(audioRequest(input)).success).toBe(true)
+})
+
+test.each([
+  { data: "AQID" },
+  { data: "", format: "wav" },
+  { data: "AQI", format: "wav" },
+  { data: "AR==", format: "wav" },
+  { data: "AQID!", format: "wav" },
+  { data: "AQID\n", format: "wav" },
+  { data: "https://audio.example/a.wav", format: "wav" },
+  { data: "data:audio/wav;base64,AQID", format: "mp3" },
+  { data: "data:image/png;base64,AQID", format: "wav" },
+  { data: "data:audio/unknown;base64,AQID" },
+  { data: "data:audio/wav;base64,", format: "wav" },
+  { data: "AQID", format: "pcm" },
+  { data: "AQID", format: "wav", url: "https://audio.example/a.wav" },
+])("input audio rejects ambiguous or invalid payloads: %j", (input) => {
+  expect(ChatCompletionRequest.safeParse(audioRequest(input)).success).toBe(false)
+})
+
+test("input audio bounds decoded payloads at 20 MiB and only permits user messages", () => {
+  const data = Buffer.alloc(20 * 1024 * 1024).toString("base64")
+  expect(ChatCompletionRequest.safeParse(audioRequest({ data, format: "wav" })).success).toBe(true)
+  expect(
+    ChatCompletionRequest.safeParse(
+      audioRequest({ data: Buffer.alloc(20 * 1024 * 1024 + 1).toString("base64"), format: "wav" }),
+    ).success,
+  ).toBe(false)
+  for (const role of ["system", "developer", "assistant", "tool"]) {
+    expect(
+      ChatCompletionRequest.safeParse({
+        ...base,
+        messages: [{ role, content: [{ type: "input_audio", input_audio: { data: "AQID", format: "wav" } }] }],
+      }).success,
+    ).toBe(false)
+  }
+})
+
 test.each([
   { model: "", messages: [] },
   { ...base, temperature: 3 },
   { ...base, max_tokens: 0 },
   {
     ...base,
-    messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "https://example.com/a.png" } }] }],
+    messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "ftp://example.com/a.png" } }] }],
   },
   {
     ...base,
@@ -19,9 +87,33 @@ test.each([
     ...base,
     messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:text/html;base64,SGk=" } }] }],
   },
-])("rejects invalid or remote image input: %j", (value) => {
+])("rejects invalid image input: %j", (value) => {
   expect(ChatCompletionRequest.safeParse(value).success).toBe(false)
 })
+
+test.each(["https://images.example/a.png?signature=public", "http://images.example/a.gif"])(
+  "accepts HTTP image references for controlled downloading: %s",
+  (url) => {
+    expect(
+      ChatCompletionRequest.safeParse({
+        ...base,
+        messages: [{ role: "user", content: [{ type: "image_url", image_url: { url } }] }],
+      }).success,
+    ).toBe(true)
+  },
+)
+
+test.each(["https://user:password@images.example/a.png", "https://user@images.example/a.png", "file:///tmp/a.png"])(
+  "rejects credential-bearing and non-HTTP image references: %s",
+  (url) => {
+    expect(
+      ChatCompletionRequest.safeParse({
+        ...base,
+        messages: [{ role: "user", content: [{ type: "image_url", image_url: { url } }] }],
+      }).success,
+    ).toBe(false)
+  },
+)
 
 test.each([
   { n: 2 },
@@ -34,9 +126,6 @@ test.each([
   { verbosity: "low" },
   { modalities: ["audio"] },
   { functions: [] },
-  { provider_options: {} },
-  { provider_options: { messages: [] } },
-  { provider_options: { tools: [], response_format: { type: "json_object" } } },
   { tool_choice: "required" },
 ])("refuses unsupported behavior instead of ignoring it: %j", (extra) => {
   expect(unsupported(ChatCompletionRequest.parse({ ...base, ...extra }))).toBeDefined()
@@ -155,4 +244,23 @@ test("reports provider usage including cache and reasoning details", () => {
     prompt_tokens_details: { cached_tokens: 4 },
     completion_tokens_details: { reasoning_tokens: 2 },
   })
+})
+
+test.each([
+  {},
+  { reasoningEffort: "high" },
+  { thinking: { type: "disabled" } },
+  { thinkingConfig: { thinkingBudget: 0 } },
+])("provider options defer supported shapes to the selected model: %j", (provider_options) => {
+  expect(unsupported(ChatCompletionRequest.parse({ ...base, provider_options }))).toBeUndefined()
+})
+
+test.each([
+  '{"__proto__":{"polluted":true}}',
+  '{"thinking":{"type":"enabled","__proto__":{"polluted":true}}}',
+  '{"thinkingConfig":{"includeThoughts":true,"constructor":{"prototype":{"polluted":true}}}}',
+  "null",
+  "[]",
+])("provider options reject unsafe JSON before parser key normalization: %s", (json) => {
+  expect(ChatCompletionRequest.safeParse({ ...base, provider_options: JSON.parse(json) }).success).toBe(false)
 })
