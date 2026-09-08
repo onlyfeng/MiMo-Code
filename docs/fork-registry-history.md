@@ -2440,3 +2440,44 @@ capability or a new compat override.
   must stay identical on both branches; approved private WebFetch and the mocked
   private-MCP sentinel remain separate. Actual propagation, final overlay checks,
   remote branch tips and exact-SHA CI remain pending for this repair.
+
+## 2026-09-08 specified compaction-trigger alignment
+
+- Scope: COMPACTION-01 only. Main source/test behavior is
+  `fd285d92a3779b583a9ca82842516c863eb743bf`, based on fork
+  `1f88fded9402ebcb2f6379477d77f7d8d15549a2` (26 selected files).
+  The overall upstream review baseline remains
+  `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; comparison with release
+  `2a0eb706e95a77cba34a319e9f11f33f26d4450c` and selected upstream snapshot
+  `0abfeba186191c1a361cf3f27b802e9d29bf0fdc` imports no unrelated commits.
+- Provenance: upstream `70ef8edccaeb10fc9a03399eeb0448316d1d9429` raised
+  the existing buffer to 33K; upstream
+  `957bc463c33d1d38cdfc4510151ec2f60ba5a92a` replaced the reserve cutoff
+  with a flat ratio. Fork merge
+  `07d16a5f757377b816a1979297ec1cce80b7c9bd` retained both cutoffs.
+  This review supersedes that fork policy at the user's request; it does not
+  attribute the old constants to a new fork capability.
+- FC-015 now uses `floor(effective * ratio)`, default 90%, while preserving
+  upstream budget validation/precedence and the fork's bounded projection,
+  frozen context, and no-tool summaries. `/context-limit` previews candidates
+  through the actual resolver and reports the applied trigger. Config schema,
+  generated SDK/OpenAPI, bundled guidance and translated references describe
+  the remaining budget-validation role of `reserved`.
+- Local final affected matrix: 123 pass, zero failures, 320 assertions across
+  eight files; package typecheck passed. Full repository lint reported zero
+  errors (4,455 warnings); final changed-code lint reported zero errors
+  (82 warnings). The prompt-effect sweep had 105 pass, two existing skips,
+  and one stale high-pressure fixture failure; after resizing that fixture to
+  reach the new threshold, its isolated regression passed. SDK generation and
+  generated-description consistency checks passed.
+- Final matrix unset `MIMOCODE_EXPERIMENTAL`,
+  `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`,
+  `MIMOCODE_CODEX_MODE`, `MIMOCODE_COMPACTION_MAX_CONTEXT`,
+  `MIMOCODE_COMPACTION_TRIGGER_RATIO`, and `MIMOCODE_DISABLE_CHECKPOINT`.
+  Package-owned preload `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true` remains the
+  harness baseline; individual opt-in tests set their own target selector.
+- Compat additionally removes its 5K request-preflight advance so estimates
+  use the shared trigger. Its real wire estimate, static/recoverable overflow
+  classification, and frozen actor/context behavior remain separate retained
+  capabilities. Final compat validation and exact-SHA publication evidence
+  are recorded by the propagation review, not asserted by this main entry.
