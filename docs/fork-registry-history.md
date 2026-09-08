@@ -3015,3 +3015,17 @@ no-progress defect. Final validation: complete Actor/main HTTP 90 tests / 596
 assertions; ordinary main inbox/handoff 7 / 22; existing Inbox 50 / 125 across
 ten files. Package typecheck and repository lint pass (warnings remain). No
 public schema or SDK change is introduced by the internal cancellation identity.
+
+### 2026-09-09 POLICY-02 cancellation survives post-hook failure
+
+Source `273b72f1191c786412486d0a597048ed8f567b66` preserves an earlier cancellation decision when the subsequent
+session.post hook fails, retaining both the original failure and an internal
+cancellation marker. A real configured-plugin regression failed before the fix
+and passes afterward; targeted main HTTP/Actor tests pass 19 / 192 assertions.
+Typecheck and lint pass. The earlier complete 90 / 596 matrix is overlapping
+evidence on the preceding source, not a new full-suite run.
+
+Three existing real-provider/context-retirement fixtures now have an explicit
+15-second timeout with unchanged assertions. Compat previously exceeded its
+default five seconds in one fixture; the same-source isolated run passed in
+4.9 seconds. This budget change does not claim to eliminate timing variance.
