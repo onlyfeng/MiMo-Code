@@ -26,6 +26,8 @@
 - 补齐 main recovery 的 task_id 拒绝测试，分别覆盖省略 agentID 和显式 main，确认旧候选不变。
 - 收敛 Actor 错误事件文案：HTTP 不新增主会话失败上报，不声称底层同 sessionID 的 processor 事件被隔离。
 - MCP 自动连接使用真实 HTTP/stdio transport 验证；保留默认 pending、手动连接、禁用优先、实例隔离及原进程清理。
+- 首次远端 CI 发现两处旧测试仍排除所有 nested actor，已改为精确校验仅 send/status，完整生命周期仍在直接 actor；新增普通 subagent 即使配置 actor:allow 也不能取得该接口的回归。
+- 新 HTTP 恢复测试与同分片的独立 SessionPrompt 单元测试共享全局 captor，后者退出会清空已预热 AppRuntime 的引用。已用两个真实 producer 复现；常规应用入口复用单例 AppRuntime，未发现同样运行路径。按已有 stdio 测试模式，为 HTTP 整个文件设置独立 CI 进程，保留 main 8 项、compat 9 项逐项 JUnit 校验、发现检查和零执行拒绝；没有伪造冻结上下文或修改运行时协议。
 
 ## 验证与发布证据
 
@@ -34,6 +36,8 @@
 主分支四个 exec/actor 文件 135 项、sandbox 全文件 31 项、MCP 配置及真实传输 88 项、MCP 生命周期/OAuth 37 项、接口/前缀 13 项通过；Actor recovery/spawn 审计 79 项通过。若干聚焦复跑与这些组重叠，不把它们相加为独立测试总量。早期 Actor 审计仍带 `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL=1`，最终工具/config/contract 检查清除此变量；远端默认环境结果以最终 SHA 的 CI 为准。opencode 和 SDK 的包级 typecheck 通过，lint 零错误；SDK/OpenAPI 已从各分支源码生成。
 
 compat 工具与 sandbox 矩阵 168 项、MCP 矩阵 126 项、API/生成契约 16 项、HTTP Actor 冻结上下文 9 项全部通过。完整上下文/Actor/prefix/overflow/checkpoint 矩阵为 303 pass、2 个原有 skip、0 fail；两个 skip 是已有 Bash 取消计时夹具，本次未新增跳过。HTTP 回归覆盖 append/replace-agent 和同目录/独立目录 peer，并验证修改 live context 后 Unicode 冻结内容只出现一次。
+
+首次发布的 main `9b3823b7` 和 compat `a03186c0` 均为 lint/typecheck 通过、test 第四分片失败，不能视为交付成功。后续测试/CI 修正来源为 main `224920e08eb3506214f540f1411cc7bd9f26a87e`、compat `100abd923867627ac9de7998993b5d4e51e92d92`，本地整分片结果追加于 registry history；最终交付以修正后远端精确 SHA 的 test/typecheck/lint 结果为准。
 
 本次只有功能与生命周期验证，没有真实模型 token、错误率、任务完成率的对照实验，不据此声明效率提升。
 

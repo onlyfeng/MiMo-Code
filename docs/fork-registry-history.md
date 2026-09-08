@@ -2294,3 +2294,36 @@ requires successful CI for the new exact branch tips and fresh remote/ancestry p
   zero failures. Both package typechecks and zero-error lint pass. The only
   extra compat source/test delta is a regression proving original turnContext
   bytes survive live context changes; no compat production adaptation is added.
+
+
+## 2026-09-08 Actor/MCP CI contract correction
+
+- First publication was not accepted as complete: main `9b3823b7` and compat
+  `a03186c0` passed lint/typecheck, but test shard 4 failed. The two stale actor
+  exclusions failed on both branches; the new HTTP suite failed 8 main / 9
+  compat cases because another scoped prompt layer cleared the real
+  AppRuntime prefix captor. The remaining initial CI jobs passed.
+- Main source/test behavior is now
+  `224920e08eb3506214f540f1411cc7bd9f26a87e`; compat inherits it at
+  `100abd923867627ac9de7998993b5d4e51e92d92`. The runtime, generated SDK and
+  OpenAPI source are unchanged from `cedd542f` / `972b3b31`; this correction
+  changes only three contract test files and the CI workflow.
+- Actor declarations now assert exactly send/status, while the direct actor
+  schema accepts all eight lifecycle/control actions. Ordinary subagents
+  cannot gain direct or nested actor access through an actor:allow override.
+  The three complete contract files pass 71 tests after reproducing the two
+  original failures.
+- Two real unit-test producers reproduced captor loss after AppRuntime
+  warmup. Normal application entry points share one ownership chain; no
+  normal-entry runtime failure was demonstrated. FC-008 isolates the whole
+  HTTP recovery file in its own job, alongside the existing separate stdio
+  observer job. Discovery requires both files, and each dedicated job deletes
+  stale output and verifies exact-file, nonzero-execution JUnit. No case is
+  removed or skipped, and no artificial context capture is substituted.
+- Isolated HTTP evidence is 8 main cases / 103 assertions and 9 compat cases /
+  161 assertions, each with zero failures/skips and successful JUnit verification.
+  Both owning opencode typechecks pass. All seven selectors named in the shared
+  review are cleared for these tests, retaining package preload isolation.
+- Final branch tips still require fresh remote equality, successful exact-SHA
+  test/typecheck/lint, and selected-upstream-to-main-to-compat ancestry. Prior
+  failed runs are not reused as successful publication evidence.
