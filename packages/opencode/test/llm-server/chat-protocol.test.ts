@@ -9,7 +9,7 @@ test.each([
   { ...base, max_tokens: 0 },
   {
     ...base,
-    messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "https://example.com/a.png" } }] }],
+    messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "ftp://example.com/a.png" } }] }],
   },
   {
     ...base,
@@ -19,9 +19,33 @@ test.each([
     ...base,
     messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:text/html;base64,SGk=" } }] }],
   },
-])("rejects invalid or remote image input: %j", (value) => {
+])("rejects invalid image input: %j", (value) => {
   expect(ChatCompletionRequest.safeParse(value).success).toBe(false)
 })
+
+test.each(["https://images.example/a.png?signature=public", "http://images.example/a.gif"])(
+  "accepts HTTP image references for controlled downloading: %s",
+  (url) => {
+    expect(
+      ChatCompletionRequest.safeParse({
+        ...base,
+        messages: [{ role: "user", content: [{ type: "image_url", image_url: { url } }] }],
+      }).success,
+    ).toBe(true)
+  },
+)
+
+test.each(["https://user:password@images.example/a.png", "https://user@images.example/a.png", "file:///tmp/a.png"])(
+  "rejects credential-bearing and non-HTTP image references: %s",
+  (url) => {
+    expect(
+      ChatCompletionRequest.safeParse({
+        ...base,
+        messages: [{ role: "user", content: [{ type: "image_url", image_url: { url } }] }],
+      }).success,
+    ).toBe(false)
+  },
+)
 
 test.each([
   { n: 2 },

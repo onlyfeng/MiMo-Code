@@ -15,6 +15,7 @@ import { Provider, ProviderTransform } from "../provider"
 import { Plugin } from "../plugin"
 import { SessionID, MessageID } from "../session/schema"
 import type { User } from "../session/message-v2"
+import { ImageError, prepareImages, type ImageTransport } from "./images"
 import {
   ChatCompletionRequest,
   unsupported,
@@ -44,6 +45,8 @@ export class RequestError extends Error {
 function failed(error: unknown, abort: AbortSignal): never {
   abort.throwIfAborted()
   if (error instanceof RequestError) throw error
+  if (error instanceof ImageError)
+    throw new RequestError(error.status, error.message, error.status === 502 ? "api_error" : "invalid_request_error")
   if (error instanceof Provider.ModelNotFoundError)
     throw new RequestError(404, "Model is not available in this instance", "invalid_request_error", "model_not_found")
   // Provider and plugin errors may contain credentials, prompts or response bodies.
@@ -68,7 +71,7 @@ function toolSet(tools: NonNullable<ChatCompletionRequest["tools"]>): ToolSet {
   )
 }
 
-async function start(req: ChatCompletionRequest, abort: AbortSignal) {
+async function start(req: ChatCompletionRequest, abort: AbortSignal, imageTransport?: ImageTransport) {
   const parsed = Provider.parseModel(req.model)
   const resolved = await AppRuntime.runPromise(
     Effect.gen(function* () {
@@ -84,6 +87,13 @@ async function start(req: ChatCompletionRequest, abort: AbortSignal) {
     { signal: abort },
   )
   const model = resolved.model
+  const urls = req.messages.flatMap((message) =>
+    message.role === "user" && Array.isArray(message.content)
+      ? message.content.flatMap((part) => (part.type === "image_url" ? [part.image_url.url] : []))
+      : [],
+  )
+  if (urls.length && !model.capabilities.input.image)
+    throw new RequestError(400, "This model does not support image input")
   const id = completionID()
   const sessionID = SessionID.descending()
   const message: User = {
@@ -121,6 +131,8 @@ async function start(req: ChatCompletionRequest, abort: AbortSignal) {
   const headers = new Headers(model.headers)
   new Headers(hooked.headers).forEach((value, name) => headers.set(name, value))
   const tools = req.tools?.length ? ProviderTransform.tools(toolSet(req.tools), model) : undefined
+  const images = await prepareImages(urls, abort, imageTransport)
+  abort.throwIfAborted()
   return {
     id,
     ref: req.model,
@@ -137,7 +149,7 @@ async function start(req: ChatCompletionRequest, abort: AbortSignal) {
           },
         },
       }),
-      messages: toModelMessages(req.messages),
+      messages: toModelMessages(req.messages, images),
       tools,
       toolChoice: tools ? toToolChoice(req.tool_choice) : undefined,
       temperature: hooked.params.temperature,
@@ -294,11 +306,14 @@ async function* stream(started: Started, controller: AbortController, abort: Abo
 }
 
 /** Must run within the gateway's fixed Instance lease until response EOF/cancel. */
-export async function execute(input: {
-  req: ChatCompletionRequest
-  models: string[]
-  abort: AbortSignal
-}): Promise<Response> {
+export async function execute(
+  input: {
+    req: ChatCompletionRequest
+    models: string[]
+    abort: AbortSignal
+  },
+  imageTransport?: ImageTransport,
+): Promise<Response> {
   input.abort.throwIfAborted()
   const parsed = ChatCompletionRequest.safeParse(input.req)
   if (!parsed.success) throw new RequestError(400, "Invalid chat completion request")
@@ -312,7 +327,7 @@ export async function execute(input: {
   const controller = new AbortController()
   const abort = AbortSignal.any([input.abort, controller.signal])
   try {
-    const started = await start(parsed.data, abort)
+    const started = await start(parsed.data, abort, imageTransport)
     if (!parsed.data.stream) return Response.json(await collect(started, controller, abort))
     const iterator = stream(started, controller, abort, parsed.data.stream_options?.include_usage === true)
     const first = await iterator.next()

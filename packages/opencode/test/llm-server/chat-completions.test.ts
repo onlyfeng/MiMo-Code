@@ -10,6 +10,7 @@ import { Global } from "../../src/global"
 import { Env } from "../../src/env"
 import { Auth } from "../../src/auth"
 import { makeRuntime } from "../../src/effect/run-service"
+import { imageBytes, imageFixture } from "./image-fixture"
 
 beforeAll(() => prepareConfigDependencies(Global.Path.config))
 afterEach(() => Instance.disposeAll())
@@ -55,6 +56,7 @@ async function fixture<T>(
     providerID?: string
     apiID?: string
     npm?: string
+    images?: boolean
   } = {},
 ) {
   const seen: Seen[] = []
@@ -87,7 +89,7 @@ async function fixture<T>(
                 id: options.apiID ?? "wire-model",
                 temperature: true,
                 reasoning: true,
-                modalities: { input: ["text", "image"], output: ["text"] },
+                modalities: { input: options.images === false ? ["text"] : ["text", "image"], output: ["text"] },
                 options: { reasoningEffort: "low" },
                 variants: { high: { reasoningEffort: "high" } },
                 headers: { "x-model": "model", "X-Override": "model" },
@@ -493,6 +495,105 @@ test("inline images and historical tool results reach the actual provider", () =
     ])
     expect(messages[2]).toMatchObject({ role: "tool", tool_call_id: "history", content: "20C" })
   }))
+
+test("remote image bytes reach the real provider SDK without exposing its credentials to the image host", () =>
+  fixture(async (seen) =>
+    imageFixture(async ({ transport, seen: downloaded }) => {
+      const url = "http://images.example/picture.png"
+      const response = await execute(
+        {
+          req: ChatCompletionRequest.parse({
+            ...base,
+            messages: [{ role: "user", content: [{ type: "image_url", image_url: { url } }] }],
+          }),
+          models: ["local/chat"],
+          abort: new AbortController().signal,
+        },
+        transport,
+      )
+      expect(completionSchema.parse(await response.json()).choices[0].message.content).toBe("Hello.")
+      expect(seen).toHaveLength(1)
+      expect(seen[0].body.messages).toMatchObject([
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: `data:image/png;base64,${imageBytes.toString("base64")}` } },
+          ],
+        },
+      ])
+      expect(seen[0].headers.get("authorization")).toBe("Bearer local-vendor-key")
+      expect(downloaded).toHaveLength(1)
+      expect(downloaded[0].headers.authorization).toBeUndefined()
+      expect(downloaded[0].headers["x-provider"]).toBeUndefined()
+      expect(downloaded[0].headers["x-model"]).toBeUndefined()
+      expect(JSON.stringify(seen[0].body)).not.toContain("images.example")
+    }),
+  ))
+
+test.each([
+  { extra: {}, models: [], status: 404 },
+  { extra: { model: "local/missing" }, models: ["local/missing"], status: 404 },
+  { extra: { model: "local/speech" }, models: ["local/speech"], status: 400 },
+  { extra: { reasoning_effort: "impossible" }, models: ["local/chat"], status: 400 },
+  { extra: { parallel_tool_calls: false }, models: ["local/chat"], status: 400 },
+])("validates model scope and options before image DNS or provider work: %j", ({ extra, models, status }) =>
+  fixture(async (seen) => {
+    let lookups = 0
+    await expect(
+      execute(
+        {
+          req: {
+            ...base,
+            ...extra,
+            messages: [
+              { role: "user", content: [{ type: "image_url", image_url: { url: "http://images.example/p.png" } }] },
+            ],
+          },
+          models: [...models],
+          abort: new AbortController().signal,
+        },
+        {
+          lookup: async () => {
+            lookups++
+            return [{ address: "127.0.0.1", family: 4 }]
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ status })
+    expect(lookups).toBe(0)
+    expect(seen).toHaveLength(0)
+  }),
+)
+
+test("rejects images for a text-only model before downloading or invoking the provider", () =>
+  fixture(
+    async (seen) => {
+      let lookups = 0
+      await expect(
+        execute(
+          {
+            req: {
+              ...base,
+              messages: [
+                { role: "user", content: [{ type: "image_url", image_url: { url: "http://images.example/p.png" } }] },
+              ],
+            },
+            models: ["local/chat"],
+            abort: new AbortController().signal,
+          },
+          {
+            lookup: async () => {
+              lookups++
+              return [{ address: "127.0.0.1", family: 4 }]
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ status: 400 })
+      expect(lookups).toBe(0)
+      expect(seen).toHaveLength(0)
+    },
+    { images: false },
+  ))
 
 test.each([
   ["mimo-v2.5", "/v1/chat/completions"],
