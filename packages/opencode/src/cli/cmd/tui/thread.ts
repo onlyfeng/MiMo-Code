@@ -296,10 +296,12 @@ export const TuiThreadCommand = cmd({
       process.on("unhandledRejection", error)
       process.on("SIGUSR2", reload)
 
+      let upgrade: ReturnType<typeof setTimeout> | undefined
       let stopped = false
       const stop = async () => {
         if (stopped) return
         stopped = true
+        clearTimeout(upgrade)
         process.off("uncaughtException", error)
         process.off("unhandledRejection", error)
         process.off("SIGUSR2", reload)
@@ -311,37 +313,46 @@ export const TuiThreadCommand = cmd({
         worker.terminate()
       }
 
-      const prompt = await input(args.prompt)
-      const config = await TuiConfig.get()
-
-      const network = resolveNetworkOptionsNoConfig(args)
-      const external =
-        process.argv.includes("--port") ||
-        process.argv.includes("--hostname") ||
-        process.argv.includes("--mdns") ||
-        network.mdns ||
-        network.port !== 0 ||
-        network.hostname !== "127.0.0.1"
-
-      const transport = external
-        ? {
-            url: (await client.call("server", network)).url,
-            fetch: undefined,
-            events: undefined,
-          }
-        : {
-            url: "http://opencode.internal",
-            fetch: createWorkerFetch(client),
-            events: createEventSource(client),
-          }
-
-      setTimeout(() => {
-        client.call("checkUpgrade", { directory: cwd }).catch(() => {})
-      }, 1000).unref?.()
-
       try {
+        const prompt = await input(args.prompt)
+        const config = await TuiConfig.get()
+        const network = resolveNetworkOptionsNoConfig(args)
+        const external =
+          ["--port", "--hostname", "--mdns"].some((name) =>
+            process.argv.some((arg) => arg === name || arg.startsWith(`${name}=`)),
+          ) ||
+          network.mdns ||
+          network.port !== 0 ||
+          network.hostname !== "127.0.0.1"
+        const server = await client
+          .call("server", external ? { ...network, http: true } : undefined)
+          .catch((error) => ({
+            ok: false as const,
+            error: errorMessage(error),
+          }))
+        if (!server.ok) {
+          if (external) throw new Error(server.error)
+          UI.error(`Failed to start model API: ${server.error}`)
+        }
+        const transport =
+          external && server.ok
+            ? { url: server.url, headers: server.headers, fetch: undefined, events: undefined }
+            : {
+                url: "http://opencode.internal",
+                headers: undefined,
+                fetch: createWorkerFetch(client),
+                events: createEventSource(client),
+              }
+
+        upgrade = setTimeout(() => {
+          if (stopped) return
+          client.call("checkUpgrade", { directory: cwd }).catch(() => {})
+        }, 1000)
+        upgrade.unref?.()
+
         await tui({
           url: transport.url,
+          headers: transport.headers,
           async onSnapshot() {
             const tui = writeHeapSnapshot("tui.heapsnapshot")
             const server = await client.call("snapshot", undefined)
