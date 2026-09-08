@@ -186,7 +186,6 @@ export function isGeneratedSkillCatalog(part: {
 }) {
   if (part.type !== "text" || part.synthetic !== true || typeof part.text !== "string") return false
   const text = part.text.replace(/\r\n?/g, "\n")
-  if (/<skill_content\b/.test(text)) return false
   if (!text.startsWith("<system-reminder>\n") || !text.endsWith("\n</system-reminder>")) return false
   const content = text.slice("<system-reminder>\n".length, -"\n</system-reminder>".length)
   const v2 = `${SKILL_CATALOG_SNAPSHOT_MARKER}\nWhen multiple snapshots exist, the last one is authoritative.\n`
@@ -201,6 +200,9 @@ export function isGeneratedSkillCatalog(part: {
       createHash("sha256").update(canonicalSkillCatalog(catalog)).digest("hex")
     )
   }
+  // Authenticated v2 descriptions are arbitrary text; only unproven legacy
+  // candidates need the loaded-content substring safeguard.
+  if (/<skill_content\b/.test(text)) return false
   // Malformed v2 metadata must not fall back to the metadata-free legacy form.
   if (part.metadata?.[SKILL_CATALOG_METADATA_KEY] !== undefined) return false
   if (!content.startsWith(`${SKILL_CATALOG_REMINDER_MARKER}\n`)) return false

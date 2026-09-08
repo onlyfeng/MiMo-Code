@@ -44,7 +44,7 @@ const config = (url: string) => ({
   },
 })
 const CATALOG_MARKER = "Skills available in this session:"
-const OLD = "OLD_CATALOG_DESCRIPTION_6a31"
+const OLD = "OLD_CATALOG_DESCRIPTION_6a31 describes <skill_content> syntax"
 const NEW = "NEW_CATALOG_DESCRIPTION_2f47"
 const BODY = "SKILL_BODY_STAYS_IN_USER_MESSAGE_8d13"
 const skillPath = (dir: string) => path.join(dir, ".mimocode/skill/catalog-probe/SKILL.md")
