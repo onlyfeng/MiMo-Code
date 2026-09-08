@@ -36,6 +36,8 @@ export type SkillCatalogSnapshot = {
   turnID: MessageID
   // Position in the frozen system, independent of the catalog content hash.
   systemSlot?: { message: number; offset: number }
+  // Caller-owned output-format instruction shares the managed range.
+  formatPrefix?: string
 }
 
 export function captureSkillCatalog(text: string | undefined, turnID: MessageID): SkillCatalogSnapshot {
@@ -61,39 +63,74 @@ function withoutSystemSlot(catalog: SkillCatalogSnapshot) {
   return snapshot
 }
 
+function withFormat(catalog: SkillCatalogSnapshot, formatPrefix: string) {
+  const { formatPrefix: _format, ...snapshot } = catalog
+  return formatPrefix ? { ...snapshot, formatPrefix } : snapshot
+}
+
+function managedText(catalog: SkillCatalogSnapshot) {
+  return (catalog.formatPrefix ?? "") + catalog.text
+}
+
 // The marker is transient: validate and materialize before persistence or dispatch.
-export function bindSkillCatalog(system: string[], catalog: SkillCatalogSnapshot, token: string) {
+export function bindSkillCatalog(system: string[], catalog: SkillCatalogSnapshot, token: string, formatPrefix = "") {
   if (!/^<mimocode-catalog-slot-[0-9a-f-]{36}>$/.test(token)) throw new Error("Invalid skill catalog slot token")
   const slots = occurrences(system, token)
   if (slots.length !== 1) throw new Error("Skill catalog slot must occur exactly once")
   const slot = slots[0]
-  if (!catalog.text && system[slot.message] === token)
-    return { system: system.filter((_, index) => index !== slot.message), catalog: withoutSystemSlot(catalog) }
+  const next = withFormat(catalog, formatPrefix)
+  if (!managedText(next) && system[slot.message] === token)
+    return { system: system.filter((_, index) => index !== slot.message), catalog: withoutSystemSlot(next) }
   return {
     system: system.map((text, index) =>
       index === slot.message
-        ? text.slice(0, slot.offset) + catalog.text + text.slice(slot.offset + token.length)
+        ? text.slice(0, slot.offset) + managedText(next) + text.slice(slot.offset + token.length)
         : text,
     ),
-    catalog: { ...catalog, systemSlot: slot },
+    catalog: { ...next, systemSlot: slot },
   }
 }
 
 export function refreshFrozenSkillCatalog(
   system: string[],
   previous: SkillCatalogSnapshot | undefined,
-  next: SkillCatalogSnapshot | undefined,
+  selected: SkillCatalogSnapshot | undefined,
+  options?: { formatPrefix: string; legacyFormatPrefix?: string },
 ): { system: string[]; catalog: SkillCatalogSnapshot | undefined; reason?: string } {
-  if (!next || previous === next) return { system, catalog: previous }
-  // Old empty/legacy prefixes have no catalog bytes to remove. Append without
-  // normalizing or rebuilding their frozen environment, instructions or plugin text.
-  if (!previous?.text && !previous?.systemSlot) {
-    // An old empty catalog has no insertion anchor. Keep it that way until
-    // actual catalog text is available, rather than sending an empty message.
-    if (!next.text) return { system, catalog: withoutSystemSlot(next) }
-    return { system: [...system, next.text], catalog: { ...next, systemSlot: { message: system.length, offset: 0 } } }
+  if (!selected) return { system, catalog: previous }
+  const next = withFormat(selected, options?.formatPrefix ?? previous?.formatPrefix ?? "")
+  const unchanged = {
+    system,
+    catalog: previous,
+    reason: "Frozen catalog position is missing, invalid or ambiguous; preserving its original system/catalog pair",
   }
-  const slots = previous.systemSlot ? [previous.systemSlot] : occurrences(system, previous.text)
+  // Before managed ranges, a StructuredOutput tool in the saved snapshot proves
+  // that its generated format instruction was emitted. Adopt only its unique
+  // location, or the exact range immediately preceding the known catalog slot.
+  const prior = (() => {
+    if (previous?.formatPrefix !== undefined || !options?.legacyFormatPrefix) return previous
+    if (!previous?.text && !previous?.systemSlot) {
+      const text = options.legacyFormatPrefix.trimEnd()
+      const slots = occurrences(system, text)
+      if (slots.length !== 1) return null
+      return { ...(previous ?? selected), text: "", formatPrefix: text, systemSlot: slots[0] }
+    }
+    const slots = previous.systemSlot ? [previous.systemSlot] : occurrences(system, previous.text)
+    if (slots.length !== 1) return null
+    const slot = slots[0]
+    const offset = slot.offset - options.legacyFormatPrefix.length
+    if (offset < 0 || system[slot.message]?.slice(offset, slot.offset) !== options.legacyFormatPrefix) return null
+    return { ...previous, formatPrefix: options.legacyFormatPrefix, systemSlot: { ...slot, offset } }
+  })()
+  if (prior === null) return unchanged
+  if (!prior || (!managedText(prior) && !prior.systemSlot)) {
+    if (!managedText(next)) return { system, catalog: withoutSystemSlot(next) }
+    return {
+      system: [...system, managedText(next)],
+      catalog: { ...next, systemSlot: { message: system.length, offset: 0 } },
+    }
+  }
+  const slots = prior.systemSlot ? [prior.systemSlot] : occurrences(system, managedText(prior))
   const slot = slots[0]
   if (
     slots.length !== 1 ||
@@ -104,21 +141,15 @@ export function refreshFrozenSkillCatalog(
     slot.offset < 0 ||
     typeof system[slot.message] !== "string" ||
     slot.offset > system[slot.message].length ||
-    system[slot.message].slice(slot.offset, slot.offset + previous.text.length) !== previous.text
+    system[slot.message].slice(slot.offset, slot.offset + managedText(prior).length) !== managedText(prior)
   )
-    return {
-      system,
-      catalog: previous,
-      reason: "Frozen catalog position is missing, invalid or ambiguous; preserving its original system/catalog pair",
-    }
-  // Legacy migrations may have appended a standalone catalog message. Drop
-  // that message when clearing it, but never trim surrounding frozen content.
-  if (!next.text && slot.offset === 0 && system[slot.message] === previous.text)
+    return unchanged
+  if (!managedText(next) && slot.offset === 0 && system[slot.message] === managedText(prior))
     return { system: system.filter((_, index) => index !== slot.message), catalog: withoutSystemSlot(next) }
   return {
     system: system.map((text, index) =>
       index === slot.message
-        ? text.slice(0, slot.offset) + next.text + text.slice(slot.offset + previous.text.length)
+        ? text.slice(0, slot.offset) + managedText(next) + text.slice(slot.offset + managedText(prior).length)
         : text,
     ),
     catalog: { ...next, systemSlot: slot },
@@ -140,7 +171,9 @@ const legacySearchIntro = [
 
 function isCatalogBody(text: string) {
   if (text === "No skills are currently available.") return true
-  return /^<available_skills>\n(?:  <skill>\n    <name>[^\n]*<\/name>\n    <description>[\s\S]*?<\/description>\n    <location>file:[^\n]*<\/location>\n  <\/skill>\n)+<\/available_skills>$/.test(text)
+  return /^<available_skills>\n(?:  <skill>\n    <name>[^\n]*<\/name>\n    <description>[\s\S]*?<\/description>\n    <location>file:[^\n]*<\/location>\n  <\/skill>\n)+<\/available_skills>$/.test(
+    text,
+  )
 }
 
 // This is a historical-format recognizer, not a substring detector. Only the

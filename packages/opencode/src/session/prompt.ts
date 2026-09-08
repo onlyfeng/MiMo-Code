@@ -662,9 +662,6 @@ export const layer = Layer.effect(
               ])
               return [
                 ...env,
-                ...(captureUser.info.role === "user" && captureUser.info.format?.type === "json_schema"
-                  ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT]
-                  : []),
                 ...(catalogSlot ? [catalogSlot] : []),
                 ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
               ]
@@ -697,7 +694,12 @@ export const layer = Layer.effect(
           return empty
         const materialized =
           catalog && catalogSlot
-            ? bindSkillCatalog(prefix.system, catalog, catalogSlot)
+            ? bindSkillCatalog(
+                prefix.system,
+                catalog,
+                catalogSlot,
+                captureUser.info.format?.type === "json_schema" ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n" : "",
+              )
             : { system: prefix.system, catalog }
         // A cold capture owns a frozen generation too. Reuse the winning row
         // if another capture or the normal loop pinned this profile first.
@@ -5147,13 +5149,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               permission: runtimePermission,
             })
             const refreshed = frozen
-              ? refreshFrozenSkillCatalog(frozen.system, frozen.skill_catalog ?? undefined, selectedCatalog)
+              ? refreshFrozenSkillCatalog(frozen.system, frozen.skill_catalog ?? undefined, selectedCatalog, {
+                  formatPrefix: format.type === "json_schema" ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n" : "",
+                  legacyFormatPrefix: frozen.tools?.some((tool) => tool.name === "StructuredOutput")
+                    ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n"
+                    : undefined,
+                })
               : undefined
             if (refreshed?.reason)
               yield* slog.warn("skill catalog refresh retained frozen pair", { reason: refreshed.reason, sessionID })
             const catalog = refreshed ? refreshed.catalog : selectedCatalog
             const catalogSlot = !frozen && catalog ? newSkillCatalogSlot() : undefined
-            const catalogChanged = Boolean(catalog && catalog.version !== frozen?.skill_catalog?.version)
+            const catalogChanged = Boolean(catalog && (
+              catalog.version !== frozen?.skill_catalog?.version ||
+              catalog.formatPrefix !== frozen?.skill_catalog?.formatPrefix
+            ))
             const catalogTurnChanged = Boolean(catalog && catalog.turnID !== frozen?.skill_catalog?.turnID)
             const currentAdditions = Effect.fnUntraced(function* () {
               const [env, instructions] = yield* Effect.all([
@@ -5172,7 +5182,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               }
               return [
                 ...env,
-                ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
                 ...(catalogSlot ? [catalogSlot] : []),
                 ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
               ]
@@ -5204,7 +5213,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }).pipe(Effect.provideService(LLM.Service, llm), Effect.provideService(ToolRegistry.Service, registry))
             const materialized =
               catalog && catalogSlot
-                ? bindSkillCatalog(builtPrefix.system, catalog, catalogSlot)
+                ? bindSkillCatalog(
+                    builtPrefix.system,
+                    catalog,
+                    catalogSlot,
+                    format.type === "json_schema" ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n" : "",
+                  )
                 : { system: builtPrefix.system, catalog }
             const initialPrefix = { ...builtPrefix, system: materialized.system }
             const currentToolsHash = SessionPrefixSnapshot.toolsHash(resolvedTools.snapshotTools, activeTools)
@@ -5226,14 +5240,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 // A concurrent cold capture may have pinned this profile first.
                 // Keep its system/catalog pair while retaining the live executable
                 // tool pool, just as an ordinary tools-only rotation does below.
+                const winner = refreshFrozenSkillCatalog(
+                  pinned.system,
+                  pinned.skill_catalog ?? undefined,
+                  pinned.skill_catalog ?? undefined,
+                  {
+                    formatPrefix: format.type === "json_schema" ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n" : "",
+                    legacyFormatPrefix: pinned.tools?.some((tool) => tool.name === "StructuredOutput")
+                      ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n"
+                      : undefined,
+                  },
+                )
                 const snapshot =
-                  pinned.tools && pinned.tools_hash === currentToolsHash
+                  pinned.tools && pinned.tools_hash === currentToolsHash && isDeepStrictEqual(winner.system, pinned.system)
                     ? pinned
                     : yield* SessionPrefixSnapshot.rotate({
                         sessionID,
                         profileKey: prefixProfileKey,
-                        system: pinned.system,
-                        skillCatalog: pinned.skill_catalog ?? undefined,
+                        system: winner.system,
+                        skillCatalog: winner.catalog,
                         toolsHash: currentToolsHash,
                         tools: currentTools,
                         loadedMcpTools: resolvedTools.loadedMcpTools,

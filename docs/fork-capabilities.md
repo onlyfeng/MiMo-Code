@@ -285,7 +285,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   system-prompt suites plus `memory-path-template.test.ts` at the reviewed main
   behavior.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`.
+  main behavior `b948ef02e6a44aa8eb8cdf67662d69335f58f6df`.
 - Retirement condition: upstream exposes the same canonical writer, isolated
   child, mode-specific prefix ownership, aligned delta, disabled-checkpoint
   guidance behavior, and stable placeholder resolution only at filesystem-tool
@@ -424,7 +424,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   old-database migration. Session tests are under `packages/opencode/test/session/`.
   Local evidence does not assert publication, exact-head CI or compat acceptance.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`.
+  main behavior `b948ef02e6a44aa8eb8cdf67662d69335f58f6df`.
 - Retirement condition: upstream uses one effective permission/tool decision
   across discovery and invocation and provides equivalent retryable,
   generation-aware producer behavior plus versioned system-tail snapshots,
@@ -987,7 +987,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   `compaction-projection.test.ts` and prompt-effect regressions bind the
   projection budget, frozen system/tool bytes, and no-tool summary policy.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`. The selected trigger
+  main behavior `b948ef02e6a44aa8eb8cdf67662d69335f58f6df`. The selected trigger
   was additionally compared with release `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
   and upstream `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`; this named-behavior
   adoption does not advance the overall upstream review baseline.
