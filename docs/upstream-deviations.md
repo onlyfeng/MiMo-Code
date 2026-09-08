@@ -17,9 +17,9 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
-- Bundled guidance content: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
-- Prior fork `main` tip: `3350f0f2ce17501d4d925f5e293f07d809f29f22`
+- Main behavior (runtime/tests): `0353965ea38ce3d963f123acb2f9a965bcbb98c3`
+- Bundled guidance content: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`
+- Prior fork `main` tip: `d415822c29539a4b6eebeafb59de1b88da18b95c`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -33,7 +33,7 @@ capability audit is recorded in [the model API review](released-model-api-review
 | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | FD-001 | yolo, permission, Bash delete                                         | Adopts startup delete approval; rejects run-driven shared switch mutation                                         | Preserve deny precedence and live invocation isolation                               |
 | FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries               | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
-| FD-004 | instance server, explicit model/audio APIs, `/v1`, SDK/OpenAPI        | Adopts capability discovery and token-scoped proxy behind explicit admission; rejects implicit capability service | Preserve opt-in, authentication-before-bootstrap, and bounded shutdown                |
+| FD-004 | TUI listener, model/audio APIs, `/v1`, SDK/OpenAPI | Adopts TUI-owned default listener with explicit model tokens; retains other entrypoint and admission boundaries | Preserve token scope, operator-origin limits, authentication-before-bootstrap and bounded shutdown |
 | FD-005 | model identity, prompt, discovery, tools, retry                       | Adapts inconsistent upstream classification                                                                       | Preserve one resolved identity                                                        |
 | FD-006 | compact Codex declarations and nested execution                       | Adopts compact registration and full authorized nested Actor/interactive composition                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
 | FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
@@ -145,16 +145,19 @@ capability audit is recorded in [the model API review](released-model-api-review
   set, and a session base replaces actor identity only with positive main or
   registered-peer evidence.
 
-## FD-004 — ordinary instances expose no implicit OpenAI-compatible listener
+## FD-004 — TUI-owned model listener with scoped tokens and bounded admission
 
 - Status: active
 - Canonical owner: fork `main` instance-server and generated API boundary
-- Observable contract: ordinary TUI, `serve`, ACP, and embedded instances do
-  not mount an implicit `/v1` capability surface or bind an additional listener
-  merely because provider credentials or issued tokens exist. Fork SDK/OpenAPI
-  artifacts are generated from that default-off source behavior. Explicit
-  `mimo serve --llm-server` enables model discovery, chat completions, and basic
-  audio on its existing socket using directory-bound tokens with explicit single,
+- Observable contract: ordinary TUI startup creates one worker-owned model API
+  listener for its fixed startup directory, using loopback and automatic port
+  selection unless explicit network options select another bind. Concurrent
+  starts share the listener; TUI exit closes it. `mimo attach` only connects to
+  an existing server and does not start a local listener. Plain `serve`, ACP and
+  embedded instances retain explicit API enablement; credentials or tokens alone
+  do not start a service. `mimo serve --llm-server` uses its existing socket.
+  Both TUI and explicit mode provide discovery, chat and basic audio using
+  directory-bound tokens with explicit single,
   multiple, or all-model scope. Defaults remain one-hour idle and one-day absolute
   lifetime; either limit may be explicitly disabled, and only disabling both
   produces no expiry. Missing stored lifetime fields never grant permanence.
@@ -163,10 +166,22 @@ capability audit is recorded in [the model API review](released-model-api-review
   bodies/concurrency, propagate cancellation, and close intake before retirement.
   Neither credential replaces generic API Basic auth. Capability selection
   chooses a model; it does not grant a separate endpoint capability scope.
-- Upstream relationship: rejects the implicit listener and unsafe admission
-  ordering anchored at `b4bbe81c67f215d32bdbf1b7984928dea80b7c92`. Independently
-  adopts capability discovery, explicit token management, standard chat proxy,
-  and basic audio from `6203ea2e`. The selected `v0.1.14` capability set additionally
+- Authentication origin: worker-generated Basic credentials stay in memory and
+  protect ordinary server routes; they do not enter process.env, token storage,
+  address records or public output. Existing operator credentials take priority.
+  Automatic authentication does not relax directory containment or non-loopback
+  admission; those policies still require operator credentials, or the existing
+  explicit noAuth bind option where applicable. Default TUI RPC supplies Basic
+  internally, while explicit HTTP transport receives headers through trusted
+  host/worker RPC. Model tokens remain explicitly issued Bearer credentials;
+  Basic authentication never grants model access.
+- Upstream relationship: POLICY-03 adopts ordinary TUI listener startup from
+  release `2a0eb706e95a77cba34a319e9f11f33f26d4450c` and upstream snapshot
+  `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, replacing only the former TUI
+  explicit-start requirement. N=1; the overall upstream baseline is unchanged.
+  Residual boundaries cover scoped admission, other entrypoints, and resource
+  ownership. The earlier capability discovery, explicit token management,
+  standard chat proxy and basic audio adoption from `6203ea2e` remains. The selected `v0.1.14` capability set additionally
   supplies public HTTP(S) image inputs, inline chat audio, Google/Vertex language
   model SDK transcription, constrained client `provider_options`, explicit
   multi/all-model scope, and independent lifetime disabling. Empty model lists
@@ -190,6 +205,9 @@ capability audit is recorded in [the model API review](released-model-api-review
   token expiry is disabled.
 - Watch surfaces: `packages/opencode/src/cli/cmd/tui/thread.ts`,
   `packages/opencode/src/cli/cmd/tui/worker.ts`,
+  `packages/opencode/src/cli/cmd/tui/worker-listener.ts`,
+  `packages/opencode/src/cli/cmd/tui/context/sdk.tsx`,
+  `packages/opencode/src/flag/flag.ts`, `packages/opencode/src/server/auth.ts`,
   `packages/opencode/src/cli/cmd/llm-server.ts`, `packages/opencode/src/index.ts`,
   `packages/opencode/src/node.ts`,
   `packages/opencode/src/llm-server/`,
@@ -207,6 +225,12 @@ capability audit is recorded in [the model API review](released-model-api-review
   runtime and published OpenAPI recovery/resume operations expose the same
   constrained `agentID` selector owned by FC-001/FD-009, omit caller task
   replacement, and expose the same compaction projection contract.
+- POLICY-03 evidence: `test/cli/tui/worker-listener.test.ts` uses actual sockets
+  for pending-start/stop, bind failure/retry and operator-origin checks;
+  `worker-model-api.test.ts` drives two real worker RPC/HTTP instances.
+  `thread.test.ts` separately checks host wiring and startup-failure fallback.
+  These package tests do not by themselves prove the actual ordinary CLI TUI
+  startup or attach path; POSIX PTY validation has a separate publication record.
 - Audio evidence: `packages/opencode/test/audio/`,
   `packages/opencode/test/server/audio-api.test.ts`,
   `packages/opencode/test/server/audio-admission.test.ts`, and its isolated
@@ -227,10 +251,11 @@ capability audit is recorded in [the model API review](released-model-api-review
   records its historical absence; the Node entry now restores the functional
   LLMServerTokens export for explicit embedding alongside Server.listen.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
-- Retirement condition: the listener is explicit opt-in, authentication
-  completes before directory bootstrap or other side effects, resource bounds
-  are defined, and shutdown closes intake before draining and retiring instances.
+  main behavior `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
+- Retirement condition: upstream preserves the TUI-owned listener lifecycle,
+  explicit enabling on other entrypoints, operator-origin directory/bind limits,
+  and explicit token scope; authentication precedes bootstrap, resources are
+  bounded, and shutdown closes intake before draining and retiring instances.
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
 
