@@ -1274,7 +1274,7 @@ export const SessionTool = Tool.define<typeof parameters, Metadata, Deps>(
         const lastUser = slice.findLast((m) => m.info.role === "user")
         const lastAssistant = slice.findLast((m) => m.info.role === "assistant")
         for (const m of [lastUser, lastAssistant]) {
-          if (m) yield* sessions.updateMessage({ ...m.info, agent: op.mode })
+          if (m) yield* sessions.patchMessageMetadata({ sessionID: childID, messageID: m.info.id, agent: op.mode })
         }
         const took = lastUser || lastAssistant
         return {

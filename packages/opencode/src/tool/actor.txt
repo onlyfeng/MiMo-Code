@@ -100,12 +100,20 @@ You are the subagent's only briefing — it hasn't seen this conversation.
 ## Actor ID vs Task ID
 
 `actor_id` identifies a live subagent. It is returned by `spawn`/`run` and accepted by
-`status`, `wait`, `cancel`, `resume`, and `send`. Task IDs (T1, T2, ...) come from the `task` tool — only pass a `task_id` you got from a `task` tool call this session. If the `task_id` is malformed or unknown, the binding is dropped: the subagent's findings won't be captured to any task, and the tool result tells you so.
+`status`, `wait`, `cancel`, `resume`, and `send`. Task IDs (T1, T2, ...) come from the `task` tool — only pass a `task_id` you got from a `task` tool call this session. On spawn/run, if the `task_id` is malformed or unknown, the binding is dropped: the subagent's findings won't be captured to any task, and the tool result tells you so.
 
 ## Recovering an interrupted actor
 
 Use `{"operation":{"action":"resume","actor_id":"<existing>"}}` to retry the
-existing interrupted user turn. This accepts no new prompt, model, or task ID.
+existing interrupted user turn. It accepts no new prompt or model. Optionally add
+`"task_id":"T2.1"` to validate its original task, or bind an unbound interrupted
+user to an eligible task in the actor's original task session. A different existing
+binding is rejected. New bindings reject malformed, unknown, terminal, or another
+actor's task without changing the interrupted turn. Passing the same ID preserves
+the task's state; omitting `task_id` retains the persisted task.
+You may address registered non-main actors in this session, including actors managed
+by another registered actor, or a peer child of this session. A peer may also be
+addressed from its own session; unrelated sessions remain unavailable.
 Only persistent full-context actors retaining their original context qualify;
 ordinary ephemeral subagents require a new spawn after termination.
 

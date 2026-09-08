@@ -66,6 +66,8 @@ import { inboxServiceRef } from "../../src/inbox/inbox-ref"
 import { Flag } from "../../src/flag/flag"
 import { prefixModelIdentity, prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 
+let recoveryCommitGate: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void>; done: Deferred.Deferred<void> } | undefined
+let cancelAdmissionGate: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
 let recoveryHooks: { pre: (string | undefined)[]; post: (string | undefined)[] } | undefined
 let resumeCompletionGate: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
 let cancelCompletionGate: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
@@ -74,6 +76,8 @@ let resumeValidationGate: { hit: Deferred.Deferred<void>; release: Deferred.Defe
 let agentLookupFailure: { agent: string; armed: boolean } | undefined
 
 afterEach(async () => {
+  recoveryCommitGate = undefined
+  cancelAdmissionGate = undefined
   agentLookupFailure = undefined
   resumeValidationGate = undefined
   resumeCompletionGate = undefined
@@ -142,7 +146,14 @@ const run = Layer.effect(
     const inner = yield* SessionRunState.Service
     return SessionRunState.Service.of({
       ...inner,
-      cancelActor: (...args) => inner.cancelActor(...args).pipe(Effect.andThen(Effect.gen(function* () {
+      cancelActor: (...args) => Effect.gen(function* () {
+        const gate = cancelAdmissionGate
+        if (gate) {
+          yield* Deferred.succeed(gate.hit, undefined)
+          yield* Deferred.await(gate.release)
+        }
+        return yield* inner.cancelActor(...args)
+      }).pipe(Effect.andThen(Effect.gen(function* () {
         const gate = cancelCompletionGate
         if (!gate) return
         yield* Deferred.succeed(gate.hit, undefined)
@@ -172,8 +183,24 @@ function makeLayer(
       })
     }),
   ).pipe(Layer.provide(AgentSvc.defaultLayer))
+  const recoverySession = Layer.effect(
+    Session.Service,
+    Effect.gen(function* () {
+      const inner = yield* Session.Service
+      return Session.Service.of({
+        ...inner,
+        commitRecoveryCandidate: (input) => Effect.gen(function* () {
+          const gate = recoveryCommitGate
+          if (!gate) return yield* inner.commitRecoveryCandidate(input)
+          yield* Deferred.succeed(gate.hit, undefined)
+          yield* Deferred.await(gate.release)
+          return yield* inner.commitRecoveryCandidate(input).pipe(Effect.ensuring(Deferred.succeed(gate.done, undefined)))
+        }),
+      })
+    }),
+  ).pipe(Layer.provide(Session.defaultLayer))
   const deps = Layer.mergeAll(
-    Session.defaultLayer,
+    recoverySession,
     Snapshot.defaultLayer,
     LLM.defaultLayer,
     Env.defaultLayer,
@@ -2460,6 +2487,154 @@ const interruptedActor = Effect.fnUntraced(function* (
   return { ...spawned, messages, context }
 })
 
+pauseIt.live("resume binds an unbound original task before hooks and provider execution", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const spawned = yield* interruptedActor()
+      const user = spawned.messages.find((message) => message.info.role === "user")!
+      if (user.info.role !== "user") return yield* Effect.die("missing recovery user")
+      const task = yield* Effect.gen(function* () {
+        return yield* (yield* TaskRegistry.Service).create({
+          session_id: spawned.sessionID,
+          summary: "bind the existing interrupted task",
+        })
+      }).pipe(Effect.provide(TaskRegistry.defaultLayer))
+      recoveryHooks = { pre: [], post: [] }
+      yield* llm.text("bound recovery finished")
+      const completion = yield* actor.resume!({ ...spawned, task_id: task.id })
+      expect(MessageV2.get({ sessionID: spawned.sessionID, messageID: user.info.id }).info).toEqual({
+        ...user.info,
+        task_id: task.id,
+      })
+      const result = yield* completion
+      expect(result.parts.some((part) => part.type === "text" && part.text === "bound recovery finished")).toBe(true)
+      expect(recoveryHooks.pre).toEqual([task.id])
+      expect(recoveryHooks.post).toEqual([task.id])
+      expect(yield* llm.calls).toBe(2)
+      const claimed = yield* Effect.gen(function* () {
+        return yield* (yield* TaskRegistry.Service).get({ session_id: spawned.sessionID, id: task.id })
+      }).pipe(Effect.provide(TaskRegistry.defaultLayer))
+      expect(claimed).toMatchObject({ status: "in_progress", owner: spawned.actorID })
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("resume task conflict rejects admission without settling the old candidate", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const spawned = yield* interruptedActor()
+      const user = spawned.messages.find((message) => message.info.role === "user")!
+      if (user.info.role !== "user") return yield* Effect.die("missing recovery user")
+      yield* sessions.updateMessage({ ...user.info, task_id: "T7" })
+      const before = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+      const result = yield* actor.resume!({ ...spawned, task_id: "T8" }).pipe(Effect.exit)
+      expect(result._tag).toBe("Failure")
+      if (Exit.isFailure(result)) expect(Cause.squash(result.cause)).toBeInstanceOf(Session.RecoveryConflictError)
+      expect(yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).toEqual(before)
+      expect(yield* llm.calls).toBe(1)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("resume binds a subagent task in its retained explicit parent namespace", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "actual task owner session" })
+      const child = yield* sessions.create({ title: "subagent receiver session" })
+      const tasks = yield* Effect.gen(function* () {
+        const registry = yield* TaskRegistry.Service
+        const original = yield* registry.create({ session_id: parent.id, summary: "retained task provenance" })
+        const foreign = yield* registry.create({
+          session_id: child.id,
+          summary: "same ID belongs to a different session",
+          owner: "another-actor",
+        })
+        return { original, foreign }
+      }).pipe(Effect.provide(TaskRegistry.defaultLayer))
+      expect(tasks.original.id).toBe(tasks.foreign.id)
+      yield* llm.error(400, { error: { message: "interrupt the original subagent" } })
+      const spawned = yield* actor.spawn({
+        mode: "subagent",
+        sessionID: child.id,
+        parentSessionID: parent.id,
+        agentType: "explore",
+        task: "resume with the original task namespace",
+        context: "full",
+        lifecycle: "persistent",
+        tools: [],
+        background: false,
+        model: ref,
+        forkContext: {
+          modelIdentity: prefixModelIdentity(yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)),
+          system: ["explicit parent recovery namespace"],
+          tools: {},
+          inheritedMessages: [],
+          parentPermission: [],
+          watermarkMsgID: MessageID.ascending(),
+          model: ref,
+        },
+      })
+      expect((yield* Deferred.await(spawned.outcome)).status).toBe("failure")
+      yield* llm.text("original namespace recovery finished")
+      const completion = yield* actor.resume!({ ...spawned, task_id: tasks.original.id })
+      const result = yield* completion
+      expect(result.parts.some((part) => part.type === "text" && part.text === "original namespace recovery finished")).toBe(true)
+      yield* Effect.gen(function* () {
+        const registry = yield* TaskRegistry.Service
+        expect(yield* registry.get({ session_id: parent.id, id: tasks.original.id })).toMatchObject({
+          status: "in_progress",
+          owner: spawned.actorID,
+        })
+        expect(yield* registry.get({ session_id: child.id, id: tasks.foreign.id })).toEqual(tasks.foreign)
+      }).pipe(Effect.provide(TaskRegistry.defaultLayer))
+      expect(yield* llm.calls).toBe(2)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("resume cancellation claim before runner interruption prevents task commit", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const spawned = yield* interruptedActor()
+      const task = yield* Effect.gen(function* () {
+        return yield* (yield* TaskRegistry.Service).create({ session_id: spawned.sessionID, summary: "cancel before binding" })
+      }).pipe(Effect.provide(TaskRegistry.defaultLayer))
+      const commit = { hit: yield* Deferred.make<void>(), release: yield* Deferred.make<void>(), done: yield* Deferred.make<void>() }
+      const cancel = { hit: yield* Deferred.make<void>(), release: yield* Deferred.make<void>() }
+      recoveryCommitGate = commit
+      cancelAdmissionGate = cancel
+      yield* Effect.addFinalizer(() => Deferred.succeed(commit.release, undefined).pipe(Effect.andThen(Deferred.succeed(cancel.release, undefined))))
+      const resume = yield* actor.resume!({ ...spawned, task_id: task.id }).pipe(Effect.forkChild)
+      yield* Deferred.await(commit.hit).pipe(Effect.timeout("3 seconds"))
+      const stop = yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced").pipe(Effect.forkChild)
+      yield* Deferred.await(cancel.hit).pipe(Effect.timeout("3 seconds"))
+      yield* Deferred.succeed(commit.release, undefined)
+      yield* Deferred.await(commit.done).pipe(Effect.timeout("3 seconds"))
+      const after = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+      yield* Deferred.succeed(cancel.release, undefined)
+      yield* Fiber.join(stop).pipe(Effect.timeout("3 seconds"))
+      expect((yield* Fiber.await(resume))._tag).toBe("Failure")
+      expect(after).toEqual(spawned.messages)
+      yield* Effect.gen(function* () {
+        expect(yield* (yield* TaskRegistry.Service).get({ session_id: spawned.sessionID, id: task.id })).toEqual(task)
+      }).pipe(Effect.provide(TaskRegistry.defaultLayer))
+      expect(yield* llm.calls).toBe(1)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
 for (const continuation of ["compaction", "invalid output"] as const) {
   pauseIt.live(
     `resume accepts owned ${continuation} continuations and preserves original task provenance`,
@@ -2924,7 +3099,7 @@ it.live(
         expect(yield* llm.calls).toBe(1)
         expect(
           tool.parameters.safeParse({ operation: { action: "resume", actor_id: peer.actorID, task_id: "T1" } }).success,
-        ).toBe(false)
+        ).toBe(true)
         yield* llm.hang
         const result = yield* tool.execute({ operation: { action: "resume", actor_id: peer.actorID } }, ctx)
         expect(JSON.parse(result.output)).toEqual({ actor_id: peer.actorID, status: "running" })
@@ -3090,7 +3265,7 @@ it.live(
   20_000,
 )
 
-it.live("resume handoff cancellation settles admission after the owned supervisor exits", () =>
+it.live("resume committed handoff cancellation settles admission after the owned supervisor exits", () =>
   provideTmpdirServer(Effect.fnUntraced(function* () {
     const actor = yield* Actor.Service
     const spawned = yield* interruptedActor()
@@ -3106,7 +3281,11 @@ it.live("resume handoff cancellation settles admission after the owned superviso
     expect(result._tag).toBe("Some")
     if (result._tag === "Some") expect(result.value._tag).toBe("Failure")
     const old = spawned.messages.at(-1)!
-    expect(MessageV2.get({ sessionID: spawned.sessionID, messageID: old.info.id })).toEqual(old)
+    expect(MessageV2.get({ sessionID: spawned.sessionID, messageID: old.info.id }).info).toMatchObject({
+      id: old.info.id,
+      time: { completed: expect.any(Number) },
+      error: { name: "MessageAbortedError" },
+    })
   }), { git: true, config: providerCfg }),
   15_000,
 )

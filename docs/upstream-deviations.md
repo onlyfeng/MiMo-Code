@@ -17,8 +17,8 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `f860c352f292d6d7aa0bf97cc282d4c3e5ef4fb4`
-- Bundled guidance content: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`
+- Main behavior (runtime/tests): `85ce2094506417608777ff1c410a3dd070f42551`
+- Bundled guidance content: `85ce2094506417608777ff1c410a3dd070f42551`
 - Prior fork `main` tip: `d415822c29539a4b6eebeafb59de1b88da18b95c`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
@@ -150,6 +150,13 @@ capability audit is recorded in [the model API review](released-model-api-review
   model payload, every request/live-step/MaxMode retry reuses that same resolved
   set, and a session base replaces actor identity only with positive main or
   registered-peer evidence.
+
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FD-004 — TUI-owned model listener with scoped tokens and bounded admission
 
@@ -545,7 +552,12 @@ capability audit is recorded in [the model API review](released-model-api-review
   and undisposed run scope. A changed API/family/harness identity, released
   context, explicit cancellation, or process restart rejects recovery. It does
   not rebuild released context. The public recovery/resume API accepts `agentID`
-  only through this same constrained actor admission, and rejects task replacement.
+  only through this same constrained actor admission. It accepts registered
+  same-session targets beyond direct main children and peers through their own
+  session or original parent. POST/tool task_id validates the persisted binding
+  or atomically fills a missing value using retained spawn task provenance;
+  another binding is never overwritten. Task validation, claim, user binding
+  and old assistant settlement commit together before supervisor handoff.
   Only an explicit full-context persistent spawn selects retained context;
   the existing ephemeral release policy remains unchanged.
   Successful internal retry/compaction writes can continue the admitted task
@@ -595,3 +607,10 @@ capability audit is recorded in [the model API review](released-model-api-review
   with equivalent mode-specific validation, frozen authority/membership,
   deterministic failure settlement, and proof that live-context fallback is
   impossible.
+
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.

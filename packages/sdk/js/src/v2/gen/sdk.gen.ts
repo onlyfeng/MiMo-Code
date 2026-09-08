@@ -2711,7 +2711,7 @@ export class Session2 extends HeyApiClient {
   /**
    * Resume an interrupted turn
    *
-   * Resume the specified incomplete turn for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Admission and old-turn settlement finish before 202; the persisted user and task remain authoritative.
+   * Resume the specified incomplete turn for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Admission and atomic task validation or binding finish before 202. The original user and any existing task binding remain authoritative.
    */
   public resume<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2721,6 +2721,7 @@ export class Session2 extends HeyApiClient {
       workspace?: string
       titleLocale?: string
       agentID?: string
+      task_id?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2735,6 +2736,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "query", key: "titleLocale" },
             { in: "query", key: "agentID" },
+            { in: "query", key: "task_id" },
           ],
         },
       ],
