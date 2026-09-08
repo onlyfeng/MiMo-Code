@@ -135,7 +135,7 @@ describe("compaction projection", () => {
     expect(JSON.stringify([newUser, newAssistant]).length).toBeGreaterThan(4_000)
   })
 
-  test("tail budget fits the frozen projection inside a configured reserve-safe window", async () => {
+  test("tail budget fits the frozen projection inside the configured ratio window", async () => {
     const cfg: Config.Info = { compaction: { max_context: 50_000, reserved: 1_000 } }
     const model = ProviderTest.model({ limit: { context: 200_000, output: 20_000 } })
     const fixed = {

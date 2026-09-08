@@ -498,7 +498,7 @@ Você pode controlar o comportamento de compactação de contexto através da op
 
 - `auto` - Compactar automaticamente a sessão quando o contexto estiver cheio (padrão: `true`).
 - `prune` - Remover saídas antigas de ferramentas para economizar tokens (padrão: `true`).
-- `reserved` - Buffer de tokens para compactação. Deixa janela suficiente para evitar estouro durante a compactação
+- `reserved` - Buffer de compatibilidade usado para validar o orçamento `max_context`; não é subtraído do limite de compactação calculado pela proporção.
 
 ---
 

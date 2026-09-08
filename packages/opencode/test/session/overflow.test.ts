@@ -111,7 +111,7 @@ describe("isOverflow", () => {
   test("returns true when token count exceeds usable context", () => {
     const model = createModel({ context: 100_000, output: 32_000 })
     const cfg = mockCfg()
-    const tokens = { input: 75_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } } as any
+    const tokens = { input: 90_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
     expect(isOverflow({ cfg, tokens, model })).toBe(true)
   })
 
@@ -125,8 +125,9 @@ describe("isOverflow", () => {
   test("includes cache.read in token count", () => {
     const model = createModel({ context: 100_000, output: 32_000 })
     const cfg = mockCfg()
-    const tokens = { input: 60_000, output: 10_000, reasoning: 0, cache: { read: 10_000, write: 0 } } as any
+    const tokens = { input: 75_000, output: 10_000, reasoning: 0, cache: { read: 10_000, write: 0 } }
     expect(isOverflow({ cfg, tokens, model })).toBe(true)
+    expect(isOverflow({ cfg, tokens: { ...tokens, cache: { read: 0, write: 0 } }, model })).toBe(false)
   })
 
   test("includes cache.write in token count", () => {
@@ -163,68 +164,12 @@ describe("isOverflow", () => {
     expect(isOverflow({ cfg, tokens, model })).toBe(false)
   })
 
-  // ─── Bug reproduction tests ───────────────────────────────────────────
-  // These tests demonstrate that when limit.input is set, isOverflow()
-  // does not subtract any headroom for the next model response. This means
-  // compaction only triggers AFTER we've already consumed the full input
-  // budget, leaving zero room for the next API call's output tokens.
-  //
-  // Compare: without limit.input, usable = context - output (reserves space).
-  // With limit.input, usable = limit.input (reserves nothing).
-  //
-  // Related issues: #10634, #8089, #11086, #12621
-  // Open PRs: #6875, #12924
-
-  test("BUG: no headroom when limit.input is set — compaction should trigger near boundary but does not", () => {
-    // Simulate Claude with prompt caching: input limit = 200K, output limit = 32K
-    const model = createModel({ context: 200_000, input: 200_000, output: 32_000 })
+  test.each([undefined, 200_000])("uses the same ratio with input cap %p", (input) => {
+    const model = createModel({ context: 200_000, input, output: 32_000 })
     const cfg = mockCfg()
-
-    // We've used 198K tokens total. Only 2K under the input limit.
-    // On the next turn, the full conversation (198K) becomes input,
-    // plus the model needs room to generate output — this WILL overflow.
-    const tokens = { input: 180_000, output: 15_000, reasoning: 0, cache: { read: 3_000, write: 0 } } as any
-    // count = 180K + 3K + 15K = 198K
-    // usable = limit.input = 200K (no output subtracted!)
-    // 198K > 200K = false → no compaction triggered
-
-    // WITHOUT limit.input: usable = 200K - 32K = 168K, and 198K > 168K = true ✓
-    // WITH limit.input: usable = 200K, and 198K > 200K = false ✗
-
-    // With 198K used and only 2K headroom, the next turn will overflow.
-    // Compaction MUST trigger here.
-    expect(isOverflow({ cfg, tokens, model })).toBe(true)
-  })
-
-  test("BUG: without limit.input, same token count correctly triggers compaction", () => {
-    // Same model but without limit.input — uses context - output instead
-    const model = createModel({ context: 200_000, output: 32_000 })
-    const cfg = mockCfg()
-
-    // Same token usage as above
-    const tokens = { input: 180_000, output: 15_000, reasoning: 0, cache: { read: 3_000, write: 0 } } as any
-    // count = 198K
-    // usable = context - output = 200K - 32K = 168K
-    // 198K > 168K = true → compaction correctly triggered
-
-    expect(isOverflow({ cfg, tokens, model })).toBe(true) // ← Correct: headroom is reserved
-  })
-
-  test("BUG: asymmetry — limit.input model allows 30K more usage before compaction than equivalent model without it", () => {
-    // Two models with identical context/output limits, differing only in limit.input
-    const withInputLimit = createModel({ context: 200_000, input: 200_000, output: 32_000 })
-    const withoutInputLimit = createModel({ context: 200_000, output: 32_000 })
-    const cfg = mockCfg()
-
-    // 170K total tokens — well above context-output (168K) but below input limit (200K)
-    const tokens = { input: 166_000, output: 10_000, reasoning: 0, cache: { read: 5_000, write: 0 } } as any
-
-    const withLimit = isOverflow({ cfg, tokens, model: withInputLimit })
-    const withoutLimit = isOverflow({ cfg, tokens, model: withoutInputLimit })
-
-    // Both models have identical real capacity — they should agree:
-    expect(withLimit).toBe(true) // should compact (170K leaves no room for 32K output)
-    expect(withoutLimit).toBe(true) // correctly compacts (170K > 168K)
+    const tokens = { input: 160_000, output: 10_000, reasoning: 0, cache: { read: 5_000, write: 0 } }
+    expect(isOverflow({ cfg, tokens, model })).toBe(false)
+    expect(isOverflow({ cfg, tokens: { ...tokens, input: 165_000 }, model })).toBe(true)
   })
 
   test("returns false when model context limit is 0", () => {
@@ -237,8 +182,9 @@ describe("isOverflow", () => {
   test("returns false when compaction.auto is disabled", () => {
     const model = createModel({ context: 100_000, output: 32_000 })
     const cfg = mockCfg({ auto: false })
-    const tokens = { input: 75_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } } as any
+    const tokens = { input: 90_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
     expect(isOverflow({ cfg, tokens, model })).toBe(false)
+    expect(isOverflow({ cfg: mockCfg(), tokens, model })).toBe(true)
   })
 })
 
@@ -576,33 +522,30 @@ describe("SessionNs.getUsage", () => {
 })
 
 describe("usable", () => {
-  test("caps output reservation at 20K when model.limit.output is larger", () => {
-    // 200K context with 32K output — without the cap, usable would be 200K - 32K = 168K.
-    // With OUTPUT_CAP=20K, usable should be 200K - 20K - reserved.
-    const model = createModel({ context: 200_000, output: 32_000 })
-    const cfg = mockCfg() // reserved defaults to min(33K, 32K) = 32K
-    expect(usable({ cfg, model })).toBe(148_000) // 200K - 20K (output cap) - 32K (reserved)
+  test.each([
+    { context: 64_000, output: 16_000, trigger: 57_600 },
+    { context: 128_000, output: 32_000, trigger: 115_200 },
+    { context: 200_000, output: 32_000, trigger: 180_000 },
+    { context: 200_000, input: 200_000, output: 32_000, trigger: 180_000 },
+    { context: 1_000_000, output: 32_000, trigger: 900_000 },
+  ])("uses the upstream ratio boundary for %j", ({ trigger, ...limits }) => {
+    const model = createModel(limits)
+    const cfg = mockCfg()
+    expect(usable({ cfg, model })).toBe(trigger)
+    const tokens = { input: trigger - 1, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+    expect(isOverflow({ cfg, model, tokens })).toBe(false)
+    expect(isOverflow({ cfg, model, tokens: { ...tokens, input: trigger } })).toBe(true)
   })
 
-  test("does not cap when model.limit.output is below 20K", () => {
-    // 100K context with 8K output — output cap (20K) does not bite.
-    // usable should be 100K - 8K - reserved.
-    const model = createModel({ context: 100_000, output: 8_000 })
-    const cfg = mockCfg() // reserved defaults to min(33K, 8K) = 8K
-    expect(usable({ cfg, model })).toBe(84_000) // 100K - 8K (raw output, below cap) - 8K (reserved)
-  })
-
-  test("respects user-configured cfg.compaction.reserved", () => {
-    // 200K context, output 32K, user sets reserved=5K explicitly.
-    // usable = 200K - min(32K, 20K) - 5K = 175K
+  test("configured reserves do not lower the ratio trigger", () => {
     const model = createModel({ context: 200_000, output: 32_000 })
     const cfg = mockCfg({ reserved: 5_000 })
-    expect(usable({ cfg, model })).toBe(175_000)
+    expect(usable({ cfg, model })).toBe(180_000)
   })
 })
 
 describe("MIMOCODE_COMPACTION_TRIGGER_RATIO", () => {
-  test("can move compaction earlier without crossing the reserve boundary", () => {
+  test("accepts decimal and percentage trigger ratios", () => {
     const model = createModel({ context: 200_000, input: 200_000, output: 32_000 })
     process.env.MIMOCODE_COMPACTION_TRIGGER_RATIO = "0.75"
     expect(usable({ cfg: mockCfg(), model })).toBe(150_000)
@@ -610,16 +553,16 @@ describe("MIMOCODE_COMPACTION_TRIGGER_RATIO", () => {
     expect(usable({ cfg: mockCfg(), model })).toBe(150_000)
   })
 
-  test("cannot remove configured response and summary headroom", () => {
+  test("allows the configured ratio to use the entire working window", () => {
     const model = createModel({ context: 200_000, output: 32_000 })
     process.env.MIMOCODE_COMPACTION_TRIGGER_RATIO = "1"
-    expect(usable({ cfg: mockCfg(), model })).toBe(148_000)
-    expect(usable({ cfg: mockCfg({ reserved: 5_000 }), model })).toBe(175_000)
+    expect(usable({ cfg: mockCfg(), model })).toBe(200_000)
+    expect(usable({ cfg: mockCfg({ reserved: 5_000 }), model })).toBe(200_000)
   })
 
   test.each(["0", "-0.5", "1.5", "150%", "abc", ""])("ignores %p and keeps the safe default", (value) => {
     process.env.MIMOCODE_COMPACTION_TRIGGER_RATIO = value
-    expect(usable({ cfg: mockCfg(), model: createModel({ context: 200_000, input: 200_000 }) })).toBe(168_000)
+    expect(usable({ cfg: mockCfg(), model: createModel({ context: 200_000, input: 200_000 }) })).toBe(180_000)
   })
 })
 
@@ -644,12 +587,12 @@ describe("compaction.max_context", () => {
     expect(contextWindow({ cfg, model })).toEqual({
       hard: 922_000,
       effective: 300_000,
-      usable: 267_000,
+      usable: 270_000,
       source: "config",
     })
-    const tokens = { input: 267_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } as any
+    const tokens = { input: 270_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
     expect(isOverflow({ cfg, tokens, model })).toBe(true)
-    const under = { input: 266_999, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } as any
+    const under = { input: 269_999, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
     expect(isOverflow({ cfg, tokens: under, model })).toBe(false)
   })
 
@@ -665,15 +608,15 @@ describe("compaction.max_context", () => {
     expect(contextWindow({ cfg, model })).toEqual({
       hard: 128_000,
       effective: 128_000,
-      usable: 95_232,
+      usable: 115_200,
       source: "model",
     })
   })
 
   test("matches per-model keys with wildcards, longest pattern wins", () => {
     const cfg = mockCfg({ max_context: { "test/gpt-5*": "300K", "test/gpt-5.6": "200K" } })
-    expect(usable({ cfg, model: large() })).toBe(167_000)
-    expect(usable({ cfg, model: createModel({ context: 1_050_000, input: 922_000, id: "gpt-5.4" }) })).toBe(267_000)
+    expect(usable({ cfg, model: large() })).toBe(180_000)
+    expect(usable({ cfg, model: createModel({ context: 1_050_000, input: 922_000, id: "gpt-5.4" }) })).toBe(270_000)
   })
 
   test("ignores keys that match no model", () => {
@@ -712,7 +655,7 @@ describe("MIMOCODE_COMPACTION_MAX_CONTEXT", () => {
     expect(contextWindow({ cfg: mockCfg(), model: large() })).toEqual({
       hard: 922_000,
       effective: 300_000,
-      usable: 267_000,
+      usable: 270_000,
       source: "config",
     })
   })
@@ -722,7 +665,7 @@ describe("MIMOCODE_COMPACTION_MAX_CONTEXT", () => {
     expect(contextWindow({ cfg: mockCfg({ max_context: "200K" }), model: large() })).toEqual({
       hard: 922_000,
       effective: 200_000,
-      usable: 167_000,
+      usable: 180_000,
       source: "config",
     })
   })
@@ -770,20 +713,18 @@ describe("compaction.max_context reset sentinel", () => {
 })
 
 describe("degenerate windows", () => {
-  test("usable collapses to 0 when the window cannot cover the reserves", () => {
-    // 8K window with an 8K output limit: reserved 8K + output reserve 8K > window.
-    // UI code must not divide by this (see tui/util/model.contextWindow).
+  test("small windows still use the ratio when legacy reserves exceed the window", () => {
     const model = createModel({ context: 8_192, output: 8_192 })
     expect(contextWindow({ cfg: mockCfg(), model })).toEqual({
       hard: 8_192,
       effective: 8_192,
-      usable: 0,
+      usable: 7_372,
       source: "model",
     })
   })
 
-  test("a reserved larger than the window also collapses to 0", () => {
+  test("a reserved larger than the window does not change the trigger", () => {
     const model = createModel({ context: 200_000, output: 32_000 })
-    expect(usable({ cfg: mockCfg({ reserved: 500_000 }), model })).toBe(0)
+    expect(usable({ cfg: mockCfg({ reserved: 500_000 }), model })).toBe(180_000)
   })
 })
