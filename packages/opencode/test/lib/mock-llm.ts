@@ -164,7 +164,7 @@ export class MockLLM {
           const stream = Stream.fromIterable(events)
           return (reply?.error ? Stream.concat(stream, Stream.fail(reply.error)) : stream) as any
         },
-        buildSystemArray: (_input) => Effect.succeed([]),
+        buildSystemArray: (input) => Effect.succeed(input.system.filter(Boolean)),
       }),
     )
   }
