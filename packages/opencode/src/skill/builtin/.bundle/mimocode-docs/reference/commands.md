@@ -6,7 +6,8 @@ Invoked from the shell. `mimo` with no command opens the TUI.
 
 | Command | Purpose |
 |---------|---------|
-| `mimo` | Launch the interactive TUI |
+| `mimo` | Launch the interactive TUI and its project model API listener; tokens still require explicit issue |
+| `mimo attach <url>` | Connect a TUI to an existing server without starting a local listener |
 | `mimo run` | Headless, non-interactive run (scripting/eval) |
 | `mimo mcp` | Manage / inspect MCP servers |
 | `mimo agent` | Manage agents |

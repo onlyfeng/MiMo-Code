@@ -2812,6 +2812,43 @@ Combined focused evidence is 125 pass, 0 fail, 694 assertions across 14 files.
 Package typecheck passes. No product or timeout change was needed. New-head
 Codex completion and all CI remain required before merge.
 
+## 2026-09-08 POLICY-04 frozen non-catalog prefix follow-up
+
+- Runtime/tests source: `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`, following reviewed candidate `110222157896b16e7ba85bc3d5d3f5eef975a6e1`. Bundled guidance remains `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`; the overall upstream baseline and selected released source remain unchanged. This is a local follow-up, not a formal acceptance or compat propagation claim.
+- Codex identified that refreshing the directory rebuilt frozen instructions and plugin output. A verified optional internal catalog position now permits only that range to change; tool-schema rotation also preserves every non-catalog system byte. Legacy schema-3 rows infer only a unique complete match; ambiguous or invalid old positions retain the old pair and log the reason. Empty legacy and standalone-catalog transitions never introduce empty system entries. Temporary construction markers are fully materialized before pin or dispatch.
+- The failed shard-1 reopen test exited its child successfully but received a truncated long stdout JSON line. Child results now use an awaited JSON file read after child exit; the original bounded timeout and real persistent database/reopen paths remain.
+- Focused follow-up matrix: 33 passing tests / 180 assertions (24 catalog helpers plus 9 real prefix/capture/compaction/reopen cases). This overlaps the prior 125-test matrix and is not added to it. New behavior, cancellation-free empty transitions and stdout transport fixes each have their own reproduced RED; the current patch passed package typecheck, diff check and lint (4,487 warnings, zero errors). The last empty-catalog helper fix was verified by its helper cases and final typecheck; the nine provider cases were not redundantly rerun.
+- Main PR87 must receive a fresh Codex review and exact-head CI before merge. Compat must inherit this patch and retain its capped-history projection and current-turn split before its own review/publication gates.
+
+## 2026-09-08 POLICY-03 default TUI model API local review
+
+- Selected upstream source: `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, released in v0.1.14 (`2a0eb706e95a77cba34a319e9f11f33f26d4450c`). The overall upstream review baseline remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; this is selected behavior adoption, not a full upstream merge.
+- Main runtime/tests and changed bundled guidance: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`; local development base `d415822c29539a4b6eebeafb59de1b88da18b95c`. Policy 04 must be inherited and accepted before publication/propagation is complete.
+- Ordinary TUI owns a loopback ephemeral model listener, isolated automatic credentials, startup directory scope, and shutdown. Explicit HTTP TUI transport carries Basic credentials through the workspace SDK factory. Model callers still require scoped Bearer tokens; attach reuses the existing listener. Operator-supplied password provenance alone can relax operator directory/bind limits. Existing model/media implementations remain the shared provider path.
+- Reviewed ownership: FD-004 and FC-007/008/011; adjacent authentication, media, permission and interaction consumers checked. Remaining entries retain their prior individually recorded review bases. Incremental implementation from the development base: 19 paths, 1,129 insertions, 87 deletions (includes focused tests, guide and plan).
+- Default-path validation cleared six ambient feature/approval selectors, preserved the package harness baseline, and ran from the package directory. Bun matrix: 203 passing tests, 629 assertions, 12 files, zero failures. This comprises worker-listener 8/55, thread wiring 12/51, real dual-worker lifecycle 1/7, workspace SDK auth 2/14, and existing model/media/TUI regression 180/502. The existing regression groups were run sequentially once; counts exclude exploratory RED runs.
+- Two standalone POSIX PTY scenarios separately launched ordinary TUI and attach without test preload; production Solid preload remained. Natural /exit returned zero; ordinary owned socket/discovery retired before process completion, while attach preserved the remote listener. Both exercised a real local HTTP chat through the SDK (two provider calls total). This is local controlled-provider evidence, not an external hosted-provider claim.
+- Package typecheck passed after the final SDK-header fix; repository lint passed with 4,485 warnings and zero errors; diff check passed. No public API schema changed, so no SDK generation was required by this policy. Current-head Codex review, exact PR/branch CI, formal inheritance and compat propagation remain pending.
+
+## 2026-09-08 POLICY-03 inheritance of the POLICY-04 review correction
+
+The TUI model API branch locally inherited POLICY-04 candidate
+`c1e391d184bb0a3efbf7a60a38f553c41d6c5935` (runtime `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`)
+through merge `bfb0c5e2c63fcad0b055c9e7bca58089268500d9`. This aggregate runtime/test basis
+contains both POLICY-03 and the frozen catalog slot correction; the subsequent
+registry audit adds no runtime change. Bundled guidance remains
+`0353965ea38ce3d963f123acb2f9a965bcbb98c3`. Individual FD/FC review bases remain
+with their respective reviewed policy sources, which are ancestors of this merge.
+
+Runtime files merged without conflicts. POLICY-03 package changes match its
+original source; the inherited POLICY-04 correction matches its candidate source.
+The three registry/history conflicts retain both policies and historical records.
+This local inheritance passes package typecheck and diff checks; provider tests
+are not repeated and the earlier 203-test/629-assertion POLICY-03 evidence is not
+relabelled as a new merged-tree test run. POLICY-04 current-head review, CI and
+formal main acceptance remain pending; this is neither publication nor compat
+propagation.
+
 ## 2026-09-09 POLICY-02 registered recovery and task binding
 
 - Runtime/tests and changed bundled guidance: `6ff976a97026610335dc367d8875a87d1d91d1a7`. Development base is POLICY-04 preview `110222157896b16e7ba85bc3d5d3f5eef975a6e1`; POLICY-03 and final POLICY-04 inheritance must follow before publication. Selected upstream `0abfeba186191c1a361cf3f27b802e9d29bf0fdc` and overall baseline `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` remain unchanged.

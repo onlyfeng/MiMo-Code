@@ -51,6 +51,19 @@ const MIMOCODE_DISABLE_CLAUDE_CODE_SKILLS =
   MIMOCODE_DISABLE_EXTERNAL_SKILLS || MIMOCODE_DISABLE_CLAUDE_CODE || truthy("MIMOCODE_DISABLE_CLAUDE_CODE_SKILLS")
 const copy = process.env["MIMOCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"]
 
+let operatorServerPassword = process.env["MIMOCODE_SERVER_PASSWORD"]
+let automaticServerPassword: { password: string } | undefined
+
+// Worker-owned credentials never enter process.env or child-process options.
+// A retired owner cannot clear a later worker credential.
+export function installAutomaticServerPassword(password: string) {
+  const owner = { password }
+  automaticServerPassword = owner
+  return () => {
+    if (automaticServerPassword === owner) automaticServerPassword = undefined
+  }
+}
+
 export const Flag = {
   OTEL_EXPORTER_OTLP_ENDPOINT: process.env["OTEL_EXPORTER_OTLP_ENDPOINT"],
   OTEL_EXPORTER_OTLP_HEADERS: process.env["OTEL_EXPORTER_OTLP_HEADERS"],
@@ -214,7 +227,15 @@ export const Flag = {
   // the working directory. Use to avoid touching git in restricted/sandboxed
   // environments or where git startup probing is undesirable.
   MIMOCODE_DISABLE_GIT: truthy("MIMOCODE_DISABLE_GIT"),
-  MIMOCODE_SERVER_PASSWORD: process.env["MIMOCODE_SERVER_PASSWORD"],
+  get MIMOCODE_SERVER_PASSWORD() {
+    return operatorServerPassword || automaticServerPassword?.password
+  },
+  set MIMOCODE_SERVER_PASSWORD(value: string | undefined) {
+    operatorServerPassword = value
+  },
+  get MIMOCODE_SERVER_OPERATOR_PASSWORD() {
+    return operatorServerPassword
+  },
   MIMOCODE_SERVER_USERNAME: process.env["MIMOCODE_SERVER_USERNAME"],
   MIMOCODE_ENABLE_QUESTION_TOOL: truthy("MIMOCODE_ENABLE_QUESTION_TOOL"),
 

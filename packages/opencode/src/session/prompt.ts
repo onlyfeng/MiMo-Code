@@ -148,7 +148,7 @@ import {
 } from "@/tool/mcp-tool-search"
 import { isMcpToolSearchEnabled, resolveHarnessMode } from "@/tool/gpt"
 import { GPT_TOP_LEVEL_TOOLS, TOOL_SCRIPT_EXCLUDED } from "@/tool/tool-script-ref"
-import { captureSkillCatalog } from "./skill-catalog"
+import { captureSkillCatalog, newSkillCatalogSlot, bindSkillCatalog, refreshFrozenSkillCatalog } from "./skill-catalog"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
 import { isDeepStrictEqual } from "node:util"
 
@@ -650,6 +650,7 @@ export const layer = Layer.effect(
               yield* sys.skills({ ...ag, permission: capturePermission }, { tools: captureUser.info.tools }),
               captureUser.info.id,
             )
+        const catalogSlot = !frozen && catalog ? newSkillCatalogSlot() : undefined
         const additions = frozen
           ? []
           : yield* Effect.gen(function* () {
@@ -664,7 +665,7 @@ export const layer = Layer.effect(
                 ...(captureUser.info.role === "user" && captureUser.info.format?.type === "json_schema"
                   ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT]
                   : []),
-                ...(catalog?.text ? [catalog.text] : []),
+                ...(catalogSlot ? [catalogSlot] : []),
                 ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
               ]
             })
@@ -694,6 +695,10 @@ export const layer = Layer.effect(
         )
         if (prefixModelIdentity(model, capturePrompt.harness) !== modelIdentity || !prefix.inheritedMessages.length)
           return empty
+        const materialized =
+          catalog && catalogSlot
+            ? bindSkillCatalog(prefix.system, catalog, catalogSlot)
+            : { system: prefix.system, catalog }
         // A cold capture owns a frozen generation too. Reuse the winning row
         // if another capture or the normal loop pinned this profile first.
         const snapshot =
@@ -701,8 +706,8 @@ export const layer = Layer.effect(
           (yield* SessionPrefixSnapshot.pin({
             sessionID: input.sessionID,
             profileKey: key,
-            system: prefix.system,
-            skillCatalog: catalog,
+            system: materialized.system,
+            skillCatalog: materialized.catalog,
             toolsHash: SessionPrefixSnapshot.toolsHash(prefix.tools, prefix.activeTools),
             tools: yield* Effect.promise(() => SessionPrefixSnapshot.snapshotTools(prefix.tools, prefix.activeTools)),
             loadedMcpTools: prefix.loadedMcpTools,
@@ -5134,13 +5139,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               permission: runtimePermission,
             })
             const frozen = yield* SessionPrefixSnapshot.get(sessionID, prefixProfileKey)
-            const catalog = yield* selectSkillCatalog({
+            const selectedCatalog = yield* selectSkillCatalog({
               frozen,
               user: lastUser,
               parts: msgs.find((message) => message.info.id === lastUser.id)?.parts ?? [],
               agent,
               permission: runtimePermission,
             })
+            const refreshed = frozen
+              ? refreshFrozenSkillCatalog(frozen.system, frozen.skill_catalog ?? undefined, selectedCatalog)
+              : undefined
+            if (refreshed?.reason)
+              yield* slog.warn("skill catalog refresh retained frozen pair", { reason: refreshed.reason, sessionID })
+            const catalog = refreshed ? refreshed.catalog : selectedCatalog
+            const catalogSlot = !frozen && catalog ? newSkillCatalogSlot() : undefined
             const catalogChanged = Boolean(catalog && catalog.version !== frozen?.skill_catalog?.version)
             const catalogTurnChanged = Boolean(catalog && catalog.turnID !== frozen?.skill_catalog?.turnID)
             const currentAdditions = Effect.fnUntraced(function* () {
@@ -5161,7 +5173,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return [
                 ...env,
                 ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
-                ...(catalog?.text ? [catalog.text] : []),
+                ...(catalogSlot ? [catalogSlot] : []),
                 ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
               ]
             })
@@ -5176,20 +5188,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // task creates, etc.) so each step doesn't replay from the bare
             // user prompt. Snapshot watermarks are boundary metadata, never a
             // reason to slice the main request history.
-            const initialPrefix = yield* buildLLMRequestPrefix({
+            const builtPrefix = yield* buildLLMRequestPrefix({
               sessionID,
               agent,
               model,
               msgs,
               permission: session.permission,
-              additions: frozen && !catalogChanged ? [] : yield* currentAdditions(),
-              prebuiltSystem: catalogChanged ? undefined : frozen?.system,
+              additions: frozen ? [] : yield* currentAdditions(),
+              prebuiltSystem: refreshed?.system,
               skillCatalogInSystem: Boolean(catalog),
               prompt: sessionPrompt,
               // Rebuild tails collapse into an activity log so hollow
               // tool_results never look like a live transcript (anti-hallucination).
               collapseCheckpointTail: true,
             }).pipe(Effect.provideService(LLM.Service, llm), Effect.provideService(ToolRegistry.Service, registry))
+            const materialized =
+              catalog && catalogSlot
+                ? bindSkillCatalog(builtPrefix.system, catalog, catalogSlot)
+                : { system: builtPrefix.system, catalog }
+            const initialPrefix = { ...builtPrefix, system: materialized.system }
             const currentToolsHash = SessionPrefixSnapshot.toolsHash(resolvedTools.snapshotTools, activeTools)
             const currentTools = yield* Effect.promise(() =>
               SessionPrefixSnapshot.snapshotTools(resolvedTools.snapshotTools, activeTools),
@@ -5200,7 +5217,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   sessionID,
                   profileKey: prefixProfileKey,
                   system: initialPrefix.system,
-                  skillCatalog: catalog,
+                  skillCatalog: materialized.catalog,
                   toolsHash: currentToolsHash,
                   tools: currentTools,
                   loadedMcpTools: resolvedTools.loadedMcpTools,
@@ -5247,7 +5264,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       agent,
                       model,
                       msgs,
-                      additions: yield* currentAdditions(),
+                      additions: [],
+                      prebuiltSystem: initialPrefix.system,
                       skillCatalogInSystem: Boolean(catalog),
                       permission: session.permission,
                       prompt: sessionPrompt,
@@ -5257,7 +5275,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 sessionID,
                 profileKey: prefixProfileKey,
                 system: prefix.system,
-                skillCatalog: catalog,
+                skillCatalog: materialized.catalog,
                 toolsHash: currentToolsHash,
                 tools: currentTools,
                 loadedMcpTools: resolvedTools.loadedMcpTools,

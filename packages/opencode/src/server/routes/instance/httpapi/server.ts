@@ -101,7 +101,7 @@ const instance = HttpRouter.middleware()(
         const workspace = query.workspace || undefined
         const directory = Filesystem.resolve(decode(raw))
 
-        if (!Flag.MIMOCODE_SERVER_PASSWORD) {
+        if (!Flag.MIMOCODE_SERVER_OPERATOR_PASSWORD) {
           const cwd = Filesystem.resolve(process.cwd())
           if (!Filesystem.contains(cwd, directory)) {
             return yield* new DirectoryAccessDenied({
