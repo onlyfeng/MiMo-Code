@@ -24,7 +24,7 @@ export function InstanceMiddleware(workspaceID?: WorkspaceID): MiddlewareHandler
       })(),
     )
 
-    if (!Flag.MIMOCODE_SERVER_PASSWORD) {
+    if (!Flag.MIMOCODE_SERVER_OPERATOR_PASSWORD) {
       const cwd = Filesystem.resolve(process.cwd())
       // The fixed global Orchestrator workspace is app-owned (under Global.Path.data),
       // not user-supplied, so entering Orchestrator mode may switch to it even though

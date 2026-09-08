@@ -7,12 +7,13 @@ import { Rpc } from "@/util"
 import { upgrade } from "@/cli/upgrade"
 import { Config } from "@/config"
 import { GlobalBus } from "@/bus/global"
-import { Flag } from "@/flag/flag"
 import { writeHeapSnapshot } from "node:v8"
 import { Heap } from "@/cli/heap"
 import { AppRuntime } from "@/effect/app-runtime"
 import { SessionCheckpoint } from "@/session/checkpoint"
 import { ensureProcessMetadata } from "@/util/mimo-process"
+import { serverAuthHeader } from "@/server/auth"
+import { createWorkerListener, type WorkerListenerInput } from "./worker-listener"
 
 ensureProcessMetadata("worker")
 
@@ -44,12 +45,14 @@ GlobalBus.on("event", (event) => {
   Rpc.emit("global.event", event)
 })
 
-let server: Awaited<ReturnType<typeof Server.listen>> | undefined
+const listener = createWorkerListener({ directory: process.cwd() })
+let shutdown: Promise<void> | undefined
 
 export const rpc = {
   async fetch(input: { url: string; method: string; headers: Record<string, string>; body?: string }) {
+    if (shutdown) return { status: 503, headers: {}, body: "Worker is shutting down" }
     const headers = { ...input.headers }
-    const auth = getAuthorizationHeader()
+    const auth = serverAuthHeader()
     if (auth && !headers["authorization"] && !headers["Authorization"]) {
       headers["Authorization"] = auth
     }
@@ -70,10 +73,8 @@ export const rpc = {
     const result = writeHeapSnapshot("server.heapsnapshot")
     return result
   },
-  async server(input: { port: number; hostname: string; mdns?: boolean; cors?: string[] }) {
-    if (server) await server.stop(true)
-    server = await Server.listen(input)
-    return { url: server.url.toString() }
+  async server(input?: WorkerListenerInput) {
+    return listener.start(input).catch(() => ({ ok: false as const, error: "Model API listener startup failed." }))
   },
   async checkUpgrade(input: { directory: string }) {
     await Instance.provide({
@@ -87,37 +88,26 @@ export const rpc = {
   async reload() {
     await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.invalidate(true)))
   },
-  async shutdown() {
-    Log.Default.info("worker shutting down")
-    // Flush instead of closing: the host may kill the worker during the drain
-    // below, so queued records must already be on disk. Closing here would
-    // leave the rest of teardown without a file sink.
-    await Log.flush()
+  shutdown() {
+    shutdown ??= (async () => {
+      Log.Default.info("worker shutting down")
+      // Revoke API admission and join even a late listener before any writer or
+      // instance teardown. Keep the GlobalBus bridge alive for terminal events.
+      await listener.stop().catch(() => Log.Default.warn("listener cleanup failed during shutdown"))
+      await Log.flush().catch(() => {})
 
-    // Give in-flight background checkpoint writers a bounded chance to finish
-    // before we tear down instances. A checkpoint writer can run for minutes on
-    // a large session; when the host recycles the worker (e.g. right after a
-    // user abort), a straight disposeAll() interrupts the writer mid-LLM-call,
-    // leaving the on-disk checkpoint stale and the session's token count pinned
-    // — the exact wedge that makes a large session unable to send. Draining
-    // here mirrors cli/bootstrap.ts's headless-run teardown so both entry
-    // points shut down gracefully. Writers that don't settle within the drain
-    // budget are abandoned (disposeAll would kill them anyway).
-    await AppRuntime.runPromise(SessionCheckpoint.Service.use((svc) => svc.drainWriters({ timeoutMs: 30_000 }))).catch(
-      (error) => Log.Default.warn("checkpoint drain failed during shutdown", { error: String(error) }),
-    )
-
-    await Instance.disposeAll()
-    if (server) await server.stop(true)
-    await Log.shutdown()
+      // Preserve the existing bounded opportunity for checkpoint writers to
+      // finish before Instance disposal interrupts their in-flight work.
+      await AppRuntime.runPromise(
+        SessionCheckpoint.Service.use((svc) => svc.drainWriters({ timeoutMs: 30_000 })),
+      ).catch((error) => Log.Default.warn("checkpoint drain failed during shutdown", { error: String(error) }))
+      await Instance.disposeAll().catch(() => Log.Default.warn("instance cleanup failed during shutdown"))
+    })().finally(async () => {
+      listener.clearAuthentication()
+      await Log.shutdown().catch(() => {})
+    })
+    return shutdown
   },
 }
 
 Rpc.listen(rpc)
-
-function getAuthorizationHeader(): string | undefined {
-  const password = Flag.MIMOCODE_SERVER_PASSWORD
-  if (!password) return undefined
-  const username = Flag.MIMOCODE_SERVER_USERNAME ?? "mimocode"
-  return `Basic ${btoa(`${username}:${password}`)}`
-}

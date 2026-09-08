@@ -23,6 +23,7 @@ function scoped(sdk: ReturnType<typeof useSDK>, sync: ReturnType<typeof useSync>
   return createOpencodeClient({
     baseUrl: sdk.url,
     fetch: sdk.fetch,
+    headers: sdk.headers,
     directory: sync.path.directory || sdk.directory,
     experimental_workspaceID: workspaceID,
   })

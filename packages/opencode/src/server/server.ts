@@ -119,7 +119,7 @@ export async function listen(opts: {
 }): Promise<Listener> {
   if (opts.childEnv) setChildProcessEnv(opts.childEnv)
   const isLoopback = opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
-  if (!isLoopback && !Flag.MIMOCODE_SERVER_PASSWORD && !opts.noAuth) {
+  if (!isLoopback && !Flag.MIMOCODE_SERVER_OPERATOR_PASSWORD && !opts.noAuth) {
     throw new Error(
       "Refusing to bind to non-loopback address without MIMOCODE_SERVER_PASSWORD. " +
         "Set the environment variable or pass noAuth to explicitly allow unauthenticated access.",

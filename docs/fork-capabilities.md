@@ -18,8 +18,8 @@ authority.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `0b665c7e681e44cac6f1a6acf18732015fb2bf86`
-- Bundled guidance content: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
+- Main behavior (runtime/tests): `37bbc8229ca70a92b5eaaa7bafd725d070f3f271`
+- Bundled guidance content: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`
 - Prior fork `main` tip: `d415822c29539a4b6eebeafb59de1b88da18b95c`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
@@ -513,8 +513,15 @@ capability audit is recorded in [the model API review](released-model-api-review
   different directory or workspace; the new Node token export is opt-in host
   functionality. FD-004 remains the canonical listener/auth owner. Coverage:
   `test/server/model-api.test.ts`, shared `server/api-request.ts`, and CLI tests.
+- POLICY-03 carrier review: TUI-generated Basic authentication is distinct
+  from operator configuration. Both instance-route directory guards and the
+  non-loopback bind guard preserve their operator-origin policy; automatic
+  credentials cannot authorize a broader directory. Model tokens retain their
+  exact startup directory and reject workspace switching regardless of Basic
+  credentials. Existing orchestrator and explicit noAuth exceptions retain
+  their original scope. The fixed-cwd and deletion contracts above are unchanged.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `c7014557445832a97248ed7b0af568e51bfd291d`.
+  main behavior `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
 - Retirement condition: upstream retains fixed instance cwd and supplies
   equivalent inert compatibility schema, protected-root, project/worktree
   containment, fixed-cwd relative file-tool resolution, MultiEdit normalization,
@@ -620,8 +627,18 @@ capability audit is recorded in [the model API review](released-model-api-review
   bound, unconditional kill and a bounded two-second drain on cleanup; multi-child
   cases declare their total 60-second budget. Image/SDK cancellation and Node
   checks cover adjacent API resources, not a rerun of all workflow lifecycle tests.
+- POLICY-03 lifecycle review: the TUI worker stops model API admission and
+  joins pending listener startup before checkpoint draining and instance
+  disposal. Its GlobalBus bridge remains available for terminal events; only
+  final cleanup releases automatic authentication. Repeated shutdown shares
+  completion. Listener startup errors return a bounded RPC result: default
+  startup reports the error and keeps the TUI's internal RPC transport usable;
+  explicit HTTP startup failure exits through cleanup. The host clears its
+  upgrade timer on every teardown path. Real socket/worker tests and host wiring
+  tests are distinct from actual CLI PTY evidence; none implies all-platform
+  terminal coverage or new exact-head CI success.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
+  main behavior `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
 - 2026-08-25 publication companion: the `AGENTS.md` default-environment rule is
   a process-only registry companion and does not advance the frozen main
   behavior or its changed-path calculation.
@@ -732,7 +749,8 @@ capability audit is recorded in [the model API review](released-model-api-review
   can return an image attachment but does not persist a local path for
   `python-pptx`; generation is conditional on a listed image tool, local
   downloads create their parent directory and fail closed, and shape/text is a
-  valid fallback. Bundled `mimocode-docs` also documents the explicit model API,
+  valid fallback. Bundled `mimocode-docs` also documents the TUI-owned default
+  model API, explicit `serve`/embedding modes and explicit token issuance,
   bounded public image and inline audio inputs, verified SDK transcription,
   provider option whitelist, explicit model scopes, and independent lifetime
   controls; the content snapshot is recorded separately from runtime/tests.
@@ -753,6 +771,10 @@ capability audit is recorded in [the model API review](released-model-api-review
   bundled `mimocode-docs/reference/config.md` under `packages/opencode`.
   Content snapshot: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
   Other selected policies and existing native task/Actor guidance are unchanged.
+- POLICY-03 content carriers: `docs/model-api.md`, `docs/audio-api.md`, and
+  bundled `mimocode-docs/reference/model-api.md` and `commands.md` distinguish
+  TUI startup, attach reuse, in-memory ordinary API authentication and explicit
+  Bearer model access. Content snapshot: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
 - Tests/evidence: session system, including the actionable task/actor guidance
   regression, actor-shell, skill-description,
   `packages/opencode/test/skill/mimocode-docs.test.ts` at the main runtime/test
@@ -760,7 +782,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   `packages/opencode/test/skill/builtin.test.ts`
   binds the shipped PPTX guidance to the available-tool and WebFetch facts.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
+  main behavior `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
 - 2026-08-28 review: adapted upstream PPTX image-sourcing guidance instead of
   shipping unconditional `image_gen`, text-only WebFetch, or unchecked curl
   claims. Actor help also distinguishes reusable actors from completed

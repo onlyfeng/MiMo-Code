@@ -1,13 +1,20 @@
 # Model API
 
 The model API lets external clients use the providers configured for one project.
-It is disabled in ordinary TUI, ACP, embedded instances, and `mimo serve`.
-Provider credentials and issued tokens alone never start it.
+Ordinary `mimo` TUI startup runs a worker-owned listener for the startup project,
+using loopback and an automatically selected port by default. It closes with
+that TUI. `mimo attach` connects to an existing server and starts no local
+listener. ACP, embedded instances and plain `mimo serve` retain explicit API
+enablement. Provider credentials and issued tokens alone never start a server;
+TUI startup never automatically issues a model token.
 
 ## Start and authorize
 
 ```sh
-# Start in the configured project directory.
+# Ordinary TUI starts the project model API automatically.
+mimo /absolute/project/path
+
+# Alternatively, start an explicit server from that project without a TUI.
 mimo serve --llm-server --port 4096
 
 # In another terminal, issue a token for the same project.
@@ -21,6 +28,23 @@ Use the key as `Authorization: Bearer ...`; the base URL already
 ends in `/v1`. A `null` base URL means a matching local listener was not found;
 issuing a token does not start one. Use the exact `provider/model` identifier.
 Renewal issues a new token and does not revoke the old token.
+
+The TUI worker uses an in-memory random Basic password for ordinary server API
+requests unless operator credentials are configured. Internal RPC adds that
+header; explicit HTTP transport obtains it only through trusted worker/host
+RPC. Automatic credentials are not written to the environment, address records,
+project configuration or token store, and are not printed. They neither grant
+model access nor relax ordinary directory containment or non-loopback binding.
+Operator credentials take priority; explicit network options retain their
+existing admission rules. Configure an operator password before starting a
+server if another TUI needs to attach with that password. Model Bearer tokens
+cannot authorize attach or ordinary server routes.
+
+Multiple TUI workers own separate listeners and automatic credentials. Default
+listener startup failure reports an error while internal RPC remains usable;
+explicit HTTP startup failure exits through cleanup. Shutdown stops model API
+admission and joins pending listener startup before checkpoint/instance teardown,
+then releases automatic credentials. It does not revoke persisted model tokens.
 
 `--capability chat|speech|transcription` selects an available model. It is a
 selection rule, not an endpoint permission: the selected model can serve any of
@@ -207,5 +231,6 @@ authorize that static-key mode. Neither replaces generic server Basic auth via
 
 Ordinary generated OpenAPI and the JavaScript SDK omit these optional routes.
 Use a compatible client or direct HTTP. The Node entry exports `LLMServerTokens`
-for explicit embedding; only `Server.listen({ ..., llm: { directory } })`
-enables the model API.
+for explicit embedding; `Server.listen({ ..., llm: { directory } })` enables
+the model API. The TUI worker supplies this option automatically; other
+entrypoints retain explicit enabling.

@@ -3362,3 +3362,25 @@ package typecheck passed and repository lint has zero errors. Earlier 55-case
 and 101-case matrices remain historical, overlapping evidence. Registry source
 references now identify the correction. The seven DC owner inventory and
 97-path overlay remain unchanged; final compat review and remote CI are pending.
+
+## 2026-09-09 POLICY-03 default TUI model API inheritance
+
+| Capability inventory (N=1) | Main result | Compat result |
+| --- | --- | --- |
+| POLICY-03 | Ordinary TUI starts its authenticated model API, with scoped directory and owned shutdown | Same behavior; no new compat production difference |
+
+Accepted main `6e4ed8d3f859bd1355789748ae7a5f385cf0fbb1` is inherited by source `ec963d93abcc41a41aff9a65a6fd8f4b5aabfdef` with a
+tree-identical ancestry merge. Prior compat is `823e21d2fd7c3a2603d14bf15289351a6c555f81`. Shared runtime/tests
+are `37bbc8229ca70a92b5eaaa7bafd725d070f3f271`, shared audit `e44e926c2cf9dff4f3fc04cb4f3f5493af194d87`, and bundled guidance `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
+All seven active DC owners were reviewed. Every incoming file equals main;
+all 97 prior non-registry overlay paths and normalized deltas remain, including
+42 package src paths. Shared registries and the catalog guide are identical.
+
+The actual worker/socket/thread/scoped-SDK matrix passed 23 cases / 127
+assertions; HTTP/bootstrap/TUI event regressions passed 24 / 131. The later raw
+fetch correction passed 8 / 46, including real authenticated BashInteractive
+completion and workspace adaptor requests. Six cases overlap prior groups;
+there are 49 distinct tests / 271 assertions across the combined evidence,
+not 55 tests. Six ambient selectors were cleared and package preload retained.
+Final package typecheck passed. Source-only merges after these runs changed no
+runtime/test content. Final PR review, CI and remote push CI remain gates.
