@@ -1,3 +1,4 @@
+import { InboxTable } from "../../src/inbox/inbox.sql"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, describe, expect } from "bun:test"
@@ -2848,9 +2849,11 @@ it.live("resume rejects changed model harness identity before settling the old a
   ),
 )
 
-for (const outcome of ["success", "failure"] as const) {
+for (const { outcome, delivery } of (["success", "failure"] as const).flatMap((outcome) =>
+  (["durable", "live"] as const).map((delivery) => ({ outcome, delivery })),
+)) {
   pauseIt.live(
-    `resume defers inbox for every loop step and consumes it after ${outcome}`,
+    `resume drains ${delivery} inbox once after ${outcome}`,
     () =>
       provideTmpdirServer(
         Effect.fnUntraced(function* ({ dir, llm }) {
@@ -2873,15 +2876,26 @@ for (const outcome of ["success", "failure"] as const) {
           else yield* llm.error(400, { error: { message: "second recovery step failed" } })
           yield* llm.text("queued followup complete")
           if (!actor.resume) return yield* Effect.die("resume missing")
+          const queued: { inboxID: string } = { inboxID: crypto.randomUUID() }
+          if (delivery === "durable") Database.use((db) => db.insert(InboxTable).values({
+            id: queued.inboxID,
+            receiver_session_id: spawned.sessionID,
+            receiver_actor_id: spawned.actorID,
+            sender_session_id: spawned.sessionID,
+            sender_actor_id: "main",
+            content: { text: "queued-after-recovery" },
+            created_at: Date.now(),
+          }).run())
           const completion = yield* actor.resume(spawned)
           yield* llm.wait(2)
-          const queued = yield* inbox.send({
-            receiverSessionID: spawned.sessionID,
-            receiverActorID: spawned.actorID,
-            senderSessionID: spawned.sessionID,
-            senderActorID: "main",
-            content: "queued-after-recovery",
-          })
+          if (delivery === "live") {
+            const sent = yield* inbox.send({
+              receiverSessionID: spawned.sessionID, receiverActorID: spawned.actorID,
+              senderSessionID: spawned.sessionID, senderActorID: "main",
+              content: "queued-after-recovery",
+            })
+            queued.inboxID = sent.inboxID
+          }
           expect(yield* inbox.has(queued.inboxID)).toBe(true)
           expect(
             (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).filter(
@@ -2930,6 +2944,12 @@ for (const stop of ["cancel", "dispose"] as const) {
           yield* llm.hang
           const completion = yield* actor.resume(spawned)
           yield* llm.wait(2)
+          Database.use((db) => db.insert(InboxTable).values({
+            id: crypto.randomUUID(), receiver_session_id: spawned.sessionID,
+            receiver_actor_id: spawned.actorID, content: { text: "must remain retired" },
+            created_at: Date.now(),
+          }).run())
+          yield* llm.text("must not wake a cancelled or disposed recovery")
           const waiter = yield* completion.pipe(Effect.forkChild)
           yield* Fiber.interrupt(waiter)
           expect((yield* reg.get(spawned.sessionID, spawned.actorID))?.status).toBe("running")
@@ -2939,6 +2959,9 @@ for (const stop of ["cancel", "dispose"] as const) {
           else yield* Effect.promise(() => Instance.provide({ directory: dir, fn: () => Instance.dispose() }))
           yield* completion.pipe(Effect.exit, Effect.timeout("3 seconds"))
           expect((yield* actor.resume(spawned).pipe(Effect.exit))._tag).toBe("Failure")
+          yield* Effect.yieldNow
+          expect(yield* llm.calls).toBe(2)
+          expect(yield* llm.pending).toBe(1)
         }),
         { git: true, config: providerCfg },
       ),

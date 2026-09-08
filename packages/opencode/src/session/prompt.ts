@@ -6194,6 +6194,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   ),
                 ),
               ),
+              // Durable rows may outlive their original wake fiber. Join this
+              // runner through the normal inbox lifecycle and drain after it settles.
+              Effect.onExit((exit) =>
+                Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
+                  ? Effect.void
+                  : inbox.wakePending(input.sessionID, input.actorID).pipe(Effect.ignoreCause),
+              ),
             ),
           ),
         ),

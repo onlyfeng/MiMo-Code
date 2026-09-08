@@ -3,7 +3,6 @@ import { Effect, Layer, Schedule } from "effect"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { InboxTable } from "../../src/inbox"
-import { SessionStatus } from "../../src/session/status"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { AppLayer } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -64,6 +63,7 @@ it.live(
         params: [] as (string | undefined)[],
         post: [] as (string | undefined)[],
         done: Promise.withResolvers<void>(),
+        queuedDone: Promise.withResolvers<void>(),
       }
       Reflect.set(globalThis, key, state)
       yield* Effect.addFinalizer(() =>
@@ -87,6 +87,7 @@ it.live(
       const state = Reflect.get(globalThis, ${JSON.stringify(key)})
       state?.post.push(input.task_id)
       if (input.finalText === "RECOVERY_TASK_FINISHED") state?.done.resolve()
+      if (input.finalText === "QUEUED_NOTIFICATION_FINISHED") state?.queuedDone.resolve()
     },
   })`,
         ),
@@ -150,9 +151,17 @@ it.live(
                 },
               ],
             })
-            yield* llm.text("RECOVERY_TASK_FINISHED")
+            const release = Promise.withResolvers<void>()
+            yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+            yield* llm.hold("RECOVERY_TASK_FINISHED", release.promise)
+            yield* llm.text("QUEUED_NOTIFICATION_FINISHED")
             const response = yield* resume(dir, session.id, candidates[0].assistantMessageID, task.id)
             expect(response.status).toBe(202)
+            yield* llm.wait(3).pipe(Effect.timeout("10 seconds"))
+            expect(
+              Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, queued)).get()),
+            ).toBeDefined()
+            release.resolve()
             yield* Effect.promise(() => state.done.promise).pipe(Effect.timeout("20 seconds"))
             const messages = yield* sessions.messages({ sessionID: session.id })
             const user = messages.find((message) => message.info.id === original.info.id)
@@ -173,28 +182,16 @@ it.live(
               status: "in_progress",
               owner: "main",
             })
-            expect(state.pre).toEqual([task.id])
-            expect(state.params).toEqual([task.id, task.id])
-            expect(state.post).toEqual([task.id])
+            expect(state.pre.slice(0, 1)).toEqual([task.id])
+            expect(state.params.slice(0, 2)).toEqual([task.id, task.id])
+            expect(state.post.slice(0, 1)).toEqual([task.id])
             const requests = yield* llm.inputs
-            expect(requests).toHaveLength(3)
-            expect(
-              Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, queued)).get()),
-            ).toBeDefined()
-            for (const request of requests.slice(1)) {
+            for (const request of requests.slice(1, 3)) {
               expect(JSON.stringify(request.messages)).toContain("ORIGINAL_RECOVERY_TASK_SOURCE")
               expect(JSON.stringify(request.messages)).toContain(`RECOVERY_BOUND_TASK=${task.id}`)
               expect(JSON.stringify(request.messages)).not.toContain("QUEUED_UNRELATED_NOTIFICATION")
             }
-            const status = yield* SessionStatus.Service
-            yield* status
-              .get(session.id)
-              .pipe(
-                Effect.repeat({ until: (value) => value.type === "idle", schedule: Schedule.spaced("20 millis") }),
-                Effect.timeout("10 seconds"),
-              )
-            yield* llm.text("QUEUED_NOTIFICATION_FINISHED")
-            yield* prompt.loop({ sessionID: session.id })
+            yield* Effect.promise(() => state.queuedDone.promise).pipe(Effect.timeout("10 seconds"))
             expect(
               Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, queued)).get()),
             ).toBeUndefined()
