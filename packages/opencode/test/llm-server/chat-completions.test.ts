@@ -36,7 +36,7 @@ const request = (
   req: Partial<ChatCompletionRequest> = {},
   models = ["local/chat"],
   abort = new AbortController().signal,
-) => execute({ req: { ...base, ...req }, models, abort })
+) => execute({ req: { ...base, ...req }, scope: { type: "models", models }, abort })
 const wireChunk = (delta: Record<string, unknown>, finish: string | null = null) => ({
   id: "vendor-id",
   object: "chat.completion.chunk",
@@ -536,7 +536,7 @@ test("remote image bytes reach the real provider SDK without exposing its creden
             ...base,
             messages: [{ role: "user", content: [{ type: "image_url", image_url: { url } }] }],
           }),
-          models: ["local/chat"],
+          scope: { type: "models", models: ["local/chat"] },
           abort: new AbortController().signal,
         },
         transport,
@@ -579,7 +579,7 @@ test.each([
               { role: "user", content: [{ type: "image_url", image_url: { url: "http://images.example/p.png" } }] },
             ],
           },
-          models: [...models],
+          scope: { type: "models", models: [...models] },
           abort: new AbortController().signal,
         },
         {
@@ -608,7 +608,7 @@ test("rejects images for a text-only model before downloading or invoking the pr
                 { role: "user", content: [{ type: "image_url", image_url: { url: "http://images.example/p.png" } }] },
               ],
             },
-            models: ["local/chat"],
+            scope: { type: "models", models: ["local/chat"] },
             abort: new AbortController().signal,
           },
           {
@@ -881,7 +881,7 @@ test.each([
               },
             ],
           },
-          models: ["local/chat"],
+          scope: { type: "models", models: ["local/chat"] },
           abort: new AbortController().signal,
         },
         {
@@ -979,7 +979,7 @@ test("input audio and inline images exhaust the shared media budget before downl
                   },
                 ],
               },
-              models: ["local/chat"],
+              scope: { type: "models", models: ["local/chat"] },
               abort: new AbortController().signal,
             },
             transport,
@@ -1011,7 +1011,7 @@ test("input audio reduces the remaining remote-image download budget", () =>
                   },
                 ],
               },
-              models: ["local/chat"],
+              scope: { type: "models", models: ["local/chat"] },
               abort: new AbortController().signal,
             },
             transport,
@@ -1063,7 +1063,7 @@ test("input audio at the exact mixed-media boundary leaves room for its remote i
                 },
               ],
             },
-            models: ["local/chat"],
+            scope: { type: "models", models: ["local/chat"] },
             abort: new AbortController().signal,
           },
           transport,
@@ -1130,7 +1130,7 @@ test("input audio refuses an undeclared custom SDK before image DNS or generatio
                 },
               ],
             },
-            models: ["local/chat"],
+            scope: { type: "models", models: ["local/chat"] },
             abort: new AbortController().signal,
           },
           {
@@ -1522,7 +1522,7 @@ test.each([
                   { role: "user", content: [{ type: "image_url", image_url: { url: "https://image.example/a.png" } }] },
                 ],
               },
-              models: ["local/chat"],
+              scope: { type: "models", models: ["local/chat"] },
               abort: new AbortController().signal,
             },
             {

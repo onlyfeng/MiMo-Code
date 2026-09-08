@@ -1,3 +1,4 @@
+import { LLMServerScope } from "./scope"
 import { type FinishReason, type LanguageModelUsage } from "ai"
 import { Effect } from "effect"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
@@ -188,7 +189,7 @@ async function* stream(started: Started, controller: AbortController, abort: Abo
 export async function execute(
   input: {
     req: ChatCompletionRequest
-    models: string[]
+    scope: LLMServerScope.Scope
     abort: AbortSignal
   },
   imageTransport?: ImageTransport,
@@ -201,7 +202,7 @@ export async function execute(
   const model = Provider.parseModel(parsed.data.model)
   if (!model.providerID || !model.modelID)
     throw new RequestError(400, "model must be an explicit provider/model identifier")
-  if (!input.models.includes(parsed.data.model))
+  if (!LLMServerScope.allows(input.scope, parsed.data.model))
     throw new RequestError(404, "Model is not available to this token", "invalid_request_error", "model_not_found")
   const controller = new AbortController()
   const abort = AbortSignal.any([input.abort, controller.signal])

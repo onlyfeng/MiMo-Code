@@ -94,7 +94,7 @@ describe("instance capability discovery", () => {
           ),
         ).rejects.toThrow(mode === "speech-only" ? "languageModel" : "UnsupportedModel")
         expect(await LLMServerCapability.resolve("chat")).toEqual([])
-        expect(await LLMServerCapability.available(undefined, ["p/chat"])).toEqual([])
+        expect(await LLMServerCapability.available(undefined, { type: "models", models: ["p/chat"] })).toEqual([])
         expect(LLMServerCapability.explain("chat", listed)).toContain("language factory")
       })
     },
@@ -121,7 +121,9 @@ describe("instance capability discovery", () => {
         expect(view(await LLMServerCapability.resolve("transcription"))).toEqual([
           { ref: "openai/multimodal", dedicated: false },
         ])
-        expect((await LLMServerCapability.available()).map((entry) => entry.ref)).toEqual(["openai/multimodal"])
+        expect((await LLMServerCapability.available(undefined, { type: "all" })).map((entry) => entry.ref)).toEqual([
+          "openai/multimodal",
+        ])
       })
     } finally {
       Auth.inject(undefined)
@@ -182,10 +184,9 @@ describe("instance capability discovery", () => {
   test("Google offers its multimodal SDK fallback but not plain chat or dedicated ASR", () =>
     fixture(config({ chat, asr, multimodal }, { npm: "@ai-sdk/google" }), async () => {
       expect((await LLMServerCapability.resolve("transcription")).map((item) => item.ref)).toEqual(["p/multimodal"])
-      expect((await LLMServerCapability.available()).map((entry) => entry.ref).sort()).toEqual([
-        "p/chat",
-        "p/multimodal",
-      ])
+      expect(
+        (await LLMServerCapability.available(undefined, { type: "all" })).map((entry) => entry.ref).sort(),
+      ).toEqual(["p/chat", "p/multimodal"])
     }))
 
   test("raw audio without an explicit valid HTTP base URL is unavailable", async () => {
@@ -193,7 +194,9 @@ describe("instance capability discovery", () => {
       await fixture(config({ tts: speech, asr, multimodal }, { baseURL }), async () => {
         expect(await LLMServerCapability.resolve("speech")).toEqual([])
         expect(await LLMServerCapability.resolve("transcription")).toEqual([])
-        expect((await LLMServerCapability.available()).map((entry) => entry.ref)).toEqual(["p/multimodal"])
+        expect((await LLMServerCapability.available(undefined, { type: "all" })).map((entry) => entry.ref)).toEqual([
+          "p/multimodal",
+        ])
       })
     }
   })
@@ -245,15 +248,17 @@ describe("instance capability discovery", () => {
       { npm: pathToFileURL(path.join(sdk.path, "scoped.ts")).href },
     ).provider!.p
     await fixture(cfg, async () => {
-      const listed = await LLMServerCapability.available(undefined, ["p/visible"])
+      const listed = await LLMServerCapability.available(undefined, { type: "models", models: ["p/visible"] })
       expect(await Bun.file(path.join(sdk.path, "initialized")).exists()).toBe(false)
       expect(listed.map((entry) => entry.ref)).toEqual(["p/visible"])
-      expect(await LLMServerCapability.available(undefined, [])).toEqual([])
-      expect(await LLMServerCapability.available(undefined, ["p/unknown"])).toEqual([])
+      expect(await LLMServerCapability.available(undefined, { type: "models", models: [] })).toEqual([])
+      expect(await LLMServerCapability.available(undefined, { type: "models", models: ["p/unknown"] })).toEqual([])
       expect(await Bun.file(path.join(sdk.path, "initialized")).exists()).toBe(false)
-      expect((await LLMServerCapability.available(undefined, ["secret/hidden"])).map((entry) => entry.ref)).toEqual([
-        "secret/hidden",
-      ])
+      expect(
+        (await LLMServerCapability.available(undefined, { type: "models", models: ["secret/hidden"] })).map(
+          (entry) => entry.ref,
+        ),
+      ).toEqual(["secret/hidden"])
       expect(await Bun.file(path.join(sdk.path, "initialized")).exists()).toBe(true)
     })
   })
@@ -263,14 +268,16 @@ describe("instance capability discovery", () => {
     cfg.provider!.p!.blacklist = ["hidden"]
     await fixture(cfg, async () => {
       expect((await LLMServerCapability.all()).map((entry) => entry.ref)).toEqual(["p/visible"])
-      expect((await LLMServerCapability.available()).map((entry) => entry.ref)).toEqual(["p/visible"])
+      expect((await LLMServerCapability.available(undefined, { type: "all" })).map((entry) => entry.ref)).toEqual([
+        "p/visible",
+      ])
     })
     await fixture(config({ different: speech }), async () => {
       expect((await LLMServerCapability.all()).map((entry) => entry.ref)).toEqual(["p/different"])
     })
     await fixture({ ...config({ hidden: speech }), disabled_providers: ["p"] }, async () => {
       expect(await LLMServerCapability.all()).toEqual([])
-      expect(await LLMServerCapability.available()).toEqual([])
+      expect(await LLMServerCapability.available(undefined, { type: "all" })).toEqual([])
     })
   })
 

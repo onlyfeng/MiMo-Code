@@ -1,3 +1,4 @@
+import { LLMServerScope } from "@/llm-server/scope"
 import { randomUUID } from "node:crypto"
 import path from "node:path"
 import { Hono } from "hono"
@@ -82,15 +83,15 @@ function streamBody(body: ReadableStream<Uint8Array>, controller: AbortControlle
   return { stream, done: done.promise }
 }
 
-async function prepare(c: Context, models: string[], signal: AbortSignal) {
+async function prepare(c: Context, scope: LLMServerScope.Scope, signal: AbortSignal) {
   if (c.req.path === "/v1/models") {
     return async () => {
-      const available = await LLMServerCapability.available(signal, models)
+      const available = await LLMServerCapability.available(signal, scope)
       signal.throwIfAborted()
       return c.json({
         object: "list",
         data: available
-          .filter((entry) => models.includes(entry.ref))
+          .filter((entry) => LLMServerScope.allows(scope, entry.ref))
           .map((entry) => ({
             id: entry.ref,
             object: "model",
@@ -100,17 +101,17 @@ async function prepare(c: Context, models: string[], signal: AbortSignal) {
       })
     }
   }
-  if (c.req.path.startsWith("/v1/audio/")) return prepareAudio(c, signal, models)
+  if (c.req.path.startsWith("/v1/audio/")) return prepareAudio(c, signal, scope)
   if ((c.req.header("content-type") ?? "").split(";")[0].trim().toLowerCase() !== "application/json")
     return failure(c, 415, "Chat requests require application/json")
   const bytes = await readBody(c.req.raw, signal)
   const value: unknown = await new Response(bytes).json().catch(() => undefined)
   const parsed = ChatCompletionRequest.safeParse(value)
   if (!parsed.success) return failure(c, 400, "Invalid chat completion request")
-  if (!models.includes(parsed.data.model)) return failure(c, 403, "Model is outside token scope")
+  if (!LLMServerScope.allows(scope, parsed.data.model)) return failure(c, 403, "Model is outside token scope")
   const rejection = unsupported(parsed.data)
   if (rejection) return failure(c, 400, rejection)
-  return () => execute({ req: parsed.data, models, abort: signal })
+  return () => execute({ req: parsed.data, scope, abort: signal })
 }
 
 /** Explicitly mounted before generic auth, body parsing, and instance routing. */
@@ -173,7 +174,7 @@ export function createModelAPI(opts?: ModelAPIOptions) {
         c.header("Allow", method)
         return failure(c, 405, `This endpoint requires ${method}`)
       }
-      const run = await prepare(c, auth.models, signal)
+      const run = await prepare(c, auth.scope, signal)
       if (run instanceof Response) return run
       return inInstance(directory, signal, async () => {
         const response = await run()

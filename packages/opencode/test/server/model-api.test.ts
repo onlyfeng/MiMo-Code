@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createConnection } from "node:net"
+import fs from "node:fs/promises"
+import path from "node:path"
 import { Flag } from "../../src/flag/flag"
 import { Instance } from "../../src/project/instance"
 import { LLMServerTokens } from "../../src/llm-server/tokens"
@@ -76,6 +78,7 @@ async function harness(
     await using tmp = await tmpdir({
       root: "cwd",
       config: {
+        enabled_providers: ["local"],
         provider: {
           local: {
             npm: "@ai-sdk/openai-compatible",
@@ -183,6 +186,129 @@ function within<T>(promise: Promise<T>) {
 }
 
 describe("explicit model API", () => {
+  test("multi-model scope admits each exact member and rejects all other endpoints before bootstrap", async () => {
+    await harness(async ({ url, directory, seen }) => {
+      const issued = await LLMServerTokens.issue({
+        directory,
+        models: ["local/chat", "local/other"],
+        expiry: { idleMs: 60_000, maxAgeMs: 120_000 },
+      })
+      expect(
+        (await request(url, "/v1/audio/speech", issued.token, { model: "local/tts", input: "hello" })).status,
+      ).toBe(403)
+      const form = new FormData()
+      form.set("model", "local/asr")
+      form.set("file", new File([audio], "test.wav", { type: "audio/wav" }))
+      expect(
+        (
+          await fetch(new URL("/v1/audio/transcriptions", url), {
+            method: "POST",
+            headers: { authorization: `Bearer ${issued.token}` },
+            body: form,
+          })
+        ).status,
+      ).toBe(403)
+      expect((await chat(url, issued.token, { model: "secret/hidden" })).status).toBe(403)
+      expect(await Instance.peek(directory)).toBeUndefined()
+      expect(seen).toEqual([])
+      const listed = await request(url, "/v1/models", issued.token)
+      expect((await listed.json()).data.map((entry: { id: string }) => entry.id)).toEqual(["local/chat", "local/other"])
+      for (const model of ["local/chat", "local/other"]) {
+        const response = await chat(url, issued.token, { model })
+        expect(response.status).toBe(200)
+        await response.arrayBuffer()
+      }
+      expect(seen).toHaveLength(2)
+    })
+  })
+
+  test("explicit all scope serves chat speech and transcription without escaping its directory", async () => {
+    await harness(async ({ url, directory, seen }) => {
+      const issued = await LLMServerTokens.issue({
+        directory,
+        allModels: true,
+        expiry: { idleMs: 60_000, maxAgeMs: 120_000 },
+      })
+      expect((await request(url, "/v1/models?directory=/", issued.token)).status).toBe(403)
+      await using other = await tmpdir()
+      const foreign = await LLMServerTokens.issue({
+        directory: other.path,
+        allModels: true,
+        expiry: { idleMs: 60_000, maxAgeMs: 120_000 },
+      })
+      expect((await request(url, "/v1/models", foreign.token)).status).toBe(401)
+      expect(await Instance.peek(directory)).toBeUndefined()
+      const listed = await request(url, "/v1/models", issued.token)
+      expect(listed.status).toBe(200)
+      expect((await listed.json()).data.map((entry: { id: string }) => entry.id)).toEqual([
+        "local/asr",
+        "local/chat",
+        "local/other",
+        "local/tts",
+      ])
+      const response = await chat(url, issued.token)
+      expect(response.status).toBe(200)
+      await response.arrayBuffer()
+      const speech = await request(url, "/v1/audio/speech", issued.token, { model: "local/tts", input: "hello" })
+      expect(speech.status).toBe(200)
+      expect(Buffer.from(await speech.arrayBuffer())).toEqual(audio)
+      const form = new FormData()
+      form.set("model", "local/asr")
+      form.set("file", new File([audio], "test.wav", { type: "audio/wav" }))
+      const transcription = await fetch(new URL("/v1/audio/transcriptions", url), {
+        method: "POST",
+        headers: { authorization: `Bearer ${issued.token}` },
+        body: form,
+      })
+      expect(transcription.status).toBe(200)
+      expect(await transcription.json()).toEqual({ text: "本地模型回复" })
+      expect((await chat(url, issued.token, { model: "local/missing" })).status).toBe(404)
+      expect(seen).toHaveLength(3)
+    })
+  })
+
+  test("all issued against an empty registry follows later configured additions and removals", async () => {
+    await harness(async ({ url, directory }) => {
+      const target = path.join(directory, "mimocode.json")
+      const configured = JSON.parse(await fs.readFile(target, "utf8"))
+      await fs.writeFile(target, JSON.stringify({ ...configured, enabled_providers: [] }))
+      const issued = await LLMServerTokens.issue({
+        directory,
+        allModels: true,
+        expiry: { idleMs: 60_000, maxAgeMs: 120_000 },
+      })
+      const refs = async () => {
+        const response = await request(url, "/v1/models", issued.token)
+        expect(response.status).toBe(200)
+        return (await response.json()).data.map((entry: { id: string }) => entry.id)
+      }
+      expect(await refs()).toEqual([])
+      await Instance.disposeAll()
+      await fs.writeFile(
+        target,
+        JSON.stringify({
+          ...configured,
+          enabled_providers: ["local"],
+          provider: {
+            local: {
+              ...configured.provider.local,
+              models: { fresh: { name: "Fresh", modalities: { input: ["text"], output: ["text"] } } },
+              whitelist: ["fresh"],
+            },
+          },
+        }),
+      )
+      expect(await refs()).toEqual(["local/fresh"])
+      const response = await chat(url, issued.token, { model: "local/fresh" })
+      expect(response.status).toBe(200)
+      await response.arrayBuffer()
+      await Instance.disposeAll()
+      await fs.writeFile(target, JSON.stringify({ ...configured, enabled_providers: [] }))
+      expect(await refs()).toEqual([])
+      expect((await chat(url, issued.token, { model: "local/fresh" })).status).toBe(404)
+    })
+  })
+
   test("explicit listener identity is available without initializing a project", async () => {
     await harness(async ({ url, directory }) => {
       const response = await request(url, "/v1/_mimocode")
