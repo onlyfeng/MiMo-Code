@@ -4070,6 +4070,68 @@ it.live("MaxMode final step bypasses runMaxStep and sends toolChoice none to the
 )
 
 it.live(
+  "request preflight sends a request inside the former guard band without compaction",
+  () =>
+    withoutDynamicSystemPrompt(() =>
+      withInstructionsDisabled(() =>
+        provideTmpdirServer(
+          Effect.fnUntraced(function* ({ llm }) {
+            const prompt = yield* SessionPrompt.Service
+            const sessions = yield* Session.Service
+            const chat = yield* sessions.create({ title: "Preflight threshold boundary" })
+            const text = "BOUNDARY_REQUEST " + "x".repeat(255_000)
+            yield* prompt.prompt({
+              sessionID: chat.id,
+              agent: "boundary",
+              model: ref,
+              noReply: true,
+              parts: [{ type: "text", text }],
+            })
+            yield* llm.text("within the compaction threshold")
+
+            const result = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.timeout("20 seconds"))
+            expect(
+              result.parts.some((part) => part.type === "text" && part.text === "within the compaction threshold"),
+            ).toBe(true)
+            const inputs = yield* llm.inputs
+            expect(inputs).toHaveLength(1)
+            expect(JSON.stringify(inputs[0].messages)).toContain(text)
+            const messages = yield* sessions.messages({ sessionID: chat.id })
+            expect(messages.flatMap((message) => message.parts).filter((part) => part.type === "compaction")).toEqual(
+              [],
+            )
+          }),
+          {
+            git: true,
+            config: (url) => {
+              const base = providerCfg(url)
+              return {
+                ...base,
+                memory: { disable_write: true },
+                compaction: { reserved: 0 },
+                agent: { boundary: { mode: "primary", prompt: "Respond briefly.", tool_allowlist: [] } },
+                provider: {
+                  ...base.provider,
+                  test: {
+                    ...base.provider.test,
+                    models: {
+                      "test-model": {
+                        ...base.provider.test.models["test-model"],
+                        limit: { context: 100_000, input: 100_000, output: 1_000 },
+                      },
+                    },
+                  },
+                },
+              }
+            },
+          },
+        ),
+      ),
+    ),
+  30_000,
+)
+
+it.live(
   "request preflight recovers old history once and preserves the active turn",
   () =>
     provideTmpdirServer(

@@ -646,24 +646,34 @@ describe("request preflight overflow", () => {
     expect(requestTokens).toBeGreaterThan(2_000)
   })
 
-  test("routes near-limit requests to recovery before streamText", () => {
-    const model = createModel({ context: 100_000, output: 8_000 })
-    const cfg = mockCfg()
-    const limit = usable({ cfg, model })
+  test("request preflight uses the compaction threshold without an extra guard", () => {
+    const model = createModel({ context: 100_000, input: 100_000, output: 8_000 })
+    const cfg = mockCfg({ reserved: 0 })
 
-    expect(isRequestOverflow({ cfg, model, requestTokens: limit - 6_000 })).toBe(false)
-    expect(isRequestOverflow({ cfg, model, requestTokens: limit - 5_000 })).toBe(true)
+    expect(isRequestOverflow({ cfg, model, requestTokens: 85_000 })).toBe(false)
+    expect(isRequestOverflow({ cfg, model, requestTokens: 89_999 })).toBe(false)
+    expect(isRequestOverflow({ cfg, model, requestTokens: 90_000 })).toBe(true)
+    expect(isRequestOverflow({ cfg, model, requestTokens: 90_001 })).toBe(true)
   })
 
-  test("does not route every request to recovery for small usable windows", () => {
+  test("request preflight does not subtract another ten percent on small input windows", () => {
     const model = createModel({ context: 12_000, input: 8_000, output: 4_000 })
-    const cfg = mockCfg()
-    const limit = usable({ cfg, model })
+    const cfg = mockCfg({ reserved: 0 })
 
-    expect(limit).toBe(4_000)
     expect(isRequestOverflow({ cfg, model, requestTokens: 1 })).toBe(false)
-    expect(isRequestOverflow({ cfg, model, requestTokens: Math.floor(limit / 2) })).toBe(false)
-    expect(isRequestOverflow({ cfg, model, requestTokens: limit })).toBe(true)
+    expect(isRequestOverflow({ cfg, model, requestTokens: 6_480 })).toBe(false)
+    expect(isRequestOverflow({ cfg, model, requestTokens: 7_199 })).toBe(false)
+    expect(isRequestOverflow({ cfg, model, requestTokens: 7_200 })).toBe(true)
+  })
+
+  test("request preflight follows the configured ratio and context budget without an extra guard", () => {
+    process.env.MIMOCODE_COMPACTION_TRIGGER_RATIO = "0.8"
+    const model = createModel({ context: 100_000, input: 100_000, output: 8_000 })
+    const cfg = mockCfg({ reserved: 0, max_context: 50_000 })
+
+    expect(isRequestOverflow({ cfg, model, requestTokens: 36_000 })).toBe(false)
+    expect(isRequestOverflow({ cfg, model, requestTokens: 39_999 })).toBe(false)
+    expect(isRequestOverflow({ cfg, model, requestTokens: 40_000 })).toBe(true)
   })
 
   test("does not route request preflight overflow when automatic compaction is disabled", () => {
@@ -781,18 +791,18 @@ describe("request preflight overflow tool filtering", () => {
 // recovery cannot remove. Only history proven to precede the active-turn
 // boundary may be omitted when deciding whether compaction can make progress.
 describe("request preflight overflow recovery floor", () => {
-  // context 12K, input 8K, output 4K → usable 4K, trip threshold ~3.6K.
+  // The dedicated 8K input window has a 7.2K compaction threshold.
   const model = createModel({ context: 12_000, input: 8_000, output: 4_000 })
-  const cfg = mockCfg()
+  const cfg = mockCfg({ reserved: 0 })
 
   test("static prefix that overflows on its own is unrecoverable", () => {
     // System prompt alone exceeds the window; clearing messages doesn't help.
-    const staticTokens = estimateRequestTokens({ prebuiltSystem: ["s".repeat(20_000)], messages: [] })
+    const staticTokens = estimateRequestTokens({ prebuiltSystem: ["s".repeat(30_000)], messages: [] })
     expect(isRequestOverflow({ cfg, model, requestTokens: staticTokens })).toBe(true)
   })
 
   test("oversized message over a small static prefix stays recoverable", () => {
-    const messages = [{ role: "user", content: [{ type: "text", text: "m".repeat(20_000) }] }] as any
+    const messages = [textMessage("m".repeat(30_000))]
     // The full request overflows...
     const full = estimateRequestTokens({ prebuiltSystem: ["ok"], messages })
     expect(isRequestOverflow({ cfg, model, requestTokens: full })).toBe(true)
@@ -813,13 +823,41 @@ describe("request preflight overflow recovery floor", () => {
     ).toEqual({ type: "ok" })
   })
 
+  test("request preflight accepts a request inside the former guard band", () => {
+    const messages = [textMessage("m".repeat(21_000))]
+    const requestTokens = estimateRequestTokens({ prebuiltSystem: ["ok"], messages })
+    expect(requestTokens).toBeGreaterThanOrEqual(6_480)
+    expect(requestTokens).toBeLessThan(7_200)
+
+    expect(
+      classifyRequestOverflow({ cfg, model, prebuiltSystem: ["ok"], messages, recoveryFloorMessages: messages }),
+    ).toEqual({ type: "ok" })
+  })
+
+  test("request preflight keeps a recovery floor inside the former guard band recoverable", () => {
+    const currentTurn = textMessage("m".repeat(21_000))
+    const result = classifyRequestOverflow({
+      cfg,
+      model,
+      prebuiltSystem: ["ok"],
+      messages: [textMessage("old history ".repeat(1_000)), currentTurn],
+      recoveryFloorMessages: [currentTurn],
+    })
+
+    expect(result.type).toBe("overflow")
+    if (result.type !== "overflow") return
+    expect(result.requestTokens).toBeGreaterThan(7_200)
+    expect(result.recoveryFloorTokens).toBeGreaterThanOrEqual(6_480)
+    expect(result.recoveryFloorTokens).toBeLessThan(7_200)
+  })
+
   test("classifies oversized discardable history as recoverable overflow", () => {
     const currentTurn = textMessage("current turn")
     const result = classifyRequestOverflow({
       cfg,
       model,
       prebuiltSystem: ["ok"],
-      messages: [textMessage("m".repeat(20_000)), currentTurn],
+      messages: [textMessage("m".repeat(30_000)), currentTurn],
       recoveryFloorMessages: [currentTurn],
     })
 
@@ -830,7 +868,7 @@ describe("request preflight overflow recovery floor", () => {
   })
 
   test("classifies an oversized active turn as unrecoverable overflow", () => {
-    const currentTurn = textMessage("m".repeat(20_000))
+    const currentTurn = textMessage("m".repeat(30_000))
     const result = classifyRequestOverflow({
       cfg,
       model,
@@ -849,7 +887,7 @@ describe("request preflight overflow recovery floor", () => {
     const result = classifyRequestOverflow({
       cfg,
       model,
-      prebuiltSystem: ["s".repeat(20_000)],
+      prebuiltSystem: ["s".repeat(30_000)],
       messages: [textMessage("hello")],
       recoveryFloorMessages: [textMessage("hello")],
     })

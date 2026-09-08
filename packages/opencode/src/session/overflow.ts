@@ -14,11 +14,6 @@ const COMPACTION_BUFFER = 33_000
 // don't strangle the usable input window. 20K covers >99.99% of compaction
 // summary outputs based on production telemetry of summary token counts.
 const OUTPUT_CAP = 20_000
-// Safety margin for request preflight overflow detection. The preflight
-// estimates tokens before the provider call; this guard prevents false-tripping
-// overflow when the request is near (but not over) the usable window. Capped
-// at 10% of usable for small-context models.
-const REQUEST_PREFLIGHT_GUARD = 5_000
 // Cap tool schema bytes for overflow estimation. Tool schemas are static and
 // compaction cannot shrink them, so oversized schemas must be detected at
 // preflight time. 80KB covers the worst-case toolset (~30 tools with verbose
@@ -147,8 +142,7 @@ export function isRequestOverflow(input: { cfg: Config.Info; model: Provider.Mod
   if (input.model.limit.context === 0) return false
   const limit = usable(input)
   if (limit <= 0) return input.requestTokens > 0
-  const guard = Math.min(REQUEST_PREFLIGHT_GUARD, Math.floor(limit * 0.1))
-  return input.requestTokens >= Math.max(1, limit - guard)
+  return input.requestTokens >= limit
 }
 
 export function classifyRequestOverflow(
