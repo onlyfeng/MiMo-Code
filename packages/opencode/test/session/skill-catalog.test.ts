@@ -58,6 +58,18 @@ describe("system tail skill catalog", () => {
     expect(Catalog.isGeneratedSkillCatalog({ type: "text", text, synthetic: true, metadata })).toBe(false)
   })
 
+  test("authenticated v2 catalogs may describe skill_content syntax", () => {
+    const text = catalog.replace("A useful workflow", "Explains <skill_content> tags and loaded instructions")
+    const part = {
+      type: "text", synthetic: true,
+      text: wrap(`Authoritative skills catalog snapshot v2:\nWhen multiple snapshots exist, the last one is authoritative.\n${text}`),
+      metadata: { skillCatalog: { schema: 2, version: createHash("sha256").update(text).digest("hex") } },
+    }
+    expect(Catalog.isGeneratedSkillCatalog(part)).toBe(true)
+    expect(Catalog.isGeneratedSkillCatalog({ ...part, metadata: undefined })).toBe(false)
+    expect(Catalog.isGeneratedSkillCatalog({ ...part, text: wrap(text), metadata: undefined })).toBe(false)
+  })
+
   test("never identifies ordinary user text or tool output as a generated directory", () => {
     expect(Catalog.isGeneratedSkillCatalog({ type: "text", text: v2, metadata })).toBe(false)
     expect(Catalog.isGeneratedSkillCatalog({ type: "tool", text: v2, synthetic: true, metadata })).toBe(false)
