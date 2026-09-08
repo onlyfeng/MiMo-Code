@@ -138,7 +138,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `b948ef02e6a44aa8eb8cdf67662d69335f58f6df`.
+  main behavior `0b665c7e681e44cac6f1a6acf18732015fb2bf86`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
