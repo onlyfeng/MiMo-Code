@@ -53,9 +53,16 @@ const resume = (dir: string, sessionID: string, assistantID: string, taskID: str
     ),
   )
 
-for (const backlog of [1, 101]) {
+for (const scenario of [
+  { backlog: 1, failure: "provider", cancelHook: undefined },
+  { backlog: 101, failure: "provider", cancelHook: undefined },
+  { backlog: 101, failure: "defect", cancelHook: undefined },
+  { backlog: 1, failure: "provider", cancelHook: "session.pre" },
+  { backlog: 1, failure: "provider", cancelHook: "session.userQuery.pre" },
+]) {
+  const backlog = scenario.backlog
   it.live(
-    `main HTTP recovery preserves its task and drains ${backlog} queued rows after length continuation`,
+    `main HTTP recovery preserves its task and drains ${backlog} queued rows after length continuation with ${scenario.cancelHook ?? scenario.failure}`,
     () =>
       Effect.gen(function* () {
         const key = `recovery-task-${crypto.randomUUID()}`
@@ -65,6 +72,10 @@ for (const backlog of [1, 101]) {
           post: [] as (string | undefined)[],
           done: Promise.withResolvers<void>(),
           queuedDone: Promise.withResolvers<void>(),
+          cancelledDone: Promise.withResolvers<void>(),
+          armed: false,
+          mode: scenario.cancelHook ? "cancel" : scenario.failure,
+          hook: scenario.cancelHook ?? "session.pre",
         }
         Reflect.set(globalThis, key, state)
         yield* Effect.addFinalizer(() =>
@@ -77,7 +88,22 @@ for (const backlog of [1, 101]) {
           Bun.write(
             plugin,
             `export default async () => ({
-    "session.pre": async (input) => { Reflect.get(globalThis, ${JSON.stringify(key)})?.pre.push(input.task_id) },
+    "session.pre": async (input, output) => {
+      const state = Reflect.get(globalThis, ${JSON.stringify(key)})
+      state?.pre.push(input.task_id)
+      if (!state?.armed || state.hook !== "session.pre" || (state.mode === "defect" && input.task_id)) return
+      state.armed = false
+      if (state.mode === "defect") throw new Error("actual configured inbox hook defect")
+      output.cancel = true
+      output.cancelReason = "one-shot main recovery cancellation"
+    },
+    "session.userQuery.pre": async (_, output) => {
+      const state = Reflect.get(globalThis, ${JSON.stringify(key)})
+      if (!state?.armed || state.hook !== "session.userQuery.pre") return
+      state.armed = false
+      output.cancel = true
+      output.cancelReason = "one-shot main recovery cancellation"
+    },
     "chat.params": async (input) => { Reflect.get(globalThis, ${JSON.stringify(key)})?.params.push(input.message.task_id) },
     "experimental.chat.messages.transform": async (_, output) => {
       const user = output.messages.findLast(message => message.info.role === "user")
@@ -89,6 +115,7 @@ for (const backlog of [1, 101]) {
       state?.post.push(input.task_id)
       if (input.finalText === "RECOVERY_TASK_FINISHED") state?.done.resolve()
       if (input.finalText === "QUEUED_NOTIFICATION_FINISHED") state?.queuedDone.resolve()
+      if (input.outcome === "cancelled") state?.cancelledDone.resolve()
     },
   })`,
           ),
@@ -137,6 +164,7 @@ for (const backlog of [1, 101]) {
               state.pre.length = 0
               state.params.length = 0
               state.post.length = 0
+              state.armed = !!scenario.cancelHook || scenario.failure === "defect"
               yield* llm.push({
                 type: "sse",
                 head: [],
@@ -158,12 +186,26 @@ for (const backlog of [1, 101]) {
               yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
               yield* llm.hold("RECOVERY_TASK_FINISHED", release.promise)
               const batches = Math.ceil(backlog / 100)
-              for (const batch of Array.from({ length: batches }, (_, index) => index))
+              for (const batch of Array.from({ length: batches }, (_, index) => index)) {
+                if (scenario.failure === "defect" && batch < batches - 1) continue
                 yield* batch === batches - 1
                   ? llm.text("QUEUED_NOTIFICATION_FINISHED")
                   : llm.error(400, { error: { message: "Queued first batch failed" } })
+              }
               const response = yield* resume(dir, session.id, candidates[0].assistantMessageID, task.id)
               expect(response.status).toBe(202)
+              if (scenario.cancelHook) {
+                yield* Effect.promise(() => state.cancelledDone.promise).pipe(Effect.timeout("10 seconds"))
+                yield* Effect.sleep("50 millis")
+                expect(state.armed).toBe(false)
+                expect(yield* llm.calls).toBe(1)
+                expect(
+                  Database.use((db) =>
+                    db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, session.id)).all(),
+                  ),
+                ).toHaveLength(backlog)
+                return
+              }
               yield* llm.wait(3).pipe(Effect.timeout("10 seconds"))
               expect(
                 Database.use((db) =>
@@ -219,7 +261,7 @@ for (const backlog of [1, 101]) {
               expect(inboxUser?.info.id).not.toBe(original.info.id)
               expect(inboxUser?.info).not.toHaveProperty("task_id")
               expect(state.pre).toEqual([task.id, ...Array.from({ length: batches }, () => undefined)])
-              expect(yield* llm.calls).toBe(3 + batches)
+              expect(yield* llm.calls).toBe(3 + batches - (scenario.failure === "defect" ? 1 : 0))
               expect(JSON.stringify((yield* llm.inputs)[3].messages)).toContain("QUEUED_UNRELATED_NOTIFICATION")
             }),
           { git: true, root: "cwd", config: (url) => ({ ...config(url), plugin: [pathToFileURL(plugin).href] }) },

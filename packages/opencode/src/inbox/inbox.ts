@@ -129,6 +129,7 @@ export interface Interface {
   readonly send: (input: SendInput) => Effect.Effect<SendResult, InboxReceiverNotFound>
   readonly drain: (sessionID: SessionID, actorID: string) => Effect.Effect<number>
   readonly has: (inboxID: string) => Effect.Effect<boolean>
+  readonly head: (sessionID: SessionID, actorID: string) => Effect.Effect<string | undefined>
   readonly wakePending: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
   /** Internal cycle-breaker: binds this inbox layer to its owning prompt layer. */
   readonly bindPrompt?: (
@@ -215,6 +216,18 @@ export const layer: Layer.Layer<
           receiverActorID: actorID,
         })
       }
+    })
+
+    const head = Effect.fn("Inbox.head")(function* (sessionID: SessionID, actorID: string) {
+      return Database.use((db) =>
+        db
+          .select({ id: InboxTable.id })
+          .from(InboxTable)
+          .where(and(eq(InboxTable.receiver_session_id, sessionID), eq(InboxTable.receiver_actor_id, actorID)))
+          .orderBy(InboxTable.id)
+          .limit(1)
+          .get()?.id,
+      )
     })
 
     const wakePending = Effect.fn("Inbox.wakePending")(function* (sessionID: SessionID, actorID: string) {
@@ -434,7 +447,7 @@ export const layer: Layer.Layer<
       return rendered.length
     })
 
-    const impl = Service.of({ send, drain, has, wakePending, bindPrompt })
+    const impl = Service.of({ send, drain, has, head, wakePending, bindPrompt })
     inboxServiceRef.current = impl
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {

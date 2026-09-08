@@ -1,3 +1,4 @@
+import { isTurnCancelled, PluginCancelledError } from "./turn-cancellation"
 import * as RunApproval from "./run-approval"
 import path from "path"
 import os from "os"
@@ -4340,7 +4341,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               cancelled = true
               cancelReason = preSession.cancelReason
               return yield* Effect.fail(
-                new NamedError.Unknown({
+                new PluginCancelledError({
                   message: preSession.cancelReason ?? "Session cancelled by plugin",
                 }),
               )
@@ -5702,13 +5703,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
           : Effect.gen(function* () {
               while (true) {
+                const head = input.inboxID ? yield* inbox.head(input.sessionID, agentID) : undefined
+                const attempt = { started: false }
                 const result = yield* state.ensureRunning(
                   input.sessionID,
                   agentID,
                   lastAssistant(input.sessionID, agentID),
-                  work,
-                )
-                if (!input.inboxID || !(yield* inbox.has(input.inboxID))) return result
+                  Effect.sync(() => {
+                    attempt.started = true
+                  }).pipe(Effect.andThen(work)),
+                ).pipe(Effect.exit)
+                const stalled = Exit.isFailure(result) && attempt.started && (!head || (yield* inbox.has(head)))
+                if (input.inboxID && !isTurnCancelled(result) && !stalled && (yield* inbox.has(input.inboxID))) continue
+                if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
+                return result.value
               }
             }).pipe(state.withRunDisposal)
       const exit = yield* execution.pipe(Effect.exit)
@@ -6197,7 +6205,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // Durable rows may outlive their original wake fiber. Join this
               // runner through the normal inbox lifecycle and drain after it settles.
               Effect.onExit((exit) =>
-                Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
+                isTurnCancelled(exit)
                   ? Effect.void
                   : inbox.wakePending(input.sessionID, input.actorID).pipe(Effect.ignoreCause),
               ),
