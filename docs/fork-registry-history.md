@@ -25,6 +25,8 @@ they are never used as an `upstream` or `main behavior` review basis.
 | 2026-08-27 | `6da12e0c98d9e2c4838896eac642c65179501f8e` | `d0acb856f1ec0edae6cce29ca44178af14d94293` | 6 | 15 | 252 paths; 24,541 insertions; 10,196 deletions | Adopted actor-scoped `replace-agent` for main/peer, but separated identity replacement from checkpoint's unknown-actor fail-open: only main and positively registered non-system peers inherit the session base; subagent, system, ephemeral, and unknown actors retain their own prompt. |
 | 2026-08-28 | `35bb2636a99b457940f1c12f2c8f5ec554369c57` | `64b4bdda6829ca697cecf4cf79eeec6a35ec2e57` | 6 | 15 | 256 paths; 24,605 insertions; 10,234 deletions | Classified all three incoming capabilities: removed the unimplemented actor spawn/run resume argument while preserving lifecycle and frozen-context failure boundaries; adapted PPTX sourcing to actual tool/WebFetch behavior; isolated the auto-overflow fixture while retaining its reserve-safe 25K sentinel. |
 | 2026-09-08 | `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` (unchanged; POLICY-01 selected source below) | `aa2dbe494fb5903f918d8d7cd8b6d04404acb031` | 6 | 16 | Incremental from accepted main: 47 paths; 2,715 insertions; 517 deletions | N=1 POLICY-01: adopt full authorized nested Actor/question/plan composition with canonical control identity, complete native-schema freezing, generation-owned admission cleanup, real interactive routing and atomic plan-to-build transition. Local validation only; publication and compat gates remain pending. |
+| 2026-09-08 | `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` (unchanged; POLICY-04 selected source below) | `22c5a51099f460cb9b58c064c57c8632e2cd70be` | 6 | 16 | Incremental runtime/tests/plan from accepted main: 18 paths; 1,589 insertions; 143 deletions | N=1 POLICY-04: move the authorized skill catalog to the frozen system tail, persist catalog version and originating turn, migrate legacy pairs only at a later direct input, and preserve loaded bodies plus native tool snapshots. Local validation only; publication and compat gates remain pending. |
+| 2026-09-08 | `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` (unchanged) | `d9ed4dc480ddbe319d79e6ca655facc552e2cd35` | 6 | 16 | Incremental runtime/tests/plan from accepted main: 20 paths; 1,631 insertions; 157 deletions | POLICY-04 CI follow-up: update two prior prefix-layout/turn-revision assertions and route persistent-Actor fixture responses to the delegated user request, preserving concurrent parent notifications. Product implementation unchanged; current-head review/CI must be repeated. |
 
 ## 2026-08-23 review details
 
@@ -2759,3 +2761,68 @@ actor/spawn turnContext alongside the new native-schema contract.
 
 Exact-head CI, current-head review feedback, main acceptance and subsequent
 compat propagation remain root-owned gates after this local registry update.
+
+## 2026-09-08 POLICY-04 frozen skill catalog system tail
+
+- Selected capability N=1: POLICY-04; selected upstream snapshot
+  `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, released source
+  `2a0eb706e95a77cba34a319e9f11f33f26d4450c`. Overall upstream review remains
+  `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; this is not a full sync.
+- Accepted prior main: `d415822c29539a4b6eebeafb59de1b88da18b95c`.
+  Runtime/tests/plan: `22c5a51099f460cb9b58c064c57c8632e2cd70be`, tree-identical to implementation
+  `3e2fca0e` after inheriting that formal main ancestor.
+- FC-005 owns the layout/version/migration contract. FC-002 and FC-015 retain
+  the captured pair across Actor/checkpoint and compaction consumers. FD-002
+  instruction enablement remains unchanged. POLICY-01 native contracts,
+  POLICY-06 approval ownership and the accepted pure 90% threshold are retained.
+- A nullable schema-3 catalog record stores canonical text, content hash and
+  originating user turn independently of the stable profile and tool hashes.
+  Cold capture pins and returns the winning pair. A normal loop losing the
+  initial pin uses that pair while retaining its live executable tool pool.
+  Legacy SQL NULL preserves history layout until a later direct user input;
+  projection suppresses only recognized generated parts and never rewrites DB
+  messages or moves loaded skill bodies.
+- Local focused validation: 122 pass, 0 fail, 653 assertions across 13 files.
+  This combines helper/projection, actual old-schema database migration and
+  reopen, existing skill command gates, real cold-capture competition, two
+  non-test session-reopen children, actual provider continuations/compaction,
+  native full-Actor contracts and prefix/checkpoint consumers. The 16-case
+  prefix/checkpoint subset includes recording fixtures and is not claimed as
+  full checkpoint E2E. Ambient experimental, MCP-search, Codex, workflow, yolo
+  and auto-delete selectors were removed; package-owned preloads were retained.
+- Package typecheck passed. Repository lint passed with 4,486 warnings and
+  zero errors; warnings are not classified as all pre-existing. No public
+  schema changed and no SDK/OpenAPI field carries the internal catalog column.
+  Exact-head remote CI, Codex review and compat propagation are later gates.
+
+## 2026-09-08 POLICY-04 CI test convergence
+
+PR #87 at `2f297184b9eb8b8cbc46f61604c900d291d48d4b` completed Codex review
+with a positive connector reaction. CI exposed two prior prefix tests still
+asserting history placement/revision 1, plus a pre-existing Actor fixture
+whose shared response FIFO let a parent-notification request consume the
+child's recovery response. A real parent-first probe reproduced the latter
+without modifying production code; routing responses by the delegated user
+input fixed the same ordering while keeping the real parent request.
+
+Corrected source/test basis: `d9ed4dc480ddbe319d79e6ca655facc552e2cd35`. The two prefix tests pass with 14
+assertions; the formal Actor recovery case passes with 27. The deterministic
+parent-first probe passes separately with 27 and is not double-counted.
+Combined focused evidence is 125 pass, 0 fail, 694 assertions across 14 files.
+Package typecheck passes. No product or timeout change was needed. New-head
+Codex completion and all CI remain required before merge.
+
+## 2026-09-08 POLICY-04 frozen non-catalog prefix follow-up
+
+- Runtime/tests source: `8ed2c5806a5e8d79aed7212c7c7c020bc817b2c4`, following reviewed candidate `110222157896b16e7ba85bc3d5d3f5eef975a6e1`. Bundled guidance remains `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`; the overall upstream baseline and selected released source remain unchanged. This is a local follow-up, not a formal acceptance or compat propagation claim.
+- Codex identified that refreshing the directory rebuilt frozen instructions and plugin output. A verified optional internal catalog position now permits only that range to change; tool-schema rotation also preserves every non-catalog system byte. Legacy schema-3 rows infer only a unique complete match; ambiguous or invalid old positions retain the old pair and log the reason. Empty legacy and standalone-catalog transitions never introduce empty system entries. Temporary construction markers are fully materialized before pin or dispatch.
+- The failed shard-1 reopen test exited its child successfully but received a truncated long stdout JSON line. Child results now use an awaited JSON file read after child exit; the original bounded timeout and real persistent database/reopen paths remain.
+- Focused follow-up matrix: 33 passing tests / 180 assertions (24 catalog helpers plus 9 real prefix/capture/compaction/reopen cases). This overlaps the prior 125-test matrix and is not added to it. New behavior, cancellation-free empty transitions and stdout transport fixes each have their own reproduced RED; the current patch passed package typecheck, diff check and lint (4,487 warnings, zero errors). The last empty-catalog helper fix was verified by its helper cases and final typecheck; the nine provider cases were not redundantly rerun.
+- Main PR87 must receive a fresh Codex review and exact-head CI before merge. Compat must inherit this patch and retain its capped-history projection and current-turn split before its own review/publication gates.
+
+## 2026-09-09 POLICY-04 request-owned format correction
+
+- Runtime/tests: `b948ef02e6a44aa8eb8cdf67662d69335f58f6df`. The preceding PR87 head `c1e391d184bb0a3efbf7a60a38f553c41d6c5935` completed Codex review but failed CI and was not merged.
+- CI caught a real JSON-to-text format regression: freezing the entire non-catalog prefix retained the StructuredOutput instruction after its tool was removed. The managed range now records the caller-owned format prefix independently of the catalog content hash; format transitions change that prefix while instruction files, environment and plugin content remain frozen. A competing pin also preserves the winner's catalog while applying the current caller's format.
+- Old structured-tool snapshots prove the presence of their generated format instruction; migration adopts only its verified adjacent or unique position. Empty and ambiguous range behavior remains bounded. Cold capture persists the complete range metadata. The shared MockLLM fixture now preserves the caller-controlled system tail, matching the real builder's post-plugin append instead of discarding it and losing the slot token.
+- Verification: 39 tests /135 assertions across catalog helpers, actual Codex structured-schema transitions and text-loop fixtures; 9 prefix/capture/reopen/compaction tests /134 assertions; final expanded four-case pin/capture matrix /64 assertions overlaps the previous three captures. There are 49 distinct tests in these seven files. New provider assertions switch text to JSON and back after editing AGENTS/plugin data and prove frozen non-format bytes stay unchanged. Current source passes package typecheck, diff check and lint (4,487 warnings, zero errors). Fresh-head CI and Codex review remain required.

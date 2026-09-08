@@ -62,6 +62,8 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   additions: string[]
   /** Frozen Session/Fork system; bypasses all system regeneration when present. */
   prebuiltSystem?: string[]
+  /** True only when this system already carries the frozen catalog. */
+  skillCatalogInSystem?: boolean
   prompt?: PromptConfig
   /**
    * Collapse post-checkpoint rebuild tails into an activity log. Enable for the
@@ -78,6 +80,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   // See spec changelog at docs/superpowers/specs/2026-05-26-fork-agent-prefix-cache-design.md
   const inheritedMessages = yield* MessageV2.toModelMessagesEffect(input.msgs, input.model, {
     collapseCheckpointTail: input.collapseCheckpointTail,
+    skillCatalogInSystem: input.skillCatalogInSystem,
   })
 
   // Find the last user message; required for system "user.system" pass-through

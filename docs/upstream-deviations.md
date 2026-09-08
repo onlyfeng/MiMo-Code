@@ -17,9 +17,9 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
+- Main behavior (runtime/tests): `b948ef02e6a44aa8eb8cdf67662d69335f58f6df`
 - Bundled guidance content: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
-- Prior fork `main` tip: `3350f0f2ce17501d4d925f5e293f07d809f29f22`
+- Prior fork `main` tip: `d415822c29539a4b6eebeafb59de1b88da18b95c`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -115,6 +115,12 @@ capability audit is recorded in [the model API review](released-model-api-review
   event/payload parity, immutable retry-set, and unknown-identity fail-closed
   boundaries; upstream's actor-scoped `replace-agent` correction is adapted
   rather than copied because checkpoint ownership intentionally fails open.
+- POLICY-04 carrier review: the authorized skill catalog now occupies the
+  frozen system tail after environment/format and before instruction files.
+  FC-005 owns its schema-3 snapshot and legacy-pair migration; this placement
+  does not change instruction enablement, disable event/payload parity, or
+  actor identity. The separate instruction-delivery policy is not advanced by
+  this selection. See [skill catalog layout](skill-catalog-system-tail.md).
 - Watch surfaces: `packages/opencode/src/cli/cmd/tui/app.tsx`,
   `packages/opencode/src/session/instruction.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
@@ -132,7 +138,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `b948ef02e6a44aa8eb8cdf67662d69335f58f6df`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.

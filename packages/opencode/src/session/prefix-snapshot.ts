@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import { and, Database, eq } from "@/storage"
 import type { Permission } from "@/permission"
 import type { MessageID, SessionID } from "./schema"
+import type { SkillCatalogSnapshot } from "./skill-catalog"
 import { SessionPrefixSnapshotTable, type SessionPrefixToolSnapshot } from "./session.sql"
 
 export type NativeTool = AITool & { nativeInputSchema?: JSONSchema7 }
@@ -127,6 +128,7 @@ export const pin = Effect.fn("SessionPrefixSnapshot.pin")(function* (input: {
   toolsHash: string
   tools: SessionPrefixToolSnapshot[]
   loadedMcpTools: string[]
+  skillCatalog?: SkillCatalogSnapshot
   watermarkMessageID: MessageID
 }) {
   const now = Date.now()
@@ -142,6 +144,7 @@ export const pin = Effect.fn("SessionPrefixSnapshot.pin")(function* (input: {
           tools_hash: input.toolsHash,
           tools: input.tools,
           loaded_mcp_tools: input.loadedMcpTools,
+          skill_catalog: input.skillCatalog,
           watermark_message_id: input.watermarkMessageID,
           revision: 1,
           created_at: now,
@@ -163,6 +166,7 @@ export const rotate = Effect.fn("SessionPrefixSnapshot.rotate")(function* (input
   toolsHash: string
   tools: SessionPrefixToolSnapshot[]
   loadedMcpTools: string[]
+  skillCatalog?: SkillCatalogSnapshot
   watermarkMessageID: MessageID
 }) {
   const current = yield* get(input.sessionID, input.profileKey)
@@ -177,6 +181,8 @@ export const rotate = Effect.fn("SessionPrefixSnapshot.rotate")(function* (input
           tools_hash: input.toolsHash,
           tools: input.tools,
           loaded_mcp_tools: input.loadedMcpTools,
+          // Older callers only rotate the prefix; retain its catalog metadata.
+          ...(input.skillCatalog ? { skill_catalog: input.skillCatalog } : {}),
           watermark_message_id: input.watermarkMessageID,
           revision: current.revision + 1,
           updated_at: Date.now(),

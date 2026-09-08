@@ -53,16 +53,28 @@ describe("session prefix snapshot", () => {
 
   test("freezes native Actor schemas independently of identical shell wire schemas", async () => {
     const wire = tool({ inputSchema: jsonSchema({ type: "object", properties: { script: { type: "string" } } }) })
-    const original = { ...wire, nativeInputSchema: { type: "object" as const, properties: { agent: { enum: ["general"] } } } }
-    const changed = { ...wire, nativeInputSchema: { type: "object" as const, properties: { agent: { enum: ["general", "new-agent"] } } } }
+    const original = {
+      ...wire,
+      nativeInputSchema: { type: "object" as const, properties: { agent: { enum: ["general"] } } },
+    }
+    const changed = {
+      ...wire,
+      nativeInputSchema: { type: "object" as const, properties: { agent: { enum: ["general", "new-agent"] } } },
+    }
     expect(SessionPrefixSnapshot.toolsHash({ actor: original }, ["actor"])).not.toBe(
       SessionPrefixSnapshot.toolsHash({ actor: changed }, ["actor"]),
     )
-    const snapshot = JSON.parse(JSON.stringify(await SessionPrefixSnapshot.snapshotTools({ actor: original }, ["actor"])))
+    const snapshot = JSON.parse(
+      JSON.stringify(await SessionPrefixSnapshot.snapshotTools({ actor: original }, ["actor"])),
+    )
     expect(snapshot[0].native_input_schema).toEqual(original.nativeInputSchema)
-    expect(SessionPrefixSnapshot.restoreTools(snapshot).actor).toHaveProperty("nativeInputSchema", original.nativeInputSchema)
-    expect(SessionPrefixSnapshot.restoreTools([{ name: "actor", input_schema: { type: "object" } }]).actor)
-      .not.toHaveProperty("nativeInputSchema")
+    expect(SessionPrefixSnapshot.restoreTools(snapshot).actor).toHaveProperty(
+      "nativeInputSchema",
+      original.nativeInputSchema,
+    )
+    expect(
+      SessionPrefixSnapshot.restoreTools([{ name: "actor", input_schema: { type: "object" } }]).actor,
+    ).not.toHaveProperty("nativeInputSchema")
   })
 
   test("pins, rotates, advances, and cascades with its session", async () => {
@@ -100,6 +112,7 @@ describe("session prefix snapshot", () => {
           system: ["first"],
           tools_hash: "tools-1",
           loaded_mcp_tools: ["mcp_first"],
+          skill_catalog: null,
           watermark_message_id: firstWatermark,
         })
 
@@ -132,6 +145,7 @@ describe("session prefix snapshot", () => {
           system: ["second"],
           tools_hash: "tools-2",
           loaded_mcp_tools: ["mcp_second"],
+          skill_catalog: null,
         })
 
         const finalWatermark = MessageID.ascending()
@@ -158,6 +172,103 @@ describe("session prefix snapshot", () => {
 
         await AppRuntime.runPromise(SessionNs.Service.use((service) => service.remove(session.id)))
         expect(await AppRuntime.runPromise(SessionPrefixSnapshot.get(session.id, key))).toBeUndefined()
+      },
+    })
+  })
+
+  test("persists skill catalog metadata with native schemas across pin, rotation, and watermark advance", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await AppRuntime.runPromise(SessionNs.Service.use((service) => service.create({})))
+        const catalog = {
+          schema: 3 as const,
+          text: "<available_skills>\n<skill>部署与 review</skill>\n</available_skills>",
+          version: "a".repeat(64),
+          turnID: MessageID.ascending(),
+        }
+        const replacement = {
+          ...catalog,
+          text: "<available_skills />",
+          version: "b".repeat(64),
+          turnID: MessageID.ascending(),
+        }
+        const native = { type: "object" as const, properties: { action: { enum: ["spawn", "resume"] } } }
+        const actor = {
+          ...tool({
+            description: "Actor lifecycle",
+            inputSchema: jsonSchema({ type: "object", properties: { script: { type: "string" } } }),
+          }),
+          nativeInputSchema: native,
+        }
+        const tools = await SessionPrefixSnapshot.snapshotTools({ actor }, ["actor"])
+        const input = {
+          sessionID: session.id,
+          profileKey: "catalog-roundtrip",
+          system: ["stable prefix", catalog.text],
+          toolsHash: "native-tools",
+          tools,
+          loadedMcpTools: ["mcp_hidden"],
+          watermarkMessageID: MessageID.ascending(),
+        }
+        const first = await AppRuntime.runPromise(SessionPrefixSnapshot.pin({ ...input, skillCatalog: catalog }))
+        expect(first.skill_catalog).toEqual(catalog)
+        expect(first.tools?.[0].native_input_schema).toEqual(native)
+        expect(await AppRuntime.runPromise(SessionPrefixSnapshot.pin({ ...input, skillCatalog: replacement }))).toEqual(
+          first,
+        )
+
+        const rotated = await AppRuntime.runPromise(
+          SessionPrefixSnapshot.rotate({ ...input, skillCatalog: replacement }),
+        )
+        expect(rotated.skill_catalog).toEqual(replacement)
+        expect(rotated.revision).toBe(2)
+        // Older callers rotate tools/system without knowing this new metadata.
+        const legacyRotation = await AppRuntime.runPromise(SessionPrefixSnapshot.rotate(input))
+        expect(legacyRotation.skill_catalog).toEqual(replacement)
+        expect(legacyRotation.revision).toBe(3)
+        expect(legacyRotation.created_at).toBe(first.created_at)
+        const watermark = MessageID.ascending()
+        await AppRuntime.runPromise(
+          SessionPrefixSnapshot.advance({
+            sessionID: session.id,
+            profileKey: input.profileKey,
+            revision: 2,
+            watermarkMessageID: watermark,
+          }),
+        )
+        expect(await AppRuntime.runPromise(SessionPrefixSnapshot.get(session.id, input.profileKey))).toEqual(
+          legacyRotation,
+        )
+        await AppRuntime.runPromise(
+          SessionPrefixSnapshot.advance({
+            sessionID: session.id,
+            profileKey: input.profileKey,
+            revision: 3,
+            watermarkMessageID: watermark,
+          }),
+        )
+        const restored = await AppRuntime.runPromise(SessionPrefixSnapshot.get(session.id, input.profileKey))
+        expect(restored).toMatchObject({
+          skill_catalog: replacement,
+          tools,
+          loaded_mcp_tools: ["mcp_hidden"],
+          revision: 3,
+          watermark_message_id: watermark,
+        })
+        expect(SessionPrefixSnapshot.restoreTools(restored!.tools!).actor).toHaveProperty("nativeInputSchema", native)
+        expect(
+          (
+            await AppRuntime.runPromise(
+              SessionPrefixSnapshot.rotate({
+                ...input,
+                profileKey: "rotate-without-existing-row",
+                skillCatalog: catalog,
+              }),
+            )
+          ).skill_catalog,
+        ).toEqual(catalog)
       },
     })
   })
