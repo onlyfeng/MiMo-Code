@@ -3136,3 +3136,31 @@ MIMOCODE_AUTO_APPROVE_DELETE; retain package preload including ORCHESTRATOR=true
 Groups overlap and are not an aggregate count. Remote compat PR head review,
 exact-head CI, merge and final branch push CI remain separate publication gates;
 this local validation does not claim those gates have already completed.
+
+
+## 2026-09-08 POLICY-06 mixed-command approval correction
+
+Codex feedback on PR #83 identified that an automatic deletion grant could
+bypass ordinary authorization for other effects in the same Bash command. The
+shared correction was accepted on main through PR #84 at
+`3350f0f2ce17501d4d925f5e293f07d809f29f22`, after final head
+`0e57377e9f6201dee1b23efb3ccc0239378b9d8d` completed Codex re-review with no
+findings and all eight CI checks successful. Runtime/tests and guidance are
+identified by `c7014557445832a97248ed7b0af568e51bfd291d`.
+
+Compat source `f912482a26b8ae32f03987798dd5068f24860b91` inherits that formal
+main merge. Explicit approval of a complete command, including its winning
+forwarded SessionTool reply, retains a single confirmation. Automatic deletion
+approval still requires ordinary Bash/external-directory authorization; deny
+and invocation isolation remain intact. No public schema changed.
+
+All 96 existing overlay paths, including 43 production paths, retain their
+previous main and compat blobs. Shared registries and guidance match accepted
+main. All seven DC entries were checked against the two changed runtime files
+and the existing RunApproval carriers; no new override is introduced.
+
+The correction matrix recorded 50 passes and one 20-second CLI child startup
+timeout (211 assertions). The same real CLI test passed in isolation with 15
+assertions; package typecheck passed. The preview and formal ancestry merge
+have identical trees. Final compat HEAD Codex review, PR CI, and post-merge push
+CI remain required; this entry records local validation and main acceptance.
