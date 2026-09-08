@@ -17,8 +17,8 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior: `1ad318dc86895a63763fe47bfa965ca8d5b3d45b`
-- Prior fork `main` tip: `c1dfc423fe021072d37b8585b5bcc33c4742d514`
+- Main behavior: `cedd542f215424ccde54d0a779b6747dc2b34d28`
+- Prior fork `main` tip: `588d183d5e8b944fa613205e55b41d805d7d5231`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` and `main behavior` name the source/test trees reviewed here. A pure
@@ -57,7 +57,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `1ad318dc86895a63763fe47bfa965ca8d5b3d45b`.
+  main behavior `cedd542f215424ccde54d0a779b6747dc2b34d28`.
 - Retirement condition: delete authorization becomes request- or
   session-scoped, ownership/restoration is linearizable, caller loss cannot
   leave it enabled, and Bash evaluates the same immutable authorization state.
@@ -101,7 +101,7 @@ registry or history commit does not advance either behavior reference.
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `1ad318dc86895a63763fe47bfa965ca8d5b3d45b`.
+  main behavior `cedd542f215424ccde54d0a779b6747dc2b34d28`.
 - 2026-08-27 follow-up: adopted the main/peer scope but separated identity
   replacement from checkpoint responsibility. The former requires positive
   main/registered-peer evidence; the latter retains its deliberate fail-open.
@@ -151,9 +151,9 @@ registry or history commit does not advance either behavior reference.
   generated-artifact checks at the reviewed main behavior; the JavaScript SDK
   is regenerated with `./packages/sdk/js/script/build.ts` rather than copied
   from upstream. `packages/opencode/test/server/openapi-refs.test.ts` checks both
-  runtime and published OpenAPI recovery/resume operations remain main-only,
-  omit their upstream agent/task selectors, and expose the same compaction
-  projection contract.
+  runtime and published OpenAPI recovery/resume operations expose the same
+  constrained `agentID` selector owned by FC-001/FD-009, omit caller task
+  replacement, and expose the same compaction projection contract.
 - Audio evidence: `packages/opencode/test/audio/`,
   `packages/opencode/test/server/audio-api.test.ts`,
   `packages/opencode/test/server/audio-admission.test.ts`, and its isolated
@@ -174,7 +174,7 @@ registry or history commit does not advance either behavior reference.
   records its historical absence; the Node entry now restores the functional
   LLMServerTokens export for explicit embedding alongside Server.listen.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `1ad318dc86895a63763fe47bfa965ca8d5b3d45b`.
+  main behavior `cedd542f215424ccde54d0a779b6747dc2b34d28`.
 - Retirement condition: the listener is explicit opt-in, authentication
   completes before directory bootstrap or other side effects, resource bounds
   are defined, and shutdown closes intake before draining and retiring instances.
@@ -241,7 +241,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/test/tool/websearch.test.ts` regression binds the Xiaomi
   sidecar request to the resolved API model ID.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `1ad318dc86895a63763fe47bfa965ca8d5b3d45b`.
+  main behavior `cedd542f215424ccde54d0a779b6747dc2b34d28`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
   complete resolved identity while keeping transport and harness/toolset as
   separate decisions. MiMo v2.5 precedence remains authoritative even when an
@@ -291,9 +291,14 @@ registry or history commit does not advance either behavior reference.
   effective permissions, user toggles and agent/actor/frozen allowlists. Hidden
   direct calls retain the same gates. Codex MCP calls need no redundant search
   load; non-Codex explicit search retains its load-before-direct contract.
+  Nested actor composition exposes only `send` and `status` through a narrowed
+  schema, validated again after tool hooks. The registered caller identity,
+  target ownership and existing subagent send-only restriction still apply;
+  actor creation, wait, cancellation and recovery retain their direct entries.
   Each nested built-in permission receipt identifies the actual post-hook input and
   inherits the parent permission routing, while using the child abort signal.
-  Termination closes intake, aborts and joins nested effects/finalizers. Frozen
+  Termination closes intake, aborts and joins nested effects/finalizers and the
+  script VM, including guest-only pending promises and outer Effect interruption. Frozen
   captures preserve the full pool and active subset separately; changed hidden
   schemas fail closed before execution. The existing resolver precedence,
   actor task source and recovery admission remain unchanged.
@@ -317,7 +322,9 @@ registry or history commit does not advance either behavior reference.
   `1a0ffba7842af3f11edcb456688bbdf067407c08`, as present in the selected
   `6203ea2e` baseline. It adopts hidden tools, compact declarations and the
   nested shell adapter, while retaining direct actor and interactive/lifecycle
-  controls rather than narrowing actor functionality to send-only scripts.
+  controls. Released upstream permits broader nested operations for primary/peer
+  callers and restricts only subagents to `send`; the fork adapts nested
+  `send/status` without exposing other actor operations through exec.
   Existing normalization, fixed cwd, deletion approval and code/unit limits
   remain; broader upstream source and selectors are not restored.
 - Watch surfaces: `packages/opencode/src/agent/prompt/generate-gpt.txt`,
@@ -326,6 +333,7 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/src/tool/tool-script-ref.ts`,
   `packages/opencode/src/tool/tool-script.ts`,
   `packages/opencode/src/tool/tool-script.txt`,
+  `packages/opencode/src/workflow/sandbox.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
   `packages/opencode/src/session/prefix-snapshot.ts`,
   `packages/opencode/src/session/observed-tool-parts.ts`,
@@ -335,13 +343,23 @@ registry or history commit does not advance either behavior reference.
   `packages/opencode/src/cli/cmd/tui/routes/session/exec-expanded.tsx`.
 - Tests/evidence: `test/tool/tool-script.test.ts` covers request-pool pinning,
   strict alias validation, canonical Bash policy hooks, child ask receipts,
-  permission/allowlist exclusions, media bounds and close-abort-join. The real
+  permission/allowlist exclusions, media bounds and close-abort-join.
+  `test/tool/actor-exec.test.ts` covers renamed registered callers, hook narrowing,
+  parent-only subagent sends, and outer interruption through VM disposal;
+  `test/workflow/sandbox.test.ts` verifies active cancellation and timer/listener
+  cleanup even when guest code awaits an unresolved promise. The real
   HTTP/SDK `test/session/codex-compact.test.ts` checks wire visibility, hidden
   MCP execution/denial, shell approval with no rejected write, and image delivery.
   `test/session/prompt-effect.test.ts` covers frozen hidden-schema positive and
   negative execution; registry, prefix, checkpoint, skill, TUI permission and
   `test/session/exec-effect-carriers.test.ts` cover the other carriers.
   Experiment-only tests retain their independent evidence attribution.
+- 2026-09-08 actor composition: `test/tool/actor-exec.test.ts` exercises
+  real inbox/status calls in JSON and shell invocation modes, trusted sender
+  identity, subagent parent routing, post-hook action rejection, MCP-name
+  fallback rejection and cancellation without a late send. The live Codex
+  tests prove direct actor plus narrowed nested declarations, a committed
+  InboxArrived event and no send when actor is disabled in the request.
 - 2026-09-08 selected integration: the explicit user decision supersedes the
   earlier blanket production compact/shell rejection in the dated notes below.
   FD-006 remains active for the residual authority, control-entry, schema,
@@ -351,7 +369,7 @@ registry or history commit does not advance either behavior reference.
   output path. This changes direct Bash output only; nested shell exclusions,
   permission attribution, code-size gates, and timeout units remain intact.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `1ad318dc86895a63763fe47bfa965ca8d5b3d45b`.
+  main behavior `cedd542f215424ccde54d0a779b6747dc2b34d28`.
 - 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
   resolved identity. The compact single-exec authority model remains rejected;
   direct permission-visible tools and nested actor/shell/control exclusions are
@@ -398,8 +416,9 @@ registry or history commit does not advance either behavior reference.
   persistent actor retaining its full context in the original receiver Instance
   and undisposed run scope. A changed API/family/harness identity, released
   context, explicit cancellation, or process restart rejects recovery. It does
-  not rebuild released context or broaden the public main-only recovery/resume
-  API. Only an explicit full-context persistent spawn selects retained context;
+  not rebuild released context. The public recovery/resume API accepts `agentID`
+  only through this same constrained actor admission, and rejects task replacement.
+  Only an explicit full-context persistent spawn selects retained context;
   the existing ephemeral release policy remains unchanged.
   Successful internal retry/compaction writes can continue the admitted task
   without recapturing its frozen context. Their exact conditional-write receipt
@@ -425,7 +444,7 @@ registry or history commit does not advance either behavior reference.
   The actor spawn suite also exercises owned compaction and invalid-output
   continuations, a same-source foreign hook user, and a lost compaction write.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `1ad318dc86895a63763fe47bfa965ca8d5b3d45b`.
+  main behavior `cedd542f215424ccde54d0a779b6747dc2b34d28`.
 - 2026-08-28 review: adopted removal of the unimplemented `actor_id` resume
   argument from actor `spawn` and `run`. Follow-up work uses `send` only while
   the actor remains reusable. A completed ephemeral `context: "full"` actor has

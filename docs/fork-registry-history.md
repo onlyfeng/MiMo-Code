@@ -2241,3 +2241,56 @@ Node build/import evidence remains valid for unchanged production. No real
 provider benchmark is added. Shared registries retain all six FD and sixteen FC
 entries, now referencing the final source/test behavior. Final publication still
 requires successful CI for the new exact branch tips and fresh remote/ancestry proof.
+
+
+## 2026-09-08 selected Actor/MCP completion audit
+
+- Scope: complete the three user-selected capabilities from the predecessor's
+  uncommitted implementation; do not advance the reviewed upstream baseline
+  `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`.
+- Prior main tip: `588d183d5e8b944fa613205e55b41d805d7d5231`.
+- Main source/test behavior: `cedd542f215424ccde54d0a779b6747dc2b34d28`.
+- Selected behavior delta: 29 paths, 1,882 insertions, 136 deletions. The full
+  tree comparison to the selected upstream is 351 paths, 45,496 insertions,
+  10,618 deletions; this is fork divergence, not the size of incoming work.
+- All three capability results and the released-feature backlog are recorded in
+  [the completion review](upstream-integration-review-2026-09-08.md). Canonical
+  owners remain main; all six FD and sixteen FC entries remain active.
+- EXEC-ACTOR-01 retains narrowed send/status, request authority, hook revalidation,
+  and direct lifecycle tools. Independent review corrected renamed registered
+  caller resolution and closed outer-interruption and parked-guest VM cleanup
+  gaps. Sandbox active cancellation preserves existing consumers without a signal.
+- MCP-AUTO-01 preserves pending defaults and disabled precedence while allowing
+  explicit per-name auto_connect for imported transports, with real HTTP/stdio
+  execution and cleanup rather than config-parse-only evidence.
+- API-ACTOR-01 admits only directly controlled registered persistent/full-context
+  actors retaining the original receiver and frozen identity. Exact assistant
+  selection and persisted task ownership are retained; task_id is rejected for
+  both main and actor calls. Existing HTTP error normalization now covers actor
+  NotFound consistently. No duplicate completion worker is introduced.
+- Main validation: four exec/actor files 135 pass; sandbox full file 31 pass
+  (final cancellation cases 4 pass after test-only timeout/type cleanup); config
+  and real MCP transport files 88 pass; MCP lifecycle/OAuth files 37 pass;
+  actor spawn and recovery files 79 pass; prefix/OpenAPI/busy contracts 13 pass.
+  Additional main task-selector and parent-routing cases passed after their
+  focused assertion/message updates. These groups overlap and are not a unique
+  aggregate count. Early actor audit runs retained ambient WORKFLOW_TOOL=1;
+  the final tool/config/contract runs clear it alongside the three required
+  selectors. Package ORCHESTRATOR preload remains enabled and is not production
+  default evidence.
+- Both main package typechecks pass. Lint has zero errors with existing repository
+  warnings. Fresh SDK/OpenAPI generation matches the predecessor's generated
+  files byte for byte. The final publication tips require their own exact-SHA CI;
+  these local results do not substitute for the delivery-time remote proof.
+- Unrelated and predecessor worktrees are preserved; only this operation's own
+  clean, integrated worktrees/branches are eligible for cleanup.
+
+- Compat behavior `972b3b3195e1ef3b9cba7ab4e3989046164c7aad` inherits
+  all three capabilities. The sole textual conflict kept compat's generated
+  OpenAPI producer while accepting the actor query contract. Fresh generation
+  matches the merged artifacts. Tools/sandbox: 168 pass; MCP: 126 pass;
+  public contracts: 16 pass; HTTP frozen-context recovery: 9 pass; complete
+  context/actor/checkpoint matrix: 303 pass, two pre-existing timing skips,
+  zero failures. Both package typechecks and zero-error lint pass. The only
+  extra compat source/test delta is a regression proving original turnContext
+  bytes survive live context changes; no compat production adaptation is added.
