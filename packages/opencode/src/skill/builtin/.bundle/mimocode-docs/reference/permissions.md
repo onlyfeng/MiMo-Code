@@ -84,7 +84,7 @@ For trusted, disposable environments (containers, sandboxes, CI) you can auto-ap
 | Headless (`mimo run`) | `mimo run --dangerously-skip-permissions "<prompt>"` or `mimo run --yolo "<prompt>"` |
 | Any surface (env) | `MIMOCODE_PERMISSION='"allow"'` or `MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1` |
 
-Startup `--yolo` / `--dangerously-skip-permissions` includes deletion confirmation. Bash still checks explicit `bash`, `bash_delete`, and external-directory denies before execution. `MIMOCODE_AUTO_APPROVE_DELETE=1` can enable deletion approval independently; it also preserves explicit denies.
+Startup `--yolo` / `--dangerously-skip-permissions` includes deletion confirmation. Bash still checks explicit `bash`, `bash_delete`, and external-directory denies before execution. `MIMOCODE_AUTO_APPROVE_DELETE=1` can enable deletion approval independently; it also preserves explicit denies. Automatic deletion approval does not skip ordinary Bash or external-directory asks for a mixed command: no part runs until those checks pass. An explicit reply to the deletion prompt approves the complete command shown there and avoids duplicate prompts.
 
 The TUI startup flag injects an **allow-all base UNDER your config** for ordinary tools. A matching explicit `ask` still prompts for an ordinary operation, and a `deny` still blocks. Deletion confirmation uses the separate startup grant after deny checks, so an ordinary `*: ask` is not a way to turn that deletion grant off.
 
