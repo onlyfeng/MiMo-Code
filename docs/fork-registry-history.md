@@ -2856,6 +2856,22 @@ relabelled as a new merged-tree test run. POLICY-04 current-head review, CI and
 formal main acceptance remain pending; this is neither publication nor compat
 propagation.
 
+## 2026-09-09 — POLICY-03 inherits final POLICY-04 format follow-up
+
+Runtime/test snapshot `9ef178175cb4707fb63e54f9313f97ec7363664f` inherits PR #87 candidate
+`32b01dcd828f692ea0656e53319cd48abf054c18`, including structured/text format
+refresh and the mock provider system-tail contract. Source merges were clean.
+Bundled guidance snapshot is `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
+Publication remains ordered after the preceding policy is accepted on both branches;
+this local inheritance is not evidence of remote acceptance.
+
+### POLICY-03 accepted predecessor ancestry
+
+Snapshot `f860c352f292d6d7aa0bf97cc282d4c3e5ef4fb4` inherits accepted POLICY-04 main
+`69275c9cf4d772afe2167b82922e1dcebd9ab468` with a tree-identical merge.
+The inherited-format package typecheck passed. POLICY-03 publication retains
+its own exact-head CI and Codex review gates and waits for POLICY-04 compat acceptance.
+
 ## 2026-09-09 POLICY-02 registered recovery and task binding
 
 - Runtime/tests and changed bundled guidance: `6ff976a97026610335dc367d8875a87d1d91d1a7`. Development base is POLICY-04 preview `110222157896b16e7ba85bc3d5d3f5eef975a6e1`; POLICY-03 and final POLICY-04 inheritance must follow before publication. Selected upstream `0abfeba186191c1a361cf3f27b802e9d29bf0fdc` and overall baseline `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` remain unchanged.
