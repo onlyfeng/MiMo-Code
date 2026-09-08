@@ -1,3 +1,4 @@
+import { isTurnCancelled } from "../session/turn-cancellation"
 import * as RunApproval from "@/session/run-approval"
 import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit, Schedule } from "effect"
 import type { SessionID, MessageID } from "@/session/schema"
@@ -1376,12 +1377,13 @@ export const layer = Layer.effect(
             }
             if (ownership._tag === "follower") {
               const result = yield* Deferred.await(ownership.active.result)
-              if (input.inboxID && (yield* inbox.has(input.inboxID))) continue
+              if (input.inboxID && !isTurnCancelled(result) && (yield* inbox.has(input.inboxID))) continue
               if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
               return result.value
             }
 
             const owner = ownership.owner
+            const head = input.inboxID ? yield* inbox.head(input.sessionID, input.actorID) : undefined
             const guardedWork = Effect.gen(function* () {
               if (!(yield* lifecycleState.isCurrentOpen(key, owner))) return yield* Effect.interrupt
               yield* actorReg
@@ -1392,11 +1394,19 @@ export const layer = Layer.effect(
             const result = yield* state
               .ensureRunning(input.sessionID, input.actorID, input.onInterrupt, guardedWork)
               .pipe(Effect.interruptible, Effect.exit)
-            const finished = yield* finishPersistentTurn(input, actor, owner, result)
-            // An owner must cover its tracked inbox row just like a follower;
-            // one failed batch may leave the durable tail for a successor turn.
-            if (input.inboxID && (yield* inbox.has(input.inboxID))) continue
-            return finished
+            const finished = yield* finishPersistentTurn(input, actor, owner, result).pipe(Effect.exit)
+            // Retry an unconsumed tail after progress, including a failed finish;
+            // cancellation and failures before any drain must not restart work.
+            const stalled = Exit.isFailure(finished) && (!head || (yield* inbox.has(head)))
+            if (
+              input.inboxID &&
+              !isTurnCancelled(result) &&
+              !isTurnCancelled(finished) &&
+              !stalled &&
+              (yield* inbox.has(input.inboxID))
+            ) continue
+            if (Exit.isFailure(finished)) return yield* Effect.failCause(finished.cause)
+            return finished.value
           }
         }),
       )
