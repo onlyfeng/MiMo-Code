@@ -1126,6 +1126,7 @@ export const SessionRoutes = lazy(() =>
               assistantMessageID: params.assistantMessageID,
               titleLocale: query.titleLocale,
               task_id: query.task_id,
+              signal: c.req.raw.signal,
             }),
           ),
         )
