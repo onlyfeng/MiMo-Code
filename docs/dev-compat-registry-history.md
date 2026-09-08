@@ -3343,3 +3343,22 @@ Package typecheck passed; repository lint has 4537 warnings / 0 errors.
 The prior 44-case and 101-case runs are separate historical evidence, not added
 to this matrix. Compat PR review, exact-head CI and post-merge push CI remain
 publication gates. No public API schema or SDK output changed.
+
+### 2026-09-09 POLICY-04 accepted authenticated-description correction
+
+Main correction PR #90 accepted head `e136aa2ae24e13ec0f988a1a261d3af127b8eeda` after all eight CI checks
+and Codex completed with no major issues. Formal main `fb16a8fd5a7b916421e7a04ca31f06559e086298` is inherited
+by compat source `a3ed4d703767db5b130a6b38ce3e38317b2ece36` with a tree-identical ancestry merge. Shared
+FD/FC/history and the layout guide match the accepted main audit.
+
+The recognizer authenticates v2 descriptions before applying the metadata-free
+legacy loaded-content guard. Compat still requires its exact capped producer
+budget; the real capped-description projection now covers `<skill_content>`.
+Both full and current-turn model projections remove only verified generated
+catalogs. Malformed producer budgets, hashes and actual loaded bodies remain.
+
+The final affected four-file matrix has 43 pass / 0 fail / 148 assertions;
+package typecheck passed and repository lint has zero errors. Earlier 55-case
+and 101-case matrices remain historical, overlapping evidence. Registry source
+references now identify the correction. The seven DC owner inventory and
+97-path overlay remain unchanged; final compat review and remote CI are pending.
