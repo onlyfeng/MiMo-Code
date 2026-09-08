@@ -3424,3 +3424,35 @@ Cross-restart recovery is outside this change.
 
 Final compat current-head Codex review, all eight PR CI checks and merged-tip
 push CI are publication gates. These references do not rewrite older evidence.
+
+### 2026-09-09 POLICY-02 accepted durable inbox wake correction
+
+PR #93 review exposed a shared wake gap after preserving the recovered user.
+Main correction PR #94 accepts source `996ba09e92b9506ce0b09a34525851ffd85af3ec`, audit `c5e1a04fa43ad53ba489a79b5418ad2e4fa01f68`, formal main `9d26949e36c178d723a60b5664f7b31162ad64d8` and is inherited by compat source `a21254e9482785426bbe3ad58c895f83b2b764b8`.
+The ancestry merge preserves the tested preview tree exactly. Existing 98
+non-registry overlay paths (42 package src) remain; the incoming wake helper
+introduces no new compat difference. Shared FD/FC/history match main.
+
+The POLICY-02 durable-inbox follow-up rearms pending rows after successful or
+failed recovery through the existing Inbox/Runner/Actor lifecycle. It preserves
+the recovered user during execution and does not depend on a live sender wake
+or a manual later prompt. Plugin cancellation (including a subsequent post-hook failure), interruption, disposal and retired receivers do not
+restart execution. Both live and durable wake variants consume each row once. The wake tracks the
+queue tail, and persistent owners recheck it after settling each turn, so a
+provider or runtime failure in the first 100-row batch does not strand later rows.
+Both owners and concurrent followers require observed queue consumption before
+retrying after failure; a failure before consumption does not trigger extra work.
+Compat keeps its inherited Inbox content cap and all existing instance/context
+boundaries. No additional compat delta is introduced by this shared correction.
+
+The preceding compat main HTTP/Actor matrix passes 91 tests / 605 assertions;
+Inbox tests pass 54 / 133 across eleven files, and inbox/handoff tests pass
+8 / 30. The final joined-failure correction passes 35 tests / 319 assertions across
+main HTTP, Actor inbox and prompt handoff; the above earlier groups overlap. The preceding five-second retirement-fixture timeout is recorded in
+shared history; this complete run passes with explicit fixture budgets. Earlier matrices are
+historical, overlapping evidence. Package typecheck and repository lint pass;
+this internal helper changes no public schema or generated SDK. Shared registry
+files remain byte-identical to the accepted main correction.
+
+Current compat HEAD review, all eight CI checks and merged-tip push CI remain
+the final publication gates. Prior main/compat evidence is not re-dated.

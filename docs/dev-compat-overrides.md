@@ -14,15 +14,15 @@ registry/history commit does not advance either behavior reference below.
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-09
 - Reviewed upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
-- Accepted `main` tip: `540dad7493235cc5c0ce800ed49dfe1cb3a6e2b3`
-- Inherited main behavior: `afa6198588ba7f6e0a0c92623622c10da68837d7`
-- Compat behavior: `ade6a56b2f6a5ab0725077c772db32138edbc89e`
+- Accepted `main` tip: `9d26949e36c178d723a60b5664f7b31162ad64d8`
+- Inherited main behavior: `996ba09e92b9506ce0b09a34525851ffd85af3ec`
+- Compat behavior: `a21254e9482785426bbe3ad58c895f83b2b764b8`
 - Prior compat tip: `f38eecbf31fad26a8ff03dd2a90970be52fa71e5`
-- Main source inheritance merge: `ade6a56b2f6a5ab0725077c772db32138edbc89e`
-- Shared audit commit: `e9b426595c67b269c8fafa0555145f6da21fc1dd`
-- Inherited bundled guidance content: `afa6198588ba7f6e0a0c92623622c10da68837d7`
-- Tested local preview: `c754793e2bab87cf8f84e1322ce98beded80689c` (inbox provenance correction; later changes are documentation/ancestry only)
-- Publication state: POLICY-02 main PR #92 accepted after current-head Codex review and all eight CI checks; compat inherits the formal merge and awaits its own review and CI.
+- Main source inheritance merge: `a21254e9482785426bbe3ad58c895f83b2b764b8`
+- Shared audit commit: `c5e1a04fa43ad53ba489a79b5418ad2e4fa01f68`
+- Inherited bundled guidance content: `996ba09e92b9506ce0b09a34525851ffd85af3ec`
+- Tested local preview: `9348f3bffecf290af0d7ea294da37f6d97f8480b` (durable inbox wake; later changes are documentation/ancestry only)
+- Publication state: POLICY-02 main PR #92 and correction PR #94 accepted after current-head Codex review and all eight CI checks; compat inherits both and awaits its final review and CI.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -358,6 +358,27 @@ standard SDK/OpenAPI regeneration from resolved sources adds no difference.
 Six ambient selectors are cleared; package preload remains the harness baseline.
 Cross-restart recovery is outside this change.
 
+The POLICY-02 durable-inbox follow-up rearms pending rows after successful or
+failed recovery through the existing Inbox/Runner/Actor lifecycle. It preserves
+the recovered user during execution and does not depend on a live sender wake
+or a manual later prompt. Plugin cancellation (including a subsequent post-hook failure), interruption, disposal and retired receivers do not
+restart execution. Both live and durable wake variants consume each row once. The wake tracks the
+queue tail, and persistent owners recheck it after settling each turn, so a
+provider or runtime failure in the first 100-row batch does not strand later rows.
+Both owners and concurrent followers require observed queue consumption before
+retrying after failure; a failure before consumption does not trigger extra work.
+Compat keeps its inherited Inbox content cap and all existing instance/context
+boundaries. No additional compat delta is introduced by this shared correction.
+
+The preceding compat main HTTP/Actor matrix passes 91 tests / 605 assertions;
+Inbox tests pass 54 / 133 across eleven files, and inbox/handoff tests pass
+8 / 30. The final joined-failure correction passes 35 tests / 319 assertions across
+main HTTP, Actor inbox and prompt handoff; the above earlier groups overlap. The preceding five-second retirement-fixture timeout is recorded in
+shared history; this complete run passes with explicit fixture budgets. Earlier matrices are
+historical, overlapping evidence. Package typecheck and repository lint pass;
+this internal helper changes no public schema or generated SDK. Shared registry
+files remain byte-identical to the accepted main correction.
+
 ## Sync index
 
 | ID | Watch surfaces | Relationship to inherited `main` | Required decision |
@@ -684,6 +705,8 @@ Cross-restart recovery is outside this change.
 
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
 
+- POLICY-02 wake follow-up: Inherit durable-row rearming through the existing receiver lifecycle; keep content caps, frozen context, cancellation and disposal boundaries.
+
 - POLICY-02 review: Preserve monotonic message producers and completed >= created in atomic recovery settlement, alongside metadata-only stale-writer fixes. Frozen catalog, current-turn preflight, checkpoint coverage and continuation provenance remain unchanged.
 
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
@@ -881,6 +904,8 @@ Cross-restart recovery is outside this change.
   same request-aware, active-tool preflight without weakening FD-002 delivery.
 
 ## DC-ACTOR-001 — full-context actor and static-prefix overflow extensions
+
+- POLICY-02 wake follow-up: Inherit durable-row rearming through the existing receiver lifecycle; keep content caps, frozen context, cancellation and disposal boundaries.
 
 - POLICY-02 review: Retain full frozen turnContext and native/active tool snapshots while inheriting broader registered targets, trusted task namespaces and commit ownership. Real actor and HTTP fixtures retain isolated append/replace context coverage.
 
