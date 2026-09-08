@@ -79,16 +79,22 @@ mimo llm-server revoke TOKEN_ID --directory /absolute/project/path
 服务关闭传播取消信号；关闭先停止接收并取消在途工作。`serve` CLI 收到
 SIGINT/SIGTERM 后再清理项目实例；嵌入宿主调用 `Server.stop()` 后仍负责实例生命周期。
 
-聊天图片只支持请求体内的 `data:image/...;base64,...`，每张最多 5 MiB，支持 PNG、
-JPEG、WebP、GIF；远程图片 URL 返回
-400。客户端 `provider_options` 整包返回 400，避免透传参数覆盖授权模型；
+聊天图片支持请求体内的 `data:image/...;base64,...` 和 HTTP(S) `image_url`，每张
+解码后最多 5 MiB，支持 PNG、JPEG、WebP、GIF；全部图片合计最多 25 MiB。
+远程图片在认证、模型范围、图片能力和参数校验之后下载，逐跳检查所有 DNS 结果并
+固定连接到已校验的公网 IP，保留原 Host 与 TLS 主机名校验。最多五次重定向，拒绝
+URL 用户凭据、私网/回环/特殊地址、压缩响应及图片类型不匹配；取消后清理连接。
+下载请求不携带客户端或供应商凭据，SDK 只收到下载后的图片数据。此限制同样适用于
+dev/compat，独立于它的 WebFetch 私网规则。
+
+客户端 `provider_options` 整包返回 400，避免透传参数覆盖授权模型；
 项目配置中的模型选项和显式 `reasoning_effort` 变体仍然有效。其他影响行为但未支持
 的参数也明确拒绝。聊天处理累计 SDK 事件限制为 16 MiB（含事件字段）。
 供应商错误脱敏；未收到
 有效结束事件的流不会被标成正常 `stop`。聊天和音频均不自动重试。
 
 音频后端、格式、预设音色及参数限制见 [音频 API](audio-api.md)。本轮未加入音色
-设计、克隆、Whisper 原生转写供应商适配或额外的远程图片下载器。
+设计、克隆或 Whisper 原生转写供应商适配。
 
 普通 OpenAPI 和生成 SDK 仍不包含这组可选接口；可使用兼容客户端或直接 HTTP
 调用。Node 入口导出 `LLMServerTokens` 供嵌入端显式管理令牌，只有传入
