@@ -54,14 +54,13 @@ export const toolScriptRegistry: {
 // it is not a separately registered tool. StructuredOutput is request-owned.
 export const GPT_TOP_LEVEL_TOOLS = new Set(["exec", "wait", "actor", "question", "plan_exit", "session", "workflow"])
 
-// These controls retain their direct conversation/actor entry points. Nested
+// These controls retain their direct conversation entry points. Nested
 // data, shell, task and skill calls use the same request authority as direct calls.
 export const TOOL_SCRIPT_EXCLUDED = new Set([
   "exec",
   "mcp_tool_search",
   "invalid",
   "question",
-  "actor",
   "plan_exit",
   "session",
   "workflow",

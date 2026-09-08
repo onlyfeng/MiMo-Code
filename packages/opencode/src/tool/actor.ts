@@ -37,6 +37,44 @@ export interface ActorPromptOps {
 
 const id = "actor"
 
+const actorIdRequiredField = z
+  .string()
+  .min(1)
+  .describe(
+    "Actor session id to operate on. Distinct from the user-task IDs (T1, T2, ...) used by the `task` tool.",
+  )
+const statusSchema = z.strictObject({
+  action: z.literal("status"),
+  actor_id: actorIdRequiredField,
+})
+const sendSchema = z.strictObject({
+  action: z.literal("send"),
+  to_session_id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "(optional) Target session ID. Defaults to the current session — useful for sending to subagents in this session.",
+    ),
+  to_actor_id: z
+    .string()
+    .min(1)
+    .describe(
+      "Target actor ID. Use 'main' to send to a session's main agent, or a subagent ID like 'explore-1'.",
+    ),
+  content: z.string().min(1).describe("Message content (plain text). Wrapped in <inbox> for the receiver."),
+  type: z
+    .string()
+    .optional()
+    .describe(
+      "(optional) Message type. Default 'text' is wrapped in <inbox>...</inbox>. 'actor_notification' is passed through verbatim (sender pre-renders).",
+    ),
+})
+
+export const ActorExecParameters = z.strictObject({
+  operation: z.discriminatedUnion("action", [sendSchema, statusSchema]).meta({ type: "object" }),
+})
+
 const MODEL_PARAM_DESCRIPTION =
   "(optional) Model for this subagent: a model group name (e.g. ultra/standard/lite) or a literal provider/model (e.g. mimo-v2.5-pro). Overrides the agent's configured model; defaults to the agent's model, else the parent's. If no model_groups are configured, the tier names resolve to the default model. To discover valid provider/model values (e.g. a vision-capable model for image tasks), run `actor models` (or `actor models --vision`)."
 
@@ -406,13 +444,6 @@ export const ActorTool = Tool.define(
       }
       const subagentTypeEnum = z.enum(spawnableNames as [string, ...string[]])
 
-      const actorIdRequiredField = z
-        .string()
-        .min(1)
-        .describe(
-          "Actor session id to operate on. Distinct from the user-task IDs (T1, T2, ...) used by the `task` tool.",
-        )
-
       const timeoutField = z
         .number()
         .int()
@@ -499,11 +530,6 @@ export const ActorTool = Tool.define(
           ),
       })
 
-      const statusSchema = z.strictObject({
-        action: z.literal("status"),
-        actor_id: actorIdRequiredField,
-      })
-
       const waitSchema = z.strictObject({
         action: z.literal("wait"),
         actor_id: actorIdRequiredField,
@@ -518,30 +544,6 @@ export const ActorTool = Tool.define(
       const cancelSchema = z.strictObject({
         action: z.literal("cancel"),
         actor_id: actorIdRequiredField,
-      })
-
-      const sendSchema = z.strictObject({
-        action: z.literal("send"),
-        to_session_id: z
-          .string()
-          .min(1)
-          .optional()
-          .describe(
-            "(optional) Target session ID. Defaults to the current session — useful for sending to subagents in this session.",
-          ),
-        to_actor_id: z
-          .string()
-          .min(1)
-          .describe(
-            "Target actor ID. Use 'main' to send to a session's main agent, or a subagent ID like 'explore-1'.",
-          ),
-        content: z.string().min(1).describe("Message content (plain text). Wrapped in <inbox> for the receiver."),
-        type: z
-          .string()
-          .optional()
-          .describe(
-            "(optional) Message type. Default 'text' is wrapped in <inbox>...</inbox>. 'actor_notification' is passed through verbatim (sender pre-renders).",
-          ),
       })
 
       const modelsSchema = z.strictObject({
@@ -579,19 +581,38 @@ export const ActorTool = Tool.define(
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
 
-        // When called through exec, subagents may only use `send` to communicate
-        // with the parent. All other actions (spawn, run, cancel, resume, status, wait,
-        // models) are restricted to primary agents. Peer actors have a primary
-        // agent type so they are unaffected by this guard.
+        // Exec exposes only send/status. Resolve the trusted caller independently
+        // of script arguments; a stale agent name cannot become a primary caller.
         if (ctx.extra?.fromExec) {
-          const caller = yield* agent.get(ctx.agent)
-          if (caller?.mode === "subagent" && op.action !== "send") {
+          const callers = (yield* agent.list()).filter((item) => item.name === ctx.agent)
+          const callerActor = ctx.actorID && ctx.actorID !== "main"
+            ? yield* actorRegistry.get(ctx.sessionID, ctx.actorID)
+            : undefined
+          // Registry rows persist the agent config key; Tool.Context carries
+          // its display name, which the user may rename independently.
+          const registeredCaller = callerActor ? yield* agent.get(callerActor.agent) : undefined
+          if (
+            callers.length !== 1 ||
+            (ctx.actorID && ctx.actorID !== "main" && (!callerActor || registeredCaller !== callers[0]))
+          )
+            return yield* Effect.fail(new RecoverableError("Nested actor caller identity is unavailable"))
+          const subagent = callers[0].mode === "subagent" || callerActor?.mode === "subagent"
+          if (subagent && op.action !== "send") {
             return yield* Effect.fail(
               new RecoverableError(
-                `Subagents can only use actor send to communicate with the parent agent. You are running as "${caller.name}"; use actor send with to_actor_id="main" to report progress or findings.`,
+                `Subagents can only use actor send to communicate with the parent agent. You are running as "${ctx.agent}"; use actor send with to_actor_id=${JSON.stringify(callerActor?.parentActorID ?? "main")} to report progress or findings.`,
               ),
             )
           }
+          if (op.action !== "send" && op.action !== "status")
+            return yield* Effect.fail(new RecoverableError("Only actor send/status are available inside exec"))
+          if (subagent && (
+            !callerActor ||
+            op.action !== "send" ||
+            op.to_actor_id !== (callerActor.parentActorID ?? "main") ||
+            (op.to_session_id !== undefined && op.to_session_id !== ctx.sessionID)
+          ))
+            return yield* Effect.fail(new RecoverableError("Nested subagent sends require its registered parent target"))
         }
 
         // Helper: "actor belongs to another session OR doesn't exist" response.
@@ -671,7 +692,7 @@ export const ActorTool = Tool.define(
               receiverSessionID: targetSid,
               receiverActorID: op.to_actor_id,
               senderSessionID: ctx.sessionID,
-              senderActorID: ctx.agent ?? "main",
+              senderActorID: ctx.extra?.fromExec ? ctx.actorID ?? "main" : ctx.agent ?? "main",
               content: op.content,
               ...(op.type !== undefined ? { type: op.type } : {}),
             })

@@ -18,6 +18,9 @@ import { Snapshot } from "@/snapshot"
 import { Command } from "@/command"
 import { Log } from "@/util"
 import { ActorRegistry } from "@/actor/registry"
+import { Actor } from "@/actor/spawn"
+import { NotFoundError } from "@/storage"
+import { InstanceState } from "@/effect"
 import { TaskRegistry } from "@/task/registry"
 import { Task } from "@/task/schema"
 import { Permission } from "@/permission"
@@ -34,6 +37,31 @@ import { jsonRequest, runRequest } from "./trace"
 import { RateLimitMiddleware } from "../../rate-limit"
 
 const log = Log.create({ service: "server" })
+
+// The authenticated session control plane manages its main actor's own children.
+// Peer rows live in their child session; never search unrelated actor transcripts.
+const recoveryActorTarget = Effect.fn("SessionRoutes.recoveryActorTarget")(function* (
+  sessionID: SessionID,
+  actorID: string,
+) {
+  const registry = yield* ActorRegistry.Service
+  const sessions = yield* Session.Service
+  const parent = yield* sessions.get(sessionID)
+  if (parent.directory !== (yield* InstanceState.context).directory)
+    return yield* Effect.fail(new NotFoundError({ message: "Actor recovery target is unavailable" }))
+  const local = yield* registry.get(sessionID, actorID)
+  const target = local ?? (yield* registry.get(SessionID.make(actorID), actorID))
+  if (
+    !target ||
+    target.mode === "main" ||
+    (target.parentActorID ?? "main") !== "main" ||
+    (target.mode === "peer"
+      ? (yield* sessions.get(target.sessionID)).parentID !== sessionID
+      : target.sessionID !== sessionID)
+  )
+    return yield* Effect.fail(new NotFoundError({ message: "Actor recovery target is unavailable" }))
+  return { sessionID: target.sessionID, actorID: target.actorID }
+})
 
 // Cadence of the keep-alive whitespace written on the POST /:sessionID/message
 // stream while a turn is in flight. Matches the 10s SSE heartbeat in
@@ -1011,7 +1039,8 @@ export const SessionRoutes = lazy(() =>
       "/:sessionID/recovery",
       describeRoute({
         summary: "List interrupted turn recovery candidates",
-        description: "Return incomplete main-agent turns that can be resumed without creating a user message.",
+        description:
+          "Return incomplete turns for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Recovery never creates a user message or overrides its task.",
         operationId: "session.recovery",
         responses: {
           200: {
@@ -1034,19 +1063,34 @@ export const SessionRoutes = lazy(() =>
         },
       }),
       validator("param", z.object({ sessionID: SessionID.zod })),
-      validator("query", z.object({})),
-      async (c) =>
-        jsonRequest("SessionRoutes.recovery", c, function* () {
+      validator("query", z.object({ agentID: z.string().min(1).optional() })),
+      async (c) => {
+        if (c.req.query("task_id") !== undefined)
+          return c.json(
+            new NamedError.Unknown({ message: "Recovery uses the persisted task; task_id is not accepted" }).toObject(),
+            400,
+          )
+        return jsonRequest("SessionRoutes.recovery", c, function* () {
           const sessionID = c.req.valid("param").sessionID
+          const agentID = c.req.valid("query").agentID ?? "main"
+          if (agentID !== "main") {
+            const target = yield* recoveryActorTarget(sessionID, agentID)
+            const actor = yield* Actor.Service
+            if (!actor.recovery)
+              return yield* Effect.fail(new NotFoundError({ message: "Actor recovery is unavailable" }))
+            return yield* actor.recovery(target)
+          }
           const svc = yield* SessionPrompt.Service
           return yield* svc.recovery({ sessionID })
-        }),
+        })
+      },
     )
     .post(
       "/:sessionID/turn/:assistantMessageID/resume",
       describeRoute({
         summary: "Resume an interrupted turn",
-        description: "Resume an incomplete main-agent turn without creating another user message.",
+        description:
+          "Resume the specified incomplete turn for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Admission and old-turn settlement finish before 202; the persisted user and task remain authoritative.",
         operationId: "session.resume",
         responses: {
           202: { description: "Resume accepted" },
@@ -1065,12 +1109,35 @@ export const SessionRoutes = lazy(() =>
         z.object({
           directory: z.string().optional(),
           workspace: z.string().optional(),
-          titleLocale: z.string().optional(),
+          titleLocale: z.string().optional().describe("Title locale for main-agent recovery only"),
+          agentID: z.string().min(1).optional(),
         }),
       ),
       async (c) => {
+        if (c.req.query("task_id") !== undefined)
+          return c.json(
+            new NamedError.Unknown({ message: "Recovery uses the persisted task; task_id is not accepted" }).toObject(),
+            400,
+          )
         const params = c.req.valid("param")
         const query = c.req.valid("query")
+        if (query.agentID && query.agentID !== "main") {
+          await runRequest(
+            "SessionRoutes.actorResume.start",
+            c,
+            Effect.gen(function* () {
+              const target = yield* recoveryActorTarget(params.sessionID, query.agentID!)
+              const actor = yield* Actor.Service
+              if (!actor.resume)
+                return yield* Effect.fail(new NotFoundError({ message: "Actor recovery is unavailable" }))
+              // Actor.resume owns completion in its existing lifecycle supervisor.
+              // HTTP only waits for admission; it must not create a second worker
+              // or publish an actor failure as a main-session failure.
+              yield* actor.resume({ ...target, assistantMessageID: params.assistantMessageID, signal: c.req.raw.signal })
+            }),
+          )
+          return c.body(null, 202)
+        }
         const completion = await runRequest(
           "SessionRoutes.resume.start",
           c,

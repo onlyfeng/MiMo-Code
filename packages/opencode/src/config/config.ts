@@ -212,8 +212,13 @@ const InfoSchema = Schema.Struct({
       Schema.String,
       Schema.Union([
         ConfigMCP.Info,
-        // Matches the legacy `{ enabled: false }` form used to disable a server.
-        Schema.Any.annotate({ [ZodOverride]: z.object({ enabled: z.boolean() }).strict() }),
+        // Startup controls can override an imported server without copying its transport.
+        Schema.Any.annotate({
+          [ZodOverride]: z.union([
+            z.object({ enabled: z.boolean(), auto_connect: z.boolean().optional() }).strict(),
+            z.object({ auto_connect: z.boolean(), enabled: z.boolean().optional() }).strict(),
+          ]),
+        }),
       ]),
     ),
   ).annotate({ description: "MCP (Model Context Protocol) server configurations" }),
@@ -774,14 +779,14 @@ export const layer = Layer.effect(
           )
         })
 
-        const mergeClaudeMcp = Effect.fnUntraced(function* (source: string) {
+        const mergeClaudeMcp = Effect.fnUntraced(function* (source: string, overrides: Info["mcp"]) {
           const data = yield* readClaudeConfig(source)
           if (!isRecord(data)) return
           if (!isRecord(data.mcpServers)) return
 
           for (const [name, server] of Object.entries(data.mcpServers)) {
-            const existing = result.mcp?.[name]
-            if (existing && result.mcp_origins?.[name]?.type !== "claude") {
+            const existing = overrides?.[name]
+            if (existing && "type" in existing) {
               log.info(`skipped Claude Code MCP server "${name}"; native opencode MCP with same name already exists.`)
               continue
             }
@@ -792,7 +797,7 @@ export const layer = Layer.effect(
               continue
             }
 
-            const next = ConfigParse.schema(Info, { mcp: { [name]: converted.config } }, source)
+            const next = ConfigParse.schema(Info, { mcp: { [name]: { ...converted.config, ...existing } } }, source)
             result.mcp = {
               ...(result.mcp ?? {}),
               [name]: next.mcp![name],
@@ -974,8 +979,9 @@ export const layer = Layer.effect(
         }
 
         if (!Flag.MIMOCODE_DISABLE_CLAUDE_CODE_MCP) {
-          yield* mergeClaudeMcp(path.join(Global.Path.home, ".claude.json"))
-          yield* mergeClaudeMcp(path.join(ctx.directory, ".claude.json"))
+          const overrides = result.mcp
+          yield* mergeClaudeMcp(path.join(Global.Path.home, ".claude.json"), overrides)
+          yield* mergeClaudeMcp(path.join(ctx.directory, ".claude.json"), overrides)
         }
 
         for (const [name, mode] of Object.entries(result.mode ?? {})) {

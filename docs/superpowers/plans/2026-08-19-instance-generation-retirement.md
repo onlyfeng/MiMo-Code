@@ -1,5 +1,15 @@
 # Instance Generation Retirement Implementation Plan
 
+> **Actor/MCP API amendment (2026-09-08):** The selected integration adds
+> [public actor recovery](../../actor-recovery-api.md) through the existing
+> registered persistent/full actor lifecycle, including controlled peer receivers.
+> It supersedes the earlier main-only public API boundary below, while retaining
+> frozen receiver identity, persisted task provenance and atomic admission.
+> [Nested actor send/status](../../codex-compact-tools.md) uses the existing request
+> authority; [Claude MCP auto-connect](../../claude-mcp-autoconnect.md) requires an
+> explicit per-entry configuration. These extend the listed producers without
+> implementing GenerationLease or completing pending Tasks 1–10.
+
 > **Compact tools amendment (2026-09-08):** [Codex compact tools](../../codex-compact-tools.md) pin the complete request tool pool separately from advertised names, preserve frozen schemas and add child permission receipts plus close/abort/join. This updates exec producers in the inventory; it does not implement GenerationLease or complete Tasks 1–10.
 
 > **Scope amendment (2026-09-07):** Approved audio and model integrations permit

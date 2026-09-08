@@ -2675,13 +2675,14 @@ export class Session2 extends HeyApiClient {
   /**
    * List interrupted turn recovery candidates
    *
-   * Return incomplete main-agent turns that can be resumed without creating a user message.
+   * Return incomplete turns for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Recovery never creates a user message or overrides its task.
    */
   public recovery<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
       directory?: string
       workspace?: string
+      agentID?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2693,6 +2694,7 @@ export class Session2 extends HeyApiClient {
             { in: "path", key: "sessionID" },
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "query", key: "agentID" },
           ],
         },
       ],
@@ -2707,7 +2709,7 @@ export class Session2 extends HeyApiClient {
   /**
    * Resume an interrupted turn
    *
-   * Resume an incomplete main-agent turn without creating another user message.
+   * Resume the specified incomplete turn for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Admission and old-turn settlement finish before 202; the persisted user and task remain authoritative.
    */
   public resume<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2716,6 +2718,7 @@ export class Session2 extends HeyApiClient {
       directory?: string
       workspace?: string
       titleLocale?: string
+      agentID?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2729,6 +2732,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "query", key: "titleLocale" },
+            { in: "query", key: "agentID" },
           ],
         },
       ],

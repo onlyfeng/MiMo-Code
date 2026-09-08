@@ -25,6 +25,7 @@ v0.1.14 的紧凑声明与隐藏工具注册实现，并保留 fork 的权限、
 | 任务、技能、已启用的定时任务      | `tools.task`、`tools.skill`、`tools.skill_search`、`tools.cron`                  |
 | MCP                               | 查询 `ALL_TOOLS`，按实际名称调用 `tools[name](args)`                             |
 | actor 创建、发送、恢复等          | 保留直接 `actor` 工具及其完整合同                                                |
+| actor 消息发送和状态查询          | 也可通过 `exec` 内的 `tools.actor` 组合调用；须已获 actor 工具授权                 |
 | 提问、计划确认、session、workflow | 已启用且获准时保留直接工具                                                       |
 
 `wait` 是上游预留名称，本 fork 没有新增独立 `wait` 工具。结构化输出请求仍单独暴露
@@ -44,8 +45,22 @@ return result.output
 仍表示秒数的计算时间预算；等待工具不消耗计算时间，另有 30 分钟总时限。
 
 每条嵌套 shell 命令仍经过 Bash 的路径、权限和删除确认。TUI 审批显示实际命令。
+嵌套 actor 仅提供 `send/status`，调用者必须具有对应的已注册 actor 身份和目标权限。
+普通 subagent 不会因此自动获得 actor 工具；已获授权的 subagent 仍只能向注册的父 actor 发送消息。
+入站参数及工具钩子修改后的参数都要符合窄接口；不能借脚本或钩子改成创建、取消或恢复。
+使用直接 `actor spawn` 返回的实际 actor ID，例如：
+
+```js
+await tools.actor({
+  operation: { action: "send", to_actor_id: "explore-1", content: "请回报当前进度" },
+})
+return tools.actor({ operation: { action: "status", actor_id: "explore-1" } })
+```
+
+此处始终使用 `operation` 对象，直接 actor 工具配置为 shell 形态时也相同。
 任务和技能等工具同样受进程本次请求的权限、agent/actor 白名单和用户工具开关限制。
-`exec` 结束时先停止接收调用，再取消执行并等待清理完成。
+`exec` 结束时先停止接收调用，再取消执行并等待嵌套调用与脚本虚拟机清理完成。
+外层运行被中断、脚本等待自身未完成的 Promise 时也走相同清理流程。
 
 图片等附件由宿主转发给模型，不穿过脚本的 JSON 返回值；每次 `exec` 最多转发
 8 项附件、总计 10 MiB 编码数据。超额会给出未转发提示。原有 128 KiB 代码、

@@ -1470,10 +1470,9 @@ describe("renderToolScriptDeclarations", () => {
     expect(text).toContain("declare const tools")
   })
 
-  test("exclusion list preserves direct actor and conversation-control entry points", () => {
+  test("exclusion list preserves direct conversation-control entry points", () => {
     for (const id of [
       "question",
-      "actor",
       "plan_exit",
       "exec",
       "mcp_tool_search",
@@ -1644,6 +1643,9 @@ describe("exec MCP dispatch", () => {
     for (const [name, candidate] of [
       ["exec_command", "Exec_Command"],
       ["actor", "Actor"],
+      ["Actor", "Actor"],
+      ["ACTOR", "actor"],
+      ["ac-tor", "a_ctor"],
     ]) {
       let called = false
       const result = await runToolScript(

@@ -4718,10 +4718,18 @@
               "pattern": "^ses.*"
             },
             "required": true
+          },
+          {
+            "in": "query",
+            "name": "agentID",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         ],
         "summary": "List interrupted turn recovery candidates",
-        "description": "Return incomplete main-agent turns that can be resumed without creating a user message.",
+        "description": "Return incomplete turns for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Recovery never creates a user message or overrides its task.",
         "responses": {
           "200": {
             "description": "Recovery candidates",
@@ -4820,11 +4828,20 @@
             "name": "titleLocale",
             "schema": {
               "type": "string"
+            },
+            "description": "Title locale for main-agent recovery only"
+          },
+          {
+            "in": "query",
+            "name": "agentID",
+            "schema": {
+              "type": "string",
+              "minLength": 1
             }
           }
         ],
         "summary": "Resume an interrupted turn",
-        "description": "Resume an incomplete main-agent turn without creating another user message.",
+        "description": "Resume the specified incomplete turn for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Admission and old-turn settlement finish before 202; the persisted user and task remain authoritative.",
         "responses": {
           "202": {
             "description": "Resume accepted"
@@ -15441,6 +15458,10 @@
             "description": "Enable or disable the MCP server on startup",
             "type": "boolean"
           },
+          "auto_connect": {
+            "description": "Connect automatically when the instance starts. Defaults to false for Claude-imported servers and true for native servers. enabled: false takes precedence.",
+            "type": "boolean"
+          },
           "timeout": {
             "description": "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
             "type": "number"
@@ -15486,6 +15507,10 @@
           },
           "enabled": {
             "description": "Enable or disable the MCP server on startup",
+            "type": "boolean"
+          },
+          "auto_connect": {
+            "description": "Connect automatically when the instance starts. Defaults to false for Claude-imported servers and true for native servers. enabled: false takes precedence.",
             "type": "boolean"
           },
           "headers": {
@@ -16141,14 +16166,34 @@
                   ]
                 },
                 {
-                  "type": "object",
-                  "properties": {
-                    "enabled": {
-                      "type": "boolean"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "auto_connect": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["enabled"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "auto_connect": {
+                          "type": "boolean"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["auto_connect"],
+                      "additionalProperties": false
                     }
-                  },
-                  "required": ["enabled"],
-                  "additionalProperties": false
+                  ]
                 }
               ]
             }

@@ -484,17 +484,23 @@ export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
   readonly startPrompt: (input: PromptInput) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, Session.BusyError>
-  readonly recovery: (input: { sessionID: SessionID }) => Effect.Effect<RecoveryCandidate[]>
+  /** Non-main callers must enter through the owning Actor lifecycle. */
+  readonly recovery: (input: {
+    sessionID: SessionID
+    agentID?: string
+    modelIdentity?: string
+  }) => Effect.Effect<RecoveryCandidate[], InstanceType<typeof NotFoundError>>
   readonly startResume: (
     input: ResumeTurnInput,
   ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError>
   readonly resume: (
     input: ResumeTurnInput,
   ) => Effect.Effect<MessageV2.WithParts, InstanceType<typeof NotFoundError> | Session.BusyError>
-  /** Internal actor lifecycle entry; never exposed by HTTP recovery/resume schemas. */
+  /** Internal mechanism; HTTP and tools enter through the owning Actor lifecycle. */
   readonly startActorResume?: (input: {
     sessionID: SessionID
     actorID: string
+    assistantMessageID?: MessageID
     modelIdentity?: string
     validate: Effect.Effect<void, InstanceType<typeof NotFoundError>>
     onAdmitted: Effect.Effect<void>
@@ -3596,9 +3602,35 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return candidates
     })
 
-    const recovery = Effect.fn("SessionPrompt.recovery")(function* (input: { sessionID: SessionID }) {
-      if ((yield* status.get(input.sessionID)).type !== "idle") return []
-      return yield* recoveryCandidates(input.sessionID)
+    const validateActorRecovery = Effect.fn("SessionPrompt.validateActorRecovery")(function* (input: {
+      sessionID: SessionID
+      actorID: string
+      modelIdentity?: string
+    }) {
+      const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.actorID })
+      const user = messages.findLast((message) => message.info.role === "user")?.info
+      if (!input.modelIdentity || user?.role !== "user")
+        return yield* Effect.fail(new NotFoundError({ message: "Actor frozen model identity is unavailable" }))
+      const model = yield* provider
+        .getModel(user.model.providerID, user.model.modelID)
+        .pipe(Effect.catch(() => Effect.fail(new NotFoundError({ message: "Actor frozen model is unavailable" }))))
+      const prompt = yield* sessions.resolvePrompt({ sessionID: input.sessionID })
+      if (prefixModelIdentity(model, prompt.harness) !== input.modelIdentity)
+        return yield* Effect.fail(new NotFoundError({ message: "Actor frozen model identity has changed" }))
+    })
+
+    const recovery: Interface["recovery"] = Effect.fn("SessionPrompt.recovery")(function* (input) {
+      const actorID = input.agentID ?? "main"
+      if (actorID === "main") {
+        if ((yield* status.get(input.sessionID)).type !== "idle") return []
+        return yield* recoveryCandidates(input.sessionID)
+      }
+      const idle = yield* state.assertNotBusy(input.sessionID, actorID).pipe(
+        Effect.match({ onSuccess: () => true, onFailure: () => false }),
+      )
+      if (!idle) return []
+      yield* validateActorRecovery({ ...input, actorID })
+      return yield* recoveryCandidates(input.sessionID, actorID)
     })
 
     const abandonRecoveredAssistant = Effect.fn("SessionPrompt.abandonRecoveredAssistant")(function* (input: {
@@ -6340,19 +6372,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       startResumeTurn({
         ...input,
         resumeIdentity: input.modelIdentity,
-        validate: Effect.gen(function* () {
-          const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.actorID })
-          const user = messages.findLast((message) => message.info.role === "user")?.info
-          if (!input.modelIdentity || user?.role !== "user")
-            return yield* Effect.fail(new NotFoundError({ message: "Actor frozen model identity is unavailable" }))
-          const model = yield* provider
-            .getModel(user.model.providerID, user.model.modelID)
-            .pipe(Effect.catch(() => Effect.fail(new NotFoundError({ message: "Actor frozen model is unavailable" }))))
-          const prompt = yield* sessions.resolvePrompt({ sessionID: input.sessionID })
-          if (prefixModelIdentity(model, prompt.harness) !== input.modelIdentity)
-            return yield* Effect.fail(new NotFoundError({ message: "Actor frozen model identity has changed" }))
-          yield* input.validate
-        }),
+        validate: validateActorRecovery(input).pipe(Effect.andThen(input.validate)),
       })
 
     const resume = Effect.fn("SessionPrompt.resume")(function* (input: ResumeTurnInput) {

@@ -258,6 +258,69 @@ test("skips unsupported Claude Code MCP servers", async () => {
   })
 })
 
+test("Claude MCP startup controls preserve project precedence and native definitions", async () => {
+  await writeClaudeConfig(path.join(Global.Path.home, ".claude.json"), {
+    mcpServers: {
+      selected: { command: "home-server", args: ["home"] },
+      blocked: { command: "home-blocked" },
+      native: { command: "home-shadow" },
+    },
+  })
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        mcp: {
+          selected: { auto_connect: true },
+          blocked: { enabled: false, auto_connect: true },
+          missing: { auto_connect: true },
+          native: { type: "local", command: ["native-server"], auto_connect: false },
+        },
+      })
+      await writeClaudeConfig(path.join(dir, ".claude.json"), {
+        mcpServers: {
+          selected: { command: "project-server", args: ["project"], env: { FIXTURE: "project" } },
+          blocked: { command: "project-blocked" },
+          native: { command: "project-shadow" },
+          untrusted: { command: "claude-opt-in", auto_connect: true },
+        },
+      })
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const config = await load()
+      expect(config.mcp?.selected).toEqual({
+        type: "local",
+        command: ["project-server", "project"],
+        environment: { FIXTURE: "project" },
+        enabled: true,
+        auto_connect: true,
+      })
+      expect(config.mcp?.blocked).toEqual({
+        type: "local",
+        command: ["project-blocked"],
+        enabled: false,
+        auto_connect: true,
+      })
+      expect(config.mcp?.native).toEqual({ type: "local", command: ["native-server"], auto_connect: false })
+      expect(config.mcp?.missing).toEqual({ auto_connect: true })
+      expect(config.mcp?.untrusted).toEqual({ type: "local", command: ["claude-opt-in"], enabled: true })
+      expect(config.mcp_origins?.selected).toEqual({ type: "claude", source: path.join(tmp.path, ".claude.json") })
+      expect(config.mcp_origins?.blocked?.type).toBe("claude")
+      expect(config.mcp_origins?.native?.type).toBe("opencode")
+    },
+  })
+})
+
+test("Claude MCP startup controls require booleans and do not admit incomplete transports", () => {
+  expect(Config.Info.safeParse({ mcp: { selected: { auto_connect: true } } }).success).toBe(true)
+  expect(Config.Info.safeParse({ mcp: { selected: { enabled: false } } }).success).toBe(true)
+  for (const selected of [{ auto_connect: "true" }, {}, { auto_connect: true, command: ["untyped"] }]) {
+    expect(Config.Info.safeParse({ mcp: { selected } }).success).toBe(false)
+  }
+})
+
 test("loads formatter boolean config", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {

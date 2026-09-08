@@ -16,6 +16,7 @@ import { MessageV2 } from "../session/message-v2"
 import { normalizeResult } from "../session/try-best-detector"
 import { evalScript, type HostFn } from "../workflow/sandbox"
 import { toolScriptRegistry, TOOL_SCRIPT_ALIASES, TOOL_SCRIPT_EXCLUDED } from "./tool-script-ref"
+import { ActorExecParameters } from "./actor"
 import type { HarnessMode } from "./gpt"
 import DESCRIPTION from "./tool-script.txt"
 import * as Tool from "./tool"
@@ -43,6 +44,7 @@ const EXEC_PROGRESS_DEBOUNCE_MS = 150
 const TRACE_TAIL_ENTRIES = 20
 const EXEC_COMMAND_DEFAULT_YIELD_TIME_MS = 10_000
 const EXEC_COMMAND_DEFAULT_MAX_OUTPUT_TOKENS = 10_000
+const ACTOR_EXEC_DESCRIPTION = "Send messages or inspect actor status. All other actor operations use the direct actor tool."
 
 const ExecCommandParameters = z.strictObject({
   cmd: z.string().describe("Shell command to execute."),
@@ -113,8 +115,8 @@ export function renderToolScriptDeclarations(defs: Tool.Def[]): string {
   const lines = defs
     .filter((def) => !TOOL_SCRIPT_EXCLUDED.has(def.id) && !aliases.has(def.id))
     .map((def) => {
-      const summary = def.description.split("\n").find((l) => l.trim()) ?? ""
-      const input = schemaToTs(z.toJSONSchema(def.parameters))
+      const summary = def.id === "actor" ? ACTOR_EXEC_DESCRIPTION : def.description.split("\n").find((l) => l.trim()) ?? ""
+      const input = schemaToTs(z.toJSONSchema(def.id === "actor" ? ActorExecParameters : def.parameters))
       return `  /** ${summary.trim().slice(0, 200)} */\n  ${def.id}(input: ${input}): Promise<ToolResult>`
     })
   const aliasLines = Object.entries(TOOL_SCRIPT_ALIASES).flatMap(([alias, target]) => {
@@ -831,6 +833,7 @@ export const ToolScriptTool = Tool.define(
             Object.entries(mcpTools).filter(
               ([id]) =>
                 !byId.has(id) &&
+                ToolCompat.canonical(id) !== "actor" &&
                 !TOOL_SCRIPT_EXCLUDED.has(id) &&
                 !Object.hasOwn(TOOL_SCRIPT_ALIASES, id) &&
                 (!toolWhitelist || toolWhitelist.has(id)) &&
@@ -838,7 +841,10 @@ export const ToolScriptTool = Tool.define(
             ),
           )
           const allTools = [
-            ...[...byId.values()].map((def) => ({ name: def.id, description: def.description })),
+            ...[...byId.values()].map((def) => ({
+              name: def.id,
+              description: def.id === "actor" ? ACTOR_EXEC_DESCRIPTION : def.description,
+            })),
             ...Object.entries(TOOL_SCRIPT_ALIASES).flatMap(([name, target]) => {
               const def = byId.get(target)
               if (!def) return []
@@ -918,6 +924,7 @@ export const ToolScriptTool = Tool.define(
             return Effect.sync(() => nestedAbort.removeEventListener("abort", abort))
           })
           const admittedCalls = new Set<Promise<unknown>>()
+          let evaluation: Promise<unknown> | undefined
           let lifecycleClosed = false
           let closeNestedCallsPromise: Promise<void> | undefined
           const trackCall = <T>(call: Promise<T>) => {
@@ -978,6 +985,10 @@ export const ToolScriptTool = Tool.define(
                 progress.timer = undefined
               }
               await closeNestedCalls()
+              // evalScript owns the guest VM and pump. Abort also wakes a
+              // guest awaiting its own unresolved Promise; join its disposal
+              // before completing this exec's scope.
+              await evaluation?.catch(() => {})
               closeProgress()
               enqueueProgress()
               progress.closed = true
@@ -1003,17 +1014,27 @@ export const ToolScriptTool = Tool.define(
             progress.dirty = true
           }
 
+          // The outer Effect may be interrupted independently of ctx.abort.
+          // Bridge promises own separate fibers, so scope disposal must stop
+          // admission and join them even when no terminal result is produced.
+          yield* Effect.addFinalizer(() => flushProgress())
+
           const callTool: HostFn = (name: unknown, args: unknown) => {
             if (lifecycleClosed || nestedAbort.aborted)
               return Promise.reject(new Error("exec terminated before nested tool started"))
             const id = String(name)
             const alias = TOOL_SCRIPT_ALIASES[id as keyof typeof TOOL_SCRIPT_ALIASES]
             const def = byId.get(alias ?? id)
-            if (TOOL_SCRIPT_EXCLUDED.has(id) || (alias && !def)) return Promise.reject(new Error(`unknown tool: ${id}`))
+            if (
+              TOOL_SCRIPT_EXCLUDED.has(id) ||
+              (alias && !def) ||
+              (ToolCompat.canonical(id) === "actor" && (id !== "actor" || !def))
+            )
+              return Promise.reject(new Error(`unknown tool: ${id}`))
             const mcpID = def ? undefined : ToolCompat.resolveName(id, [...mcpById.keys()])
             const mcpDef = mcpID ? mcpById.get(mcpID) : undefined
             if (!def && !mcpDef) return Promise.reject(new Error(`unknown tool: ${id}`))
-            const toolArgs = id === "exec_command" ? execCommandArgs(args) : args
+            const toolArgs = id === "exec_command" ? execCommandArgs(args) : id === "actor" ? ActorExecParameters.parse(args) : args
             calls++
             if (calls > maxToolCalls)
               return Promise.reject(new Error(`tool call budget exceeded (${maxToolCalls} per execution)`))
@@ -1082,6 +1103,12 @@ export const ToolScriptTool = Tool.define(
                   return input.cancel(beforeOutput.cancelReason || "Tool call cancelled by hook")
                 }
                 subPart.state.input = beforeOutput.args
+                if (def?.id === "actor") {
+                  yield* Effect.try({
+                    try: () => ActorExecParameters.parse(beforeOutput.args),
+                    catch: (error) => new Error(Tool.validationErrorMessage("actor", error)),
+                  })
+                }
                 const output = yield* input.execute(beforeOutput.args)
                 yield* plugin.trigger(
                   "tool.execute.after",
@@ -1294,7 +1321,7 @@ export const ToolScriptTool = Tool.define(
               // with a $.path instead of silently degrading to "[object Object]",
               // and lossy conversions (NaN→null, Map→array, Error→plain object) are
               // reported as warnings. The envelope crosses the boundary as plain JSON.
-              evalScript(
+              evaluation = evalScript(
                 `const ALL_TOOLS = Object.freeze(${JSON.stringify(allTools)}.map(Object.freeze));\n` +
                   GUEST_PRELUDE +
                   "\n" +
@@ -1312,7 +1339,8 @@ return { __undef: __out.value === undefined, json: __out.value === undefined ? "
                   deterministic: false,
                   deadlineMs: WALL_DEADLINE_MS,
                   activeDeadlineMs,
-                  interrupt: () => ctx.abort.aborted,
+                  signal: nestedAbort,
+                  interrupt: () => nestedAbort.aborted,
                 },
               ),
             catch: (err) => (err instanceof Error ? err : new Error(String(err))),
@@ -1377,7 +1405,7 @@ return { __undef: __out.value === undefined, json: __out.value === undefined ? "
             ...(attachments.length ? { attachments } : {}),
             output: `<exec status="completed">\n<return_value>\n${returnedText}\n</return_value>\n${warningsBlock}${logBlock}${traceBlock}${attachmentNotice()}</exec>`,
           }
-        }).pipe(Effect.orDie),
+        }).pipe(Effect.scoped, Effect.orDie),
     }
   }),
 )

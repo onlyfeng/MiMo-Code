@@ -39,8 +39,9 @@ main、已明确取消的 actor，以及已经释放上下文的 ephemeral actor
 准入前取消调用会撤回请求；准入成功后，中断等待者不会提前释放 actor 的运行代，
 停止 actor 仍使用其取消命令。
 
-公开 session recovery/resume HTTP 接口仍只面向 main，不增加 `agentID` 或 `task_id`
-选择器，也不增加 `resumeBackground`。这是一项受限的 actor 能力融合，不表示整个
+公开 session recovery/resume HTTP 接口默认面向 main，也可通过 `agentID` 选择仍符合
+上述约束的 actor；调用方式见 [actor 恢复 API](actor-recovery-api.md)。接口不允许
+`task_id` 替换持久化任务，也不增加 `resumeBackground`。这项融合不表示整个
 [实例代迁移计划](superpowers/plans/2026-08-19-instance-generation-retirement.md)已经完成。
 
 约束登记见 [FC-001](fork-capabilities.md#fc-001--linearized-actor-generations-and-persistent-peer-lifecycle)
