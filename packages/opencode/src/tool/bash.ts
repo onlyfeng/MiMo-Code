@@ -736,9 +736,9 @@ const ask = Effect.fn("BashTool.ask")(function* (ctx: Tool.Context, scan: Scan) 
 // forced-ask: no `allow` rule (not even a broad `"*": allow`) can silently
 // pre-approve it — only an explicit `deny` blocks. `always` is empty because
 // a persisted "allow all deletes" rule is exactly what forced-ask exists to
-// prevent. The delete UI shows the full command, so this ask FULLY replaces
-// the regular bash/external_directory prompts when it fires (see the caller
-// below) — deletion is authorized in a single, unambiguous confirmation.
+// prevent. An explicit reply to the full-command delete UI covers the ordinary
+// Bash/external-directory asks too. Automatic deletion approval covers only the
+// delete, so those ordinary permission checks still have to run.
 const askDelete = Effect.fn("BashTool.askDelete")(function* (ctx: Tool.Context, scan: Scan, command: string) {
   // A single delete confirmation covers the complete command, but cannot
   // override explicit rules for its other Bash or external-directory effects.
@@ -761,12 +761,15 @@ const askDelete = Effect.fn("BashTool.askDelete")(function* (ctx: Tool.Context, 
     })
   }
   const patterns = Array.from(scan.deletes)
-  yield* ctx.ask({
-    permission: "bash_delete",
-    patterns,
-    always: [],
-    metadata: { command, deletes: patterns },
-  })
+  return yield* Permission.withReplyReceipt(
+    "bash_delete",
+    ctx.ask({
+      permission: "bash_delete",
+      patterns,
+      always: [],
+      metadata: { command, deletes: patterns },
+    }),
+  )
 })
 
 function cmd(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
@@ -1294,15 +1297,13 @@ export const BashTool = Tool.define(
               }
               const scan = yield* collect(root, cwd, ps, shell)
               if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
-              // Delete-containing commands are authorized by askDelete alone —
-              // the delete UI shows the full command (including any external
-              // paths it touches), so a separate bash/external_directory
-              // prompt would just be a second confirmation of the same thing.
-              // Only provably temporary targets bypass the delete ask. The
-              // Permission service handles automatic approval after deny checks.
+              // Only an explicit reply to the full command replaces ordinary
+              // asks. Automatic deletion approval cannot authorize its other
+              // effects, and temporary-only deletes still use ordinary checks.
               const skipDeleteAsk = scan.deletes.size === 0 || (yield* tmpOnlyDelete(root, cwd, ps, shell))
               if (!skipDeleteAsk) {
-                yield* askDelete(ctx, scan, params.command)
+                const confirmed = yield* askDelete(ctx, scan, params.command)
+                if (!confirmed) yield* ask(ctx, scan)
               } else {
                 yield* ask(ctx, scan)
               }
