@@ -18,9 +18,9 @@ authority.
 - Last reviewed: 2026-09-08
 - Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
 - Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
+- Main behavior (runtime/tests): `22c5a51099f460cb9b58c064c57c8632e2cd70be`
 - Bundled guidance content: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`
-- Prior fork `main` tip: `3350f0f2ce17501d4d925f5e293f07d809f29f22`
+- Prior fork `main` tip: `d415822c29539a4b6eebeafb59de1b88da18b95c`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -250,6 +250,10 @@ capability audit is recorded in [the model API review](released-model-api-review
   separately for both writer modes, including independently frozen native
   Actor input contracts in warm and cold capture; explicit non-fork writers
   also retain their own resolved model identity when no warm prefix exists.
+- POLICY-04 carrier review: cold capture pins a complete catalog/system/history
+  pair; warm capture reuses the stored layout. Full-context Actors and writers
+  inherit that copied pair, including legacy layout, without rereading a live
+  catalog or expanding frozen native-tool authority. FC-005 owns migration.
 - Upstream relationship: fork extension plus adapted request construction.
 - Watch surfaces: `packages/opencode/src/session/checkpoint.ts`,
   `packages/opencode/src/session/llm-request-prefix.ts`,
@@ -263,7 +267,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   system-prompt suites plus `memory-path-template.test.ts` at the reviewed main
   behavior.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
+  main behavior `22c5a51099f460cb9b58c064c57c8632e2cd70be`.
 - Retirement condition: upstream exposes the same canonical writer, isolated
   child, mode-specific prefix ownership, aligned delta, disabled-checkpoint
   guidance behavior, and stable placeholder resolution only at filesystem-tool
@@ -350,10 +354,19 @@ capability audit is recorded in [the model API review](released-model-api-review
 - Observable contract: skill listing, reminders, search, and loading use the
   same effective permission, agent allowlist, and user tool toggles. Stable
   global discovery runs in a scoped producer that one caller cannot cancel;
-  failures remain retryable and reload invalidates the generation. The model
-  history contains immutable, hash-versioned full catalog snapshots; an
-  unchanged catalog is not duplicated, while a changed catalog appends a new
-  snapshot without rewriting prior turns or weakening permission/tool filters.
+  failures remain retryable and reload invalidates the generation. The
+  authorized catalog is a frozen system-tail block after environment/format
+  and before instruction files. An internal schema-3 snapshot stores canonical
+  text, its SHA-256 content version, and originating user turn ID. Within the
+  same authorized prefix profile, tool continuations, retries, recovery and
+  synthetic continuations reuse that catalog; a later direct user turn may
+  refresh it, including to an explicitly empty catalog. Advancing the message
+  watermark does not change catalog ownership. Loaded skill bodies remain in
+  their existing messages and tool results.
+  Legacy SQL NULL means the old system/messages pair, not an empty catalog.
+  Continuing that old turn preserves its pair; a new direct turn migrates it.
+  New-layout projection suppresses only strictly recognized generated catalog
+  parts, without deleting or rewriting stored history or user quotations.
   Codex routes skill/search invocation through exec with the same validators
   and permission gates. Completed nested skill loads identifiable in retained
   validated records protect the containing exec result from pruning.
@@ -361,28 +374,44 @@ capability audit is recorded in [the model API review](released-model-api-review
   cannot acquire canonical Actor/plan authority by name or expand the frozen
   native Actor contract. FD-006 owns this control boundary; skill matching,
   catalog placement and activation policy are unchanged by this selection.
-- Upstream relationship: upstream discovery is retained with stronger shared
-  permission and producer-lifetime gates.
+- POLICY-04 adoption: selects the system-tail placement from release
+  `2a0eb706e95a77cba34a319e9f11f33f26d4450c` and upstream snapshot
+  `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, while retaining the fork's frozen
+  prefix, permission and legacy-pair boundaries. N=1; the overall upstream
+  baseline is unchanged. See [skill catalog layout](skill-catalog-system-tail.md).
+- Upstream relationship: upstream discovery and catalog placement are retained
+  with stronger shared permission, producer-lifetime and frozen-pair gates.
 - Watch surfaces: `packages/opencode/src/skill/index.ts`,
   `packages/opencode/src/skill/search-access.ts`,
   `packages/opencode/src/session/skill-catalog.ts`,
   `packages/opencode/src/session/message-v2.ts`,
+  `packages/opencode/src/session/llm-request-prefix.ts`,
+  `packages/opencode/src/session/prefix-snapshot.ts`,
+  `packages/opencode/src/session/session.sql.ts`,
+  `packages/opencode/migration/20260908000000_session_prefix_skill_catalog/migration.sql`,
   `packages/opencode/src/tool/skill.ts`,
   `packages/opencode/src/tool/skill-search.ts`,
   `packages/opencode/src/session/observed-tool-parts.ts`,
   `packages/opencode/src/session/compaction.ts`,
   `packages/opencode/src/session/system.ts`, and
   `packages/opencode/src/session/prompt.ts`.
-- Tests/evidence: skill search/description/discovery suites, tool skill/search
-  suites, and versioned prompt skill-command snapshot tests at the reviewed main
-  behavior.
+- Tests/evidence: skill search/description/discovery and tool skill/search
+  suites retain the permission contract. `skill-catalog-system-tail.test.ts`
+  checks actual provider recovery, next-direct-turn migration, same-turn tool
+  continuation, cold capture and compaction; `skill-catalog-capture.test.ts`
+  covers capture freezing. `skill-catalog.test.ts`, `message-v2.test.ts` and
+  `prompt-skill-command-multi.test.ts` cover historical recognition, loaded
+  bodies and filtered system placement. `prefix-snapshot.test.ts` and
+  `test/storage/prefix-skill-catalog-migration.test.ts` cover metadata and real
+  old-database migration. Session tests are under `packages/opencode/test/session/`.
+  Local evidence does not assert publication, exact-head CI or compat acceptance.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
+  main behavior `22c5a51099f460cb9b58c064c57c8632e2cd70be`.
 - Retirement condition: upstream uses one effective permission/tool decision
   across discovery and invocation and provides equivalent retryable,
-  generation-aware producer behavior plus immutable hash-versioned snapshots
-  that append on catalog change without rewriting history; FD-006 remains the
-  tool-authority owner.
+  generation-aware producer behavior plus versioned system-tail snapshots,
+  same-turn freezing and lossless legacy-pair migration without rewriting
+  history; FD-006 remains the tool-authority owner.
 
 ## FC-006 — instance-local plugin memory-write decision
 
@@ -874,6 +903,11 @@ capability audit is recorded in [the model API review](released-model-api-review
   advertised subset. Its file manifest includes retained validated terminal
   nested exec effects within the snapshot budget; these read-only views never
   create tool-execution authority.
+- POLICY-04 carrier review: compaction is the third frozen-prefix consumer.
+  Its history projection uses the layout paired with the selected frozen
+  system, preserving legacy catalog messages or suppressing known generated
+  catalog parts for schema 3. It reuses the stored catalog despite live skill
+  changes; the ratio-only trigger and no-tool summary boundary remain intact.
 - Upstream relationship: adopts upstream's max-context controls and ratio-only
   trigger. The retained fork adaptations concern bounded projection, frozen
   request identity, and no-tool summaries, not extra trigger headroom.
@@ -899,7 +933,7 @@ capability audit is recorded in [the model API review](released-model-api-review
   `compaction-projection.test.ts` and prompt-effect regressions bind the
   projection budget, frozen system/tool bytes, and no-tool summary policy.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `f10c0d83291da9d7721be0e1bceea9925a4d27e5`. The selected trigger
+  main behavior `22c5a51099f460cb9b58c064c57c8632e2cd70be`. The selected trigger
   was additionally compared with release `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
   and upstream `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`; this named-behavior
   adoption does not advance the overall upstream review baseline.
