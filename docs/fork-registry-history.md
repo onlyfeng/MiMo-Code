@@ -2380,3 +2380,63 @@ requires successful CI for the new exact branch tips and fresh remote/ancestry p
   requires the final fork branch tips, successful test/typecheck/lint on each
   exact SHA, selected-baseline ancestry through main to compat, and preservation
   of prior worktrees. Local green runs do not substitute for that proof.
+
+
+## 2026-09-08 MEDIA-DNS-01 image connection fallback
+
+PR #77 feedback identified a first-address-only failure: a hostname could have
+multiple validated public addresses, but an unreachable first address prevented
+using a reachable later one. This is one repair to MEDIA-01, not another adopted
+capability or a new compat override.
+
+| Inventory item | Reviewed behavior | Owner and source |
+| --- | --- | --- |
+| MEDIA-DNS-01 (N=1) | Sequential fallback within the already fully validated public DNS answer set, restricted to explicit refused/unreachable connection errors; TLS, HTTP and body failures remain terminal | FD-004; `packages/opencode/src/llm-server/images.ts` and its image test/fixture at `d5798519cd1227ab4061bd69ef9efc5f483b74d8` |
+
+- Prior main: `85dfc3f2edbd1eca5cf92daa3521a7bcf2027cb5`; current runtime/test
+  behavior: `d5798519cd1227ab4061bd69ef9efc5f483b74d8`. The overall upstream
+  baseline remains `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; bundled guidance
+  content remains `3cb9d8df7d453d8995de22f3242eee4bc81f6e97`. Pure registry/history
+  edits advance neither runtime nor content snapshots.
+- The complete source/test delta is three files: `src/llm-server/images.ts`,
+  `test/llm-server/images.test.ts`, and `test/llm-server/image-fixture.ts`, under
+  `packages/opencode`. All six active FD and sixteen FC were reviewed against
+  this final delta. FD-004 has direct source/evidence overlap; FD-005 and FC-004,
+  FC-007, FC-008, FC-009 and FC-010 have semantic adjacency. FD-001/002/006/009
+  and FC-001/002/003/005/006/011/012/013/014/015/016 have no relevant changed
+  carrier. This is an incremental owner review, not a claim that all owner
+  runtime suites were rerun. Existing dated evidence remains historical.
+- The fallback whitelist is `ECONNREFUSED`, `ENETUNREACH`, `EHOSTUNREACH`, and
+  `EADDRNOTAVAIL`, with absent `syscall` or `syscall: connect`. It excludes
+  reset/timeout and TLS failures. Each attempt retains numeric-address pinning,
+  original Host/SNI, native TLS verification and close-before-next cleanup.
+  Cancellation, per-request deadlines, per-hop public-address validation,
+  redirect count, and media limits remain in force. HTTP responses and body
+  failures do not trigger candidate replay; `sdk.ts` generation `maxRetries: 0`
+  is unchanged. WebFetch private-network policy and the other five adopted model
+  API capabilities are unchanged; voice design/cloning remains excluded.
+- Main focused validation reported 272 pass, 0 fail, 0 skip, 686 assertions
+  across four files in 42.44 seconds; the coordinator independently checked its
+  JUnit counts. Package typecheck passed. Repository lint reported 4,462 warnings
+  and zero errors. The run cleared seven ambient selectors while preserving
+  package-owned preload flags: `MIMOCODE_EXPERIMENTAL`,
+  `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`,
+  `MIMOCODE_CODEX_MODE`, `MIMOCODE_COMPACTION_MAX_CONTEXT`,
+  `MIMOCODE_COMPACTION_TRIGGER_RATIO`, and `MIMOCODE_DISABLE_CHECKPOINT` were
+  unset. These are local results for this source tree,
+  not remote exact-SHA CI evidence.
+- Independent real-socket probes at the final source passed 10/10 on Node
+  v24.16.0 and 10/10 on Bun 1.3.14, with zero failures. They cover refused-first
+  fallback, candidate exhaustion, cancellation at error/close, no replay after
+  a real GET reset or HTTP 500, per-redirect DNS fallback/private rejection,
+  and original Host/SNI TLS success plus hostname-mismatch rejection before
+  any HTTP request. The trusted request seam maps validated public numeric
+  candidates to local temporary closed ports and HTTP/TLS sockets; this is not
+  live public-network availability or IPv6-link evidence.
+- Compat preflight at `14716fe3` confirms images source/tests/fixture equal main
+  and do not overlap its 96-path overlay. All seven DC were reviewed: NET-001,
+  NET-002 and CONTEXT-001 have semantic adjacency; PLATFORM-001, MODEL-001,
+  ACTOR-001 and TUI-001 have no relevant changed carrier. Public image policy
+  must stay identical on both branches; approved private WebFetch and the mocked
+  private-MCP sentinel remain separate. Actual propagation, final overlay checks,
+  remote branch tips and exact-SHA CI remain pending for this repair.

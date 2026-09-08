@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test"
 import { createServer as createTLSServer, type TLSSocket } from "node:tls"
 import { request as httpsRequest } from "node:https"
+import { request as httpRequest } from "node:http"
 import { readFile } from "node:fs/promises"
 import { prepareImages } from "../../src/llm-server/images"
-import { imageBytes, imageFixture, imageSocketFixture } from "./image-fixture"
+import { closedImagePort, imageBytes, imageFixture, imageSocketFixture } from "./image-fixture"
 
 const signal = () => new AbortController().signal
 const url = "http://images.example/pixel.png?signature=public"
@@ -27,6 +28,178 @@ test("downloads through the validated address while preserving Host and omitting
     expect(seen[0].headers["accept-encoding"]).toBe("identity")
     expect(dialed).toMatchObject([{ hostname: "93.184.216.34", port: 80, servername: "images.example", agent: false }])
   }))
+
+test("falls back to another validated address after a refused connection", () =>
+  imageFixture(async ({ transport, seen }) => {
+    const port = await closedImagePort()
+    const dialed: string[] = []
+    let lookups = 0
+    let closed = false
+    const images = await prepareImages([url], signal(), {
+      lookup: async () => {
+        lookups++
+        return [
+          { address: "2606:4700:4700::1111", family: 6 },
+          { address: "93.184.216.34", family: 4 },
+        ]
+      },
+      request(options) {
+        dialed.push(String(options.hostname))
+        if (options.hostname === "2606:4700:4700::1111") {
+          const request = httpRequest({ ...options, hostname: "127.0.0.1", port })
+          request.once("close", () => (closed = true))
+          return request
+        }
+        expect(closed).toBe(true)
+        return transport.request!(options)
+      },
+    })
+    expect(images.get(url)).toEqual({ bytes: imageBytes, mediaType: "image/png" })
+    expect(dialed).toEqual(["2606:4700:4700::1111", "93.184.216.34"])
+    expect(lookups).toBe(1)
+    expect(seen).toHaveLength(1)
+    expect(seen[0].headers.host).toBe("images.example")
+  }))
+
+test("tries each validated address once and sanitizes exhausted connection failures", async () => {
+  const port = await closedImagePort()
+  const dialed: string[] = []
+  let closed = 0
+  await expect(
+    prepareImages([url], signal(), {
+      lookup: async () => [
+        { address: "2606:4700:4700::1111", family: 6 },
+        { address: "93.184.216.34", family: 4 },
+      ],
+      request(options) {
+        dialed.push(String(options.hostname))
+        const request = httpRequest({ ...options, hostname: "127.0.0.1", port })
+        request.once("close", () => closed++)
+        return request
+      },
+    }),
+  ).rejects.toMatchObject({ status: 502, message: "Image download failed" })
+  expect(dialed).toEqual(["2606:4700:4700::1111", "93.184.216.34"])
+  expect(closed).toBe(2)
+})
+
+test.each(["error", "close"])("cancellation during failed address %s prevents another dial", (event) =>
+  imageFixture(async ({ transport, seen }) => {
+    const port = await closedImagePort()
+    const controller = new AbortController()
+    const dialed: string[] = []
+    let closed = false
+    await expect(
+      deadline(
+        prepareImages([url], controller.signal, {
+          lookup: async () => [
+            { address: "2606:4700:4700::1111", family: 6 },
+            { address: "93.184.216.34", family: 4 },
+          ],
+          request(options) {
+            dialed.push(String(options.hostname))
+            if (options.hostname !== "2606:4700:4700::1111") return transport.request!(options)
+            const request = httpRequest({ ...options, hostname: "127.0.0.1", port })
+            request.once(event, () => controller.abort(new DOMException("cancelled", "AbortError")))
+            request.once("close", () => (closed = true))
+            return request
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(dialed).toEqual(["2606:4700:4700::1111"])
+    expect(closed).toBe(true)
+    expect(seen).toHaveLength(0)
+  }),
+)
+
+test("address fallback does not retry a reset after sending the HTTP request", () => {
+  let requests = 0
+  return imageSocketFixture(
+    async (transport) => {
+      const dialed: string[] = []
+      await expect(
+        prepareImages([url], signal(), {
+          ...transport,
+          lookup: async () => [
+            { address: "93.184.216.34", family: 4 },
+            { address: "1.1.1.1", family: 4 },
+          ],
+          request(options) {
+            dialed.push(String(options.hostname))
+            return transport.request!(options)
+          },
+        }),
+      ).rejects.toMatchObject({ status: 502 })
+      expect(dialed).toEqual(["93.184.216.34"])
+      expect(requests).toBe(1)
+    },
+    (socket) => {
+      requests++
+      socket.destroy()
+    },
+  )
+})
+
+test("address fallback does not retry an HTTP failure", () =>
+  imageFixture(
+    async ({ transport, dialed, seen }) => {
+      await expect(
+        prepareImages([url], signal(), {
+          ...transport,
+          lookup: async () => [
+            { address: "93.184.216.34", family: 4 },
+            { address: "1.1.1.1", family: 4 },
+          ],
+        }),
+      ).rejects.toMatchObject({ status: 502 })
+      expect(dialed).toHaveLength(1)
+      expect(seen).toHaveLength(1)
+    },
+    (_, response) => {
+      response.writeHead(503)
+      response.end()
+    },
+  ))
+
+test("redirect targets get their own validated address fallback", () =>
+  imageFixture(
+    async ({ transport, seen }) => {
+      const port = await closedImagePort()
+      const lookups: string[] = []
+      const dialed: string[] = []
+      const images = await prepareImages([url], signal(), {
+        lookup: async (hostname) => {
+          lookups.push(hostname)
+          return hostname === "images.example"
+            ? [{ address: "93.184.216.34", family: 4 }]
+            : [
+                { address: "2606:4700:4700::1111", family: 6 },
+                { address: "1.1.1.1", family: 4 },
+              ]
+        },
+        request(options) {
+          dialed.push(String(options.hostname))
+          return options.hostname === "2606:4700:4700::1111"
+            ? httpRequest({ ...options, hostname: "127.0.0.1", port })
+            : transport.request!(options)
+        },
+      })
+      expect(images.get(url)?.bytes).toEqual(imageBytes)
+      expect(lookups).toEqual(["images.example", "redirect.example"])
+      expect(dialed).toEqual(["93.184.216.34", "2606:4700:4700::1111", "1.1.1.1"])
+      expect(seen.map((request) => request.headers.host)).toEqual(["images.example", "redirect.example"])
+    },
+    (request, response) => {
+      if (request.headers.host === "images.example") {
+        response.writeHead(302, { location: "http://redirect.example/image.png" })
+        response.end()
+        return
+      }
+      response.setHeader("content-type", "image/png")
+      response.end(imageBytes)
+    },
+  ))
 
 test.each([
   "http://127.0.0.1/a",
@@ -131,10 +304,15 @@ test.each([
   { "content-type": "image/png", "content-length": String(5 * 1024 * 1024 + 1) },
 ])("rejects invalid image response headers: %j", (headers) =>
   imageFixture(
-    async ({ transport }) => {
+    async ({ transport, dialed }) => {
+      transport.lookup = async () => [
+        { address: "93.184.216.34", family: 4 },
+        { address: "1.1.1.1", family: 4 },
+      ]
       await expect(prepareImages([url], signal(), transport)).rejects.toMatchObject({
         status: headers["content-length"] ? 413 : 400,
       })
+      expect(dialed.map((options) => options.hostname)).toEqual(["93.184.216.34"])
     },
     (_, response) => {
       response.writeHead(200, headers)
@@ -145,8 +323,13 @@ test.each([
 
 test("rejects content that is not an image despite its MIME", () =>
   imageFixture(
-    async ({ transport }) => {
+    async ({ transport, dialed }) => {
+      transport.lookup = async () => [
+        { address: "93.184.216.34", family: 4 },
+        { address: "1.1.1.1", family: 4 },
+      ]
       await expect(prepareImages([url], signal(), transport)).rejects.toMatchObject({ status: 400 })
+      expect(dialed.map((options) => options.hostname)).toEqual(["93.184.216.34"])
     },
     (_, response) => {
       response.writeHead(200, { "content-type": "image/png" })
@@ -156,8 +339,13 @@ test("rejects content that is not an image despite its MIME", () =>
 
 test("bounds chunked image bytes without relying on Content-Length", () =>
   imageFixture(
-    async ({ transport }) => {
+    async ({ transport, dialed }) => {
+      transport.lookup = async () => [
+        { address: "93.184.216.34", family: 4 },
+        { address: "1.1.1.1", family: 4 },
+      ]
       await expect(prepareImages([url], signal(), transport)).rejects.toMatchObject({ status: 413 })
+      expect(dialed.map((options) => options.hostname)).toEqual(["93.184.216.34"])
     },
     (_, response) => {
       response.writeHead(200, { "content-type": "image/png" })
@@ -274,11 +462,15 @@ test.each(["images.example", "different.example"])(
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
     const address = server.address()
     if (!address || typeof address === "string") throw new Error("Missing TLS fixture port")
+    const dialed: string[] = []
     try {
       const result = prepareImages([`https://${hostname}/image.png`], signal(), {
-        lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+        lookup: async () => [
+          { address: "93.184.216.34", family: 4 },
+          { address: "1.1.1.1", family: 4 },
+        ],
         request(options) {
-          expect(options.hostname).toBe("93.184.216.34")
+          dialed.push(String(options.hostname))
           expect(options.servername).toBe(hostname)
           expect(options.rejectUnauthorized).toBe(true)
           return httpsRequest({ ...options, hostname: "127.0.0.1", port: address.port, ca: cert })
@@ -287,10 +479,12 @@ test.each(["images.example", "different.example"])(
       if (hostname === "images.example") {
         expect((await result).get(`https://${hostname}/image.png`)?.bytes).toEqual(imageBytes)
         expect(names).toEqual(["images.example"])
+        expect(dialed).toEqual(["93.184.216.34"])
         return
       }
       await expect(result).rejects.toMatchObject({ status: 502, message: "Image download failed" })
       expect(names).toHaveLength(0)
+      expect(dialed).toEqual(["93.184.216.34"])
     } finally {
       sockets.forEach((socket) => socket.destroy())
       await new Promise<void>((resolve) => server.close(() => resolve()))
