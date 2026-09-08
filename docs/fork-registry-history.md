@@ -2913,3 +2913,12 @@ refresh and the mock provider system-tail contract. Source merges were clean.
 Bundled guidance snapshot is `85ce2094506417608777ff1c410a3dd070f42551`.
 Publication remains ordered after the preceding policy is accepted on both branches;
 this local inheritance is not evidence of remote acceptance.
+
+### 2026-09-09 POLICY-02 combined correction inheritance
+
+Runtime/test and combined bundled guidance snapshot `47570681da036ca98237f5e06f79f69a1afbf039` contains
+the POLICY-02 recovery/task implementation and the subsequent shared catalog
+and raw TUI authentication corrections. Source inheritance was conflict-free;
+only shared review/history references required reconciliation. The prior
+POLICY-02 runtime validation remains attached to its tested source; inherited
+corrections have their own producer and transport regression evidence.
