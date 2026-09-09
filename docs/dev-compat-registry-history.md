@@ -3476,3 +3476,30 @@ the final publication gates. Prior main/compat evidence is not re-dated.
 - The validation commands unset the seven default-path selectors listed in the shared review. Package preload retains `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`; strict tool-name cases set `MIMOCODE_IGNORE_TOOL_NAME_CASE=false` only. The non-test API child removes preload selectors. Real-provider fixtures use local controlled HTTP endpoints, not production model credentials.
 - Docs/diff consistency checks pass. Seven incoming production files are byte-identical to main; no compat-owned production path, migration, API input, generated output or lockfile changed. No local binary build is claimed.
 - Final publication proof must match the eventual remote SHA to successful test/lint/typecheck runs and prove selected upstream -> main -> compat ancestry. This source/test record is not a substitute for that live check.
+
+## 2026-09-09 specified audio convergence
+
+- Inventory N=1: AUDIO-ALIGN-01, selected upstream `534f32d8` semantics at unchanged
+  baseline `1c13f05105b7c671a3e201b61410ccbfa8acf96e`; no new upstream fetch.
+- Accepted main tip `ab722d0e0c7c65c5109110b08af34a3e2eb47a94`, shared source/tests and bundled content `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`.
+  Direct inheritance merge and compat behavior `a6cd04a5d89c3df54d3f0a3df494540294474fd1`; prior compat tip
+  `6b6a36698c3a66b826586d6d2512cc54bcf6f8a8`. No merge conflicts.
+- All seven DC owners reviewed. AUDIO-ALIGN-01 is inherited unchanged from main;
+  DC-MODEL-001/CONTEXT-001/ACTOR-001 retain request/compaction boundaries, and
+  DC-NET-001/002, DC-PLATFORM-001 and DC-TUI-001 have no changed owned runtime path.
+  No compat-only audio implementation remains or is introduced.
+- Byte comparison confirms the shared API, provider, CLI, media, tests and FD/FC/history
+  records match main. Existing compat API/SDK extensions, TUI voice, MCP sampling,
+  WebFetch policy, lockfile, schema inputs and workflows are unchanged.
+- `bun ci` and package `bun typecheck` pass. The final related matrix passes 579 tests
+  across 20 files, 2223 assertions, zero failures. Includes the shared 565-case matrix
+  and 14 compat-adjacent compaction scope/projection cases. Actual source CLI refuses
+  retired flags; headers-only requests prove removed routes do not wait for bodies.
+- Default validation unsets `MIMOCODE_EXPERIMENTAL`,
+  `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE`,
+  `MIMOCODE_COMPACTION_MAX_CONTEXT`, `MIMOCODE_COMPACTION_TRIGGER_RATIO`,
+  `MIMOCODE_DISABLE_CHECKPOINT`, and `MIMOCODE_IGNORE_TOOL_NAME_CASE`. The package
+  preload retains `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`; the non-test child
+  independently removes its opt-in selectors before production imports.
+- `git diff --check` passes. Final remote-tip equality, exact-SHA CI and ancestry
+  are publication checks, distinct from this source/test record.

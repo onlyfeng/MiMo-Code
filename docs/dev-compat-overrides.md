@@ -8,20 +8,32 @@ Review this registry whenever work targets `dev/compat` or propagates `main`
 into it, including when a listed surface merges without conflicts. A pure
 registry/history commit does not advance either behavior reference below.
 
+## 2026-09-09 specified audio convergence
+
+AUDIO-ALIGN-01 replaces only the audio-retention decision of the earlier full sync.
+Standalone speech/transcription, static audio keys, capability selection and provider
+speech factories retire through the direct main merge. Registry discovery and chat
+input audio are inherited byte-for-byte; all seven DC owners retain their contracts.
+DC-MODEL-001, DC-CONTEXT-001 and DC-ACTOR-001 have request-semantics adjacency, but
+no audio override. TUI voice, MCP sampling, private WebFetch policy, platform fallbacks
+and TUI metadata are unchanged. Historical adoption paragraphs below describe their
+original snapshots; the [audio convergence record](audio-upstream-alignment-2026-09-09.md)
+is authoritative for the current audio boundary.
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-09
 - Reviewed upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
-- Accepted `main` tip: `f4146b1a2feccaa224d7f7c8fde0c826161bdd90`
-- Inherited main behavior: `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`
-- Compat behavior: `ace4085284584c0477f4becae1a825d588c97264`
-- Prior compat tip: `8e4da1a2ebd6e5a8f019da52098707429c08aa8d`
-- Main source inheritance merge: `ace4085284584c0477f4becae1a825d588c97264`
-- Shared audit commit: `f4146b1a2feccaa224d7f7c8fde0c826161bdd90`
-- Inherited bundled guidance content: `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`
-- Publication state: full upstream source propagation is complete locally; final remote-tip CI remains a publication gate. See the 2026-09-09 full-sync entry in the history for local validation.
+- Accepted `main` tip: `ab722d0e0c7c65c5109110b08af34a3e2eb47a94`
+- Inherited main behavior: `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
+- Compat behavior: `a6cd04a5d89c3df54d3f0a3df494540294474fd1`
+- Prior compat tip: `6b6a36698c3a66b826586d6d2512cc54bcf6f8a8`
+- Main source inheritance merge: `a6cd04a5d89c3df54d3f0a3df494540294474fd1`
+- Shared audit commit: `ab722d0e0c7c65c5109110b08af34a3e2eb47a94`
+- Inherited bundled guidance content: `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
+- Publication state: specified audio convergence at the existing upstream baseline; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
