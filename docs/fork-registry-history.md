@@ -3042,3 +3042,10 @@ Both concurrent regressions failed before the fix (main follower executed the
 notification; Actor follower ran twice). The combined main HTTP, Actor inbox
 and prompt handoff matrix passes 34 tests / 311 assertions afterward. Package
 typecheck and lint pass. Earlier full matrices remain source-specific evidence.
+
+## 2026-09-09 full upstream synchronization
+
+- Upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85..1c13f05105b7c671a3e201b61410ccbfa8acf96e`; main behavior `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`.
+- Capability inventory N=6 covers all 43 incoming paths; see [review](upstream-sync-2026-09-09.md).
+- Retain all six FD and sixteen FC owners. FD-004 rejects the chat-only audio retirement as a complete capability; adopt tool case gating, image normalization/BMP conversion, plugin guards and portable README/skill guidance.
+- SDK/OpenAPI and lockfile inputs remain unchanged. Final remote-tip CI is a publication gate, separate from this source review.

@@ -14,18 +14,22 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-08
-- Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
-- Prior reviewed upstream: `ec3f989438d4b1f4e2b2c2044e1ecfc5327f45b7`
-- Main behavior (runtime/tests): `996ba09e92b9506ce0b09a34525851ffd85af3ec`
-- Bundled guidance content: `996ba09e92b9506ce0b09a34525851ffd85af3ec`
-- Prior fork `main` tip: `d415822c29539a4b6eebeafb59de1b88da18b95c`
+- Last reviewed: 2026-09-09
+- Upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
+- Prior reviewed upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
+- Main behavior (runtime/tests): `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`
+- Bundled guidance content: `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`
+- Prior fork `main` tip: `9d26949e36c178d723a60b5664f7b31162ad64d8`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
 the reviewed runtime/test tree; bundled guidance has a separate content snapshot.
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
+
+Full synchronization review: [2026-09-09 capability inventory](upstream-sync-2026-09-09.md).
+All active owners remain; earlier per-owner behavior references remain historical
+where this delta does not change their implementation.
 
 ## Sync index
 
@@ -188,6 +192,12 @@ capability audit is recorded in [the model API review](released-model-api-review
   internally, while explicit HTTP transport receives headers through trusted
   host/worker RPC. Model tokens remain explicitly issued Bearer credentials;
   Basic authentication never grants model access.
+- 2026-09-09 full-sync disposition: upstream `534f32d8` removes standalone
+  audio and capability selection. FD-004 deliberately retains the fork model
+  discovery, speech/transcription, scoped token selection, and provider speech
+  factory. The legacy implicit capability routes and voice design/clone fields
+  remain absent. This rejection covers runtime, CLI, provider interfaces, tests
+  and bundled documentation together; shared chat image normalization is adopted.
 - Upstream relationship: POLICY-03 adopts ordinary TUI listener startup from
   release `2a0eb706e95a77cba34a319e9f11f33f26d4450c` and upstream snapshot
   `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, replacing only the former TUI

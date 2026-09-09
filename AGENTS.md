@@ -16,6 +16,7 @@
 - Prefer automation: execute requested actions without confirmation unless blocked by missing info or safety/irreversibility.
 - Install deps with `bun ci` (= `bun install --frozen-lockfile`) — install per `bun.lock`, don't mutate the lockfile. ⛔ Do NOT use `bun install`/`npm install`.
 - Cloud Agents boot from [.cursor/environment.json](.cursor/environment.json) (owned by FC-014): Bun is preinstalled and a read-only `upstream` remote is preconfigured, so a sync can start with `git fetch upstream` immediately (`git push upstream` is intentionally disabled).
+- Comments, docs, shipped skill content and test assertions use synthetic values, never machine-specific ones — `/tmp/example` for paths, `test/model` for model refs, `feat/example` for branches.
 
 ## Core Focus
 
