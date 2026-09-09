@@ -13,16 +13,15 @@ registry/history commit does not advance either behavior reference below.
 - Status: active
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-09
-- Reviewed upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
-- Accepted `main` tip: `9d26949e36c178d723a60b5664f7b31162ad64d8`
-- Inherited main behavior: `996ba09e92b9506ce0b09a34525851ffd85af3ec`
-- Compat behavior: `a21254e9482785426bbe3ad58c895f83b2b764b8`
-- Prior compat tip: `f38eecbf31fad26a8ff03dd2a90970be52fa71e5`
-- Main source inheritance merge: `a21254e9482785426bbe3ad58c895f83b2b764b8`
-- Shared audit commit: `c5e1a04fa43ad53ba489a79b5418ad2e4fa01f68`
-- Inherited bundled guidance content: `996ba09e92b9506ce0b09a34525851ffd85af3ec`
-- Tested local preview: `9348f3bffecf290af0d7ea294da37f6d97f8480b` (durable inbox wake; later changes are documentation/ancestry only)
-- Publication state: POLICY-02 main PR #92 and correction PR #94 accepted after current-head Codex review and all eight CI checks; compat inherits both and awaits its final review and CI.
+- Reviewed upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
+- Accepted `main` tip: `f4146b1a2feccaa224d7f7c8fde0c826161bdd90`
+- Inherited main behavior: `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`
+- Compat behavior: `ace4085284584c0477f4becae1a825d588c97264`
+- Prior compat tip: `8e4da1a2ebd6e5a8f019da52098707429c08aa8d`
+- Main source inheritance merge: `ace4085284584c0477f4becae1a825d588c97264`
+- Shared audit commit: `f4146b1a2feccaa224d7f7c8fde0c826161bdd90`
+- Inherited bundled guidance content: `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`
+- Publication state: full upstream source propagation is complete locally; final remote-tip CI remains a publication gate. See the 2026-09-09 full-sync entry in the history for local validation.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -393,6 +392,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-NET-001 — approved private-network WebFetch
 
+- 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
+
 - POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
 
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
@@ -473,6 +474,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-NET-002 — RFC1918 remote HTTP(S) MCP reachability
 
+- 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
+
 - POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
 
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
@@ -539,6 +542,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-PLATFORM-001 — restricted-network and Windows ripgrep/archive fallback
 
+- 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
+
 - POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
 
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
@@ -604,6 +609,8 @@ files remain byte-identical to the accepted main correction.
   fail-closed boundaries.
 
 ## DC-MODEL-001 — per-agent MaxMode
+
+- 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
 
 - POLICY-02 review: Inherited recovery query/schema and Session changes preserve MaxMode, retry/status isolation and generated compat APIs. Fresh standard SDK/OpenAPI generation matches the resolved artifacts.
 
@@ -704,6 +711,8 @@ files remain byte-identical to the accepted main correction.
   exists.
 
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
+
+- 2026-09-09 full sync: image normalization is inherited through the existing model transform. Keep bounded replay/error media, active-tool preflight, frozen context and chronology; adapt image fixtures to actual containers. Provider/API/schema inputs and compat SDK operations remain unchanged.
 
 - POLICY-02 wake follow-up: Inherit durable-row rearming through the existing receiver lifecycle; keep content caps, frozen context, cancellation and disposal boundaries.
 
@@ -905,6 +914,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-ACTOR-001 — full-context actor and static-prefix overflow extensions
 
+- 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
+
 - POLICY-02 wake follow-up: Inherit durable-row rearming through the existing receiver lifecycle; keep content caps, frozen context, cancellation and disposal boundaries.
 
 - POLICY-02 review: Retain full frozen turnContext and native/active tool snapshots while inheriting broader registered targets, trusted task namespaces and commit ownership. Real actor and HTTP fixtures retain isolated append/replace context coverage.
@@ -1032,6 +1043,8 @@ files remain byte-identical to the accepted main correction.
   or are retired independently.
 
 ## DC-TUI-001 — request provider/model/variant display
+
+- 2026-09-09 full sync: retain provider/model/variant metadata and titleLocale; the multimodal title test now sends actual PNG/JPEG bytes through the inherited image transform.
 
 - POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
 

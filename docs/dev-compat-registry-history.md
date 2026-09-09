@@ -3456,3 +3456,23 @@ files remain byte-identical to the accepted main correction.
 
 Current compat HEAD review, all eight CI checks and merged-tip push CI remain
 the final publication gates. Prior main/compat evidence is not re-dated.
+
+## 2026-09-09 full upstream sync through 1c13f051
+
+- Upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85..1c13f05105b7c671a3e201b61410ccbfa8acf96e`; accepted main `f4146b1a2feccaa224d7f7c8fde0c826161bdd90`; main behavior `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`; compat behavior `ace4085284584c0477f4becae1a825d588c97264`.
+- The [shared inventory](upstream-sync-2026-09-09.md) has N=6 and covers all 43 upstream paths. All seven DC owners remain active.
+
+| ID | Selected behavior | Main result | Compat result | Decisive evidence |
+| --- | --- | --- | --- | --- |
+| SYNC-01 | Tool-name case control | Adopted | Inherited unchanged | `src/util/tool-compat.ts`, `test/util/tool-compat.test.ts`, nested exec tests |
+| SYNC-02 | Image MIME/BMP conversion | Adopted with existing bounds | Inherited with existing replay/preflight caps | provider image/transform, message/title/read tests, prefix/compaction tests |
+| SYNC-03 | Chat-only audio retirement | Rejected under FD-004 | Same retained model/audio contract | audio/model API, discovery/token and generated-contract tests; shared audio/provider/API source equality |
+| SYNC-04 | Missing catalog/auth protection | Adopted | Inherited unchanged | provider/plugin tests and source equality |
+| SYNC-05 | Portable examples/research guidance | Adopted | Inherited unchanged | AGENTS policy, bundled-skill/system/TUI tests |
+| SYNC-06 | Desktop README/screenshots | Adopted | Inherited alongside compat README content | README asset references and diff inspection |
+
+- Resolved the sole textual conflict by using actual JPEG bytes in the multimodal title fixture. No compat-owned production file changed. Shared FD/FC registries, audio/model/provider implementation, tool-name resolver and `bun.lock` match main; existing generated compat operations remain unchanged.
+- Validation: Bun 1.3.14 `bun ci` with unchanged lockfile; package `bun typecheck` passed; lint 0 errors (4573 reported warnings). Focused matrix 473 passed / 6 files; integration/context matrix 352 passed / 13 files; model/audio/API matrix 438 passed / 15 files; separate audio HTTP suite 16 passed / 1 file, including the non-test default-path child. Total: 1279 passed, 0 failed.
+- The validation commands unset the seven default-path selectors listed in the shared review. Package preload retains `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`; strict tool-name cases set `MIMOCODE_IGNORE_TOOL_NAME_CASE=false` only. The non-test API child removes preload selectors. Real-provider fixtures use local controlled HTTP endpoints, not production model credentials.
+- Docs/diff consistency checks pass. Seven incoming production files are byte-identical to main; no compat-owned production path, migration, API input, generated output or lockfile changed. No local binary build is claimed.
+- Final publication proof must match the eventual remote SHA to successful test/lint/typecheck runs and prove selected upstream -> main -> compat ancestry. This source/test record is not a substitute for that live check.
