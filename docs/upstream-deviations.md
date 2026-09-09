@@ -17,9 +17,9 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-09
 - Upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
 - Prior reviewed upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
-- Main behavior (runtime/tests): `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`
-- Bundled guidance content: `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`
-- Prior fork `main` tip: `9d26949e36c178d723a60b5664f7b31162ad64d8`
+- Main behavior (runtime/tests): `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
+- Bundled guidance content: `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
+- Prior fork `main` tip: `f4146b1a2feccaa224d7f7c8fde0c826161bdd90`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -28,6 +28,7 @@ Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
 Full synchronization review: [2026-09-09 capability inventory](upstream-sync-2026-09-09.md).
+Subsequent specified-change review: [audio convergence](audio-upstream-alignment-2026-09-09.md).
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
 

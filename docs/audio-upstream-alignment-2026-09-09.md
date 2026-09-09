@@ -45,8 +45,24 @@ dev/compat `6b6a36698c3a66b826586d6d2512cc54bcf6f8a8`。
 ## 验证记录
 
 移除端点的回归先在旧实现失败（预期 404，实际 400），然后在新实现通过。
-最终验证结果和源提交由本次发布前审计补齐；远端最终 SHA 的 CI 与祖先关系独立验证，
-不以本地检查替代。测试采用包自有 preload baseline：
+主实现及 bundled 内容提交：`254181bb0ac08dc1fd43c3534efc3405c9c58d6c`。
+
+- `bun ci` 成功，lockfile 不变；包目录 `bun typecheck` 通过。
+- 最终 18 文件矩阵覆盖 565 项：564 通过，1 项新增 CLI 输出文案断言失败。
+  真实 CLI 已正确退出且未启动服务；断言按现有帮助页输出修正后，该用例独立通过
+  （1 pass / 10 assertions）。没有修改 CLI 错误处理以迁就测试。
+- 模型发现按 upstream 字符串顺序排序，追加大小写标识后独立复核 4 项全部通过。
+- 初轮并行检查有两个默认 5 秒超时：单模型 CLI 签发及缺 catalog 的 plugin auth
+  fixture。最终矩阵使用 CI 相同的 `--timeout 120000`，两项均通过；不更改生产逻辑。
+- 仓库 lint：4491 warnings / 0 errors；最后模型发现变更的局部 lint 为 2 warnings /
+  0 errors。未声称 warning-free。独立只读审查发现的旧 audio bootstrap 测试已退休，
+  对应两种取消情形继续由 model bootstrap 测试覆盖；无未解决的重要审查项。
+- `git diff --check`、现行指南链接及已删除模块的全仓引用检查通过。生成 API/SDK、
+  schema/config、workflow 和 lockfile 无变化。未运行新二进制构建。
+- dev/compat 继承及其本地验证写入该分支 DC 登记；最终远端 SHA 的 CI、分支尖端和
+  upstream → main → compat 祖先关系在发布后独立核对，本地结果不替代该证据。
+
+测试采用包自有 preload baseline：
 `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`；默认路径清除 AGENTS 指定的 ambient
 experimental/MCP-search/Codex selectors 及 compaction/checkpoint、tool-name-case selectors。
 隔离的非 test 子进程另清 preload 的 opt-in flags，验证旧静态 key 不会启用 plain serve。

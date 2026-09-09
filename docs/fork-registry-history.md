@@ -3049,3 +3049,17 @@ typecheck and lint pass. Earlier full matrices remain source-specific evidence.
 - Capability inventory N=6 covers all 43 incoming paths; see [review](upstream-sync-2026-09-09.md).
 - Retain all six FD and sixteen FC owners. FD-004 rejects the chat-only audio retirement as a complete capability; adopt tool case gating, image normalization/BMP conversion, plugin guards and portable README/skill guidance.
 - SDK/OpenAPI and lockfile inputs remain unchanged. Final remote-tip CI is a publication gate, separate from this source review.
+
+## 2026-09-09 specified audio convergence
+
+- User explicitly replaces the earlier SYNC-03 audio-retention decision with upstream
+  `534f32d8` semantics at the existing `1c13f05105b7c671a3e201b61410ccbfa8acf96e` baseline.
+  No fresh upstream fetch or unrelated source adoption; inventory N=1.
+- AUDIO-ALIGN-01 is owned by shared main. Source/tests and bundled content: `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`.
+  Retire standalone speech/transcription, static-key mode, capability selection and
+  speech factories; keep inline chat audio, scoped tokens and lifecycle safeguards.
+- FD-004 and FC-007/008/011 are reconciled; FC-016 voice remains unchanged. Compat
+  inherits the shared implementation without an audio override. See the complete
+  [scope and validation record](audio-upstream-alignment-2026-09-09.md).
+- API/SDK inputs and lockfile are unchanged. Exact final-tip CI is checked separately
+  after publication; this record identifies source evidence, not an earlier CI SHA.
