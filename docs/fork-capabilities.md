@@ -531,7 +531,7 @@ where this delta does not change their implementation.
   immutable instance-cwd handling. Full output remains archived independently
   of the inline preview; `metadata.truncated` prevents wrapper re-truncation.
 - 2026-09-07 explicit model API review: capability discovery and token-scoped
-  chat/audio admission use a fixed startup directory. Requests cannot select a
+  model API admission use a fixed startup directory. Requests cannot select a
   different directory or workspace; the new Node token export is opt-in host
   functionality. FD-004 remains the canonical listener/auth owner. Coverage:
   `test/server/model-api.test.ts`, shared `server/api-request.ts`, and CLI tests.
@@ -780,7 +780,7 @@ where this delta does not change their implementation.
   downloads create their parent directory and fail closed, and shape/text is a
   valid fallback. Bundled `mimocode-docs` also documents the TUI-owned default
   model API, explicit `serve`/embedding modes and explicit token issuance,
-  bounded public image and inline audio inputs, verified SDK transcription,
+  bounded public image and inline audio inputs, registry model discovery,
   provider option whitelist, explicit model scopes, and independent lifetime
   controls; the content snapshot is recorded separately from runtime/tests.
 - Upstream relationship: fork-facing guidance plus selectively adopted upstream
@@ -800,6 +800,9 @@ where this delta does not change their implementation.
   bundled `mimocode-docs/reference/config.md` under `packages/opencode`.
   Content snapshot: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
   Other selected policies and existing native task/Actor guidance are unchanged.
+- Audio convergence: standalone speech/transcription, static-key mode and capability
+  selection are retired across runtime, CLI and bundled guidance; see
+  [2026-09-09 audio alignment](audio-upstream-alignment-2026-09-09.md).
 - POLICY-03 content carriers: `docs/model-api.md`, `docs/audio-api.md`, and
   bundled `mimocode-docs/reference/model-api.md` and `commands.md` distinguish
   TUI startup, attach reuse, in-memory ordinary API authentication and explicit

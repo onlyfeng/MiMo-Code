@@ -6,7 +6,7 @@ import { Instance } from "@/project/instance"
 import { Filesystem } from "@/util"
 import { LLMServerTokens } from "../../llm-server/tokens"
 import { LLMServerScope } from "../../llm-server/scope"
-import { LLMServerCapability } from "../../llm-server/capability"
+import { LLMServerModels } from "../../llm-server/models"
 
 /** Only explicit none disables a limit; omitted CLI options keep their finite defaults. */
 export function duration(input: string | undefined, fallback: string): number | null {
@@ -73,23 +73,16 @@ const issue = cmd({
       })
       .option("all-models", {
         type: "boolean",
-        describe: "authorize all current and future available models in this directory",
-      })
-      .option("capability", {
-        type: "string",
-        choices: ["chat", "speech", "transcription"] as const,
-        describe: "select one currently usable model by capability",
+        describe: "authorize all current and future registered models in this directory",
       })
       .option("label", { type: "string", describe: "a note shown by llm-server list" })
       .option("json", { type: "boolean", default: false, describe: "print connection details as JSON" }),
   handler: async (args) => {
     if (
-      [args.model !== undefined, args["all-models"] !== undefined, args.capability !== undefined].filter(Boolean)
-        .length !== 1 ||
-      (args["all-models"] !== undefined && args["all-models"] !== true) ||
-      (args.capability !== undefined && typeof args.capability !== "string")
+      [args.model !== undefined, args["all-models"] !== undefined].filter(Boolean).length !== 1 ||
+      (args["all-models"] !== undefined && args["all-models"] !== true)
     )
-      throw new Error("Specify exactly one of --model provider/model (repeatable), --all-models or --capability")
+      throw new Error("Specify exactly one of --model provider/model (repeatable) or --all-models")
     if (
       args.model &&
       (!LLMServerScope.Models.safeParse(args.model).success || args.model.some((model) => model.includes("*")))
@@ -98,21 +91,11 @@ const issue = cmd({
     const expiry = { idleMs: duration(args.ttl, "1h"), maxAgeMs: duration(args["max-age"], "24h") }
     const target = await directory(args.directory)
     const run = async () => {
-      const chosen = await (async () => {
-        if (!args.capability) return undefined
-        const matches = await LLMServerCapability.resolve(args.capability)
-        if (!matches[0]) throw new Error(LLMServerCapability.explain(args.capability, await LLMServerCapability.all()))
-        return {
-          capability: args.capability,
-          best: matches[0],
-          alternatives: matches.slice(1).map((entry) => entry.ref),
-        }
-      })()
-      const models = chosen ? [chosen.best.ref] : args.model
-      if (!chosen && models) {
-        const available = await LLMServerCapability.available(undefined, { type: "models", models })
+      const models = args.model
+      if (models) {
+        const available = await LLMServerModels.available(undefined, { type: "models", models })
         const missing = models.filter((model) => !available.some((entry) => entry.ref === model))
-        if (missing.length) throw new Error(`Model is not available: ${missing.join(", ")}`)
+        if (missing.length) throw new Error(`Model is not configured: ${missing.join(", ")}`)
       }
       const issued = await LLMServerTokens.issue({
         directory: target,
@@ -133,14 +116,6 @@ const issue = cmd({
           ? {
               models: issued.record.scope.models,
               ...(issued.record.scope.models.length === 1 ? { model: issued.record.scope.models[0] } : {}),
-            }
-          : {}),
-        ...(chosen
-          ? {
-              capability: chosen.capability,
-              fallback: !chosen.best.dedicated,
-              alternatives: chosen.alternatives.slice(0, 5),
-              alternatives_total: chosen.alternatives.length,
             }
           : {}),
         renew_argv: invocation([

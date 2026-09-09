@@ -1,5 +1,9 @@
 # 显式模型 API 与能力发现整合计划
 
+> Historical snapshot: dedicated audio endpoints and capability selection described here
+> were superseded by the [2026-09-09 audio convergence](../../audio-upstream-alignment-2026-09-09.md).
+> Use the current Model API guide for supported behavior.
+
 本轮在 `f45bbccddb5d6d532f6ad8ff2acc2c93a625dddb` 上提取 upstream
 `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85` 的两个指定能力；不推进 upstream
 基线。用户已授权整合，已有音频接口继续保留。

@@ -8,6 +8,7 @@ import {
   type LanguageModelUsage,
   type ModelMessage,
 } from "ai"
+import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { Effect } from "effect"
 import { mergeDeep, omit, pipe } from "remeda"
 import { AppRuntime } from "../effect/app-runtime"
@@ -25,21 +26,6 @@ export class SDKError extends Error {
   ) {
     super(message)
   }
-}
-
-/** Resolves factories without generating; callers retain their own admission. */
-export async function resolve(model: Provider.Model, abort: AbortSignal) {
-  return AppRuntime.runPromise(
-    Effect.gen(function* () {
-      const service = yield* Provider.Service
-      return {
-        model,
-        language: yield* service.getLanguage(model),
-        provider: yield* service.getProvider(model.providerID),
-      }
-    }),
-    { signal: abort },
-  )
 }
 
 function variantFor(model: Provider.Model, effort: string) {
@@ -61,11 +47,10 @@ function toolSet(tools: NonNullable<ChatCompletionRequest["tools"]>): ToolSet {
 }
 
 export async function start(input: {
-  resolved: Awaited<ReturnType<typeof resolve>>
+  resolved: { model: Provider.Model; language: LanguageModelV3; provider: Provider.Info }
   settings: Omit<ChatCompletionRequest, "messages" | "model">
   messages: () => ModelMessage[] | Promise<ModelMessage[]>
   abort: AbortSignal
-  outputCap?: number
 }) {
   const model = input.resolved.model
   const resolved = input.resolved
@@ -129,9 +114,6 @@ export async function start(input: {
   const headers = new Headers(model.headers)
   new Headers(hooked.headers).forEach((value, name) => headers.set(name, value))
   const tools = req.tools?.length ? ProviderTransform.tools(toolSet(req.tools), model) : undefined
-  const maxOutputTokens = input.outputCap === undefined ? output : Math.min(output, input.outputCap)
-  if (input.outputCap !== undefined && (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0))
-    throw new SDKError(400, "Invalid transcription output limit")
   const messages = await input.messages()
   abort.throwIfAborted()
   return streamText({
@@ -153,7 +135,7 @@ export async function start(input: {
     temperature: hooked.params.temperature,
     topP: hooked.params.topP,
     topK: hooked.params.topK,
-    maxOutputTokens,
+    maxOutputTokens: output,
     stopSequences: typeof req.stop === "string" ? [req.stop] : req.stop,
     seed: req.seed,
     presencePenalty: req.presence_penalty,

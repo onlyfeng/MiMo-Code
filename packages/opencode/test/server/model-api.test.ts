@@ -10,7 +10,7 @@ import { tmpdir } from "../fixture/fixture"
 
 const password = Flag.MIMOCODE_SERVER_PASSWORD
 const username = Flag.MIMOCODE_SERVER_USERNAME
-const audioKey = "test-audio-only-key-01234567890123456789"
+const legacyAudioKey = "test-audio-only-key-01234567890123456789"
 const audio = Buffer.from("RIFF....WAVEtest-audio")
 
 afterEach(async () => {
@@ -151,12 +151,12 @@ function chat(url: URL, token: string, body: Record<string, unknown> = {}, signa
   )
 }
 
-function headersOnly(url: URL, authorization?: string, length = 1024) {
+function headersOnly(url: URL, authorization?: string, length = 1024, endpoint = "/v1/chat/completions") {
   return new Promise<number>((resolve, reject) => {
     const socket = createConnection({ host: url.hostname, port: Number(url.port) }, () => {
       socket.write(
         [
-          "POST /v1/chat/completions HTTP/1.1",
+          `POST ${endpoint} HTTP/1.1`,
           `Host: ${url.host}`,
           "Content-Type: application/json",
           `Content-Length: ${length}`,
@@ -183,6 +183,17 @@ function within<T>(promise: Promise<T>) {
   const timeout = Promise.withResolvers<never>()
   const timer = setTimeout(() => timeout.reject(new Error("operation failed to settle")), 3000)
   return Promise.race([promise, timeout.promise]).finally(() => clearTimeout(timer))
+}
+
+function deadline<T>(promise: Promise<T>, message: string) {
+  const controller = new AbortController()
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      const timer = setTimeout(() => reject(new Error(message)), 20_000)
+      controller.signal.addEventListener("abort", () => clearTimeout(timer), { once: true })
+    }),
+  ]).finally(() => controller.abort())
 }
 
 describe("explicit model API", () => {
@@ -213,7 +224,7 @@ describe("explicit model API", () => {
       })
       expect(
         (await request(url, "/v1/audio/speech", issued.token, { model: "local/tts", input: "hello" })).status,
-      ).toBe(403)
+      ).toBe(404)
       const form = new FormData()
       form.set("model", "local/asr")
       form.set("file", new File([audio], "test.wav", { type: "audio/wav" }))
@@ -225,7 +236,7 @@ describe("explicit model API", () => {
             body: form,
           })
         ).status,
-      ).toBe(403)
+      ).toBe(404)
       expect((await chat(url, issued.token, { model: "secret/hidden" })).status).toBe(403)
       expect(await Instance.peek(directory)).toBeUndefined()
       expect(seen).toEqual([])
@@ -240,7 +251,7 @@ describe("explicit model API", () => {
     })
   })
 
-  test("explicit all scope serves chat speech and transcription without escaping its directory", async () => {
+  test("explicit all scope serves chat and rejects removed audio endpoints without escaping its directory", async () => {
     await harness(async ({ url, directory, seen }) => {
       const issued = await LLMServerTokens.issue({
         directory,
@@ -268,8 +279,8 @@ describe("explicit model API", () => {
       expect(response.status).toBe(200)
       await response.arrayBuffer()
       const speech = await request(url, "/v1/audio/speech", issued.token, { model: "local/tts", input: "hello" })
-      expect(speech.status).toBe(200)
-      expect(Buffer.from(await speech.arrayBuffer())).toEqual(audio)
+      expect(speech.status).toBe(404)
+      await speech.arrayBuffer()
       const form = new FormData()
       form.set("model", "local/asr")
       form.set("file", new File([audio], "test.wav", { type: "audio/wav" }))
@@ -278,10 +289,10 @@ describe("explicit model API", () => {
         headers: { authorization: `Bearer ${issued.token}` },
         body: form,
       })
-      expect(transcription.status).toBe(200)
-      expect(await transcription.json()).toEqual({ text: "本地模型回复" })
+      expect(transcription.status).toBe(404)
+      await transcription.arrayBuffer()
       expect((await chat(url, issued.token, { model: "local/missing" })).status).toBe(404)
-      expect(seen).toHaveLength(3)
+      expect(seen).toHaveLength(1)
     })
   })
 
@@ -352,24 +363,11 @@ describe("explicit model API", () => {
     )
   })
 
-  test("audio and model modes cannot share ambiguous credentials", async () => {
-    await using tmp = await tmpdir()
-    await expect(
-      Server.listen({
-        hostname: "127.0.0.1",
-        port: 0,
-        audio: { key: audioKey, directory: tmp.path },
-        llm: { directory: tmp.path },
-      }),
-    ).rejects.toThrow("mutually exclusive")
-    expect(await Instance.peek(tmp.path)).toBeUndefined()
-  })
-
   test("missing and unknown tokens are rejected before any body bytes or bootstrap", async () => {
     await harness(async ({ url, directory, seen }) => {
       expect(await headersOnly(url)).toBe(401)
       expect(await headersOnly(url, "Bearer unknown-token")).toBe(401)
-      expect(await headersOnly(url, `Bearer ${audioKey}`)).toBe(401)
+      expect(await headersOnly(url, `Bearer ${legacyAudioKey}`)).toBe(401)
       expect(await Instance.peek(directory)).toBeUndefined()
       expect(seen).toEqual([])
     })
@@ -466,26 +464,19 @@ describe("explicit model API", () => {
     })
   })
 
-  test("audio uses the existing implementation with the same model scope", async () => {
-    await harness(async ({ url, token, issue, seen }) => {
-      expect((await request(url, "/v1/audio/speech", token, { model: "local/tts", input: "hello" })).status).toBe(403)
-      const speech = await request(url, "/v1/audio/speech", await issue("local/tts"), {
-        model: "local/tts",
-        input: "hello",
-      })
-      expect(speech.status).toBe(200)
-      expect(Buffer.from(await speech.arrayBuffer())).toEqual(audio)
-      const form = new FormData()
-      form.set("model", "local/asr")
-      form.set("file", new File([audio], "recording.wav", { type: "audio/wav" }))
-      const transcription = await fetch(new URL("/v1/audio/transcriptions", url), {
-        method: "POST",
-        headers: { authorization: `Bearer ${await issue("local/asr")}`, connection: "close" },
-        body: form,
-      })
-      expect(transcription.status).toBe(200)
-      expect(await transcription.json()).toEqual({ text: "本地模型回复" })
-      expect(seen).toHaveLength(2)
+  test("removed audio endpoints reject matching model tokens before bootstrap", async () => {
+    await harness(async ({ url, token, issue, seen, directory }) => {
+      for (const credential of [token, await issue("local/tts"), await issue("local/asr")]) {
+        for (const endpoint of ["speech", "transcriptions"]) {
+          const response = await request(url, `/v1/audio/${endpoint}`, credential, { model: "local/tts" })
+          expect(response.status).toBe(404)
+        }
+      }
+      for (const endpoint of ["speech", "transcriptions"]) {
+        expect(await headersOnly(url, `Bearer ${token}`, 1024, `/v1/audio/${endpoint}`)).toBe(404)
+      }
+      expect(seen).toHaveLength(0)
+      expect(await Instance.peek(directory)).toBeUndefined()
     })
   })
 
@@ -572,6 +563,47 @@ describe("explicit model API", () => {
       },
     )
   })
+  test("a non-test child keeps audio and models off even when an API key exists in the environment", async () => {
+    await using tmp = await tmpdir({ root: "cwd" })
+    const env: NodeJS.ProcessEnv = { ...process.env, MIMOCODE_AUDIO_API_KEY: legacyAudioKey }
+    for (const name of [
+      "MIMOCODE_EXPERIMENTAL",
+      "MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH",
+      "MIMOCODE_CODEX_MODE",
+      "MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL",
+      "MIMOCODE_EXPERIMENTAL_ORCHESTRATOR",
+      "MIMOCODE_COMPACTION_MAX_CONTEXT",
+      "MIMOCODE_COMPACTION_TRIGGER_RATIO",
+      "MIMOCODE_DISABLE_CHECKPOINT",
+      "MIMOCODE_WORKSPACE_ID",
+      "MIMOCODE_SERVER_PASSWORD",
+      "MIMOCODE_SERVER_USERNAME",
+    ])
+      delete env[name]
+    const child = Bun.spawn({
+      cmd: [process.execPath, path.join(import.meta.dir, "../fixture/model-api-default-child.ts")],
+      cwd: tmp.path,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    try {
+      const [code, stdout, stderr] = await deadline(
+        Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]),
+        "non-test default-path child did not exit",
+      )
+      expect(code, stderr).toBe(0)
+      expect(JSON.parse(stdout)).toEqual({
+        orchestrator: false,
+        apiKeyPresent: true,
+        statuses: [404, 404, 404, 404],
+        initialized: false,
+      })
+    } finally {
+      child.kill()
+      await child.exited
+    }
+  }, 30_000)
 })
 
 test("input audio is authenticated and scoped before chat generation", () =>

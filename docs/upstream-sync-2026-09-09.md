@@ -1,5 +1,9 @@
 # Upstream synchronization — 2026-09-09
 
+> Historical snapshot: dedicated audio endpoints and capability selection described here
+> were superseded by the [2026-09-09 audio convergence](audio-upstream-alignment-2026-09-09.md).
+> Use the current Model API guide for supported behavior.
+
 - Upstream audit range: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85..1c13f05105b7c671a3e201b61410ccbfa8acf96e` (17 commits, 8 first-parent commits, 43 paths).
 - Selected fork main: `9d26949e36c178d723a60b5664f7b31162ad64d8`.
 - Selected compat: `8e4da1a2ebd6e5a8f019da52098707429c08aa8d`; already contains selected main.

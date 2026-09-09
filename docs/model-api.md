@@ -1,8 +1,7 @@
 # 模型 API
 
 在项目目录中启动普通 `mimo` TUI，会为该 TUI 的固定启动目录自动运行一个模型 API
-监听器，默认绑定 `127.0.0.1` 并自动选择可用端口。它复用已有的模型列表、聊天和基础
-音频实现；退出该 TUI 时关闭。`mimo attach` 只连接现有服务，不启动本地监听器。
+监听器，默认绑定 `127.0.0.1` 并自动选择可用端口。它提供模型列表和支持音频输入的聊天接口；退出该 TUI 时关闭。`mimo attach` 只连接现有服务，不启动本地监听器。
 
 无需 TUI 时，仍可执行 `mimo serve --llm-server`，在现有服务端口启用相同接口。
 ACP、嵌入式实例以及不带显式 API 参数的 `serve` 保持默认关闭；供应商凭据或模型令牌
@@ -17,33 +16,28 @@ mimo /absolute/project/path
 # 或者在该项目目录中使用无 TUI 的显式服务
 mimo serve --port 4096 --llm-server
 
-# 终端二：选择同一个项目，按能力签发
-mimo llm-server issue --directory /absolute/project/path --capability chat --json
-
-# 也可明确选择自己的 provider/model
+# 终端二：选择同一个项目，明确选择自己的 provider/model
 mimo llm-server issue --directory /absolute/project/path --model provider/model --ttl 1h --max-age 24h --json
 
 # 有限模型列表：重复 --model
-mimo llm-server issue --directory /absolute/project/path --model provider/chat --model provider/asr --json
+mimo llm-server issue --directory /absolute/project/path --model provider/chat --model provider/other-chat --json
 
-# 显式授权该项目当前及后续生效配置中可服务的全部模型
+# 显式授权该项目当前及后续生效配置中的全部模型
 mimo llm-server issue --directory /absolute/project/path --all-models --json
 ```
 
-`--capability` 接受 `chat`、`speech` 或 `transcription`。候选来自该项目当前生效
-的 provider 和模型配置，按解析后的模型能力及已支持的调用方式筛选。专用模型优先，
-其后优先配置的默认模型，再按模型标识稳定排序。发现不会发送生成请求，因此不证明
-供应商当前在线、账户余额或具体模型支持的所有参数。
+`--model` 与 `--all-models` 必须且只能使用一种。模型发现与 upstream 一致，
+从该项目当前生效、经过插件及配置过滤的 provider registry 中枚举模型，并按标识排序；
+不按语音能力分类，不调用 SDK 工厂或发送生成请求。因此列表表示登记与授权范围，
+不证明聊天传输可用、供应商在线、账户余额或远端参数支持。
 
-重复 `--model`、`--all-models` 与 `--capability` 三种选择方式必须且只能使用一种。
-有限列表接受 1 至 64 个不重复的完整 `provider/model`，签发时逐个检查是否可用，
+有限列表接受 1 至 64 个不重复的完整 `provider/model`，签发时逐个检查是否存在于当前登记，
 拒绝空列表和通配符。`--all-models` 使用显式全部范围，不把当前目录的模型展开成快照。
 
 `--json` 签发结果包含 `api_key`、`scope`、`base_url` 和固定目录/范围/期限的
 `renew_argv`。有限范围继续返回 `models`，仅单模型时返回 `model`；全部范围使用
-`scope:{"type":"all"}`，不伪造空 `models`。按能力签发时还返回备选模型，但它们不自动
-获得授权；续签始终保留实际选中的模型，不重新按能力选模。调用方应使用完整
-`provider/model`；全部范围可从 `GET /v1/models` 查询当前可用列表。找不到该目录对应的
+`scope:{"type":"all"}`，不伪造空 `models`。续签保留实际授权范围。调用方应使用完整
+`provider/model`；全部范围可从 `GET /v1/models` 查询当前登记列表。找不到该目录对应的
 存活监听器时，`base_url` 为 `null`；命令不会自动启动监听器。
 
 地址发现只探测本机地址，使用不携带令牌的监听器身份检查，拒绝旧登记和重定向。
@@ -74,28 +68,26 @@ HTTP transport 的认证头只经受信任的 worker/host 通道传递。
 
 | 接口                            | 行为                                             |
 | ------------------------------- | ------------------------------------------------ |
-| `GET /v1/models`                | 返回该令牌授权且当前配置可服务的模型             |
+| `GET /v1/models`                | 返回该令牌授权且当前有效配置中的模型             |
 | `POST /v1/chat/completions`     | 非流式 JSON 或 SSE，支持文本、图片、输入音频和客户端工具调用协议 |
-| `POST /v1/audio/speech`         | 使用已融合的基础语音合成实现，返回完整音频       |
-| `POST /v1/audio/transcriptions` | 使用已融合的标准 multipart 转写入口              |
 
 把签发结果中的 `api_key` 作为 `Authorization: Bearer ...`，将 `base_url`
 配置为客户端的 API 基址（已经包含 `/v1`）。例如将签发结果保存在调用方的秘密配置
 中，再传入客户端；不要提交令牌到项目文件。
 
 令牌授权**固定项目目录及显式模型范围**。有限范围精确匹配模型标识；全部范围只包含
-该目录当前生效配置中可服务的模型，后续增加或删除模型也随有效配置变化，不扩大到
-其他目录。`--capability` 是选模条件，不是端点权限：如果选中的多模态模型同时支持
-聊天与转写，同一令牌可调用这两种接口。空范围和通配符都不表示全部模型。
+该目录当前生效配置中的模型，后续增加或删除模型也随有效配置变化，不扩大到
+其他目录。空范围和通配符都不表示全部模型。
 HTTP 参数不能切换目录或 workspace。
 
 代理使用项目已有供应商凭据；客户端令牌不会成为供应商请求的认证头。聊天路径沿用
 provider 配置和聊天插件钩子，构造不持久化的请求上下文；只把工具调用返回给客户端，
 不执行 TUI 的工具、MaxMode、actor、checkpoint 或压缩工作流。
 
-现有 `serve --audio-api` 仍使用独立静态音频密钥。它与 `--llm-server` 互斥；
-静态音频密钥不能授权模型代理，模型令牌也不能授权静态密钥模式。两者均不代替
-普通服务 API 的 `MIMOCODE_SERVER_PASSWORD` Basic 认证。
+与 upstream `1c13f051` 保持一致，不提供独立语音合成或转录端点。
+`/v1/audio/speech` 和 `/v1/audio/transcriptions` 在有效模型令牌下也返回 404；
+`serve --audio-api`、`MIMOCODE_AUDIO_API_KEY` 和 `issue --capability` 已移除。
+聊天内 `input_audio`、TUI 语音输入及 MCP sampling 保持各自现有行为。
 
 ## 有效期、查询与撤销
 
@@ -176,7 +168,7 @@ OpenAI Responses、已知不支持音频的适配器及未经验证的适配器�
 音频不代表供应商当前在线或每个模型都能理解该音频。
 
 聊天累计 SDK 输出事件限制为 16 MiB（含事件字段，不重复计算 SDK 回带的输入请求）。
-供应商错误脱敏；未收到有效结束事件的流不会被标成正常 `stop`。聊天和音频均不自动重试。
+供应商错误脱敏；未收到有效结束事件的流不会被标成正常 `stop`。聊天请求不自动重试。
 
 ## 客户端供应商选项
 
@@ -213,12 +205,8 @@ summary 等默认值也会覆盖客户端字段；要独立组合推理强度和
 同时指定 effort，若顶层变体开启 thinking 则按该变体处理。
 
 省略 `provider_options` 或传 `{}` 保持此前的配置和变体合并行为，不自动启用新参数。
-白名单证明本地 SDK 的编码和校验范围，不保证远端接受所有模型与参数组合。音频
-转写和语音合成端点仍拒绝客户端 `provider_options`。其他影响行为但未支持的参数也
-明确拒绝。
-
-音频后端、格式、预设音色及参数限制见 [音频 API](audio-api.md)。本轮未加入音色
-设计、克隆或 Whisper 原生转写供应商适配。
+白名单证明本地 SDK 的编码和校验范围，不保证远端接受所有模型与参数组合。
+其他影响行为但未支持的参数也明确拒绝。旧音频接口的迁移说明见 [音频接口调整](audio-api.md)。
 
 普通 OpenAPI 和生成 SDK 仍不包含这组可选接口；可使用兼容客户端或直接 HTTP
 调用。Node 入口导出 `LLMServerTokens` 供嵌入端显式管理令牌，只有传入

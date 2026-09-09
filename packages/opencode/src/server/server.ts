@@ -17,7 +17,6 @@ import { WorkspaceRouterMiddleware } from "./workspace"
 import { InstanceMiddleware } from "./routes/instance/middleware"
 import { WorkspaceRoutes } from "./routes/control/workspace"
 import { setChildProcessEnv } from "@/util/child-process-env"
-import { createAudio, type AudioOptions } from "./audio"
 import { createModelAPI, type ModelAPIOptions } from "./model-api"
 import { LLMServerTokens } from "@/llm-server/tokens"
 
@@ -37,18 +36,13 @@ export type Listener = {
 
 export const Default = lazy(() => create({}))
 
-function create(opts: { cors?: string[]; audio?: AudioOptions; llm?: ModelAPIOptions }) {
-  if (opts.audio && opts.llm) throw new Error("audio-api and llm-server are mutually exclusive")
+function create(opts: { cors?: string[]; llm?: ModelAPIOptions }) {
   const llm = createModelAPI(opts.llm)
-  const audio = createAudio(opts.audio)
-  const optional = new Hono()
-  if (opts.llm) optional.route("/v1", llm.app)
-  else optional.route("/v1/audio", audio.app).route("/v1", llm.app)
   const app = new Hono()
     .onError(ErrorMiddleware)
     .use(CorsMiddleware(opts))
     .use(LoggerMiddleware)
-    .route("/", optional)
+    .route("/v1", llm.app)
     .use(AuthMiddleware)
     .use(CompressionMiddleware)
     .route("/global", GlobalRoutes())
@@ -62,7 +56,6 @@ function create(opts: { cors?: string[]; audio?: AudioOptions; llm?: ModelAPIOpt
         .use(FenceMiddleware)
         .route("/", InstanceRoutes(runtime.upgradeWebSocket)),
       runtime,
-      audio,
       llm,
     }
   }
@@ -80,7 +73,6 @@ function create(opts: { cors?: string[]; audio?: AudioOptions; llm?: ModelAPIOpt
       )
       .route("/", UIRoutes()),
     runtime,
-    audio,
     llm,
   }
 }
@@ -114,7 +106,6 @@ export async function listen(opts: {
   cors?: string[]
   noAuth?: boolean
   childEnv?: NodeJS.ProcessEnv
-  audio?: AudioOptions
   llm?: ModelAPIOptions
 }): Promise<Listener> {
   if (opts.childEnv) setChildProcessEnv(opts.childEnv)
@@ -167,7 +158,6 @@ export async function listen(opts: {
         if (mdns) MDNS.unpublish()
         // Close optional API admission before socket shutdown and instance retirement.
         await Promise.all([
-          built.audio.close(),
           built.llm.close(),
           opts.llm ? LLMServerTokens.unpublish({ directory: opts.llm.directory, listenerID: built.llm.id }) : undefined,
           server.stop(close),

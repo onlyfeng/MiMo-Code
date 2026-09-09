@@ -8,20 +8,13 @@ import { Instance } from "../../project/instance"
 export const ServeCommand = cmd({
   command: "serve",
   builder: (yargs) =>
-    withNetworkOptions(yargs)
-      .option("llm-server", {
-        type: "boolean",
-        default: false,
-        describe: "enable the model API with directory-scoped temporary tokens",
-      })
-      .option("audio-api", {
-        type: "boolean",
-        default: false,
-        describe: "enable authenticated speech and transcription endpoints (requires MIMOCODE_AUDIO_API_KEY)",
-      }),
+    withNetworkOptions(yargs).option("llm-server", {
+      type: "boolean",
+      default: false,
+      describe: "enable the model API with directory-scoped temporary tokens",
+    }),
   describe: "starts a headless mimocode server",
   handler: async (args) => {
-    if (args["audio-api"] && args["llm-server"]) throw new Error("audio-api and llm-server are mutually exclusive")
     const opts = await resolveNetworkOptions(args)
     const isLoopback = opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
 
@@ -38,14 +31,10 @@ export const ServeCommand = cmd({
     const server = await Server.listen({
       ...opts,
       llm: args["llm-server"] ? { directory: process.cwd() } : undefined,
-      audio: args["audio-api"]
-        ? { key: process.env.MIMOCODE_AUDIO_API_KEY ?? "", directory: process.cwd() }
-        : undefined,
     })
     console.log(`mimocode server listening on http://${server.hostname}:${server.port}`)
 
     if (args["llm-server"]) console.log("Model API enabled at /v1 (temporary Bearer token required)")
-    if (args["audio-api"]) console.log("Audio API enabled at /v1/audio (Bearer authentication required)")
     await new Promise<void>((resolve) => {
       const stop = () => {
         process.off("SIGINT", stop)

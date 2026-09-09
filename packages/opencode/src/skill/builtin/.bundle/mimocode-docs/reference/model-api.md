@@ -18,7 +18,7 @@ mimo /absolute/project/path
 mimo serve --llm-server --port 4096
 
 # In another terminal, issue a token for the same project.
-mimo llm-server issue --directory /absolute/project/path --capability chat --json
+mimo llm-server issue --directory /absolute/project/path --model provider/chat --json
 ```
 
 The JSON result contains `api_key`, `scope`, `base_url`, and `renew_argv`. A finite
@@ -46,31 +46,26 @@ explicit HTTP startup failure exits through cleanup. Shutdown stops model API
 admission and joins pending listener startup before checkpoint/instance teardown,
 then releases automatic credentials. It does not revoke persisted model tokens.
 
-`--capability chat|speech|transcription` selects an available model. It is a
-selection rule, not an endpoint permission: the selected model can serve any of
-its supported API operations. Discovery checks configuration and supported
-transports without sending a generation request; it cannot prove availability,
-credit, or remote acceptance of every parameter.
+Discovery follows upstream: enumerate the current project's post-plugin,
+post-configuration provider registry, filter by token scope, and sort model refs.
+It does not classify audio models, initialize SDK factories, or generate output.
+Registry membership does not prove chat transport support or remote availability.
 
 Choose exactly one selection mode: repeat `--model` for a finite list, use
-`--all-models`, or use `--capability`. Finite lists contain 1–64 unique, explicit
-`provider/model` identifiers checked for availability at issue time. Empty
+`--all-models`. Finite lists contain 1–64 unique, explicit
+`provider/model` identifiers checked for registry membership at issue time. Empty
 lists and wildcard authorization are rejected.
 
 ```sh
-mimo llm-server issue --directory /absolute/project/path --model provider/chat --model provider/asr --json
+mimo llm-server issue --directory /absolute/project/path --model provider/chat --model provider/other-chat --json
 mimo llm-server issue --directory /absolute/project/path --all-models --json
 ```
 
-All-model scope applies to serviceable models in this project's effective
-configuration, including later additions; removals cease to be serviceable.
+All-model scope applies to registered models in this project's effective
+configuration, including later additions; removed models cease to be listed.
 It is not expanded into a snapshot when issued and never grants another
-directory. Query `GET /v1/models` to discover the currently available selection.
-Renewal preserves all repeated models or `--all-models`. Capability selection
-freezes the selected model in `renew_argv`, so renewal does not select a different
-model after configuration changes. Alternatives in the issue output are not
-additional authorized models.
-
+directory. Query `GET /v1/models` to discover the current registry selection.
+Renewal preserves all repeated models or `--all-models`.
 ```sh
 mimo llm-server list --directory /absolute/project/path --json
 mimo llm-server revoke TOKEN_ID --directory /absolute/project/path
@@ -123,10 +118,8 @@ successful verification result, which also exposes both lifetime fields.
 
 | Endpoint                        | Behavior                                                              |
 | ------------------------------- | --------------------------------------------------------------------- |
-| `GET /v1/models`                | Authorized models currently serviceable in the fixed project          |
+| `GET /v1/models`                | Authorized models currently registered in the fixed project          |
 | `POST /v1/chat/completions`     | JSON or SSE; text, images, input audio, and client tool-call protocol |
-| `POST /v1/audio/speech`         | Basic speech synthesis with supported preset voices                   |
-| `POST /v1/audio/transcriptions` | Multipart upload; JSON or plain-text transcript                       |
 
 The chat proxy returns tool calls to the client. It does not execute TUI tools,
 actors, MaxMode, checkpoints, or compaction, and does not persist a chat session.
@@ -168,13 +161,11 @@ WAV/MP3; verified Google/Vertex GenerateContent supports the listed containers.
 Responses and unverified audio transports reject the input before generation.
 An OpenAI/Azure package name alone does not select Chat transport.
 
-The transcription endpoint supports existing raw OpenAI-shaped ASR and verified
-Google/Vertex audio-input, text-output language models through their SDK. It
-accepts an audio file up to 20 MiB and an optional language hint. SDK transcription
-returns only complete, nonblank text; tool calls, truncated output, and missing
-completion events fail the request. It does not implement voice design, voice
-cloning, or a Whisper-native provider adapter. Ordinary speech synthesis remains
-available through its supported preset-voice transports.
+Upstream `1c13f051` removed standalone speech and transcription. This fork
+also returns 404 for `/v1/audio/speech` and `/v1/audio/transcriptions`, even
+with a valid model token. `serve --audio-api`, `MIMOCODE_AUDIO_API_KEY`, and
+`issue --capability` are removed. Chat `input_audio`, TUI voice input, and
+MCP sampling keep their existing behavior.
 
 ## Client provider options
 
@@ -212,8 +203,7 @@ explicit effort unless a top-level variant enables thinking.
 
 Omitting the object or passing `{}` keeps the earlier configuration/variant
 behavior. This whitelist verifies local encoding, not remote model availability
-or acceptance of every combination. Speech and transcription endpoints still
-reject client `provider_options`.
+or acceptance of every combination.
 
 ## Admission and resource limits
 
@@ -222,12 +212,7 @@ Each listener admits at most two concurrent requests with a 120-second request
 deadline. Cancellation and server shutdown reach the underlying request and
 drain its resources before releasing admission. SDK chat output events have a
 16 MiB limit, excluding the SDK's repeated input request body. Provider errors
-are sanitized; chat and audio do not automatically retry.
-
-`mimo serve --audio-api` is a separate, mutually exclusive mode with a static
-audio key. Its key cannot authorize model proxy access, and model tokens cannot
-authorize that static-key mode. Neither replaces generic server Basic auth via
-`MIMOCODE_SERVER_PASSWORD`.
+are sanitized; chat requests do not automatically retry.
 
 Ordinary generated OpenAPI and the JavaScript SDK omit these optional routes.
 Use a compatible client or direct HTTP. The Node entry exports `LLMServerTokens`

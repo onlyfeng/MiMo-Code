@@ -1,5 +1,9 @@
 # 2026-09-08 已确认 upstream 能力融合复核
 
+> Historical snapshot: dedicated audio endpoints and capability selection described here
+> were superseded by the [2026-09-09 audio convergence](audio-upstream-alignment-2026-09-09.md).
+> Use the current Model API guide for supported behavior.
+
 ## 范围与基线
 
 本次接续上一轮明确确认的三项能力：exec 内 Actor 编排、Claude MCP 导入后自动连接、外部 API 指定 Actor 恢复。原 Agent 的未提交实现先备份并复制到独立工作树；原工作树保留。其他新候选仅列出供确认。
