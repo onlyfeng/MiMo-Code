@@ -5,12 +5,10 @@ import { Hono } from "hono"
 import type { Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { Flag } from "@/flag/flag"
-import { RequestError as AudioError } from "@/audio/service"
 import { LLMServerTokens } from "@/llm-server/tokens"
-import { LLMServerCapability } from "@/llm-server/capability"
+import { LLMServerModels } from "@/llm-server/models"
 import { ChatCompletionRequest, unsupported } from "@/llm-server/protocol"
 import { execute, RequestError } from "@/llm-server/completions"
-import { prepareAudio } from "./audio"
 import { inInstance, readBody } from "./api-request"
 
 export type ModelAPIOptions = { directory: string }
@@ -86,7 +84,7 @@ function streamBody(body: ReadableStream<Uint8Array>, controller: AbortControlle
 async function prepare(c: Context, scope: LLMServerScope.Scope, signal: AbortSignal) {
   if (c.req.path === "/v1/models") {
     return async () => {
-      const available = await LLMServerCapability.available(signal, scope)
+      const available = await LLMServerModels.available(signal, scope)
       signal.throwIfAborted()
       return c.json({
         object: "list",
@@ -101,7 +99,6 @@ async function prepare(c: Context, scope: LLMServerScope.Scope, signal: AbortSig
       })
     }
   }
-  if (c.req.path.startsWith("/v1/audio/")) return prepareAudio(c, signal, scope)
   if ((c.req.header("content-type") ?? "").split(";")[0].trim().toLowerCase() !== "application/json")
     return failure(c, 415, "Chat requests require application/json")
   const bytes = await readBody(c.req.raw, signal)
@@ -163,12 +160,7 @@ export function createModelAPI(opts?: ModelAPIOptions) {
         c.req.header("x-mimocode-workspace") !== undefined
       )
         return failure(c, 403, "Model API is restricted to its startup directory")
-      const method =
-        c.req.path === "/v1/models"
-          ? "GET"
-          : ["/v1/chat/completions", "/v1/audio/speech", "/v1/audio/transcriptions"].includes(c.req.path)
-            ? "POST"
-            : undefined
+      const method = c.req.path === "/v1/models" ? "GET" : c.req.path === "/v1/chat/completions" ? "POST" : undefined
       if (!method) return failure(c, 404, "Unknown model API endpoint")
       if (c.req.method !== method) {
         c.header("Allow", method)
@@ -198,7 +190,7 @@ export function createModelAPI(opts?: ModelAPIOptions) {
           )
           return
         }
-        if (error instanceof RequestError || error instanceof AudioError) {
+        if (error instanceof RequestError) {
           result.resolve(failure(c, error.status, error.message, error.type))
           return
         }

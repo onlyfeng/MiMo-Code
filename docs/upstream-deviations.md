@@ -17,9 +17,9 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-09
 - Upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
 - Prior reviewed upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
-- Main behavior (runtime/tests): `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`
-- Bundled guidance content: `f3200d2ab9baa4ea2788b33b11d9236e18b29b71`
-- Prior fork `main` tip: `9d26949e36c178d723a60b5664f7b31162ad64d8`
+- Main behavior (runtime/tests): `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
+- Bundled guidance content: `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
+- Prior fork `main` tip: `f4146b1a2feccaa224d7f7c8fde0c826161bdd90`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -28,6 +28,7 @@ Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
 Full synchronization review: [2026-09-09 capability inventory](upstream-sync-2026-09-09.md).
+Subsequent specified-change review: [audio convergence](audio-upstream-alignment-2026-09-09.md).
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
 
@@ -37,7 +38,7 @@ where this delta does not change their implementation.
 | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | FD-001 | yolo, permission, Bash delete                                         | Adopts startup delete approval; rejects run-driven shared switch mutation                                         | Preserve deny precedence and live invocation isolation                               |
 | FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries               | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
-| FD-004 | TUI listener, model/audio APIs, `/v1`, SDK/OpenAPI | Adopts TUI-owned default listener with explicit model tokens; retains other entrypoint and admission boundaries | Preserve token scope, operator-origin limits, authentication-before-bootstrap and bounded shutdown |
+| FD-004 | TUI listener, chat model API, `/v1`, SDK/OpenAPI | Adopts TUI-owned default listener with explicit model tokens; retains other entrypoint and admission boundaries | Preserve token scope, operator-origin limits, authentication-before-bootstrap and bounded shutdown |
 | FD-005 | model identity, prompt, discovery, tools, retry                       | Adapts inconsistent upstream classification                                                                       | Preserve one resolved identity                                                        |
 | FD-006 | compact Codex declarations and nested execution                       | Adopts compact registration and full authorized nested Actor/interactive composition                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
 | FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
@@ -173,16 +174,14 @@ where this delta does not change their implementation.
   an existing server and does not start a local listener. Plain `serve`, ACP and
   embedded instances retain explicit API enablement; credentials or tokens alone
   do not start a service. `mimo serve --llm-server` uses its existing socket.
-  Both TUI and explicit mode provide discovery, chat and basic audio using
+  Both TUI and explicit mode provide registry discovery and chat with input audio using
   directory-bound tokens with explicit single,
   multiple, or all-model scope. Defaults remain one-hour idle and one-day absolute
   lifetime; either limit may be explicitly disabled, and only disabling both
   produces no expiry. Missing stored lifetime fields never grant permanence.
-  `mimo serve --audio-api` remains the mutually exclusive static-key audio mode.
-  Both authenticate before body/bootstrap, fix the startup directory, bound
+  Requests authenticate before body/bootstrap, fix the startup directory, bound
   bodies/concurrency, propagate cancellation, and close intake before retirement.
-  Neither credential replaces generic API Basic auth. Capability selection
-  chooses a model; it does not grant a separate endpoint capability scope.
+  Model credentials do not replace generic API Basic auth.
 - Authentication origin: worker-generated Basic credentials stay in memory and
   protect ordinary server routes; they do not enter process.env, token storage,
   address records or public output. Existing operator credentials take priority.
@@ -192,25 +191,23 @@ where this delta does not change their implementation.
   internally, while explicit HTTP transport receives headers through trusted
   host/worker RPC. Model tokens remain explicitly issued Bearer credentials;
   Basic authentication never grants model access.
-- 2026-09-09 full-sync disposition: upstream `534f32d8` removes standalone
-  audio and capability selection. FD-004 deliberately retains the fork model
-  discovery, speech/transcription, scoped token selection, and provider speech
-  factory. The legacy implicit capability routes and voice design/clone fields
-  remain absent. This rejection covers runtime, CLI, provider interfaces, tests
-  and bundled documentation together; shared chat image normalization is adopted.
+- 2026-09-09 audio convergence supersedes the initial full-sync rejection:
+  adopt upstream `534f32d8` at the existing `1c13f051` baseline. Remove standalone
+  speech/transcription routes, static-key audio mode, capability-based selection,
+  modality classification and provider speech factories. Discovery enumerates the
+  current registry without SDK probing. Preserve chat input audio, scoped tokens,
+  TUI voice and the listener lifecycle. See [audio alignment](audio-upstream-alignment-2026-09-09.md).
 - Upstream relationship: POLICY-03 adopts ordinary TUI listener startup from
   release `2a0eb706e95a77cba34a319e9f11f33f26d4450c` and upstream snapshot
   `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, replacing only the former TUI
   explicit-start requirement. N=1; the overall upstream baseline is unchanged.
   Residual boundaries cover scoped admission, other entrypoints, and resource
-  ownership. The earlier capability discovery, explicit token management,
-  standard chat proxy and basic audio adoption from `6203ea2e` remains. The selected `v0.1.14` capability set additionally
-  supplies public HTTP(S) image inputs, inline chat audio, Google/Vertex language
-  model SDK transcription, constrained client `provider_options`, explicit
+  ownership. The earlier explicit token management and standard chat proxy adoption from
+  `6203ea2e` remains; audio convergence replaces its dedicated audio behavior. The selected `v0.1.14` capability set additionally
+  supplies public HTTP(S) image inputs, inline chat audio, constrained client `provider_options`, explicit
   multi/all-model scope, and independent lifetime disabling. Empty model lists
   never mean all; legacy v1 keeps its exact scope and finite deadlines on read
-  and migrates atomically only with a real mutation. Discovery and execution
-  share the actual SDK audio transport gate. Voice design and cloning remain absent.
+  and migrates atomically only with a real mutation. Chat input audio retains its actual SDK transport gate. Voice design and cloning remain absent.
 - Media/options boundary: image downloads validate every DNS answer and redirect,
   pin the destination while preserving native TLS hostname checks, and enforce
   5 MiB per image / 25 MiB combined media limits. Within each fully validated
@@ -223,7 +220,6 @@ where this delta does not change their implementation.
   Inline audio requires validated bytes, format and
   SDK transport. Client options use a model/transport-aware whitelist; existing
   provider defaults, selected variant, trusted hooks and zero SDK retries remain.
-  SDK transcription requires a complete, nonempty text result without tool calls.
   Request deadlines, output limits, cancellation and revocation apply even when
   token expiry is disabled.
 - Watch surfaces: `packages/opencode/src/cli/cmd/tui/thread.ts`,
@@ -234,14 +230,14 @@ where this delta does not change their implementation.
   `packages/opencode/src/cli/cmd/llm-server.ts`, `packages/opencode/src/index.ts`,
   `packages/opencode/src/node.ts`,
   `packages/opencode/src/llm-server/`,
-  `packages/opencode/src/audio/`, `packages/opencode/src/provider/provider.ts`,
+  `packages/opencode/src/llm-server/input-audio.ts`, `packages/opencode/src/provider/provider.ts`,
   `packages/opencode/src/cli/cmd/serve.ts`,
-  `packages/opencode/src/server/audio.ts`, `packages/opencode/src/server/model-api.ts`,
+  `packages/opencode/src/server/model-api.ts`,
   `packages/opencode/src/server/api-request.ts`, `packages/opencode/src/server/server.ts`,
   `packages/opencode/src/server/middleware.ts`,
   `packages/opencode/src/server/routes/instance/`, `packages/sdk/openapi.json`,
   `packages/sdk/js/src/v2/gen/`, and `script/generate.ts`.
-- Tests/evidence: instance-server, capability/token, middleware, shutdown, and
+- Tests/evidence: instance-server, model-discovery/token, middleware, shutdown, and
   generated-artifact checks at the reviewed main behavior; the JavaScript SDK
   is regenerated with `./packages/sdk/js/script/build.ts` rather than copied
   from upstream. `packages/opencode/test/server/openapi-refs.test.ts` checks both
@@ -254,14 +250,13 @@ where this delta does not change their implementation.
   `thread.test.ts` separately checks host wiring and startup-failure fallback.
   These package tests do not by themselves prove the actual ordinary CLI TUI
   startup or attach path; POSIX PTY validation has a separate publication record.
-- Audio evidence: `packages/opencode/test/audio/`,
-  `packages/opencode/test/server/audio-api.test.ts`,
-  `packages/opencode/test/server/audio-admission.test.ts`, and its isolated
-  non-test default-off child cover the extracted protocols, provider requests,
-  authentication before body/instance access, fixed directory, bounds and stop.
-  [Audio API](audio-api.md) records the supported backend protocols and explicit
-  exclusions. Ordinary OpenAPI/SDK artifacts remain source-generated and omit
-  these optional protocols. [Model API](model-api.md),
+- Audio evidence: `packages/opencode/test/server/model-api.test.ts` verifies
+  removed routes reject before body/bootstrap even with valid scoped tokens.
+  Its isolated non-test child keeps plain serve disabled despite a legacy static
+  audio key. Chat protocol/completion tests cover retained inline audio and SDK
+  transport validation. [Audio migration](audio-api.md) replaces the retired
+  endpoint guide. Ordinary OpenAPI/SDK artifacts omit these optional protocols.
+  [Model API](model-api.md),
   `packages/opencode/test/llm-server/`, `packages/opencode/test/server/model-api.test.ts`,
   and `packages/opencode/test/server/model-bootstrap-cancel.test.ts` cover discovery,
   token persistence/expiry/revocation, scoped requests, and streaming lifetime.

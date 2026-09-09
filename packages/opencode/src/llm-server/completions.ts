@@ -1,13 +1,13 @@
 import { LLMServerScope } from "./scope"
 import { type FinishReason, type LanguageModelUsage } from "ai"
 import { Effect } from "effect"
-import type { ContentfulStatusCode } from "hono/utils/http-status"
+import { RequestError } from "./error"
 import { AppRuntime } from "../effect/app-runtime"
 import { Provider } from "../provider"
 import * as SDK from "./sdk"
 import { ProviderOptionsError } from "./provider-options"
 import { ImageError, prepareImages, type ImageTransport } from "./images"
-import { audioRejection, inputAudio } from "../audio/input"
+import { audioRejection, inputAudio } from "./input-audio"
 import {
   ChatCompletionRequest,
   unsupported,
@@ -21,17 +21,7 @@ import {
   type EmittedToolCall,
 } from "./protocol"
 
-export class RequestError extends Error {
-  constructor(
-    readonly status: ContentfulStatusCode,
-    message: string,
-    readonly type = "invalid_request_error",
-    readonly code?: string,
-  ) {
-    super(message)
-    this.name = "RequestError"
-  }
-}
+export { RequestError } from "./error"
 
 function failed(error: unknown, abort: AbortSignal): never {
   abort.throwIfAborted()
@@ -52,7 +42,6 @@ async function start(req: ChatCompletionRequest, abort: AbortSignal, imageTransp
     Effect.gen(function* () {
       const provider = yield* Provider.Service
       const model = yield* provider.getModel(parsed.providerID, parsed.modelID)
-      if (Provider.modelKind(model) !== "language") throw new RequestError(400, "This model requires an audio endpoint")
       return {
         model,
         language: yield* provider.getLanguage(model),

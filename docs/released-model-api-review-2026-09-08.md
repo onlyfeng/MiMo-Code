@@ -1,5 +1,9 @@
 # 已发布模型 API 能力融合审查
 
+> Historical snapshot: dedicated audio endpoints and capability selection described here
+> were superseded by the [2026-09-09 audio convergence](audio-upstream-alignment-2026-09-09.md).
+> Use the current Model API guide for supported behavior.
+
 本轮只融合用户批准的 **1 → 2 → 3 → 5 → 6 → 7**，第 4 项音色设计与克隆跳过。
 这是指定能力整合，不是全量 upstream 同步。
 

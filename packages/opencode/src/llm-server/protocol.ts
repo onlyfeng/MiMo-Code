@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import z from "zod"
 import type { FinishReason, LanguageModelUsage, ModelMessage } from "ai"
 import { acceptableImage, DATA_URL, type Image } from "./images"
-import { InputAudio, inputAudio } from "../audio/input"
+import { InputAudio, inputAudio } from "./input-audio"
 
 // Zod's JSON record parser discards __proto__. Reject reserved keys before
 // parsing so an invalid options bag cannot become an accepted empty object.

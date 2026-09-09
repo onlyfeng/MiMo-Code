@@ -1,5 +1,9 @@
 # Instance Generation Retirement Implementation Plan
 
+> Historical snapshot: dedicated audio endpoints and capability selection described here
+> were superseded by the [2026-09-09 audio convergence](../../audio-upstream-alignment-2026-09-09.md).
+> Use the current Model API guide for supported behavior.
+
 > **Actor/MCP API amendment (2026-09-08):** The selected integration adds
 > [public actor recovery](../../actor-recovery-api.md) through the existing
 > registered persistent/full actor lifecycle, including controlled peer receivers.

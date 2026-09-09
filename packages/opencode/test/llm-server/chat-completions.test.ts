@@ -11,8 +11,8 @@ import { Env } from "../../src/env"
 import { Auth } from "../../src/auth"
 import { makeRuntime } from "../../src/effect/run-service"
 import { imageBytes, imageFixture } from "./image-fixture"
-import type { AudioFormat } from "../../src/audio/input"
-import { audioRejection } from "../../src/audio/input"
+import type { AudioFormat } from "../../src/llm-server/input-audio"
+import { audioRejection } from "../../src/llm-server/input-audio"
 import { createAzure } from "@ai-sdk/azure"
 import { createOpenAI } from "@ai-sdk/openai"
 import { Effect } from "effect"
@@ -268,7 +268,6 @@ test("scope is exact and nonempty, and validation precedes any provider request"
     expect(await rejected(request({ model: "local/wire-model" }))).toMatchObject({ status: 404 })
     expect(await rejected(request({ model: "chat" }, ["chat"]))).toMatchObject({ status: 400 })
     expect(await rejected(request({ model: "local/missing" }, ["local/missing"]))).toMatchObject({ status: 404 })
-    expect(await rejected(request({ model: "local/speech" }, ["local/speech"]))).toMatchObject({ status: 400 })
     expect(await rejected(request({ parallel_tool_calls: false }))).toMatchObject({ status: 400 })
     expect(await rejected(request({ reasoning_effort: "impossible" }))).toMatchObject({ status: 400 })
     expect(seen).toHaveLength(0)

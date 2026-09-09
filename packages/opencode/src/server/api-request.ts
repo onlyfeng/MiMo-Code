@@ -1,7 +1,7 @@
 import { AppRuntime } from "@/effect/app-runtime"
 import { Instance } from "@/project/instance"
 import { InstanceBootstrap } from "@/project/bootstrap"
-import { RequestError } from "@/audio/service"
+import { RequestError } from "@/llm-server/error"
 
 const MAX_BODY = 25 * 1024 * 1024
 

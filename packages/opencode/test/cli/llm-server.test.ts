@@ -203,43 +203,33 @@ describe("llm-server CLI", () => {
     ])
   })
 
-  test("resolves a capability once and renews the selected concrete model", async () => {
+  test("the actual source CLI rejects retired audio startup and capability flags", async () => {
+    for (const args of [
+      ["serve", "--audio-api"],
+      ["llm-server", "issue", "--all-models", "--capability", "chat"],
+    ]) {
+      const result = await execute(
+        [process.execPath, "--conditions=browser", path.resolve("src/index.ts"), "--pure", ...args],
+        process.cwd(),
+      )
+      expect(result.code).toBe(1)
+      expect(result.stdout).not.toContain("api_key")
+      expect(result.stdout).not.toContain("server listening")
+      expect(result.stderr).toContain("Options:")
+      expect(result.stderr).not.toMatch(/^\s+--(?:audio-api|capability)\b/m)
+    }
+  }, 60_000)
+
+  test("rejects removed capability selection without issuing credentials", async () => {
     await using tmp = await tmpdir({ config })
-    const result = await run([
-      "issue",
-      "--directory",
-      tmp.path,
-      "--capability",
-      "chat",
-      "--ttl",
-      "30m",
-      "--max-age",
-      "2h",
-      "--json",
-    ])
-    expect(result.code, result.stderr).toBe(0)
-    const output = JSON.parse(result.stdout)
-    expect(output.model).toBe("cli/preferred")
-    expect(output.models).toEqual(["cli/preferred"])
-    expect(output.capability).toBe("chat")
-    expect(output.fallback).toBe(false)
-    expect(output.renew_argv).not.toContain("--capability")
-    await fs.writeFile(path.join(tmp.path, "mimocode.json"), JSON.stringify({ ...config, model: "cli/alternative" }))
-    const renewed = await execute(output.renew_argv, tmp.path)
-    expect(renewed.code, renewed.stderr).toBe(0)
-    expect(JSON.parse(renewed.stdout).models).toEqual(["cli/preferred"])
-    expect(JSON.parse(renewed.stdout).scope).toEqual({ type: "models", models: ["cli/preferred"] })
-    expect(output.renew_argv.slice(-9)).toEqual([
-      "--directory",
-      tmp.path,
-      "--model",
-      "cli/preferred",
-      "--ttl",
-      "1800000ms",
-      "--max-age",
-      "7200000ms",
-      "--json",
-    ])
+    for (const capability of ["chat", "speech", "transcription"]) {
+      const result = await run(["issue", "--directory", tmp.path, "--capability", capability, "--json"])
+      expect(result.code).toBe(1)
+      expect(result.stdout).toBe("")
+    }
+    const listed = await run(["list", "--directory", tmp.path, "--json"])
+    expect(listed.code, listed.stderr).toBe(0)
+    expect(JSON.parse(listed.stdout).tokens).toEqual([])
   }, 60_000)
 
   test("refuses missing conflicting duplicate and unavailable model selectors", async () => {

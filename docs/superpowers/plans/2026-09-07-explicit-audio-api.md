@@ -1,5 +1,9 @@
 # Explicit audio API integration
 
+> Historical snapshot: dedicated audio endpoints and capability selection described here
+> were superseded by the [2026-09-09 audio convergence](../../audio-upstream-alignment-2026-09-09.md).
+> Use the current Model API guide for supported behavior.
+
 The approved scope is upstream's basic speech synthesis and transcription API.
 Source: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`; the audio sources are
 unchanged in upstream main `9061f90b94dfe0339616aada7019d1c2e70709ba`.
