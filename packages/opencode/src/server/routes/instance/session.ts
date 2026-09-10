@@ -370,6 +370,7 @@ export const SessionRoutes = lazy(() =>
             },
           },
           ...errors(400, 404),
+          409: { description: "Title changed by another writer", content: { "application/json": { schema: resolver(Session.TitleConflict) } } },
         },
       }),
       validator(
@@ -381,14 +382,15 @@ export const SessionRoutes = lazy(() =>
       validator(
         "json",
         z.object({
-          title: z.string().optional(),
+          title: Session.SetTitleInput.shape.title.optional(),
+          expectedRevision: Session.Info.shape.titleRevision.optional(),
           permission: Permission.Ruleset.zod.optional(),
           time: z
             .object({
               archived: z.number().optional(),
             })
             .optional(),
-        }),
+        }).strict().refine((input) => input.title === undefined || input.expectedRevision !== undefined, { message: "expectedRevision is required when renaming", path: ["expectedRevision"] }),
       ),
       async (c) =>
         jsonRequest("SessionRoutes.update", c, function* () {
@@ -398,7 +400,7 @@ export const SessionRoutes = lazy(() =>
           const current = yield* session.get(sessionID)
 
           if (updates.title !== undefined) {
-            yield* session.setTitle({ sessionID, title: updates.title })
+            yield* session.setTitle({ sessionID, title: updates.title, expectedRevision: updates.expectedRevision! })
           }
           if (updates.permission !== undefined) {
             yield* session.setPermission({

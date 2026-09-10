@@ -38,6 +38,8 @@ function session(): Session {
     projectID: "project",
     directory: DIRECTORY,
     title: "checkpoint coverage",
+    titleSource: "fallback",
+    titleRevision: 0,
     version: "test",
     time: { created: 1, updated: 1 },
   }
