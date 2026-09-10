@@ -3082,3 +3082,15 @@ name set while preserving the historical fixture and data/restart assertions.
 Runtime and bundled guidance remain `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`.
 Local reproduction changed from failure to 2/2 related migration tests passing,
 with package typecheck passing. New final-tip CI is required on both branches.
+
+## 2026-09-10 — plugin hook objects and Xiaomi chat SDK
+
+- Reviewed upstream `ceecd1c71f88c4840f9fdbdf2450fa331121be22..cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
+  (two non-merge commits; 4 paths, 204 insertions, 44 deletions from the accepted main tip).
+- Prior fork main: `e2f62b39c25566a4c96bdc2bd7ac234248789171`; shared runtime/test snapshot `67abd1f745135c164a0c30d3769f32ddd10823a8`.
+- Bundled guidance content remains `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`; no SDK/OpenAPI or lockfile input changed.
+- Both selected capabilities are reconciled in [the synchronization inventory](upstream-sync-2026-09-10-cb00c280.md). All nine active FD and sixteen active FC owners remain active; no owner retires and no unrelated consolidation is selected.
+- C01 adopts plugin hook-object validation and guarded trigger/config/event loops; FC-006's instance-local `memoryWriteEnabled` injection into `actor.postStop` is preserved on top of the rewritten registration paths.
+- C02 adopts the Xiaomi SDK split — stock `@ai-sdk/openai-compatible` chat, bundled Copilot fork for `responses()` only — so `reasoning_content` reaches the stream as reasoning parts. FD-005 keeps resolved-identity transport selection.
+- The only conflict was two tests appended at the same anchor in `test/provider/provider.test.ts`; both are kept and no assertion was relaxed.
+- Both behaviors were mutation-checked: reverting either fix fails its regression. Pure registry commits do not advance the snapshot above; final branch-tip CI and remote ancestry are checked separately after publication.
