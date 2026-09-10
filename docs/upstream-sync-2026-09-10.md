@@ -6,7 +6,7 @@
 - Starting main: `3fd2245fcf836ff0309f6d1d75332ca32c493625`.
 - Starting compat: `eaf6cdcc54c1cc4e6cf716e766b9a2f59265c162`; already contains starting main.
 - Canonical owner for all selected capabilities: shared main. Compat-only ownership remains in the DC registry.
-- Main source/test and bundled guidance: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`.
+- Main source/test after migration-test reconciliation: `cd6db2dbf4678be6aabf166e4140a5376ad3d5a6`; runtime and bundled guidance remain `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`.
 - Status: main integration validated. Compat-specific source reconciliation and final publication evidence are recorded in its override/history registry.
 
 ## Capability inventory (7)
@@ -37,6 +37,20 @@ All active FD/FC/DC entries were considered against the selected delta. Direct o
 - Lint completed with zero errors (4499 repository warnings); `git diff --check` passed. No broad warning cleanup is included.
 - Independent source review found no blocking defect in the main conflicts or compat owner seams. Its approval/retry checks passed 15 cases; a subsequent frozen-catalog case exceeded its 20-second budget in that combined invocation, then passed alone with 15 assertions in 17.81 seconds. The combined timeout remains a validation limitation; its cause was not established, and the successful isolated matrix is not a claim that every scheduling arrangement passes.
 - The new title HTTP fixture uses `root: "cwd"` so the existing directory admission policy is exercised without an out-of-cwd 403. The server boundary is unchanged.
+
+## Publication-time migration test reconciliation
+
+The first published main candidate `9173219ae94997b398fc1fcd9659c413ee81e2c6`
+passed typecheck, lint, three unit shards and both isolated integration jobs.
+The remaining shard found the existing prefix migration test's fixed
+`entries.length + 1` assumption: the title scope migration makes two pending
+migrations at that boundary (47 journal rows rather than 46). The same failure
+reproduced locally. The test now constructs the same historical database while
+asserting the complete current migration-name set, retaining the original
+schema/data preservation and second-upgrade equality assertions. This changes
+no migration SQL or runtime migration policy. The two related migration files
+passed 2/2 with 16 assertions, and package typecheck passed. This test-only
+change supersedes that failed assertion; final-SHA CI remains a publication gate.
 
 ## Capability results (7)
 
