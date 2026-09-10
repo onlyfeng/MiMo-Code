@@ -646,10 +646,22 @@ where this delta does not change their implementation.
   boundary back. The check runs BEFORE any content inspection, mirroring the
   ordering `classify.ts` uses and documents for the conversation path: a step
   whose status already disqualifies it must not be re-judged as usable because
-  it also carried content. `error` and
-  `tool-calls` are unreachable, both already arriving as `"stop"`. `stop`,
-  `length` and `other` are adopted: truncated or abnormally-finished is not
-  suppressed, and a partial summary beats losing the session.
+  it also carried content.
+
+  `error` REJECTS on the same terms, writing `ModelError` — the discriminant the
+  conversation path uses for `failed`. `LanguageModelV2FinishReason` defines it
+  as "model stopped because of an error", and a provider can report it IN BAND
+  without throwing, in which case nothing marks the message errored and
+  `process()` returns `"continue"`. No adapter in tree maps a wire value onto it
+  today (openai-compatible sends unknown reasons to `"other"`), so the guard is
+  defensive and cannot be reached end-to-end; it is unit-tested through the
+  exported `isTerminalCompactionFinish` instead. **Do not remove it as dead code
+  on that basis** — `classify.ts` guards the same value for the same reason.
+
+  `tool-calls` is genuinely unreachable: a tool call from a summary message
+  throws in the processor and arrives as `"stop"`. `stop`, `length` and `other`
+  are adopted: truncated or abnormally-finished is not suppressed, and a partial
+  summary beats losing the session.
 - Why nothing upstream catches this: `classify.ts` short-circuits on
   `assistant.summary` before it inspects the finish reason, so every safety
   branch the conversation path relies on is skipped for a compaction message by
