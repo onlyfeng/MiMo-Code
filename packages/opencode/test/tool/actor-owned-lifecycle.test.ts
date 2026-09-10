@@ -389,7 +389,18 @@ it.live(
             expect((yield* fixture.registry.get(fixture.session.id, actorID))?.parentActorID).toBe("controller-1")
             expect((yield* fixture.registry.get(fixture.session.id, actorID))?.status).toBe("running")
             yield* Deferred.succeed(release, undefined)
-            for (let count = 0; count < 100; count++) {
+            // Delivery here is asynchronous: the aborted controller's child has to
+            // finish, settle its outcome and land an inbox row. Measured locally
+            // at ~1s (≈50 iterations), so the previous 100-iteration (2s) ceiling
+            // left only 2x headroom — which CI's four concurrent shards routinely
+            // exhaust. This test failed on four separate PRs in one day, every
+            // time at ~2.5s wall clock, i.e. the window running out rather than
+            // anything hanging.
+            //
+            // The test's own timeout is 30s, and that is the real bound. A 20s
+            // window still fails fast on a genuine hang while leaving the
+            // delivery path room to be slow under load.
+            for (let count = 0; count < 1_000; count++) {
               const rows = yield* Effect.sync(() =>
                 Database.use((db) =>
                   db
@@ -412,7 +423,7 @@ it.live(
               }
               yield* Effect.sleep("20 millis")
             }
-            throw new Error("No terminal notification was delivered")
+            throw new Error("No terminal notification was delivered within 20s")
           } finally {
             yield* Deferred.succeed(release, undefined)
             yield* fixture.actor.cancel(fixture.session.id, actorID, "forced")
