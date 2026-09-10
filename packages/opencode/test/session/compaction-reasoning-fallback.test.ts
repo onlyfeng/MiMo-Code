@@ -23,7 +23,7 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { Log } from "../../src/util"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
-import { reply } from "../lib/llm-server"
+import { raw, reply } from "../lib/llm-server"
 import { makeLayer, providerCfg } from "../workflow/lib"
 import {
   compactionBoundary,
@@ -119,6 +119,46 @@ it.live(
         expect(result.errors).toBe("")
         expect(result.boundarySurvived).toBe(true)
         expect(result.summary).toContain("a real summary of the conversation so far")
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "reasoning withheld by the content filter is never promoted",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // `process()` does not treat a content-filter finish as terminal — the
+        // conversation path does that in its own classification step, which
+        // compaction never runs. So without an explicit guard this reaches the
+        // fallback with reasoning in hand and promotes content the provider
+        // deliberately withheld, while discarding the history it replaced.
+        yield* llm.push(
+          raw({
+            head: [
+              { id: "chatcmpl-filtered", object: "chat.completion.chunk", choices: [{ delta: { role: "assistant" } }] },
+              {
+                id: "chatcmpl-filtered",
+                object: "chat.completion.chunk",
+                choices: [{ delta: { reasoning_content: "WITHHELD_BY_FILTER" } }],
+              },
+              {
+                id: "chatcmpl-filtered",
+                object: "chat.completion.chunk",
+                choices: [{ delta: {}, finish_reason: "content_filter" }],
+              },
+            ],
+          }),
+        )
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("filtered compaction")
+        expect(result.summary).not.toContain("WITHHELD_BY_FILTER")
+        expect(result.boundarySurvived).toBe(false)
+        expect(result.errors).toContain("withheld by the content filter")
       }),
       cfg,
     ),

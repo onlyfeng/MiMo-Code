@@ -576,6 +576,15 @@ export const layer: Layer.Layer<
       // synthetic because the model did not offer it as its answer.
       const summaryParts = MessageV2.parts(msg.id)
       if (!summaryParts.some((part) => part.type === "text" && part.text.trim().length > 0)) {
+        // A content-filter finish means the provider withheld the answer, and
+        // `process()` does not mark that terminal — the conversation path does,
+        // in its own classification step (SessionPrompt.writeContentFilterError),
+        // which compaction never runs. Promoting the reasoning here would do two
+        // bad things at once: replay withheld content back to the model as
+        // trusted summary, and drop the real history it replaced. Reaching for
+        // the reasoning is only defensible when nothing suppressed the answer.
+        if (processor.message.finish === "content-filter")
+          return yield* rollback("Compaction summary was withheld by the content filter")
         const reasoning = summaryParts
           .filter((part): part is MessageV2.ReasoningPart => part.type === "reasoning")
           .map((part) => part.text.trim())
