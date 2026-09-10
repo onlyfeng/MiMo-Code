@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-09
-- Upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
-- Prior reviewed upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
-- Main behavior (runtime/tests): `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
-- Bundled guidance content: `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
-- Prior fork `main` tip: `f4146b1a2feccaa224d7f7c8fde0c826161bdd90`
+- Last reviewed: 2026-09-10
+- Upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
+- Prior reviewed upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
+- Main behavior (runtime/tests): `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
+- Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
+- Prior fork `main` tip: `3fd2245fcf836ff0309f6d1d75332ca32c493625`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -27,8 +27,8 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-09 capability inventory](upstream-sync-2026-09-09.md).
-Subsequent specified-change review: [audio convergence](audio-upstream-alignment-2026-09-09.md).
+Full synchronization review: [2026-09-10 capability inventory](upstream-sync-2026-09-10.md).
+The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
 
@@ -279,6 +279,11 @@ where this delta does not change their implementation.
   bounded, and shutdown closes intake before draining and retiring instances.
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
+
+- 2026-09-10 config integration: host defaults merge underneath explicit user
+  values before the effective parsed configuration's trusted harness declarations
+  are captured. The small_model compatibility alias applies only when lite is
+  absent; mutable plugin hooks still cannot grant or replace harness authority.
 
 - Status: active
 - Canonical owner: fork `main` model-mode resolution boundary

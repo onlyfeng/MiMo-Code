@@ -3063,3 +3063,12 @@ typecheck and lint pass. Earlier full matrices remain source-specific evidence.
   [scope and validation record](audio-upstream-alignment-2026-09-09.md).
 - API/SDK inputs and lockfile are unchanged. Exact final-tip CI is checked separately
   after publication; this record identifies source evidence, not an earlier CI SHA.
+
+## 2026-09-10 — authoritative titles and first-input generation
+
+- Reviewed upstream `1c13f05105b7c671a3e201b61410ccbfa8acf96e..ceecd1c71f88c4840f9fdbdf2450fa331121be22`.
+- Prior fork main: `3fd2245fcf836ff0309f6d1d75332ca32c493625`.
+- Shared runtime/test and bundled session-tool guidance: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`.
+- All seven selected capabilities are reconciled in [the synchronization inventory](upstream-sync-2026-09-10.md). All active FD/FC owners remain active; no unrelated consolidation or optional service activation.
+- Title persistence/API/schema, text-only isolated generation, title-only default tool, TUI/App conflict editors, picker routing, low-priority host defaults, and local-file placeholders are adopted with the existing fork admission/identity/frozen-prefix boundaries.
+- Pure registry commits do not advance the above behavior snapshots. Final branch-tip CI and remote ancestry are checked separately after publication.
