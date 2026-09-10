@@ -47,18 +47,38 @@ Source evidence and the seven final result rows are recorded in the latest
 [compat history entry](dev-compat-registry-history.md). Earlier dated review
 paragraphs and per-owner implementation SHAs below remain historical snapshots.
 
+## 2026-09-10 plugin hook objects and Xiaomi chat SDK
+
+Both capabilities in the [cb00c280 shared inventory](upstream-sync-2026-09-10-cb00c280.md)
+are inherited byte-for-byte: compat carried no divergence on
+`src/plugin/index.ts`, `src/provider/provider.ts` or either test file, so the
+`main` merge was clean and needed no compat adaptation. No compat-only override
+is added and no owner retires.
+
+DC-MODEL-001 is the nearest owner: the Xiaomi SDK split changes which class
+serves chat, not which transport is selected, so per-agent MaxMode, retry status
+and the reported `xiaomi.chat` / `xiaomi.responses` provider names are unchanged.
+DC-TUI-001 keeps its request provider/model/variant display truth for the same
+reason. DC-CONTEXT-001 and DC-ACTOR-001 are request-semantics adjacent only; the
+plugin change guards registration and dispatch without altering hook contracts,
+frozen turn context or chronology. DC-NET-001/002 and DC-PLATFORM-001 have no
+incoming owned implementation change.
+
+Source evidence and the two final result rows are recorded in the latest
+[compat history entry](dev-compat-registry-history.md).
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-10
-- Reviewed upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
-- Accepted `main` tip: `e2f62b39c25566a4c96bdc2bd7ac234248789171`
-- Inherited main behavior: `cd6db2dbf4678be6aabf166e4140a5376ad3d5a6`
-- Compat behavior: `174d85f6e9ea6112c08143ea103659f93217b5ee`
-- Prior compat tip: `eaf6cdcc54c1cc4e6cf716e766b9a2f59265c162`
-- Main source inheritance merge: `174d85f6e9ea6112c08143ea103659f93217b5ee`
-- Shared audit commit: `e2f62b39c25566a4c96bdc2bd7ac234248789171`
+- Reviewed upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
+- Accepted `main` tip: `02a7a980b81a5c00d0ff5b4b46e6bf1e39b3d5b8`
+- Inherited main behavior: `67abd1f745135c164a0c30d3769f32ddd10823a8`
+- Compat behavior: `35a577504f5ff8b5c60b38a5ba0d70a63e9f2eb0`
+- Prior compat tip: `a04b7921e80c9f7f148daadff0068839be70a347`
+- Main source inheritance merge: `35a577504f5ff8b5c60b38a5ba0d70a63e9f2eb0`
+- Shared audit commit: `02a7a980b81a5c00d0ff5b4b46e6bf1e39b3d5b8`
 - Inherited bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)

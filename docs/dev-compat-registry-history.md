@@ -3536,3 +3536,23 @@ the final publication gates. Prior main/compat evidence is not re-dated.
 - Accepted main/shared audit: `e2f62b39c25566a4c96bdc2bd7ac234248789171`; inherited source/test snapshot: `cd6db2dbf4678be6aabf166e4140a5376ad3d5a6`. Compat source/test inheritance merge: `174d85f6e9ea6112c08143ea103659f93217b5ee`. Runtime and bundled guidance remain the earlier title-sync implementation; no production source or generated output changed in this follow-up.
 - The first main exact-tip CI found the prefix migration fixture's fixed one-pending-migration assumption. Compat inherits the shared correction unchanged: exact current journal names, historical pre-cutoff SQL, original row/schema preservation and second-upgrade equality. Local compat migration tests passed 2/2, 16 assertions.
 - C01 evidence is extended by this migration regression; the seven capability decisions above remain unchanged. The shared audit/FD/FC/history are byte-identical to accepted main. Final source publication still requires new exact-tip test/lint/typecheck success and remote ancestry proof.
+
+## 2026-09-10 — plugin hook objects and Xiaomi chat SDK inheritance
+
+- Selected upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22..cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`.
+- Accepted main tip/shared audit: `02a7a980b81a5c00d0ff5b4b46e6bf1e39b3d5b8`; inherited source/tests: `67abd1f745135c164a0c30d3769f32ddd10823a8`; bundled guidance remains `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`.
+- Compat source/test behavior and direct inheritance merge: `35a577504f5ff8b5c60b38a5ba0d70a63e9f2eb0`; prior tip: `a04b7921e80c9f7f148daadff0068839be70a347`. Later registry commits do not advance these source references.
+
+### Capability results (2)
+
+| ID | Selected behavior | Main result | Compat result | Decisive evidence |
+| --- | --- | --- | --- | --- |
+| C01 | Plugin registration validates the resolved hook and the trigger/config/event loops guard each entry | Adopted with FC-006's instance-local `memoryWriteEnabled` injection preserved | Inherited byte-for-byte; no compat divergence existed on the file | `test/plugin/` 184/184 within the affected matrix; mutation check fails `skips plugins that return undefined instead of a hook object` without the guard |
+| C02 | Xiaomi non-PTC chat on the stock `@ai-sdk/openai-compatible` model, bundled Copilot fork for `responses()` only | Adopted; FD-005 keeps resolved-identity transport selection | Inherited byte-for-byte; no compat provider override | `test/provider/provider.test.ts` xiaomi cases 4/4; mutation check empties the `reasoning-delta` list without the fix |
+
+- All seven active DC entries were re-reviewed against the incoming diff; none has an owned implementation change. Shared FD/FC registries, their history and the new inventory are inherited byte-for-byte from accepted main.
+- The merge into `dev/compat` was conflict-free. All four incoming paths (`src/plugin/index.ts`, `src/provider/provider.ts`, `test/plugin/trigger.test.ts`, `test/provider/provider.test.ts`) had identical main and compat blobs before the merge, so this propagation adds no compat overlay path.
+- `bun ci` completed with an unchanged lockfile; package `bun typecheck` passed. No API input changed, so no SDK/OpenAPI regeneration was required.
+- Affected matrix at `35a577504f5ff8b5c60b38a5ba0d70a63e9f2eb0`, run from `packages/opencode` with `bun test --timeout 30000` over `test/plugin/`, `test/provider/`, `test/llm-server/`, `test/flag/codex-mode-flag.test.ts`, `test/tool/harness-alias.test.ts`, `test/tool/websearch.test.ts` and `test/tool/tool-script.test.ts`: 1135 passed, 0 failed, 3459 assertions across 45 files in 131.66 s of test-process time. This matches the identical main matrix, which is expected because the covered trees are the same.
+- Ambient `MIMOCODE_EXPERIMENTAL` and `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL` were removed for every run; the package preload (`@opentui/solid/preload`, `./test/preload.ts`) remains the harness baseline.
+- Repository lint passed with zero errors and 4556 warnings; `git diff --check` passed. Final remote-tip equality, exact-SHA CI and upstream -> main -> compat ancestry are separate publication checks.
