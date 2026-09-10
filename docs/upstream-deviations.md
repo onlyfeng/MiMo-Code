@@ -42,8 +42,9 @@ where this delta does not change their implementation.
 | FD-005 | model identity, prompt, discovery, tools, retry                       | Adapts inconsistent upstream classification                                                                       | Preserve one resolved identity                                                        |
 | FD-006 | compact Codex declarations and nested execution                       | Adopts compact registration and full authorized nested Actor/interactive composition                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
 | FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
-| FD-010 | compaction summary acceptance                                          | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                        | Preserve rollback for every other failure shape, for a step with no content, and for a content-filtered step |
+| FD-010 | compaction summary acceptance                                          | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                        | Preserve rollback for every other failure shape and for a content-filtered step; empty steps are FD-012 |
 | FD-011 | compaction request tool_choice                                         | Rejects upstream's `"auto"`: it permits the one event the summary processor throws on                             | Keep tool calls disabled while summary messages cannot handle them                    |
+| FD-012 | compaction retry on an empty step                                      | Extends upstream: retries once instead of rolling back on a step that produced nothing            | Keep the bound at one and the scope to genuinely empty steps                           |
 
 ## FD-001 — run approval must not toggle shared delete state
 
@@ -630,11 +631,13 @@ where this delta does not change their implementation.
   carries reasoning, that reasoning is adopted as the summary and persisted as a
   synthetic text part, so the boundary stands and the session drops below the
   trigger — EXCEPT when the step finished with `content-filter`, which is
-  rejected before any of the step's content is inspected, with or without text. Every other failure shape keeps
-  upstream's rollback exactly: provider overflow, repeated text, a blocked or
-  errored step, and a finished step that carries no content at all. The fallback
-  never fabricates a summary — it only promotes content the model actually
-  produced.
+  rejected before any of the step's content is inspected, with or without text.
+  Every other failure shape keeps upstream's rollback exactly: provider
+  overflow, repeated text, and a blocked or errored step. A step that produced
+  nothing at all is NOT decided here — it is retried first under
+  [FD-012](#fd-012--a-compaction-step-that-produced-nothing-is-retried-once) and
+  reaches this rollback only once that retry is exhausted. The fallback never
+  fabricates a summary — it only promotes content the model actually produced.
 - Finish-reason boundary (a rejection list, so each entry is a recorded
   judgement rather than an accident): `content-filter` REJECTS, with or without
   text — the provider withheld the answer, so whatever leaked out before the
@@ -645,10 +648,22 @@ where this delta does not change their implementation.
   boundary back. The check runs BEFORE any content inspection, mirroring the
   ordering `classify.ts` uses and documents for the conversation path: a step
   whose status already disqualifies it must not be re-judged as usable because
-  it also carried content. `error` and
-  `tool-calls` are unreachable, both already arriving as `"stop"`. `stop`,
-  `length` and `other` are adopted: truncated or abnormally-finished is not
-  suppressed, and a partial summary beats losing the session.
+  it also carried content.
+
+  `error` REJECTS on the same terms, writing `ModelError` — the discriminant the
+  conversation path uses for `failed`. `LanguageModelV2FinishReason` defines it
+  as "model stopped because of an error", and a provider can report it IN BAND
+  without throwing, in which case nothing marks the message errored and
+  `process()` returns `"continue"`. No adapter in tree maps a wire value onto it
+  today (openai-compatible sends unknown reasons to `"other"`), so the guard is
+  defensive and cannot be reached end-to-end; it is unit-tested through the
+  exported `isTerminalCompactionFinish` instead. **Do not remove it as dead code
+  on that basis** — `classify.ts` guards the same value for the same reason.
+
+  `tool-calls` is genuinely unreachable: a tool call from a summary message
+  throws in the processor and arrives as `"stop"`. `stop`, `length` and `other`
+  are adopted: truncated or abnormally-finished is not suppressed, and a partial
+  summary beats losing the session.
 - Why nothing upstream catches this: `classify.ts` short-circuits on
   `assistant.summary` before it inspects the finish reason, so every safety
   branch the conversation path relies on is skipped for a compaction message by
@@ -669,12 +684,14 @@ where this delta does not change their implementation.
 - Verification: `test/session/compaction-reasoning-fallback.test.ts` drives the
   real overflow path against a scripted provider under six response shapes —
   think-only (boundary survives, reasoning reaches the projection), empty
-  (rollback preserved), normal text (unchanged), content-filtered with reasoning
+  (rolled back, but only once FD-012's retry is exhausted), normal text
+  (unchanged), content-filtered with reasoning
   only (never reaches the projection, boundary rolls back, `ContentFilterError`
   rather than the generic rollback error), content-filtered with partial text
   (same rejection — the guard is not confined to the no-text branch), and
   output-limited (`length` stays adopted, so the filter guard cannot quietly
-  widen to cover truncation).
+  widen to cover truncation). The
+  The empty-step cases belong to [FD-012](#fd-012--a-compaction-step-that-produced-nothing-is-retried-once).
 - Retirement condition: upstream gives compaction its own retry or an equivalent
   recovery for a summary step that carries reasoning but no text.
 
@@ -709,3 +726,48 @@ where this delta does not change their implementation.
 - Retirement condition: summary messages gain real tool-call handling (upstream
   or fork), at which point `"auto"` can be adopted and the guard assertion
   relaxed to inherit the conversation's `tool_choice`.
+
+## FD-012 — a compaction step that produced nothing is retried once
+
+- Status: active
+- Canonical owner: fork `main` compaction retry bound
+- Observable contract: when the compaction step produces NOTHING — no text and
+  no reasoning — it is retried, carrying a one-sentence instruction inside the
+  existing summary turn rather than as a second user message, so the request
+  shape the provider sees is unchanged. Bounded by
+  `MIMOCODE_COMPACTION_RETRY_LIMIT` (default 1; `0` disables the retry
+  entirely). No other failure shape is retried.
+- Rationale: an empty step is the only compaction failure that may be a one-off.
+  Every other shape is either already recoverable — think-only, handled by
+  [FD-010](#fd-010--a-think-only-compaction-step-is-recovered-not-discarded) —
+  or deterministic: a content filter refilters, an over-cap request is still
+  over, a blocked or errored step stays blocked. The bound is deliberately
+  tighter than the conversation path's two, because a compaction retry re-sends
+  the ENTIRE transcript: one attempt separates a one-off from a systematic
+  cause, and a second only buys the same answer at another full-transcript cost.
+- Relationship to FD-010: adjacent but independent. FD-010 decides what counts
+  as an acceptable summary; this decides whether to ask again when there was no
+  summary at all. Upstream adopting either one does not retire the other —
+  which is exactly why this is a separate entry.
+- Recovery invariant: the completion marker is cleared before each retry.
+  `process()`'s cleanup stamps `time.completed` when an attempt finishes, and
+  re-entering does not clear it, so without this the assistant would look
+  finished for the whole of a full-transcript retry — and a crash or interrupt
+  there would leave the boundary behind an apparently-completed assistant that
+  orphan sweeping and `recoveryCandidates` both skip (`"completed" in time`),
+  stranding the session with no recovery path. Cleared with `delete`, not
+  `= undefined`: that check tests for the KEY.
+- Flag note: the limit reads through `nonNegativeNumber`, not `number`.
+  `number()` rejects `"0"` and would silently fall back to `1`, making the off
+  switch a no-op.
+- Verification: `test/session/compaction-reasoning-fallback.test.ts` covers a
+  one-off empty step (retried once, retry accepted) and an exhausted retry
+  (bounded at one, then rolled back), plus negative cases proving think-only and
+  content-filtered steps are never retried. The assertions count requests
+  carrying the retry instruction rather than compaction requests overall: a
+  FAILED compaction is followed by a second, independent compaction round, so
+  counting requests would let a retry-disabled build pass. Mutation-checked at
+  `MIMOCODE_COMPACTION_RETRY_LIMIT=0`, where exactly the two retry tests fail.
+- Retirement condition: upstream retries a compaction step that produced no
+  content, under a comparable bound. Upstream recovering reasoning-only
+  summaries satisfies FD-010, NOT this entry.
