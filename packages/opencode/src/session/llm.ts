@@ -551,6 +551,9 @@ const live: Layer.Layer<
         mergeDeep(variant),
       )
       const isWorkflow = language instanceof GitLabWorkflowLanguageModel
+      // Workflow connectors mutate shared session/tool-executor state and may
+      // ask permissions. They have no safe isolated title adapter.
+      if (input.ephemeral && isWorkflow) return yield* Effect.fail(new Error("Ephemeral workflow generation is unsupported"))
       const providerSystem =
         input.user.systemMode !== "replace-agent" && (isOpenaiOauth || isWorkflow) && input.user.system?.trim()
           ? [...system, input.user.system]
@@ -586,7 +589,14 @@ const live: Layer.Layer<
               ...requestMessagesWithContext,
             ]
 
-      const params = yield* plugin.trigger(
+      const defaults = {
+        temperature: input.model.capabilities.temperature ? (input.agent.temperature ?? ProviderTransform.temperature(input.model)) : undefined,
+        topP: input.agent.topP ?? ProviderTransform.topP(input.model),
+        topK: ProviderTransform.topK(input.model),
+        maxOutputTokens: ProviderTransform.maxOutputTokens(input.model),
+        options,
+      }
+      const params = input.ephemeral ? defaults : yield* plugin.trigger(
         "chat.params",
         {
           sessionID: input.sessionID,
@@ -606,7 +616,7 @@ const live: Layer.Layer<
         },
       )
 
-      const { headers } = yield* plugin.trigger(
+      const { headers } = input.ephemeral ? { headers: {} } : yield* plugin.trigger(
         "chat.headers",
         {
           sessionID: input.sessionID,

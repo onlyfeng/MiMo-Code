@@ -1973,13 +1973,9 @@ it.live("resume continues an incomplete assistant without creating or rewriting 
         assistantMessageID: seeded.assistant.id,
         titleLocale: "fr-FR",
       })
-      yield* llm.wait(2)
-      const titleRequest = (yield* llm.inputs).find((input) =>
-        JSON.stringify(input).includes("Generate a title for this conversation"),
-      )
-      expect(titleRequest).toBeDefined()
-      expect(JSON.stringify(titleRequest)).toContain("Write the title using locale")
-      expect(JSON.stringify(titleRequest)).toContain("fr-FR")
+      const requests = yield* llm.inputs
+      expect(requests).toHaveLength(1)
+      expect(JSON.stringify(requests)).not.toContain("Generate a single-line title")
 
       const after = yield* sessions.messages({ sessionID: chat.id })
       expect(after.filter((message) => message.info.role === "user")).toHaveLength(1)
@@ -5235,7 +5231,8 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  // Include real fixture setup and scoped cancellation/disposal in the budget.
+  20_000,
 )
 
 it.live("assertNotBusy succeeds when idle", () =>
