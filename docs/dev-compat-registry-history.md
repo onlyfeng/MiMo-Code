@@ -3503,3 +3503,30 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   independently removes its opt-in selectors before production imports.
 - `git diff --check` passes. Final remote-tip equality, exact-SHA CI and ancestry
   are publication checks, distinct from this source/test record.
+
+
+## 2026-09-10 — title authority full synchronization
+
+- Selected upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e..ceecd1c71f88c4840f9fdbdf2450fa331121be22`.
+- Accepted main tip/shared audit: `9173219ae94997b398fc1fcd9659c413ee81e2c6`; inherited source/tests and bundled guidance: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`.
+- Compat source/test behavior and direct inheritance merge: `cd92030860e33506c5bc79b7e417ada3bed542d5`; prior tip: `eaf6cdcc54c1cc4e6cf716e766b9a2f59265c162`. Later registry commits do not advance these source references.
+
+### Capability results (7)
+
+| ID | Selected behavior | Main result | Compat result | Decisive evidence |
+| --- | --- | --- | --- | --- |
+| C01 | Revisioned title persistence, imports, replay and HTTP/SDK | Adopted | Inherited with chronological fork and checkpoint fields | title-authority, title-migration, title-sdk; rebuilt Node CAS/restart 4/4 |
+| C02 | First-input fallback and isolated text-only generation | Adapted to fork admission and retry ownership | Inherited with strict receipt identity, frozen context, bounded preflight and MaxMode isolation | title-first-turn 5/5; prompt-effect seams 29/29; admission guards |
+| C03 | Current-session title-only default tool | Adopted | Inherited without enabling create or widening frozen tools | separate non-test default child; title-tool and registry |
+| C04 | Revision-aware TUI/App editors and title reads | Adopted | Inherited with checkpoint maps, revert pagination and deletion guards | TUI title-authority, checkpoint-coverage-sync; App tree identical to validated main |
+| C05 | Picker skill commands and multiline text parts | Adopted | Inherited with ModelMetadata, both titleLocale paths and voice | skill-picker-submit, voice; metadata tests |
+| C06 | Host defaults and lite alias precedence | Adapted before trusted declaration capture | Inherited with per-agent model routing unchanged | title-defaults, harness-alias, max-mode |
+| C07 | Unsupported local attachment placeholders | Adopted | Inherited with model-visible content caps | message-v2, title-input, prompt and overflow tests |
+
+- All seven active DC entries were re-reviewed; shared FD/FC/history and the inventory are inherited byte-for-byte. App/UI and lockfile match main. No unrelated network, platform, audio or provider routing policy changed.
+- `bun ci`, source SDK/OpenAPI generation and package `bun typecheck` passed. The first typecheck identified missing title fields in a compat-only checkpoint fixture; it passed after adding the required fields and again after the receipt test adaptation.
+- Affected Bun matrix: 32 separately executed files. Initially 400 passed and one new title receipt case failed because its repeated message used newly generated part IDs. After adapting only that fixture to compat's existing identity contract, the affected file passed 5/5 with 102 assertions; the reconciled matrix covers 401 passing cases and no remaining failure. No production consistency check was relaxed.
+- Compat owner matrix: 144 passed across nine separate files, zero failed/skipped; covers overflow, frozen fork prefix, MaxMode, writer-first recovery, checkpoint API, metadata and TUI synchronization. The title/context/frozen/checkpoint/preflight prompt-effect filter passed 29 cases with 231 assertions. Admission/BusyError filter passed 3 cases with nine assertions; chronological direct admission and transaction rollback passed another two cases with 14 assertions. Filtered-out cases are not reported as skips or coverage.
+- Rebuilt plain-Node title migration/CAS/restart tests passed 4/4. A separate non-test Bun child with Orchestrator and all ambient experimental selectors absent proved one title-only session tool, create rejected and generated-title commit accepted. Ordinary suites retain package preload Orchestrator=true, fixture model catalog, isolated home/config/cache, in-memory DB and disabled default plugins; they unset experimental, MCP-search, Codex, context-limit, trigger-ratio and checkpoint selectors before imports.
+- Lint passed with zero errors and 4549 repository warnings before the final receipt-only test adaptation; the final publication hook/typecheck and exact-tip CI validate the committed tree. `git diff --check` and shared-record consistency checks passed. App unit/browser results are the main source evidence (2/2 and 10/10), reused only because the entire App/UI tree is identical; no additional compat browser run is claimed.
+- Independent review found no blocking production defect in the reconciled main/compat seams. The shared inventory records its combined-run frozen-catalog timing limitation. Final remote-tip equality, exact-SHA CI and upstream -> main -> compat ancestry are separately checked after publication.

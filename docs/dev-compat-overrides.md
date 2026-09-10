@@ -20,20 +20,44 @@ and TUI metadata are unchanged. Historical adoption paragraphs below describe th
 original snapshots; the [audio convergence record](audio-upstream-alignment-2026-09-09.md)
 is authoritative for the current audio boundary.
 
+## 2026-09-10 title authority synchronization
+
+All seven capabilities in the [shared inventory](upstream-sync-2026-09-10.md)
+are inherited. DC-CONTEXT-001 and DC-ACTOR-001 retain atomic message/part
+identity, monotonic chronology, frozen turn context, active-tool membership and
+bounded request recovery. DC-MODEL-001 retains per-agent MaxMode; detached title
+requests remain outside that execution path. DC-TUI-001 retains request metadata
+and both titleLocale submission paths, while checkpoint coverage maps coexist
+with title revision reads and deleted-session guards. DC-NET-001/002 and
+DC-PLATFORM-001 have no incoming owned implementation changes. No owner retires.
+
+Three conflicts were reconciled by capability: TUI sync keeps checkpoint/revert
+pagination and clears both checkpoint and title state on deletion; session fork
+accepts protected manual titles while validating chronological boundaries; prompt
+tests inherit text-only title expectations alongside preflight-domain sentinels.
+The new duplicate-receipt fixture uses stable part IDs and verifies unchanged
+persisted count/IDs, preserving compat's stronger content identity checks.
+Checkpoint coverage test sessions now supply the required title source/revision.
+Generated SDK/OpenAPI preserve compat operations and include the new title API.
+
+Source evidence and the seven final result rows are recorded in the latest
+[compat history entry](dev-compat-registry-history.md). Earlier dated review
+paragraphs and per-owner implementation SHAs below remain historical snapshots.
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
-- Last reviewed: 2026-09-09
-- Reviewed upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
-- Accepted `main` tip: `ab722d0e0c7c65c5109110b08af34a3e2eb47a94`
-- Inherited main behavior: `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
-- Compat behavior: `a6cd04a5d89c3df54d3f0a3df494540294474fd1`
-- Prior compat tip: `6b6a36698c3a66b826586d6d2512cc54bcf6f8a8`
-- Main source inheritance merge: `a6cd04a5d89c3df54d3f0a3df494540294474fd1`
-- Shared audit commit: `ab722d0e0c7c65c5109110b08af34a3e2eb47a94`
-- Inherited bundled guidance content: `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
-- Publication state: specified audio convergence at the existing upstream baseline; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
+- Last reviewed: 2026-09-10
+- Reviewed upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
+- Accepted `main` tip: `9173219ae94997b398fc1fcd9659c413ee81e2c6`
+- Inherited main behavior: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
+- Compat behavior: `cd92030860e33506c5bc79b7e417ada3bed542d5`
+- Prior compat tip: `eaf6cdcc54c1cc4e6cf716e766b9a2f59265c162`
+- Main source inheritance merge: `cd92030860e33506c5bc79b7e417ada3bed542d5`
+- Shared audit commit: `9173219ae94997b398fc1fcd9659c413ee81e2c6`
+- Inherited bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
+- Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
