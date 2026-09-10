@@ -158,7 +158,12 @@ it.live(
         const result = yield* driveCompaction("filtered compaction")
         expect(result.summary).not.toContain("WITHHELD_BY_FILTER")
         expect(result.boundarySurvived).toBe(false)
-        expect(result.errors).toContain("withheld by the content filter")
+        // The discriminant matters as much as the rollback: SDK consumers switch
+        // on it, and the TUI's safety notice is driven by it — so this must be
+        // the same error the conversation path publishes, not the generic
+        // rollback error.
+        expect(result.errors).toContain("ContentFilterError")
+        expect(result.errors).not.toContain("InvalidOutputError")
       }),
       cfg,
     ),

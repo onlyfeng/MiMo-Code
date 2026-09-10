@@ -598,8 +598,23 @@ export const layer: Layer.Layer<
         //   other → adopt. An unrecognised finish reason is not evidence that
         //     anything was withheld, and the conversation path treats this same
         //     shape as recoverable (classify.ts returns think-only for it).
-        if (processor.message.finish === "content-filter")
+        //
+        // Persist the SAME error shape the conversation path publishes for this
+        // finish, not the generic rollback error: SDK consumers discriminate on
+        // it, and the TUI's safety notice is driven by the published event.
+        // Setting it before rollback() also stops rollback from overwriting the
+        // discriminant or rewriting `finish`.
+        if (processor.message.finish === "content-filter") {
+          processor.message.error = new MessageV2.ContentFilterError({
+            message: "The response was withheld by the model provider's content safety filter.",
+          }).toObject()
+          yield* session.updateMessage(processor.message)
+          yield* bus.publish(Session.Event.Error, {
+            sessionID: input.sessionID,
+            error: processor.message.error,
+          })
           return yield* rollback("Compaction summary was withheld by the content filter")
+        }
         const reasoning = summaryParts
           .filter((part): part is MessageV2.ReasoningPart => part.type === "reasoning")
           .map((part) => part.text.trim())
