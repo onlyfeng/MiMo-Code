@@ -38,6 +38,9 @@ tests inherit text-only title expectations alongside preflight-domain sentinels.
 The new duplicate-receipt fixture uses stable part IDs and verifies unchanged
 persisted count/IDs, preserving compat's stronger content identity checks.
 Checkpoint coverage test sessions now supply the required title source/revision.
+The shared migration CI follow-up checks the complete journal name set rather
+than assuming one pending migration; historical schema/data and restart
+assertions remain intact. Both related migration files pass on compat (2/2).
 Generated SDK/OpenAPI preserve compat operations and include the new title API.
 
 Source evidence and the seven final result rows are recorded in the latest
@@ -50,12 +53,12 @@ paragraphs and per-owner implementation SHAs below remain historical snapshots.
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-10
 - Reviewed upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
-- Accepted `main` tip: `9173219ae94997b398fc1fcd9659c413ee81e2c6`
-- Inherited main behavior: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
-- Compat behavior: `cd92030860e33506c5bc79b7e417ada3bed542d5`
+- Accepted `main` tip: `e2f62b39c25566a4c96bdc2bd7ac234248789171`
+- Inherited main behavior: `cd6db2dbf4678be6aabf166e4140a5376ad3d5a6`
+- Compat behavior: `174d85f6e9ea6112c08143ea103659f93217b5ee`
 - Prior compat tip: `eaf6cdcc54c1cc4e6cf716e766b9a2f59265c162`
-- Main source inheritance merge: `cd92030860e33506c5bc79b7e417ada3bed542d5`
-- Shared audit commit: `9173219ae94997b398fc1fcd9659c413ee81e2c6`
+- Main source inheritance merge: `174d85f6e9ea6112c08143ea103659f93217b5ee`
+- Shared audit commit: `e2f62b39c25566a4c96bdc2bd7ac234248789171`
 - Inherited bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
