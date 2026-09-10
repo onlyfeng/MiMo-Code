@@ -16,7 +16,7 @@
  * provider can return, so what they pin is the response shape and nothing else.
  */
 import { afterEach, expect } from "bun:test"
-import { Effect } from "effect"
+import { Deferred, Effect } from "effect"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { SessionPrompt } from "../../src/session/prompt"
@@ -310,6 +310,54 @@ it.live(
         expect(result.boundarySurvived).toBe(true)
         expect(result.summary).toContain("we changed Y")
         expect(result.summary).not.toContain("MUST_NOT_BE_REQUESTED")
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "the compaction assistant stays incomplete while a retry is in flight",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        const sessions = yield* Session.Service
+        const prompt = yield* SessionPrompt.Service
+        const session = yield* sessions.create({ title: "retry in flight" })
+        yield* seedOverflowingTurn(session.id)
+
+        // First attempt empty; the retry hangs so the in-flight state can be
+        // observed. The first attempt already ran process()'s cleanup, which
+        // stamps time.completed — if that stamp survives into the retry, a crash
+        // here leaves the boundary behind an apparently-finished assistant that
+        // orphan sweeping and recoveryCandidates both skip.
+        const gate = yield* Deferred.make<void>()
+        yield* llm.push(reply().stop().item())
+        yield* llm.hangUntil(gate)
+
+        yield* Effect.forkScoped(
+          prompt
+            .prompt({
+              sessionID: session.id,
+              parts: [{ type: "text", text: "a follow-up turn that trips the compaction trigger" }],
+              agent: "build",
+            })
+            .pipe(Effect.ignore),
+        )
+
+        // Two requests received = the retry is on the wire and hanging.
+        yield* llm.wait(2)
+        const inFlight = (yield* sessions.messages({ sessionID: session.id, agentID: "main" })).find(
+          (message) => message.info.role === "assistant" && message.info.summary === true,
+        )
+        expect(inFlight).toBeDefined()
+        // `in`, matching how recoveryCandidates decides.
+        expect(inFlight && "completed" in inFlight.info.time).toBe(false)
+
+        // Release the hang so the scoped fiber can finish on its own; the
+        // scope closes with the test.
+        yield* Deferred.succeed(gate, undefined)
       }),
       cfg,
     ),

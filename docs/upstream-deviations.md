@@ -734,6 +734,14 @@ where this delta does not change their implementation.
   as an acceptable summary; this decides whether to ask again when there was no
   summary at all. Upstream adopting either one does not retire the other —
   which is exactly why this is a separate entry.
+- Recovery invariant: the completion marker is cleared before each retry.
+  `process()`'s cleanup stamps `time.completed` when an attempt finishes, and
+  re-entering does not clear it, so without this the assistant would look
+  finished for the whole of a full-transcript retry — and a crash or interrupt
+  there would leave the boundary behind an apparently-completed assistant that
+  orphan sweeping and `recoveryCandidates` both skip (`"completed" in time`),
+  stranding the session with no recovery path. Cleared with `delete`, not
+  `= undefined`: that check tests for the KEY.
 - Flag note: the limit reads through `nonNegativeNumber`, not `number`.
   `number()` rejects `"0"` and would silently fall back to `1`, making the off
   switch a no-op.

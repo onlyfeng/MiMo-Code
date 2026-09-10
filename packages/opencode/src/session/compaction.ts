@@ -581,6 +581,18 @@ export const layer: Layer.Layer<
           attempt,
           limit: Flag.MIMOCODE_COMPACTION_RETRY_LIMIT,
         })
+        // The finished attempt already ran process()'s cleanup, which stamped
+        // `time.completed`. Re-entering does not clear it, so for the whole of
+        // the retry — a full-transcript request, potentially long — the
+        // assistant would look finished while it is not. A crash or interrupt
+        // there leaves the boundary in place behind an apparently-completed
+        // assistant, and both orphan sweeping and recoveryCandidates skip it
+        // (`"completed" in time`), stranding the session with no recovery path.
+        //
+        // `delete`, not `= undefined`: that check tests for the KEY, so an
+        // explicit undefined would still read as completed.
+        delete processor.message.time.completed
+        yield* session.updateMessage(processor.message)
         result = yield* processor.process({
           ...request,
           // Carried inside the existing summary turn rather than appended as a
