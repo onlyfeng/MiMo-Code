@@ -593,6 +593,12 @@ export const layer: Layer.Layer<
         // explicit undefined would still read as completed.
         delete processor.message.time.completed
         yield* session.updateMessage(processor.message)
+        // `finish-step` ACCUMULATES cost but REPLACES tokens (processor.ts), so
+        // without carrying the previous attempt forward the message would bill
+        // two full-transcript requests while reporting one — and consumers that
+        // sum `info.tokens` (cli/cmd/stats.ts) would under-report a request that
+        // was really sent and paid for.
+        const spent = { ...processor.message.tokens, cache: { ...processor.message.tokens.cache } }
         result = yield* processor.process({
           ...request,
           // Carried inside the existing summary turn rather than appended as a
@@ -612,6 +618,20 @@ export const layer: Layer.Layer<
             },
           ],
         })
+        const attempted = processor.message.tokens
+        processor.message.tokens = {
+          ...(spent.total === undefined && attempted.total === undefined
+            ? {}
+            : { total: (spent.total ?? 0) + (attempted.total ?? 0) }),
+          input: spent.input + attempted.input,
+          output: spent.output + attempted.output,
+          reasoning: spent.reasoning + attempted.reasoning,
+          cache: {
+            read: spent.cache.read + attempted.cache.read,
+            write: spent.cache.write + attempted.cache.write,
+          },
+        }
+        yield* session.updateMessage(processor.message)
       }
 
       const rollback = Effect.fn("SessionCompaction.rollback")(function* (message: string) {

@@ -757,6 +757,11 @@ where this delta does not change their implementation.
   orphan sweeping and `recoveryCandidates` both skip (`"completed" in time`),
   stranding the session with no recovery path. Cleared with `delete`, not
   `= undefined`: that check tests for the KEY.
+- Usage accounting: each attempt's tokens are carried forward. `finish-step`
+  accumulates cost but REPLACES `tokens`, so a retried compaction would
+  otherwise bill two full-transcript requests while reporting one, and consumers
+  that sum `info.tokens` (`cli/cmd/stats.ts`) would under-report a request that
+  was really sent.
 - Flag note: the limit reads through `nonNegativeNumber`, not `number`.
   `number()` rejects `"0"` and would silently fall back to `1`, making the off
   switch a no-op.
