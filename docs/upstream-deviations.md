@@ -15,11 +15,11 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-09-10
-- Upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
-- Prior reviewed upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
-- Main behavior (runtime/tests): `cd6db2dbf4678be6aabf166e4140a5376ad3d5a6`
+- Upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
+- Prior reviewed upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
+- Main behavior (runtime/tests): `67abd1f745135c164a0c30d3769f32ddd10823a8`
 - Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
-- Prior fork `main` tip: `3fd2245fcf836ff0309f6d1d75332ca32c493625`
+- Prior fork `main` tip: `e2f62b39c25566a4c96bdc2bd7ac234248789171`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -27,7 +27,8 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-10 capability inventory](upstream-sync-2026-09-10.md).
+Full synchronization review: [2026-09-10 (cb00c280) capability inventory](upstream-sync-2026-09-10-cb00c280.md),
+continuing the [2026-09-10 title authority inventory](upstream-sync-2026-09-10.md).
 The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
@@ -378,6 +379,16 @@ where this delta does not change their implementation.
   hard-coded MiMo identifier. This preserves FD-005's resolved model identity
   through the sidecar without changing harness precedence, prompt/tool
   selection, transport classification, or alias-conflict handling.
+- 2026-09-10 Xiaomi SDK-split review: adopted upstream `fc25fed05ee63e74ad157196afbdffcf0d61efe3`,
+  merged by `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`. The bundled Copilot fork
+  now serves `responses()` only, while chat comes from the stock
+  `@ai-sdk/openai-compatible` model, so Xiaomi `reasoning_content` reaches the
+  stream as reasoning parts instead of being dropped by a parser that only knows
+  Copilot's `reasoning_text`. This narrows upstream toward FD-005's position and
+  changes no selection authority: the fork's custom xiaomi loader still chooses
+  `responses()` versus `languageModel()` from the complete resolved identity,
+  and both members exist on the composed SDK object.
+
 - Retirement condition: the provider layer exposes one immutable model-mode
   value consumed unchanged by every prompt, discovery, registry, capture, and
   dispatch surface, with alias-conflict and GPT-4 regressions.

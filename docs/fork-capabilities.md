@@ -16,11 +16,11 @@ authority.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-09-10
-- Upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
-- Prior reviewed upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
-- Main behavior (runtime/tests): `cd6db2dbf4678be6aabf166e4140a5376ad3d5a6`
+- Upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
+- Prior reviewed upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
+- Main behavior (runtime/tests): `67abd1f745135c164a0c30d3769f32ddd10823a8`
 - Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
-- Prior fork `main` tip: `3fd2245fcf836ff0309f6d1d75332ca32c493625`
+- Prior fork `main` tip: `e2f62b39c25566a4c96bdc2bd7ac234248789171`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -28,7 +28,8 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-10 capability inventory](upstream-sync-2026-09-10.md).
+Full synchronization review: [2026-09-10 (cb00c280) capability inventory](upstream-sync-2026-09-10-cb00c280.md),
+continuing the [2026-09-10 title authority inventory](upstream-sync-2026-09-10.md).
 The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
@@ -461,6 +462,14 @@ where this delta does not change their implementation.
   enabled, disabled, absent, and instance-local configuration paths.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+- 2026-09-10 hook-validation review: upstream `1493f7813e3041e9da2ea52738940591d03ed8a8`,
+  merged by `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`, routes every registration
+  path through `registerHook` and guards the trigger, config and event loops, so
+  a plugin resolving to a non-object is skipped with a warning. FC-006's
+  instance-local `memoryWriteEnabled` injection into the `actor.postStop`
+  aggregate is preserved on top of the rewritten loops, including its fail-open
+  behavior when the value is absent.
+
 - Retirement condition: the progress-checker hook no longer writes memory or
   upstream supplies an equivalent instance-local decision without HTTP/cwd
   coupling.
