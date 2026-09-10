@@ -630,17 +630,22 @@ where this delta does not change their implementation.
   carries reasoning, that reasoning is adopted as the summary and persisted as a
   synthetic text part, so the boundary stands and the session drops below the
   trigger — EXCEPT when the step finished with `content-filter`, which is
-  rejected before the reasoning is read. Every other failure shape keeps
+  rejected before any of the step's content is inspected, with or without text. Every other failure shape keeps
   upstream's rollback exactly: provider overflow, repeated text, a blocked or
   errored step, and a finished step that carries no content at all. The fallback
   never fabricates a summary — it only promotes content the model actually
   produced.
 - Finish-reason boundary (a rejection list, so each entry is a recorded
-  judgement rather than an accident): `content-filter` REJECTS — the provider
-  withheld the answer, so adopting it would replay suppressed content back to
-  the model as trusted summary and drop the real history it replaced; that
-  branch persists and publishes `ContentFilterError`, matching the discriminant
-  the conversation path uses, and still rolls the boundary back. `error` and
+  judgement rather than an accident): `content-filter` REJECTS, with or without
+  text — the provider withheld the answer, so whatever leaked out before the
+  filter fired is withheld content too, and adopting any of it would replay
+  suppressed content back to the model as trusted summary and drop the real
+  history it replaced; that branch persists and publishes `ContentFilterError`,
+  matching the discriminant the conversation path uses, and still rolls the
+  boundary back. The check runs BEFORE any content inspection, mirroring the
+  ordering `classify.ts` uses and documents for the conversation path: a step
+  whose status already disqualifies it must not be re-judged as usable because
+  it also carried content. `error` and
   `tool-calls` are unreachable, both already arriving as `"stop"`. `stop`,
   `length` and `other` are adopted: truncated or abnormally-finished is not
   suppressed, and a partial summary beats losing the session.
@@ -662,12 +667,14 @@ where this delta does not change their implementation.
   branches above the fallback are unchanged, so an upstream change to any of
   them merges cleanly; only the final no-text branch differs.
 - Verification: `test/session/compaction-reasoning-fallback.test.ts` drives the
-  real overflow path against a scripted provider under five response shapes —
+  real overflow path against a scripted provider under six response shapes —
   think-only (boundary survives, reasoning reaches the projection), empty
-  (rollback preserved), normal text (unchanged), content-filtered (reasoning
-  never reaches the projection, boundary rolls back, `ContentFilterError` rather
-  than the generic rollback error), and output-limited (`length` stays adopted,
-  so the filter guard cannot quietly widen to cover truncation).
+  (rollback preserved), normal text (unchanged), content-filtered with reasoning
+  only (never reaches the projection, boundary rolls back, `ContentFilterError`
+  rather than the generic rollback error), content-filtered with partial text
+  (same rejection — the guard is not confined to the no-text branch), and
+  output-limited (`length` stays adopted, so the filter guard cannot quietly
+  widen to cover truncation).
 - Retirement condition: upstream gives compaction its own retry or an equivalent
   recovery for a summary step that carries reasoning but no text.
 

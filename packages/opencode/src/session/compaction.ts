@@ -574,47 +574,55 @@ export const layer: Layer.Layer<
       // adopt it rather than discarding the turn. A summary of imperfect shape
       // keeps the session alive; a rolled-back boundary does not. Marked
       // synthetic because the model did not offer it as its answer.
+      // Decide on the finish reason BEFORE looking at what the step produced.
+      // `classify.ts` applies the same ordering for the conversation path, and
+      // says why: a step whose status is already disqualifying must not be
+      // re-judged as usable just because it also carried content. A
+      // content-filter finish means the provider withheld the answer, so
+      // whatever leaked out before the filter fired is withheld content too —
+      // partial text is not a lesser case, it is the same case.
+      //
+      // Nothing upstream of here enforces that for a summary message:
+      // `process()` only reports blocked/errored steps as "stop", and
+      // `classify.ts` short-circuits on `assistant.summary` before it ever
+      // inspects the finish reason — so every safety branch the conversation
+      // path relies on is skipped here by construction.
+      //
+      // Judgement per finish reason, so adding one is a decision rather than
+      // an accident:
+      //   content-filter → REJECT, with or without text. Adopting it would
+      //     replay suppressed content back to the model as trusted summary AND
+      //     drop the real history it replaced.
+      //   error / tool-calls → unreachable. Both already surface as "stop"
+      //     (halt() writes the error; a tool call from a summary message
+      //     throws in the processor), handled above.
+      //   stop → accept. The model simply answered, or spent the step thinking.
+      //   length → accept. The recap is truncated, not suppressed; a partial
+      //     summary still beats losing the session, which is the whole premise
+      //     of the reasoning fallback below.
+      //   other → accept. An unrecognised finish reason is not evidence that
+      //     anything was withheld, and the conversation path treats this same
+      //     shape as recoverable (classify.ts returns think-only for it).
+      //
+      // Persist the SAME error shape the conversation path publishes for this
+      // finish, not the generic rollback error: SDK consumers discriminate on
+      // it, and the TUI's safety notice is driven by the published event.
+      // Setting it before rollback() also stops rollback from overwriting the
+      // discriminant or rewriting `finish`.
+      if (processor.message.finish === "content-filter") {
+        processor.message.error = new MessageV2.ContentFilterError({
+          message: "The response was withheld by the model provider's content safety filter.",
+        }).toObject()
+        yield* session.updateMessage(processor.message)
+        yield* bus.publish(Session.Event.Error, {
+          sessionID: input.sessionID,
+          error: processor.message.error,
+        })
+        return yield* rollback("Compaction summary was withheld by the content filter")
+      }
+
       const summaryParts = MessageV2.parts(msg.id)
       if (!summaryParts.some((part) => part.type === "text" && part.text.trim().length > 0)) {
-        // Before reaching for the reasoning, ask WHY the step produced no text.
-        // Nothing upstream of here asks that question for a summary message:
-        // `process()` only reports blocked/errored steps as "stop", and
-        // `classify.ts` short-circuits on `assistant.summary` before it ever
-        // inspects the finish reason — so every safety branch the conversation
-        // path relies on is skipped here by construction.
-        //
-        // Judgement per finish reason, so adding one is a decision rather than
-        // an accident:
-        //   content-filter → REJECT. The provider withheld the answer. Adopting
-        //     it would replay suppressed content back to the model as trusted
-        //     summary AND drop the real history it replaced.
-        //   error / tool-calls → unreachable. Both already surface as "stop"
-        //     (halt() writes the error; a tool call from a summary message
-        //     throws in the processor), handled above.
-        //   stop → adopt. The model simply spent the step thinking.
-        //   length → adopt. The recap is truncated, not suppressed; a partial
-        //     summary still beats losing the session, which is the whole
-        //     premise of this fallback.
-        //   other → adopt. An unrecognised finish reason is not evidence that
-        //     anything was withheld, and the conversation path treats this same
-        //     shape as recoverable (classify.ts returns think-only for it).
-        //
-        // Persist the SAME error shape the conversation path publishes for this
-        // finish, not the generic rollback error: SDK consumers discriminate on
-        // it, and the TUI's safety notice is driven by the published event.
-        // Setting it before rollback() also stops rollback from overwriting the
-        // discriminant or rewriting `finish`.
-        if (processor.message.finish === "content-filter") {
-          processor.message.error = new MessageV2.ContentFilterError({
-            message: "The response was withheld by the model provider's content safety filter.",
-          }).toObject()
-          yield* session.updateMessage(processor.message)
-          yield* bus.publish(Session.Event.Error, {
-            sessionID: input.sessionID,
-            error: processor.message.error,
-          })
-          return yield* rollback("Compaction summary was withheld by the content filter")
-        }
         const reasoning = summaryParts
           .filter((part): part is MessageV2.ReasoningPart => part.type === "reasoning")
           .map((part) => part.text.trim())

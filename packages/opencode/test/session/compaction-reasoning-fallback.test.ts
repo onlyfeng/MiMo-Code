@@ -206,3 +206,42 @@ it.live(
     ),
   60_000,
 )
+
+it.live(
+  "text streamed before the content filter fired is never accepted",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // Partial text is not a lesser case than reasoning-only — whatever
+        // leaked out before the filter fired is withheld content too. Guarding
+        // only the no-text branch would let this through: the boundary would
+        // survive and the real history would be hidden behind it.
+        yield* llm.push(
+          raw({
+            head: [
+              { id: "chatcmpl-partial", object: "chat.completion.chunk", choices: [{ delta: { role: "assistant" } }] },
+              {
+                id: "chatcmpl-partial",
+                object: "chat.completion.chunk",
+                choices: [{ delta: { content: "PARTIAL_BEFORE_FILTER" } }],
+              },
+              {
+                id: "chatcmpl-partial",
+                object: "chat.completion.chunk",
+                choices: [{ delta: {}, finish_reason: "content_filter" }],
+              },
+            ],
+          }),
+        )
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("partially filtered compaction")
+        expect(result.summary).not.toContain("PARTIAL_BEFORE_FILTER")
+        expect(result.boundarySurvived).toBe(false)
+        expect(result.errors).toContain("ContentFilterError")
+      }),
+      cfg,
+    ),
+  60_000,
+)
