@@ -391,3 +391,30 @@ it.live(
     ),
   60_000,
 )
+
+it.live(
+  "a retry that fails before reporting usage does not double the first attempt's tokens",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // The retry dies before `finish-step`, so it never assigns a usage
+        // object. Merging unconditionally would add the first attempt's tokens
+        // to themselves and report usage the failed attempt never sent.
+        yield* llm.push(reply().usage({ input: 1_000, output: 10 }).stop().item())
+        // A context-overflow rejection is terminal and arrives before any
+        // finish-step, so the retry never assigns a usage object.
+        yield* llm.error(400, {
+          error: { message: "This model's maximum context length is 100 tokens.", type: "invalid_request_error" },
+        })
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("failed retry usage", llm)
+        expect(result.retryRequests).toBe(1)
+        expect(result.summaryTokens?.input).toBe(1_000)
+        expect(result.summaryTokens?.output).toBe(10)
+      }),
+      cfg,
+    ),
+  60_000,
+)
