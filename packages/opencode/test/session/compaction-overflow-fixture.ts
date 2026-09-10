@@ -15,17 +15,25 @@ import { ref } from "../workflow/lib"
 
 /**
  * `test-model` caps context at 100_000 with a 10_000 output limit, so the
- * reserve floor is 100 + 10_000. A 40_000 budget clears it, stays under the
- * cap, and puts the compaction trigger at floor(40_000 * 0.9) = 36_000.
+ * reserve floor is 100 + 10_000. A 90_000 budget clears it, stays under the
+ * cap, and puts the compaction trigger at floor(90_000 * 0.9) = 81_000.
+ *
+ * The trigger has to sit well above the fixed request prefix, not merely above
+ * the seeded usage. dev/compat preflights every request against the usable
+ * window (DC-CONTEXT-001), so a tight budget makes the post-compaction turn
+ * fail with "the fixed request prefix and active turn still do not fit" — the
+ * compaction succeeds and the turn after it dies, which looks like a compaction
+ * bug and is not one. Keep the window generous enough that only the seeded
+ * usage crosses the trigger.
  *
  * `checkpoint.thresholds: []` is declared rather than left to inference:
  * SessionPrune only consults the default ladder when `thresholds` is absent, so
  * passing an empty list keeps checkpoint firing out of the measurement.
  */
-export const COMPACTION_TRIGGER = 36_000
+export const COMPACTION_TRIGGER = 81_000
 
 export const compactionCfg = {
-  compaction: { reserved: 100, max_context: 40_000 },
+  compaction: { reserved: 100, max_context: 90_000 },
   checkpoint: { thresholds: [], reserved: 100 },
 }
 
@@ -50,7 +58,7 @@ export const disableCheckpoint = Effect.gen(function* () {
  * runLoop reads exactly this message as `lastFinished` and feeds its tokens to
  * the overflow check, so this is what makes the next prompt overflow.
  *
- * Defaults to 47_000 — 117% of the 36_000 trigger, mirroring the field report
+ * Defaults to 95_000 — 117% of the 81_000 trigger, mirroring the field report
  * this fixture was built from.
  */
 export const seedOverflowingTurn = Effect.fn("test.seedOverflowingTurn")(function* (
@@ -75,7 +83,7 @@ export const seedOverflowingTurn = Effect.fn("test.seedOverflowingTurn")(functio
     text: options?.userText ?? "context that must survive",
   })
 
-  const totalTokens = options?.totalTokens ?? 47_000
+  const totalTokens = options?.totalTokens ?? 95_000
   const assistant: MessageV2.Assistant = {
     id: MessageID.ascending(),
     role: "assistant",
