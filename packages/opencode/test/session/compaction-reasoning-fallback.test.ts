@@ -164,3 +164,40 @@ it.live(
     ),
   60_000,
 )
+
+it.live(
+  "reasoning truncated by the output limit is still adopted",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // `length` is the deliberate counterpart to the content-filter case: the
+        // recap is truncated, not suppressed. A partial summary still beats
+        // losing the session, so this must NOT be swept up by that guard.
+        yield* llm.push(
+          raw({
+            head: [
+              { id: "chatcmpl-length", object: "chat.completion.chunk", choices: [{ delta: { role: "assistant" } }] },
+              {
+                id: "chatcmpl-length",
+                object: "chat.completion.chunk",
+                choices: [{ delta: { reasoning_content: "We changed Y and Z rem" } }],
+              },
+              {
+                id: "chatcmpl-length",
+                object: "chat.completion.chunk",
+                choices: [{ delta: {}, finish_reason: "length" }],
+              },
+            ],
+          }),
+        )
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("truncated compaction")
+        expect(result.boundarySurvived).toBe(true)
+        expect(result.summary).toContain("We changed Y and Z rem")
+      }),
+      cfg,
+    ),
+  60_000,
+)
