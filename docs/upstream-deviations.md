@@ -42,7 +42,7 @@ where this delta does not change their implementation.
 | FD-005 | model identity, prompt, discovery, tools, retry                       | Adapts inconsistent upstream classification                                                                       | Preserve one resolved identity                                                        |
 | FD-006 | compact Codex declarations and nested execution                       | Adopts compact registration and full authorized nested Actor/interactive composition                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
 | FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
-| FD-010 | compaction summary acceptance                                          | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                        | Preserve rollback for every other failure shape, for a step with no content, and for a content-filtered step |
+| FD-010 | compaction summary acceptance                                          | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                        | Preserve rollback for every other failure shape and for a content-filtered step; empty steps are FD-012 |
 | FD-011 | compaction request tool_choice                                         | Rejects upstream's `"auto"`: it permits the one event the summary processor throws on                             | Keep tool calls disabled while summary messages cannot handle them                    |
 | FD-012 | compaction retry on an empty step                                      | Extends upstream: retries once instead of rolling back on a step that produced nothing            | Keep the bound at one and the scope to genuinely empty steps                           |
 
@@ -631,11 +631,13 @@ where this delta does not change their implementation.
   carries reasoning, that reasoning is adopted as the summary and persisted as a
   synthetic text part, so the boundary stands and the session drops below the
   trigger — EXCEPT when the step finished with `content-filter`, which is
-  rejected before any of the step's content is inspected, with or without text. Every other failure shape keeps
-  upstream's rollback exactly: provider overflow, repeated text, a blocked or
-  errored step, and a finished step that carries no content at all. The fallback
-  never fabricates a summary — it only promotes content the model actually
-  produced.
+  rejected before any of the step's content is inspected, with or without text.
+  Every other failure shape keeps upstream's rollback exactly: provider
+  overflow, repeated text, and a blocked or errored step. A step that produced
+  nothing at all is NOT decided here — it is retried first under
+  [FD-012](#fd-012--a-compaction-step-that-produced-nothing-is-retried-once) and
+  reaches this rollback only once that retry is exhausted. The fallback never
+  fabricates a summary — it only promotes content the model actually produced.
 - Finish-reason boundary (a rejection list, so each entry is a recorded
   judgement rather than an accident): `content-filter` REJECTS, with or without
   text — the provider withheld the answer, so whatever leaked out before the
@@ -682,7 +684,8 @@ where this delta does not change their implementation.
 - Verification: `test/session/compaction-reasoning-fallback.test.ts` drives the
   real overflow path against a scripted provider under six response shapes —
   think-only (boundary survives, reasoning reaches the projection), empty
-  (rollback preserved), normal text (unchanged), content-filtered with reasoning
+  (rolled back, but only once FD-012's retry is exhausted), normal text
+  (unchanged), content-filtered with reasoning
   only (never reaches the projection, boundary rolls back, `ContentFilterError`
   rather than the generic rollback error), content-filtered with partial text
   (same rejection — the guard is not confined to the no-text branch), and
