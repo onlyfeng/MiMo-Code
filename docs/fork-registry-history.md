@@ -3072,3 +3072,13 @@ typecheck and lint pass. Earlier full matrices remain source-specific evidence.
 - All seven selected capabilities are reconciled in [the synchronization inventory](upstream-sync-2026-09-10.md). All active FD/FC owners remain active; no unrelated consolidation or optional service activation.
 - Title persistence/API/schema, text-only isolated generation, title-only default tool, TUI/App conflict editors, picker routing, low-priority host defaults, and local-file placeholders are adopted with the existing fork admission/identity/frozen-prefix boundaries.
 - Pure registry commits do not advance the above behavior snapshots. Final branch-tip CI and remote ancestry are checked separately after publication.
+
+### Migration journal CI reconciliation
+
+The first title-sync candidate's exact-SHA CI isolated a stale migration-count
+assertion. Source/test snapshot `cd6db2dbf4678be6aabf166e4140a5376ad3d5a6`
+replaces the fixed one-pending-migration count with the complete current journal
+name set while preserving the historical fixture and data/restart assertions.
+Runtime and bundled guidance remain `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`.
+Local reproduction changed from failure to 2/2 related migration tests passing,
+with package typecheck passing. New final-tip CI is required on both branches.

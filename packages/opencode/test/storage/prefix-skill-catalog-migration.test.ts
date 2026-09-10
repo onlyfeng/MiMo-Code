@@ -13,7 +13,7 @@ test("runtime migration upgrades a real legacy prefix database without replacing
   // Use the actual historical SQL and the runtime UTC journal timestamps.
   // A current table definition with a field deleted is not an old database.
   const entries = readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name < "20260908000000")
+    .filter((entry) => entry.isDirectory())
     .map((entry) => {
       const tag = entry.name.slice(0, 14)
       return {
@@ -42,7 +42,7 @@ test("runtime migration upgrades a real legacy prefix database without replacing
   const before = (() => {
     try {
       old.run("PRAGMA foreign_keys = ON")
-      migrate(drizzle({ client: old }), entries)
+      migrate(drizzle({ client: old }), entries.filter((entry) => entry.name < "20260908000000"))
       expect(
         old
           .query<{ name: string }, []>("PRAGMA table_info(session_prefix_snapshot)")
@@ -116,6 +116,8 @@ test("runtime migration upgrades a real legacy prefix database without replacing
     expect.objectContaining({ name: "skill_catalog", type: "TEXT", notnull: 0, dflt_value: null }),
   )
   expect(migrated.row).toEqual({ ...before, skill_catalog: null })
-  expect(migrated.journal).toHaveLength(entries.length + 1)
+  expect(migrated.journal.map((entry: { name: string }) => entry.name).sort()).toEqual(
+    entries.map((entry) => entry.name).sort(),
+  )
   expect(await upgrade()).toEqual(migrated)
 }, 60_000)
