@@ -593,6 +593,18 @@ export const layer: Layer.Layer<
         // explicit undefined would still read as completed.
         delete processor.message.time.completed
         yield* session.updateMessage(processor.message)
+        // Deliberately NOT accumulating `tokens` across attempts, even though
+        // `cost` accumulates. The two fields answer different questions:
+        // `cost` is what was spent, `tokens` is the CONTEXT FOOTPRINT of the
+        // latest request. The TUI context readout
+        // (cli/cmd/tui/util/model.ts), the context sidebar and acp/agent.ts all
+        // read it as current usage, and none of them exclude summary messages —
+        // so summing two full-transcript attempts there would report roughly
+        // twice the transcript and can read above 100%, which is the exact
+        // display failure this whole line of work started from.
+        //
+        // The discarded attempt is not lost: its cost is accumulated, and its
+        // usage stays on that attempt's own step-finish part.
         result = yield* processor.process({
           ...request,
           // Carried inside the existing summary turn rather than appended as a

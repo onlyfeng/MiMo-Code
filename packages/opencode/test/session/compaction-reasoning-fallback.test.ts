@@ -66,8 +66,12 @@ const driveCompaction = Effect.fn("test.driveCompaction")(function* (
   const retryRequests = llm
     ? (yield* llm.inputs).filter((body) => JSON.stringify(body).includes(RETRY_NUDGE)).length
     : 0
+  const summaryMessage = (yield* sessions.messages({ sessionID: session.id, agentID: "main" })).find(
+    (message) => message.info.role === "assistant" && message.info.summary === true,
+  )
   return {
     retryRequests,
+    summaryTokens: summaryMessage?.info.role === "assistant" ? summaryMessage.info.tokens : undefined,
     // A surviving boundary means the summary was accepted; a rolled back one
     // means the turn was discarded.
     boundarySurvived: !!boundary,
@@ -358,6 +362,34 @@ it.live(
         // Release the hang so the scoped fiber can finish on its own; the
         // scope closes with the test.
         yield* Deferred.succeed(gate, undefined)
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "a retried compaction reports the successful attempt as its context footprint",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // `tokens` is the context footprint of the latest request, not a
+        // running total — the TUI readout, the context sidebar and acp/agent.ts
+        // all read it that way and none of them exclude summary messages.
+        // Summing two full-transcript attempts here would report roughly twice
+        // the transcript and can read above 100%. `cost` is the field that
+        // accumulates; the discarded attempt keeps its usage on its own
+        // step-finish part.
+        yield* llm.push(reply().usage({ input: 9_000, output: 10 }).stop().item())
+        yield* llm.text("a real summary", { usage: { input: 2_000, output: 20 } })
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("footprint", llm)
+        expect(result.retryRequests).toBe(1)
+        expect(result.boundarySurvived).toBe(true)
+        expect(result.summaryTokens?.input).toBe(2_000)
+        expect(result.summaryTokens?.output).toBe(20)
       }),
       cfg,
     ),
