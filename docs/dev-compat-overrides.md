@@ -731,6 +731,28 @@ files remain byte-identical to the accepted main correction.
 - POLICY-02 review: Preserve monotonic message producers and completed >= created in atomic recovery settlement, alongside metadata-only stale-writer fixes. Frozen catalog, current-turn preflight, checkpoint coverage and continuation provenance remain unchanged.
 
 - POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
+
+- 2026-09-10 FD-010/FD-011/FD-012 propagation review: no compat-side change is
+  needed and none is made. The inherited summary fallback promotes reasoning to
+  a synthetic text part, which reaches the projection through the same summary
+  path as a model-authored one and is therefore already bounded by this entry's
+  caps. Its content-filter and error rejections publish `ContentFilterError` and
+  `ModelError` on the session error surface exactly as the conversation path
+  does, and compat adds no listener of its own. FD-012's bounded retry re-enters
+  the same processor rather than building a second request path, so current-turn
+  preflight, active-tool scope and frozen context apply to the retry
+  identically; its completion-marker invariant is orthogonal to this entry.
+  FD-012 also pins compaction `tokens` to the LATEST attempt rather than the sum
+  — compat's own context readout reads that field as the current footprint, so
+  aggregating would inflate it here exactly as it would on main. FD-011's
+  `toolChoice: "none"` matches what compat already sent; the merge conflict
+  there was resolved by keeping compat's `frozenActiveTools` (this entry's
+  active-only membership) and adopting main's `as const`, a type narrowing only.
+  The inherited fixture's compaction budget was raised on main first (90_000,
+  trigger 81_000) because compat preflights every request against the usable
+  window: the earlier 36_000 trigger cleared the seeded usage but not the fixed
+  request prefix, so the turn AFTER a successful compaction failed here while
+  passing on main.
 - Status: active
 - Canonical owner: `dev/compat` model-request safety boundary
 - Base: inherited main behavior
