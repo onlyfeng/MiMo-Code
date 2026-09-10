@@ -1,12 +1,28 @@
 ---
 name: upstream-sync
-description: Use when MiMo-Code needs a full upstream synchronization, a named change propagated between fork branches, or an explicitly frozen upstream baseline audited.
+description: Use when MiMo-Code needs upstream synchronization, a named change propagated between fork branches, a frozen-baseline audit, or related PR, CI, and worktree cleanup follow-up.
 ---
 
 # MiMo-Code upstream synchronization
 
 Fix the scope before fetching. Current refs, source, registries, workflows, and
 exact-SHA CI are authoritative; history and agent memory are risk hints only.
+
+## Canonical entry and conditional references
+
+This repository skill is the maintained workflow. Read the selected branch's
+`AGENTS.md` and FD/FC/DC registries for current contracts; older memory skills
+and rollout notes supply failure patterns, not current SHAs or replacement rules.
+Do not require a personal memory folder or another agent product to execute it.
+
+- For test selection or CI failures, read [validation and CI](references/validation-and-ci.md).
+- For PR integration or requested old-worktree removal, read [publication and cleanup](references/publication-and-cleanup.md).
+- For recording a sync, use [the evidence contract](references/evidence-record.md).
+
+A PR/CI/cleanup-only request follows its relevant reference and the user's
+selected scope; it does not initiate an upstream sync or a new capability audit.
+Previously authorized actions stay authorized. Independently requested removal
+of named old worktrees is separate from automatic cleanup at the end of a sync.
 
 ## Select scope and baseline
 
@@ -22,6 +38,13 @@ compare selected trees and report findings, skipping merge, commit, publication,
 and registry updates. Clean up any resources created for the audit under step 8.
 Do not broaden a specified change into a full sync. Refresh `origin` in every mode;
 refresh `upstream` branch refs only for a full sync without a frozen baseline.
+If the user explicitly forbids ref changes, do not fetch either remote: use the
+available immutable objects and report that current remote alignment was not
+established. Missing required objects are a stated blocker, not permission to
+advance the baseline. This read-only constraint takes precedence over refreshing
+`origin` in every mode.
+For audits that permit fetching, the refresh updates remote-tracking refs;
+it does not authorize changes to source, the index, local branches or registries.
 Override configured fetch mappings with a branch-only refspec and disable tag
 pruning, preserving local tags even with ambient prune-tags settings or tag refspecs:
 `git fetch --no-tags --no-prune-tags --prune --refmap= <remote> '+refs/heads/*:refs/remotes/<remote>/*'`.
@@ -75,6 +98,9 @@ them for the audit.
    Later code, configuration, generated-output, or test changes invalidate
    affected branch and descendant validation. Documentation-only corrections
    need documentation and consistency checks, not repeated runtime matrices.
+   Select existing downstream contract tests as well as incoming changed tests;
+   use the validation reference for migration journals, shared-process failures,
+   fixture timing and the difference between source, runtime and binary evidence.
 6. Reconcile every inventory row against the final branch states, including
    contracts, tests, documentation, and naming drift. Record duplicate or
    consolidation findings as recommendations unless separately authorized.
@@ -106,7 +132,8 @@ them for the audit.
 
 ## Completion report
 
-Use exactly one row per capability: ID, selected behavior, `main` result,
+For a sync or capability audit that establishes an inventory, use exactly one
+row per capability: ID, selected behavior, `main` result,
 `dev/compat` result (or not targeted), and decisive paths/tests. Every inventory
 ID must appear exactly once and the result row count must equal `N`.
 For audit-only work, distinguish observed state from proposed changes; do not
@@ -114,3 +141,7 @@ claim propagation or publication. Separately report selected and final SHAs,
 exact-SHA CI, ancestry or exclusions, registry updates, remaining
 state, cleanup, and any missing evidence. Never claim current-upstream parity in
 specified-change or frozen mode.
+
+For standalone PR, CI or cleanup follow-up, report its actual target, evidence,
+result and remaining state using the relevant reference; do not invent a new
+capability inventory solely to satisfy this report format.

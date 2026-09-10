@@ -1,0 +1,6 @@
+# `.mimocode/.gitignore` ignores agent-cached `references/` directories and
+# nested `.gitignore` files. This skill's references are maintained source, so
+# re-include the directory — a file inside an excluded directory cannot be
+# re-included on its own — and the rule file that does it.
+!/.gitignore
+!/references/
