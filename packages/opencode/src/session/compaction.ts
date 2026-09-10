@@ -11,6 +11,7 @@ import { SessionProcessor } from "./processor"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config"
+import { Flag } from "@/flag/flag"
 import { NotFoundError } from "@/storage"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Layer, Context } from "effect"
@@ -512,7 +513,7 @@ export const layer: Layer.Layer<
         role: "user" as const,
         content: [{ type: "text" as const, text: prompt }],
       }
-      const result = yield* processor.process({
+      const request = {
         user: {
           ...requestUser.info,
           system: promptConfig.system,
@@ -524,13 +525,63 @@ export const layer: Layer.Layer<
         sessionID: input.sessionID,
         tools: frozen?.tools ? SessionPrefixSnapshot.restoreTools(frozen.tools) : {},
         activeTools: frozen?.tools ? SessionPrefixSnapshot.restoreActiveTools(frozen.tools) : undefined,
-        toolChoice: "none",
+        toolChoice: "none" as const,
         system: [],
         prebuiltSystem: frozen?.system,
         messages: [...modelMessages, summaryRequest],
         mergeTurnContextBeforeLastMessage: true,
         model,
-      })
+      }
+      let result = yield* processor.process(request)
+
+      // A step that produced NOTHING — no text, no reasoning — is the one
+      // compaction failure that might just be a one-off. Every other shape is
+      // either already recoverable (think-only: the reasoning fallback below
+      // uses what it produced) or deterministic (a content filter refilters,
+      // an over-cap request is still over, a blocked or errored step stays
+      // blocked), so retrying those buys nothing and costs a full transcript.
+      //
+      // Bounded far more tightly than the conversation path for exactly that
+      // reason: one attempt separates a one-off from a systematic cause, and a
+      // second would only re-send the whole transcript to learn the same thing.
+      // Re-entry is safe — process() resets every per-step field it owns.
+      const producedNothing = () =>
+        !MessageV2.parts(msg.id).some(
+          (part) => (part.type === "text" || part.type === "reasoning") && part.text.trim().length > 0,
+        )
+      for (
+        let attempt = 1;
+        result === "continue" &&
+        processor.message.finish !== "content-filter" &&
+        attempt <= Flag.MIMOCODE_COMPACTION_RETRY_LIMIT &&
+        producedNothing();
+        attempt++
+      ) {
+        log.warn("compaction produced nothing, retrying", {
+          sessionID: input.sessionID,
+          attempt,
+          limit: Flag.MIMOCODE_COMPACTION_RETRY_LIMIT,
+        })
+        result = yield* processor.process({
+          ...request,
+          // Carried inside the existing summary turn rather than appended as a
+          // second user message, so the request shape the provider sees does
+          // not change. One sentence: against a full transcript its token cost
+          // is noise, but the instruction has to be unmissable.
+          messages: [
+            ...modelMessages,
+            {
+              role: "user" as const,
+              content: [
+                {
+                  type: "text" as const,
+                  text: `${prompt}\n\nYour previous response was empty. Write the summary as plain text now.`,
+                },
+              ],
+            },
+          ],
+        })
+      }
 
       const rollback = Effect.fn("SessionCompaction.rollback")(function* (message: string) {
         if (!processor.message.error) {

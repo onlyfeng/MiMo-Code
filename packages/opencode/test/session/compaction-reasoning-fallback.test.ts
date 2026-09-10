@@ -42,7 +42,12 @@ afterEach(async () => {
 const it = testEffect(makeLayer())
 
 /** Runs one prompt against an already-overflowing session and reports the outcome. */
-const driveCompaction = Effect.fn("test.driveCompaction")(function* (title: string) {
+const RETRY_NUDGE = "Your previous response was empty"
+
+const driveCompaction = Effect.fn("test.driveCompaction")(function* (
+  title: string,
+  llm?: { inputs: Effect.Effect<unknown[]> },
+) {
   const sessions = yield* Session.Service
   const prompt = yield* SessionPrompt.Service
   const session = yield* sessions.create({ title })
@@ -55,7 +60,14 @@ const driveCompaction = Effect.fn("test.driveCompaction")(function* (title: stri
   })
 
   const boundary = yield* compactionBoundary(session.id)
+  // Counting requests that carry the nudge isolates the RETRY from a second,
+  // independent compaction round — both would otherwise show up as "two
+  // compaction requests" and make the assertion meaningless.
+  const retryRequests = llm
+    ? (yield* llm.inputs).filter((body) => JSON.stringify(body).includes(RETRY_NUDGE)).length
+    : 0
   return {
+    retryRequests,
     // A surviving boundary means the summary was accepted; a rolled back one
     // means the turn was discarded.
     boundarySurvived: !!boundary,
@@ -94,10 +106,15 @@ it.live(
         yield* disableCheckpoint
         // Nothing to recover, so the existing behaviour must be untouched — the
         // fallback must not become a blanket "accept any finished step".
+        // Two empty steps: the compaction request and its one retry. Only after
+        // the bounded retry is exhausted does the boundary roll back.
+        yield* llm.push(reply().stop().item())
         yield* llm.push(reply().stop().item())
         yield* llm.text("final answer")
 
-        const result = yield* driveCompaction("empty compaction")
+        const result = yield* driveCompaction("empty compaction", llm)
+        // Exactly one retry — the bound is respected, not merely present.
+        expect(result.retryRequests).toBe(1)
         expect(result.errors).toContain("Compaction produced no usable summary")
         expect(result.boundarySurvived).toBe(false)
       }),
@@ -155,7 +172,7 @@ it.live(
         )
         yield* llm.text("final answer")
 
-        const result = yield* driveCompaction("filtered compaction")
+        const result = yield* driveCompaction("filtered compaction", llm)
         expect(result.summary).not.toContain("WITHHELD_BY_FILTER")
         expect(result.boundarySurvived).toBe(false)
         // The discriminant matters as much as the rollback: SDK consumers switch
@@ -164,6 +181,9 @@ it.live(
         // rollback error.
         expect(result.errors).toContain("ContentFilterError")
         expect(result.errors).not.toContain("InvalidOutputError")
+        // A filter refilters — retrying would spend a whole transcript to be
+        // withheld again.
+        expect(result.retryRequests).toBe(0)
       }),
       cfg,
     ),
@@ -240,6 +260,56 @@ it.live(
         expect(result.summary).not.toContain("PARTIAL_BEFORE_FILTER")
         expect(result.boundarySurvived).toBe(false)
         expect(result.errors).toContain("ContentFilterError")
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "a one-off empty step is retried once and the retry is accepted",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // Empty, then a real summary. This is the case the retry exists for:
+        // nothing about an empty step says the next attempt will also be empty.
+        yield* llm.push(reply().stop().item())
+        yield* llm.text("a real summary of the conversation so far")
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("retried compaction", llm)
+        // Load-bearing: without this the test passes even with retries disabled,
+        // because a FAILED compaction is followed by a second, independent
+        // compaction round that would also end up with a surviving boundary.
+        // Only the retry path sends the nudge.
+        expect(result.retryRequests).toBe(1)
+        expect(result.errors).toBe("")
+        expect(result.boundarySurvived).toBe(true)
+        expect(result.summary).toContain("a real summary of the conversation so far")
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "a think-only step is never retried — the reasoning fallback already covers it",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // One think-only step, then a summary that must never be requested.
+        // Retrying here would spend a whole transcript to obtain what the
+        // fallback already has in hand.
+        yield* llm.reason("The user asked about X; we changed Y.")
+        yield* llm.text("MUST_NOT_BE_REQUESTED")
+
+        const result = yield* driveCompaction("think-only not retried", llm)
+        expect(result.retryRequests).toBe(0)
+        expect(result.boundarySurvived).toBe(true)
+        expect(result.summary).toContain("we changed Y")
+        expect(result.summary).not.toContain("MUST_NOT_BE_REQUESTED")
       }),
       cfg,
     ),

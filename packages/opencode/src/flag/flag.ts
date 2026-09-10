@@ -156,6 +156,15 @@ export const Flag = {
   MIMOCODE_DISABLE_MOUSE: truthy("MIMOCODE_DISABLE_MOUSE"),
   MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT: number("MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT") ?? 3,
   MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT: number("MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT") ?? 2,
+  // Deliberately lower than the conversation limit above. A compaction retry
+  // re-sends the ENTIRE transcript, so it is orders of magnitude more expensive
+  // than a conversation continuation, and it only pays off for a one-off empty
+  // response — a systematic cause (an over-cap request, a failing gateway) fails
+  // identically every time. One attempt distinguishes the two; a second only
+  // burns another full-transcript request.
+  // nonNegativeNumber, not number: 0 must be a usable value so the retry can be
+  // turned off outright — number() rejects it and would silently fall back to 1.
+  MIMOCODE_COMPACTION_RETRY_LIMIT: nonNegativeNumber("MIMOCODE_COMPACTION_RETRY_LIMIT") ?? 1,
   MIMOCODE_TEXT_TOOL_CALL_RETRY_LIMIT: number("MIMOCODE_TEXT_TOOL_CALL_RETRY_LIMIT") ?? 2,
   // Defaults to true (lenient): a tool call whose name only differs from the
   // registered one by letter case (`Read` for `read`, `applyPatch` for

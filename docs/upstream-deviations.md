@@ -635,6 +635,16 @@ where this delta does not change their implementation.
   errored step, and a finished step that carries no content at all. The fallback
   never fabricates a summary — it only promotes content the model actually
   produced.
+- Bounded retry: a step that produced NOTHING — no text and no reasoning — is
+  retried once (`MIMOCODE_COMPACTION_RETRY_LIMIT`, default 1, `0` disables it),
+  carrying a one-sentence instruction inside the existing summary turn. It is
+  the only compaction failure that may be a one-off; every other shape is either
+  already recoverable (think-only, via the fallback above) or deterministic (a
+  content filter refilters, an over-cap request is still over, a blocked or
+  errored step stays blocked). The bound is deliberately tighter than the
+  conversation path's: a compaction retry re-sends the ENTIRE transcript, so one
+  attempt separates a one-off from a systematic cause and a second only buys the
+  same answer at another full-transcript cost.
 - Finish-reason boundary (a rejection list, so each entry is a recorded
   judgement rather than an accident): `content-filter` REJECTS, with or without
   text — the provider withheld the answer, so whatever leaked out before the
@@ -667,14 +677,19 @@ where this delta does not change their implementation.
   branches above the fallback are unchanged, so an upstream change to any of
   them merges cleanly; only the final no-text branch differs.
 - Verification: `test/session/compaction-reasoning-fallback.test.ts` drives the
-  real overflow path against a scripted provider under six response shapes —
+  real overflow path against a scripted provider under eight response shapes —
   think-only (boundary survives, reasoning reaches the projection), empty
   (rollback preserved), normal text (unchanged), content-filtered with reasoning
   only (never reaches the projection, boundary rolls back, `ContentFilterError`
   rather than the generic rollback error), content-filtered with partial text
   (same rejection — the guard is not confined to the no-text branch), and
   output-limited (`length` stays adopted, so the filter guard cannot quietly
-  widen to cover truncation).
+  widen to cover truncation), a one-off empty step (retried once, the retry
+  accepted), and an exhausted retry (bounded at one, then rolled back). The
+  retry assertions count requests carrying the retry instruction rather than
+  compaction requests overall, since a FAILED compaction is followed by a
+  second, independent compaction round that would otherwise be
+  indistinguishable from a retry.
 - Retirement condition: upstream gives compaction its own retry or an equivalent
   recovery for a summary step that carries reasoning but no text.
 
