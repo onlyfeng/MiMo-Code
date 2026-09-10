@@ -757,16 +757,15 @@ where this delta does not change their implementation.
   orphan sweeping and `recoveryCandidates` both skip (`"completed" in time`),
   stranding the session with no recovery path. Cleared with `delete`, not
   `= undefined`: that check tests for the KEY.
-- Usage accounting: each attempt's tokens are carried forward, but ONLY when the
-  attempt actually reported usage. `finish-step` accumulates cost while
-  REPLACING `tokens`, so a retried compaction would otherwise bill two
-  full-transcript requests and report one, and consumers that sum `info.tokens`
-  (`cli/cmd/stats.ts`) would under-report a request that was really sent.
-  The "actually reported" test is object IDENTITY, not value: `finish-step`
-  assigns a fresh usage object, so a changed reference is the only reliable
-  signal. A retry that dies before it — a context overflow, an API error —
-  leaves the previous object in place, and merging unconditionally would add it
-  to itself and report usage the failed attempt never sent.
+- Usage accounting: `tokens` is NOT accumulated across attempts, even though
+  `cost` is. The two fields answer different questions — `cost` is what was
+  spent, `tokens` is the CONTEXT FOOTPRINT of the latest request. The TUI
+  context readout (`cli/cmd/tui/util/model.ts`), the context sidebar and
+  `acp/agent.ts` all read it as current usage, and none of them exclude summary
+  messages, so summing two full-transcript attempts would report roughly twice
+  the transcript and can read above 100% — the exact display failure this work
+  began from. A discarded attempt is not lost: its cost is accumulated, and its
+  usage stays on that attempt's own `step-finish` part.
 - Flag note: the limit reads through `nonNegativeNumber`, not `number`.
   `number()` rejects `"0"` and would silently fall back to `1`, making the off
   switch a no-op.

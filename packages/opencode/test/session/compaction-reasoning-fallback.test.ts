@@ -369,50 +369,27 @@ it.live(
 )
 
 it.live(
-  "a retried compaction reports both attempts' tokens",
+  "a retried compaction reports the successful attempt as its context footprint",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         yield* disableCheckpoint
-        // finish-step accumulates cost but REPLACES tokens, so without carrying
-        // the first attempt forward the message would bill two full-transcript
-        // requests while reporting one — and stats.ts sums info.tokens.
-        yield* llm.push(reply().usage({ input: 1_000, output: 10 }).stop().item())
+        // `tokens` is the context footprint of the latest request, not a
+        // running total — the TUI readout, the context sidebar and acp/agent.ts
+        // all read it that way and none of them exclude summary messages.
+        // Summing two full-transcript attempts here would report roughly twice
+        // the transcript and can read above 100%. `cost` is the field that
+        // accumulates; the discarded attempt keeps its usage on its own
+        // step-finish part.
+        yield* llm.push(reply().usage({ input: 9_000, output: 10 }).stop().item())
         yield* llm.text("a real summary", { usage: { input: 2_000, output: 20 } })
         yield* llm.text("final answer")
 
-        const result = yield* driveCompaction("token carry", llm)
+        const result = yield* driveCompaction("footprint", llm)
         expect(result.retryRequests).toBe(1)
         expect(result.boundarySurvived).toBe(true)
-        expect(result.summaryTokens?.input).toBe(3_000)
-        expect(result.summaryTokens?.output).toBe(30)
-      }),
-      cfg,
-    ),
-  60_000,
-)
-
-it.live(
-  "a retry that fails before reporting usage does not double the first attempt's tokens",
-  () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ llm }) {
-        yield* disableCheckpoint
-        // The retry dies before `finish-step`, so it never assigns a usage
-        // object. Merging unconditionally would add the first attempt's tokens
-        // to themselves and report usage the failed attempt never sent.
-        yield* llm.push(reply().usage({ input: 1_000, output: 10 }).stop().item())
-        // A context-overflow rejection is terminal and arrives before any
-        // finish-step, so the retry never assigns a usage object.
-        yield* llm.error(400, {
-          error: { message: "This model's maximum context length is 100 tokens.", type: "invalid_request_error" },
-        })
-        yield* llm.text("final answer")
-
-        const result = yield* driveCompaction("failed retry usage", llm)
-        expect(result.retryRequests).toBe(1)
-        expect(result.summaryTokens?.input).toBe(1_000)
-        expect(result.summaryTokens?.output).toBe(10)
+        expect(result.summaryTokens?.input).toBe(2_000)
+        expect(result.summaryTokens?.output).toBe(20)
       }),
       cfg,
     ),

@@ -593,19 +593,18 @@ export const layer: Layer.Layer<
         // explicit undefined would still read as completed.
         delete processor.message.time.completed
         yield* session.updateMessage(processor.message)
-        // `finish-step` ACCUMULATES cost but REPLACES tokens (processor.ts), so
-        // without carrying the previous attempt forward the message would bill
-        // two full-transcript requests while reporting one — and consumers that
-        // sum `info.tokens` (cli/cmd/stats.ts) would under-report a request that
-        // was really sent and paid for.
-        // Identity, not value: `finish-step` ASSIGNS a fresh usage object, so a
-        // changed reference is the only reliable signal that the attempt
-        // actually reported usage. A retry that dies before finish-step — an
-        // API error, a context overflow — leaves the previous object in place,
-        // and adding it to itself would double every field and report usage the
-        // failed attempt never sent.
-        const previousTokens = processor.message.tokens
-        const spent = { ...previousTokens, cache: { ...previousTokens.cache } }
+        // Deliberately NOT accumulating `tokens` across attempts, even though
+        // `cost` accumulates. The two fields answer different questions:
+        // `cost` is what was spent, `tokens` is the CONTEXT FOOTPRINT of the
+        // latest request. The TUI context readout
+        // (cli/cmd/tui/util/model.ts), the context sidebar and acp/agent.ts all
+        // read it as current usage, and none of them exclude summary messages —
+        // so summing two full-transcript attempts there would report roughly
+        // twice the transcript and can read above 100%, which is the exact
+        // display failure this whole line of work started from.
+        //
+        // The discarded attempt is not lost: its cost is accumulated, and its
+        // usage stays on that attempt's own step-finish part.
         result = yield* processor.process({
           ...request,
           // Carried inside the existing summary turn rather than appended as a
@@ -625,21 +624,6 @@ export const layer: Layer.Layer<
             },
           ],
         })
-        const attempted = processor.message.tokens
-        if (attempted !== previousTokens)
-          processor.message.tokens = {
-            ...(spent.total === undefined && attempted.total === undefined
-              ? {}
-              : { total: (spent.total ?? 0) + (attempted.total ?? 0) }),
-            input: spent.input + attempted.input,
-            output: spent.output + attempted.output,
-            reasoning: spent.reasoning + attempted.reasoning,
-            cache: {
-              read: spent.cache.read + attempted.cache.read,
-              write: spent.cache.write + attempted.cache.write,
-            },
-          }
-        yield* session.updateMessage(processor.message)
       }
 
       const rollback = Effect.fn("SessionCompaction.rollback")(function* (message: string) {
