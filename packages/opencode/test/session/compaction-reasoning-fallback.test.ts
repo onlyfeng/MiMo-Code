@@ -1,0 +1,397 @@
+/**
+ * Compaction survives a think-only summary step (FD-010).
+ *
+ * A reasoning model asked to write a summary can finish the step having emitted
+ * only reasoning and no text. The conversation path already recognises that
+ * shape and retries it (SessionPrompt.autoContinueInvalidOutput, reason
+ * "think-only"); compaction had no equivalent and rolled the boundary back on
+ * the first miss.
+ *
+ * That asymmetry is what kills sessions. Compaction is the only way back down
+ * once usage passes the trigger, so one rolled-back boundary leaves the session
+ * pinned above it: /compact reports "no usable summary" and changes nothing,
+ * and every turn after it fails the same way.
+ *
+ * The three tests are the same fixture under the three response shapes a
+ * provider can return, so what they pin is the response shape and nothing else.
+ */
+import { afterEach, expect } from "bun:test"
+import { Deferred, Effect } from "effect"
+import { Instance } from "../../src/project/instance"
+import { Session } from "../../src/session"
+import { SessionPrompt } from "../../src/session/prompt"
+import { Log } from "../../src/util"
+import { provideTmpdirServer } from "../fixture/fixture"
+import { testEffect } from "../lib/effect"
+import { raw, reply } from "../lib/llm-server"
+import { makeLayer, providerCfg } from "../workflow/lib"
+import {
+  compactionBoundary,
+  compactionCfg,
+  disableCheckpoint,
+  seedOverflowingTurn,
+  sessionErrors,
+} from "./compaction-overflow-fixture"
+
+void Log.init({ print: false })
+
+afterEach(async () => {
+  await Instance.disposeAll()
+})
+
+const it = testEffect(makeLayer())
+
+/** Runs one prompt against an already-overflowing session and reports the outcome. */
+const RETRY_NUDGE = "Your previous response was empty"
+
+const driveCompaction = Effect.fn("test.driveCompaction")(function* (
+  title: string,
+  llm?: { inputs: Effect.Effect<unknown[]> },
+) {
+  const sessions = yield* Session.Service
+  const prompt = yield* SessionPrompt.Service
+  const session = yield* sessions.create({ title })
+  yield* seedOverflowingTurn(session.id)
+
+  yield* prompt.prompt({
+    sessionID: session.id,
+    parts: [{ type: "text", text: "a follow-up turn that trips the compaction trigger" }],
+    agent: "build",
+  })
+
+  const boundary = yield* compactionBoundary(session.id)
+  // Counting requests that carry the nudge isolates the RETRY from a second,
+  // independent compaction round — both would otherwise show up as "two
+  // compaction requests" and make the assertion meaningless.
+  const retryRequests = llm
+    ? (yield* llm.inputs).filter((body) => JSON.stringify(body).includes(RETRY_NUDGE)).length
+    : 0
+  const summaryMessage = (yield* sessions.messages({ sessionID: session.id, agentID: "main" })).find(
+    (message) => message.info.role === "assistant" && message.info.summary === true,
+  )
+  return {
+    retryRequests,
+    summaryTokens: summaryMessage?.info.role === "assistant" ? summaryMessage.info.tokens : undefined,
+    // A surviving boundary means the summary was accepted; a rolled back one
+    // means the turn was discarded.
+    boundarySurvived: !!boundary,
+    summary: boundary?.type === "compaction" ? (boundary.projection?.summary ?? "") : "",
+    errors: yield* sessionErrors(session.id),
+  }
+})
+
+const cfg = { git: true as const, config: (url: string) => ({ ...providerCfg(url), ...compactionCfg }) }
+
+it.live(
+  "a think-only summary step is adopted instead of discarded",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        yield* llm.reason("The user asked about X; we changed Y and Z remains open.")
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("think-only compaction")
+        expect(result.errors).not.toContain("Compaction produced no usable summary")
+        expect(result.boundarySurvived).toBe(true)
+        // The reasoning is what ends up in the projection the next turn replays.
+        expect(result.summary).toContain("we changed Y and Z remains open")
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "a step with no content at all still rolls back",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // Nothing to recover, so the existing behaviour must be untouched — the
+        // fallback must not become a blanket "accept any finished step".
+        // Two empty steps: the compaction request and its one retry. Only after
+        // the bounded retry is exhausted does the boundary roll back.
+        yield* llm.push(reply().stop().item())
+        yield* llm.push(reply().stop().item())
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("empty compaction", llm)
+        // Exactly one retry — the bound is respected, not merely present.
+        expect(result.retryRequests).toBe(1)
+        expect(result.errors).toContain("Compaction produced no usable summary")
+        expect(result.boundarySurvived).toBe(false)
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "a normal text summary is unaffected",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        yield* llm.text("a real summary of the conversation so far")
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("text compaction")
+        expect(result.errors).toBe("")
+        expect(result.boundarySurvived).toBe(true)
+        expect(result.summary).toContain("a real summary of the conversation so far")
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "reasoning withheld by the content filter is never promoted",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // `process()` does not treat a content-filter finish as terminal — the
+        // conversation path does that in its own classification step, which
+        // compaction never runs. So without an explicit guard this reaches the
+        // fallback with reasoning in hand and promotes content the provider
+        // deliberately withheld, while discarding the history it replaced.
+        yield* llm.push(
+          raw({
+            head: [
+              { id: "chatcmpl-filtered", object: "chat.completion.chunk", choices: [{ delta: { role: "assistant" } }] },
+              {
+                id: "chatcmpl-filtered",
+                object: "chat.completion.chunk",
+                choices: [{ delta: { reasoning_content: "WITHHELD_BY_FILTER" } }],
+              },
+              {
+                id: "chatcmpl-filtered",
+                object: "chat.completion.chunk",
+                choices: [{ delta: {}, finish_reason: "content_filter" }],
+              },
+            ],
+          }),
+        )
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("filtered compaction", llm)
+        expect(result.summary).not.toContain("WITHHELD_BY_FILTER")
+        expect(result.boundarySurvived).toBe(false)
+        // The discriminant matters as much as the rollback: SDK consumers switch
+        // on it, and the TUI's safety notice is driven by it — so this must be
+        // the same error the conversation path publishes, not the generic
+        // rollback error.
+        expect(result.errors).toContain("ContentFilterError")
+        expect(result.errors).not.toContain("InvalidOutputError")
+        // A filter refilters — retrying would spend a whole transcript to be
+        // withheld again.
+        expect(result.retryRequests).toBe(0)
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "reasoning truncated by the output limit is still adopted",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // `length` is the deliberate counterpart to the content-filter case: the
+        // recap is truncated, not suppressed. A partial summary still beats
+        // losing the session, so this must NOT be swept up by that guard.
+        yield* llm.push(
+          raw({
+            head: [
+              { id: "chatcmpl-length", object: "chat.completion.chunk", choices: [{ delta: { role: "assistant" } }] },
+              {
+                id: "chatcmpl-length",
+                object: "chat.completion.chunk",
+                choices: [{ delta: { reasoning_content: "We changed Y and Z rem" } }],
+              },
+              {
+                id: "chatcmpl-length",
+                object: "chat.completion.chunk",
+                choices: [{ delta: {}, finish_reason: "length" }],
+              },
+            ],
+          }),
+        )
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("truncated compaction")
+        expect(result.boundarySurvived).toBe(true)
+        expect(result.summary).toContain("We changed Y and Z rem")
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "text streamed before the content filter fired is never accepted",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // Partial text is not a lesser case than reasoning-only — whatever
+        // leaked out before the filter fired is withheld content too. Guarding
+        // only the no-text branch would let this through: the boundary would
+        // survive and the real history would be hidden behind it.
+        yield* llm.push(
+          raw({
+            head: [
+              { id: "chatcmpl-partial", object: "chat.completion.chunk", choices: [{ delta: { role: "assistant" } }] },
+              {
+                id: "chatcmpl-partial",
+                object: "chat.completion.chunk",
+                choices: [{ delta: { content: "PARTIAL_BEFORE_FILTER" } }],
+              },
+              {
+                id: "chatcmpl-partial",
+                object: "chat.completion.chunk",
+                choices: [{ delta: {}, finish_reason: "content_filter" }],
+              },
+            ],
+          }),
+        )
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("partially filtered compaction")
+        expect(result.summary).not.toContain("PARTIAL_BEFORE_FILTER")
+        expect(result.boundarySurvived).toBe(false)
+        expect(result.errors).toContain("ContentFilterError")
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "a one-off empty step is retried once and the retry is accepted",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // Empty, then a real summary. This is the case the retry exists for:
+        // nothing about an empty step says the next attempt will also be empty.
+        yield* llm.push(reply().stop().item())
+        yield* llm.text("a real summary of the conversation so far")
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("retried compaction", llm)
+        // Load-bearing: without this the test passes even with retries disabled,
+        // because a FAILED compaction is followed by a second, independent
+        // compaction round that would also end up with a surviving boundary.
+        // Only the retry path sends the nudge.
+        expect(result.retryRequests).toBe(1)
+        expect(result.errors).toBe("")
+        expect(result.boundarySurvived).toBe(true)
+        expect(result.summary).toContain("a real summary of the conversation so far")
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "a think-only step is never retried — the reasoning fallback already covers it",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // One think-only step, then a summary that must never be requested.
+        // Retrying here would spend a whole transcript to obtain what the
+        // fallback already has in hand.
+        yield* llm.reason("The user asked about X; we changed Y.")
+        yield* llm.text("MUST_NOT_BE_REQUESTED")
+
+        const result = yield* driveCompaction("think-only not retried", llm)
+        expect(result.retryRequests).toBe(0)
+        expect(result.boundarySurvived).toBe(true)
+        expect(result.summary).toContain("we changed Y")
+        expect(result.summary).not.toContain("MUST_NOT_BE_REQUESTED")
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "the compaction assistant stays incomplete while a retry is in flight",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        const sessions = yield* Session.Service
+        const prompt = yield* SessionPrompt.Service
+        const session = yield* sessions.create({ title: "retry in flight" })
+        yield* seedOverflowingTurn(session.id)
+
+        // First attempt empty; the retry hangs so the in-flight state can be
+        // observed. The first attempt already ran process()'s cleanup, which
+        // stamps time.completed — if that stamp survives into the retry, a crash
+        // here leaves the boundary behind an apparently-finished assistant that
+        // orphan sweeping and recoveryCandidates both skip.
+        const gate = yield* Deferred.make<void>()
+        yield* llm.push(reply().stop().item())
+        yield* llm.hangUntil(gate)
+
+        yield* Effect.forkScoped(
+          prompt
+            .prompt({
+              sessionID: session.id,
+              parts: [{ type: "text", text: "a follow-up turn that trips the compaction trigger" }],
+              agent: "build",
+            })
+            .pipe(Effect.ignore),
+        )
+
+        // Two requests received = the retry is on the wire and hanging.
+        yield* llm.wait(2)
+        const inFlight = (yield* sessions.messages({ sessionID: session.id, agentID: "main" })).find(
+          (message) => message.info.role === "assistant" && message.info.summary === true,
+        )
+        expect(inFlight).toBeDefined()
+        // `in`, matching how recoveryCandidates decides.
+        expect(inFlight && "completed" in inFlight.info.time).toBe(false)
+
+        // Release the hang so the scoped fiber can finish on its own; the
+        // scope closes with the test.
+        yield* Deferred.succeed(gate, undefined)
+      }),
+      cfg,
+    ),
+  60_000,
+)
+
+it.live(
+  "a retried compaction reports the successful attempt as its context footprint",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* disableCheckpoint
+        // `tokens` is the context footprint of the latest request, not a
+        // running total — the TUI readout, the context sidebar and acp/agent.ts
+        // all read it that way and none of them exclude summary messages.
+        // Summing two full-transcript attempts here would report roughly twice
+        // the transcript and can read above 100%. `cost` is the field that
+        // accumulates; the discarded attempt keeps its usage on its own
+        // step-finish part.
+        yield* llm.push(reply().usage({ input: 9_000, output: 10 }).stop().item())
+        yield* llm.text("a real summary", { usage: { input: 2_000, output: 20 } })
+        yield* llm.text("final answer")
+
+        const result = yield* driveCompaction("footprint", llm)
+        expect(result.retryRequests).toBe(1)
+        expect(result.boundarySurvived).toBe(true)
+        expect(result.summaryTokens?.input).toBe(2_000)
+        expect(result.summaryTokens?.output).toBe(20)
+      }),
+      cfg,
+    ),
+  60_000,
+)

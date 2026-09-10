@@ -11,6 +11,7 @@ import { SessionProcessor } from "./processor"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config"
+import { Flag } from "@/flag/flag"
 import { NotFoundError } from "@/storage"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Layer, Context } from "effect"
@@ -23,6 +24,25 @@ import { SessionPrefixSnapshot } from "./prefix-snapshot"
 import { observedToolParts } from "./observed-tool-parts"
 
 const log = Log.create({ service: "session.compaction" })
+
+/**
+ * Finish reasons that disqualify a compaction step regardless of what it
+ * produced, mirroring how `classify.ts` treats them for the conversation path.
+ *
+ * `process()` surfaces neither: it reports blocked or errored MESSAGES as
+ * "stop", so a step that merely REPORTS one of these in band arrives as
+ * "continue" and has to be recognised here.
+ *
+ * `error` is defensive rather than currently reachable — no adapter in tree
+ * maps a wire value onto it today (openai-compatible sends unknown reasons to
+ * "other"), but `LanguageModelV2FinishReason` defines it as "model stopped
+ * because of an error" and `classify.ts` guards it for the same reason. That is
+ * why it has unit coverage but no end-to-end case: a scripted provider cannot
+ * currently produce it.
+ */
+export function isTerminalCompactionFinish(finish: string | undefined) {
+  return finish === "content-filter" || finish === "error"
+}
 
 export const Event = {
   Compacted: BusEvent.define(
@@ -545,7 +565,7 @@ export const layer: Layer.Layer<
         role: "user" as const,
         content: [{ type: "text" as const, text: prompt }],
       }
-      const result = yield* processor.process({
+      const request = {
         user: {
           ...requestUser.info,
           system: promptConfig.system,
@@ -556,14 +576,90 @@ export const layer: Layer.Layer<
         permission: parentSession.permission,
         sessionID: input.sessionID,
         tools: frozen?.tools ? SessionPrefixSnapshot.restoreTools(frozen.tools) : {},
+        // compat keeps its active-only membership (DC-CONTEXT-001); the
+        // `as const` is main's type narrowing and is adopted.
         activeTools: frozenActiveTools,
-        toolChoice: "none",
+        toolChoice: "none" as const,
         system: [],
         prebuiltSystem: frozen?.system,
         messages: [...modelMessages, summaryRequest],
         mergeTurnContextBeforeLastMessage: true,
         model,
-      })
+      }
+      let result = yield* processor.process(request)
+
+      // A step that produced NOTHING — no text, no reasoning — is the one
+      // compaction failure that might just be a one-off. Every other shape is
+      // either already recoverable (think-only: the reasoning fallback below
+      // uses what it produced) or deterministic (a content filter refilters,
+      // an over-cap request is still over, a blocked or errored step stays
+      // blocked), so retrying those buys nothing and costs a full transcript.
+      //
+      // Bounded far more tightly than the conversation path for exactly that
+      // reason: one attempt separates a one-off from a systematic cause, and a
+      // second would only re-send the whole transcript to learn the same thing.
+      // Re-entry is safe — process() resets every per-step field it owns.
+      const producedNothing = () =>
+        !MessageV2.parts(msg.id).some(
+          (part) => (part.type === "text" || part.type === "reasoning") && part.text.trim().length > 0,
+        )
+      for (
+        let attempt = 1;
+        result === "continue" &&
+        !isTerminalCompactionFinish(processor.message.finish) &&
+        attempt <= Flag.MIMOCODE_COMPACTION_RETRY_LIMIT &&
+        producedNothing();
+        attempt++
+      ) {
+        log.warn("compaction produced nothing, retrying", {
+          sessionID: input.sessionID,
+          attempt,
+          limit: Flag.MIMOCODE_COMPACTION_RETRY_LIMIT,
+        })
+        // The finished attempt already ran process()'s cleanup, which stamped
+        // `time.completed`. Re-entering does not clear it, so for the whole of
+        // the retry — a full-transcript request, potentially long — the
+        // assistant would look finished while it is not. A crash or interrupt
+        // there leaves the boundary in place behind an apparently-completed
+        // assistant, and both orphan sweeping and recoveryCandidates skip it
+        // (`"completed" in time`), stranding the session with no recovery path.
+        //
+        // `delete`, not `= undefined`: that check tests for the KEY, so an
+        // explicit undefined would still read as completed.
+        delete processor.message.time.completed
+        yield* session.updateMessage(processor.message)
+        // Deliberately NOT accumulating `tokens` across attempts, even though
+        // `cost` accumulates. The two fields answer different questions:
+        // `cost` is what was spent, `tokens` is the CONTEXT FOOTPRINT of the
+        // latest request. The TUI context readout
+        // (cli/cmd/tui/util/model.ts), the context sidebar and acp/agent.ts all
+        // read it as current usage, and none of them exclude summary messages —
+        // so summing two full-transcript attempts there would report roughly
+        // twice the transcript and can read above 100%, which is the exact
+        // display failure this whole line of work started from.
+        //
+        // The discarded attempt is not lost: its cost is accumulated, and its
+        // usage stays on that attempt's own step-finish part.
+        result = yield* processor.process({
+          ...request,
+          // Carried inside the existing summary turn rather than appended as a
+          // second user message, so the request shape the provider sees does
+          // not change. One sentence: against a full transcript its token cost
+          // is noise, but the instruction has to be unmissable.
+          messages: [
+            ...modelMessages,
+            {
+              role: "user" as const,
+              content: [
+                {
+                  type: "text" as const,
+                  text: `${prompt}\n\nYour previous response was empty. Write the summary as plain text now.`,
+                },
+              ],
+            },
+          ],
+        })
+      }
 
       const rollback = Effect.fn("SessionCompaction.rollback")(function* (message: string) {
         if (!processor.message.error) {
@@ -590,8 +686,103 @@ export const layer: Layer.Layer<
 
       if (result === "text-repeat") return yield* rollback("Compaction produced repeated text")
       if (result === "stop") return yield* rollback("Compaction failed before producing a summary")
-      if (!MessageV2.parts(msg.id).some((part) => part.type === "text" && part.text.trim().length > 0))
-        return yield* rollback("Compaction produced no usable summary")
+
+      // A reasoning model asked to write a summary can spend the whole step
+      // thinking and finish without emitting any text — the "think-only" step
+      // the conversation path already recognises and retries
+      // (SessionPrompt.autoContinueInvalidOutput). Compaction has no such
+      // retry: it rolls the boundary back on the first miss, and because
+      // compaction is the session's only way back down once usage passes the
+      // trigger, that single miss pins the session above the trigger with no
+      // way down. Manual /compact then reports "no usable summary" and changes
+      // nothing, every turn after it fails the same way, and the session is
+      // dead.
+      //
+      // For this particular task the thinking is not scratch work — it is a
+      // recap of the conversation, which is exactly what was asked for. So
+      // adopt it rather than discarding the turn. A summary of imperfect shape
+      // keeps the session alive; a rolled-back boundary does not. Marked
+      // synthetic because the model did not offer it as its answer.
+      // Decide on the finish reason BEFORE looking at what the step produced.
+      // `classify.ts` applies the same ordering for the conversation path, and
+      // says why: a step whose status is already disqualifying must not be
+      // re-judged as usable just because it also carried content. A
+      // content-filter finish means the provider withheld the answer, so
+      // whatever leaked out before the filter fired is withheld content too —
+      // partial text is not a lesser case, it is the same case.
+      //
+      // Nothing upstream of here enforces that for a summary message:
+      // `process()` only reports blocked/errored steps as "stop", and
+      // `classify.ts` short-circuits on `assistant.summary` before it ever
+      // inspects the finish reason — so every safety branch the conversation
+      // path relies on is skipped here by construction.
+      //
+      // Judgement per finish reason, so adding one is a decision rather than
+      // an accident:
+      //   content-filter → REJECT, with or without text. Adopting it would
+      //     replay suppressed content back to the model as trusted summary AND
+      //     drop the real history it replaced.
+      //   error → REJECT. `LanguageModelV2FinishReason` includes it ("model
+      //     stopped because of an error"), and a provider can report it IN BAND
+      //     without throwing — in which case nothing upstream marks the message
+      //     errored and `process()` returns "continue". The conversation path
+      //     calls this `failed` and writes ModelError; so does this one.
+      //   tool-calls → unreachable: a tool call from a summary message throws
+      //     in the processor, which surfaces as "stop" and is handled above.
+      //   stop → accept. The model simply answered, or spent the step thinking.
+      //   length → accept. The recap is truncated, not suppressed; a partial
+      //     summary still beats losing the session, which is the whole premise
+      //     of the reasoning fallback below.
+      //   other → accept. An unrecognised finish reason is not evidence that
+      //     anything was withheld, and the conversation path treats this same
+      //     shape as recoverable (classify.ts returns think-only for it).
+      //
+      // Persist the SAME error shape the conversation path publishes for this
+      // finish, not the generic rollback error: SDK consumers discriminate on
+      // it, and the TUI's safety notice is driven by the published event.
+      // Setting it before rollback() also stops rollback from overwriting the
+      // discriminant or rewriting `finish`.
+      if (isTerminalCompactionFinish(processor.message.finish)) {
+        processor.message.error =
+          processor.message.finish === "content-filter"
+            ? new MessageV2.ContentFilterError({
+                message: "The response was withheld by the model provider's content safety filter.",
+              }).toObject()
+            : new MessageV2.ModelError({ message: "The model ended the summary step with an error." }).toObject()
+        yield* session.updateMessage(processor.message)
+        yield* bus.publish(Session.Event.Error, {
+          sessionID: input.sessionID,
+          error: processor.message.error,
+        })
+        return yield* rollback(
+          processor.message.finish === "content-filter"
+            ? "Compaction summary was withheld by the content filter"
+            : "Compaction summary ended with a model error",
+        )
+      }
+
+      const summaryParts = MessageV2.parts(msg.id)
+      if (!summaryParts.some((part) => part.type === "text" && part.text.trim().length > 0)) {
+        const reasoning = summaryParts
+          .filter((part): part is MessageV2.ReasoningPart => part.type === "reasoning")
+          .map((part) => part.text.trim())
+          .filter((text) => text.length > 0)
+          .join("\n\n")
+        if (!reasoning) return yield* rollback("Compaction produced no usable summary")
+        log.warn("compaction summary recovered from reasoning", {
+          sessionID: input.sessionID,
+          length: reasoning.length,
+        })
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          messageID: msg.id,
+          sessionID: input.sessionID,
+          type: "text",
+          text: reasoning,
+          synthetic: true,
+          time: { start: Date.now(), end: Date.now() },
+        })
+      }
 
       if (compactionPart) {
         const current = yield* session.messages({

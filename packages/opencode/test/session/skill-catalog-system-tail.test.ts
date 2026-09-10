@@ -363,6 +363,10 @@ it.live(
           expect(wire(summary, "system")).not.toContain(NEW)
           expect(wire(summary, "conversation")).not.toContain(CATALOG_MARKER)
           expect(summary.tools).toEqual(before.tools)
+          // Load-bearing literal, not a snapshot of current behavior: the
+          // processor throws on any tool call from a summary message, which
+          // rolls the compaction boundary back. Upstream sends "auto" here and
+          // carries the same throw. See FD-011.
           expect(summary.tool_choice).toBe("none")
           expect(yield* llm.misses).toEqual([])
           expect((yield* rows(session.id))[0].skill_catalog).toEqual(frozen[0].skill_catalog)

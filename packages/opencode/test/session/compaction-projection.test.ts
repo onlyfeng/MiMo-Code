@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import {
+  isTerminalCompactionFinish,
   buildFileManifest,
   buildProjectionTail,
   buildSummaryMessage,
@@ -275,5 +276,26 @@ describe("compaction projection", () => {
     expect(message).toContain("## Goal")
     expect(message).not.toContain("transcript-path")
     expect(message).not.toContain("mimocode.db")
+  })
+})
+
+describe("terminal compaction finish", () => {
+  test("disqualifies a step regardless of what it produced", () => {
+    // Mirrors classify.ts: these are judged on status, never on content, so a
+    // step that also produced text or reasoning is still disqualified.
+    expect(isTerminalCompactionFinish("content-filter")).toBe(true)
+    // Defensive: no adapter in tree maps a wire value onto "error" today
+    // (openai-compatible sends unknown reasons to "other"), but the SDK type
+    // defines it and classify.ts guards it, so compaction does too. Not
+    // reachable end-to-end, which is why the judgement is unit-tested here.
+    expect(isTerminalCompactionFinish("error")).toBe(true)
+  })
+
+  test("leaves every recoverable finish alone", () => {
+    // Widening this set would silently disable the reasoning fallback and the
+    // empty-step retry for the shapes they exist to serve.
+    for (const finish of ["stop", "length", "other", "tool-calls", undefined]) {
+      expect(isTerminalCompactionFinish(finish)).toBe(false)
+    }
   })
 })
