@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-09
-- Upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
-- Prior reviewed upstream: `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`
-- Main behavior (runtime/tests): `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
-- Bundled guidance content: `254181bb0ac08dc1fd43c3534efc3405c9c58d6c`
-- Prior fork `main` tip: `f4146b1a2feccaa224d7f7c8fde0c826161bdd90`
+- Last reviewed: 2026-09-10
+- Upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
+- Prior reviewed upstream: `1c13f05105b7c671a3e201b61410ccbfa8acf96e`
+- Main behavior (runtime/tests): `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
+- Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
+- Prior fork `main` tip: `3fd2245fcf836ff0309f6d1d75332ca32c493625`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -28,8 +28,8 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-09 capability inventory](upstream-sync-2026-09-09.md).
-Subsequent specified-change review: [audio convergence](audio-upstream-alignment-2026-09-09.md).
+Full synchronization review: [2026-09-10 capability inventory](upstream-sync-2026-09-10.md).
+The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
 
@@ -55,6 +55,12 @@ where this delta does not change their implementation.
 | FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets | Upstream voice protocol plus fork lifecycle/editor hardening | Preserve owner identity, drain-before-idle, and grapheme boundaries |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-09-10 title authority: inherit transactional title revisions and protected
+  manual titles across imports, replay and HTTP conflicts. First genuine input
+  commits a deterministic fallback before detached generation through the
+  existing promptWork/send admission and queue handoff. Recovery alone does not
+  retitle historical turns. This changes no Actor generation or task ownership.
 
 - Status: active
 - Canonical owner: fork `main` actor/inbox runtime
@@ -681,6 +687,13 @@ where this delta does not change their implementation.
   bounded exact-SHA CI proves process exit.
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
+
+- 2026-09-10 title isolation: automatic titles use persisted genuine user text,
+  configured lite then the exact source model, and an isolated StructuredOutput
+  request. Attachment-only input keeps a filename fallback; image bytes never
+  enter this title request. Ephemeral generation bypasses mutable chat parameter
+  and header hooks and rejects workflow connectors. Preserve the stronger fork
+  rule that only non-ephemeral main requests publish global retry state/events.
 
 - Status: adapted
 - Canonical owner: shared `main` session runtime
