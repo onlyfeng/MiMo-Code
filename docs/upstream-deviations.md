@@ -42,6 +42,7 @@ where this delta does not change their implementation.
 | FD-005 | model identity, prompt, discovery, tools, retry                       | Adapts inconsistent upstream classification                                                                       | Preserve one resolved identity                                                        |
 | FD-006 | compact Codex declarations and nested execution                       | Adopts compact registration and full authorized nested Actor/interactive composition                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
 | FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
+| FD-010 | compaction summary acceptance                                          | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                        | Preserve rollback for every other failure shape and for a step with no content        |
 
 ## FD-001 — run approval must not toggle shared delete state
 
@@ -619,3 +620,34 @@ where this delta does not change their implementation.
   metadata-only background updates preserve existing task and message sources.
   HTTP/SDK/tool publication and actual provider/transaction regressions are
   recorded in the shared history; no cross-restart recovery is introduced.
+
+## FD-010 — a think-only compaction step is recovered, not discarded
+
+- Status: active
+- Canonical owner: fork `main` compaction summary acceptance boundary
+- Observable contract: when the compaction step finishes with no text part but
+  carries reasoning, that reasoning is adopted as the summary and persisted as a
+  synthetic text part, so the boundary stands and the session drops below the
+  trigger. Every other failure shape keeps upstream's rollback exactly: provider
+  overflow, repeated text, a blocked or errored step, and a finished step that
+  carries no content at all. The fallback never fabricates a summary — it only
+  promotes content the model actually produced.
+- Rationale: upstream's conversation path already classifies this response shape
+  and retries it (`SessionPrompt.autoContinueInvalidOutput`, reason
+  "think-only"), but compaction has no retry and rolls back on the first miss.
+  Because compaction is the only way back down once usage passes the trigger,
+  that single miss pins the session above it: `/compact` reports "Compaction
+  produced no usable summary" and changes nothing, and every subsequent turn
+  fails identically. Reasoning models are most likely to produce this shape on
+  precisely this task, since a summary prompt invites the model to spend the
+  step recapping. The reasoning IS the requested recap, so adopting it is
+  strictly better than discarding a turn that cannot be retried.
+- Upstream relationship: extends upstream `compaction.ts`. The three rollback
+  branches above the fallback are unchanged, so an upstream change to any of
+  them merges cleanly; only the final no-text branch differs.
+- Verification: `test/session/compaction-reasoning-fallback.test.ts` drives the
+  real overflow path against a scripted provider under all three response
+  shapes — think-only (boundary survives, reasoning reaches the projection),
+  empty (rollback preserved), and normal text (unchanged).
+- Retirement condition: upstream gives compaction its own retry or an equivalent
+  recovery for a summary step that carries reasoning but no text.

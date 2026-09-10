@@ -557,8 +557,45 @@ export const layer: Layer.Layer<
 
       if (result === "text-repeat") return yield* rollback("Compaction produced repeated text")
       if (result === "stop") return yield* rollback("Compaction failed before producing a summary")
-      if (!MessageV2.parts(msg.id).some((part) => part.type === "text" && part.text.trim().length > 0))
-        return yield* rollback("Compaction produced no usable summary")
+
+      // A reasoning model asked to write a summary can spend the whole step
+      // thinking and finish without emitting any text — the "think-only" step
+      // the conversation path already recognises and retries
+      // (SessionPrompt.autoContinueInvalidOutput). Compaction has no such
+      // retry: it rolls the boundary back on the first miss, and because
+      // compaction is the session's only way back down once usage passes the
+      // trigger, that single miss pins the session above the trigger with no
+      // way down. Manual /compact then reports "no usable summary" and changes
+      // nothing, every turn after it fails the same way, and the session is
+      // dead.
+      //
+      // For this particular task the thinking is not scratch work — it is a
+      // recap of the conversation, which is exactly what was asked for. So
+      // adopt it rather than discarding the turn. A summary of imperfect shape
+      // keeps the session alive; a rolled-back boundary does not. Marked
+      // synthetic because the model did not offer it as its answer.
+      const summaryParts = MessageV2.parts(msg.id)
+      if (!summaryParts.some((part) => part.type === "text" && part.text.trim().length > 0)) {
+        const reasoning = summaryParts
+          .filter((part): part is MessageV2.ReasoningPart => part.type === "reasoning")
+          .map((part) => part.text.trim())
+          .filter((text) => text.length > 0)
+          .join("\n\n")
+        if (!reasoning) return yield* rollback("Compaction produced no usable summary")
+        log.warn("compaction summary recovered from reasoning", {
+          sessionID: input.sessionID,
+          length: reasoning.length,
+        })
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          messageID: msg.id,
+          sessionID: input.sessionID,
+          type: "text",
+          text: reasoning,
+          synthetic: true,
+          time: { start: Date.now(), end: Date.now() },
+        })
+      }
 
       if (compactionPart) {
         const current = yield* session.messages({
