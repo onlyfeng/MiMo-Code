@@ -44,6 +44,7 @@ where this delta does not change their implementation.
 | FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
 | FD-010 | compaction summary acceptance                                          | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                        | Preserve rollback for every other failure shape, for a step with no content, and for a content-filtered step |
 | FD-011 | compaction request tool_choice                                         | Rejects upstream's `"auto"`: it permits the one event the summary processor throws on                             | Keep tool calls disabled while summary messages cannot handle them                    |
+| FD-012 | compaction retry on an empty step                                      | Extends upstream: retries once instead of rolling back on a step that produced nothing            | Keep the bound at one and the scope to genuinely empty steps                           |
 
 ## FD-001 — run approval must not toggle shared delete state
 
@@ -635,16 +636,6 @@ where this delta does not change their implementation.
   errored step, and a finished step that carries no content at all. The fallback
   never fabricates a summary — it only promotes content the model actually
   produced.
-- Bounded retry: a step that produced NOTHING — no text and no reasoning — is
-  retried once (`MIMOCODE_COMPACTION_RETRY_LIMIT`, default 1, `0` disables it),
-  carrying a one-sentence instruction inside the existing summary turn. It is
-  the only compaction failure that may be a one-off; every other shape is either
-  already recoverable (think-only, via the fallback above) or deterministic (a
-  content filter refilters, an over-cap request is still over, a blocked or
-  errored step stays blocked). The bound is deliberately tighter than the
-  conversation path's: a compaction retry re-sends the ENTIRE transcript, so one
-  attempt separates a one-off from a systematic cause and a second only buys the
-  same answer at another full-transcript cost.
 - Finish-reason boundary (a rejection list, so each entry is a recorded
   judgement rather than an accident): `content-filter` REJECTS, with or without
   text — the provider withheld the answer, so whatever leaked out before the
@@ -677,19 +668,15 @@ where this delta does not change their implementation.
   branches above the fallback are unchanged, so an upstream change to any of
   them merges cleanly; only the final no-text branch differs.
 - Verification: `test/session/compaction-reasoning-fallback.test.ts` drives the
-  real overflow path against a scripted provider under eight response shapes —
+  real overflow path against a scripted provider under six response shapes —
   think-only (boundary survives, reasoning reaches the projection), empty
   (rollback preserved), normal text (unchanged), content-filtered with reasoning
   only (never reaches the projection, boundary rolls back, `ContentFilterError`
   rather than the generic rollback error), content-filtered with partial text
   (same rejection — the guard is not confined to the no-text branch), and
   output-limited (`length` stays adopted, so the filter guard cannot quietly
-  widen to cover truncation), a one-off empty step (retried once, the retry
-  accepted), and an exhausted retry (bounded at one, then rolled back). The
-  retry assertions count requests carrying the retry instruction rather than
-  compaction requests overall, since a FAILED compaction is followed by a
-  second, independent compaction round that would otherwise be
-  indistinguishable from a retry.
+  widen to cover truncation). The
+  The empty-step cases belong to [FD-012](#fd-012--a-compaction-step-that-produced-nothing-is-retried-once).
 - Retirement condition: upstream gives compaction its own retry or an equivalent
   recovery for a summary step that carries reasoning but no text.
 
@@ -724,3 +711,40 @@ where this delta does not change their implementation.
 - Retirement condition: summary messages gain real tool-call handling (upstream
   or fork), at which point `"auto"` can be adopted and the guard assertion
   relaxed to inherit the conversation's `tool_choice`.
+
+## FD-012 — a compaction step that produced nothing is retried once
+
+- Status: active
+- Canonical owner: fork `main` compaction retry bound
+- Observable contract: when the compaction step produces NOTHING — no text and
+  no reasoning — it is retried, carrying a one-sentence instruction inside the
+  existing summary turn rather than as a second user message, so the request
+  shape the provider sees is unchanged. Bounded by
+  `MIMOCODE_COMPACTION_RETRY_LIMIT` (default 1; `0` disables the retry
+  entirely). No other failure shape is retried.
+- Rationale: an empty step is the only compaction failure that may be a one-off.
+  Every other shape is either already recoverable — think-only, handled by
+  [FD-010](#fd-010--a-think-only-compaction-step-is-recovered-not-discarded) —
+  or deterministic: a content filter refilters, an over-cap request is still
+  over, a blocked or errored step stays blocked. The bound is deliberately
+  tighter than the conversation path's two, because a compaction retry re-sends
+  the ENTIRE transcript: one attempt separates a one-off from a systematic
+  cause, and a second only buys the same answer at another full-transcript cost.
+- Relationship to FD-010: adjacent but independent. FD-010 decides what counts
+  as an acceptable summary; this decides whether to ask again when there was no
+  summary at all. Upstream adopting either one does not retire the other —
+  which is exactly why this is a separate entry.
+- Flag note: the limit reads through `nonNegativeNumber`, not `number`.
+  `number()` rejects `"0"` and would silently fall back to `1`, making the off
+  switch a no-op.
+- Verification: `test/session/compaction-reasoning-fallback.test.ts` covers a
+  one-off empty step (retried once, retry accepted) and an exhausted retry
+  (bounded at one, then rolled back), plus negative cases proving think-only and
+  content-filtered steps are never retried. The assertions count requests
+  carrying the retry instruction rather than compaction requests overall: a
+  FAILED compaction is followed by a second, independent compaction round, so
+  counting requests would let a retry-disabled build pass. Mutation-checked at
+  `MIMOCODE_COMPACTION_RETRY_LIMIT=0`, where exactly the two retry tests fail.
+- Retirement condition: upstream retries a compaction step that produced no
+  content, under a comparable bound. Upstream recovering reasoning-only
+  summaries satisfies FD-010, NOT this entry.

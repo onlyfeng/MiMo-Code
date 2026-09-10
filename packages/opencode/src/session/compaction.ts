@@ -25,6 +25,25 @@ import { observedToolParts } from "./observed-tool-parts"
 
 const log = Log.create({ service: "session.compaction" })
 
+/**
+ * Finish reasons that disqualify a compaction step regardless of what it
+ * produced, mirroring how `classify.ts` treats them for the conversation path.
+ *
+ * `process()` surfaces neither: it reports blocked or errored MESSAGES as
+ * "stop", so a step that merely REPORTS one of these in band arrives as
+ * "continue" and has to be recognised here.
+ *
+ * `error` is defensive rather than currently reachable — no adapter in tree
+ * maps a wire value onto it today (openai-compatible sends unknown reasons to
+ * "other"), but `LanguageModelV2FinishReason` defines it as "model stopped
+ * because of an error" and `classify.ts` guards it for the same reason. That is
+ * why it has unit coverage but no end-to-end case: a scripted provider cannot
+ * currently produce it.
+ */
+export function isTerminalCompactionFinish(finish: string | undefined) {
+  return finish === "content-filter" || finish === "error"
+}
+
 export const Event = {
   Compacted: BusEvent.define(
     "session.compacted",
@@ -552,7 +571,7 @@ export const layer: Layer.Layer<
       for (
         let attempt = 1;
         result === "continue" &&
-        processor.message.finish !== "content-filter" &&
+        !isTerminalCompactionFinish(processor.message.finish) &&
         attempt <= Flag.MIMOCODE_COMPACTION_RETRY_LIMIT &&
         producedNothing();
         attempt++
@@ -644,9 +663,13 @@ export const layer: Layer.Layer<
       //   content-filter → REJECT, with or without text. Adopting it would
       //     replay suppressed content back to the model as trusted summary AND
       //     drop the real history it replaced.
-      //   error / tool-calls → unreachable. Both already surface as "stop"
-      //     (halt() writes the error; a tool call from a summary message
-      //     throws in the processor), handled above.
+      //   error → REJECT. `LanguageModelV2FinishReason` includes it ("model
+      //     stopped because of an error"), and a provider can report it IN BAND
+      //     without throwing — in which case nothing upstream marks the message
+      //     errored and `process()` returns "continue". The conversation path
+      //     calls this `failed` and writes ModelError; so does this one.
+      //   tool-calls → unreachable: a tool call from a summary message throws
+      //     in the processor, which surfaces as "stop" and is handled above.
       //   stop → accept. The model simply answered, or spent the step thinking.
       //   length → accept. The recap is truncated, not suppressed; a partial
       //     summary still beats losing the session, which is the whole premise
@@ -660,16 +683,23 @@ export const layer: Layer.Layer<
       // it, and the TUI's safety notice is driven by the published event.
       // Setting it before rollback() also stops rollback from overwriting the
       // discriminant or rewriting `finish`.
-      if (processor.message.finish === "content-filter") {
-        processor.message.error = new MessageV2.ContentFilterError({
-          message: "The response was withheld by the model provider's content safety filter.",
-        }).toObject()
+      if (isTerminalCompactionFinish(processor.message.finish)) {
+        processor.message.error =
+          processor.message.finish === "content-filter"
+            ? new MessageV2.ContentFilterError({
+                message: "The response was withheld by the model provider's content safety filter.",
+              }).toObject()
+            : new MessageV2.ModelError({ message: "The model ended the summary step with an error." }).toObject()
         yield* session.updateMessage(processor.message)
         yield* bus.publish(Session.Event.Error, {
           sessionID: input.sessionID,
           error: processor.message.error,
         })
-        return yield* rollback("Compaction summary was withheld by the content filter")
+        return yield* rollback(
+          processor.message.finish === "content-filter"
+            ? "Compaction summary was withheld by the content filter"
+            : "Compaction summary ended with a model error",
+        )
       }
 
       const summaryParts = MessageV2.parts(msg.id)
