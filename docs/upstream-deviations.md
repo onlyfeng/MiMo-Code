@@ -43,6 +43,7 @@ where this delta does not change their implementation.
 | FD-006 | compact Codex declarations and nested execution                       | Adopts compact registration and full authorized nested Actor/interactive composition                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
 | FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
 | FD-010 | compaction summary acceptance                                          | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                        | Preserve rollback for every other failure shape and for a step with no content        |
+| FD-011 | compaction request tool_choice                                         | Rejects upstream's `"auto"`: it permits the one event the summary processor throws on                             | Keep tool calls disabled while summary messages cannot handle them                    |
 
 ## FD-001 — run approval must not toggle shared delete state
 
@@ -651,3 +652,35 @@ where this delta does not change their implementation.
   empty (rollback preserved), and normal text (unchanged).
 - Retirement condition: upstream gives compaction its own retry or an equivalent
   recovery for a summary step that carries reasoning but no text.
+
+## FD-011 — the compaction request keeps tool calls disabled
+
+- Status: active
+- Canonical owner: fork `main` compaction request construction
+- Observable contract: the compaction request is sent with
+  `toolChoice: "none"` while still carrying the frozen tool list, so the prefix
+  stays cache-identical to the conversation request without inviting a tool call
+  the summary path cannot service.
+- Rationale: `SessionProcessor.handleEvent` throws unconditionally on
+  `tool-input-start` and `tool-call` when the assistant message carries
+  `summary: true`. `process()` converts that throw to `"stop"`, and compaction
+  answers `"stop"` by rolling its boundary back. A tool call during the summary
+  step therefore does not degrade the summary — it destroys the compaction, and
+  compaction is the only way back down once usage passes the trigger, so the
+  session is stranded above it. Interacts with [FD-010](#fd-010--a-think-only-compaction-step-is-recovered-not-discarded):
+  that entry recovers a summary step that produced no text, and this one keeps
+  the model from spending the step on a tool call instead.
+- Upstream relationship: upstream `6080a114` set this to `"auto"` ("so the
+  summary model can call tools when needed") but did not add the tool handling
+  that would require: the same unconditional throw is still present in upstream
+  `processor.ts`. Upstream is therefore internally inconsistent here, and the
+  fork keeps `"none"` until the summary path can actually service a tool call.
+  Adopting `"auto"` on a later sync would import that inconsistency.
+- Verification: `test/session/compaction-tool-choice.test.ts` drives the real
+  overflow path and shows a tool call during the summary step surfacing as
+  `Tool call not allowed while generating summary`. The guard is the literal
+  `tool_choice` assertion in `test/session/skill-catalog-system-tail.test.ts`,
+  which exercises a compaction request built from a real frozen prefix snapshot.
+- Retirement condition: summary messages gain real tool-call handling (upstream
+  or fork), at which point `"auto"` can be adopted and the guard assertion
+  relaxed to inherit the conversation's `tool_choice`.
