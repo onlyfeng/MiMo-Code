@@ -2693,6 +2693,8 @@ export class Session2 extends HeyApiClient {
       titleLocale?: string
       agentID?: string
       task_id?: string
+      modelProviderID?: string
+      modelID?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2708,6 +2710,8 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "titleLocale" },
             { in: "query", key: "agentID" },
             { in: "query", key: "task_id" },
+            { in: "query", key: "modelProviderID" },
+            { in: "query", key: "modelID" },
           ],
         },
       ],

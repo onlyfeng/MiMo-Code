@@ -5606,6 +5606,14 @@ export type SessionResumeData = {
      * Validate the original task or bind an unbound interrupted user; never replace an existing task
      */
     task_id?: string
+    /**
+     * Model override for main-agent resume only; requires modelID
+     */
+    modelProviderID?: string
+    /**
+     * Model override for main-agent resume only; requires modelProviderID
+     */
+    modelID?: string
   }
   url: "/session/{sessionID}/turn/{assistantMessageID}/resume"
 }

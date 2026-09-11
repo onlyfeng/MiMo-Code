@@ -492,6 +492,8 @@ export interface ResumeTurnInput {
   assistantMessageID: MessageID
   task_id?: TaskID
   titleLocale?: string
+  /** 可选模型覆盖：用户在继续前切换了模型时，用新模型执行恢复步。 */
+  model?: { providerID: string; modelID: string }
 }
 
 export interface SummarizeInput {
@@ -3520,7 +3522,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const msgs = yield* sessions.messages({ sessionID, agentID })
       const candidates: RecoveryCandidate[] = []
       for (const [index, msg] of msgs.entries()) {
-        if (msg.info.role !== "assistant" || "completed" in msg.info.time) continue
+        if (msg.info.role !== "assistant") continue
+        // A step-level `time.completed` does not prove the round finished:
+        // `tool-calls` (the tool step finished, the turn did not answer) and
+        // `length` (output truncated) are still recoverable. Everything else
+        // that carries `time.completed` has been settled deliberately — the
+        // processor leaves an errored turn without it precisely so recovery can
+        // find it, and `sweepOrphanAssistants`/`abandonRecoveredAssistant` set
+        // it when a new user admission or a resume abandons the turn. Upstream
+        // instead keeps every errored message a candidate even after that
+        // settlement; FC-001 is authoritative here, so settlement removes the
+        // choice. An unsettled turn with `finish === "stop"` and no error
+        // completed normally and is not a candidate either.
+        if ("completed" in msg.info.time && msg.info.finish !== "tool-calls" && msg.info.finish !== "length") continue
+        if (msg.info.finish === "stop" && !msg.info.error) continue
         const assistant = msg.info
         if (!msgs.some((parent) => parent.info.role === "user" && parent.info.id === assistant.parentID)) continue
         if (msgs.slice(index + 1).some((later) => later.info.role === "user" || later.info.role === "assistant"))
@@ -3573,7 +3588,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     }) {
       const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
       const message = messages.find((item) => item.info.id === input.assistantMessageID)
-      if (!message || message.info.role !== "assistant" || "completed" in message.info.time) return
+      if (!message || message.info.role !== "assistant") return
+      // Already settled with an error: idempotent no-op. A step-level
+      // `completed` without an error no longer blocks settlement, because
+      // recoveryCandidates now admits such a turn.
+      if ("completed" in message.info.time && message.info.error) return
       if (
         input.expectedParentID &&
         (message.info.parentID !== input.expectedParentID ||
@@ -3583,7 +3602,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         return yield* Effect.fail(new NotFoundError({ message: "Actor recovery candidate changed before settlement" }))
       yield* sessions.updateMessage({
         ...message.info,
-        time: { ...message.info.time, completed: Date.now() },
+        time: { ...message.info.time, completed: message.info.time.completed ?? Date.now() },
         error: new MessageV2.AbortedError({ message: "Abandoned: resumed as a new assistant turn" }).toObject(),
       })
     })
@@ -3594,12 +3613,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       titleLocale?: string,
       resumeIdentity?: string,
       recoveryParentID?: MessageID,
+      resumeFrom?: MessageID,
+      modelOverride?: { providerID: string; modelID: string },
     ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(function* (
       sessionID: SessionID,
       agentID?: string,
       titleLocale?: string,
       resumeIdentity?: string,
       recoveryParentID?: MessageID,
+      resumeFrom?: MessageID,
+      modelOverride?: { providerID: string; modelID: string },
     ) {
       const ctx = yield* InstanceState.context
       const slog = elog.with({ sessionID })
@@ -4382,7 +4405,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             continue
           }
 
-          if (lastAssistant) {
+          if (lastAssistant && lastAssistant.id !== resumeFrom) {
             const classification = classifyAssistantStep({
               phase: "existing-assistant",
               lastUser,
@@ -4486,7 +4509,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
           }
 
-          const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID, lastUser)
+          const model = yield* getModel(
+            modelOverride ? ProviderID.make(modelOverride.providerID) : lastUser.model.providerID,
+            modelOverride ? ModelID.make(modelOverride.modelID) : lastUser.model.modelID,
+            sessionID,
+            lastUser,
+          )
+          // A frozen actor recovery keeps its original identity, so an override
+          // that changed it fails closed here as well as at the HTTP boundary.
           if (resumeIdentity && prefixModelIdentity(model, sessionPrompt.harness) !== resumeIdentity)
             return yield* Effect.die(new Error("Actor model identity changed during recovery"))
           lastModelForPrune = model
@@ -6107,6 +6137,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       shouldCommit?: () => boolean
       onAdmitted?: Effect.Effect<void>
       resumeIdentity?: string
+      model?: { providerID: string; modelID: string }
     }) {
       const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError> | Session.RecoveryConflictError>()
       const recovered: { id?: MessageID; parentID?: MessageID } = {}
@@ -6131,6 +6162,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               message: "No resumable interrupted turn found for " + (input.assistantMessageID ?? input.actorID),
             }),
           )
+        // A model override is resolved before the candidate is settled: a model
+        // that cannot be resolved must not leave the turn abandoned with no
+        // successor, which is what settling first would do.
+        if (input.model)
+          yield* provider
+            .getModel(ProviderID.make(input.model.providerID), ModelID.make(input.model.modelID))
+            .pipe(Effect.catch(() => Effect.fail(new NotFoundError({ message: "Resume model is unavailable" }))))
         if (input.validate) {
           yield* input.validate
           const current = yield* recoveryCandidates(input.sessionID, input.actorID)
@@ -6178,6 +6216,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 input.titleLocale,
                 input.resumeIdentity,
                 recovered.parentID,
+                // The settled candidate, not the caller's argument: an actor
+                // resume selects the latest candidate itself.
+                recovered.id,
+                input.model,
               ),
             ).pipe(
               Effect.ensuring(
