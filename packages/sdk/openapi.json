@@ -4903,6 +4903,24 @@
               "pattern": "^T\\d+(\\.\\d+)*$"
             },
             "description": "Validate the original task or bind an unbound interrupted user; never replace an existing task"
+          },
+          {
+            "in": "query",
+            "name": "modelProviderID",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Model override for main-agent resume only; requires modelID"
+          },
+          {
+            "in": "query",
+            "name": "modelID",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Model override for main-agent resume only; requires modelProviderID"
           }
         ],
         "summary": "Resume an interrupted turn",

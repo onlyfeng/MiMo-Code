@@ -1092,12 +1092,27 @@ export const SessionRoutes = lazy(() =>
           task_id: TaskID.optional().describe(
             "Validate the original task or bind an unbound interrupted user; never replace an existing task",
           ),
+          modelProviderID: z.string().min(1).optional().describe("Model override for main-agent resume only; requires modelID"),
+          modelID: z.string().min(1).optional().describe("Model override for main-agent resume only; requires modelProviderID"),
         }),
       ),
       async (c) => {
         const params = c.req.valid("param")
         const query = c.req.valid("query")
+        // A model override replaces both halves of the identity or neither.
+        if (!!query.modelProviderID !== !!query.modelID)
+          return c.json(
+            new NamedError.Unknown({ message: "modelProviderID and modelID must be provided together" }).toObject(),
+            400,
+          )
         if (query.agentID && query.agentID !== "main") {
+          // An actor resumes on its original frozen model identity (FD-009), so
+          // the override is refused rather than silently ignored.
+          if (query.modelProviderID)
+            return c.json(
+              new NamedError.Unknown({ message: "Model override is available for main-agent resume only" }).toObject(),
+              400,
+            )
           await runRequest(
             "SessionRoutes.actorResume.start",
             c,
@@ -1128,6 +1143,10 @@ export const SessionRoutes = lazy(() =>
               assistantMessageID: params.assistantMessageID,
               titleLocale: query.titleLocale,
               task_id: query.task_id,
+              model:
+                query.modelProviderID && query.modelID
+                  ? { providerID: query.modelProviderID, modelID: query.modelID }
+                  : undefined,
               signal: c.req.raw.signal,
             }),
           ),

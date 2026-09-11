@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-10
-- Upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
-- Prior reviewed upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
-- Main behavior (runtime/tests): `67abd1f745135c164a0c30d3769f32ddd10823a8`
+- Last reviewed: 2026-09-11
+- Upstream: `7641dbbd3b8aa20ffd4fb74089f2dc65bf032201`
+- Prior reviewed upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
+- Main behavior (runtime/tests): `332d1961f2bc9d2b1b9e0e56f2143b09a80d2077`
 - Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
-- Prior fork `main` tip: `e2f62b39c25566a4c96bdc2bd7ac234248789171`
+- Prior fork `main` tip: `ea633a0bd8a343b8e8ea8fefc20b8cf15e0ced17`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -28,8 +28,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-10 (cb00c280) capability inventory](upstream-sync-2026-09-10-cb00c280.md),
-continuing the [2026-09-10 title authority inventory](upstream-sync-2026-09-10.md).
+Full synchronization review: [2026-09-11 (7641dbbd) capability inventory](upstream-sync-2026-09-11-7641dbbd.md),
+continuing the [2026-09-10 (cb00c280) inventory](upstream-sync-2026-09-10-cb00c280.md) and the
+[2026-09-10 title authority inventory](upstream-sync-2026-09-10.md).
 The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
@@ -256,6 +257,33 @@ where this delta does not change their implementation.
   guarantees plus positive known-peer evidence for parent identity replacement,
   with behavior-focused regressions.
 
+- 2026-09-11 recovery-predicate and resume-override review: adopted the part of
+  upstream's allowlist predicate that is a genuine fix — a step-level
+  `time.completed` does not prove the round finished, so a turn that stopped on
+  `tool-calls` or `length` is a candidate again, while a clean `stop`/`other`
+  turn is not — and its idempotent settlement of an already-errored assistant.
+  Upstream additionally keeps every errored message a candidate even after it is
+  settled; that is not taken. `time.completed` remains this entry's settlement
+  marker: the processor leaves an errored turn without it so recovery can find
+  it, and `sweepOrphanAssistants`/`abandonRecoveredAssistant` set it when a new
+  user admission or a resume abandons the turn, which is what "until
+  recovery/resume or a newly admitted user turn abandons and completes it"
+  means above. The settlement guard is now "completed and errored" rather than
+  "completed" so a `tool-calls`/`length` candidate that already carries
+  `time.completed` can still be settled; the fork's `expectedParentID`
+  candidate-identity check is unchanged and still runs before any write. Upstream's `resume` / `resumeBackground` remain absent:
+  the optional model override is plumbed through the single `startResumeTurn`
+  admission path, resolved before `commitRecoveryCandidate` so an unresolvable
+  model settles nothing, and the classification skip uses the candidate the
+  runner actually settled rather than the caller's argument. `packages/sdk/`
+  artifacts are regenerated from the merged route; FD-009 owns the actor
+  frozen-identity refusal. Evidence:
+  `packages/opencode/test/server/session-recovery.test.ts` predicate matrix plus
+  the two fork-owned cases, plus `packages/opencode/test/session/prompt-sweep.test.ts`
+  for the settlement boundary; the predicate is mutation-checked from both
+  sides, since the fork's older exclusion loses the `tool-calls`/`length` fix and
+  upstream's exclusion loses the settlement contract.
+
 - 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
   task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
   The retained spawn task namespace, synchronous commit/ownership boundary and
@@ -317,9 +345,20 @@ where this delta does not change their implementation.
   `packages/opencode/src/project/instance.ts`.
 - Tests/evidence: `packages/opencode/test/tool/read-state.test.ts`,
   `packages/opencode/test/tool/edit.test.ts`, and instance-disposal regressions
-  at the reviewed main behavior.
+  at the reviewed main behavior. Its `tool.read-state attachment gate` cases
+  cover both directions of the attachment-gate interaction above; moving
+  `markFileRead` back above the shrink result fails the refusal case.
+- 2026-09-11 attachment-gate review: the read tool can now read an image's
+  bytes and still refuse to deliver them, when the upstream size gate cannot
+  recompress it under `MIMOCODE_MAX_ATTACHMENT_SIZE`. Read state follows what
+  the model actually received, matching the existing no-vision branch, which
+  also returns a warning without marking: `markFileRead` sits on the image
+  success path, after the shrink result is known, so a refused attachment
+  authorizes no later edit while a recompressed one still does. The stat-based
+  reject and the PDF capability refusal return before any bytes are read.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
+  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`; attachment-gate
+  behavior `6407d53ccbf883c0b6ad3b2ef9370d33e2ed56e4`.
 - Retirement condition: upstream provides equivalent session/actor/instance
   scoping, consumption, and disposal behavior with cross-actor/project tests.
 
@@ -871,6 +910,13 @@ where this delta does not change their implementation.
   and cancellation release. Bundled configuration guidance describes
   `harness_model`; these instructions do not widen runtime permission or
   restore public actor/task recovery selectors.
+- 2026-09-11 PDF-gate review: the read tool now refuses a PDF when the active
+  model declares no `pdf` input support and names the bundled skill by path —
+  `<builtinSkillRoot()>/pdf-official/SKILL.md`. That is factually correct here:
+  the fork ships `pdf-official` in the same bundle under the same
+  `OFFICIAL_SKILL_NAMES` / `MIMOCODE_DISABLE_OFFICIAL_SKILLS` opt-out as
+  upstream, so no fork-facing rewrite is needed. This is a runtime message, not
+  bundled content; the guidance content snapshot is unchanged.
 - Retirement condition: the corresponding prompts/content cease to ship or
   upstream guidance is factually equivalent for fork branch names, keys,
   runtime support, and user-facing errors.

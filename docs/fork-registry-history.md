@@ -3094,3 +3094,21 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - C02 adopts the Xiaomi SDK split — stock `@ai-sdk/openai-compatible` chat, bundled Copilot fork for `responses()` only — so `reasoning_content` reaches the stream as reasoning parts. FD-005 keeps resolved-identity transport selection.
 - The only conflict was two tests appended at the same anchor in `test/provider/provider.test.ts`; both are kept and no assertion was relaxed.
 - Both behaviors were mutation-checked: reverting either fix fails its regression. Pure registry commits do not advance the snapshot above; final branch-tip CI and remote ancestry are checked separately after publication.
+
+
+## 2026-09-11 — inline attachment bounds, the PDF capability gate, and recovery-candidate breadth
+
+- Reviewed upstream `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8..7641dbbd3b8aa20ffd4fb74089f2dc65bf032201`
+  (three commits — `8a179796`, merge `943b965d`, `7641dbbd`; 13 paths, 754 insertions, 58 deletions from the accepted main tip).
+  Upstream advanced from `943b965d` to `7641dbbd` mid-publication; the selected SHA was moved forward and both
+  capabilities were propagated in one pass.
+- Prior fork main: `ea633a0bd8a343b8e8ea8fefc20b8cf15e0ced17`; shared runtime/test snapshot `332d1961f2bc9d2b1b9e0e56f2143b09a80d2077`
+  (C01 landed at `6407d53ccbf883c0b6ad3b2ef9370d33e2ed56e4`).
+- Bundled guidance content remains `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`; the lockfile is unchanged, and the
+  JavaScript SDK plus `packages/sdk/openapi.json` were regenerated from fork sources rather than taking upstream's
+  hand-updated generated text.
+- Both selected capabilities are reconciled in [the synchronization inventory](upstream-sync-2026-09-11-7641dbbd.md). All nine active FD and sixteen active FC owners remain active; no owner retires and no unrelated consolidation is selected.
+- C01 adopts the production-time attachment gate — classify on stat or base64 length, attach, recompress an oversized image, or replace with a notice — across the read tool, user prompt attachments and MCP result normalization, plus the read tool's refusal of a PDF the active model cannot take, which names the bundled `pdf-official` skill. The only conflict was `src/tool/read.ts`: FC-003's `markFileRead` moved to the image success path, after the shrink result, so bytes read but refused authorize no later edit.
+- C02 adopts upstream's recovery-predicate fix for `tool-calls`/`length` turns, idempotent settlement of an already-errored assistant, the resumed-loop classification skip and the optional resume model override. Upstream's further clause keeping every errored message a candidate after settlement is not taken: `time.completed` stays FC-001's settlement marker, which `test/session/prompt-sweep.test.ts` enforces. FC-001 keeps the `expectedParentID` identity check, the single `startResumeTurn` admission path and the absent `resumeBackground`; the override is validated before `commitRecoveryCandidate`, `resumeFrom` is the settled candidate, and FD-009 refuses an override for a non-main `agentID`.
+- FD-006's eight-attachment/10 MiB nested relay bound and FC-010's 5 MB WebFetch bound are both stricter than the new 50 MB limit and are unchanged; FC-011 records that the `pdf-official` reference is factually correct in this fork; FD-004 records the regeneration of both published artifacts.
+- Seven mutation checks were run and each fails its regression when reverted; the recovery predicate is pinned from both sides. One coverage limit is recorded rather than claimed: `resumeFrom` changes no current test outcome and upstream ships no regression for it. Pure registry commits do not advance the snapshot above; final branch-tip CI and remote ancestry are checked separately after publication.
