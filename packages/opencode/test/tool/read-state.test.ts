@@ -1,5 +1,6 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import path from "path"
+import { PNG } from "pngjs"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
@@ -50,13 +51,13 @@ afterAll(async () => {
   await runtime.dispose()
 })
 
-const read = (filePath: string) =>
+const read = (filePath: string, context: typeof ctx & { extra?: { [key: string]: unknown } } = ctx) =>
   runtime.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
         const info = yield* ReadTool
         const tool = yield* info.init()
-        return yield* tool.execute({ file_path: filePath }, ctx)
+        return yield* tool.execute({ file_path: filePath }, context)
       }),
     ),
   )
@@ -195,5 +196,97 @@ describe("tool.read-state", () => {
 
     await disposeInstance(AppFileSystem.resolve(parent.path))
     expect(() => assertFileRead(sharedCtx, parentFile, "edit")).toThrow("has not been read")
+  })
+})
+
+// The attachment size gate can read an image's bytes and still refuse to
+// deliver them. Read state must follow what the model actually received, the
+// same way the no-vision branch returns a warning without marking the file.
+describe("tool.read-state attachment gate", () => {
+  const LIMIT = 4096
+  const CEILING = 32 * 1024
+  // The size gate lives behind the vision check, so these reads need a model
+  // that accepts images; the shared fake model does not.
+  const visionCtx = {
+    ...ctx,
+    extra: {
+      model: ProviderTest.model({
+        capabilities: {
+          toolcall: true,
+          attachment: true,
+          reasoning: false,
+          temperature: true,
+          interleaved: false,
+          input: { text: true, image: true, audio: false, video: false, pdf: true },
+          output: { text: true, image: false, audio: false, video: false, pdf: false },
+        },
+      }),
+    },
+  }
+
+  // Random noise defeats PNG's own compression, so a small canvas still lands
+  // over the tiny limit these tests run under.
+  const noisyPng = (size: number) => {
+    let seed = 4242
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed % 256
+    }
+    const png = new PNG({ width: size, height: size })
+    for (let i = 0; i < png.data.length; i += 4) {
+      png.data[i] = rand()
+      png.data[i + 1] = rand()
+      png.data[i + 2] = rand()
+      png.data[i + 3] = 255
+    }
+    return PNG.sync.write(png)
+  }
+
+  beforeAll(() => {
+    process.env["MIMOCODE_MAX_ATTACHMENT_SIZE"] = String(LIMIT)
+    process.env["MIMOCODE_MAX_ATTACHMENT_SOURCE_SIZE"] = String(CEILING)
+  })
+
+  afterAll(() => {
+    delete process.env["MIMOCODE_MAX_ATTACHMENT_SIZE"]
+    delete process.env["MIMOCODE_MAX_ATTACHMENT_SOURCE_SIZE"]
+  })
+
+  test("an oversized image that could not be attached does not authorize an edit", async () => {
+    await using tmp = await tmpdir()
+    const filePath = path.join(tmp.path, "broken.png")
+    // Valid PNG signature, garbage body: over the limit and undecodable, so the
+    // bytes are read but the shrink fails and nothing reaches the model.
+    const bytes = Buffer.alloc(LIMIT + 1)
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes)
+    await Bun.write(filePath, bytes)
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const result = await read("broken.png", visionCtx)
+        expect(result.attachments).toBeUndefined()
+        expect(result.output).toContain("could not be compressed")
+        expect(() => assertFileRead(ctx, filePath, "edit")).toThrow("has not been read")
+      },
+    })
+  })
+
+  test("an oversized image recompressed under the limit still authorizes an edit", async () => {
+    await using tmp = await tmpdir()
+    const filePath = path.join(tmp.path, "huge.png")
+    const bytes = noisyPng(120)
+    expect(bytes.byteLength).toBeGreaterThan(LIMIT)
+    expect(bytes.byteLength).toBeLessThanOrEqual(CEILING)
+    await Bun.write(filePath, bytes)
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const result = await read("huge.png", visionCtx)
+        expect(result.attachments?.length).toBe(1)
+        expect(() => assertFileRead(ctx, filePath, "edit")).not.toThrow()
+      },
+    })
   })
 })
