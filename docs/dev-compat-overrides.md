@@ -73,12 +73,12 @@ Source evidence and the two final result rows are recorded in the latest
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-10
 - Reviewed upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
-- Accepted `main` tip: `02a7a9805ea9725ff5e08bbadd13fcea0bf47d3a`
+- Accepted `main` tip: `ea633a0bd8a343b8e8ea8fefc20b8cf15e0ced17`
 - Inherited main behavior: `67abd1f745135c164a0c30d3769f32ddd10823a8`
 - Compat behavior: `35a577506c8ddeb556b5deac1b838b1a2d5feb5e`
 - Prior compat tip: `a04b7921e80c9f7f148daadff0068839be70a347`
 - Main source inheritance merge: `35a577506c8ddeb556b5deac1b838b1a2d5feb5e`
-- Shared audit commit: `02a7a9805ea9725ff5e08bbadd13fcea0bf47d3a`
+- Shared audit commit: `ea633a0bd8a343b8e8ea8fefc20b8cf15e0ced17`
 - Inherited bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)

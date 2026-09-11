@@ -3556,3 +3556,14 @@ the final publication gates. Prior main/compat evidence is not re-dated.
 - Affected matrix at `35a577506c8ddeb556b5deac1b838b1a2d5feb5e`, run from `packages/opencode` with `bun test --timeout 30000` over `test/plugin/`, `test/provider/`, `test/llm-server/`, `test/flag/codex-mode-flag.test.ts`, `test/tool/harness-alias.test.ts`, `test/tool/websearch.test.ts` and `test/tool/tool-script.test.ts`: 1135 passed, 0 failed, 3459 assertions across 45 files in 131.66 s of test-process time. This matches the identical main matrix, which is expected because the covered trees are the same.
 - Ambient `MIMOCODE_EXPERIMENTAL` and `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL` were removed for every run; the package preload (`@opentui/solid/preload`, `./test/preload.ts`) remains the harness baseline.
 - Repository lint passed with zero errors and 4556 warnings; `git diff --check` passed. Final remote-tip equality, exact-SHA CI and upstream -> main -> compat ancestry are separate publication checks.
+
+## 2026-09-11 — upstream-sync skill reference split inheritance
+
+- Accepted main tip/shared audit: `ea633a0bd8a343b8e8ea8fefc20b8cf15e0ced17` (PR #105 merge `195b7f17a23c870edce94ac3710bc52621d2feea`, PR #106 merge `ea633a0bd8a343b8e8ea8fefc20b8cf15e0ced17`).
+- Compat inheritance merge: `c0a319f41f86f8c9de4eb7e09b2df78799963362`; prior tip: `a7094298c296f4ad5102a5714458423d87ddac12`.
+- Inherited source/test behavior is unchanged at `67abd1f745135c164a0c30d3769f32ddd10823a8`; this propagation advances no runtime, test or generated-artifact reference.
+- Scope: process guidance only. The upstream-sync skill moved its conditional detail into `references/validation-and-ci.md`, `references/publication-and-cleanup.md` and `references/evidence-record.md`, keeping `SKILL.md` as the scope and baseline entry; a local `.gitignore` re-includes that directory against `.mimocode/.gitignore`. FC-008 now lists the reference directory and the rule file beside `SKILL.md`.
+- All six incoming paths had no prior compat divergence and merged without conflict; each is byte-identical to accepted main after the merge. No compat overlay path is added.
+- All seven active DC entries were re-reviewed: none has an incoming owned implementation change, and none watches `.mimocode/`. No owner is added, retired or renumbered. Shared FD/FC registries and their history are inherited byte-for-byte.
+- The cleanup-scope review finding on PR #105 was adjudicated on the PR: the prescription to restrict cleanup to operation-created worktrees was already the rule, and the separately-authorized named-worktree removal was retained, with its precondition moved inline to the table it governs. Codex re-review and the follow-up review both finished with no findings.
+- Final remote-tip equality, exact-SHA CI and `main -> dev/compat` ancestry are verified after publication, separately from this record.
