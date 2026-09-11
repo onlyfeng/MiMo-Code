@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-10
-- Upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
-- Prior reviewed upstream: `ceecd1c71f88c4840f9fdbdf2450fa331121be22`
-- Main behavior (runtime/tests): `67abd1f745135c164a0c30d3769f32ddd10823a8`
+- Last reviewed: 2026-09-11
+- Upstream: `7641dbbd3b8aa20ffd4fb74089f2dc65bf032201`
+- Prior reviewed upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
+- Main behavior (runtime/tests): `332d1961f2bc9d2b1b9e0e56f2143b09a80d2077`
 - Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
-- Prior fork `main` tip: `e2f62b39c25566a4c96bdc2bd7ac234248789171`
+- Prior fork `main` tip: `ea633a0bd8a343b8e8ea8fefc20b8cf15e0ced17`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -27,8 +27,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-10 (cb00c280) capability inventory](upstream-sync-2026-09-10-cb00c280.md),
-continuing the [2026-09-10 title authority inventory](upstream-sync-2026-09-10.md).
+Full synchronization review: [2026-09-11 (7641dbbd) capability inventory](upstream-sync-2026-09-11-7641dbbd.md),
+continuing the [2026-09-10 (cb00c280) inventory](upstream-sync-2026-09-10-cb00c280.md) and the
+[2026-09-10 title authority inventory](upstream-sync-2026-09-10.md).
 The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
@@ -272,6 +273,12 @@ where this delta does not change their implementation.
   present under the narrower contract above. The September 5 Node-export note
   records its historical absence; the Node entry now restores the functional
   LLMServerTokens export for explicit embedding alongside Server.listen.
+- 2026-09-11 generated-artifact review: upstream shipped hand-updated
+  `packages/sdk/js/src/v2/gen/` entries for the new resume query parameters and
+  left `packages/sdk/openapi.json` behind. Both artifacts were regenerated from
+  the merged fork route instead, so the published OpenAPI and the JavaScript SDK
+  carry the fork's constrained parameter schemas and descriptions and stay
+  consistent with each other.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
 - Retirement condition: upstream preserves the TUI-owned listener lifecycle,
@@ -514,6 +521,14 @@ where this delta does not change their implementation.
   earlier blanket production compact/shell rejection in the dated notes below.
   FD-006 remains active for the residual authority, control-entry, schema,
   cancellation, media and budget differences.
+- 2026-09-11 attachment-bound review: upstream now bounds every inline
+  attachment where it is produced — the read tool, user prompt attachments and
+  MCP result normalization — at `MIMOCODE_MAX_ATTACHMENT_SIZE` (50 MB default).
+  That gate sits above this entry's relay boundary and does not change it: the
+  host still relays at most eight authorized attachments totaling 10 MiB
+  encoded data and still reports omissions, so the stricter relay bound remains
+  the one nested execution observes. `src/tool/tool-script.ts` is unchanged.
+
 - 2026-09-05 Bash-output review: adopted the shared default of 30,000
   approximate output tokens and the unified head/tail preview with an archived
   output path. This changes direct Bash output only; nested shell exclusions,
@@ -627,6 +642,12 @@ where this delta does not change their implementation.
   equivalent duplicate. The fork retains its stronger generation, cancellation,
   frozen-membership, and lifecycle implementation rather than adding a second
   context map or weakening fail-closed admission.
+- 2026-09-11 resume model-override review: upstream's new resume model override
+  would replace the model a recovered turn runs on. A frozen actor keeps its
+  original resolved identity, so the HTTP route refuses an override for a
+  non-main `agentID` rather than applying it, and the run loop's existing
+  `resumeIdentity` comparison still fails closed behind that refusal. Main
+  resume, which has no frozen identity, accepts the override.
 - Retirement condition: upstream provides an atomic capture-and-spawn protocol
   with equivalent mode-specific validation, frozen authority/membership,
   deterministic failure settlement, and proof that live-context fallback is
