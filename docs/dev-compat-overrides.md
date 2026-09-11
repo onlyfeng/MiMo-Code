@@ -67,18 +67,64 @@ incoming owned implementation change.
 Source evidence and the two final result rows are recorded in the latest
 [compat history entry](dev-compat-registry-history.md).
 
+## 2026-09-11 inline attachment bounds and recovery-candidate breadth
+
+Both capabilities in the [7641dbbd shared inventory](upstream-sync-2026-09-11-7641dbbd.md)
+are inherited. C01's five production files (`src/flag/flag.ts`,
+`src/util/media.ts`, `src/provider/image.ts`, `src/tool/read.ts`,
+`src/mcp/tool-result.ts`) and all three C01 test files are byte-identical to
+accepted `main` after the merge, as is
+`test/server/session-recovery.test.ts`. No compat-only override is added and no
+owner retires.
+
+Two conflicts, both in `src/session/prompt.ts` and both unions. The `./classify`
+import keeps compat's `REQUEST_OVERFLOW_RECOVERY_MESSAGE` beside main's new
+`@/util/media` and `@/provider/image` imports. The existing-assistant branch
+keeps compat's per-iteration `agents.get(lastUser.agent)` resolution and its
+`recoverOverflowPlaceholder: usageRecovered || isBoundedComputation` argument
+while adopting main's `lastAssistant.id !== resumeFrom` guard; the two are
+independent, since the guard decides whether the branch runs and
+`recoverOverflowPlaceholder` decides how it classifies.
+
+DC-CONTEXT-001 is the nearest owner and keeps its contract unchanged: the new
+attachment gate is a production-time bound above its model-visible caps, whose
+rejection notice is an ordinary synthetic text part, and the recovery change
+touches candidate selection, settlement and the resume model source rather than
+caps, serialization or request preflight. Its `src/server/routes/instance/session.ts`
+overlay is limited to the compat-only `checkpoint-coverage` route, which the
+merge left untouched; the resume route is byte-identical to main.
+DC-ACTOR-001 keeps full-context actor and static-prefix overflow behavior:
+`resumeFrom` is bound to the candidate the runner settled, and FD-009's frozen
+identity refusal means an actor resume still cannot switch models. The inherited
+predicate keeps `time.completed` as the settlement marker rather than upstream's
+"any errored message is always a candidate", so a compat turn settled by
+`sweepOrphanAssistants` leaves the candidate list here exactly as it does on
+main.
+DC-MODEL-001 keeps per-agent MaxMode; a resume model override selects the model
+for the resumed turn without entering MaxMode's retry policy. DC-TUI-001's
+request provider/model/variant display reports whatever model the turn actually
+used, including an overridden one. DC-NET-001/002 and DC-PLATFORM-001 have no
+incoming owned implementation changes.
+
+The generated SDK and `packages/sdk/openapi.json` were regenerated from compat
+sources and are byte-identical to the merge result, so compat keeps its own
+operations and gains the same two resume query parameters.
+
+Source evidence and the two final result rows are recorded in the latest
+[compat history entry](dev-compat-registry-history.md).
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
-- Last reviewed: 2026-09-10
-- Reviewed upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
-- Accepted `main` tip: `ea633a0bd8a343b8e8ea8fefc20b8cf15e0ced17`
-- Inherited main behavior: `67abd1f745135c164a0c30d3769f32ddd10823a8`
-- Compat behavior: `35a577506c8ddeb556b5deac1b838b1a2d5feb5e`
-- Prior compat tip: `a04b7921e80c9f7f148daadff0068839be70a347`
-- Main source inheritance merge: `35a577506c8ddeb556b5deac1b838b1a2d5feb5e`
-- Shared audit commit: `ea633a0bd8a343b8e8ea8fefc20b8cf15e0ced17`
+- Last reviewed: 2026-09-11
+- Reviewed upstream: `7641dbbd3b8aa20ffd4fb74089f2dc65bf032201`
+- Accepted `main` tip: `bcf2fba7c337a812071ccacc5184347c0bd5536e`
+- Inherited main behavior: `332d1961f2bc9d2b1b9e0e56f2143b09a80d2077`
+- Compat behavior: `43e8d80270345bdadda596eab7e9b1871ed30b92`
+- Prior compat tip: `c1ee9ecbeda90224d4a7abbcfc877b9016b1117e`
+- Main source inheritance merge: `43e8d80270345bdadda596eab7e9b1871ed30b92`
+- Shared audit commit: `bcf2fba7c337a812071ccacc5184347c0bd5536e`
 - Inherited bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)

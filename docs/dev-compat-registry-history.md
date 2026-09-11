@@ -3567,3 +3567,28 @@ the final publication gates. Prior main/compat evidence is not re-dated.
 - All seven active DC entries were re-reviewed: none has an incoming owned implementation change, and none watches `.mimocode/`. No owner is added, retired or renumbered. Shared FD/FC registries and their history are inherited byte-for-byte.
 - The cleanup-scope review finding on PR #105 was adjudicated on the PR: the prescription to restrict cleanup to operation-created worktrees was already the rule, and the separately-authorized named-worktree removal was retained, with its precondition moved inline to the table it governs. Codex re-review and the follow-up review both finished with no findings.
 - Final remote-tip equality, exact-SHA CI and `main -> dev/compat` ancestry are verified after publication, separately from this record.
+
+## 2026-09-11 — inline attachment bounds and recovery-candidate breadth inheritance
+
+- Selected upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8..7641dbbd3b8aa20ffd4fb74089f2dc65bf032201`.
+- Accepted main tip/shared audit: `bcf2fba7c337a812071ccacc5184347c0bd5536e`; inherited source/tests: `332d1961f2bc9d2b1b9e0e56f2143b09a80d2077`; bundled guidance remains `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`.
+- Compat source/test behavior and direct inheritance merge: `43e8d80270345bdadda596eab7e9b1871ed30b92`; prior tip: `c1ee9ecbeda90224d4a7abbcfc877b9016b1117e`. Later registry commits do not advance these source references.
+
+### Capability results (2)
+
+| ID | Selected behavior | Main result | Compat result | Decisive evidence |
+| --- | --- | --- | --- | --- |
+| C01 | Inline attachments are bounded where they are produced, oversized images recompressed and everything else refused with a notice; the read tool refuses a PDF the active model cannot take | Adopted unchanged; FC-003's `markFileRead` moved to the image success path | Inherited byte-for-byte — all five production files and all three incoming test files are identical to accepted main | `test/tool/read.test.ts`, `test/tool/read-state.test.ts`, `test/mcp/tool-result.test.ts` and `test/session/prompt.test.ts` within the compat matrix below; the covered runtime is identical to main, so main's three C01 mutation checks apply unchanged |
+| C02 | Recovery-candidate predicate fix for `tool-calls`/`length` turns, idempotent settlement, resumed-loop classification skip, and an optional resume model override | Adopted through the fork's single `startResumeTurn` admission, keeping `time.completed` as FC-001's settlement marker; actor overrides refused; artifacts regenerated | Inherited with two union conflicts in `src/session/prompt.ts`; DC-CONTEXT-001/DC-ACTOR-001 contracts unchanged | `test/server/session-recovery.test.ts` predicate matrix and both fork-owned cases, plus `test/session/prompt-sweep.test.ts` for the settlement boundary and `test/session/prompt-effect.test.ts` for compat's overflow-placeholder classification, all within the compat matrix below |
+
+- All seven active DC entries were re-reviewed against the incoming diff; none has an owned implementation change. Shared FD/FC registries, their history and the new inventory are inherited byte-for-byte from accepted main.
+- Two conflicts, both unions in `src/session/prompt.ts`: the `./classify` import keeps compat's `REQUEST_OVERFLOW_RECOVERY_MESSAGE` beside main's new media/image imports, and the existing-assistant branch keeps compat's per-iteration agent resolution and `recoverOverflowPlaceholder` while adopting main's `lastAssistant.id !== resumeFrom` guard. `src/server/routes/instance/session.ts` merged cleanly; its only compat delta remains the `checkpoint-coverage` route.
+- `bun ci` completed with an unchanged lockfile; repository `bun typecheck` passed 12/12. The JavaScript SDK and `packages/sdk/openapi.json` were regenerated from compat sources and are byte-identical to the merge result, so no compat operation was lost and both resume query parameters are published.
+- Affected matrix at `43e8d80270345bdadda596eab7e9b1871ed30b92`, run from `packages/opencode` with `bun test --timeout 120000` in three sequential processes, mirroring the isolation `.github/workflows/test.yml` applies to `session-actor-recovery.test.ts`:
+  - `test/tool/ test/mcp/ test/util/ test/provider/ test/flag/ test/skill/` — 2258 passed, 3 skipped, 0 failed, 6434 assertions across 141 files in 287.68 s.
+  - `test/server/` (every file except `session-actor-recovery.test.ts`) `test/session/ test/actor/ test/inbox/ test/effect/` — 1818 passed, 23 skipped, 1 todo, 0 failed, 6277 assertions across 171 files in 767.81 s.
+  - `test/server/session-actor-recovery.test.ts` in its own process — 14 passed, 0 failed, 233 assertions in 25.56 s.
+  The counts exceed main's because compat carries additional owned cases; no case is skipped by the isolation.
+  That matrix ran on the equivalent merge before the shared registry commit was folded in; `packages/` is byte-identical in the published merge, which carries only the additional shared documentation.
+- Ambient `MIMOCODE_EXPERIMENTAL` and `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL` were removed for every run; the package preload (`@opentui/solid/preload`, `./test/preload.ts`) remains the harness baseline.
+- Repository lint passed with zero errors and 4558 warnings; `git diff --check` passed. Final remote-tip equality, exact-SHA CI and upstream -> main -> compat ancestry are separate publication checks.
