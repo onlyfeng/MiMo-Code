@@ -16,11 +16,11 @@ authority.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-09-11
-- Upstream: `7641dbbd3b8aa20ffd4fb74089f2dc65bf032201`
-- Prior reviewed upstream: `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`
-- Main behavior (runtime/tests): `332d1961f2bc9d2b1b9e0e56f2143b09a80d2077`
+- Upstream: `f11e35ede439df5555ca1f0309ffea8e9b49f06e`
+- Prior reviewed upstream: `7641dbbd3b8aa20ffd4fb74089f2dc65bf032201`
+- Main behavior (runtime/tests): `635618207270af55435aee88ce27003fc1809b44`
 - Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
-- Prior fork `main` tip: `ea633a0bd8a343b8e8ea8fefc20b8cf15e0ced17`
+- Prior fork `main` tip: `bcf2fba7c337a812071ccacc5184347c0bd5536e`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -28,9 +28,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-11 (7641dbbd) capability inventory](upstream-sync-2026-09-11-7641dbbd.md),
-continuing the [2026-09-10 (cb00c280) inventory](upstream-sync-2026-09-10-cb00c280.md) and the
-[2026-09-10 title authority inventory](upstream-sync-2026-09-10.md).
+Full synchronization review: [2026-09-11 (f11e35ed) capability inventory](upstream-sync-2026-09-11-f11e35ed.md),
+continuing the [2026-09-11 (7641dbbd) inventory](upstream-sync-2026-09-11-7641dbbd.md) and the
+[2026-09-10 (cb00c280) inventory](upstream-sync-2026-09-10-cb00c280.md).
 The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
@@ -330,6 +330,14 @@ where this delta does not change their implementation.
   child, mode-specific prefix ownership, aligned delta, disabled-checkpoint
   guidance behavior, and stable placeholder resolution only at filesystem-tool
   boundaries; FD-009 remains separately satisfied or retired.
+
+- 2026-09-11 history-escalation copy review: the verbatim elision marker and its
+  doc comment now point at `history around` followed by `get(part_id)` instead of
+  `around` alone, because upstream's bounded history returns summaries from
+  `around` and the original text from `get`. That is factually correct in this
+  fork, which merged the same history tool. The two lines are the entire
+  incoming change to `src/session/checkpoint.ts`; the writer modes, frozen
+  context, watermark advancement and token budget are untouched.
 
 ## FC-003 — actor- and instance-scoped read-before-edit state
 
