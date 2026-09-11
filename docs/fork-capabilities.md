@@ -637,6 +637,8 @@ where this delta does not change their implementation.
   `packages/enterprise/test/core/storage.test.ts`,
   `packages/enterprise/test/core/share.test.ts`,
   `.mimocode/skills/upstream-sync/SKILL.md`,
+  `.mimocode/skills/upstream-sync/references/`,
+  `.mimocode/skills/upstream-sync/.gitignore`,
   `.github/workflows/test.yml`, `.github/scripts/verify-junit.py`,
   `.github/workflows/lint.yml`,
   `.github/workflows/typecheck.yml`, and `AGENTS.md`.
@@ -654,6 +656,18 @@ where this delta does not change their implementation.
   main into compat; it adds no runtime capability or new retirement decision.
   Final propagation evidence belongs to `dev-compat-registry-history.md`, and
   final published branch SHAs still require their own CI results.
+- 2026-09-10 skill reference split: the upstream-sync skill moved its
+  conditional detail into `references/validation-and-ci.md`,
+  `references/publication-and-cleanup.md` and `references/evidence-record.md`,
+  leaving `SKILL.md` as the scope and baseline entry. A local
+  `.gitignore` re-includes that directory, because `.mimocode/.gitignore`
+  ignores agent-cached `references/` directories and nested `.gitignore` files
+  and a file inside an excluded directory cannot be re-included on its own.
+  These are fork-only paths upstream does not define, so they join the watch
+  surfaces above; like `95b592e0` this is shared process guidance to propagate
+  unchanged from main into compat, adding no runtime capability and no new
+  retirement decision. Review-thread adjudication for the cleanup-scope finding
+  is recorded on PR #105.
 - 2026-09-05 fixture review: removed `resetDatabase` and its four call sites,
   preserving local disposal and the fork project-init authorization fixture.
   Rejected incoming auth-override, fork-prefix, and failed-subtask skips: the
