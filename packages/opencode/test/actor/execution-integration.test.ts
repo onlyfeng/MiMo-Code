@@ -234,12 +234,16 @@ test("failed completion-gate reentry preserves the result without reporting task
 }, 30000)
 
 // Desktop tool-step-schema [TP-R14-08] [TP-R14-11].
-// QUARANTINED (fork): upstream holds one ActorExecution claim across the whole
-// spawn, postStop included, so a woken continuation queues behind it. Doing that
-// here deadlocks `nested primary ActorTool hands background ownership to the real
-// parent`: the outer spawn holds the claim while waiting on a nested actor whose
-// own continuation needs it. Satisfying this case requires an ordering primitive
-// that a nested spawn cannot block on, which is a separate design change.
+// QUARANTINED (fork): this asserts the actor is still `running` while its
+// postStop hook runs, so a queued message cannot start a continuation yet. The
+// fork publishes the outcome and leaves the actor idle *before* postStop — the
+// early-publish delivery contract that `delivered no-op cancel preserves
+// forkContext while postStop is still running` pins by awaiting
+// `result.outcome` within one second. So the two are mutually exclusive, and
+// this case shares that single blocker with `[TP-R14-07] postStop LLM failure
+// preserves the successful result with a warning`. It is NOT about the
+// spawn-side ActorExecution claim: restoring that claim leaves this assertion
+// failing on `duringHook?.status` with "idle" instead of "running".
 test.skip("inbox waits for the entire spawn execution before starting a continuation", async () => {
   const server = startScriptedLLMServer([
     { lines: textStopResponse("SPAWN-RESULT") },

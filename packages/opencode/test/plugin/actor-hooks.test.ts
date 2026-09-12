@@ -624,6 +624,8 @@ describe("actor.postStop ReAct loop", () => {
   // then waits for the postStop pause, so the early publish is load-bearing
   // here. The two orderings are mutually exclusive; changing ours also changes
   // how long a blocking `actor run` waits, so it needs its own decision.
+  // `inbox waits for the entire spawn execution before starting a continuation`
+  // is blocked by this same publish ordering, so one decision unskips both.
   test.skip("[TP-R14-07] postStop LLM failure preserves the successful result with a warning", async () => {
     const server = startScriptedLLMServer([
       { lines: textStopResponse("delivered") },     // delivery turn

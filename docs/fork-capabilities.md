@@ -260,10 +260,11 @@ where this delta does not change their implementation.
 - 2026-09-12 wake-routing retirement: the continuation path is retired from
   this entry. A woken non-main turn now runs on upstream's `ActorExecution`
   claim and settles through `runTurn`, instead of `Actor.runPersistentTurn`'s
-  wake generation. `spawn` takes no such claim: holding one across its whole
-  run (postStop included) deadlocks a nested ActorTool spawn, which shares the
-  claimed key, so upstream's spawn-before-continuation ordering is not adopted
-  and the case asserting it stays quarantined.
+  wake generation. `spawn` reserves the same claim for its whole run, postStop
+  included, so a woken continuation queues behind an in-flight spawn — which is
+  upstream's ordering. The claim was briefly removed in this range on the
+  reading that it deadlocked a nested ActorTool spawn; that reading was wrong
+  (see the sync document) and it is restored.
   The eight fork-owned tests that encoded behavior upstream's execution map
   does not model were removed with it: drain-once across six `resume drains`
   cases, cancel-race registry settlement, postStop wake ordering, and
@@ -692,10 +693,12 @@ where this delta does not change their implementation.
   gains `Actor.markTerminalNotified`: the continuation records that it published
   a terminal envelope and `cancel` consumes that marker instead of sending a
   second one, so retiring an actor that was never notified still notifies.
-  Two cases stay quarantined because they are mutually exclusive with tested
-  fork behaviour rather than unimplemented: holding one execution claim across
-  the whole spawn deadlocks a nested ActorTool spawn, and publishing the outcome
-  after postStop contradicts the fork's early-publish delivery contract.
+  Two cases stay quarantined, and both reduce to one blocker rather than two:
+  the fork publishes an actor's outcome and leaves it idle *before* postStop,
+  where upstream publishes after. `delivered no-op cancel preserves forkContext
+  while postStop is still running` pins that early publish by awaiting
+  `result.outcome` within one second, so the orderings are mutually exclusive.
+  One decision on publish ordering unskips both.
 - 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
   ownership to the real parent` polled the `InboxTable` row its assertion is
   about. That row exists to wake the persistent peer it addresses, so the peer's
