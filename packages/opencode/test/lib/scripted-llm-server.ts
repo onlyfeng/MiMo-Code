@@ -29,6 +29,7 @@ type ScriptedResponse = {
   lines: string[]
   /** HTTP status to return (default: 200) */
   status?: number
+  beforeReply?: () => Promise<unknown>
 }
 
 function sseChunk(delta: Record<string, unknown>, finishReason?: string): string {
@@ -221,6 +222,7 @@ export function startScriptedLLMServer(responses: ScriptedResponse[]): ScriptedL
 
       const response = responses[Math.min(callIdx, responses.length - 1)]
       callIdx++
+      await response.beforeReply?.()
 
       const lines = response.lines
       const encoder = new TextEncoder()

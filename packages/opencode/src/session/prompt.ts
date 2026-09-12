@@ -5,7 +5,16 @@ import os from "os"
 import z from "zod"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
-import { base64ByteSize, classifyAttachment, oversizedAttachmentNotice } from "@/util/media"
+import {
+  base64ByteSize,
+  classifyAttachment,
+  fitsMediaBase64,
+  isAudioAttachment,
+  isVideoAttachment,
+  MAX_MEDIA_BASE64_BYTES,
+  oversizedAttachmentNotice,
+  oversizedMediaNotice,
+} from "@/util/media"
 import { shrinkAttachment } from "@/provider/image"
 import { classifyAssistantStep, REQUEST_OVERFLOW_RECOVERY_MESSAGE } from "./classify"
 import { Log, Token } from "../util"
@@ -128,6 +137,10 @@ import type { TaskID } from "@/task/schema"
 import { EffectBridge } from "@/effect"
 import { Team } from "@/team"
 import { ActorRegistry } from "@/actor/registry"
+import { ActorExecution } from "@/actor/execution"
+import { makeTerminalNotifier } from "@/actor/notification"
+import { parseReturnHeader } from "@/actor/return-header"
+import { runTurn } from "@/actor/turn"
 import { Metrics } from "@/metrics"
 import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
 import { ToolResultError } from "../tool/result-error"
@@ -573,7 +586,9 @@ export const layer = Layer.effect(
     const sys = yield* SystemPrompt.Service
     const llm = yield* LLM.Service
     const actorRegistry = yield* ActorRegistry.Service
+    const executions = yield* ActorExecution.Service
     const inbox = yield* Inbox.Service
+    const notifyTerminal = makeTerminalNotifier({ inbox, registry: actorRegistry, sessions })
     let boundActor: ActorInterface | undefined
     const bindActor = (actor: ActorInterface) => {
       const previous = boundActor
@@ -2972,9 +2987,27 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               }
               // Inline payloads (clipboard pastes) are classified on the base64
               // length: an oversized image within the source ceiling is
-              // recompressed, anything else oversized is dropped.
+              // recompressed, anything else oversized is dropped. Audio and
+              // video are bounded only by the provider's ENCODED-size cap (see
+              // MAX_MEDIA_BASE64_BYTES) and never enter classifyAttachment.
               const inline = part.url.slice(part.url.indexOf(",") + 1)
               const inlineSize = base64ByteSize(inline)
+              if (isAudioAttachment(part.mime) || isVideoAttachment(part.mime)) {
+                if (inline.length <= MAX_MEDIA_BASE64_BYTES) break
+                return [
+                  {
+                    messageID: info.id,
+                    sessionID: input.sessionID,
+                    type: "text",
+                    synthetic: true,
+                    text: oversizedMediaNotice({
+                      label: `"${part.filename ?? part.mime}"`,
+                      size: inlineSize,
+                      hint: "It was not attached.",
+                    }),
+                  },
+                ]
+              }
               const verdict = classifyAttachment(part.mime, inlineSize)
               if (verdict === "fits") break
               const fitted = verdict === "shrink" ? shrinkAttachment(part.mime, Buffer.from(inline, "base64")) : undefined
@@ -3159,12 +3192,31 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // an under-limit file is inlined as-is, an oversized image within
               // the source ceiling is read and recompressed, and anything else
               // oversized becomes a notice without being read, so it never
-              // reaches the session DB.
+              // reaches the session DB. Audio and video are bounded only by the
+              // provider's ENCODED-size cap (fitsMediaBase64) and never enter
+              // classifyAttachment.
               const size = yield* fsys.stat(filepath).pipe(
                 Effect.map((info) => Number(info.size)),
                 Effect.catch(() => Effect.succeed(0)),
               )
-              const verdict = classifyAttachment(part.mime, size)
+              const media = isAudioAttachment(part.mime) || isVideoAttachment(part.mime)
+              if (media && !fitsMediaBase64(size)) {
+                return [
+                  call,
+                  {
+                    messageID: info.id,
+                    sessionID: input.sessionID,
+                    type: "text",
+                    synthetic: true,
+                    text: oversizedMediaNotice({
+                      label: `"${filepath}" (${part.mime})`,
+                      size,
+                      hint: "It was not attached.",
+                    }),
+                  },
+                ]
+              }
+              const verdict = media ? "fits" : classifyAttachment(part.mime, size)
               const fitted =
                 verdict === "reject"
                   ? undefined
@@ -3508,6 +3560,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           sessionID: input.sessionID,
           agentID: input.agentID ?? "main",
           titleLocale: input.titleLocale,
+          deferInbox: input.source === "hook" && input.agentID !== undefined && input.agentID !== "main",
         })
         if (Exit.isFailure(attempt.exit)) {
           if (Cause.hasInterruptsOnly(attempt.exit.cause) || attempt.started || retriedFailedHandoff)
@@ -3706,6 +3759,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       recoveryParentID?: MessageID,
       resumeFrom?: MessageID,
       modelOverride?: { providerID: string; modelID: string },
+      deferInbox?: boolean,
     ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(function* (
       sessionID: SessionID,
       agentID?: string,
@@ -3714,6 +3768,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       recoveryParentID?: MessageID,
       resumeFrom?: MessageID,
       modelOverride?: { providerID: string; modelID: string },
+      deferInbox?: boolean,
     ) {
       const ctx = yield* InstanceState.context
       const slog = elog.with({ sessionID })
@@ -4385,7 +4440,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // for non-main actors per F47).
           if (!agentID || agentID === "main") yield* status.set(sessionID, { type: "busy" })
           // Every recovery owns its original user, including main without an Actor model identity.
-          if (!recovery) yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
+          if (!recovery && !deferInbox) yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
           yield* slog.info("loop", { step })
 
           // F37: filter by agentID so subagent slices stay isolated from the
@@ -6000,18 +6055,116 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       let started = false
       const work = Effect.sync(() => {
         started = true
-      }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale)))
-      const actor = boundActor ?? spawnRef.current
+      }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale, undefined, undefined, undefined, undefined, input.deferInbox)))
+      // Continuations are serialized per (session, actor) by ActorExecution and
+      // settle through runTurn, matching upstream. The fork's former
+      // Actor.runPersistentTurn wake-generation routing on this path is retired.
       const execution =
-        input.notifyParentOnComplete === true && agentID !== "main" && actor?.runPersistentTurn
-          ? actor.runPersistentTurn({
-              sessionID: input.sessionID,
-              actorID: agentID,
-              work,
-              onInterrupt: lastAssistant(input.sessionID, agentID),
-              notifyParentOnComplete: true,
-              inboxID: input.inboxID,
-            })
+        input.notifyParentOnComplete === true && agentID !== "main"
+          ? Effect.acquireUseRelease(
+              executions.acquire(input.sessionID, agentID),
+              (exec) =>
+                Effect.gen(function* () {
+                  yield* executions.attach(exec)
+                  // Cancelled before drain: do not consume messages for a turn
+                  // that will not run. isCancelled is re-checked inside drain
+                  // just before commit, so a cancel mid-drain leaves rows durable.
+                  if (exec.cancelled) {
+                    // fall through: `continued` interrupts and onExit notifies
+                  } else if (
+                    input.inboxID &&
+                    (yield* inbox.drain(input.sessionID, agentID, () => exec.cancelled)) === 0
+                  ) {
+                    // Re-check after an empty drain: Actor.cancel's execution path
+                    // does not notify on its own — only runTurn.onExit does.
+                    if (!exec.cancelled) return yield* lastAssistant(input.sessionID, agentID)
+                  }
+                  // Capture the last delivery even when the turn dies with a
+                  // settled error, so settle can persist a partial result.
+                  let lastFinal: MessageV2.WithParts | undefined
+                  const continued = Effect.gen(function* () {
+                    if (exec.cancelled) return yield* Effect.interrupt
+                    const final = yield* state.ensureRunning(
+                      input.sessionID,
+                      agentID,
+                      lastAssistant(input.sessionID, agentID),
+                      work,
+                    )
+                    lastFinal = final
+                    if (final.info.role === "assistant" && final.info.error)
+                      return yield* Effect.die(new Error(sessionErrorText(final.info.error) ?? "actor session failed"))
+                    return final
+                  }).pipe(
+                    Effect.onExit((exit) =>
+                      Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+                        ? state.cancelActor(input.sessionID, agentID)
+                        : Effect.void,
+                    ),
+                  )
+                  return yield* runTurn(input.sessionID, agentID, continued, {
+                    settle: (exit) =>
+                      Effect.gen(function* () {
+                        if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) return undefined
+                        const final = Exit.isSuccess(exit) ? exit.value : lastFinal
+                        if (!final || final.info.role !== "assistant") return undefined
+                        const text = assistantFinalText(final.info, final.parts)
+                        const structured = final.info.structured
+                        if (text === undefined && structured === undefined) return undefined
+                        const parsed = parseReturnHeader(text)
+                        yield* sessions.updateMessage({
+                          ...final.info,
+                          actorResult: {
+                            ...(text !== undefined ? { finalText: text } : {}),
+                            ...(structured !== undefined ? { structured } : {}),
+                            ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                            ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                          },
+                        })
+                        return final.info.id
+                      }),
+                  }).pipe(
+                    Effect.provideService(ActorRegistry.Service, actorRegistry),
+                    Effect.onExit((exit) =>
+                      Effect.gen(function* () {
+                        const final = Exit.isSuccess(exit) ? exit.value : lastFinal
+                        const text =
+                          final?.info.role === "assistant"
+                            ? assistantFinalText(final.info, final.parts)
+                            : undefined
+                        const parsed = parseReturnHeader(text)
+                        const failureCause = Exit.isFailure(exit) ? exit.cause : undefined
+                        const status = !failureCause
+                          ? ("completed" as const)
+                          : Cause.hasInterruptsOnly(failureCause)
+                            ? ("cancelled" as const)
+                            : ("failed" as const)
+                        yield* notifyTerminal({
+                          sessionID: input.sessionID,
+                          actorID: agentID,
+                          source: "continuation",
+                          status,
+                          ...(status === "completed"
+                            ? {
+                                result: text ?? "(no output)",
+                                ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                                ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                              }
+                            : {}),
+                          ...(status === "failed"
+                            ? {
+                                error: Cause.pretty(failureCause!),
+                                ...(text !== undefined ? { result: text } : {}),
+                                ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                                ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                              }
+                            : {}),
+                        })
+                      }),
+                    ),
+                  )
+                }).pipe(Effect.uninterruptible),
+              (exec) => executions.release(exec),
+            )
           : Effect.gen(function* () {
               while (true) {
                 const head = input.inboxID ? yield* inbox.head(input.sessionID, agentID) : undefined
@@ -6623,7 +6776,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     )
     return impl
   }),
-)
+).pipe(Layer.provide(ActorExecution.layer))
 
 /** App composition variant with MCP supplied by the process-wide layer. */
 export const appLayer = Layer.suspend(() =>
@@ -6788,6 +6941,9 @@ export const LoopInput = z.object({
   // double-notifying the spawn turn that forkWork already covers.
   notifyParentOnComplete: z.boolean().optional(),
   inboxID: z.string().optional(),
+  // Hook-sourced non-main turns let the wake path own the drain, so the shared
+  // loop must not consume inbox rows for them.
+  deferInbox: z.boolean().optional(),
 })
 
 export const ShellInput = z.object({

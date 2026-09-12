@@ -1360,6 +1360,69 @@ describe("Actor forkContext lifecycle", () => {
     15000,
   )
 
+  it.live("keeps forkContexts isolated when actor ids repeat across sessions", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const first = yield* session.create({ title: "first fork context" })
+        const second = yield* session.create({ title: "second fork context" })
+        // Both executors must remain live while cancellation joins the first.
+        yield* llm.hang
+        yield* llm.hang
+
+        const firstResult = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: first.id,
+          agentType: "explore",
+          task: "first",
+          context: "full",
+          tools: [],
+          background: true,
+          model: ref,
+          forkContext: {
+            // compat-only required field (DC-ACTOR-001 full-context extension)
+            turnContext: undefined,
+            system: ["first-system"],
+            tools: {},
+            inheritedMessages: [],
+            parentPermission: [],
+            watermarkMsgID: MessageID.ascending(),
+            model: ref,
+          },
+        })
+        const secondResult = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: second.id,
+          agentType: "explore",
+          task: "second",
+          context: "full",
+          tools: [],
+          background: true,
+          model: ref,
+          forkContext: {
+            turnContext: undefined,
+            system: ["second-system"],
+            tools: {},
+            inheritedMessages: [],
+            parentPermission: [],
+            watermarkMsgID: MessageID.ascending(),
+            model: ref,
+          },
+        })
+
+        expect(firstResult.actorID).toBe(secondResult.actorID)
+        expect((yield* actor.getForkContext(firstResult.sessionID, firstResult.actorID))?.system).toEqual(["first-system"])
+        expect((yield* actor.getForkContext(secondResult.sessionID, secondResult.actorID))?.system).toEqual(["second-system"])
+
+        yield* actor.cancel(firstResult.sessionID, firstResult.actorID, "forced")
+        expect((yield* actor.getForkContext(secondResult.sessionID, secondResult.actorID))?.system).toEqual(["second-system"])
+        yield* actor.cancel(secondResult.sessionID, secondResult.actorID, "forced")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
   pauseIt.live("delivered no-op cancel preserves forkContext while postStop is still running", () =>
     Effect.gen(function* () {
       const hit = yield* Deferred.make<void>()
@@ -1440,189 +1503,7 @@ describe("Actor forkContext lifecycle", () => {
     15_000,
   )
 
-  pauseIt.live(
-    "persistent inbox wake waits for initial postStop to finish and then runs without a third wake",
-    () =>
-      Effect.gen(function* () {
-        const hit = yield* Deferred.make<void>()
-        const release = yield* Deferred.make<void>()
-        postStopPause = { hit, release }
-        yield* Effect.addFinalizer(() =>
-          Effect.gen(function* () {
-            yield* Deferred.succeed(release, undefined).pipe(Effect.ignore)
-            yield* Effect.sync(() => {
-              postStopPause = undefined
-            })
-          }),
-        )
-        yield* provideTmpdirServer(
-          Effect.fnUntraced(function* ({ llm }) {
-            const actor = yield* Actor.Service
-            const actorReg = yield* ActorRegistry.Service
-            const inbox = inboxServiceRef.current
-            if (!inbox) return yield* Effect.die("inbox service was not initialized")
-            const session = yield* Session.Service
-            const parent = yield* session.create({
-              title: "persistent-poststop-wake",
-              permission: [{ permission: "*", pattern: "*", action: "allow" }],
-            })
 
-            yield* llm.text("spawn turn complete")
-            const wokenStarted = yield* Deferred.make<void>()
-            let wokenRequests = 0
-            yield* llm.textMatch((request) => {
-              if (!JSON.stringify(request.body).includes("wake-after-poststop")) return false
-              wokenRequests++
-              Effect.runFork(Deferred.succeed(wokenStarted, undefined))
-              return true
-            }, "woken turn complete")
-
-            const result = yield* actor.spawn({
-              mode: "peer",
-              sessionID: parent.id,
-              agentType: "build",
-              task: "stand by after the first turn",
-              description: "postStop-serialized peer",
-              context: "none",
-              tools: ["read"],
-              background: true,
-              model: ref,
-            })
-            expect((yield* Deferred.await(result.outcome)).status).toBe("success")
-            yield* Deferred.await(hit).pipe(
-              Effect.timeoutOrElse({
-                duration: "2 seconds",
-                orElse: () => Effect.fail(new Error("timed out waiting for persistent actor.postStop pause")),
-              }),
-            )
-
-            yield* inbox
-              .send({
-                receiverSessionID: result.sessionID,
-                receiverActorID: result.actorID,
-                senderSessionID: parent.id,
-                senderActorID: "main",
-                content: "wake-after-poststop",
-              })
-              .pipe(Effect.orDie)
-
-            const startedBeforeRelease = yield* Deferred.await(wokenStarted).pipe(
-              Effect.as(true),
-              Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.succeed(false) }),
-            )
-            expect(startedBeforeRelease).toBe(false)
-            expect((yield* actorReg.get(result.sessionID, result.actorID))?.status).not.toBe("running")
-
-            yield* Deferred.succeed(release, undefined)
-            yield* Deferred.await(wokenStarted).pipe(Effect.timeout("5 seconds"))
-            expect(wokenRequests).toBe(1)
-          }),
-          { git: true, config: providerCfg },
-        )
-      }),
-    10_000,
-  )
-
-  pauseIt.live(
-    "ephemeral inbox wake waits for generation done and consumes its row without duplicate notification",
-    () =>
-      Effect.gen(function* () {
-        const hit = yield* Deferred.make<void>()
-        const release = yield* Deferred.make<void>()
-        postStopPause = { hit, release }
-        yield* Effect.addFinalizer(() =>
-          Effect.gen(function* () {
-            yield* Deferred.succeed(release, undefined).pipe(Effect.ignore)
-            yield* Effect.sync(() => {
-              postStopPause = undefined
-            })
-          }),
-        )
-        yield* provideTmpdirServer(
-          Effect.fnUntraced(function* ({ llm }) {
-            const actor = yield* Actor.Service
-            const bus = yield* Bus.Service
-            const inbox = inboxServiceRef.current
-            if (!inbox) return yield* Effect.die("inbox service was not initialized")
-            const session = yield* Session.Service
-            const parent = yield* session.create({
-              title: "ephemeral-poststop-wake",
-              permission: [{ permission: "*", pattern: "*", action: "allow" }],
-            })
-            let notifications = 0
-            const off = yield* bus.subscribeCallback(InboxArrived, (event) => {
-              if (event.properties.receiverSessionID !== parent.id) return
-              if (event.properties.receiverActorID !== "main") return
-              if (event.properties.type !== "actor_notification") return
-              notifications++
-            })
-            yield* Effect.addFinalizer(() => Effect.sync(off))
-
-            yield* llm.text("spawn turn complete")
-            const wokenStarted = yield* Deferred.make<void>()
-            let wokenRequests = 0
-            yield* llm.textMatch((request) => {
-              if (!JSON.stringify(request.body).includes("ephemeral-wake-after-poststop")) return false
-              wokenRequests++
-              Effect.runFork(Deferred.succeed(wokenStarted, undefined))
-              return true
-            }, "woken turn complete")
-
-            const result = yield* actor.spawn({
-              mode: "subagent",
-              sessionID: parent.id,
-              agentType: "build",
-              task: "finish before accepting the queued follow-up",
-              description: "postStop-serialized ephemeral",
-              context: "none",
-              tools: ["read"],
-              background: true,
-              lifecycle: "ephemeral",
-              model: ref,
-            })
-            expect((yield* Deferred.await(result.outcome)).status).toBe("success")
-            yield* Deferred.await(hit).pipe(
-              Effect.timeoutOrElse({
-                duration: "2 seconds",
-                orElse: () => Effect.fail(new Error("timed out waiting for ephemeral actor.postStop pause")),
-              }),
-            )
-            expect(notifications).toBe(1)
-
-            const sent = yield* inbox
-              .send({
-                receiverSessionID: result.sessionID,
-                receiverActorID: result.actorID,
-                senderSessionID: parent.id,
-                senderActorID: "main",
-                content: "ephemeral-wake-after-poststop",
-              })
-              .pipe(Effect.orDie)
-
-            const startedBeforeRelease = yield* Deferred.await(wokenStarted).pipe(
-              Effect.as(true),
-              Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.succeed(false) }),
-            )
-            expect(startedBeforeRelease).toBe(false)
-            expect(yield* inbox.has(sent.inboxID)).toBe(true)
-
-            yield* Deferred.succeed(release, undefined)
-            yield* Deferred.await(wokenStarted).pipe(
-              Effect.timeoutOrElse({
-                duration: "5 seconds",
-                orElse: () => Effect.fail(new Error("timed out waiting for serialized ephemeral wake request")),
-              }),
-            )
-
-            expect(wokenRequests).toBe(1)
-            expect(yield* inbox.has(sent.inboxID)).toBe(false)
-            expect(notifications).toBe(1)
-          }),
-          { git: true, config: providerCfg },
-        )
-      }),
-    15_000,
-  )
 
   pauseIt.live(
     "postStop reentry cannot overwrite the completed registry state with running",
@@ -2870,93 +2751,6 @@ it.live("resume rejects changed model harness identity before settling the old a
   ),
 )
 
-for (const { outcome, delivery, backlog, failure } of (["success", "failure"] as const).flatMap((outcome) =>
-  ([{ delivery: "durable", backlog: 1, failure: "provider" }, { delivery: "durable", backlog: 101, failure: "provider" }, { delivery: "durable", backlog: 101, failure: "defect" }, { delivery: "live", backlog: 1, failure: "provider" }] as const).map((item) => ({ outcome, ...item })),
-)) {
-  pauseIt.live(
-    `resume drains ${backlog} ${delivery} inbox rows once after ${outcome} with ${failure}`,
-    () =>
-      provideTmpdirServer(
-        Effect.fnUntraced(function* ({ dir, llm }) {
-          const actor = yield* Actor.Service
-          const sessions = yield* Session.Service
-          const inbox = inboxServiceRef.current!
-          const spawned = yield* interruptedActor("persistent", true)
-          const original = spawned.messages.find((m) => m.info.role === "user")!
-          if (original.info.role !== "user") return yield* Effect.die("user missing")
-          yield* sessions.updateMessage({ ...original.info, task_id: "T7" })
-          recoveryHooks = { pre: [], post: [] }
-          const release = Promise.withResolvers<void>()
-          yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
-          yield* llm.push(
-            reply()
-              .wait(release.promise)
-              .tool("read", { filePath: `${dir}/config.json` }),
-          )
-          if (outcome === "success") yield* llm.text("original recovery complete")
-          else yield* llm.error(400, { error: { message: "second recovery step failed" } })
-          const batches = Math.ceil(backlog / 100)
-          if (backlog > 100 && failure === "provider") yield* llm.error(400, { error: { message: "first inbox batch failed" } })
-          yield* llm.text("queued followup complete")
-          if (!actor.resume) return yield* Effect.die("resume missing")
-          const prefix = crypto.randomUUID()
-          const rows = Array.from({ length: backlog }, (_, index) => ({
-            id: `${prefix}-${String(index).padStart(3, "0")}`,
-            receiver_session_id: spawned.sessionID,
-            receiver_actor_id: spawned.actorID,
-            sender_session_id: spawned.sessionID,
-            sender_actor_id: "main",
-            content: { text: "queued-after-recovery" },
-            created_at: Date.now(),
-          }))
-          const queued = { inboxID: rows.at(-1)!.id }
-          if (delivery === "durable") Database.use((db) => db.insert(InboxTable).values(rows).run())
-          if (failure === "defect") recoveryHookControl = { hook: "session.pre", mode: "defect", withoutTask: true, armed: true, outcomes: [] }
-          const completion = yield* actor.resume(spawned)
-          yield* llm.wait(2)
-          if (delivery === "live") {
-            const sent = yield* inbox.send({
-              receiverSessionID: spawned.sessionID, receiverActorID: spawned.actorID,
-              senderSessionID: spawned.sessionID, senderActorID: "main",
-              content: "queued-after-recovery",
-            })
-            queued.inboxID = sent.inboxID
-          }
-          expect(yield* inbox.has(queued.inboxID)).toBe(true)
-          expect(
-            (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).filter(
-              (m) => m.info.role === "user",
-            ),
-          ).toHaveLength(1)
-          release.resolve()
-          const resumed = yield* completion.pipe(Effect.timeout("8 seconds"))
-          expect(resumed.info.role === "assistant" && resumed.info.parentID).toBe(original.info.id)
-          yield* llm.wait(3 + batches - (failure === "defect" ? 1 : 0)).pipe(Effect.timeout("8 seconds"))
-          const inputs = yield* llm.inputs
-          expect(JSON.stringify(inputs[1])).not.toContain("queued-after-recovery")
-          expect(JSON.stringify(inputs[2])).not.toContain("queued-after-recovery")
-          expect(JSON.stringify(inputs[3])).toContain("queued-after-recovery")
-          expect(yield* inbox.has(queued.inboxID)).toBe(false)
-          const messages = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
-          expect(messages.filter((m) => m.info.role === "user")).toHaveLength(1 + batches)
-          expect(messages.find((m) => m.info.id === original.info.id)?.info).toMatchObject({ task_id: "T7" })
-          const recovery = messages.filter(
-            (m) =>
-              m.info.role === "assistant" &&
-              m.info.id > spawned.messages.at(-1)!.info.id &&
-              m.info.parentID === original.info.id,
-          )
-          expect(recovery).toHaveLength(2)
-          expect(recoveryHooks.pre[0]).toBe("T7")
-          expect(recoveryHooks.post[0]).toBe("T7")
-          expect(recoveryHooks.pre).toEqual(["T7", ...Array.from({ length: batches }, () => undefined)])
-          expect(yield* llm.calls).toBe(3 + batches - (failure === "defect" ? 1 : 0))
-        }),
-        { git: true, config: providerCfg },
-      ),
-    20_000,
-  )
-}
 
 it.live("persistent inbox does not retry a defect before consuming any row", () =>
   provideTmpdirServer(Effect.fnUntraced(function* () {

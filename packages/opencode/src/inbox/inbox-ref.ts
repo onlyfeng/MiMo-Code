@@ -20,9 +20,11 @@ export interface SessionPromptLoopRef {
   loop: (input: {
     sessionID: SessionID
     agentID: string
-    // The inbox wake path sets this so a persistent background peer that
-    // finishes a woken turn notifies its parent (see prompt.ts runLoop terminal).
+    // A woken child settles through SessionPrompt.loop's execution boundary.
     notifyParentOnComplete?: boolean
+    // Identifies the row that woke the loop. Strictly stronger than upstream's
+    // boolean `inboxWake`: a present id means the same thing and also says which
+    // row, which the fork's drain/settle path needs.
     inboxID?: string
   }) => Effect.Effect<MessageV2.WithParts>
 }

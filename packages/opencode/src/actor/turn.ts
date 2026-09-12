@@ -1,6 +1,6 @@
 import { Cause, Effect, Exit } from "effect"
 import { ActorRegistry } from "@/actor/registry"
-import type { SessionID } from "@/session/schema"
+import type { SessionID, MessageID } from "@/session/schema"
 
 export const runTurn = <A, E>(
   sessionID: SessionID,
@@ -10,6 +10,9 @@ export const runTurn = <A, E>(
     readonly isCancelled?: Effect.Effect<boolean>
     readonly finalize?: boolean
     readonly markRunning?: boolean
+    // Persist the turn's delivery and return the message it wrote, before the
+    // registry publishes a reference to it.
+    readonly settle?: (exit: Exit.Exit<A, E>) => Effect.Effect<MessageID | undefined>
   },
 ): Effect.Effect<A, E, ActorRegistry.Service> =>
   // Wrap the entire turn in Effect.uninterruptible so that status cleanup
@@ -44,6 +47,16 @@ export const runTurn = <A, E>(
         if (Exit.isSuccess(exit)) return exit.value
         return yield* Effect.failCause(exit.cause) as Effect.Effect<A, E>
       }
+      // Persist delivery before publishing its reference; never reuse an older
+      // one. A settle failure must not lose the turn's own outcome, so it is
+      // logged and downgraded to "no delivery" rather than re-raised.
+      const resultMessageID = options?.settle
+        ? yield* options.settle(exit).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError("actor delivery persistence failed", cause).pipe(Effect.as(undefined)),
+            ),
+          )
+        : undefined
       // Write the outcome unconditionally before re-raising.
       if (Exit.isSuccess(exit)) {
         yield* reg
@@ -51,6 +64,7 @@ export const runTurn = <A, E>(
             status: "idle",
             lastOutcome: "success",
             lastError: undefined,
+            resultMessageID,
           })
           .pipe(Effect.ignore)
         return exit.value
@@ -62,6 +76,7 @@ export const runTurn = <A, E>(
           status: "idle",
           lastOutcome: cancelled ? "cancelled" : "failure",
           lastError: cancelled ? undefined : extractErrorString(cause),
+          resultMessageID,
         })
         .pipe(Effect.ignore)
       return yield* Effect.failCause(cause) as Effect.Effect<A, E>

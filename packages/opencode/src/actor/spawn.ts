@@ -1,6 +1,7 @@
 import { isTurnCancelled } from "../session/turn-cancellation"
 import * as RunApproval from "@/session/run-approval"
 import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit, Schedule } from "effect"
+import { ActorExecution } from "./execution"
 import type { SessionID, MessageID } from "@/session/schema"
 import type { ProviderID, ModelID } from "@/provider/schema"
 import type { Tool as AITool, ModelMessage } from "ai"
@@ -158,8 +159,11 @@ export type AgentOutcome =
       // Task IDs the subagent left non-terminal after the gate's cap. Present
       // only when reportedStatus was downgraded to "partial"/"blocked".
       incompleteTasks?: string[]
+      // Non-fatal hook/gate failures surfaced to the caller instead of being
+      // swallowed (upstream: "surface hook warnings").
+      warnings?: string[]
     }
-  | { status: "failure"; error: string; failure?: FailureInfo }
+  | { status: "failure"; error: string; failure?: FailureInfo; finalText?: string; structured?: unknown }
   | { status: "cancelled" }
 
 /**
@@ -413,6 +417,7 @@ export const layer = Layer.effect(
       disposal: RunDisposalState
       taskSessionID: SessionID
     }
+    const executions = yield* ActorExecution.Service
     const lifecycleState = createActorLifecycle<MessageV2.WithParts, FrozenContext, NotificationTarget>()
     const retainForkContext = (
       key: string,
@@ -485,7 +490,7 @@ export const layer = Layer.effect(
           : (result as MessageV2.WithParts | undefined)?.parts.findLast(
               (p): p is Extract<MessageV2.Part, { type: "text" }> => p.type === "text",
             )?.text
-      return { finalText, structured }
+      return { finalText, structured, message: result as MessageV2.WithParts | undefined }
     })
 
     const forkWork = (input: {
@@ -580,6 +585,44 @@ export const layer = Layer.effect(
               ),
             )
           })
+        // Delivery carriers, shared by the success and failure terminal writes.
+        // A failed turn still publishes whatever it produced, so a later wait can
+        // resolve it through result_message_id.
+        let lastMessage: MessageV2.WithParts | undefined
+        let lastResult: { finalText?: string; structured?: unknown } = {}
+        const warnings: string[] = []
+        // Persist the delivery on the final assistant message and return its id.
+        // registry.updateStatus clears result_message_id on the running
+        // transition, so a terminal write must supply a fresh one.
+        const persistDelivery = (extra: {
+          finalText?: string
+          structured?: unknown
+          reportedStatus?: ReturnStatus
+          reportedSummary?: string
+        }) =>
+          Effect.gen(function* () {
+            const final = lastMessage
+            if (!final || final.info.role !== "assistant") return undefined
+            if (extra.finalText === undefined && extra.structured === undefined) return undefined
+            yield* session.updateMessage({
+              ...final.info,
+              actorResult: {
+                ...(extra.finalText !== undefined ? { finalText: extra.finalText } : {}),
+                ...(extra.structured !== undefined ? { structured: extra.structured } : {}),
+                ...(extra.reportedStatus ? { reportedStatus: extra.reportedStatus } : {}),
+                ...(extra.reportedSummary ? { reportedSummary: extra.reportedSummary } : {}),
+                ...(warnings.length ? { warnings } : {}),
+              },
+            })
+            return final.info.id
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError(`actor delivery persistence failed: ${Cause.pretty(cause)}`).pipe(
+                Effect.as(undefined),
+              ),
+            ),
+          )
+
         const settleFailure = (cause: Cause.Cause<unknown>) =>
           Effect.gen(function* () {
             const cancelled = Cause.hasInterruptsOnly(cause)
@@ -610,11 +653,13 @@ export const layer = Layer.effect(
               return
             }
             yield* Effect.gen(function* () {
+              const resultMessageID = cancelled ? undefined : yield* persistDelivery(lastResult)
               yield* actorReg
                 .updateStatus(input.sessionID, input.actorID, {
                   status: "idle",
                   lastOutcome: cancelled ? "cancelled" : "failure",
                   lastError: cancelled ? undefined : error,
+                  ...(resultMessageID ? { resultMessageID } : {}),
                 })
                 .pipe(Effect.ignoreCause)
               yield* notify(cancelled ? "cancelled" : "failed", cancelled ? {} : { error })
@@ -622,7 +667,7 @@ export const layer = Layer.effect(
                 outcome,
                 cancelled
                   ? { status: "cancelled" as const }
-                  : { status: "failure" as const, error, ...(failure ? { failure } : {}) },
+                  : { status: "failure" as const, error, ...(failure ? { failure } : {}), ...lastResult },
               )
             }).pipe(Effect.ensuring(lifecycleState.settleTerminal(input.generation)))
           })
@@ -677,6 +722,8 @@ export const layer = Layer.effect(
             )
             finalText = turn.finalText
             structured = turn.structured
+            if (turn.message) lastMessage = turn.message
+            lastResult = { finalText: turn.finalText, structured: turn.structured }
 
             iteration++
             if (iteration > MAX_PRE_REACT) {
@@ -731,6 +778,9 @@ export const layer = Layer.effect(
           Effect.matchCauseEffect({
             onSuccess: ({ finalText, structured }) =>
               Effect.gen(function* () {
+                // Set when a completion-gate re-entry turn failed; the gate then
+                // cannot vouch for a clean finish.
+                let gateFailed = false
                 // === COMPLETION GATE (B) + structured parse (A) ===
                 // Delegates the list/decide step to TaskGate.decide.
                 // We retain the runTurn re-entry + delivered-text update here
@@ -758,7 +808,13 @@ export const layer = Layer.effect(
                       Effect.catch(() =>
                         Effect.gen(function* () {
                           log.error("actor.gate runTurn failed", { actorID: input.actorID })
-                          return { finalText: undefined as string | undefined, structured: undefined as unknown }
+                          warnings.push("completion gate: re-entry turn failed")
+                          gateFailed = true
+                          return {
+                            finalText: undefined as string | undefined,
+                            structured: undefined as unknown,
+                            message: undefined as MessageV2.WithParts | undefined,
+                          }
                         }),
                       ),
                       Effect.provideService(ActorRegistry.Service, actorReg),
@@ -772,6 +828,9 @@ export const layer = Layer.effect(
                 }
 
                 // Reconcile: DB truth wins over the model's self-reported header.
+                // A gate that could not complete cannot confirm a clean finish, so
+                // the turn may not stand as "success". It never overrides a more
+                // severe status the child reported itself.
                 const remaining = input.gateEligible
                   ? yield* taskRegistry
                       .list({ session_id: input.parentSessionID, owner: input.actorID, include_terminal: false })
@@ -781,7 +840,13 @@ export const layer = Layer.effect(
                 const downgrade: ReturnStatus | undefined =
                   stillActionable.length > 0 ? "partial" : remaining.length > 0 ? "blocked" : undefined
                 const parsed = parseReturnHeader(deliveredText)
-                const reportedStatus = downgrade ?? parsed.status
+                const severity = { failed: 3, blocked: 2, partial: 1, success: 0 } as const
+                const rank = (status: ReturnStatus | undefined) => (status ? severity[status] : -1)
+                const gateFloor: ReturnStatus | undefined = gateFailed ? "partial" : undefined
+                const reportedStatus = [downgrade ?? parsed.status, gateFloor].reduce<ReturnStatus | undefined>(
+                  (worst, candidate) => (rank(candidate) > rank(worst) ? candidate : worst),
+                  undefined,
+                )
                 const incompleteTasks = remaining.map((t) => t.id)
                 const reconciledText =
                   downgrade && incompleteTasks.length > 0
@@ -809,16 +874,24 @@ export const layer = Layer.effect(
                             status: "success" as const,
                             ...(reconciledText !== undefined ? { finalText: reconciledText } : {}),
                             ...(structured !== undefined ? { structured } : {}),
+                            ...(warnings.length ? { warnings } : {}),
                           },
                   )
                   return
                 }
                 yield* Effect.gen(function* () {
+                  const resultMessageID = yield* persistDelivery({
+                    finalText: reconciledText,
+                    structured,
+                    reportedStatus,
+                    reportedSummary: parsed.summary,
+                  })
                   yield* actorReg
                     .updateStatus(input.sessionID, input.actorID, {
                       status: "idle",
                       lastOutcome: "success",
                       lastError: undefined,
+                      ...(resultMessageID ? { resultMessageID } : {}),
                     })
                     .pipe(Effect.ignoreCause)
                   yield* lifecycleState.markDelivered(key, input.generation)
@@ -835,6 +908,7 @@ export const layer = Layer.effect(
                     ...(reportedStatus ? { reportedStatus } : {}),
                     ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
                     ...(incompleteTasks.length > 0 ? { incompleteTasks } : {}),
+                    ...(warnings.length ? { warnings } : {}),
                   })
                 }).pipe(Effect.ensuring(lifecycleState.settleTerminal(input.generation)))
 
@@ -918,7 +992,12 @@ export const layer = Layer.effect(
                         log.error("actor.postStop runTurn failed", {
                           actorID: input.actorID,
                         })
-                        return { finalText: undefined as string | undefined, structured: undefined as unknown }
+                        warnings.push("postStop: re-entry turn failed")
+                        return {
+                          finalText: undefined as string | undefined,
+                          structured: undefined as unknown,
+                          message: undefined as MessageV2.WithParts | undefined,
+                        }
                       }),
                     ),
                     Effect.provideService(ActorRegistry.Service, actorReg),
@@ -941,7 +1020,17 @@ export const layer = Layer.effect(
         // The child inherits this receiver-generation marker when forked, so a
         // terminal continuation that outlives disposal cannot re-arm the instance.
         const fork = Effect.gen(function* () {
-          const fiber = yield* boundWork.pipe(Effect.interruptible, Effect.forkIn(scope))
+          // Upstream serializes a woken continuation behind the whole spawn
+          // execution, postStop included. Reserving here and releasing when the
+          // forked work settles reproduces that ordering; the fork's own wake
+          // generation still runs inside the claim.
+          const claim = yield* executions
+            .reserve(input.sessionID, input.actorID)
+            .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+          const claimed = claim
+            ? boundWork.pipe(Effect.ensuring(executions.release(claim)))
+            : boundWork
+          const fiber = yield* claimed.pipe(Effect.interruptible, Effect.forkIn(scope))
           return { fiber, outcome }
         }).pipe(state.withRunDisposal)
         return yield* (input.instanceRef ? fork.pipe(Effect.provideService(InstanceRef, input.instanceRef)) : fork)
@@ -1232,7 +1321,7 @@ export const layer = Layer.effect(
             }),
           }),
           origin,
-        ).pipe(Effect.ignoreCause)
+        )
         yield* withNotificationTarget(
           notificationTarget,
           bus.publish(TuiEvent.ToastShow, {
@@ -1241,7 +1330,7 @@ export const layer = Layer.effect(
           }),
           origin,
         ).pipe(Effect.ignoreCause)
-      }).pipe(Effect.catchCause((cause) => Effect.logError(`terminal notify failed: ${Cause.pretty(cause)}`)))
+      }).pipe(Effect.catchCause((cause) => Effect.logError(`actor terminal notification failed: ${Cause.pretty(cause)}`)))
 
     const finishPersistentTurn = (
       input: { sessionID: SessionID; actorID: string; notifyParentOnComplete: boolean },
@@ -1279,11 +1368,41 @@ export const layer = Layer.effect(
               // Settle the old receiver's receipts without writing through a
               // disposed instance or notifying a parent that is still alive.
               if (isRunDisposing(source)) return
+              // Persist this turn's delivery before publishing its reference:
+              // updateStatus cleared result_message_id on the running transition,
+              // so a terminal write must supply a fresh one.
+              const resultMessageID =
+                status === "cancelled"
+                  ? undefined
+                  : yield* Effect.gen(function* () {
+                      if (!assistant || !value) return undefined
+                      const text = assistantFinalText(assistant, value.parts)
+                      const structured = assistant.structured
+                      if (text === undefined && structured === undefined) return undefined
+                      const parsedDelivery = parseReturnHeader(text)
+                      yield* session.updateMessage({
+                        ...assistant,
+                        actorResult: {
+                          ...(text !== undefined ? { finalText: text } : {}),
+                          ...(structured !== undefined ? { structured } : {}),
+                          ...(parsedDelivery.status ? { reportedStatus: parsedDelivery.status } : {}),
+                          ...(parsedDelivery.summary ? { reportedSummary: parsedDelivery.summary } : {}),
+                        },
+                      })
+                      return assistant.id
+                    }).pipe(
+                      Effect.catchCause((cause) =>
+                        Effect.logError(`actor delivery persistence failed: ${Cause.pretty(cause)}`).pipe(
+                          Effect.as(undefined),
+                        ),
+                      ),
+                    )
               yield* actorReg
                 .updateStatus(input.sessionID, input.actorID, {
                   status: "idle",
                   lastOutcome: status === "completed" ? "success" : status === "failed" ? "failure" : "cancelled",
                   lastError: status === "failed" ? error : undefined,
+                  ...(resultMessageID ? { resultMessageID } : {}),
                 })
                 .pipe(Effect.ignoreCause)
               if (input.notifyParentOnComplete) {
@@ -1318,6 +1437,78 @@ export const layer = Layer.effect(
         return terminalResult.value
       })
 
+    // Terminal settlement for a continuation turn of a NON-persistent actor.
+    // Mirrors the persistent path's finishPersistentTurn: persist the delivery,
+    // publish its id on the registry row, and notify the parent once.
+    const continueTurn = (
+      sessionID: SessionID,
+      actorID: string,
+      actor: Actor,
+      onInterrupt: Effect.Effect<MessageV2.WithParts>,
+      work: Effect.Effect<MessageV2.WithParts>,
+    ) =>
+      Effect.gen(function* () {
+        let lastFinal: MessageV2.WithParts | undefined
+        const continued = Effect.gen(function* () {
+          const final = yield* state.ensureRunning(sessionID, actorID, onInterrupt, work)
+          lastFinal = final
+          if (final.info.role === "assistant" && final.info.error)
+            return yield* Effect.die(new Error(sessionErrorText(final.info.error) ?? "actor session failed"))
+          return final
+        })
+        const delivery = (exit: Exit.Exit<MessageV2.WithParts>) =>
+          Effect.gen(function* () {
+            if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) return undefined
+            const final = Exit.isSuccess(exit) ? exit.value : lastFinal
+            if (!final || final.info.role !== "assistant") return undefined
+            const text = assistantFinalText(final.info, final.parts)
+            const structured = final.info.structured
+            if (text === undefined && structured === undefined) return undefined
+            const parsed = parseReturnHeader(text)
+            yield* session.updateMessage({
+              ...final.info,
+              actorResult: {
+                ...(text !== undefined ? { finalText: text } : {}),
+                ...(structured !== undefined ? { structured } : {}),
+                ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+              },
+            })
+            return final.info.id
+          })
+        return yield* runTurn(sessionID, actorID, continued, { settle: delivery }).pipe(
+          Effect.provideService(ActorRegistry.Service, actorReg),
+          Effect.onExit((exit) =>
+            Effect.gen(function* () {
+              const final = Exit.isSuccess(exit) ? exit.value : lastFinal
+              const text = final?.info.role === "assistant" ? assistantFinalText(final.info, final.parts) : undefined
+              const parsed = parseReturnHeader(text)
+              const failureCause = Exit.isFailure(exit) ? exit.cause : undefined
+              const status = !failureCause
+                ? ("completed" as const)
+                : Cause.hasInterruptsOnly(failureCause)
+                  ? ("cancelled" as const)
+                  : ("failed" as const)
+              yield* notifyTerminal(
+                sessionID,
+                actorID,
+                actor,
+                status,
+                status === "completed"
+                  ? {
+                      result: text ?? "(no output)",
+                      ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                      ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                    }
+                  : status === "failed"
+                    ? { error: Cause.pretty(failureCause!), ...(text !== undefined ? { result: text } : {}) }
+                    : {},
+              )
+            }),
+          ),
+        )
+      })
+
     const runPersistentTurnImpl = Effect.fn("Actor.runPersistentTurn.impl")(function* (
       input: {
         sessionID: SessionID
@@ -1336,7 +1527,14 @@ export const layer = Layer.effect(
           const active = yield* lifecycleState.currentGeneration(key)
           if (active?.kind === "fork") yield* Deferred.await(active.done)
           if (input.inboxID && !(yield* inbox.has(input.inboxID))) return yield* input.onInterrupt
-          const result = yield* state.ensureRunning(input.sessionID, input.actorID, input.onInterrupt, input.work)
+          // A continuation of a non-persistent actor still settles: it writes the
+          // turn's delivery, publishes its id and notifies the parent exactly
+          // once. Only the persistent path below owns a wake generation, so this
+          // branch drives the terminal write through runTurn directly.
+          const settleTurn = !actor || !input.notifyParentOnComplete
+          const result = settleTurn
+            ? yield* state.ensureRunning(input.sessionID, input.actorID, input.onInterrupt, input.work)
+            : yield* continueTurn(input.sessionID, input.actorID, actor, input.onInterrupt, input.work)
           if (!input.inboxID || !(yield* inbox.has(input.inboxID))) return result
         }
       }
@@ -1917,7 +2115,7 @@ export const layer = Layer.effect(
     )
     return impl
   }),
-)
+).pipe(Layer.provide(ActorExecution.layer))
 
 // Wrapped in Layer.suspend so the cross-module `.defaultLayer` reads defer to
 // first use instead of running at module load. Without this, the

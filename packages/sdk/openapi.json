@@ -12661,6 +12661,28 @@
             "required": ["input", "output", "reasoning", "cache"]
           },
           "structured": {},
+          "actorResult": {
+            "type": "object",
+            "properties": {
+              "finalText": {
+                "type": "string"
+              },
+              "structured": {},
+              "reportedStatus": {
+                "type": "string",
+                "enum": ["success", "partial", "failed", "blocked"]
+              },
+              "reportedSummary": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "variant": {
             "type": "string"
           },
