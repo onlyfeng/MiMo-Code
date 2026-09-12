@@ -716,6 +716,13 @@ where this delta does not change their implementation.
   settlement permanently unreported. Awaiting the outcome removes the window in
   both directions rather than moving it, and the completion runs on every exit
   of the notify, interrupt included, or a cancel would wait forever.
+  `Actor.cancel` marks the actor's `ActorExecution` before it does anything
+  else, which is upstream's own shape. The fork adopted that service for
+  continuations but left `requestCancel` with no caller anywhere in `src`, so
+  cancel and the continuation had no shared point to serialise on and every
+  interleaving between them had to be reconstructed out of band. With the claim
+  marked, a continuation that is admitted or already in flight observes the
+  cancellation through the claim it holds, at the checks it already makes.
   Delivery is reported by `Inbox.send` itself, through a `committed` flag it
   sets the moment the row lands and unsets if its retirement re-check removes
   it again — inferring it from how the call ended was wrong in both directions.

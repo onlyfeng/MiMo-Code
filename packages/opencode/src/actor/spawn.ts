@@ -1914,6 +1914,15 @@ export const layer = Layer.effect(
         yield* Deferred.await(ownership.episode.done)
         return
       }
+      // Upstream's cancel marks the actor's execution before it does anything
+      // else, so a continuation that is admitted or already in flight sees the
+      // cancellation through the claim it holds. This fork adopted
+      // ActorExecution for continuations but left `requestCancel` unwired,
+      // which left cancel and the continuation with no shared point to
+      // serialise on: every interleaving between them had to be reconstructed
+      // out of band. Marking here restores that point.
+      const execution = yield* executions.current(sessionID, actorID)
+      if (execution) yield* executions.requestCancel(execution)
 
         const releaseEpisode = lifecycleState.releaseCancel(key, ownership.episode)
         const retire = lifecycleState
