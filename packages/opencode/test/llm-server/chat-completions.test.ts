@@ -858,7 +858,7 @@ test.each(["wav", "mp3", "mpeg", "mpga", "m4a", "mp4", "flac", "ogg", "webm"] as
 
 test.each([
   { npm: "@ai-sdk/openai-compatible", audio: false, format: "wav" },
-  { npm: "@ai-sdk/openai-compatible", audio: true, format: "flac" },
+  { npm: "@ai-sdk/openai-compatible", audio: true, format: "webm" },
   { npm: "@ai-sdk/anthropic", audio: true, format: "wav" },
   { npm: "@ai-sdk/openai", audio: true, format: "wav" },
   { npm: "@ai-sdk/azure", audio: true, format: "wav" },
@@ -940,7 +940,7 @@ test.each(["@ai-sdk/openai", "@ai-sdk/azure"])(
         expect(audioRejection(model, sdk.responses("wire-model"), [{ mediaType: "audio/wav", bytes: 3 }])).toMatch(
           /audio/,
         )
-        expect(audioRejection(model, language, [{ mediaType: "audio/flac", bytes: 3 }])).toMatch(/audio/)
+        expect(audioRejection(model, language, [{ mediaType: "audio/aac", bytes: 3 }])).toMatch(/audio/)
         for (const bytes of [0, -1, NaN, Infinity, 1.5, 20 * 1024 * 1024 + 1]) {
           expect(audioRejection(model, language, [{ mediaType: "audio/wav", bytes }])).toBeDefined()
         }
