@@ -260,8 +260,10 @@ where this delta does not change their implementation.
 - 2026-09-12 wake-routing retirement: the continuation path is retired from
   this entry. A woken non-main turn now runs on upstream's `ActorExecution`
   claim and settles through `runTurn`, instead of `Actor.runPersistentTurn`'s
-  wake generation. `spawn` reserves the same claim for its whole run so a
-  continuation waits behind an in-flight spawn, which is upstream's ordering.
+  wake generation. `spawn` takes no such claim: holding one across its whole
+  run (postStop included) deadlocks a nested ActorTool spawn, which shares the
+  claimed key, so upstream's spawn-before-continuation ordering is not adopted
+  and the case asserting it stays quarantined.
   The eight fork-owned tests that encoded behavior upstream's execution map
   does not model were removed with it: drain-once across six `resume drains`
   cases, cancel-race registry settlement, postStop wake ordering, and
@@ -694,6 +696,19 @@ where this delta does not change their implementation.
   fork behaviour rather than unimplemented: holding one execution claim across
   the whole spawn deadlocks a nested ActorTool spawn, and publishing the outcome
   after postStop contradicts the fork's early-publish delivery contract.
+- 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
+  ownership to the real parent` polled the `InboxTable` row its assertion is
+  about. That row exists to wake the persistent peer it addresses, so the peer's
+  continuation drains it within milliseconds and the poll observes a state the
+  system is designed to erase. A drained row never returns, so the earlier
+  window widening (2s to 20s) only moved the failure from ~2.5s to ~21s. The
+  case now observes `InboxArrived`, published after the row commits and before
+  `wake()`, matching how `test/actor/cancel-notification.test.ts` already counts
+  envelopes. Behavior is unchanged and was verified identical with
+  `spawn.ts`/`prompt.ts` reverted to `e92d7a52`; the assertion is
+  mutation-checked against a suppressed notification and against one misrouted
+  to `main`. Prefer the bus envelope over inbox rows whenever a test asserts
+  notification routing.
 - 2026-09-12 quarantine: four upstream-new actor cases are skipped in place with
   an inline rationale — `inbox waits for the entire spawn execution before
   starting a continuation`, `[TP-R14-12] undeliverable terminal notification is
