@@ -5800,13 +5800,28 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   // Capture the last delivery even when the turn dies with a
                   // settled error, so settle can persist a partial result.
                   let lastFinal: MessageV2.WithParts | undefined
+                  // Re-checked inside the runner, which is the first point at
+                  // which `Actor.cancel` can find this turn: until the runner is
+                  // registered, a cancel starting now only flips a flag already
+                  // read above and then returns for lack of a runner, leaving
+                  // the turn free to start its model call behind a completed
+                  // cancellation. Mirrors the same guard in runPersistentTurn.
+                  const guardedWork = Effect.gen(function* () {
+                    if (exec.cancelled) return yield* Effect.interrupt
+                    if (
+                      (yield* (boundActor ?? spawnRef.current)?.isCancelling?.(input.sessionID, agentID) ??
+                        Effect.succeed(false)) === true
+                    )
+                      return yield* Effect.interrupt
+                    return yield* work
+                  })
                   const continued = Effect.gen(function* () {
                     if (exec.cancelled) return yield* Effect.interrupt
                     const final = yield* state.ensureRunning(
                       input.sessionID,
                       agentID,
                       lastAssistant(input.sessionID, agentID),
-                      work,
+                      guardedWork,
                     )
                     lastFinal = final
                     if (final.info.role === "assistant" && final.info.error)
