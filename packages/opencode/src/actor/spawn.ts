@@ -348,6 +348,15 @@ export interface Interface {
    * that produced it.
    */
   readonly resetTerminalNotified?: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
+  /**
+   * Complete the in-flight record opened by `markTerminalNotified` with whether
+   * the send actually wrote an envelope. Must run on every exit of the notify.
+   */
+  readonly settleTerminalNotified?: (
+    sessionID: SessionID,
+    actorID: string,
+    delivered: boolean,
+  ) => Effect.Effect<void>
   readonly runPersistentTurn?: (input: {
     sessionID: SessionID
     actorID: string
@@ -430,11 +439,14 @@ export const layer = Layer.effect(
     // Actor keys whose current settlement already produced a terminal
     // notification. A forced cancel retires such an actor without notifying
     // again; anything else still notifies on retirement.
-    // Actors whose most recent settlement already produced a delivered terminal
-    // envelope. Reset when a new turn is admitted, so a record from an earlier
-    // turn can never suppress a later settlement's notice; dropped on
-    // retirement, so the set is bounded by the live standing peers.
-    const notifiedTerminals = new Set<string>()
+    // The most recent settlement's terminal envelope, as an in-flight record:
+    // it is opened before the send and completed with whether the send wrote an
+    // envelope. A cancel that lands mid-send awaits the outcome instead of
+    // guessing, so it neither duplicates a delivered envelope nor swallows the
+    // only notice a dropped one could still get. Reset when a new turn is
+    // admitted and dropped on retirement, so the map is bounded by the live
+    // standing peers.
+    const notifiedTerminals = new Map<string, Deferred.Deferred<boolean>>()
     const lifecycleState = createActorLifecycle<MessageV2.WithParts, FrozenContext, NotificationTarget>()
     const retainForkContext = (
       key: string,
@@ -1461,6 +1473,7 @@ export const layer = Layer.effect(
                 // already sees the record and retires without publishing a
                 // second envelope; a send that wrote nothing clears it again.
                 yield* markTerminalNotified(input.sessionID, input.actorID)
+                let delivered = false
                 const reported = yield* notifyTerminal(
                   input.sessionID,
                   input.actorID,
@@ -1476,8 +1489,15 @@ export const layer = Layer.effect(
                       ? { error }
                       : {},
                   source,
+                ).pipe(
+                  Effect.tap((written) => Effect.sync(() => (delivered = written))),
+                  // On every exit, interrupt included, or a cancel awaiting the
+                  // outcome would wait forever.
+                  Effect.ensuring(
+                    Effect.suspend(() => settleTerminalNotified(input.sessionID, input.actorID, delivered)),
+                  ),
                 )
-                if (!reported) yield* clearTerminalNotified(input.sessionID, input.actorID)
+                void reported
               }
             }).pipe(Effect.ensuring(lifecycleState.settleTerminal(owner)))
           } else {
@@ -1544,6 +1564,7 @@ export const layer = Layer.effect(
                   ? ("cancelled" as const)
                   : ("failed" as const)
               yield* markTerminalNotified(sessionID, actorID)
+              let delivered = false
               const reported = yield* notifyTerminal(
                 sessionID,
                 actorID,
@@ -1558,8 +1579,11 @@ export const layer = Layer.effect(
                   : status === "failed"
                     ? { error: Cause.pretty(failureCause!), ...(text !== undefined ? { result: text } : {}) }
                     : {},
+              ).pipe(
+                Effect.tap((written) => Effect.sync(() => (delivered = written))),
+                Effect.ensuring(Effect.suspend(() => settleTerminalNotified(sessionID, actorID, delivered))),
               )
-              if (!reported) yield* clearTerminalNotified(sessionID, actorID)
+              void reported
             }),
           ),
         )
@@ -1769,7 +1793,9 @@ export const layer = Layer.effect(
                 accepted.value = true
                 // Only an admission that commits supersedes the previous
                 // settlement; a failed one leaves its record intact.
+                const pending = notifiedTerminals.get(key)
                 notifiedTerminals.delete(key)
+                if (pending) Deferred.doneUnsafe(pending, Exit.succeed(false))
               },
               shouldCommit: () =>
                 !input.signal?.aborted &&
@@ -2017,16 +2043,47 @@ export const layer = Layer.effect(
     ) {
       const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       if (actor?.lifecycle !== "persistent") return
-      yield* Effect.sync(() => notifiedTerminals.add(actorKey(sessionID, actorID)))
+      const pending = yield* Deferred.make<boolean>()
+      yield* Effect.sync(() => notifiedTerminals.set(actorKey(sessionID, actorID), pending))
     })
 
-    /** True once, then cleared: the pending duplicate has been suppressed. */
+    /**
+     * Complete the in-flight record with the send's outcome. A send that wrote
+     * nothing drops the record, so a later retirement reports the settlement.
+     * Must run on every exit of the notify, including an interrupt, or a cancel
+     * awaiting the outcome would wait forever.
+     */
+    const settleTerminalNotified = (sessionID: SessionID, actorID: string, delivered: boolean) =>
+      Effect.suspend(() => {
+        const key = actorKey(sessionID, actorID)
+        const pending = notifiedTerminals.get(key)
+        if (!pending) return Effect.void
+        if (!delivered) notifiedTerminals.delete(key)
+        return Deferred.succeed(pending, delivered).pipe(Effect.asVoid)
+      })
+
+    /**
+     * Whether this settlement's envelope was already delivered. Waits out a send
+     * still in flight rather than deciding on incomplete information, then
+     * clears the record either way.
+     */
     const consumeTerminalNotified = (sessionID: SessionID, actorID: string) =>
-      Effect.sync(() => notifiedTerminals.delete(actorKey(sessionID, actorID)))
+      Effect.suspend(() => {
+        const key = actorKey(sessionID, actorID)
+        const pending = notifiedTerminals.get(key)
+        if (!pending) return Effect.succeed(false)
+        return Deferred.await(pending).pipe(
+          Effect.tap(() => Effect.sync(() => notifiedTerminals.delete(key))),
+        )
+      })
 
     const clearTerminalNotified = (sessionID: SessionID, actorID: string) =>
-      Effect.sync(() => {
-        notifiedTerminals.delete(actorKey(sessionID, actorID))
+      Effect.suspend(() => {
+        const key = actorKey(sessionID, actorID)
+        const pending = notifiedTerminals.get(key)
+        notifiedTerminals.delete(key)
+        // Release anything already waiting on this record.
+        return pending ? Deferred.succeed(pending, false).pipe(Effect.asVoid) : Effect.void
       })
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
@@ -2180,7 +2237,7 @@ export const layer = Layer.effect(
         if (!instance.disposing) yield* captureNotificationTarget(instance)
         yield* scanRememberedTargets
       })
-    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, resetTerminalNotified: clearTerminalNotified, runPersistentTurn, scanStalledOnce })
+    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, resetTerminalNotified: clearTerminalNotified, settleTerminalNotified, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it

@@ -704,25 +704,29 @@ where this delta does not change their implementation.
   postStop case awaits with a 5s-to-30s or unbounded timeout and never pauses
   the hook. One change to publish ordering unskips both quarantined cases.
 - 2026-09-13 Codex review follow-up: four defects in the marker introduced above
-  are fixed. The record is written *before* the send and cleared when the send
-  writes nothing. Two earlier placements were wrong and are retired: after the
-  notifier returned, where a dropped envelope still counted; and inside
-  `Inbox.send` between the row insert and `InboxArrived`, where that method's
-  retirement re-check protects the receiver while the record is sender-side
-  state, so a force-cancel landing in between published its own envelope,
-  retired, and then had the key re-added for an already retired actor. Marking
-  first removes the window instead of narrowing it: a cancel at any point during
-  the send already sees the record. `Inbox.send` carries no hook, and
-  `src/actor/notification.ts` — otherwise upstream-identical — returns whether
-  an envelope was written, which is what the clear-on-failure needs.
-  That ordering settles three of the four together: a send that writes nothing
-  clears the record again, so retirement still reports a settlement the parent
-  never heard about (pinned by `retirement reports a settlement whose envelope
-  was never delivered`, mutation-checked); a cancel that interleaves with the
-  send already sees the record, so it retires without publishing a second
-  envelope and leaves no key behind; and `finishPersistentTurn` plus the
-  persistent-turn exit path record the same way, so an accepted `Actor.resume`
-  no longer leaves retirement to publish an extra envelope.
+  are fixed. The record is an *in-flight notification*, not a flag. It is opened
+  before the send and completed with whether the send wrote an envelope, and a
+  cancel that lands mid-send awaits that outcome instead of guessing. Three
+  earlier shapes were wrong and are retired: set after the notifier returned,
+  where a dropped envelope still counted; set inside `Inbox.send` between the
+  row insert and `InboxArrived`, where that method's retirement re-check
+  protects the receiver while the record is sender-side state; and set before
+  the send as a plain flag, where a cancel landing between the flag and a
+  *failed* send suppressed its own envelope and retired, leaving that
+  settlement permanently unreported. Awaiting the outcome removes the window in
+  both directions rather than moving it, and the completion runs on every exit
+  of the notify, interrupt included, or a cancel would wait forever.
+  `Inbox.send` carries no hook, and `src/actor/notification.ts` — otherwise
+  upstream-identical — returns whether an envelope was written, which is what
+  the completion needs.
+  That shape settles the delivery questions together: a send that wrote nothing
+  completes the record as undelivered and drops it, so retirement still reports
+  a settlement the parent never heard about (pinned by `retirement reports a
+  settlement whose envelope was never delivered`, mutation-checked); a cancel
+  during the send blocks on the record rather than publishing a second
+  envelope; and `finishPersistentTurn` plus the persistent-turn exit path open
+  and complete the same record, so an accepted `Actor.resume` no longer leaves
+  retirement to publish an extra envelope.
   Fourth, the marker set had no bound: `Actor.markTerminalNotified` records only
   `persistent` actors, since an already-settled ephemeral actor's cancel returns
   before the consuming branch, and every cancel branch clears the key through

@@ -5839,13 +5839,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           : Cause.hasInterruptsOnly(failureCause)
                             ? ("cancelled" as const)
                             : ("failed" as const)
-                        // Recorded before the send, so a forced cancel that
-                        // interleaves with it already sees the record and retires
-                        // without publishing a second envelope. A send that wrote
-                        // nothing clears it again, leaving retirement to report.
+                        // Opened before the send and completed with its outcome,
+                        // so a cancel that interleaves with the send awaits the
+                        // result instead of guessing: it neither duplicates a
+                        // delivered envelope nor swallows the only notice a
+                        // dropped one could still get.
                         const owner = boundActor ?? spawnRef.current
                         yield* owner?.markTerminalNotified?.(input.sessionID, agentID) ?? Effect.void
-                        const reported = yield* notifyTerminal({
+                        let delivered = false
+                        yield* notifyTerminal({
                           sessionID: input.sessionID,
                           actorID: agentID,
                           source: "continuation",
@@ -5865,8 +5867,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                                 ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
                               }
                             : {}),
-                        })
-                        if (!reported) yield* owner?.resetTerminalNotified?.(input.sessionID, agentID) ?? Effect.void
+                        }).pipe(
+                          Effect.tap((written) => Effect.sync(() => (delivered = written))),
+                          // On every exit, interrupt included, or a cancel
+                          // awaiting the outcome would wait forever.
+                          Effect.ensuring(
+                            Effect.suspend(
+                              () =>
+                                owner?.settleTerminalNotified?.(input.sessionID, agentID, delivered) ?? Effect.void,
+                            ),
+                          ),
+                        )
                       }),
                     ),
                   )
