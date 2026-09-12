@@ -141,18 +141,47 @@ operations are unaffected.
 Source evidence and the final result row are recorded in the latest
 [compat history entry](dev-compat-registry-history.md).
 
+## 2026-09-12 actor execution model, models catalog, media reading
+
+All four capabilities in the [98702641 shared inventory](upstream-sync-2026-09-12-98702641.md)
+are inherited, including **FC-001's retirement of its continuation
+wake-generation routing**: a woken non-main turn now runs on upstream's
+`ActorExecution` claim and settles through `runTurn`, and the eight fork-owned
+tests that encoded behavior the execution map does not model were removed with
+it on `main`. Compat adds no override for that path and no owner retires here.
+
+One conflict, in `src/inbox/inbox.ts`: main's cancelled-before-commit drain
+guard is adopted while compat keeps its `createMessage` wording for the
+non-transactional crash window that comment documents — compat seeds the
+synthetic user message through `createMessage`, main through `updateMessage`.
+
+DC-ACTOR-001 keeps its full-context actor extension: `ForkContext` still
+requires compat's `turnContext`, so the upstream `keeps forkContexts isolated`
+fixture ported on `main` carries that field here. DC-CONTEXT-001 is unchanged —
+the media work bounds encoded size at production time above its model-visible
+caps, and the actor delivery persists `actorResult` on a message the caps
+already govern. DC-MODEL-001, DC-TUI-001, DC-NET-001/002 and DC-PLATFORM-001
+have no incoming owned implementation change.
+
+The generated SDK and `packages/sdk/openapi.json` were regenerated from compat
+sources; compat's own operations are preserved and the new `actorResult`
+projection is published.
+
+Source evidence and the four final result rows are recorded in the latest
+[compat history entry](dev-compat-registry-history.md).
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
-- Last reviewed: 2026-09-11
-- Reviewed upstream: `f11e35ede439df5555ca1f0309ffea8e9b49f06e`
-- Accepted `main` tip: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`
-- Inherited main behavior: `635618207270af55435aee88ce27003fc1809b44`
-- Compat behavior: `84b55973efe3e2571185e2769b85faea852a1e97`
-- Prior compat tip: `2a2632d4455920701f4ce50074b7c4da91244902`
-- Main source inheritance merge: `84b55973efe3e2571185e2769b85faea852a1e97`
-- Shared audit commit: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`
+- Last reviewed: 2026-09-12
+- Reviewed upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
+- Accepted `main` tip: `2e40da87ad03d51944b3a06360ff5a573ffb1361`
+- Inherited main behavior: `377a2ad981010c10cbb1ad52143960c2ecf0294e`
+- Compat behavior: `4c352ec92cb09ac5ac817ed3f3099720b5e62211`
+- Prior compat tip: `2fb8dc206ff9b7c8c43c2699e5e2a2d81d3cbe90`
+- Main source inheritance merge: `4c352ec92cb09ac5ac817ed3f3099720b5e62211`
+- Shared audit commit: `2e40da87ad03d51944b3a06360ff5a573ffb1361`
 - Inherited bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
