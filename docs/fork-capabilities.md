@@ -746,7 +746,10 @@ where this delta does not change their implementation.
   release a cancel waiting on it before that envelope was committed and both
   would publish. The first completion wins and owns the map entry, so the
   guard that guarantees no notice is left pending is a no-op once the notifier
-  has settled.
+  has settled. A cancel waiting on a notice also re-checks identity after the
+  wait, not only before deleting: a queued continuation can replace the notice
+  while that wait is parked, and the replacement's settlement — not the
+  displaced one's — is what the retirement about to run must not duplicate.
   That shape settles the delivery questions together: a send that wrote nothing
   completes the record as undelivered and drops it, so retirement still reports
   a settlement the parent never heard about (pinned by `retirement reports a

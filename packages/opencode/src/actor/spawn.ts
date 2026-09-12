@@ -2121,17 +2121,22 @@ export const layer = Layer.effect(
      * clears the record either way.
      */
     const consumeTerminalNotified = (sessionID: SessionID, actorID: string) =>
-      Effect.suspend(() => {
+      Effect.gen(function* () {
         const key = actorKey(sessionID, actorID)
-        const notice = notifiedTerminals.get(key)
-        if (!notice) return Effect.succeed(false)
-        return Deferred.await(notice.done).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              if (notifiedTerminals.get(key) === notice) notifiedTerminals.delete(key)
-            }),
-          ),
-        )
+        for (;;) {
+          const notice = notifiedTerminals.get(key)
+          if (!notice) return false
+          const delivered = yield* Deferred.await(notice.done)
+          // A newer turn can replace the notice while this wait is parked. Its
+          // settlement, not the displaced one's, is what the retirement about to
+          // run must not duplicate — so follow the current token rather than
+          // answering with a result that no longer describes the actor. An entry
+          // that is gone rather than replaced was settled as undelivered, since
+          // only that case unlists it, and the next pass reports exactly that.
+          if (notifiedTerminals.get(key) !== notice) continue
+          notifiedTerminals.delete(key)
+          return delivered
+        }
       })
 
     const clearTerminalNotified = (sessionID: SessionID, actorID: string) =>
