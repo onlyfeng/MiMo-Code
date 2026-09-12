@@ -3592,3 +3592,26 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   That matrix ran on the equivalent merge before the shared registry commit was folded in; `packages/` is byte-identical in the published merge, which carries only the additional shared documentation.
 - Ambient `MIMOCODE_EXPERIMENTAL` and `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL` were removed for every run; the package preload (`@opentui/solid/preload`, `./test/preload.ts`) remains the harness baseline.
 - Repository lint passed with zero errors and 4558 warnings; `git diff --check` passed. Final remote-tip equality, exact-SHA CI and upstream -> main -> compat ancestry are separate publication checks.
+
+## 2026-09-11 — bounded history search and paged part details inheritance
+
+- Selected upstream: `7641dbbd3b8aa20ffd4fb74089f2dc65bf032201..f11e35ede439df5555ca1f0309ffea8e9b49f06e`.
+- Accepted main tip/shared audit: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`; inherited source/tests: `635618207270af55435aee88ce27003fc1809b44`; bundled guidance remains `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`.
+- Compat source/test behavior and direct inheritance merge: `84b55973efe3e2571185e2769b85faea852a1e97`; prior tip: `2a2632d4455920701f4ce50074b7c4da91244902`. Later registry commits do not advance these source references.
+
+### Capability results (1)
+
+| ID | Selected behavior | Main result | Compat result | Decisive evidence |
+| --- | --- | --- | --- | --- |
+| C03 | History search and `get` stop materializing inline base64: SQL projections leave unused media in the database, `get` returns paged `part_id` details, data-URL cleaning is hardened, FTS takes a neutral `[media <mime>]` marker, `around` keeps its anchor, and one migration clears the derived `history_fts` index | Adopted unchanged; the only diverged file took two copy lines | Inherited; sixteen of seventeen paths had no compat divergence and `src/session/checkpoint.ts` keeps compat's overlay beside the same two copy lines | `test/history/details.test.ts`, `test/history/media.test.ts`, `test/tool/history.test.ts` and `test/storage/` migration regressions within the compat matrix below |
+
+- All seven active DC entries were re-reviewed against the incoming diff; none has an owned implementation change. Shared FD/FC registries, their history and the new inventory are inherited byte-for-byte from accepted main.
+- DC-CONTEXT-001 consumes the changed checkpoint text. The elision marker changes length by a few characters inside an already-bounded field, so no model-visible cap, serialization path or request preflight moves; the bounded history work reduces rather than widens what can reach a request.
+- `bun ci` completed with an unchanged lockfile; repository `bun typecheck` passed 12/12. No API input changed, so no SDK/OpenAPI regeneration was required and compat's own operations are unaffected.
+- Affected matrix at `84b55973efe3e2571185e2769b85faea852a1e97`, run from `packages/opencode` with `bun test --timeout 120000` in three sequential processes, mirroring the isolation `.github/workflows/test.yml` applies to `session-actor-recovery.test.ts`:
+  - `test/tool/ test/mcp/ test/util/ test/provider/ test/flag/ test/skill/ test/history/ test/storage/` — 2344 passed, 9 skipped, 1 failed, 6900 assertions across 154 files in 313.55 s.
+  - `test/server/` (every file except `session-actor-recovery.test.ts`) `test/session/ test/actor/ test/inbox/ test/effect/` — 1818 passed, 23 skipped, 1 todo, 0 failed, 6277 assertions across 171 files in 786.59 s.
+  - `test/server/session-actor-recovery.test.ts` in its own process — 14 passed, 0 failed, 233 assertions in 26.93 s.
+- The single failure is the same upstream darwin-only case the shared inventory records, `test/history/details.test.ts > SQL preview bounds NUL-containing fields without losing get details`. It reproduces on upstream's unmodified `f11e35ed` tree on the same machine, upstream's own ubuntu-latest `test` run for that SHA is green, and accepted main `4fa2402f` passed all three fork workflows on ubuntu-latest (test run 34620471134), so it is a platform difference rather than a compat integration defect. No compat assertion was relaxed.
+- Ambient `MIMOCODE_EXPERIMENTAL` and `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL` were removed for every run; the package preload (`@opentui/solid/preload`, `./test/preload.ts`) remains the harness baseline.
+- Repository lint passed with zero errors and 4591 warnings; `git diff --check` passed. Final remote-tip equality, exact-SHA CI and upstream -> main -> compat ancestry are separate publication checks.

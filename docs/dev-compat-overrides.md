@@ -113,18 +113,46 @@ operations and gains the same two resume query parameters.
 Source evidence and the two final result rows are recorded in the latest
 [compat history entry](dev-compat-registry-history.md).
 
+## 2026-09-11 bounded history search and paged part details
+
+The single capability in the [f11e35ed shared inventory](upstream-sync-2026-09-11-f11e35ed.md)
+is inherited. The merge was clean on every path. Sixteen of the seventeen
+incoming paths have no compat divergence at all; `src/session/checkpoint.ts`
+keeps compat's own overlay and takes only the two copy lines redirecting
+verbatim recall from `around` alone to `around` then `get(part_id)`, which is
+factually correct here because compat inherits the same history tool. No
+compat-only override is added and no owner retires.
+
+DC-CONTEXT-001 is the nearest owner and keeps its contract: it consumes that
+checkpoint text, and the marker changes length by a few characters inside an
+already-bounded field, so no model-visible cap, serialization path or request
+preflight moves. The bounded history work stays below those caps — SQL
+projections leave unused media payloads in the database and `get` pages
+`part_id` details, which reduces rather than widens what can reach a request.
+DC-ACTOR-001, DC-MODEL-001, DC-TUI-001, DC-NET-001/002 and DC-PLATFORM-001 have
+no incoming owned implementation change. The new
+`20260908000000_history_media_rebuild` migration clears only the derived
+`history_fts` index; original parts and sessions are untouched and the startup
+backfill is resumable.
+
+No SDK/OpenAPI input changed, so no regeneration was required and compat's own
+operations are unaffected.
+
+Source evidence and the final result row are recorded in the latest
+[compat history entry](dev-compat-registry-history.md).
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-11
-- Reviewed upstream: `7641dbbd3b8aa20ffd4fb74089f2dc65bf032201`
-- Accepted `main` tip: `bcf2fba7c337a812071ccacc5184347c0bd5536e`
-- Inherited main behavior: `332d1961f2bc9d2b1b9e0e56f2143b09a80d2077`
-- Compat behavior: `43e8d80270345bdadda596eab7e9b1871ed30b92`
-- Prior compat tip: `c1ee9ecbeda90224d4a7abbcfc877b9016b1117e`
-- Main source inheritance merge: `43e8d80270345bdadda596eab7e9b1871ed30b92`
-- Shared audit commit: `bcf2fba7c337a812071ccacc5184347c0bd5536e`
+- Reviewed upstream: `f11e35ede439df5555ca1f0309ffea8e9b49f06e`
+- Accepted `main` tip: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`
+- Inherited main behavior: `635618207270af55435aee88ce27003fc1809b44`
+- Compat behavior: `84b55973efe3e2571185e2769b85faea852a1e97`
+- Prior compat tip: `2a2632d4455920701f4ce50074b7c4da91244902`
+- Main source inheritance merge: `84b55973efe3e2571185e2769b85faea852a1e97`
+- Shared audit commit: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`
 - Inherited bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
