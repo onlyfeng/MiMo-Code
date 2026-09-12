@@ -119,13 +119,6 @@ export interface SendInput {
   senderActorID?: string
   content: string
   type?: string
-  /**
-   * Run once the row is committed and past the retirement race, before the row
-   * becomes observable through `InboxArrived` or the receiver wake. A sender
-   * that must not report the same thing twice records it here: any later point
-   * is already racing a subscriber that reacts to the envelope.
-   */
-  onDelivered?: Effect.Effect<void>
 }
 
 export interface SendResult {
@@ -291,9 +284,6 @@ export const layer: Layer.Layer<
           }),
         )
       }
-      // Before publish/wake: a subscriber may cancel the receiver the moment it
-      // sees the envelope, and it must observe this record as already written.
-      if (input.onDelivered) yield* input.onDelivered
       yield* bus.publish(InboxArrived, {
         receiverSessionID: input.receiverSessionID,
         receiverActorID: input.receiverActorID,

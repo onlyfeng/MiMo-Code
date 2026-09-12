@@ -1308,25 +1308,25 @@ export const layer = Layer.effect(
       status: TerminalStatus,
       extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string } = {},
       source?: RunDisposalState,
-      onDelivered?: Effect.Effect<void>,
     ) =>
       Effect.gen(function* () {
         const origin = source ?? (yield* RunDisposal)
-        if (isRunDisposing(origin)) return
-        if (!actor) return
-        if (!actor.background) return
-        if (actor.mode !== "peer" && actor.mode !== "subagent") return
-        if (SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)) return
+        if (isRunDisposing(origin)) return false
+        if (!actor) return false
+        if (!actor.background) return false
+        if (actor.mode !== "peer" && actor.mode !== "subagent") return false
+        if (SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)) return false
         // Resolve the parent session: a peer runs in its own child session (notify
         // its parentID); a subagent shares the parent's session.
         const parentSessionID = actor.mode === "peer" ? (yield* session.get(sessionID)).parentID : sessionID
-        if (!parentSessionID || isRunDisposing(origin)) return
+        if (!parentSessionID || isRunDisposing(origin)) return false
         const notificationTarget = yield* resolveNotificationTarget(actorKey(sessionID, actorID), parentSessionID)
-        if (!notificationTarget) return
-        yield* withNotificationTarget(
+        if (!notificationTarget) return false
+        // `withNotificationTarget` yields undefined when it declines to run, so
+        // this distinguishes a written envelope from a skipped one.
+        const sent = yield* withNotificationTarget(
           notificationTarget,
           inbox.send({
-            ...(onDelivered ? { onDelivered } : {}),
             receiverSessionID: parentSessionID,
             receiverActorID: actor.parentActorID ?? "main",
             senderSessionID: sessionID,
@@ -1349,7 +1349,12 @@ export const layer = Layer.effect(
           }),
           origin,
         ).pipe(Effect.ignoreCause)
-      }).pipe(Effect.catchCause((cause) => Effect.logError(`actor terminal notification failed: ${Cause.pretty(cause)}`)))
+        return sent !== undefined
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError(`actor terminal notification failed: ${Cause.pretty(cause)}`).pipe(Effect.as(false)),
+        ),
+      )
 
     const finishPersistentTurn = (
       input: { sessionID: SessionID; actorID: string; notifyParentOnComplete: boolean },
@@ -1427,7 +1432,11 @@ export const layer = Layer.effect(
               if (input.notifyParentOnComplete) {
                 const finalText = assistant && value ? assistantFinalText(assistant, value.parts) : undefined
                 const parsed = parseReturnHeader(finalText)
-                yield* notifyTerminal(
+                // Recorded before the send so a cancel that interleaves with it
+                // already sees the record and retires without publishing a
+                // second envelope; a send that wrote nothing clears it again.
+                yield* markTerminalNotified(input.sessionID, input.actorID)
+                const reported = yield* notifyTerminal(
                   input.sessionID,
                   input.actorID,
                   actor,
@@ -1442,8 +1451,8 @@ export const layer = Layer.effect(
                       ? { error }
                       : {},
                   source,
-                  markTerminalNotified(input.sessionID, input.actorID),
                 )
+                if (!reported) yield* clearTerminalNotified(input.sessionID, input.actorID)
               }
             }).pipe(Effect.ensuring(lifecycleState.settleTerminal(owner)))
           } else {
@@ -1509,7 +1518,8 @@ export const layer = Layer.effect(
                 : Cause.hasInterruptsOnly(failureCause)
                   ? ("cancelled" as const)
                   : ("failed" as const)
-              yield* notifyTerminal(
+              yield* markTerminalNotified(sessionID, actorID)
+              const reported = yield* notifyTerminal(
                 sessionID,
                 actorID,
                 actor,
@@ -1523,9 +1533,8 @@ export const layer = Layer.effect(
                   : status === "failed"
                     ? { error: Cause.pretty(failureCause!), ...(text !== undefined ? { result: text } : {}) }
                     : {},
-                undefined,
-                markTerminalNotified(sessionID, actorID),
               )
+              if (!reported) yield* clearTerminalNotified(sessionID, actorID)
             }),
           ),
         )
@@ -1706,8 +1715,6 @@ export const layer = Layer.effect(
           const ownership = yield* lifecycleState.acquireWake(key)
           if (ownership._tag === "blocked") return yield* Effect.fail(recoveryUnavailable())
           if (ownership._tag !== "owner") return yield* Effect.fail(new Session.BusyError(input.sessionID))
-          // A new turn supersedes whatever the previous one reported.
-          yield* clearTerminalNotified(input.sessionID, input.actorID)
           const owner = ownership.owner
           const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>()
           const accepted = { value: false, withdrawn: false }
@@ -1735,6 +1742,9 @@ export const layer = Layer.effect(
               // task binding and old assistant settlement have actually committed.
               onCommitted: () => {
                 accepted.value = true
+                // Only an admission that commits supersedes the previous
+                // settlement; a failed one leaves its record intact.
+                notifiedTerminals.delete(key)
               },
               shouldCommit: () =>
                 !input.signal?.aborted &&

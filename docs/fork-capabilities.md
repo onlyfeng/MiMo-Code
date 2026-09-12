@@ -704,22 +704,25 @@ where this delta does not change their implementation.
   postStop case awaits with a 5s-to-30s or unbounded timeout and never pauses
   the hook. One change to publish ordering unskips both quarantined cases.
 - 2026-09-13 Codex review follow-up: four defects in the marker introduced above
-  are fixed. The record is no longer written after the notifier returns; it is
-  written inside `Inbox.send`, once the row is committed and past the retirement
-  race but *before* `InboxArrived` and the receiver wake make it observable.
-  `SendInput.onDelivered` carries it and `TerminalNotification.onDelivered`
-  forwards it, which is the fork's first deviation in the otherwise
-  upstream-identical `src/actor/notification.ts` — ten additive lines, one
-  optional field.
-  That ordering settles three of the four together: a dropped send never runs
-  the hook, so retirement still reports the settlement the parent never heard
-  about (pinned by `retirement reports a settlement whose envelope was never
-  delivered`, mutation-checked); and a subscriber that force-cancels the moment
-  it sees the envelope now observes the record as already written, so it retires
-  without publishing a second one and cannot leave a key behind after
-  retirement. `finishPersistentTurn` and the persistent-turn exit path record
-  their deliveries the same way, so an accepted `Actor.resume` no longer leaves
-  retirement to publish an extra envelope.
+  are fixed. The record is written *before* the send and cleared when the send
+  writes nothing. Two earlier placements were wrong and are retired: after the
+  notifier returned, where a dropped envelope still counted; and inside
+  `Inbox.send` between the row insert and `InboxArrived`, where that method's
+  retirement re-check protects the receiver while the record is sender-side
+  state, so a force-cancel landing in between published its own envelope,
+  retired, and then had the key re-added for an already retired actor. Marking
+  first removes the window instead of narrowing it: a cancel at any point during
+  the send already sees the record. `Inbox.send` carries no hook, and
+  `src/actor/notification.ts` — otherwise upstream-identical — returns whether
+  an envelope was written, which is what the clear-on-failure needs.
+  That ordering settles three of the four together: a send that writes nothing
+  clears the record again, so retirement still reports a settlement the parent
+  never heard about (pinned by `retirement reports a settlement whose envelope
+  was never delivered`, mutation-checked); a cancel that interleaves with the
+  send already sees the record, so it retires without publishing a second
+  envelope and leaves no key behind; and `finishPersistentTurn` plus the
+  persistent-turn exit path record the same way, so an accepted `Actor.resume`
+  no longer leaves retirement to publish an extra envelope.
   Fourth, the marker set had no bound: `Actor.markTerminalNotified` records only
   `persistent` actors, since an already-settled ephemeral actor's cancel returns
   before the consuming branch, and every cancel branch clears the key through
@@ -728,8 +731,9 @@ where this delta does not change their implementation.
   to the turn that produced it, so a later turn whose envelope dropped inherited
   the previous turn's record and retirement suppressed the only notice that
   settlement could still get. `Actor.resetTerminalNotified` now drops it wherever
-  a new turn is admitted — after `acquireWake` in `resume` and
-  `runPersistentTurn`, and in the continuation past every no-turn exit,
+  a new turn is admitted — in `resume`'s `onCommitted`, since an admission that
+  fails on an invalid assistant message, a task-binding conflict or an abort
+  supersedes nothing; after `acquireWake` in `runPersistentTurn`; and in the continuation past every no-turn exit,
   immediately before the turn runs. The continuation's reset sat right after
   `ActorExecution.attach` at first, which is wrong for a continuation that
   acquires the execution, finds its `inboxID` already drained by an earlier one,
