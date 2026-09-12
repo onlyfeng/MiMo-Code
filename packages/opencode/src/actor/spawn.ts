@@ -335,6 +335,12 @@ export interface Interface {
   }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>
   readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
   readonly getForkContext: (sessionID: SessionID, actorID: string) => Effect.Effect<ForkContext | undefined>
+  /**
+   * Record that a terminal notification was already published for the actor's
+   * current settlement, so a later forced cancel retires it without sending a
+   * duplicate envelope. Set by the continuation path, consumed by cancel.
+   */
+  readonly markTerminalNotified?: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
   readonly runPersistentTurn?: (input: {
     sessionID: SessionID
     actorID: string
@@ -413,6 +419,10 @@ export const layer = Layer.effect(
       disposal: RunDisposalState
       taskSessionID: SessionID
     }
+    // Actor keys whose current settlement already produced a terminal
+    // notification. A forced cancel retires such an actor without notifying
+    // again; anything else still notifies on retirement.
+    const notifiedTerminals = new Set<string>()
     const lifecycleState = createActorLifecycle<MessageV2.WithParts, FrozenContext, NotificationTarget>()
     const retainForkContext = (
       key: string,
@@ -564,7 +574,7 @@ export const layer = Layer.effect(
                     })
                     .pipe(
                       (effect) => withNotificationTarget(notificationTarget, effect, source),
-                      Effect.ignoreCause({ log: "Warn", message: "actor inbox notification failed" }),
+                      Effect.ignoreCause({ log: "Warn", message: "actor terminal notification failed" }),
                     ),
                   bus
                     .publish(TuiEvent.ToastShow, {
@@ -1926,11 +1936,21 @@ export const layer = Layer.effect(
             })
             .pipe(inReceiver, Effect.ignoreCause)
           yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-          yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
+          if (!(yield* consumeTerminalNotified(sessionID, actorID)))
+            yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
           yield* retire
         }).pipe(Effect.ensuring(settleClaim), Effect.ensuring(releaseEpisode)),
       )
     })
+
+    const markTerminalNotified = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => {
+        notifiedTerminals.add(actorKey(sessionID, actorID))
+      })
+
+    /** True once, then cleared: the pending duplicate has been suppressed. */
+    const consumeTerminalNotified = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => notifiedTerminals.delete(actorKey(sessionID, actorID)))
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
       return (yield* lifecycleState.getForkContext(actorKey(sessionID, actorID)))?.context
@@ -2083,7 +2103,7 @@ export const layer = Layer.effect(
         if (!instance.disposing) yield* captureNotificationTarget(instance)
         yield* scanRememberedTargets
       })
-    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, runPersistentTurn, scanStalledOnce })
+    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it

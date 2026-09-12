@@ -683,6 +683,17 @@ where this delta does not change their implementation.
   `packages/opencode/src/tool/question.ts`;
   `test/question/lifecycle.test.ts` and real
   `test/cli/tui/question-lifecycle.test.tsx` cover these consumers.
+- 2026-09-12 follow-up: three of the five quarantined cases are now fixed and
+  unskipped — the undeliverable-notification log wording, and both peer
+  continuation envelope counts, which were a duplicate terminal notification
+  emitted when a forced cancel retired an already-notified settlement. FC-001
+  gains `Actor.markTerminalNotified`: the continuation records that it published
+  a terminal envelope and `cancel` consumes that marker instead of sending a
+  second one, so retiring an actor that was never notified still notifies.
+  Two cases stay quarantined because they are mutually exclusive with tested
+  fork behaviour rather than unimplemented: holding one execution claim across
+  the whole spawn deadlocks a nested ActorTool spawn, and publishing the outcome
+  after postStop contradicts the fork's early-publish delivery contract.
 - 2026-09-12 quarantine: four upstream-new actor cases are skipped in place with
   an inline rationale — `inbox waits for the entire spawn execution before
   starting a continuation`, `[TP-R14-12] undeliverable terminal notification is

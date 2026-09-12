@@ -5854,6 +5854,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                               }
                             : {}),
                         })
+                        // A forced cancel that retires this actor afterwards must
+                        // not publish a second envelope for the same settlement.
+                        const owner = boundActor ?? spawnRef.current
+                        yield* owner?.markTerminalNotified?.(input.sessionID, agentID) ?? Effect.void
                       }),
                     ),
                   )

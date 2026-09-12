@@ -234,9 +234,12 @@ test("failed completion-gate reentry preserves the result without reporting task
 }, 30000)
 
 // Desktop tool-step-schema [TP-R14-08] [TP-R14-11].
-// QUARANTINED (fork): upstream behaviour not yet reproduced on the fork's
-// actor pipeline. Tracked for a dedicated fork PR; see FC-008 and the
-// 2026-09-12 synchronization record. No upstream PR is opened for this.
+// QUARANTINED (fork): upstream holds one ActorExecution claim across the whole
+// spawn, postStop included, so a woken continuation queues behind it. Doing that
+// here deadlocks `nested primary ActorTool hands background ownership to the real
+// parent`: the outer spawn holds the claim while waiting on a nested actor whose
+// own continuation needs it. Satisfying this case requires an ordering primitive
+// that a nested spawn cannot block on, which is a separate design change.
 test.skip("inbox waits for the entire spawn execution before starting a continuation", async () => {
   const server = startScriptedLLMServer([
     { lines: textStopResponse("SPAWN-RESULT") },

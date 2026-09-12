@@ -617,12 +617,13 @@ describe("actor.postStop ReAct loop", () => {
     }
   })
 
-  // QUARANTINED (fork): upstream runs the postStop ReAct loop before publishing
-  // the outcome, so a postStop warning reaches it. This fork publishes the
-  // outcome first and runs postStop as housekeeping afterwards - a behaviour
-  // its own "delivered no-op cancel preserves forkContext while postStop is
-  // still running" case asserts. Reconciling the two orderings is tracked for a
-  // dedicated follow-up fork PR; see FC-008 and the 2026-09-12 record.
+  // QUARANTINED (fork): a postStop warning can only reach the outcome if the
+  // outcome is published after postStop, which is what upstream does. This fork
+  // publishes it first: "delivered no-op cancel preserves forkContext while
+  // postStop is still running" awaits result.outcome within one second and only
+  // then waits for the postStop pause, so the early publish is load-bearing
+  // here. The two orderings are mutually exclusive; changing ours also changes
+  // how long a blocking `actor run` waits, so it needs its own decision.
   test.skip("[TP-R14-07] postStop LLM failure preserves the successful result with a warning", async () => {
     const server = startScriptedLLMServer([
       { lines: textStopResponse("delivered") },     // delivery turn
