@@ -773,6 +773,9 @@ export const layer = Layer.effect(
           Effect.matchCauseEffect({
             onSuccess: ({ finalText, structured }) =>
               Effect.gen(function* () {
+                // Set when a completion-gate re-entry turn failed; the gate then
+                // cannot vouch for a clean finish.
+                let gateFailed = false
                 // === COMPLETION GATE (B) + structured parse (A) ===
                 // Delegates the list/decide step to TaskGate.decide.
                 // We retain the runTurn re-entry + delivered-text update here
@@ -801,6 +804,7 @@ export const layer = Layer.effect(
                         Effect.gen(function* () {
                           log.error("actor.gate runTurn failed", { actorID: input.actorID })
                           warnings.push("completion gate: re-entry turn failed")
+                          gateFailed = true
                           return {
                             finalText: undefined as string | undefined,
                             structured: undefined as unknown,
@@ -819,6 +823,9 @@ export const layer = Layer.effect(
                 }
 
                 // Reconcile: DB truth wins over the model's self-reported header.
+                // A gate that could not complete cannot confirm a clean finish, so
+                // the turn may not stand as "success". It never overrides a more
+                // severe status the child reported itself.
                 const remaining = input.gateEligible
                   ? yield* taskRegistry
                       .list({ session_id: input.parentSessionID, owner: input.actorID, include_terminal: false })
@@ -828,7 +835,13 @@ export const layer = Layer.effect(
                 const downgrade: ReturnStatus | undefined =
                   stillActionable.length > 0 ? "partial" : remaining.length > 0 ? "blocked" : undefined
                 const parsed = parseReturnHeader(deliveredText)
-                const reportedStatus = downgrade ?? parsed.status
+                const severity = { failed: 3, blocked: 2, partial: 1, success: 0 } as const
+                const rank = (status: ReturnStatus | undefined) => (status ? severity[status] : -1)
+                const gateFloor: ReturnStatus | undefined = gateFailed ? "partial" : undefined
+                const reportedStatus = [downgrade ?? parsed.status, gateFloor].reduce<ReturnStatus | undefined>(
+                  (worst, candidate) => (rank(candidate) > rank(worst) ? candidate : worst),
+                  undefined,
+                )
                 const incompleteTasks = remaining.map((t) => t.id)
                 const reconciledText =
                   downgrade && incompleteTasks.length > 0
@@ -1293,7 +1306,7 @@ export const layer = Layer.effect(
             }),
           }),
           origin,
-        ).pipe(Effect.ignoreCause)
+        )
         yield* withNotificationTarget(
           notificationTarget,
           bus.publish(TuiEvent.ToastShow, {
@@ -1302,7 +1315,7 @@ export const layer = Layer.effect(
           }),
           origin,
         ).pipe(Effect.ignoreCause)
-      }).pipe(Effect.catchCause((cause) => Effect.logError(`terminal notify failed: ${Cause.pretty(cause)}`)))
+      }).pipe(Effect.catchCause((cause) => Effect.logError(`actor terminal notification failed: ${Cause.pretty(cause)}`)))
 
     const finishPersistentTurn = (
       input: { sessionID: SessionID; actorID: string; notifyParentOnComplete: boolean },
