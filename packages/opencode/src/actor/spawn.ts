@@ -141,6 +141,14 @@ const withNotificationTarget = <A, E, R>(
         ),
   )
 
+/**
+ * One turn's pending terminal notification. Opened when the turn is admitted —
+ * before its completion is observable to a cancel — and completed with whether
+ * an envelope was actually written. Identity matters: a later turn that opens
+ * its own notice must not settle or strand this one.
+ */
+export type TerminalNotice = { readonly done: Deferred.Deferred<boolean> }
+
 export type AgentOutcome =
   | {
       status: "success"
@@ -341,7 +349,10 @@ export interface Interface {
    * current settlement, so a later forced cancel retires it without sending a
    * duplicate envelope. Set by the continuation path, consumed by cancel.
    */
-  readonly markTerminalNotified?: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
+  readonly markTerminalNotified?: (
+    sessionID: SessionID,
+    actorID: string,
+  ) => Effect.Effect<TerminalNotice | undefined>
   /**
    * Drop any record left by a previous turn. A new turn's settlement is the one
    * a later retirement must not duplicate, so the record cannot outlive the turn
@@ -355,6 +366,7 @@ export interface Interface {
   readonly settleTerminalNotified?: (
     sessionID: SessionID,
     actorID: string,
+    notice: TerminalNotice | undefined,
     delivered: boolean,
   ) => Effect.Effect<void>
   readonly runPersistentTurn?: (input: {
@@ -446,7 +458,7 @@ export const layer = Layer.effect(
     // only notice a dropped one could still get. Reset when a new turn is
     // admitted and dropped on retirement, so the map is bounded by the live
     // standing peers.
-    const notifiedTerminals = new Map<string, Deferred.Deferred<boolean>>()
+    const notifiedTerminals = new Map<string, TerminalNotice>()
     const lifecycleState = createActorLifecycle<MessageV2.WithParts, FrozenContext, NotificationTarget>()
     const retainForkContext = (
       key: string,
@@ -1478,7 +1490,7 @@ export const layer = Layer.effect(
                 // Recorded before the send so a cancel that interleaves with it
                 // already sees the record and retires without publishing a
                 // second envelope; a send that wrote nothing clears it again.
-                yield* markTerminalNotified(input.sessionID, input.actorID)
+                const notice = yield* markTerminalNotified(input.sessionID, input.actorID)
                 let delivered = false
                 const reported = yield* notifyTerminal(
                   input.sessionID,
@@ -1500,7 +1512,9 @@ export const layer = Layer.effect(
                   // On every exit, interrupt included, or a cancel awaiting the
                   // outcome would wait forever.
                   Effect.ensuring(
-                    Effect.suspend(() => settleTerminalNotified(input.sessionID, input.actorID, delivered)),
+                    Effect.suspend(() =>
+                      settleTerminalNotified(input.sessionID, input.actorID, notice, delivered),
+                    ),
                   ),
                 )
                 void reported
@@ -1569,7 +1583,7 @@ export const layer = Layer.effect(
                 : Cause.hasInterruptsOnly(failureCause)
                   ? ("cancelled" as const)
                   : ("failed" as const)
-              yield* markTerminalNotified(sessionID, actorID)
+              const notice = yield* markTerminalNotified(sessionID, actorID)
               let delivered = false
               const reported = yield* notifyTerminal(
                 sessionID,
@@ -1587,7 +1601,9 @@ export const layer = Layer.effect(
                     : {},
               ).pipe(
                 Effect.tap((written) => Effect.sync(() => (delivered = written))),
-                Effect.ensuring(Effect.suspend(() => settleTerminalNotified(sessionID, actorID, delivered))),
+                Effect.ensuring(
+                  Effect.suspend(() => settleTerminalNotified(sessionID, actorID, notice, delivered)),
+                ),
               )
               void reported
             }),
@@ -1799,9 +1815,9 @@ export const layer = Layer.effect(
                 accepted.value = true
                 // Only an admission that commits supersedes the previous
                 // settlement; a failed one leaves its record intact.
-                const pending = notifiedTerminals.get(key)
+                const displaced = notifiedTerminals.get(key)
                 notifiedTerminals.delete(key)
-                if (pending) Deferred.doneUnsafe(pending, Exit.succeed(false))
+                if (displaced) Deferred.doneUnsafe(displaced.done, Exit.succeed(false))
               },
               shouldCommit: () =>
                 !input.signal?.aborted &&
@@ -2048,9 +2064,14 @@ export const layer = Layer.effect(
       actorID: string,
     ) {
       const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-      if (actor?.lifecycle !== "persistent") return
-      const pending = yield* Deferred.make<boolean>()
-      yield* Effect.sync(() => notifiedTerminals.set(actorKey(sessionID, actorID), pending))
+      if (actor?.lifecycle !== "persistent") return undefined
+      const notice: TerminalNotice = { done: yield* Deferred.make<boolean>() }
+      const key = actorKey(sessionID, actorID)
+      const displaced = notifiedTerminals.get(key)
+      yield* Effect.sync(() => notifiedTerminals.set(key, notice))
+      // Never strand a cancel already waiting on the notice this one replaces.
+      if (displaced) yield* Deferred.succeed(displaced.done, false).pipe(Effect.asVoid)
+      return notice
     })
 
     /**
@@ -2059,13 +2080,19 @@ export const layer = Layer.effect(
      * Must run on every exit of the notify, including an interrupt, or a cancel
      * awaiting the outcome would wait forever.
      */
-    const settleTerminalNotified = (sessionID: SessionID, actorID: string, delivered: boolean) =>
+    const settleTerminalNotified = (
+      sessionID: SessionID,
+      actorID: string,
+      notice: TerminalNotice | undefined,
+      delivered: boolean,
+    ) =>
       Effect.suspend(() => {
+        if (!notice) return Effect.void
         const key = actorKey(sessionID, actorID)
-        const pending = notifiedTerminals.get(key)
-        if (!pending) return Effect.void
-        if (!delivered) notifiedTerminals.delete(key)
-        return Deferred.succeed(pending, delivered).pipe(Effect.asVoid)
+        // Only retire the map entry this notice still owns: a newer turn may
+        // already have replaced it, and that one settles itself.
+        if (notifiedTerminals.get(key) === notice && !delivered) notifiedTerminals.delete(key)
+        return Deferred.succeed(notice.done, delivered).pipe(Effect.asVoid)
       })
 
     /**
@@ -2076,20 +2103,24 @@ export const layer = Layer.effect(
     const consumeTerminalNotified = (sessionID: SessionID, actorID: string) =>
       Effect.suspend(() => {
         const key = actorKey(sessionID, actorID)
-        const pending = notifiedTerminals.get(key)
-        if (!pending) return Effect.succeed(false)
-        return Deferred.await(pending).pipe(
-          Effect.tap(() => Effect.sync(() => notifiedTerminals.delete(key))),
+        const notice = notifiedTerminals.get(key)
+        if (!notice) return Effect.succeed(false)
+        return Deferred.await(notice.done).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              if (notifiedTerminals.get(key) === notice) notifiedTerminals.delete(key)
+            }),
+          ),
         )
       })
 
     const clearTerminalNotified = (sessionID: SessionID, actorID: string) =>
       Effect.suspend(() => {
         const key = actorKey(sessionID, actorID)
-        const pending = notifiedTerminals.get(key)
+        const notice = notifiedTerminals.get(key)
         notifiedTerminals.delete(key)
         // Release anything already waiting on this record.
-        return pending ? Deferred.succeed(pending, false).pipe(Effect.asVoid) : Effect.void
+        return notice ? Deferred.succeed(notice.done, false).pipe(Effect.asVoid) : Effect.void
       })
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {

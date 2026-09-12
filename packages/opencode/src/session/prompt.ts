@@ -5774,12 +5774,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     // does not notify on its own — only runTurn.onExit does.
                     if (!exec.cancelled) return yield* lastAssistant(input.sessionID, agentID)
                   }
-                  // Past every no-turn exit: a continuation that returns the
-                  // previous assistant without running reported nothing, so it
-                  // must leave the earlier turn's record intact. Only a turn
-                  // that actually runs supersedes it.
-                  yield* (boundActor ?? spawnRef.current)?.resetTerminalNotified?.(input.sessionID, agentID) ??
-                    Effect.void
+                  // Opened here, past every no-turn exit and before the turn's
+                  // completion is observable to a cancel. A continuation that
+                  // returns the previous assistant without running reported
+                  // nothing and must leave the earlier turn's record intact;
+                  // only a turn that actually runs supersedes it. Opening this
+                  // early also means a cancel arriving any time during the turn
+                  // finds an in-flight notice to wait on rather than none.
+                  const notice = yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
+                    input.sessionID,
+                    agentID,
+                  ) ?? Effect.succeed(undefined)
                   // Capture the last delivery even when the turn dies with a
                   // settled error, so settle can persist a partial result.
                   let lastFinal: MessageV2.WithParts | undefined
@@ -5845,7 +5850,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                         // delivered envelope nor swallows the only notice a
                         // dropped one could still get.
                         const owner = boundActor ?? spawnRef.current
-                        yield* owner?.markTerminalNotified?.(input.sessionID, agentID) ?? Effect.void
                         let delivered = false
                         yield* notifyTerminal({
                           sessionID: input.sessionID,
@@ -5874,7 +5878,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           Effect.ensuring(
                             Effect.suspend(
                               () =>
-                                owner?.settleTerminalNotified?.(input.sessionID, agentID, delivered) ?? Effect.void,
+                                owner?.settleTerminalNotified?.(input.sessionID, agentID, notice, delivered) ??
+                                Effect.void,
                             ),
                           ),
                         )

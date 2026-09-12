@@ -718,13 +718,16 @@ where this delta does not change their implementation.
   of the notify, interrupt included, or a cancel would wait forever.
   Delivery is reported by `Inbox.send` itself, through a `committed` flag it
   sets the moment the row lands and unsets if its retirement re-check removes
-  it again. Inferring it from how the call ended was wrong in both directions:
-  the row commits before that re-check, the event publication and the wake, so
-  a defect in any of those left a drainable envelope behind a failed call, while
-  a defect in the pre-insert receiver lookup ended the call the same way with no
-  row at all. `src/actor/notification.ts` — otherwise upstream-identical —
-  returns that flag, and the fork's own `notifyTerminal` reports it the same
-  way, so the persistent-turn paths are covered too.
+  it again — inferring it from how the call ended was wrong in both directions.
+  The notice is opened when the turn is *admitted*, not when it notifies, so a
+  cancel arriving any time during the turn finds an in-flight notice to wait on
+  rather than none: `state.cancelActor` waits only for the runner's inner fiber,
+  so a notice opened in the turn's exit handler could be published after a
+  cancel had already retired the actor. Each notice is its own token, settled by
+  identity: two settlements racing for one actor — an `Actor.resume` overlapping
+  an inbox continuation — replace rather than share the map entry, and the
+  displaced notice is completed at once so a cancel waiting on it cannot be
+  stranded.
   That shape settles the delivery questions together: a send that wrote nothing
   completes the record as undelivered and drops it, so retirement still reports
   a settlement the parent never heard about (pinned by `retirement reports a
