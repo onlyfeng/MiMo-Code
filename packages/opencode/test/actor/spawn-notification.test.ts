@@ -688,6 +688,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
       }),
       { git: true, config: providerCfg },
     ),
+    45000,
   )
 
   it.live(

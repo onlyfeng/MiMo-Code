@@ -3417,6 +3417,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           sessionID: input.sessionID,
           agentID: input.agentID ?? "main",
           titleLocale: input.titleLocale,
+          deferInbox: input.source === "hook" && input.agentID !== undefined && input.agentID !== "main",
         })
         if (Exit.isFailure(attempt.exit)) {
           if (Cause.hasInterruptsOnly(attempt.exit.cause) || attempt.started || retriedFailedHandoff)
@@ -3615,6 +3616,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       recoveryParentID?: MessageID,
       resumeFrom?: MessageID,
       modelOverride?: { providerID: string; modelID: string },
+      deferInbox?: boolean,
     ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(function* (
       sessionID: SessionID,
       agentID?: string,
@@ -3623,6 +3625,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       recoveryParentID?: MessageID,
       resumeFrom?: MessageID,
       modelOverride?: { providerID: string; modelID: string },
+      deferInbox?: boolean,
     ) {
       const ctx = yield* InstanceState.context
       const slog = elog.with({ sessionID })
@@ -4275,7 +4278,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // for non-main actors per F47).
           if (!agentID || agentID === "main") yield* status.set(sessionID, { type: "busy" })
           // Every recovery owns its original user, including main without an Actor model identity.
-          if (!recovery) yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
+          if (!recovery && !deferInbox) yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
           yield* slog.info("loop", { step })
 
           // F37: filter by agentID so subagent slices stay isolated from the
@@ -5695,7 +5698,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       let started = false
       const work = Effect.sync(() => {
         started = true
-      }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale)))
+      }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale, undefined, undefined, undefined, undefined, input.deferInbox)))
       const actor = boundActor ?? spawnRef.current
       const execution =
         input.notifyParentOnComplete === true && agentID !== "main" && actor?.runPersistentTurn
@@ -6477,6 +6480,9 @@ export const LoopInput = z.object({
   // double-notifying the spawn turn that forkWork already covers.
   notifyParentOnComplete: z.boolean().optional(),
   inboxID: z.string().optional(),
+  // Hook-sourced non-main turns let the wake path own the drain, so the shared
+  // loop must not consume inbox rows for them.
+  deferInbox: z.boolean().optional(),
 })
 
 export const ShellInput = z.object({

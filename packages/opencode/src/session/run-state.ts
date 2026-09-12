@@ -59,6 +59,13 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 
 const runnerKey = (sessionID: SessionID, agentID: string) => `${sessionID}:${agentID}`
 
+// A child executor must observe cancellation, not the stale assistant its caller
+// happens to pass. Upstream applies this in its runner factory, which takes
+// onInterrupt; this fork threads onInterrupt per start, so the same coercion
+// happens at the entry points instead.
+const interruptFor = (agentID: string, onInterrupt: Effect.Effect<MessageV2.WithParts>) =>
+  agentID === "main" ? onInterrupt : Effect.interrupt
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -183,7 +190,7 @@ export const layer = Layer.effect(
     ) {
       const current = yield* runner(sessionID, agentID)
       yield* current.entry.runner
-        .start(work, onInterrupt)
+        .start(work, interruptFor(agentID, onInterrupt))
         .pipe(
           Effect.provideService(RunDisposal, current.data),
           Effect.ensuring(release(current.entry)),
@@ -245,7 +252,7 @@ export const layer = Layer.effect(
     ) {
       const current = yield* runner(sessionID, agentID)
       return yield* current.entry.runner
-        .ensureRunning(work, onInterrupt)
+        .ensureRunning(work, interruptFor(agentID, onInterrupt))
         .pipe(
           Effect.provideService(RunDisposal, current.data),
           Effect.ensuring(release(current.entry)),
@@ -274,7 +281,7 @@ export const layer = Layer.effect(
     ) {
       const current = yield* runner(sessionID, agentID)
       const completion = yield* current.entry.runner
-        .startRunning(work, onInterrupt)
+        .startRunning(work, interruptFor(agentID, onInterrupt))
         .pipe(
           Effect.provideService(RunDisposal, current.data),
           Effect.ensuring(release(current.entry)),

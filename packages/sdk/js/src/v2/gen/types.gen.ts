@@ -1065,6 +1065,13 @@ export type AssistantMessage = {
     }
   }
   structured?: unknown
+  actorResult?: {
+    finalText?: string
+    structured?: unknown
+    reportedStatus?: "success" | "partial" | "failed" | "blocked"
+    reportedSummary?: string
+    warnings?: Array<string>
+  }
   variant?: string
   finish?: string
 }
