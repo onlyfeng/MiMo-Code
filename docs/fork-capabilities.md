@@ -723,6 +723,14 @@ where this delta does not change their implementation.
   interleaving between them had to be reconstructed out of band. With the claim
   marked, a continuation that is admitted or already in flight observes the
   cancellation through the claim it holds, at the checks it already makes.
+  That lookup is a point in time, so it pairs with a check in the other
+  direction: a continuation asks `Actor.isCancelling` right after acquiring its
+  execution, because a claim created after cancel's lookup would otherwise start
+  a turn behind a cancellation already in progress. The predicate reads the
+  cancel episode, which `acquireCancel` registers as its first act for every
+  owner, live generation or not, so it is the earliest observable sign that a
+  cancellation has begun. Cancel-first is caught by the check, acquire-first by
+  the mark.
   Delivery is reported by `Inbox.send` itself, through a `committed` flag it
   sets the moment the row lands and unsets if its retirement re-check removes
   it again — inferring it from how the call ended was wrong in both directions.

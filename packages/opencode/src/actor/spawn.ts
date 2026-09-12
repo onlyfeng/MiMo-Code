@@ -349,6 +349,13 @@ export interface Interface {
    * current settlement, so a later forced cancel retires it without sending a
    * duplicate envelope. Set by the continuation path, consumed by cancel.
    */
+  /**
+   * Whether a cancellation has already begun for this actor. A continuation
+   * checks it right after acquiring its execution: `Actor.cancel` marks a live
+   * execution through `requestCancel`, but a claim created *after* that lookup
+   * would otherwise start a turn behind a cancellation already in progress.
+   */
+  readonly isCancelling?: (sessionID: SessionID, actorID: string) => Effect.Effect<boolean>
   readonly markTerminalNotified?: (
     sessionID: SessionID,
     actorID: string,
@@ -2287,7 +2294,9 @@ export const layer = Layer.effect(
         if (!instance.disposing) yield* captureNotificationTarget(instance)
         yield* scanRememberedTargets
       })
-    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, resetTerminalNotified: clearTerminalNotified, settleTerminalNotified, runPersistentTurn, scanStalledOnce })
+    const isCancelling = (sessionID: SessionID, actorID: string) =>
+      lifecycleState.isCancelling(actorKey(sessionID, actorID))
+    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, isCancelling, markTerminalNotified, resetTerminalNotified: clearTerminalNotified, settleTerminalNotified, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it

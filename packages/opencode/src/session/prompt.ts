@@ -5764,10 +5764,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 let notice: TerminalNotice | undefined
                 return Effect.gen(function* () {
                   yield* executions.attach(exec)
+                  // `Actor.cancel` marks a live execution, but this claim may
+                  // have been created after that lookup, behind a cancellation
+                  // already in progress. Checking here closes the other half:
+                  // a cancel that started first is seen now, and one that starts
+                  // later finds this claim and marks it.
+                  const cancelling =
+                    (yield* (boundActor ?? spawnRef.current)?.isCancelling?.(input.sessionID, agentID) ??
+                      Effect.succeed(false)) === true
                   // Cancelled before drain: do not consume messages for a turn
                   // that will not run. isCancelled is re-checked inside drain
                   // just before commit, so a cancel mid-drain leaves rows durable.
-                  if (exec.cancelled) {
+                  if (exec.cancelled || cancelling) {
                     // fall through: `continued` interrupts and onExit notifies
                   } else if (
                     input.inboxID &&

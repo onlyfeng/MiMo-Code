@@ -190,6 +190,12 @@ export function createActorLifecycle<Result, ContextValue, NotificationTarget = 
   return {
     key,
     isCancelled: (actorKey: string) => Effect.sync(() => cancelledActors.has(actorKey)),
+    /**
+     * A cancel episode is registered as the first thing `acquireCancel` does,
+     * for every owner and whether or not a generation was live. It is therefore
+     * the earliest observable sign that a cancellation has begun.
+     */
+    isCancelling: (actorKey: string) => Effect.sync(() => cancelEpisodes.has(actorKey)),
     retainPersistent: (actorKey: string) => Effect.sync(() => persistentActors.add(actorKey)),
     releasePersistent: (actorKey: string) => Effect.sync(() => persistentActors.delete(actorKey)),
     setForkContext: (actorKey: string, context: ContextValue) => Effect.sync(() => forkContexts.set(actorKey, context)),
