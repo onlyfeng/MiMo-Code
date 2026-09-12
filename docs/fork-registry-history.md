@@ -49,17 +49,17 @@ The 211-path, 19,057-insertion, 8,460-deletion total compares the reviewed
 upstream tree directly with the pre-documentation main behavior tree. It
 excludes all five registry/history tracking paths:
 
-```text
+``text
 docs/upstream-deviations.md
 docs/fork-capabilities.md
 docs/dev-compat-overrides.md
 docs/fork-registry-history.md
 docs/dev-compat-registry-history.md
-```
+``
 
 Reproduction commands:
 
-```bash
+``bash
 git diff --shortstat \
   c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
   7c52b1412e9e39685b6975bdc4a4847fe2352647 -- . \
@@ -77,7 +77,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ### Decision notes
 
@@ -120,7 +120,7 @@ The corrected 211-path, 19,073-insertion, 8,461-deletion total compares the
 same reviewed upstream tree with the corrected pre-documentation main behavior
 tree and excludes the same five registry/history tracking paths:
 
-```bash
+``bash
 git diff --shortstat \
   c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
   d1e3ddc3298a2b4504651d0fcaf7e8aa24affa39 -- . \
@@ -138,7 +138,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ## 2026-08-23 syntax-aware tool-script angle repair correction
 
@@ -161,7 +161,7 @@ The syntax-aware 211-path, 19,096-insertion, 8,469-deletion total compares the
 same reviewed upstream tree with the corrected pre-documentation main behavior
 tree and excludes the same five registry/history tracking paths:
 
-```bash
+``bash
 git diff --shortstat \
   c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
   edc2d123cbebfadc8fb7a8a18c4974def0fc2be5 -- . \
@@ -179,7 +179,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ## 2026-08-24 IPv6 link-local SSRF correction
 
@@ -198,7 +198,7 @@ The 213-path, 19,110-insertion, 8,473-deletion total compares the same reviewed
 upstream tree with the corrected pre-documentation main behavior tree and
 excludes the same five registry/history tracking paths:
 
-```bash
+``bash
 git diff --shortstat \
   c23eeaed1983197f1c45ac3ec14c6b99784b7d27 \
   e0389a146ad09a439bbb1009b5f01fc3cc63d7d8 -- . \
@@ -216,7 +216,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ## 2026-08-25 upstream synchronization
 
@@ -282,7 +282,7 @@ The 234-path, 22,785-insertion, 8,955-deletion total compares the freshly
 reviewed upstream tree with the corrected pre-documentation main behavior and
 excludes all five shared/compat registry tracking paths:
 
-```bash
+``bash
 git diff --shortstat \
   5e32992a97ed7f8d2d00e4c312133716292dab9e \
   1cfe7efc8f13da6157f30324c4eeac0111e99115 -- . \
@@ -300,7 +300,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ## 2026-08-25 fixed instance cwd, SDK compatibility, and retry coordinator synchronization
 
@@ -428,7 +428,7 @@ The 240-path, 23,405-insertion, 9,188-deletion total compares the freshly
 reviewed upstream tree with the frozen pre-documentation main behavior and
 excludes all five shared/compat registry tracking paths:
 
-```bash
+``bash
 git diff --shortstat \
   fa6fdf176cef7f82659705b555333d6302725748 \
   6ae30e66ab0ecbb526f85009d300e7c2533fe72c -- . \
@@ -446,7 +446,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ## 2026-08-27 title, stable-prefix, and compaction synchronization
 
@@ -536,7 +536,7 @@ The 251-path, 24,431-insertion, 10,181-deletion total compares the freshly
 reviewed upstream tree with the frozen pre-documentation main behavior and
 excludes all five shared/compat registry tracking paths:
 
-```bash
+``bash
 git diff --shortstat \
   1fc2daac07b5936f4dcba75143bc7d9af971caa1 \
   07d16a5f757377b816a1979297ec1cce80b7c9bd -- . \
@@ -554,7 +554,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ## 2026-08-27 replace-agent actor-scope follow-up synchronization
 
@@ -615,7 +615,7 @@ The 252-path, 24,541-insertion, 10,196-deletion total compares the freshly
 reviewed upstream tree with the frozen pre-documentation main behavior and
 excludes all five shared/compat registry tracking paths:
 
-```bash
+``bash
 git diff --shortstat \
   6da12e0c98d9e2c4838896eac642c65179501f8e \
   d0acb856f1ec0edae6cce29ca44178af14d94293 -- . \
@@ -633,7 +633,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ## 2026-08-28 actor follow-up, PPTX sourcing, and overflow-fixture synchronization
 
@@ -699,7 +699,7 @@ The 256-path, 24,605-insertion, 10,234-deletion total compares the freshly
 reviewed upstream tree with the frozen pre-documentation main behavior and
 excludes all five shared/compat registry tracking paths:
 
-```bash
+``bash
 git diff --shortstat \
   35bb2636a99b457940f1c12f2c8f5ec554369c57 \
   64b4bdda6829ca697cecf4cf79eeec6a35ec2e57 -- . \
@@ -717,7 +717,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ## 2026-09-01 prefix snapshots, compaction projection, recovery, and CI synchronization
 
@@ -837,7 +837,7 @@ The 273-path, 25,268-insertion, 10,065-deletion total compares the freshly
 reviewed upstream tree with the frozen pre-documentation main behavior and
 excludes all five shared/compat registry tracking paths:
 
-```bash
+``bash
 git diff --shortstat \
   2c5cd4972c3f3cb8947a5117c7910d485e6f6179 \
   2b4c6569ac308fa6a6662c2c044059893748e0ad -- . \
@@ -855,7 +855,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ## 2026-09-01 OAuth branding synchronization
 
@@ -937,7 +937,7 @@ The 273-path, 25,268-insertion, 10,065-deletion total compares the freshly
 reviewed upstream tree with the pre-documentation main behavior and excludes
 all five shared/compat registry tracking paths:
 
-```bash
+``bash
 git diff --shortstat \
   2ce93f4188275aff0dc0353d36ec5f7538bcb32b \
   c63ae51911f8455fd1cc8defcc4a0a2e827889e2 -- . \
@@ -955,7 +955,7 @@ git diff --name-only \
   ':(exclude)docs/dev-compat-overrides.md' \
   ':(exclude)docs/fork-registry-history.md' \
   ':(exclude)docs/dev-compat-registry-history.md'
-```
+``
 
 ## 2026-09-01 Codex-mode specified-change follow-up
 
@@ -986,7 +986,7 @@ removed from every default-path process. To reproduce, check out that commit and
 run this single block from the repository root; the first two commands fail
 closed if either prerequisite is wrong:
 
-```bash
+``bash
 test "$(git rev-parse HEAD)" = \
   0899a4802dd65c1ca98e68722a7ee0c017e5cb7c
 cd packages/opencode
@@ -1031,22 +1031,22 @@ env -u MIMOCODE_EXPERIMENTAL \
   test/session/replace-agent-subagent.test.ts \
   --timeout 120000
 # expected: 19 pass, 1 pre-existing TODO, 0 fail
-```
+``
 
 From the repository root, typechecks ran independently from their package
 directories:
 
-```bash
+``bash
 (cd packages/opencode && bun typecheck)
 (cd packages/sdk/js && bun typecheck)
 # expected: both exit 0
-```
+``
 
 From the repository root, the two source descriptions project to exactly two
 source, three OpenAPI, and three JavaScript SDK occurrences; the selected range
 is whitespace-clean:
 
-```bash
+``bash
 test "$(rg -F -c 'Explicit codex or default is authoritative.' \
   packages/opencode/src/session/prompt.ts)" -eq 2
 test "$(rg -F -c 'Explicit codex or default is authoritative.' \
@@ -1056,7 +1056,7 @@ test "$(rg -F -c 'Explicit codex or default is authoritative.' \
 git diff --check c3fd051a27585a3e2a04124e00ce0439b27130e6 \
   0899a4802dd65c1ca98e68722a7ee0c017e5cb7c
 # expected: all exit 0
-```
+``
 
 | # | Capability | `audit_range` | Commit/path/symbol evidence | `main_counterpart` | `compat_counterpart` | Relationship | Drift | `canonical_owner` | Disposition | Status evidence |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1147,7 +1147,7 @@ Run from a clean checkout of the behavior commit. The package preload then
 adds only its owned test baseline; the command removes every ambient selector
 that could change the default path.
 
-```bash
+``bash
 (
   set -e
   set -o pipefail
@@ -1227,7 +1227,7 @@ that could change the default path.
     c6a2f5f3c8cd0851b36049da5176e2ee7fb81d05 \
     4866d01f754429e3782f60983311c24468a9949a
 )
-```
+``
 
 Expected result: the four test groups report `93/0`, `8/0`, `97/0`, and
 `19/1` pass/todo with zero failures; both typechecks exit zero; lint reports
@@ -1333,7 +1333,7 @@ unclassified.
 
 Run from a clean checkout of the behavior commit:
 
-```bash
+``bash
 (
   set -e
   test "$(git rev-parse HEAD)" = \
@@ -1362,7 +1362,7 @@ Run from a clean checkout of the behavior commit:
   git diff --check c9bdea878aa289f427c4bfbe798411d4907df600 \
     7bfe6ac48e0db40b2b0b42c00b05a35032fcc113
 )
-```
+``
 
 Expected result: 149 tests and 414 assertions pass with zero failures; both
 package typechecks and all 12 pre-push tasks succeed; lint reports 4,285
@@ -1456,7 +1456,7 @@ disposition, and status evidence; no incoming capability remains unclassified.
 
 Run from a clean checkout of the stable behavior commit:
 
-```bash
+``bash
 (
   set -e
   test "$(git rev-parse HEAD)" = \
@@ -1500,7 +1500,7 @@ Run from a clean checkout of the stable behavior commit:
     28c1f36c8a3bc85bda7e3691960e7d0b531b8636 \
     dad492e0af72d22d3ec796f6814eda7e52ed51a8
 )
-```
+``
 
 Expected result: 197 tests pass, two existing cancellation tests skip, and no
 test fails; both typechecks exit zero; lint reports 4,285 warnings and zero
@@ -1576,7 +1576,7 @@ disposition, and status evidence; no incoming capability remains unclassified.
 
 Run from a clean checkout of the stable behavior commit:
 
-```bash
+``bash
 (
   set -e
   test "$(git rev-parse HEAD)" = \
@@ -1640,7 +1640,7 @@ Run from a clean checkout of the stable behavior commit:
     'native tool schema|process-disabled auto GPT requests|locks system and harness|persists auto|instruction files' \
     --timeout 120000
 )
-```
+``
 
 Expected result: the behavior SHA and both merge parents match; the incoming
 range is whitespace-clean; the exact four-path allowlist matches upstream
@@ -3131,7 +3131,7 @@ with package typecheck passing. New final-tip CI is required on both branches.
 
 - Reviewed upstream `f11e35ede439df5555ca1f0309ffea8e9b49f06e..98702641a985fd2a3b81e407f58df7cbcee1f248`
   (eight commits; 66 paths, 4,734 insertions, 865 deletions from the accepted main tip). Upstream advanced three times during the audit; the selected SHA was moved forward each time and everything propagated in one pass.
-- Prior fork main: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`; shared runtime/test snapshot `MAIN_BEHAVIOR`.
+- Prior fork main: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`; shared runtime/test snapshot `377a2ad981010c10cbb1ad52143960c2ecf0294e`.
 - Bundled guidance content remains `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`; `bun.lock` unchanged, with a new `@ai-sdk/openai-compatible` patch applied by `bun ci`.
 - The four selected capabilities are reconciled in [the synchronization inventory](upstream-sync-2026-09-12-98702641.md). Nine active FD entries remain; **FC-001 retires its continuation wake-generation routing** while remaining active for spawn admission, terminal claims, disposal provenance and actor-resume. No other owner retires.
 - C01 adopts upstream's execution/delivery model: `runTurn` settles a delivery into `MessageV2.actorResult` and publishes `result_message_id`, `ActorExecution` serializes per `(session, actor)`, hook failures surface as `warnings`, and a failed turn reports its partial result. The fork's `Actor.runPersistentTurn` wake routing is retired from the continuation path together with eight fork-owned tests — drain-once across six `resume drains` cases, cancel-race registry settlement, postStop wake ordering, disposed-parent retargeting. None of the eight exist upstream; the decision and its measured cost are recorded in the inventory.
