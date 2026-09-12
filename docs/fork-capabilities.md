@@ -733,14 +733,24 @@ where this delta does not change their implementation.
   settlement could still get. `Actor.resetTerminalNotified` now drops it wherever
   a new turn is admitted — in `resume`'s `onCommitted`, since an admission that
   fails on an invalid assistant message, a task-binding conflict or an abort
-  supersedes nothing; after `acquireWake` in `runPersistentTurn`; and in the continuation past every no-turn exit,
-  immediately before the turn runs. The continuation's reset sat right after
+  supersedes nothing; after `acquireWake` in `runPersistentTurn`; and in the
+  continuation past every no-turn exit, immediately before the turn runs. The continuation's reset sat right after
   `ActorExecution.attach` at first, which is wrong for a continuation that
   acquires the execution, finds its `inboxID` already drained by an earlier one,
   and returns the previous assistant without running or reporting: it cleared a
   record it did not replace, so retirement duplicated the envelope the earlier
   continuation had already delivered. Only a turn that actually runs supersedes
   the record.
+  A sixth review round moved where the spawn claim is taken. `forkWork`
+  reserved it itself, which is after registration has already published
+  `ActorRegistered`: a client that reacts by messaging the new actor produces a
+  wake that takes the key first, the reserve then fails, and the failure was
+  swallowed so the spawn turn ran unclaimed — the exact ordering the claim
+  exists to enforce. Both spawn paths now reserve before `actorReg.register`
+  and hand the claim to `forkWork`, releasing it if anything fails before the
+  work is forked. A key that is already active at that earlier point is a real
+  collision with a previous execution rather than this race, and is tolerated
+  as before.
   Two coverage gaps are stated rather than papered over, both because the
   harness cannot produce the required drop. The persistent-turn recording is
   unpinned: `runPersistentTurn` has no caller outside `spawn.ts` since the

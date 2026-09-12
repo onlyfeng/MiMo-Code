@@ -1,7 +1,7 @@
 import { isTurnCancelled } from "../session/turn-cancellation"
 import * as RunApproval from "@/session/run-approval"
 import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit, Schedule } from "effect"
-import { ActorExecution } from "./execution"
+import { ActorExecution, type Execution } from "./execution"
 import type { SessionID, MessageID } from "@/session/schema"
 import type { ProviderID, ModelID } from "@/provider/schema"
 import type { Tool as AITool, ModelMessage } from "ai"
@@ -534,6 +534,9 @@ export const layer = Layer.effect(
       // in their own git worktree so their tools resolve paths/write-boundary
       // against the worktree, not the orchestrator's directory.
       instanceRef?: InstanceContext
+      // Taken by the caller before the actor is registered, so nothing can
+      // react to ActorRegistered and claim the key first.
+      executionClaim?: Execution
     }) =>
       Effect.gen(function* () {
         const parentDisposal = yield* RunDisposal
@@ -1038,12 +1041,11 @@ export const layer = Layer.effect(
         // terminal continuation that outlives disposal cannot re-arm the instance.
         const fork = Effect.gen(function* () {
           // Upstream serializes a woken continuation behind the whole spawn
-          // execution, postStop included. Reserving here and releasing when the
-          // forked work settles reproduces that ordering; the fork's own wake
-          // generation still runs inside the claim.
-          const claim = yield* executions
-            .reserve(input.sessionID, input.actorID)
-            .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+          // execution, postStop included. The claim is taken by the caller
+          // before registration publishes the actor — reserving here would race
+          // a client that reacts to ActorRegistered by messaging the new actor,
+          // whose wake would take the key first and leave this work unclaimed.
+          const claim = input.executionClaim
           const claimed = claim
             ? boundWork.pipe(Effect.ensuring(executions.release(claim)))
             : boundWork
@@ -1163,6 +1165,8 @@ export const layer = Layer.effect(
       // (updateTurn/updateStatus). Prerequisite for T43 (--topic reuse).
       return yield* admit(input, child.id, child.id, lifecycle, (generation) =>
         Effect.gen(function* () {
+          const claim = yield* reserveSpawn(child.id, child.id)
+          return yield* Effect.gen(function* () {
           yield* actorReg.register({
             sessionID: child.id,
             actorID: child.id,
@@ -1178,6 +1182,7 @@ export const layer = Layer.effect(
           })
           if (input.forkContext) yield* retainForkContext(key, input.forkContext, input.sessionID, instanceRef)
           return yield* forkWork({
+            executionClaim: claim,
             runApproval: input.runApproval,
             sessionID: child.id,
             parentSessionID: input.sessionID,
@@ -1194,6 +1199,9 @@ export const layer = Layer.effect(
             format: input.format,
             ...(instanceRef ? { instanceRef } : {}),
           })
+          // forkWork hands the claim to the forked work, which releases it when
+          // it settles; anything that fails before that must not leak the key.
+          }).pipe(Effect.onError(() => releaseSpawnClaim(claim)))
         }),
       )
     })
@@ -1205,6 +1213,8 @@ export const layer = Layer.effect(
 
       return yield* admit(input, input.sessionID, actorID, lifecycle, (generation) =>
         Effect.gen(function* () {
+          const claim = yield* reserveSpawn(input.sessionID, actorID)
+          return yield* Effect.gen(function* () {
           const watermark = input.context === "full" ? yield* session.lastMainMessageID(input.sessionID) : undefined
           yield* actorReg.register({
             sessionID: input.sessionID,
@@ -1234,6 +1244,7 @@ export const layer = Layer.effect(
             agentInfo?.mode === "subagent" &&
             (agentInfo.completionGate === true || (!agentInfo.prompt && input.agentType !== "checkpoint-writer"))
           return yield* forkWork({
+            executionClaim: claim,
             runApproval: input.runApproval,
             sessionID: input.sessionID,
             parentSessionID: input.parentSessionID ?? input.sessionID,
@@ -1250,9 +1261,23 @@ export const layer = Layer.effect(
             gateEligible,
             format: input.format,
           })
+          }).pipe(Effect.onError(() => releaseSpawnClaim(claim)))
         }),
       )
     })
+
+    /**
+     * Take the spawn's execution claim before registration publishes the actor.
+     * Reserving after `ActorRegistered` races a client that reacts by messaging
+     * the new actor: that wake takes the key first and the spawn turn then runs
+     * unclaimed, which is the ordering the claim exists to prevent. A key that
+     * is already active here is a real collision with a previous execution, not
+     * this race, and is tolerated exactly as before.
+     */
+    const reserveSpawn = (sessionID: SessionID, actorID: string) =>
+      executions.reserve(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+    const releaseSpawnClaim = (claim: Execution | undefined) =>
+      claim ? executions.release(claim) : Effect.void
 
     const spawnImpl = Effect.fn("Actor.spawn.impl")(function* (input: SpawnInput) {
       if (input.mode === "peer") return yield* spawnPeer(input)
