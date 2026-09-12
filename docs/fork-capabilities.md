@@ -695,10 +695,14 @@ where this delta does not change their implementation.
   second one, so retiring an actor that was never notified still notifies.
   Two cases stay quarantined, and both reduce to one blocker rather than two:
   the fork publishes an actor's outcome and leaves it idle *before* postStop,
-  where upstream publishes after. `delivered no-op cancel preserves forkContext
-  while postStop is still running` pins that early publish by awaiting
-  `result.outcome` within one second, so the orderings are mutually exclusive.
-  One decision on publish ordering unskips both.
+  where upstream publishes after. What holds this open is a product decision,
+  not a test conflict — publishing after postStop means a spawn's caller, and a
+  blocking `actor run`, resolves only once postStop finishes. Exactly one fork
+  case reads on the early publish, `delivered no-op cancel preserves forkContext
+  while postStop is still running`, and only in how it sequences its awaits;
+  its subject holds under either ordering once they are swapped. Every other
+  postStop case awaits with a 5s-to-30s or unbounded timeout and never pauses
+  the hook. One change to publish ordering unskips both quarantined cases.
 - 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
   ownership to the real parent` polled the `InboxTable` row its assertion is
   about. That row exists to wake the persistent peer it addresses, so the peer's
