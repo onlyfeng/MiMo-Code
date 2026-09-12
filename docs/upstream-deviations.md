@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-11
-- Upstream: `f11e35ede439df5555ca1f0309ffea8e9b49f06e`
-- Prior reviewed upstream: `7641dbbd3b8aa20ffd4fb74089f2dc65bf032201`
-- Main behavior (runtime/tests): `635618207270af55435aee88ce27003fc1809b44`
+- Last reviewed: 2026-09-12
+- Upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
+- Prior reviewed upstream: `f11e35ede439df5555ca1f0309ffea8e9b49f06e`
+- Main behavior (runtime/tests): `MAIN_BEHAVIOR`
 - Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
-- Prior fork `main` tip: `bcf2fba7c337a812071ccacc5184347c0bd5536e`
+- Prior fork `main` tip: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -27,9 +27,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-11 (f11e35ed) capability inventory](upstream-sync-2026-09-11-f11e35ed.md),
-continuing the [2026-09-11 (7641dbbd) inventory](upstream-sync-2026-09-11-7641dbbd.md) and the
-[2026-09-10 (cb00c280) inventory](upstream-sync-2026-09-10-cb00c280.md).
+Full synchronization review: [2026-09-12 (98702641) capability inventory](upstream-sync-2026-09-12-98702641.md),
+continuing the [2026-09-11 (f11e35ed) inventory](upstream-sync-2026-09-11-f11e35ed.md) and the
+[2026-09-11 (7641dbbd) inventory](upstream-sync-2026-09-11-7641dbbd.md).
 The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
@@ -642,6 +642,11 @@ where this delta does not change their implementation.
   equivalent duplicate. The fork retains its stronger generation, cancellation,
   frozen-membership, and lifecycle implementation rather than adding a second
   context map or weakening fail-closed admission.
+- 2026-09-12 wake-routing note: FC-001 retired its continuation wake-generation
+  routing in favour of upstream's `ActorExecution` claim. Frozen-context capture
+  and the resolved-model/harness identity checks are unaffected: actor recovery
+  and resume still validate the frozen identity before admission, and the
+  retirement changes only which primitive serializes a woken turn.
 - 2026-09-11 resume model-override review: upstream's new resume model override
   would replace the model a recovered turn runs on. A frozen actor keeps its
   original resolved identity, so the HTTP route refuses an override for a

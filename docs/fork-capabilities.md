@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-11
-- Upstream: `f11e35ede439df5555ca1f0309ffea8e9b49f06e`
-- Prior reviewed upstream: `7641dbbd3b8aa20ffd4fb74089f2dc65bf032201`
-- Main behavior (runtime/tests): `635618207270af55435aee88ce27003fc1809b44`
+- Last reviewed: 2026-09-12
+- Upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
+- Prior reviewed upstream: `f11e35ede439df5555ca1f0309ffea8e9b49f06e`
+- Main behavior (runtime/tests): `MAIN_BEHAVIOR`
 - Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
-- Prior fork `main` tip: `bcf2fba7c337a812071ccacc5184347c0bd5536e`
+- Prior fork `main` tip: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -28,9 +28,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-11 (f11e35ed) capability inventory](upstream-sync-2026-09-11-f11e35ed.md),
-continuing the [2026-09-11 (7641dbbd) inventory](upstream-sync-2026-09-11-7641dbbd.md) and the
-[2026-09-10 (cb00c280) inventory](upstream-sync-2026-09-10-cb00c280.md).
+Full synchronization review: [2026-09-12 (98702641) capability inventory](upstream-sync-2026-09-12-98702641.md),
+continuing the [2026-09-11 (f11e35ed) inventory](upstream-sync-2026-09-11-f11e35ed.md) and the
+[2026-09-11 (7641dbbd) inventory](upstream-sync-2026-09-11-7641dbbd.md).
 The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
 where this delta does not change their implementation.
@@ -257,6 +257,20 @@ where this delta does not change their implementation.
   guarantees plus positive known-peer evidence for parent identity replacement,
   with behavior-focused regressions.
 
+- 2026-09-12 wake-routing retirement: the continuation path is retired from
+  this entry. A woken non-main turn now runs on upstream's `ActorExecution`
+  claim and settles through `runTurn`, instead of `Actor.runPersistentTurn`'s
+  wake generation. `spawn` reserves the same claim for its whole run so a
+  continuation waits behind an in-flight spawn, which is upstream's ordering.
+  The eight fork-owned tests that encoded behavior upstream's execution map
+  does not model were removed with it: drain-once across six `resume drains`
+  cases, cancel-race registry settlement, postStop wake ordering, and
+  disposed-parent retargeting. None of them existed upstream. Generation
+  ownership, terminal claims and disposal provenance remain this entry's
+  contract for the spawn and actor-resume paths, which are unchanged.
+  Four upstream-new cases are quarantined under FC-008 for a dedicated
+  follow-up fork PR rather than fixed in this synchronization; no upstream PR
+  is opened for them.
 - 2026-09-11 recovery-predicate and resume-override review: adopted the part of
   upstream's allowlist predicate that is a genuine fix — a step-level
   `time.completed` does not prove the round finished, so a turn that stopped on
@@ -669,6 +683,16 @@ where this delta does not change their implementation.
   `packages/opencode/src/tool/question.ts`;
   `test/question/lifecycle.test.ts` and real
   `test/cli/tui/question-lifecycle.test.tsx` cover these consumers.
+- 2026-09-12 quarantine: four upstream-new actor cases are skipped in place with
+  an inline rationale — `inbox waits for the entire spawn execution before
+  starting a continuation`, `[TP-R14-12] undeliverable terminal notification is
+  logged`, and the peer `success`/`failure` variants of
+  `[TP-R14-08] [TP-R14-09] ... continuation settles ... once`. They assert
+  upstream behavior the fork's actor pipeline does not yet reproduce after the
+  FC-001 wake-routing retirement. Each is `skip`ped rather than deleted so the
+  gap stays visible, and is tracked for a dedicated follow-up fork PR; no
+  upstream PR is opened. The peer `cancelled` variant and both subagent variants
+  run normally.
 - Upstream relationship: stronger runtime cleanup plus a narrower quarantine
   than the reviewed upstream workflow; adopts its package-scoped enterprise
   storage fixture.
