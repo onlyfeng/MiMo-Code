@@ -716,15 +716,15 @@ where this delta does not change their implementation.
   settlement permanently unreported. Awaiting the outcome removes the window in
   both directions rather than moving it, and the completion runs on every exit
   of the notify, interrupt included, or a cancel would wait forever.
-  `Inbox.send` carries no hook, and `src/actor/notification.ts` — otherwise
-  upstream-identical — returns whether an envelope was written. That boolean is
-  drawn at the commit boundary, not from the call succeeding: `Inbox.send`
-  commits the row before its retirement re-check, its event publication and the
-  receiver wake, so a defect in any of those leaves a durable, drainable
-  envelope. Only the typed failure removes the row again — the ESRCH check runs
-  before the insert, and the retirement re-check deletes what it inserted — so a
-  cause carrying no typed failure, raised after the send began, still counts as
-  delivered.
+  Delivery is reported by `Inbox.send` itself, through a `committed` flag it
+  sets the moment the row lands and unsets if its retirement re-check removes
+  it again. Inferring it from how the call ended was wrong in both directions:
+  the row commits before that re-check, the event publication and the wake, so
+  a defect in any of those left a drainable envelope behind a failed call, while
+  a defect in the pre-insert receiver lookup ended the call the same way with no
+  row at all. `src/actor/notification.ts` — otherwise upstream-identical —
+  returns that flag, and the fork's own `notifyTerminal` reports it the same
+  way, so the persistent-turn paths are covered too.
   That shape settles the delivery questions together: a send that wrote nothing
   completes the record as undelivered and drops it, so retirement still reports
   a settlement the parent never heard about (pinned by `retirement reports a

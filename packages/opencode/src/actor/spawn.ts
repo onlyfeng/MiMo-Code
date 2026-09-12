@@ -1345,8 +1345,12 @@ export const layer = Layer.effect(
       status: TerminalStatus,
       extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string } = {},
       source?: RunDisposalState,
-    ) =>
-      Effect.gen(function* () {
+    ) => {
+      // Reported by the send itself: the row is committed before the retirement
+      // re-check, the event publication and the wake, so a defect in any of
+      // those must not turn a drainable envelope into "nothing delivered".
+      const committed = { current: false }
+      return Effect.gen(function* () {
         const origin = source ?? (yield* RunDisposal)
         if (isRunDisposing(origin)) return false
         if (!actor) return false
@@ -1359,11 +1363,10 @@ export const layer = Layer.effect(
         if (!parentSessionID || isRunDisposing(origin)) return false
         const notificationTarget = yield* resolveNotificationTarget(actorKey(sessionID, actorID), parentSessionID)
         if (!notificationTarget) return false
-        // `withNotificationTarget` yields undefined when it declines to run, so
-        // this distinguishes a written envelope from a skipped one.
-        const sent = yield* withNotificationTarget(
+        yield* withNotificationTarget(
           notificationTarget,
           inbox.send({
+            committed,
             receiverSessionID: parentSessionID,
             receiverActorID: actor.parentActorID ?? "main",
             senderSessionID: sessionID,
@@ -1386,12 +1389,15 @@ export const layer = Layer.effect(
           }),
           origin,
         ).pipe(Effect.ignoreCause)
-        return sent !== undefined
+        return committed.current
       }).pipe(
         Effect.catchCause((cause) =>
-          Effect.logError(`actor terminal notification failed: ${Cause.pretty(cause)}`).pipe(Effect.as(false)),
+          Effect.logError(`actor terminal notification failed: ${Cause.pretty(cause)}`).pipe(
+            Effect.as(committed.current),
+          ),
         ),
       )
+    }
 
     const finishPersistentTurn = (
       input: { sessionID: SessionID; actorID: string; notifyParentOnComplete: boolean },

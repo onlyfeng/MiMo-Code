@@ -119,6 +119,14 @@ export interface SendInput {
   senderActorID?: string
   content: string
   type?: string
+  /**
+   * Set the moment the row is committed, and unset again if the retirement
+   * re-check removes it. A sender that must know whether an envelope exists
+   * reads this rather than inferring it from how the call ended: the row is
+   * committed before the re-check, the event publication and the wake, so a
+   * defect in any of those leaves a drainable envelope behind a failed call.
+   */
+  committed?: { current: boolean }
 }
 
 export interface SendResult {
@@ -272,11 +280,17 @@ export const layer: Layer.Layer<
         content: { text: input.content },
         created_at: Date.now(),
       }
-      yield* Effect.sync(() => Database.use((db) => db.insert(InboxTable).values(row).run()))
+      yield* Effect.sync(() => {
+        Database.use((db) => db.insert(InboxTable).values(row).run())
+        if (input.committed) input.committed.current = true
+      })
       // Close the get→insert retirement race. If cancel committed its tombstone
       // after the first ESRCH check, remove this just-inserted row before publish.
       if (isRetiredPersistent(yield* reg.get(input.receiverSessionID, input.receiverActorID))) {
-        yield* Effect.sync(() => Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.id, row.id)).run()))
+        yield* Effect.sync(() => {
+          Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.id, row.id)).run())
+          if (input.committed) input.committed.current = false
+        })
         return yield* Effect.fail(
           new InboxReceiverNotFound({
             receiverSessionID: input.receiverSessionID,

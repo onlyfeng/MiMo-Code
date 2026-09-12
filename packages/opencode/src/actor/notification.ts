@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit } from "effect"
+import { Effect, Exit } from "effect"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
@@ -34,7 +34,7 @@ export function makeTerminalNotifier(deps: {
   sessions: Pick<SessionService["Service"], "get">
 }) {
   return (input: TerminalNotification) => {
-    let attempted = false
+    const committed = { current: false }
     return Effect.gen(function* () {
       const actor = yield* deps.registry.get(input.sessionID, input.actorID)
       if (!actor?.background) return false
@@ -44,12 +44,8 @@ export function makeTerminalNotifier(deps: {
         input.parentSessionID ??
         (actor.mode === "peer" ? (yield* deps.sessions.get(input.sessionID)).parentID : input.sessionID)
       if (!parentSessionID) return yield* Effect.fail(new Error("actor parent session missing"))
-      // From here on the row may reach the table. `Inbox.send` commits it before
-      // its retirement re-check, its event publication and the receiver wake, so
-      // a defect in any of those leaves a durable, drainable envelope even
-      // though the call failed. Only the typed failure removes the row again.
-      attempted = true
       yield* deps.inbox.send({
+        committed,
         receiverSessionID: parentSessionID,
         receiverActorID: input.parentActorID ?? actor.parentActorID ?? "main",
         senderSessionID: input.sessionID,
@@ -87,11 +83,10 @@ export function makeTerminalNotifier(deps: {
                 log: "Error",
                 message: `actor terminal notification failed: ${input.sessionID}/${input.actorID}`,
               }),
-              // A typed failure is the only one that leaves no row: the ESRCH
-              // check runs before the insert and the retirement re-check deletes
-              // what it inserted. Anything else after the send began failed with
-              // the row already committed and drainable.
-              Effect.as(attempted && !Cause.hasFails(exit.cause)),
+              // Reported by the send itself, so a defect anywhere in the call
+              // cannot turn a committed envelope into "nothing delivered", nor
+              // an uncommitted one into a delivery.
+              Effect.as(committed.current),
             ),
       ),
     )
