@@ -724,14 +724,25 @@ where this delta does not change their implementation.
   `persistent` actors, since an already-settled ephemeral actor's cancel returns
   before the consuming branch, and every cancel branch clears the key through
   `retire`, so the set is bounded by the live standing peers.
-  Coverage gap, stated rather than papered over: the persistent-turn recording
-  is unpinned. `runPersistentTurn` has no caller outside `spawn.ts` since the
-  wake-routing retirement, and the path is reachable in production only through
-  the `session.resume` route, so removing the recording fails no test. Driving
-  `Actor.runPersistentTurn` directly does admit the turn but its `notifyTerminal`
+  A third review round added the record's lifetime: it belonged to the actor, not
+  to the turn that produced it, so a later turn whose envelope dropped inherited
+  the previous turn's record and retirement suppressed the only notice that
+  settlement could still get. `Actor.resetTerminalNotified` now drops it wherever
+  a new turn is admitted — after `acquireWake` in `resume` and
+  `runPersistentTurn`, and after `ActorExecution.attach` in the continuation —
+  so a record never outlives its turn.
+  Two coverage gaps are stated rather than papered over, both because the
+  harness cannot produce the required drop. The persistent-turn recording is
+  unpinned: `runPersistentTurn` has no caller outside `spawn.ts` since the
+  wake-routing retirement and the path is reachable in production only through
+  the `session.resume` route, so removing the recording fails no test; driving
+  `Actor.runPersistentTurn` directly admits the turn but its `notifyTerminal`
   silently returns, because a test context resolves no notification target. The
-  fix matches the continuation path's rule by construction and is kept; pinning
-  it needs a harness that can resolve a notification target outside a spawn.
+  turn-scoped reset is unpinned for the same reason: demonstrating it needs one
+  turn to deliver and the next to drop, and retiring the receiver's registry row
+  mid-sequence does not make `Inbox.send` fail from the notifier's instance
+  context, while an unregistered receiver drops every turn. Both fixes match the
+  continuation path's rule by construction and are kept.
 - 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
   ownership to the real parent` polled the `InboxTable` row its assertion is
   about. That row exists to wake the persistent peer it addresses, so the peer's

@@ -342,6 +342,12 @@ export interface Interface {
    * duplicate envelope. Set by the continuation path, consumed by cancel.
    */
   readonly markTerminalNotified?: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
+  /**
+   * Drop any record left by a previous turn. A new turn's settlement is the one
+   * a later retirement must not duplicate, so the record cannot outlive the turn
+   * that produced it.
+   */
+  readonly resetTerminalNotified?: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
   readonly runPersistentTurn?: (input: {
     sessionID: SessionID
     actorID: string
@@ -424,6 +430,10 @@ export const layer = Layer.effect(
     // Actor keys whose current settlement already produced a terminal
     // notification. A forced cancel retires such an actor without notifying
     // again; anything else still notifies on retirement.
+    // Actors whose most recent settlement already produced a delivered terminal
+    // envelope. Reset when a new turn is admitted, so a record from an earlier
+    // turn can never suppress a later settlement's notice; dropped on
+    // retirement, so the set is bounded by the live standing peers.
     const notifiedTerminals = new Set<string>()
     const lifecycleState = createActorLifecycle<MessageV2.WithParts, FrozenContext, NotificationTarget>()
     const retainForkContext = (
@@ -1595,6 +1605,8 @@ export const layer = Layer.effect(
             }
 
             const owner = ownership.owner
+            // A new turn supersedes whatever the previous one reported.
+            yield* clearTerminalNotified(input.sessionID, input.actorID)
             const guardedWork = Effect.gen(function* () {
               if (!(yield* lifecycleState.isCurrentOpen(key, owner))) return yield* Effect.interrupt
               yield* actorReg
@@ -1694,6 +1706,8 @@ export const layer = Layer.effect(
           const ownership = yield* lifecycleState.acquireWake(key)
           if (ownership._tag === "blocked") return yield* Effect.fail(recoveryUnavailable())
           if (ownership._tag !== "owner") return yield* Effect.fail(new Session.BusyError(input.sessionID))
+          // A new turn supersedes whatever the previous one reported.
+          yield* clearTerminalNotified(input.sessionID, input.actorID)
           const owner = ownership.owner
           const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>()
           const accepted = { value: false, withdrawn: false }
@@ -2131,7 +2145,7 @@ export const layer = Layer.effect(
         if (!instance.disposing) yield* captureNotificationTarget(instance)
         yield* scanRememberedTargets
       })
-    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, runPersistentTurn, scanStalledOnce })
+    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, resetTerminalNotified: clearTerminalNotified, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it

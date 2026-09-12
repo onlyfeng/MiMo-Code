@@ -5761,6 +5761,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               (exec) =>
                 Effect.gen(function* () {
                   yield* executions.attach(exec)
+                  // A new continuation supersedes whatever the previous turn
+                  // reported, so its record must not survive into this one.
+                  yield* (boundActor ?? spawnRef.current)?.resetTerminalNotified?.(input.sessionID, agentID) ??
+                    Effect.void
                   // Cancelled before drain: do not consume messages for a turn
                   // that will not run. isCancelled is re-checked inside drain
                   // just before commit, so a cancel mid-drain leaves rows durable.
