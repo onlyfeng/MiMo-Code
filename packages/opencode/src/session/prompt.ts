@@ -5705,28 +5705,113 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const work = Effect.sync(() => {
         started = true
       }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale, undefined, undefined, undefined, undefined, input.deferInbox)))
-      // Continuations are serialized per (session, actor) by upstream's
-      // ActorExecution, which is what makes a wake wait for an in-flight spawn
-      // execution. The fork's wake generation still runs inside that claim: it
-      // owns drain-once, cancel-race settlement and disposal retargeting, which
-      // the execution map does not model.
-      const actor = boundActor ?? spawnRef.current
+      // Continuations are serialized per (session, actor) by ActorExecution and
+      // settle through runTurn, matching upstream. The fork's former
+      // Actor.runPersistentTurn wake-generation routing on this path is retired.
       const execution =
-        input.notifyParentOnComplete === true && agentID !== "main" && actor?.runPersistentTurn
+        input.notifyParentOnComplete === true && agentID !== "main"
           ? Effect.acquireUseRelease(
               executions.acquire(input.sessionID, agentID),
               (exec) =>
                 Effect.gen(function* () {
                   yield* executions.attach(exec)
-                  return yield* actor.runPersistentTurn!({
-                    sessionID: input.sessionID,
-                    actorID: agentID,
-                    work,
-                    onInterrupt: lastAssistant(input.sessionID, agentID),
-                    notifyParentOnComplete: true,
-                    inboxID: input.inboxID,
-                  })
-                }),
+                  // Cancelled before drain: do not consume messages for a turn
+                  // that will not run. isCancelled is re-checked inside drain
+                  // just before commit, so a cancel mid-drain leaves rows durable.
+                  if (exec.cancelled) {
+                    // fall through: `continued` interrupts and onExit notifies
+                  } else if (
+                    input.inboxID &&
+                    (yield* inbox.drain(input.sessionID, agentID, () => exec.cancelled)) === 0
+                  ) {
+                    // Re-check after an empty drain: Actor.cancel's execution path
+                    // does not notify on its own — only runTurn.onExit does.
+                    if (!exec.cancelled) return yield* lastAssistant(input.sessionID, agentID)
+                  }
+                  // Capture the last delivery even when the turn dies with a
+                  // settled error, so settle can persist a partial result.
+                  let lastFinal: MessageV2.WithParts | undefined
+                  const continued = Effect.gen(function* () {
+                    if (exec.cancelled) return yield* Effect.interrupt
+                    const final = yield* state.ensureRunning(
+                      input.sessionID,
+                      agentID,
+                      lastAssistant(input.sessionID, agentID),
+                      work,
+                    )
+                    lastFinal = final
+                    if (final.info.role === "assistant" && final.info.error)
+                      return yield* Effect.die(new Error(sessionErrorText(final.info.error) ?? "actor session failed"))
+                    return final
+                  }).pipe(
+                    Effect.onExit((exit) =>
+                      Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+                        ? state.cancelActor(input.sessionID, agentID)
+                        : Effect.void,
+                    ),
+                  )
+                  return yield* runTurn(input.sessionID, agentID, continued, {
+                    settle: (exit) =>
+                      Effect.gen(function* () {
+                        if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) return undefined
+                        const final = Exit.isSuccess(exit) ? exit.value : lastFinal
+                        if (!final || final.info.role !== "assistant") return undefined
+                        const text = assistantFinalText(final.info, final.parts)
+                        const structured = final.info.structured
+                        if (text === undefined && structured === undefined) return undefined
+                        const parsed = parseReturnHeader(text)
+                        yield* sessions.updateMessage({
+                          ...final.info,
+                          actorResult: {
+                            ...(text !== undefined ? { finalText: text } : {}),
+                            ...(structured !== undefined ? { structured } : {}),
+                            ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                            ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                          },
+                        })
+                        return final.info.id
+                      }),
+                  }).pipe(
+                    Effect.provideService(ActorRegistry.Service, actorRegistry),
+                    Effect.onExit((exit) =>
+                      Effect.gen(function* () {
+                        const final = Exit.isSuccess(exit) ? exit.value : lastFinal
+                        const text =
+                          final?.info.role === "assistant"
+                            ? assistantFinalText(final.info, final.parts)
+                            : undefined
+                        const parsed = parseReturnHeader(text)
+                        const failureCause = Exit.isFailure(exit) ? exit.cause : undefined
+                        const status = !failureCause
+                          ? ("completed" as const)
+                          : Cause.hasInterruptsOnly(failureCause)
+                            ? ("cancelled" as const)
+                            : ("failed" as const)
+                        yield* notifyTerminal({
+                          sessionID: input.sessionID,
+                          actorID: agentID,
+                          source: "continuation",
+                          status,
+                          ...(status === "completed"
+                            ? {
+                                result: text ?? "(no output)",
+                                ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                                ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                              }
+                            : {}),
+                          ...(status === "failed"
+                            ? {
+                                error: Cause.pretty(failureCause!),
+                                ...(text !== undefined ? { result: text } : {}),
+                                ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                                ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                              }
+                            : {}),
+                        })
+                      }),
+                    ),
+                  )
+                }).pipe(Effect.uninterruptible),
               (exec) => executions.release(exec),
             )
           : Effect.gen(function* () {
