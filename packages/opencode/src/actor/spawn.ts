@@ -1,6 +1,7 @@
 import { isTurnCancelled } from "../session/turn-cancellation"
 import * as RunApproval from "@/session/run-approval"
 import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit, Schedule } from "effect"
+import { ActorExecution } from "./execution"
 import type { SessionID, MessageID } from "@/session/schema"
 import type { ProviderID, ModelID } from "@/provider/schema"
 import type { Tool as AITool, ModelMessage } from "ai"
@@ -413,6 +414,7 @@ export const layer = Layer.effect(
       disposal: RunDisposalState
       taskSessionID: SessionID
     }
+    const executions = yield* ActorExecution.Service
     const lifecycleState = createActorLifecycle<MessageV2.WithParts, FrozenContext, NotificationTarget>()
     const retainForkContext = (
       key: string,
@@ -1015,7 +1017,17 @@ export const layer = Layer.effect(
         // The child inherits this receiver-generation marker when forked, so a
         // terminal continuation that outlives disposal cannot re-arm the instance.
         const fork = Effect.gen(function* () {
-          const fiber = yield* boundWork.pipe(Effect.interruptible, Effect.forkIn(scope))
+          // Upstream serializes a woken continuation behind the whole spawn
+          // execution, postStop included. Reserving here and releasing when the
+          // forked work settles reproduces that ordering; the fork's own wake
+          // generation still runs inside the claim.
+          const claim = yield* executions
+            .reserve(input.sessionID, input.actorID)
+            .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+          const claimed = claim
+            ? boundWork.pipe(Effect.ensuring(executions.release(claim)))
+            : boundWork
+          const fiber = yield* claimed.pipe(Effect.interruptible, Effect.forkIn(scope))
           return { fiber, outcome }
         }).pipe(state.withRunDisposal)
         return yield* (input.instanceRef ? fork.pipe(Effect.provideService(InstanceRef, input.instanceRef)) : fork)
@@ -2100,7 +2112,7 @@ export const layer = Layer.effect(
     )
     return impl
   }),
-)
+).pipe(Layer.provide(ActorExecution.layer))
 
 // Wrapped in Layer.suspend so the cross-module `.defaultLayer` reads defer to
 // first use instead of running at module load. Without this, the

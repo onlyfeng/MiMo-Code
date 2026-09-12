@@ -128,6 +128,10 @@ import type { TaskID } from "@/task/schema"
 import { EffectBridge } from "@/effect"
 import { Team } from "@/team"
 import { ActorRegistry } from "@/actor/registry"
+import { ActorExecution } from "@/actor/execution"
+import { makeTerminalNotifier } from "@/actor/notification"
+import { parseReturnHeader } from "@/actor/return-header"
+import { runTurn } from "@/actor/turn"
 import { Metrics } from "@/metrics"
 import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
 import { ToolResultError } from "../tool/result-error"
@@ -537,7 +541,9 @@ export const layer = Layer.effect(
     const sys = yield* SystemPrompt.Service
     const llm = yield* LLM.Service
     const actorRegistry = yield* ActorRegistry.Service
+    const executions = yield* ActorExecution.Service
     const inbox = yield* Inbox.Service
+    const notifyTerminal = makeTerminalNotifier({ inbox, registry: actorRegistry, sessions })
     let boundActor: ActorInterface | undefined
     const bindActor = (actor: ActorInterface) => {
       const previous = boundActor
@@ -5699,17 +5705,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const work = Effect.sync(() => {
         started = true
       }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale, undefined, undefined, undefined, undefined, input.deferInbox)))
+      // Continuations are serialized per (session, actor) by upstream's
+      // ActorExecution, which is what makes a wake wait for an in-flight spawn
+      // execution. The fork's wake generation still runs inside that claim: it
+      // owns drain-once, cancel-race settlement and disposal retargeting, which
+      // the execution map does not model.
       const actor = boundActor ?? spawnRef.current
       const execution =
         input.notifyParentOnComplete === true && agentID !== "main" && actor?.runPersistentTurn
-          ? actor.runPersistentTurn({
-              sessionID: input.sessionID,
-              actorID: agentID,
-              work,
-              onInterrupt: lastAssistant(input.sessionID, agentID),
-              notifyParentOnComplete: true,
-              inboxID: input.inboxID,
-            })
+          ? Effect.acquireUseRelease(
+              executions.acquire(input.sessionID, agentID),
+              (exec) =>
+                Effect.gen(function* () {
+                  yield* executions.attach(exec)
+                  return yield* actor.runPersistentTurn!({
+                    sessionID: input.sessionID,
+                    actorID: agentID,
+                    work,
+                    onInterrupt: lastAssistant(input.sessionID, agentID),
+                    notifyParentOnComplete: true,
+                    inboxID: input.inboxID,
+                  })
+                }),
+              (exec) => executions.release(exec),
+            )
           : Effect.gen(function* () {
               while (true) {
                 const head = input.inboxID ? yield* inbox.head(input.sessionID, agentID) : undefined
@@ -6315,7 +6334,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     )
     return impl
   }),
-)
+).pipe(Layer.provide(ActorExecution.layer))
 
 /** App composition variant with MCP supplied by the process-wide layer. */
 export const appLayer = Layer.suspend(() =>
