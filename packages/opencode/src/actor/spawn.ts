@@ -1298,6 +1298,7 @@ export const layer = Layer.effect(
       status: TerminalStatus,
       extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string } = {},
       source?: RunDisposalState,
+      onDelivered?: Effect.Effect<void>,
     ) =>
       Effect.gen(function* () {
         const origin = source ?? (yield* RunDisposal)
@@ -1315,6 +1316,7 @@ export const layer = Layer.effect(
         yield* withNotificationTarget(
           notificationTarget,
           inbox.send({
+            ...(onDelivered ? { onDelivered } : {}),
             receiverSessionID: parentSessionID,
             receiverActorID: actor.parentActorID ?? "main",
             senderSessionID: sessionID,
@@ -1430,6 +1432,7 @@ export const layer = Layer.effect(
                       ? { error }
                       : {},
                   source,
+                  markTerminalNotified(input.sessionID, input.actorID),
                 )
               }
             }).pipe(Effect.ensuring(lifecycleState.settleTerminal(owner)))
@@ -1510,6 +1513,8 @@ export const layer = Layer.effect(
                   : status === "failed"
                     ? { error: Cause.pretty(failureCause!), ...(text !== undefined ? { result: text } : {}) }
                     : {},
+                undefined,
+                markTerminalNotified(sessionID, actorID),
               )
             }),
           ),

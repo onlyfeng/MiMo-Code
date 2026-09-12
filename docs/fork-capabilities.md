@@ -703,21 +703,35 @@ where this delta does not change their implementation.
   its subject holds under either ordering once they are swapped. Every other
   postStop case awaits with a 5s-to-30s or unbounded timeout and never pauses
   the hook. One change to publish ordering unskips both quarantined cases.
-- 2026-09-13 Codex review follow-up: two defects in the marker introduced above
-  are fixed. It was set on the notifier *call*, but upstream's
-  `makeTerminalNotifier` swallows every cause, so a dropped envelope still
-  marked the settlement as reported and a later retirement suppressed the only
-  notice the parent could still receive. `src/actor/notification.ts` now returns
-  whether an envelope was written — the fork's first deviation in that
-  otherwise upstream-identical file, additive and kept minimal, with upstream's
-  cause handling and log wording routed around `ignoreCause` rather than
-  replaced because `ignoreCause` discards the success value. The continuation
-  marks only on a delivered envelope, pinned by `retirement reports a settlement
-  whose envelope was never delivered`. Second, the marker set had no bound:
-  `Actor.markTerminalNotified` now records only `persistent` actors, since an
-  already-settled ephemeral actor's cancel returns before the consuming branch,
-  and every cancel branch clears the key through `retire`, so the set is bounded
-  by the live standing peers.
+- 2026-09-13 Codex review follow-up: four defects in the marker introduced above
+  are fixed. The record is no longer written after the notifier returns; it is
+  written inside `Inbox.send`, once the row is committed and past the retirement
+  race but *before* `InboxArrived` and the receiver wake make it observable.
+  `SendInput.onDelivered` carries it and `TerminalNotification.onDelivered`
+  forwards it, which is the fork's first deviation in the otherwise
+  upstream-identical `src/actor/notification.ts` — ten additive lines, one
+  optional field.
+  That ordering settles three of the four together: a dropped send never runs
+  the hook, so retirement still reports the settlement the parent never heard
+  about (pinned by `retirement reports a settlement whose envelope was never
+  delivered`, mutation-checked); and a subscriber that force-cancels the moment
+  it sees the envelope now observes the record as already written, so it retires
+  without publishing a second one and cannot leave a key behind after
+  retirement. `finishPersistentTurn` and the persistent-turn exit path record
+  their deliveries the same way, so an accepted `Actor.resume` no longer leaves
+  retirement to publish an extra envelope.
+  Fourth, the marker set had no bound: `Actor.markTerminalNotified` records only
+  `persistent` actors, since an already-settled ephemeral actor's cancel returns
+  before the consuming branch, and every cancel branch clears the key through
+  `retire`, so the set is bounded by the live standing peers.
+  Coverage gap, stated rather than papered over: the persistent-turn recording
+  is unpinned. `runPersistentTurn` has no caller outside `spawn.ts` since the
+  wake-routing retirement, and the path is reachable in production only through
+  the `session.resume` route, so removing the recording fails no test. Driving
+  `Actor.runPersistentTurn` directly does admit the turn but its `notifyTerminal`
+  silently returns, because a test context resolves no notification target. The
+  fix matches the continuation path's rule by construction and is kept; pinning
+  it needs a harness that can resolve a notification target outside a spawn.
 - 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
   ownership to the real parent` polled the `InboxTable` row its assertion is
   about. That row exists to wake the persistent peer it addresses, so the peer's
