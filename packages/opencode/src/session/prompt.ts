@@ -113,7 +113,7 @@ import {
 } from "./trajectory"
 import { prefixCaptureRef, prefixModelIdentity } from "./prefix-capture-ref"
 import { spawnRef } from "@/actor/spawn-ref"
-import type { Interface as ActorInterface } from "@/actor/spawn"
+import type { Interface as ActorInterface, TerminalNotice } from "@/actor/spawn"
 import { Inbox } from "@/inbox"
 import { sessionPromptRef, defaultModelRef } from "@/inbox/inbox-ref"
 import { Tool } from "@/tool"
@@ -5758,8 +5758,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input.notifyParentOnComplete === true && agentID !== "main"
           ? Effect.acquireUseRelease(
               executions.acquire(input.sessionID, agentID),
-              (exec) =>
-                Effect.gen(function* () {
+              (exec) => {
+                // Hoisted so the completion below can see the notice this turn
+                // opened, whatever exit path it takes.
+                let notice: TerminalNotice | undefined
+                return Effect.gen(function* () {
                   yield* executions.attach(exec)
                   // Cancelled before drain: do not consume messages for a turn
                   // that will not run. isCancelled is re-checked inside drain
@@ -5781,10 +5784,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   // only a turn that actually runs supersedes it. Opening this
                   // early also means a cancel arriving any time during the turn
                   // finds an in-flight notice to wait on rather than none.
-                  const notice = yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
-                    input.sessionID,
-                    agentID,
-                  ) ?? Effect.succeed(undefined)
+                  notice =
+                    (yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
+                      input.sessionID,
+                      agentID,
+                    ) ?? Effect.succeed(undefined)) ?? undefined
                   // Capture the last delivery even when the turn dies with a
                   // settled error, so settle can persist a partial result.
                   let lastFinal: MessageV2.WithParts | undefined
@@ -5886,7 +5890,26 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       }),
                     ),
                   )
-                }).pipe(Effect.uninterruptible),
+                })
+                  .pipe(
+                    // The notice this turn opened is always completed, even if
+                    // the turn dies before the notify's own completion is in
+                    // place. First completion wins, so a real delivered result
+                    // is never overridden.
+                    Effect.ensuring(
+                      Effect.suspend(
+                        () =>
+                          (boundActor ?? spawnRef.current)?.settleTerminalNotified?.(
+                            input.sessionID,
+                            agentID,
+                            notice,
+                            false,
+                          ) ?? Effect.void,
+                      ),
+                    ),
+                    Effect.uninterruptible,
+                  )
+              },
               (exec) => executions.release(exec),
             )
           : Effect.gen(function* () {

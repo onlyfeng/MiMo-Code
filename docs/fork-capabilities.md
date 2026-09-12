@@ -725,9 +725,13 @@ where this delta does not change their implementation.
   so a notice opened in the turn's exit handler could be published after a
   cancel had already retired the actor. Each notice is its own token, settled by
   identity: two settlements racing for one actor — an `Actor.resume` overlapping
-  an inbox continuation — replace rather than share the map entry, and the
-  displaced notice is completed at once so a cancel waiting on it cannot be
-  stranded.
+  an inbox continuation — replace rather than share the map entry, and a
+  displaced notice is only unlisted, never forced to "undelivered", because its
+  own notifier still completes it with the real outcome; forcing it would
+  release a cancel waiting on it before that envelope was committed and both
+  would publish. The first completion wins and owns the map entry, so the
+  guard that guarantees no notice is left pending is a no-op once the notifier
+  has settled.
   That shape settles the delivery questions together: a send that wrote nothing
   completes the record as undelivered and drops it, so retirement still reports
   a settlement the parent never heard about (pinned by `retirement reports a

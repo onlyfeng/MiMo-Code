@@ -1815,9 +1815,7 @@ export const layer = Layer.effect(
                 accepted.value = true
                 // Only an admission that commits supersedes the previous
                 // settlement; a failed one leaves its record intact.
-                const displaced = notifiedTerminals.get(key)
                 notifiedTerminals.delete(key)
-                if (displaced) Deferred.doneUnsafe(displaced.done, Exit.succeed(false))
               },
               shouldCommit: () =>
                 !input.signal?.aborted &&
@@ -2067,10 +2065,11 @@ export const layer = Layer.effect(
       if (actor?.lifecycle !== "persistent") return undefined
       const notice: TerminalNotice = { done: yield* Deferred.make<boolean>() }
       const key = actorKey(sessionID, actorID)
-      const displaced = notifiedTerminals.get(key)
+      // Replacing the map entry only unlists the previous notice; it is left
+      // pending for its own notifier to complete with the real outcome. Forcing
+      // it to "undelivered" here would release a cancel waiting on it before
+      // that notifier had committed its envelope, and both would then publish.
       yield* Effect.sync(() => notifiedTerminals.set(key, notice))
-      // Never strand a cancel already waiting on the notice this one replaces.
-      if (displaced) yield* Deferred.succeed(displaced.done, false).pipe(Effect.asVoid)
       return notice
     })
 
@@ -2086,13 +2085,18 @@ export const layer = Layer.effect(
       notice: TerminalNotice | undefined,
       delivered: boolean,
     ) =>
-      Effect.suspend(() => {
-        if (!notice) return Effect.void
+      Effect.gen(function* () {
+        if (!notice) return
+        // First completion wins and owns the map entry. A later call — the
+        // safety net that guarantees no notice is left pending — must then do
+        // nothing at all, or it would unlist a delivered envelope and let a
+        // retirement publish a second one.
+        if (yield* Deferred.isDone(notice.done)) return
         const key = actorKey(sessionID, actorID)
         // Only retire the map entry this notice still owns: a newer turn may
         // already have replaced it, and that one settles itself.
         if (notifiedTerminals.get(key) === notice && !delivered) notifiedTerminals.delete(key)
-        return Deferred.succeed(notice.done, delivered).pipe(Effect.asVoid)
+        yield* Deferred.succeed(notice.done, delivered)
       })
 
     /**
@@ -2117,10 +2121,10 @@ export const layer = Layer.effect(
     const clearTerminalNotified = (sessionID: SessionID, actorID: string) =>
       Effect.suspend(() => {
         const key = actorKey(sessionID, actorID)
-        const notice = notifiedTerminals.get(key)
+        // Unlist only. A waiter keeps its own token, which the notifier that
+        // opened it still completes with the real outcome.
         notifiedTerminals.delete(key)
-        // Release anything already waiting on this record.
-        return notice ? Deferred.succeed(notice.done, false).pipe(Effect.asVoid) : Effect.void
+        return Effect.void
       })
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
