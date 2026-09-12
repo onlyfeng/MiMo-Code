@@ -7,7 +7,6 @@ import { TaskTable, TaskEventTable } from "./task.sql"
 import { TaskID, type Task, type TaskEvent } from "./schema"
 import { Created as TaskCreated, Updated as TaskUpdated, type UpdatedKind } from "./events"
 import { RecoverableError } from "@/tool/recoverable"
-import { EffectBridge } from "@/effect"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -127,7 +126,6 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Config.Service> = 
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const config = yield* Config.Service
-    const bridge = yield* EffectBridge.make()
 
     const cleanupAfter = Effect.fn("TaskRegistry.cleanupAfter")(function* (now: number) {
       const cfg = yield* config.get()
@@ -150,11 +148,17 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Config.Service> = 
       )
     }
 
+    // Publish on the calling fiber so Instance.directory matches the session
+    // workspace (the same key instance /event SSE and GlobalBus consumers use).
+    // A layer-scoped EffectBridge.fork captured Instance too early (often cwd /
+    // undefined), so task.* landed on a different Bus bucket than live subscribers.
+    // ignore: Bus delivery is best-effort telemetry — the DB row remains authoritative
+    // and HTTP GET /session/:id/task still hydrates TUI/desktop stores.
     const publishCreated = (task: Task) =>
-      bridge.fork(bus.publish(TaskCreated, { sessionID: task.session_id, task }))
+      bus.publish(TaskCreated, { sessionID: task.session_id, task }).pipe(Effect.ignore)
 
     const publishUpdated = (task: Task, kind: UpdatedKind) =>
-      bridge.fork(bus.publish(TaskUpdated, { sessionID: task.session_id, task, kind }))
+      bus.publish(TaskUpdated, { sessionID: task.session_id, task, kind }).pipe(Effect.ignore)
 
     const create = Effect.fn("TaskRegistry.create")(function* (input: {
       session_id: SessionID
@@ -195,7 +199,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Config.Service> = 
       Database.use((db) => db.insert(TaskTable).values(row).run())
       insertEvent(input.session_id, id, "created", undefined, now)
       const task = fromTaskRow(row)
-      publishCreated(task)
+      yield* publishCreated(task)
       return task
     })
 
@@ -271,7 +275,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Config.Service> = 
       insertEvent(input.session_id, input.id, "blocked", input.event_summary, now)
       const updated = yield* get({ session_id: input.session_id, id: input.id })
       if (!updated) return yield* Effect.die(new RecoverableError(notFoundMessage(input.id)))
-      publishUpdated(updated, "blocked")
+      yield* publishUpdated(updated, "blocked")
       return updated
     })
 
@@ -291,7 +295,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Config.Service> = 
       insertEvent(input.session_id, input.id, "unblocked", input.event_summary, now)
       const updated = yield* get({ session_id: input.session_id, id: input.id })
       if (!updated) return yield* Effect.die(new RecoverableError(notFoundMessage(input.id)))
-      publishUpdated(updated, "unblocked")
+      yield* publishUpdated(updated, "unblocked")
       return updated
     })
 
@@ -334,7 +338,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Config.Service> = 
       insertEvent(input.session_id, input.id, "started", input.event_summary, now)
       const updated = yield* get({ session_id: input.session_id, id: input.id })
       if (!updated) return yield* Effect.die(new RecoverableError(notFoundMessage(input.id)))
-      publishUpdated(updated, "started")
+      yield* publishUpdated(updated, "started")
       return updated
     })
 
@@ -360,7 +364,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Config.Service> = 
       insertEvent(input.session_id, input.id, "done", input.event_summary, now)
       const updated = yield* get({ session_id: input.session_id, id: input.id })
       if (!updated) return yield* Effect.die(new RecoverableError(notFoundMessage(input.id)))
-      publishUpdated(updated, "done")
+      yield* publishUpdated(updated, "done")
       return updated
     })
 
@@ -386,7 +390,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Config.Service> = 
       insertEvent(input.session_id, input.id, "abandoned", input.event_summary, now)
       const updated = yield* get({ session_id: input.session_id, id: input.id })
       if (!updated) return yield* Effect.die(new RecoverableError(notFoundMessage(input.id)))
-      publishUpdated(updated, "abandoned")
+      yield* publishUpdated(updated, "abandoned")
       return updated
     })
 
@@ -406,7 +410,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Config.Service> = 
       insertEvent(input.session_id, input.id, "renamed", input.summary, now)
       const updated = yield* get({ session_id: input.session_id, id: input.id })
       if (!updated) return yield* Effect.die(new RecoverableError(notFoundMessage(input.id)))
-      publishUpdated(updated, "renamed")
+      yield* publishUpdated(updated, "renamed")
       return updated
     })
 
