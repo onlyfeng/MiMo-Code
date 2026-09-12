@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Exit } from "effect"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
@@ -22,6 +22,13 @@ export interface TerminalNotification {
   warnings?: string[]
 }
 
+/**
+ * Returns whether an envelope was actually written. Upstream's helper returns
+ * void and swallows every cause, which leaves a caller that must not report the
+ * same settlement twice unable to tell a delivered envelope from a dropped one.
+ * FC-001's retirement path needs that distinction: it suppresses its own cancel
+ * envelope only when the settlement was already delivered.
+ */
 export function makeTerminalNotifier(deps: {
   inbox: Inbox
   registry: Registry
@@ -30,9 +37,9 @@ export function makeTerminalNotifier(deps: {
   return (input: TerminalNotification) =>
     Effect.gen(function* () {
       const actor = yield* deps.registry.get(input.sessionID, input.actorID)
-      if (!actor?.background) return
+      if (!actor?.background) return false
       if (input.source === "spawn" ? actor.agent === "checkpoint-writer" : SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent))
-        return
+        return false
       const parentSessionID =
         input.parentSessionID ??
         (actor.mode === "peer" ? (yield* deps.sessions.get(input.sessionID)).parentID : input.sessionID)
@@ -54,17 +61,29 @@ export function makeTerminalNotifier(deps: {
           ...(input.warnings?.length ? { warnings: input.warnings } : {}),
         }),
       })
-      if (input.source === "continuation") return
+      // Delivered either way; a continuation only skips the toast.
+      if (input.source === "continuation") return true
       yield* Effect.promise(() =>
         Bus.publish(TuiEvent.ToastShow, {
           message: `Child "${actor.description}" ${input.status}`,
           variant: input.status === "completed" ? "success" : input.status === "cancelled" ? "info" : "error",
         }),
       ).pipe(Effect.ignore)
+      return true
     }).pipe(
-      Effect.ignoreCause({
-        log: "Error",
-        message: `actor terminal notification failed: ${input.sessionID}/${input.actorID}`,
-      }),
+      // Keep upstream's cause handling and log wording verbatim — ignoreCause
+      // discards the success value, so route around it instead of replacing it.
+      Effect.exit,
+      Effect.flatMap((exit) =>
+        Exit.isSuccess(exit)
+          ? Effect.succeed(exit.value)
+          : Effect.failCause(exit.cause).pipe(
+              Effect.ignoreCause({
+                log: "Error",
+                message: `actor terminal notification failed: ${input.sessionID}/${input.actorID}`,
+              }),
+              Effect.as(false),
+            ),
+      ),
     )
 }

@@ -519,6 +519,36 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
       Effect.provide(Logger.layer([Logger.make((options) => { messages.push(String(options.message)) })])),
     )
   })
+  // A settlement only counts as reported once an envelope actually landed. The
+  // notifier swallows send failures, so marking on the call alone would let a
+  // later retirement suppress the only notice the parent could still get.
+  it.live("retirement reports a settlement whose envelope was never delivered", () => provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const registry = yield* ActorRegistry.Service
+      const prompt = yield* SessionPrompt.Service
+      const parent = yield* sessions.create({ title: "late receiver", permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+      // "owner" is deliberately unregistered, so every envelope addressed to it
+      // fails to send while it is missing.
+      yield* llm.text("first result")
+      const peer = yield* actor.spawn({ mode: "peer", sessionID: parent.id, parentActorID: "owner", agentType: "build", task: "first", description: "standing peer", context: "none", tools: ["read"], background: true, model: ref, lifecycle: "persistent" })
+      expect((yield* Deferred.await(peer.outcome)).status).toBe("success")
+      expect((yield* parentInboxRows(parent.id, "owner")).length).toBe(0)
+
+      // A continuation settles and its envelope is dropped for the same reason.
+      yield* llm.text("second result")
+      yield* prompt.prompt({ sessionID: peer.sessionID, agentID: peer.actorID, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "continue" }] })
+      yield* prompt.loop({ sessionID: peer.sessionID, agentID: peer.actorID, notifyParentOnComplete: true })
+      expect((yield* parentInboxRows(parent.id, "owner")).length).toBe(0)
+
+      // The receiver appears, then the peer is retired. Nothing it settled has
+      // ever reached the inbox, so retirement must still report.
+      yield* registry.register({ sessionID: parent.id, actorID: "owner", mode: "subagent", agent: "build", description: "late parent", contextMode: "none", background: true, lifecycle: "ephemeral" })
+      yield* actor.cancel(peer.sessionID, peer.actorID, "forced")
+      expect((yield* parentInboxRows(parent.id, "owner")).length).toBe(1)
+    }), { git: true, config: providerCfg },
+  ))
   // Desktop tool-step-schema: real inbox-woken execution entry, isolated LLM.
   for (const mode of ["subagent", "peer"] as const) {
     for (const terminal of ["success", "failure", "cancelled"] as const) {

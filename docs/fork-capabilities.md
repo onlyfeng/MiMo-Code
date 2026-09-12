@@ -703,6 +703,21 @@ where this delta does not change their implementation.
   its subject holds under either ordering once they are swapped. Every other
   postStop case awaits with a 5s-to-30s or unbounded timeout and never pauses
   the hook. One change to publish ordering unskips both quarantined cases.
+- 2026-09-13 Codex review follow-up: two defects in the marker introduced above
+  are fixed. It was set on the notifier *call*, but upstream's
+  `makeTerminalNotifier` swallows every cause, so a dropped envelope still
+  marked the settlement as reported and a later retirement suppressed the only
+  notice the parent could still receive. `src/actor/notification.ts` now returns
+  whether an envelope was written — the fork's first deviation in that
+  otherwise upstream-identical file, additive and kept minimal, with upstream's
+  cause handling and log wording routed around `ignoreCause` rather than
+  replaced because `ignoreCause` discards the success value. The continuation
+  marks only on a delivered envelope, pinned by `retirement reports a settlement
+  whose envelope was never delivered`. Second, the marker set had no bound:
+  `Actor.markTerminalNotified` now records only `persistent` actors, since an
+  already-settled ephemeral actor's cancel returns before the consuming branch,
+  and every cancel branch clears the key through `retire`, so the set is bounded
+  by the live standing peers.
 - 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
   ownership to the real parent` polled the `InboxTable` row its assertion is
   about. That row exists to wake the persistent peer it addresses, so the peer's

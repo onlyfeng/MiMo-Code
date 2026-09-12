@@ -1816,7 +1816,9 @@ export const layer = Layer.effect(
       }
 
         const releaseEpisode = lifecycleState.releaseCancel(key, ownership.episode)
-        const retire = lifecycleState.retire(key)
+        const retire = lifecycleState
+          .retire(key)
+          .pipe(Effect.ensuring(clearTerminalNotified(sessionID, actorID)))
         const settleClaim =
           ownership.claimed && ownership.generation ? lifecycleState.settleTerminal(ownership.generation) : Effect.void
 
@@ -1951,14 +1953,27 @@ export const layer = Layer.effect(
       )
     })
 
-    const markTerminalNotified = (sessionID: SessionID, actorID: string) =>
-      Effect.sync(() => {
-        notifiedTerminals.add(actorKey(sessionID, actorID))
-      })
+    // Only a persistent actor's cancel can reach the branch that consumes this
+    // marker: an ephemeral one that has already settled returns earlier, so
+    // recording it would leave an entry nothing ever reads. Keyed per actor and
+    // dropped on retirement, so the set is bounded by the live standing peers.
+    const markTerminalNotified = Effect.fn("Actor.markTerminalNotified")(function* (
+      sessionID: SessionID,
+      actorID: string,
+    ) {
+      const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      if (actor?.lifecycle !== "persistent") return
+      yield* Effect.sync(() => notifiedTerminals.add(actorKey(sessionID, actorID)))
+    })
 
     /** True once, then cleared: the pending duplicate has been suppressed. */
     const consumeTerminalNotified = (sessionID: SessionID, actorID: string) =>
       Effect.sync(() => notifiedTerminals.delete(actorKey(sessionID, actorID)))
+
+    const clearTerminalNotified = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => {
+        notifiedTerminals.delete(actorKey(sessionID, actorID))
+      })
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
       return (yield* lifecycleState.getForkContext(actorKey(sessionID, actorID)))?.context

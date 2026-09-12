@@ -5833,7 +5833,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           : Cause.hasInterruptsOnly(failureCause)
                             ? ("cancelled" as const)
                             : ("failed" as const)
-                        yield* notifyTerminal({
+                        const delivered = yield* notifyTerminal({
                           sessionID: input.sessionID,
                           actorID: agentID,
                           source: "continuation",
@@ -5856,8 +5856,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                         })
                         // A forced cancel that retires this actor afterwards must
                         // not publish a second envelope for the same settlement.
-                        const owner = boundActor ?? spawnRef.current
-                        yield* owner?.markTerminalNotified?.(input.sessionID, agentID) ?? Effect.void
+                        // Only a delivered envelope counts: when the send fails
+                        // the parent has heard nothing, so retirement must still
+                        // report it.
+                        if (delivered) {
+                          const owner = boundActor ?? spawnRef.current
+                          yield* owner?.markTerminalNotified?.(input.sessionID, agentID) ?? Effect.void
+                        }
                       }),
                     ),
                   )
