@@ -5761,10 +5761,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               (exec) =>
                 Effect.gen(function* () {
                   yield* executions.attach(exec)
-                  // A new continuation supersedes whatever the previous turn
-                  // reported, so its record must not survive into this one.
-                  yield* (boundActor ?? spawnRef.current)?.resetTerminalNotified?.(input.sessionID, agentID) ??
-                    Effect.void
                   // Cancelled before drain: do not consume messages for a turn
                   // that will not run. isCancelled is re-checked inside drain
                   // just before commit, so a cancel mid-drain leaves rows durable.
@@ -5778,6 +5774,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     // does not notify on its own — only runTurn.onExit does.
                     if (!exec.cancelled) return yield* lastAssistant(input.sessionID, agentID)
                   }
+                  // Past every no-turn exit: a continuation that returns the
+                  // previous assistant without running reported nothing, so it
+                  // must leave the earlier turn's record intact. Only a turn
+                  // that actually runs supersedes it.
+                  yield* (boundActor ?? spawnRef.current)?.resetTerminalNotified?.(input.sessionID, agentID) ??
+                    Effect.void
                   // Capture the last delivery even when the turn dies with a
                   // settled error, so settle can persist a partial result.
                   let lastFinal: MessageV2.WithParts | undefined
