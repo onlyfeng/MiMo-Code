@@ -49,7 +49,7 @@ try {
     yield* sessions.updateMessage({ id: parentID, sessionID: session.id, agentID: "case-child", role: "user", agent: "general", model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") }, time: { created: Date.now() } })
     yield* sessions.updateMessage({ id: messageID, sessionID: session.id, agentID: "case-child", role: "assistant", parentID, agent: "general", mode: "default", modelID: ModelID.make("test-model"), providerID: ProviderID.make("test"), path: { cwd: directory, root: directory }, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: Date.now(), completed: Date.now() }, actorResult: { finalText: "PERSISTED-PARTIAL" } })
     yield* sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID, type: "text", text: "PERSISTED-PARTIAL" })
-    yield* runTurn(session.id, "case-child", Effect.fail("controlled failure"), () => Effect.succeed(messageID)).pipe(Effect.exit)
+    yield* runTurn(session.id, "case-child", Effect.fail("controlled failure"), { settle: () => Effect.succeed(messageID) }).pipe(Effect.exit)
     yield* Effect.promise(() => send({ kind: "result", sessionID: session.id }))
   }).pipe(Effect.scoped, Effect.provide(services))) })
 } catch (error) {
