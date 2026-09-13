@@ -1945,7 +1945,16 @@ export const layer = Layer.effect(
               lastError: undefined,
             })
             .pipe(inReceiver, Effect.ignoreCause)
-          yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+          // Counted, because work this cancel consumes can no longer be settled
+          // by the turn that would have run it: that wake drains zero rows and
+          // returns without publishing. The mark records that the *previous*
+          // settlement reached the parent, which says nothing about the one
+          // this cancel just discarded, so it stops covering this publish.
+          // `undefined` when the receiver's run was disposing and the drain
+          // never ran, which consumed nothing and so leaves the mark standing.
+          const drained: number =
+            (yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.catchCause(() => Effect.succeed(0)))) ?? 0
+          if (drained > 0) yield* Effect.sync(() => notifiedSettlements.delete(key))
           // Report only what the parent has not already been told. The fork
           // publishes an actor's terminal envelope from whichever turn settles
           // it, and `SessionPrompt`'s continuation is the one path that settles

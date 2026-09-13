@@ -81,7 +81,11 @@ where this delta does not change their implementation.
   swallows every cause and so makes a failed send indistinguishable from a
   delivered one. Recording a failed send would suppress the only notice the
   parent could still get.
-  Retiring a peer whose settlement was never announced still announces it.
+  Retiring a peer whose settlement was never announced still announces it, and a
+  cancel that drains queued rows drops the mark first: work it consumes can no
+  longer be settled by the turn that would have run it — that wake drains zero
+  rows and returns without publishing — so the previous settlement's mark stops
+  covering this one.
   Cancel reads two conditions at one point, after the runner is interrupted and
   the inbox drained, and they are complementary rather than redundant:
   `SessionPrompt` releases the continuation's `ActorExecution` outside the
