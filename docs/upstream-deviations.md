@@ -184,7 +184,7 @@ where this delta does not change their implementation.
   exactly, and `config.llmServer`, `Util.Self`, upstream's `llm-server` CLI and
   upstream's `generateServerPassword`/`clearGeneratedServerPassword` come with
   it. Net −3548 lines.
-- Observable contract, what remains fork-owned: three boundaries, all kept
+- Observable contract, what remains fork-owned: five boundaries, all kept
   because upstream does not have them, not because the fork prefers them.
   1. `serve --llm-server` gates only the address advertisement. The route is
      always mounted and always demands a minted token, so credentials alone
@@ -199,8 +199,22 @@ where this delta does not change their implementation.
      wrong bucket is invisible to `mimo llm-server issue` in the project it
      actually serves. Defaults to `process.cwd()`, so every other caller keeps
      upstream's behaviour.
+  4. `AuthMiddleware` verifies a capability token before waving the request past
+     basic auth. Presence alone is what upstream checks, and `InstanceMiddleware`
+     runs next — on an operator-secured server its cwd containment is off by
+     design, so a junk bearer would pick any `?directory=` on the machine and pay
+     for a full `InstanceBootstrap` before the route answered 401. This is
+     FD-004's original "authenticate before body/bootstrap", which the retired
+     model API got for free by owning its own listener.
+  5. The capability route keeps the retired route's bounded admission: at most
+     two concurrent requests (429 with `Retry-After`) and a 120s server-owned
+     deadline combined with the client signal. Upstream passes only the client's
+     signal, so a token holder can open unbounded streams and a hung provider
+     call has nothing to end it — both spend real credits.
   The non-loopback bind guard still reads `MIMOCODE_SERVER_OPERATOR_PASSWORD`,
-  so a worker-generated credential cannot satisfy it.
+  so a worker-generated credential cannot satisfy it. An IPv6 literal is
+  bracketed before it is advertised, which upstream omits and `URL.hostname`
+  silently ignores, leaving a base_url that resolves to IPv4.
 - Adopted from upstream, including where it relaxes the fork:
   - An empty `models` array now means "all configured models". Upstream maps it
     to `undefined` and documents the intent; the fork had required an explicit

@@ -139,16 +139,32 @@ export async function listen(opts: {
   // printed base_url is usable on this machine.
   const advertisedHostname = opts.hostname === "0.0.0.0" || opts.hostname === "::" ? "127.0.0.1" : opts.hostname
   const advertised = new URL("http://localhost")
-  advertised.hostname = advertisedHostname
+  // A bare IPv6 literal is silently ignored by `URL.hostname`, which would leave
+  // this as `localhost` and print a base_url that resolves to IPv4 and cannot
+  // reach an IPv6-only listener. Brackets make it a valid host.
+  advertised.hostname = advertisedHostname.includes(":") ? `[${advertisedHostname}]` : advertisedHostname
   advertised.port = String(server.port)
   if (advertise) {
-    await LLMServerTokens.publish(directory, {
+    const published = LLMServerTokens.publish(directory, {
       pid: process.pid,
       hostname: advertisedHostname,
       port: server.port,
       url: advertised.toString(),
       started: Date.now(),
-    }).catch((error) => log.warn("failed to advertise llm-server address", { error: String(error) }))
+    })
+    // An operator who asked for the advertisement gets an error rather than a
+    // listener that claims to be discoverable and is not: `llm-server issue`
+    // would resolve `base_url: null` with nothing to explain it. Upstream logs
+    // and continues, which is right for its always-on default but wrong for an
+    // explicit request (FD-004 residual).
+    if (opts.advertise === true) {
+      await published.catch(async (error) => {
+        await server.stop(true)
+        throw error
+      })
+    } else {
+      await published.catch((error) => log.warn("failed to advertise llm-server address", { error: String(error) }))
+    }
   }
 
   const next = new URL("http://localhost")

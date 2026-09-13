@@ -11,7 +11,9 @@ import { basicAuth } from "hono/basic-auth"
 import { cors } from "hono/cors"
 import { compress } from "hono/compress"
 import { isPtyConnectPath, PTY_CONNECT_TICKET_QUERY } from "./pty-ticket"
-import { CAPABILITY_PREFIX } from "./routes/instance/capability"
+import { CAPABILITY_PREFIX, presentedToken } from "./routes/instance/capability"
+import { requestedDirectory } from "./routes/instance/middleware"
+import { LLMServerTokens } from "@/llm-server/tokens"
 
 const log = Log.create({ service: "server" })
 
@@ -48,7 +50,7 @@ function presentsToken(...headers: (string | undefined)[]) {
   return headers.some((value) => (value ?? "").trim().length > 0)
 }
 
-export const AuthMiddleware: MiddlewareHandler = (c, next) => {
+export const AuthMiddleware: MiddlewareHandler = async (c, next) => {
   if (c.req.method === "OPTIONS") return next()
   const password = Flag.MIMOCODE_SERVER_PASSWORD
   if (!password) return next()
@@ -66,6 +68,28 @@ export const AuthMiddleware: MiddlewareHandler = (c, next) => {
     path.startsWith(CAPABILITY_PREFIX + "/") &&
     presentsToken(c.req.header("authorization"), c.req.header("x-api-key"), c.req.header("api-key"))
   ) {
+    // Presence is not enough to wave a request past basic auth. `InstanceMiddleware`
+    // runs next, and on an operator-secured server its cwd containment is off by
+    // design — so a junk bearer would otherwise pick any `?directory=` on the
+    // machine and pay for a full `InstanceBootstrap` (config, plugins, LSP, watcher,
+    // index) before the capability route finally answered 401. Verifying here keeps
+    // FD-004's "authenticate before bootstrap" boundary, which the fork's retired
+    // model API enforced by owning its own listener.
+    const token = presentedToken(c)
+    const verdict = token ? await LLMServerTokens.verify(requestedDirectory(c), token) : undefined
+    if (!verdict?.ok) {
+      c.header("WWW-Authenticate", "Bearer")
+      return c.json(
+        {
+          error: {
+            message: "Invalid or expired model API credential",
+            type: "invalid_request_error",
+            code: "invalid_api_key",
+          },
+        },
+        401,
+      )
+    }
     return next()
   }
 

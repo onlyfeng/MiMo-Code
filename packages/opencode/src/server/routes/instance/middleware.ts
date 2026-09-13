@@ -1,4 +1,4 @@
-import type { MiddlewareHandler } from "hono"
+import type { Context, MiddlewareHandler } from "hono"
 import { Instance } from "@/project/instance"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { AppRuntime } from "@/effect/app-runtime"
@@ -11,18 +11,28 @@ import { Global } from "@/global"
 import path from "node:path"
 import { DIRECTORY_DENIED_CODE } from "./access"
 
+/**
+ * The directory a request addresses, resolved exactly as this middleware does.
+ *
+ * Exported so `AuthMiddleware` can authenticate a capability token against it
+ * BEFORE this middleware bootstraps an instance for it.
+ */
+export function requestedDirectory(c: Context) {
+  const raw = c.req.query("directory") || c.req.header("x-mimocode-directory") || process.cwd()
+  return AppFileSystem.resolve(
+    (() => {
+      try {
+        return decodeURIComponent(raw)
+      } catch {
+        return raw
+      }
+    })(),
+  )
+}
+
 export function InstanceMiddleware(workspaceID?: WorkspaceID): MiddlewareHandler {
   return async (c, next) => {
-    const raw = c.req.query("directory") || c.req.header("x-mimocode-directory") || process.cwd()
-    const directory = AppFileSystem.resolve(
-      (() => {
-        try {
-          return decodeURIComponent(raw)
-        } catch {
-          return raw
-        }
-      })(),
-    )
+    const directory = requestedDirectory(c)
 
     if (!Flag.MIMOCODE_SERVER_OPERATOR_PASSWORD) {
       const cwd = Filesystem.resolve(process.cwd())

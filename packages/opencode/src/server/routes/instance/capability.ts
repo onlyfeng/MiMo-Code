@@ -36,7 +36,7 @@ export const CAPABILITY_PREFIX = "/v1"
  * `authorization` is the OpenAI convention; `x-api-key` is Anthropic's, and clients
  * configured for either reach the same place. `api-key` is Azure's.
  */
-function presented(c: { req: { header: (name: string) => string | undefined } }) {
+export function presentedToken(c: { req: { header: (name: string) => string | undefined } }) {
   const authorization = c.req.header("authorization")
   if (authorization) {
     const bearer = /^Bearer\s+(.+)$/i.exec(authorization)
@@ -71,6 +71,25 @@ function errorBody(input: { message: string; type: string; code?: string; param?
  */
 const scopes = new WeakMap<Request, { models: ModelScope }>()
 
+/**
+ * Bounded admission, kept from the fork's retired model API (FD-004 residual).
+ *
+ * Upstream hands the provider only the client's own signal, so a caller holding a
+ * minted token can open unbounded concurrent streams and a hung provider call has
+ * nothing to end it. Both cost real credits. Two in flight is what the retired
+ * route allowed, and the deadline is its 120s.
+ */
+const MAX_CONCURRENT = 2
+const REQUEST_DEADLINE_MS = 120_000
+const active = new Set<AbortController>()
+
+/** Server-owned signal for one request: the client's, plus our own deadline. */
+const deadlines = new WeakMap<Request, AbortSignal>()
+
+function deadlineFor(request: Request) {
+  return deadlines.get(request) ?? request.signal
+}
+
 function scopeFor(request: Request): ModelScope {
   const found = scopes.get(request)
   if (!found) {
@@ -92,7 +111,7 @@ export const CapabilityRoutes = lazy(() =>
      * carries the model scope that Basic auth has no concept of.
      */
     .use(async (c, next) => {
-      const token = presented(c)
+      const token = presentedToken(c)
       if (!token) {
         return c.json(
           errorBody({ message: "Missing bearer token", type: "invalid_request_error", code: "invalid_api_key" }),
@@ -127,6 +146,32 @@ export const CapabilityRoutes = lazy(() =>
         models: verdict.record.models.length > 0 ? verdict.record.models : undefined,
       })
       return next()
+    })
+    .use(async (c, next) => {
+      if (active.size >= MAX_CONCURRENT) {
+        c.header("Retry-After", "1")
+        return c.json(
+          errorBody({
+            message: `Model API allows at most ${MAX_CONCURRENT} concurrent requests`,
+            type: "rate_limit_error",
+            code: "rate_limit_exceeded",
+          }),
+          429,
+        )
+      }
+      const controller = new AbortController()
+      const timer = setTimeout(
+        () => controller.abort(new DOMException("Model request timed out", "TimeoutError")),
+        REQUEST_DEADLINE_MS,
+      )
+      active.add(controller)
+      deadlines.set(c.req.raw, AbortSignal.any([c.req.raw.signal, controller.signal]))
+      try {
+        return await next()
+      } finally {
+        clearTimeout(timer)
+        active.delete(controller)
+      }
     })
     .get("/models", async (c) => {
       const all = await AppRuntime.runPromise(
@@ -165,7 +210,7 @@ export const CapabilityRoutes = lazy(() =>
       const rejection = unsupported(req)
       if (rejection) throw new RequestError(400, rejection, "invalid_request_error")
 
-      const started = await start({ req, allowlist: scopeFor(c.req.raw), abort: c.req.raw.signal })
+      const started = await start({ req, allowlist: scopeFor(c.req.raw), abort: deadlineFor(c.req.raw) })
       if (req.stream !== true) {
         return c.json(await collect({ id: started.id, ref: started.ref, result: started.result }))
       }
