@@ -5873,8 +5873,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                         // back, so a later retirement still reports.
                         const owner = boundActor ?? spawnRef.current
                         const mayReport =
-                          (yield* owner?.claimTerminalReport?.(input.sessionID, agentID) ?? Effect.succeed(true)) ===
-                          true
+                          (yield* owner?.claimTerminalReport?.(input.sessionID, agentID) ??
+                            Effect.succeed({ key: "" })) ?? undefined
                         let delivered = false
                         if (mayReport)
                           yield* notifyTerminal({
@@ -5902,7 +5902,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                             Effect.ensuring(
                               Effect.suspend(() =>
                                 mayReport && !delivered
-                                  ? (owner?.releaseTerminalReport?.(input.sessionID, agentID) ?? Effect.void)
+                                  ? (owner?.releaseTerminalReport?.(input.sessionID, agentID, mayReport) ??
+                                    Effect.void)
                                   : Effect.void,
                               ),
                             ),

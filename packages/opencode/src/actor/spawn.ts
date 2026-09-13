@@ -147,6 +147,14 @@ const withNotificationTarget = <A, E, R>(
  * an envelope was actually written. Identity matters: a later turn that opens
  * its own notice must not settle or strand this one.
  */
+/**
+ * The right to report one settlement's terminal envelope, held by whichever of
+ * cancel and the settling turn won the election. Identity matters: a newer turn
+ * resets the record and takes its own, and an older notifier failing afterwards
+ * must not hand back a claim it no longer owns.
+ */
+export type TerminalClaim = { readonly key: string }
+
 export type AgentOutcome =
   | {
       status: "success"
@@ -358,9 +366,16 @@ export interface Interface {
    * Claim the right to report this settlement's terminal envelope. Exactly one
    * of cancel and the settling turn wins per settlement.
    */
-  readonly claimTerminalReport?: (sessionID: SessionID, actorID: string) => Effect.Effect<boolean>
+  readonly claimTerminalReport?: (
+    sessionID: SessionID,
+    actorID: string,
+  ) => Effect.Effect<TerminalClaim | undefined>
   /** Give the right back when the claim produced no envelope. */
-  readonly releaseTerminalReport?: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
+  readonly releaseTerminalReport?: (
+    sessionID: SessionID,
+    actorID: string,
+    claim: TerminalClaim,
+  ) => Effect.Effect<void>
   /**
    * Drop any record left by a previous turn. A new turn's settlement is the one
    * a later retirement must not duplicate, so the record cannot outlive the turn
@@ -457,7 +472,7 @@ export const layer = Layer.effect(
     // only notice a dropped one could still get. Reset when a new turn is
     // admitted and dropped on retirement, so the map is bounded by the live
     // standing peers.
-    const terminalReports = new Map<string, { claimed: boolean }>()
+    const terminalReports = new Map<string, TerminalClaim>()
     const lifecycleState = createActorLifecycle<MessageV2.WithParts, FrozenContext, NotificationTarget>()
     const retainForkContext = (
       key: string,
@@ -1356,6 +1371,7 @@ export const layer = Layer.effect(
       status: TerminalStatus,
       extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string } = {},
       source?: RunDisposalState,
+      allowRemembered = false,
     ) => {
       // Reported by the send itself: the row is committed before the retirement
       // re-check, the event publication and the wake, so a defect in any of
@@ -1372,7 +1388,11 @@ export const layer = Layer.effect(
         // its parentID); a subagent shares the parent's session.
         const parentSessionID = actor.mode === "peer" ? (yield* session.get(sessionID)).parentID : sessionID
         if (!parentSessionID || isRunDisposing(origin)) return false
-        const notificationTarget = yield* resolveNotificationTarget(actorKey(sessionID, actorID), parentSessionID)
+        const notificationTarget = yield* resolveNotificationTarget(
+          actorKey(sessionID, actorID),
+          parentSessionID,
+          allowRemembered,
+        )
         if (!notificationTarget) return false
         yield* withNotificationTarget(
           notificationTarget,
@@ -1514,7 +1534,7 @@ export const layer = Layer.effect(
                   Effect.ensuring(
                     Effect.suspend(() =>
                       mayReport && !delivered
-                        ? releaseTerminalReport(input.sessionID, input.actorID)
+                        ? releaseTerminalReport(input.sessionID, input.actorID, mayReport)
                         : Effect.void,
                     ),
                   ),
@@ -1605,7 +1625,7 @@ export const layer = Layer.effect(
                 Effect.tap((written) => Effect.sync(() => (delivered = written))),
                 Effect.ensuring(
                   Effect.suspend(() =>
-                    mayReport && !delivered ? releaseTerminalReport(sessionID, actorID) : Effect.void,
+                    mayReport && !delivered ? releaseTerminalReport(sessionID, actorID, mayReport) : Effect.void,
                   ),
                 ),
               )
@@ -2058,9 +2078,10 @@ export const layer = Layer.effect(
             })
             .pipe(inReceiver, Effect.ignoreCause)
           yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-          if (yield* electTerminalReport(key)) {
+          const claim = yield* electTerminalReport(key)
+          if (claim) {
             const reported = yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
-            if (!reported) yield* releaseTerminalReport(sessionID, actorID)
+            if (!reported) yield* releaseTerminalReport(sessionID, actorID, claim)
           }
           yield* retire
         }).pipe(Effect.ensuring(settleClaim), Effect.ensuring(releaseEpisode)),
@@ -2083,10 +2104,11 @@ export const layer = Layer.effect(
      * and leaving it unlisted keeps this map bounded by the live standing peers.
      */
     const electTerminalReport = (key: string) =>
-      Effect.sync(() => {
-        if (terminalReports.get(key)?.claimed) return false
-        terminalReports.set(key, { claimed: true })
-        return true
+      Effect.sync((): TerminalClaim | undefined => {
+        if (terminalReports.has(key)) return undefined
+        const claim: TerminalClaim = { key }
+        terminalReports.set(key, claim)
+        return claim
       })
 
     const claimTerminalReport = Effect.fn("Actor.claimTerminalReport")(function* (
@@ -2094,8 +2116,11 @@ export const layer = Layer.effect(
       actorID: string,
     ) {
       const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-      if (actor?.lifecycle !== "persistent") return true
       const key = actorKey(sessionID, actorID)
+      // Unlisted: nothing contends with an ephemeral actor, whose cancel returns
+      // before the publishing branch. The claim is still an object so callers
+      // need no special case, and releasing it matches nothing.
+      if (actor?.lifecycle !== "persistent") return { key } satisfies TerminalClaim
       // Retirement clears the map, so an empty map is not on its own evidence
       // that nothing has reported this settlement: a turn whose outer exit runs
       // after cancel finished would otherwise win a fresh claim for a retired
@@ -2110,7 +2135,7 @@ export const layer = Layer.effect(
         actor.status === "idle" &&
         actor.lastOutcome === "cancelled" &&
         !(yield* lifecycleState.isCancelling(key))
-      if (retired) return false
+      if (retired) return undefined
       return yield* electTerminalReport(key)
     })
 
@@ -2121,9 +2146,18 @@ export const layer = Layer.effect(
     const releaseTerminalReport = Effect.fn("Actor.releaseTerminalReport")(function* (
       sessionID: SessionID,
       actorID: string,
+      claim: TerminalClaim,
     ) {
       const key = actorKey(sessionID, actorID)
-      yield* Effect.sync(() => terminalReports.delete(key))
+      // Only the entry this claim still owns: a newer turn may already have
+      // reset the record and taken its own, and deleting that would let a
+      // later cancel publish a second envelope for the newer settlement.
+      const owned = yield* Effect.sync(() => {
+        if (terminalReports.get(key) !== claim) return false
+        terminalReports.delete(key)
+        return true
+      })
+      if (!owned) return
       const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       // Handing the right back assumes a later retirement will use it. If
       // retirement already happened while this send was in flight, there is no
@@ -2131,15 +2165,26 @@ export const layer = Layer.effect(
       // path reports it now.
       if (!actor) return
       if (!(actor.status === "idle" && actor.lastOutcome === "cancelled")) return
-      if (!(yield* electTerminalReport(key))) return
+      const fallback = yield* electTerminalReport(key)
+      if (!fallback) return
       // Forked into the service scope rather than published here: this runs in
       // the failing notify's own `ensuring`, and re-entering the notification
       // path from there deadlocks under load — reproduced as a 120s hang in
       // `general bound to task_id writes progress.md when postStop re-prompts`.
-      yield* notifyTerminal(sessionID, actorID, actor, "cancelled")
+      //
+      // `allowRemembered` because retirement has already dropped this actor's
+      // saved notification target. A peer running in its own worktree inherits
+      // a disposal for the child directory, which the parent session rejects,
+      // so without the layer's remembered target for that directory this retry
+      // would resolve nothing and write nothing.
+      yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, undefined, true)
         .pipe(
           Effect.tap((reported) =>
-            reported ? Effect.void : Effect.sync(() => terminalReports.delete(key)),
+            reported
+              ? Effect.void
+              : Effect.sync(() => {
+                  if (terminalReports.get(key) === fallback) terminalReports.delete(key)
+                }),
           ),
           Effect.ignoreCause,
           Effect.forkIn(scope),

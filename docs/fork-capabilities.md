@@ -753,7 +753,14 @@ where this delta does not change their implementation.
   reports the settlement itself — forked into the service scope, because that
   release runs inside the failing notify's own `ensuring` and re-entering the
   notification path from there deadlocks under load. And a caller releases only
-  a claim it actually won, or it would hand back someone else's. Delivery is reported by
+  the claim it actually holds: claims carry identity, because a newer turn
+  resets the record and takes its own, and an older notifier failing afterwards
+  would otherwise hand back a claim it no longer owns and let a later cancel
+  publish for the newer settlement. The fallback also resolves its target with
+  `allowRemembered`, since retirement has already dropped this actor's saved
+  one — a peer running in its own worktree inherits a disposal for the child
+  directory, which the parent session rejects, so without the layer's
+  remembered target for that directory the retry would write nothing. Delivery is reported by
   `Inbox.send` itself, through a `committed` flag it sets the moment the row
   lands and unsets if its retirement re-check removes it again — inferring it
   from how the call ended was wrong in both directions. Only persistent actors
