@@ -316,13 +316,23 @@ where this delta does not change their implementation.
   The declaration changes neither API model identity nor transport. Capture,
   run-loop, and compaction cache profiles include the optional declaration;
   an absent declaration preserves the original profile key.
-  Exact MiMo v2.5 identities win over generic aliases. MiMo Responses transport
-  is selected only by a resolved PTC identity; transport never selects the Codex
-  harness/toolset. Unrelated GPT-4 families do not gain Codex tools through
+  Exact MiMo v2.5 identities win over generic aliases. Transport is no longer a
+  fork concern: upstream pins every MiMo id to `@ai-sdk/openai-compatible`, and
+  the fork adopts that rather than routing a resolved PTC identity to the
+  Responses API. Transport never selects the Codex harness/toolset. Unrelated GPT-4 families do not gain Codex tools through
   API/family aliases. Request, live-step, and MaxMode retry policy reuse that
   same resolved identity instead of independently reclassifying the model
   between attempts. Xiaomi WebSearch sidecar requests use that resolved
   model's `model.api.id`; they do not substitute a hard-coded MiMo identity.
+- 2026-09-13 transport retirement: upstream `294328d7`/`b6a1008c`/`cfa07fe8`
+  remove the `xiaomi` custom loader and pin any MiMo or `mimo-auto` id to
+  `@ai-sdk/openai-compatible`. The fork had extended `usesMimoResponsesApi` into
+  a multi-value resolver and routed PTC identities to `sdk.responses`. Adopted
+  upstream's shape and retired that routing with `isMimoModel`,
+  `usesMimoResponsesApi`, their tests, and the `xiaomi transport selection uses
+  the complete resolved model identity` case. FD-005 keeps only identity
+  resolution for prompt, discovery, toolset and retry policy; it no longer owns
+  API transport. Verified: `test/provider/` + `test/tool/gpt.test.ts` 581 pass.
 - Upstream relationship: adapts the classification introduced at
   `866a5b8a2eff3970a0becb0d27f8f055e4624e19` and merged by
   `b15b0971846861a4b25576d340ce1a4207f87712`; upstream's separate fallbacks are
