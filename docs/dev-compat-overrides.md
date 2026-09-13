@@ -174,14 +174,14 @@ Source evidence and the four final result rows are recorded in the latest
 
 - Status: active
 - Canonical owner: fork `dev/compat`
-- Last reviewed: 2026-09-12
+- Last reviewed: 2026-09-13
 - Reviewed upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
-- Accepted `main` tip: `e92d7a52e3597207775a2a9be0c28c282c34dbad`
-- Inherited main behavior: `bca24711ed37d3620cd7304603b81e98849642e5`
-- Compat behavior: `b79ba5cf5736c4408ace43ebaa697f315b30a08c`
-- Prior compat tip: `2fb8dc206ff9b7c8c43c2699e5e2a2d81d3cbe90`
-- Main source inheritance merge: `b79ba5cf5736c4408ace43ebaa697f315b30a08c`
-- Shared audit commit: `e92d7a52e3597207775a2a9be0c28c282c34dbad`
+- Accepted `main` tip: `72064c41ec7311a4d3ca05dc480956f73463c0ff`
+- Inherited main behavior: `070100b0357c53d8417af5f93a81cf7414283221`
+- Compat behavior: `4d3abe9ee44d3f87ed62a5636d5e1e4f4b3c7e6e`
+- Prior compat tip: `7c710d74f7bd6cbc10684292ebfe58f382770e64`
+- Main source inheritance merge: `4d3abe9ee44d3f87ed62a5636d5e1e4f4b3c7e6e`
+- Shared audit commit: `72064c41ec7311a4d3ca05dc480956f73463c0ff`
 - Inherited bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)

@@ -3638,3 +3638,40 @@ the final publication gates. Prior main/compat evidence is not re-dated.
 - The single part-one failure is the darwin-only NUL projection case already recorded in the [f11e35ed inventory](upstream-sync-2026-09-11-f11e35ed.md); it reproduces on upstream's unmodified tree on this machine and is green on Linux CI.
 - `nested primary ActorTool hands background ownership to the real parent` failed once at 23 s in a combined compat run and did not reproduce on re-run, passes in isolation, and is green on main's exact-SHA CI for the same source. Recorded as a timing flake, not a finding.
 - Ambient `MIMOCODE_EXPERIMENTAL` and `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL` were removed for every run; the package preload remains the harness baseline. Repository lint passed with zero errors and 4601 warnings; `git diff --check` passed. Final remote-tip equality, exact-SHA CI and upstream -> main -> compat ancestry are separate publication checks.
+
+## 2026-09-13 — terminal publisher inheritance (PR #108)
+
+- Accepted main tip/shared audit: `72064c41ec7311a4d3ca05dc480956f73463c0ff`;
+  inherited source/tests: `070100b0357c53d8417af5f93a81cf7414283221`; bundled
+  guidance remains `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`.
+- Compat source/test behavior and inheritance merge:
+  `4d3abe9ee44d3f87ed62a5636d5e1e4f4b3c7e6e`; prior tip:
+  `7c710d74f7bd6cbc10684292ebfe58f382770e64`.
+- **Direct inherit, no compat override.** Main closed FC-001's one settling path
+  that published without contending for the generation's terminal claim:
+  `SessionPrompt`'s continuation, which the 2026-09-12 wake-routing retirement
+  moved onto `ActorExecution`. It now records the envelope it published and
+  `Actor.cancel` consumes that record instead of publishing a second one. This
+  unskips the peer `success`/`failure` variants of `[TP-R14-08] [TP-R14-09]
+  ... continuation settles ... once`.
+- All seven active DC entries were re-reviewed against the incoming surfaces.
+  Only DC-ACTOR-001 names `src/actor/spawn.ts` and `src/session/prompt.ts`, and
+  its delta — full-context propagation, frozen request membership, bounded
+  actor-visible state, static-prefix overflow, the checkpoint fork default and
+  the `replace-agent` identity scope — does not touch terminal-envelope
+  publication. Its `Base` does reference FC-001's lifecycle linearization, which
+  this change extends; that extension is inherited unchanged, so the entry keeps
+  its override and needs no edit. The merge applied with no conflicts.
+- The record is in-process de-duplication by design. Across a restart the
+  branch degrades to the prior behavior — publish — which is what inherited
+  `main` did unconditionally before this change, so compat exposure only
+  narrows. Two review findings were declined on that basis and answered with
+  evidence on PR #108; the remaining duplicate window (a continuation between
+  publishing and recording) closes only by `Actor.cancel` interrupting and
+  joining the execution, which is upstream's cancel shape and is scoped to a
+  separate PR together with the spawn-side execution claim.
+- Three upstream cases stay quarantined under FC-008, all reducing to the
+  fork's early-publish contract: `[TP-R14-07] postStop LLM failure preserves the
+  successful result with a warning`, `inbox waits for the entire spawn execution
+  before starting a continuation`, and `[TP-R14-12] undeliverable terminal
+  notification is logged`.
