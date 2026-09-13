@@ -773,7 +773,13 @@ where this delta does not change their implementation.
   publish, retire and clear the map in between, after which the election wins on
   an empty map. Registry reads and the in-memory map cannot be made atomic with
   each other, so every decision taken from a snapshot is confirmed again before
-  it is acted on. Retirement has its own unconditional cleanup: a retirement always runs inside a cancel episode, so
+  it is acted on. The entry is cleared when the cancel episode closes, not at retirement:
+  retirement runs while the episode is still open, and a cancelled tombstone is
+  deliberately claimable for the length of that episode, so clearing earlier let
+  the continuation a cancel had just interrupted win the empty slot and publish
+  again — and hid an already published cancellation from a failed send's retry,
+  which then published a conflicting envelope. The episode closes strictly after
+  every publisher on that settlement is finished. The cleanup is unconditional: a retirement always runs inside a cancel episode, so
   reusing the guarded reset there would never fire and the entry would outlive
   the actor — which is what keeps the map bounded. In the retired case the claim
   is kept rather than released and re-elected:

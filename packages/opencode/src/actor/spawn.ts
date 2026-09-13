@@ -1956,10 +1956,18 @@ export const layer = Layer.effect(
       const execution = yield* executions.current(sessionID, actorID)
       if (execution) yield* executions.requestCancel(execution)
 
-        const releaseEpisode = lifecycleState.releaseCancel(key, ownership.episode)
-        const retire = lifecycleState
-          .retire(key)
+        const releaseEpisode = lifecycleState
+          .releaseCancel(key, ownership.episode)
+          // The report entry is cleared here rather than at retirement, which
+          // runs while this episode is still open. A cancelled tombstone stays
+          // claimable for the length of the episode on purpose, so clearing
+          // earlier let the continuation this cancel had just interrupted win
+          // the empty slot and publish a second envelope — and it also hid an
+          // already published cancellation from a failed send's retry, which
+          // then published a conflicting completed/failed one. The episode
+          // closes strictly after every publisher on this settlement is done.
           .pipe(Effect.ensuring(retireTerminalReport(sessionID, actorID)))
+        const retire = lifecycleState.retire(key)
         const settleClaim =
           ownership.claimed && ownership.generation ? lifecycleState.settleTerminal(ownership.generation) : Effect.void
 
@@ -2196,11 +2204,19 @@ export const layer = Layer.effect(
       // to this claim has already skipped its own envelope — the settlement
       // would go unreported. Retry the read a few times, and if it still cannot
       // be read, report rather than stay silent.
+      // The last row actually read, kept so an exhausted retry still has
+      // something to notify with: `notifyTerminal` refuses an undefined actor,
+      // and the retry's own cleanup would then drop the only claim on a
+      // settlement nobody else is going to report.
+      let known: Actor | undefined
       const readRetirement = Effect.gen(function* () {
         for (let attempt = 0; ; attempt++) {
           const seen = yield* actorReg.get(sessionID, actorID).pipe(Effect.exit)
-          if (Exit.isSuccess(seen)) return { row: seen.value, retired: isRetired(seen.value) }
-          if (attempt >= 2) return { row: undefined, retired: true }
+          if (Exit.isSuccess(seen)) {
+            if (seen.value) known = seen.value
+            return { row: seen.value, retired: isRetired(seen.value) }
+          }
+          if (attempt >= 2) return { row: known, retired: true }
         }
       })
       let seen = yield* readRetirement
@@ -2233,6 +2249,11 @@ export const layer = Layer.effect(
       // status. But never over a replacement: an overlapping resume or
       // continuation may have installed its own claim while the cancel episode
       // is still open, and that owner is going to send under it.
+      // Without a row there is nothing to notify with. Keep the claim listed
+      // rather than spend it on a send that cannot succeed: the cancel episode
+      // that retired this actor clears the entry when it closes, so holding it
+      // neither leaks nor silences a publisher that could still report.
+      if (!actor) return
       const listed = yield* Effect.sync(() => {
         const current = terminalReports.get(key)
         if (current !== undefined && current !== claim) return false
