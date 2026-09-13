@@ -1,4 +1,4 @@
-import { RequestError } from "@/llm-server/error"
+import { RequestError } from "@/llm-server/completions"
 
 const MAX_BODY = 25 * 1024 * 1024
 

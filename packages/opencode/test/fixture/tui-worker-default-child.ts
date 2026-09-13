@@ -207,7 +207,7 @@ try {
   assert(secondHTTP.headers.Authorization !== firstHTTP.headers.Authorization, "Workers must own distinct credentials")
   const addresses = await LLMServerTokens.addresses(process.cwd())
   assert.equal(addresses.length, 2)
-  assert.equal(new Set(addresses.map((entry) => entry.listenerID)).size, 2)
+  assert.equal(new Set(addresses.map((entry) => entry.port)).size, 2)
   assert.equal(new Set(addresses.map((entry) => entry.pid)).size, 1)
   assert.equal(addresses[0].pid, process.pid)
   assert.equal(await metadataCount(), 2)
@@ -224,8 +224,8 @@ try {
   assert(firstSocketClosed)
   const survivors = await LLMServerTokens.addresses(process.cwd())
   assert.deepEqual(
-    survivors.map((entry) => entry.listenerID),
-    addresses.filter((entry) => entry.url === new URL(secondHTTP.url).origin).map((entry) => entry.listenerID),
+    survivors.map((entry) => entry.port),
+    addresses.filter((entry) => entry.url === new URL(secondHTTP.url).origin).map((entry) => entry.port),
   )
   assert.equal(survivors.length, 1)
   assert.equal(await metadataCount(), 1)
@@ -250,7 +250,7 @@ try {
   assert(secondSocketClosed)
   assert.deepEqual(await LLMServerTokens.addresses(process.cwd()), [])
   assert.equal(await metadataCount(), 0)
-  assert.equal((await LLMServerTokens.verify({ directory: process.cwd(), token: issued.token })).ok, true)
+  assert.equal((await LLMServerTokens.verify(process.cwd(), issued.token)).ok, true)
   assert.equal(process.env.MIMOCODE_SERVER_PASSWORD, undefined)
   assert.deepEqual(vendorCalls, ["chat", "chat", "chat"])
   process.stdout.write(
