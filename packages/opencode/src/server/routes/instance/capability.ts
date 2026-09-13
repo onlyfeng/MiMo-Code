@@ -7,6 +7,7 @@ import { Log } from "@/util"
 import { lazy } from "@/util/lazy"
 import { Instance } from "@/project/instance"
 import { LLMServerTokens } from "@/llm-server/tokens"
+import { readBody } from "@/server/api-request"
 import { RequestError, collect, start, stream, type ModelScope } from "@/llm-server/completions"
 import { ChatCompletionRequest, unsupported } from "@/llm-server/protocol"
 
@@ -149,7 +150,13 @@ export const CapabilityRoutes = lazy(() =>
       })
     })
     .post("/chat/completions", async (c) => {
-      const parsed = ChatCompletionRequest.safeParse(await c.req.json().catch(() => undefined))
+      // Bounded rather than upstream's `c.req.json()`: this route is reachable by
+      // anything holding a minted token, and an unbounded read lets one request
+      // buffer the process out of memory. FD-004 residual.
+      const raw = await readBody(c.req.raw, c.req.raw.signal)
+        .then((buffer) => JSON.parse(buffer.toString("utf8")) as unknown)
+        .catch(() => undefined)
+      const parsed = ChatCompletionRequest.safeParse(raw)
       if (!parsed.success) {
         const issue = parsed.error.issues[0]
         throw new RequestError(400, `${issue?.path.join(".") || "body"}: ${issue?.message}`, "invalid_request_error")

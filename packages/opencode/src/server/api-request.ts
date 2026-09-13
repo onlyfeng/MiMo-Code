@@ -1,6 +1,3 @@
-import { AppRuntime } from "@/effect/app-runtime"
-import { Instance } from "@/project/instance"
-import { InstanceBootstrap } from "@/project/bootstrap"
 import { RequestError } from "@/llm-server/error"
 
 const MAX_BODY = 25 * 1024 * 1024
@@ -33,40 +30,4 @@ export async function readBody(req: Request, signal: AbortSignal) {
     signal.removeEventListener("abort", cancel)
     reader.releaseLock()
   }
-}
-
-// A generic API may already own this directory's bootstrap. Cancelling an API
-// waiter must not wait for or cancel that shared producer. Once entered, retain
-// the instance lease until the provider call actually observes cancellation.
-export function inInstance(directory: string, signal: AbortSignal, fn: () => Promise<Response>) {
-  const state: { run?: () => Promise<Response>; entered: boolean } = { run: fn, entered: false }
-  return new Promise<Response>((resolve, reject) => {
-    const abort = () => {
-      if (state.entered) return
-      // Release parsed text/uploads held by the callback even if the shared
-      // bootstrap remains pending. Its eventual callback must never call a model.
-      state.run = undefined
-      signal.removeEventListener("abort", abort)
-      reject(signal.reason)
-    }
-    if (signal.aborted) return abort()
-    signal.addEventListener("abort", abort, { once: true })
-    Instance.provide({
-      directory,
-      init: () => AppRuntime.runPromise(InstanceBootstrap, { signal }),
-      fn() {
-        signal.throwIfAborted()
-        state.entered = true
-        const run = state.run
-        state.run = undefined
-        if (!run) throw new Error("API request is no longer active")
-        return run()
-      },
-    })
-      .then(resolve, reject)
-      .finally(() => {
-        state.run = undefined
-        signal.removeEventListener("abort", abort)
-      })
-  })
 }

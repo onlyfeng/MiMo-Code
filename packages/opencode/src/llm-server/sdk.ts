@@ -40,7 +40,6 @@ function toolSet(tools: NonNullable<ChatCompletionRequest["tools"]>): ToolSet {
       tool({
         description: entry.function.description,
         inputSchema: jsonSchema(entry.function.parameters ?? { type: "object", properties: {} }),
-        ...(entry.function.strict === undefined ? {} : { strict: entry.function.strict }),
       }),
     ]),
   )

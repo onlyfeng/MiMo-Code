@@ -17,7 +17,6 @@ import { WorkspaceRouterMiddleware } from "./workspace"
 import { InstanceMiddleware } from "./routes/instance/middleware"
 import { WorkspaceRoutes } from "./routes/control/workspace"
 import { setChildProcessEnv } from "@/util/child-process-env"
-import { createModelAPI, type ModelAPIOptions } from "./model-api"
 import { LLMServerTokens } from "@/llm-server/tokens"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
@@ -36,13 +35,11 @@ export type Listener = {
 
 export const Default = lazy(() => create({}))
 
-function create(opts: { cors?: string[]; llm?: ModelAPIOptions }) {
-  const llm = createModelAPI(opts.llm)
+function create(opts: { cors?: string[] }) {
   const app = new Hono()
     .onError(ErrorMiddleware)
     .use(CorsMiddleware(opts))
     .use(LoggerMiddleware)
-    .route("/v1", llm.app)
     .use(AuthMiddleware)
     .use(CompressionMiddleware)
     .route("/global", GlobalRoutes())
@@ -56,7 +53,6 @@ function create(opts: { cors?: string[]; llm?: ModelAPIOptions }) {
         .use(FenceMiddleware)
         .route("/", InstanceRoutes(runtime.upgradeWebSocket)),
       runtime,
-      llm,
     }
   }
 
@@ -73,7 +69,6 @@ function create(opts: { cors?: string[]; llm?: ModelAPIOptions }) {
       )
       .route("/", UIRoutes()),
     runtime,
-    llm,
   }
 }
 
@@ -107,7 +102,12 @@ export async function listen(opts: {
   cors?: string[]
   noAuth?: boolean
   childEnv?: NodeJS.ProcessEnv
-  llm?: ModelAPIOptions
+  /**
+   * Advertise this listener in the llm-server address registry so
+   * `mimo llm-server issue` can resolve `base_url`. Defaults to true.
+   * Embedders that only need an in-process app can pass false.
+   */
+  advertise?: boolean
 }): Promise<Listener> {
   if (opts.childEnv) setChildProcessEnv(opts.childEnv)
   const isLoopback = opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
@@ -120,16 +120,27 @@ export async function listen(opts: {
 
   const built = create(opts)
   const server = await built.runtime.listen(opts)
-  if (opts.llm) {
-    await LLMServerTokens.publish({
-      directory: opts.llm.directory,
-      listenerID: built.llm.id,
-      hostname: opts.hostname,
+
+  // Who owns the `/v1` capability surface must also say where it is. Keyed by cwd —
+  // TUI/serve chdir to the project. A multi-project host is NOT auto-discoverable
+  // from a project bucket: tokens verify against the request-resolved directory, so
+  // a cross-project base_url 401s under OpenAI-standard clients.
+  const advertise = opts.advertise !== false
+  const directory = process.cwd()
+  // `0.0.0.0`/`::` are bind addresses, not client URLs. Advertise loopback so the
+  // printed base_url is usable on this machine.
+  const advertisedHostname = opts.hostname === "0.0.0.0" || opts.hostname === "::" ? "127.0.0.1" : opts.hostname
+  const advertised = new URL("http://localhost")
+  advertised.hostname = advertisedHostname
+  advertised.port = String(server.port)
+  if (advertise) {
+    await LLMServerTokens.publish(directory, {
+      pid: process.pid,
+      hostname: advertisedHostname,
       port: server.port,
-    }).catch(async (error) => {
-      await Promise.all([built.llm.close(), server.stop(true)])
-      throw error
-    })
+      url: advertised.toString(),
+      started: Date.now(),
+    }).catch((error) => log.warn("failed to advertise llm-server address", { error: String(error) }))
   }
 
   const next = new URL("http://localhost")
@@ -156,13 +167,12 @@ export async function listen(opts: {
     url: next,
     stop(close?: boolean) {
       closing ??= (async () => {
+        // Withdraw the advertisement before the socket goes away, so a reader sees
+        // "nothing is serving" rather than a port that refuses connections. A crash
+        // skips this; the pid liveness check in `addresses` is the backstop.
+        if (advertise) await LLMServerTokens.unpublish(directory, process.pid, server.port).catch(() => {})
         if (mdns) MDNS.unpublish()
-        // Close optional API admission before socket shutdown and instance retirement.
-        await Promise.all([
-          built.llm.close(),
-          opts.llm ? LLMServerTokens.unpublish({ directory: opts.llm.directory, listenerID: built.llm.id }) : undefined,
-          server.stop(close),
-        ])
+        await server.stop(close)
       })()
       return closing
     },

@@ -28,13 +28,16 @@ export const ServeCommand = cmd({
       console.log("Warning: MIMOCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
 
+    // The capability routes are always mounted and always require a minted token.
+    // `--llm-server` gates only the address advertisement, so credentials alone
+    // never produce a discoverable service (FD-004 residual).
     const server = await Server.listen({
       ...opts,
-      llm: args["llm-server"] ? { directory: process.cwd() } : undefined,
+      advertise: args["llm-server"] === true,
     })
     console.log(`mimocode server listening on http://${server.hostname}:${server.port}`)
 
-    if (args["llm-server"]) console.log("Model API enabled at /v1 (temporary Bearer token required)")
+    if (args["llm-server"]) console.log("Model API advertised at /v1 (temporary Bearer token required)")
     await new Promise<void>((resolve) => {
       const stop = () => {
         process.off("SIGINT", stop)

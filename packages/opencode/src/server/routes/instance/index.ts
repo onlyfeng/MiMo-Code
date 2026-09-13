@@ -13,6 +13,7 @@ import { Global } from "@/global"
 import { LSP } from "@/lsp"
 import { Command } from "@/command"
 import { QuestionRoutes } from "./question"
+import { CapabilityRoutes, CAPABILITY_PREFIX } from "./capability"
 import { PermissionRoutes } from "./permission"
 import { WorkflowRoutes } from "./workflows"
 import { BashInteractiveRoutes } from "./bash-interactive"
@@ -63,6 +64,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
     .route("/bash-interactive", BashInteractiveRoutes())
     .route("/provider", ProviderRoutes())
     .route("/sync", SyncRoutes())
+    .route(CAPABILITY_PREFIX, CapabilityRoutes())
     .route("/", FileRoutes())
     .route("/", EventRoutes())
     .route("/mcp", McpRoutes())
