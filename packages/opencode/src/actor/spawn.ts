@@ -2184,33 +2184,41 @@ export const layer = Layer.effect(
         row !== undefined && row.status === "idle" && row.lastOutcome === "cancelled"
       const readActor = actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       let actor = yield* readActor
+
       if (!isRetired(actor)) {
         // Hand the right back so a later retirement can use it — but only if it
         // is still ours: a newer turn may already have reset the record and
         // taken its own, and dropping that would let a cancel publish a second
         // envelope for the newer settlement.
-        const dropped = yield* Effect.sync(() => {
-          if (terminalReports.get(key) !== claim) return false
-          terminalReports.delete(key)
-          return true
+        yield* Effect.sync(() => {
+          if (terminalReports.get(key) === claim) terminalReports.delete(key)
         })
-        if (!dropped) return
-        // The read above is a snapshot. A cancel can write its tombstone, lose
-        // the election to the claim just dropped, and retire, all in between —
-        // and it has skipped its own notification for having lost. Re-read
-        // before concluding that someone else will report this settlement.
+        // Re-read whether or not the token was still there. The read above is a
+        // snapshot, and a cancel can write its tombstone, lose the election to
+        // this claim and retire in between — removing the token itself on the
+        // way out. Both outcomes look the same here, and both need the retry:
+        // that cancel skipped its own notification for having lost.
         actor = yield* readActor
         if (!isRetired(actor)) return
       }
-      // Retirement already happened while this send was in flight, so nothing
-      // is left to use the right and this path has to report the settlement
-      // itself. It runs whether or not the token is still listed: retirement
-      // clears the map on its way out, and only a caller that won the election
-      // reaches this function at all — a cancellation that lost it has already
-      // skipped its own notification, so returning here would leave the parent
-      // with no terminal envelope. Re-listing rather than re-electing keeps
-      // cancellation from taking the claim in the gap and publishing a bare
-      // `cancelled` that loses this turn's real status and payload.
+
+      // Retired, so nothing is left to use the right and this path reports the
+      // settlement itself — only an election winner reaches this function, and
+      // a cancellation that lost has already skipped its own notification.
+      //
+      // Re-list rather than re-elect, so cancellation cannot take the slot in
+      // the gap and publish a bare `cancelled` that loses this turn's real
+      // status. But never over a replacement: an overlapping resume or
+      // continuation may have installed its own claim while the cancel episode
+      // is still open, and that owner is going to send under it.
+      const listed = yield* Effect.sync(() => {
+        const current = terminalReports.get(key)
+        if (current !== undefined && current !== claim) return false
+        terminalReports.set(key, claim)
+        return true
+      })
+      if (!listed) return
+
       // Forked into the service scope rather than published here: this runs in
       // the failing notify's own `ensuring`, and re-entering the notification
       // path from there deadlocks under load — reproduced as a 120s hang in
@@ -2221,12 +2229,6 @@ export const layer = Layer.effect(
       // a disposal for the child directory, which the parent session rejects,
       // so without the layer's remembered target for that directory this retry
       // would resolve nothing and write nothing.
-      //
-      // Re-listed before the retry is forked, not merely described as such: the
-      // cancelled tombstone stays claimable while the cancel episode is open,
-      // so a queued continuation settling in that window would otherwise win
-      // the empty map and publish `cancelled` alongside this envelope.
-      yield* Effect.sync(() => terminalReports.set(key, claim))
       yield* notifyTerminal(
         sessionID,
         actorID,
@@ -2238,18 +2240,19 @@ export const layer = Layer.effect(
         settlement?.extra ?? {},
         undefined,
         true,
+      ).pipe(
+        // Either outcome drops the claim. The actor is already retired, so no
+        // turn reset and no retirement cleanup will ever come back for it, and
+        // leaving it listed would keep one key per retired actor for the life
+        // of the layer.
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (terminalReports.get(key) === claim) terminalReports.delete(key)
+          }),
+        ),
+        Effect.ignoreCause,
+        Effect.forkIn(scope),
       )
-        .pipe(
-          Effect.tap((reported) =>
-            reported
-              ? Effect.void
-              : Effect.sync(() => {
-                  if (terminalReports.get(key) === claim) terminalReports.delete(key)
-                }),
-          ),
-          Effect.ignoreCause,
-          Effect.forkIn(scope),
-        )
     })
 
     /**
