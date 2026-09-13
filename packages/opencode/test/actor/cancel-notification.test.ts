@@ -525,11 +525,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
   // Desktop tool-step-schema: real inbox-woken execution entry, isolated LLM.
   for (const mode of ["subagent", "peer"] as const) {
     for (const terminal of ["success", "failure", "cancelled"] as const) {
-      // QUARANTINED (fork): the peer success/failure continuations still leave
-      // two parent notification envelopes where upstream leaves one. Tracked for
-      // a dedicated fork PR; see FC-008 and the 2026-09-12 record.
-      const continuationIt = mode === "peer" && terminal !== "cancelled" ? it.live.skip : it.live
-      continuationIt(`[TP-R14-08] [TP-R14-09] ${mode} continuation settles ${terminal} once`, () => provideTmpdirServer(
+      it.live(`[TP-R14-08] [TP-R14-09] ${mode} continuation settles ${terminal} once`, () => provideTmpdirServer(
         Effect.fnUntraced(function* ({ llm }) {
           const actor = yield* Actor.Service
           const sessions = yield* Session.Service
