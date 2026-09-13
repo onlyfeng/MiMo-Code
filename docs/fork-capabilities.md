@@ -783,7 +783,16 @@ where this delta does not change their implementation.
   publish, retire and clear the map in between, after which the election wins on
   an empty map. Registry reads and the in-memory map cannot be made atomic with
   each other, so every decision taken from a snapshot is confirmed again before
-  it is acted on. The entry is cleared when the cancel episode closes, not at retirement:
+  it is acted on.
+  The episode itself stays open until a continuation's execution is released,
+  which is after its outer exit handler has run: `state.cancelActor` joins only
+  the inner runner, so a turn can commit its idle/cancelled row before claiming
+  the report, and closing on that row left the late claim failing its retirement
+  check with no episode remaining and nobody publishing. Only a continuation is
+  waited for — never a spawn, whose claim spans postStop — and the wait is on
+  the execution's own release, which runs even on interrupt and never passes
+  through the notification path.
+  The entry is cleared when the cancel episode closes, not at retirement:
   retirement runs while the episode is still open, and a cancelled tombstone is
   deliberately claimable for the length of that episode, so clearing earlier let
   the continuation a cancel had just interrupted win the empty slot and publish
