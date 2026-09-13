@@ -87,8 +87,14 @@ where this delta does not change their implementation.
   `Layer.provide(ActorExecution.layer)` sites memoize to one instance: during a
   hung continuation `cancel` does observe that execution. Reading both at the
   publish decision rather than at cancel entry also means a continuation that
-  admitted while this cancel was running is seen. A turn admitted after that
-  read still races; closing it needs cancel to contend for the execution claim
+  admitted while this cancel was running is seen, and cancel requests
+  cancellation on whatever it observes there. That request is what makes the
+  suppression sound rather than a courtesy: an execution acquired but not yet
+  drained has no runner for `cancelActor` to interrupt, and if cancel drains its
+  inbox row first the turn returns through the empty-drain path without
+  notifying — suppressed in cancel, unpublished in the turn, and the parent
+  hears nothing. Marked, it takes the cancelled branch and publishes from its
+  own `onExit`. A turn admitted after that read still races; closing it needs cancel to contend for the execution claim
   itself, which is upstream's shape and deliberately out of scope here — the
   unconditional publish this replaces raced far more widely.
   Mutation-checked: removing the record fails exactly the two peer continuation
