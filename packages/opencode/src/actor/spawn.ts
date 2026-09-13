@@ -2124,12 +2124,19 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       actorID: string,
     ) {
-      const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       const key = actorKey(sessionID, actorID)
+      const lookup = yield* actorReg.get(sessionID, actorID).pipe(Effect.exit)
+      // A lookup that defects says nothing about the actor's lifecycle. Reading
+      // it as "not persistent" would hand back an untracked claim, and a
+      // delivered envelope with no entry behind it lets a later cancel win a
+      // fresh election and publish a duplicate. Fail closed: track it.
+      const actor = Exit.isSuccess(lookup) ? lookup.value : undefined
+      const unknown = !Exit.isSuccess(lookup)
       // Unlisted: nothing contends with an ephemeral actor, whose cancel returns
       // before the publishing branch. The claim is still an object so callers
       // need no special case, and releasing it matches nothing.
-      if (actor?.lifecycle !== "persistent") return { key } satisfies TerminalClaim
+      if (!unknown && actor?.lifecycle !== "persistent") return { key } satisfies TerminalClaim
+      if (unknown) return yield* electTerminalReport(key)
       // Retirement clears the map, so an empty map is not on its own evidence
       // that nothing has reported this settlement: a turn whose outer exit runs
       // after cancel finished would otherwise win a fresh claim for a retired
@@ -2214,6 +2221,12 @@ export const layer = Layer.effect(
       // a disposal for the child directory, which the parent session rejects,
       // so without the layer's remembered target for that directory this retry
       // would resolve nothing and write nothing.
+      //
+      // Re-listed before the retry is forked, not merely described as such: the
+      // cancelled tombstone stays claimable while the cancel episode is open,
+      // so a queued continuation settling in that window would otherwise win
+      // the empty map and publish `cancelled` alongside this envelope.
+      yield* Effect.sync(() => terminalReports.set(key, claim))
       yield* notifyTerminal(
         sessionID,
         actorID,

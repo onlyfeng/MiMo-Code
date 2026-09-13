@@ -759,7 +759,10 @@ where this delta does not change their implementation.
   publish for the newer settlement. A turn admission's reset never runs while a cancellation is in progress, since
   that cancel may already hold the claim and be sending under it, and it makes
   that check and its delete one synchronous step so a cancel starting between
-  them cannot have its claim taken afterwards. A claim is revalidated once held, because the registry read that admits it and
+  them cannot have its claim taken afterwards. A lookup that defects is never read as "not persistent": that would return an
+  untracked claim, and a delivered envelope with no entry behind it lets a later
+  cancel win a fresh election and duplicate it. A claim is revalidated once
+  held, because the registry read that admits it and
   the election itself are separate steps: a cancellation can tombstone,
   publish, retire and clear the map in between, after which the election wins on
   an empty map. Registry reads and the in-memory map cannot be made atomic with
