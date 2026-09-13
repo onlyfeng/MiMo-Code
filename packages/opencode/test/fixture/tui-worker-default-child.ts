@@ -225,7 +225,11 @@ try {
   const survivors = await LLMServerTokens.addresses(process.cwd())
   assert.deepEqual(
     survivors.map((entry) => entry.port),
-    addresses.filter((entry) => entry.url === new URL(secondHTTP.url).origin).map((entry) => entry.port),
+    addresses
+      // Upstream stores the advertised URL as `toString()` — with a trailing
+      // slash — where the fork's record held a bare origin.
+      .filter((entry) => new URL(entry.url).origin === new URL(secondHTTP.url).origin)
+      .map((entry) => entry.port),
   )
   assert.equal(survivors.length, 1)
   assert.equal(await metadataCount(), 1)
