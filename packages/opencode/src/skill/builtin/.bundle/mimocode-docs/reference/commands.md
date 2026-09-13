@@ -6,7 +6,7 @@ Invoked from the shell. `mimo` with no command opens the TUI.
 
 | Command | Purpose |
 |---------|---------|
-| `mimo` | Launch the interactive TUI and its project model API listener; tokens still require explicit issue |
+| `mimo` | Launch the interactive TUI and its project listener; tokens still require explicit issue |
 | `mimo attach <url>` | Connect a TUI to an existing server without starting a local listener |
 | `mimo run` | Headless, non-interactive run (scripting/eval) |
 | `mimo mcp` | Manage / inspect MCP servers |
@@ -17,8 +17,8 @@ Invoked from the shell. `mimo` with no command opens the TUI.
 | `mimo upgrade` | Update to the latest version |
 | `mimo uninstall` | Uninstall MiMoCode |
 | `mimo serve` | Run the server |
-| `mimo serve --llm-server` | Explicitly enable the model API on the existing server socket; see @model-api.md |
-| `mimo llm-server issue` / `list` / `revoke` | Issue, inspect, or revoke project-scoped model API tokens; see @model-api.md |
+| `mimo serve --llm-server` | Advertise the `/v1` surface in the address registry so `issue` can resolve `base_url`; the routes are always mounted and always require a token |
+| `mimo llm-server issue`/`list`/`revoke` | Mint and manage tokens that let a task reach this instance's models over `/v1`; it starts nothing — see @capability-api.md |
 | `mimo stats` | Usage statistics |
 | `mimo export` / `mimo import` | Export / import sessions |
 | `mimo session` | Manage sessions |

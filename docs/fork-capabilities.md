@@ -991,7 +991,7 @@ where this delta does not change their implementation.
   selection are retired across runtime, CLI and bundled guidance; see
   [2026-09-09 audio alignment](audio-upstream-alignment-2026-09-09.md).
 - POLICY-03 content carriers: `docs/model-api.md`, `docs/audio-api.md`, and
-  bundled `mimocode-docs/reference/model-api.md` and `commands.md` distinguish
+  bundled `mimocode-docs/reference/capability-api.md` and `commands.md` distinguish
   TUI startup, attach reuse, in-memory ordinary API authentication and explicit
   Bearer model access. Content snapshot: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
 - Tests/evidence: session system, including the actionable task/actor guidance
