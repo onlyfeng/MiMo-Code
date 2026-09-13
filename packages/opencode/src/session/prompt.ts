@@ -5761,6 +5761,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               (exec) =>
                 Effect.gen(function* () {
                   yield* executions.attach(exec)
+                  // A new turn supersedes whatever the previous one announced.
+                  yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
+                    input.sessionID,
+                    agentID,
+                    false,
+                  ) ?? Effect.void
                   // Cancelled before drain: do not consume messages for a turn
                   // that will not run. isCancelled is re-checked inside drain
                   // just before commit, so a cancel mid-drain leaves rows durable.
@@ -5854,6 +5860,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                               }
                             : {}),
                         })
+                        // Recorded so the retirement `Actor.cancel` performs
+                        // next consumes it instead of publishing a second
+                        // envelope for the settlement this turn just reported.
+                        yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
+                          input.sessionID,
+                          agentID,
+                          true,
+                        ) ?? Effect.void
                       }),
                     ),
                   )

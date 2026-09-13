@@ -335,6 +335,18 @@ export interface Interface {
   }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>
   readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
   readonly getForkContext: (sessionID: SessionID, actorID: string) => Effect.Effect<ForkContext | undefined>
+  /**
+   * Record whether the parent has already been told about this actor's current
+   * settlement. `SessionPrompt`'s continuation publishes its own terminal
+   * envelope, so `cancel` consumes this instead of sending a second one; a new
+   * turn clears it, and a settlement that was never announced still is.
+   */
+  readonly markTerminalNotified?: (
+    sessionID: SessionID,
+    actorID: string,
+    notified: boolean,
+  ) => Effect.Effect<void>
+
   readonly runPersistentTurn?: (input: {
     sessionID: SessionID
     actorID: string
@@ -369,6 +381,11 @@ export const layer = Layer.effect(
     const bus = yield* Bus.Service
     const taskRegistry = yield* TaskRegistry.Service
     const scope = yield* Scope.Scope
+
+    // Actors whose current settlement the parent has already been told about.
+    // Bounded by the live actors: an entry is dropped when the next turn starts
+    // and when the cancel that consumes it finishes.
+    const notifiedSettlements = new Set<string>()
 
     const layerNotificationTargets = new Map<string, NotificationTarget>()
     const rememberNotificationTarget = (target: NotificationTarget) => {
@@ -1926,9 +1943,21 @@ export const layer = Layer.effect(
             })
             .pipe(inReceiver, Effect.ignoreCause)
           yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-          yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
+          // Report only what the parent has not already been told. The fork
+          // publishes an actor's terminal envelope from whichever turn settles
+          // it, and `SessionPrompt`'s continuation is the one path that settles
+          // without a lifecycle generation for this cancel to contend with — so
+          // it leaves this mark instead, and this is the single place that
+          // consumes it. Retiring a peer whose settlement was never announced
+          // still announces it, which the durable idle-peer case asserts.
+          if (!notifiedSettlements.has(key))
+            yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
           yield* retire
-        }).pipe(Effect.ensuring(settleClaim), Effect.ensuring(releaseEpisode)),
+        }).pipe(
+          Effect.ensuring(Effect.sync(() => notifiedSettlements.delete(key))),
+          Effect.ensuring(settleClaim),
+          Effect.ensuring(releaseEpisode),
+        ),
       )
     })
 
@@ -2083,7 +2112,13 @@ export const layer = Layer.effect(
         if (!instance.disposing) yield* captureNotificationTarget(instance)
         yield* scanRememberedTargets
       })
-    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, runPersistentTurn, scanStalledOnce })
+    const markTerminalNotified = (sessionID: SessionID, actorID: string, notified: boolean) =>
+      Effect.sync(() => {
+        const key = actorKey(sessionID, actorID)
+        if (notified) notifiedSettlements.add(key)
+        else notifiedSettlements.delete(key)
+      })
+    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it
