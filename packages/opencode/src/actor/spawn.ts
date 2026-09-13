@@ -28,7 +28,6 @@ import { SessionRetry } from "@/session/retry"
 import { Inbox } from "@/inbox"
 import { renderActorNotification } from "@/inbox/render"
 import { Plugin, HookEvent } from "@/plugin"
-import { ActorExecution } from "./execution"
 import { parseReturnHeader, type ReturnStatus } from "./return-header"
 import { assistantFinalText, sessionErrorText } from "@/session/trajectory"
 import { Log } from "@/util"
@@ -380,7 +379,6 @@ export const layer = Layer.effect(
     const state = yield* SessionRunState.Service
     const plugin = yield* Plugin.Service
     const bus = yield* Bus.Service
-    const executions = yield* ActorExecution.Service
     const taskRegistry = yield* TaskRegistry.Service
     const scope = yield* Scope.Scope
 
@@ -1971,29 +1969,20 @@ export const layer = Layer.effect(
           // consumes it. Retiring a peer whose settlement was never announced
           // still announces it, which the durable idle-peer case asserts.
           //
-          // Two conditions, complementary rather than redundant: `SessionPrompt`
-          // releases a continuation's execution outside the `onExit` that both
-          // publishes and records, so the execution covers the window where a
-          // settlement is being announced and the mark is not yet set, and the
-          // mark covers every moment after. Both are read here, after the runner
-          // has been interrupted and the inbox drained, so a continuation that
-          // admitted while this cancel was running has already installed its
-          // execution and is seen. A turn admitted after this read still races
-          // — closing that needs cancel to contend for the execution claim
-          // itself, which is upstream's shape and a separate change; today this
-          // is strictly narrower than the unconditional publish it replaces.
-          //
-          // Requesting cancellation is what makes the suppression sound, not a
-          // courtesy: an execution acquired but not yet drained has no runner
-          // for `cancelActor` to interrupt, and if this cancel drains its row
-          // first it would return through the empty-drain path without
-          // notifying anyone — suppressed here, unpublished there, and the
-          // parent hears nothing. Marked, it takes the cancelled branch and
-          // publishes from its own `onExit`. `SessionPrompt.runSharedLoop` is
-          // the only acquirer, so this only ever marks a continuation.
-          const execution = yield* executions.current(sessionID, actorID)
-          if (execution) yield* executions.requestCancel(execution)
-          if (!execution && !notifiedSettlements.has(key))
+          // The mark is the only thing consulted here, deliberately. It is set
+          // only after an envelope was actually written, and cleared the moment
+          // this settlement stops being the one it describes, so suppressing on
+          // it asserts nothing about what another fiber is about to do. An
+          // earlier revision also suppressed while an `ActorExecution` was live,
+          // which asserted exactly that — and every window review found after it
+          // came from the assertion being false: an execution that is not yet
+          // in a runner cannot be stopped by `cancelActor`, is not obliged to
+          // publish, and may return through an empty drain. Suppressing on a
+          // promise this cancel cannot keep trades a duplicate envelope for a
+          // missing one, which is the worse failure. Making it true instead
+          // means cancel must interrupt and join the execution — upstream's
+          // cancel shape, and a separate change.
+          if (!notifiedSettlements.has(key))
             yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
           yield* retire
         }).pipe(
@@ -2182,7 +2171,7 @@ export const layer = Layer.effect(
     )
     return impl
   }),
-).pipe(Layer.provide(ActorExecution.layer))
+)
 
 // Wrapped in Layer.suspend so the cross-module `.defaultLayer` reads defer to
 // first use instead of running at module load. Without this, the

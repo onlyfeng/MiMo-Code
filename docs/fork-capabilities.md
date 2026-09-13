@@ -91,26 +91,20 @@ where this delta does not change their implementation.
   and still returns 0. The head also covers both ways work is consumed —
   rendered into a turn for an ephemeral actor, dropped for a retired persistent
   one.
-  Cancel reads two conditions at one point, after the runner is interrupted and
-  the inbox drained, and they are complementary rather than redundant:
-  `SessionPrompt` releases the continuation's `ActorExecution` outside the
-  `onExit` that both publishes and records, so `ActorExecution.current` covers
-  the window where a settlement is being announced and the mark is not yet set,
-  and the mark covers every moment after. Verified by probe rather than
-  inference, since this only holds if the two
-  `Layer.provide(ActorExecution.layer)` sites memoize to one instance: during a
-  hung continuation `cancel` does observe that execution. Reading both at the
-  publish decision rather than at cancel entry also means a continuation that
-  admitted while this cancel was running is seen, and cancel requests
-  cancellation on whatever it observes there. That request is what makes the
-  suppression sound rather than a courtesy: an execution acquired but not yet
-  drained has no runner for `cancelActor` to interrupt, and if cancel drains its
-  inbox row first the turn returns through the empty-drain path without
-  notifying — suppressed in cancel, unpublished in the turn, and the parent
-  hears nothing. Marked, it takes the cancelled branch and publishes from its
-  own `onExit`. A turn admitted after that read still races; closing it needs cancel to contend for the execution claim
-  itself, which is upstream's shape and deliberately out of scope here — the
-  unconditional publish this replaces raced far more widely.
+  The mark is the only thing `Actor.cancel` consults, deliberately. It is set
+  only after an envelope was actually written, and cleared the moment this
+  settlement stops being the one it describes, so suppressing on it asserts
+  nothing about what another fiber is about to do. A revision in review also
+  suppressed while an `ActorExecution` was live, to cover the window between a
+  continuation publishing and recording; every further window review found came
+  from that assertion being false — an execution not yet inside a runner cannot
+  be stopped by `cancelActor`, is not obliged to publish, and may return through
+  an empty drain. Suppressing on a promise cancel cannot keep trades a duplicate
+  envelope for a missing one, and a missing one is the worse failure. Making the
+  promise true instead means cancel must interrupt and join the execution, which
+  is upstream's cancel shape and a separate change; until then the remaining
+  exposure is a duplicate in the microseconds between a continuation's publish
+  and its record, which is what `main` does unconditionally today.
   Mutation-checked: removing the record fails exactly the two peer continuation
   envelope-count cases and nothing else; the execution half closes windows no
   case in the suite reaches.
