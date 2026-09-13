@@ -1330,8 +1330,15 @@ export const layer = Layer.effect(
      * is already active here is a real collision with a previous execution, not
      * this race, and is tolerated exactly as before.
      */
+    // Executions taken by a spawn, as opposed to a continuation's own. Cancel
+    // waits for a continuation to finish settling but never for a spawn, whose
+    // claim spans postStop and would hold the cancel open for its whole run.
+    const spawnClaims = new WeakSet<Execution>()
     const reserveSpawn = (sessionID: SessionID, actorID: string) =>
-      executions.reserve(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      executions.reserve(sessionID, actorID).pipe(
+        Effect.tap((claim) => Effect.sync(() => spawnClaims.add(claim))),
+        Effect.catchCause(() => Effect.succeed(undefined)),
+      )
     const releaseSpawnClaim = (claim: Execution | undefined) =>
       claim ? executions.release(claim) : Effect.void
 
@@ -1962,9 +1969,18 @@ export const layer = Layer.effect(
       // out of band. Marking here restores that point.
       const execution = yield* executions.current(sessionID, actorID)
       if (execution) yield* executions.requestCancel(execution)
+      const settlementWait =
+        execution && !spawnClaims.has(execution) ? Deferred.await(execution.done) : Effect.void
 
-        const releaseEpisode = lifecycleState
-          .releaseCancel(key, ownership.episode)
+        const releaseEpisode = Effect.suspend(() =>
+          // `state.cancelActor` joins only the inner runner, so the turn can
+          // commit its idle/cancelled row before its outer exit handler claims
+          // the terminal report. Closing the episode on that row left the late
+          // claim failing its retirement check with no episode left, and
+          // neither path published. Waiting for the execution to be released
+          // means that handler has already run.
+          settlementWait.pipe(Effect.andThen(lifecycleState.releaseCancel(key, ownership.episode))),
+        )
           // The report entry is cleared here rather than at retirement, which
           // runs while this episode is still open. A cancelled tombstone stays
           // claimable for the length of the episode on purpose, so clearing
