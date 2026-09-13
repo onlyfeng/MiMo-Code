@@ -2136,7 +2136,10 @@ export const layer = Layer.effect(
       // before the publishing branch. The claim is still an object so callers
       // need no special case, and releasing it matches nothing.
       if (!unknown && actor?.lifecycle !== "persistent") return { key } satisfies TerminalClaim
-      if (unknown) return yield* electTerminalReport(key)
+      // An unknown lifecycle contends like a persistent one and takes the same
+      // revalidation below, rather than electing straight away: skipping it let
+      // a defect on this read grant a claim for an actor cancellation had
+      // already published and retired.
       // Retirement clears the map, so an empty map is not on its own evidence
       // that nothing has reported this settlement: a turn whose outer exit runs
       // after cancel finished would otherwise win a fresh claim for a retired
@@ -2152,7 +2155,7 @@ export const layer = Layer.effect(
         row.status === "idle" &&
         row.lastOutcome === "cancelled" &&
         !lifecycleState.isCancellingNow(key)
-      if (retiredNow(actor)) return undefined
+      if (!unknown && retiredNow(actor)) return undefined
       const claim = yield* electTerminalReport(key)
       if (!claim) return undefined
       // The read above is a snapshot and the election is a separate step. A
@@ -2160,7 +2163,13 @@ export const layer = Layer.effect(
       // between, after which this election wins on an empty map and publishes a
       // duplicate. Revalidate once the claim is held, and give it straight back
       // if retirement completed while this was deciding.
-      if (retiredNow(yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined))))) {
+      const recheck = yield* actorReg.get(sessionID, actorID).pipe(Effect.exit)
+      // A defective revalidation is not evidence of retirement, and holding a
+      // claim is harmless on its own — the publish that follows is what a
+      // retired actor must not get. Between an unreported settlement and a
+      // possible duplicate this keeps the claim, matching the rule the rest of
+      // this path follows: silence is the worse failure.
+      if (Exit.isSuccess(recheck) && retiredNow(recheck.value)) {
         yield* Effect.sync(() => {
           if (terminalReports.get(key) === claim) terminalReports.delete(key)
         })
@@ -2182,10 +2191,22 @@ export const layer = Layer.effect(
       const key = actorKey(sessionID, actorID)
       const isRetired = (row: Actor | undefined) =>
         row !== undefined && row.status === "idle" && row.lastOutcome === "cancelled"
-      const readActor = actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-      let actor = yield* readActor
+      // A defect says nothing about retirement. Treating it as "not retired"
+      // returns without retrying, and the cancellation that lost the election
+      // to this claim has already skipped its own envelope — the settlement
+      // would go unreported. Retry the read a few times, and if it still cannot
+      // be read, report rather than stay silent.
+      const readRetirement = Effect.gen(function* () {
+        for (let attempt = 0; ; attempt++) {
+          const seen = yield* actorReg.get(sessionID, actorID).pipe(Effect.exit)
+          if (Exit.isSuccess(seen)) return { row: seen.value, retired: isRetired(seen.value) }
+          if (attempt >= 2) return { row: undefined, retired: true }
+        }
+      })
+      let seen = yield* readRetirement
+      let actor = seen.row
 
-      if (!isRetired(actor)) {
+      if (!seen.retired) {
         // Hand the right back so a later retirement can use it — but only if it
         // is still ours: a newer turn may already have reset the record and
         // taken its own, and dropping that would let a cancel publish a second
@@ -2198,8 +2219,9 @@ export const layer = Layer.effect(
         // this claim and retire in between — removing the token itself on the
         // way out. Both outcomes look the same here, and both need the retry:
         // that cancel skipped its own notification for having lost.
-        actor = yield* readActor
-        if (!isRetired(actor)) return
+        seen = yield* readRetirement
+        actor = seen.row
+        if (!seen.retired) return
       }
 
       // Retired, so nothing is left to use the right and this path reports the

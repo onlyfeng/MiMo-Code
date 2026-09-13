@@ -759,7 +759,13 @@ where this delta does not change their implementation.
   publish for the newer settlement. A turn admission's reset never runs while a cancellation is in progress, since
   that cancel may already hold the claim and be sending under it, and it makes
   that check and its delete one synchronous step so a cancel starting between
-  them cannot have its claim taken afterwards. A lookup that defects is never read as "not persistent": that would return an
+  them cannot have its claim taken afterwards. Where a registry read cannot be completed, the coordination resolves the
+  uncertainty toward reporting: a claim whose revalidation defects is kept,
+  since holding one is harmless and only the publish matters, and a release
+  whose retirement read keeps defecting retries the envelope rather than
+  assuming retirement did not happen. Silence is the worse failure — a repeated
+  envelope is visible and recoverable, a settlement nobody reported is not.
+  A lookup that defects is never read as "not persistent": that would return an
   untracked claim, and a delivered envelope with no entry behind it lets a later
   cancel win a fresh election and duplicate it. A claim is revalidated once
   held, because the registry read that admits it and
