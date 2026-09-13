@@ -234,9 +234,14 @@ test("failed completion-gate reentry preserves the result without reporting task
 }, 30000)
 
 // Desktop tool-step-schema [TP-R14-08] [TP-R14-11].
-// QUARANTINED (fork): upstream behaviour not yet reproduced on the fork's
-// actor pipeline. Tracked for a dedicated fork PR; see FC-008 and the
-// 2026-09-12 synchronization record. No upstream PR is opened for this.
+// QUARANTINED (fork): this asserts the actor is still `running` while its
+// postStop hook runs, so a queued message cannot start a continuation yet. The
+// fork publishes the outcome and leaves the actor idle *before* postStop — the
+// early-publish delivery contract. It shares that single blocker with
+// `[TP-R14-07] postStop LLM failure preserves the successful result with a
+// warning`, whose comment records what the change costs. It is NOT about the
+// spawn-side ActorExecution claim: restoring that claim leaves this assertion
+// failing on `duringHook?.status` with "idle" instead of "running".
 test.skip("inbox waits for the entire spawn execution before starting a continuation", async () => {
   const server = startScriptedLLMServer([
     { lines: textStopResponse("SPAWN-RESULT") },

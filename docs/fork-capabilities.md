@@ -260,8 +260,11 @@ where this delta does not change their implementation.
 - 2026-09-12 wake-routing retirement: the continuation path is retired from
   this entry. A woken non-main turn now runs on upstream's `ActorExecution`
   claim and settles through `runTurn`, instead of `Actor.runPersistentTurn`'s
-  wake generation. `spawn` reserves the same claim for its whole run so a
-  continuation waits behind an in-flight spawn, which is upstream's ordering.
+  wake generation. `spawn` reserves the same claim for its whole run, postStop
+  included, so a woken continuation queues behind an in-flight spawn — which is
+  upstream's ordering. The claim was briefly removed in this range on the
+  reading that it deadlocked a nested ActorTool spawn; that reading was wrong
+  (see the sync document) and it is restored.
   The eight fork-owned tests that encoded behavior upstream's execution map
   does not model were removed with it: drain-once across six `resume drains`
   cases, cancel-race registry settlement, postStop wake ordering, and
@@ -683,6 +686,139 @@ where this delta does not change their implementation.
   `packages/opencode/src/tool/question.ts`;
   `test/question/lifecycle.test.ts` and real
   `test/cli/tui/question-lifecycle.test.tsx` cover these consumers.
+- 2026-09-12 follow-up: three of the five quarantined cases are now fixed and
+  unskipped — the undeliverable-notification log wording, and both peer
+  continuation envelope counts, which were a duplicate terminal notification
+  emitted when a forced cancel retired an already-notified settlement. FC-001
+  gains `Actor.markTerminalNotified`: the continuation records that it published
+  a terminal envelope and `cancel` consumes that marker instead of sending a
+  second one, so retiring an actor that was never notified still notifies.
+  Two cases stay quarantined, and both reduce to one blocker rather than two:
+  the fork publishes an actor's outcome and leaves it idle *before* postStop,
+  where upstream publishes after. What holds this open is a product decision,
+  not a test conflict — publishing after postStop means a spawn's caller, and a
+  blocking `actor run`, resolves only once postStop finishes. Exactly one fork
+  case reads on the early publish, `delivered no-op cancel preserves forkContext
+  while postStop is still running`, and only in how it sequences its awaits;
+  its subject holds under either ordering once they are swapped. Every other
+  postStop case awaits with a 5s-to-30s or unbounded timeout and never pauses
+  the hook. One change to publish ordering unskips both quarantined cases.
+- 2026-09-13 Codex review follow-up: four defects in the marker introduced above
+  are fixed. The record is an *in-flight notification*, not a flag. It is opened
+  before the send and completed with whether the send wrote an envelope, and a
+  cancel that lands mid-send awaits that outcome instead of guessing. Three
+  earlier shapes were wrong and are retired: set after the notifier returned,
+  where a dropped envelope still counted; set inside `Inbox.send` between the
+  row insert and `InboxArrived`, where that method's retirement re-check
+  protects the receiver while the record is sender-side state; and set before
+  the send as a plain flag, where a cancel landing between the flag and a
+  *failed* send suppressed its own envelope and retired, leaving that
+  settlement permanently unreported. Awaiting the outcome removes the window in
+  both directions rather than moving it, and the completion runs on every exit
+  of the notify, interrupt included, or a cancel would wait forever.
+  `Actor.cancel` marks the actor's `ActorExecution` before it does anything
+  else, which is upstream's own shape. The fork adopted that service for
+  continuations but left `requestCancel` with no caller anywhere in `src`, so
+  cancel and the continuation had no shared point to serialise on and every
+  interleaving between them had to be reconstructed out of band. With the claim
+  marked, a continuation that is admitted or already in flight observes the
+  cancellation through the claim it holds, at the checks it already makes.
+  That lookup is a point in time, so it pairs with a check in the other
+  direction: a continuation asks `Actor.isCancelling` right after acquiring its
+  execution, because a claim created after cancel's lookup would otherwise start
+  a turn behind a cancellation already in progress. The predicate reads the
+  cancel episode, which `acquireCancel` registers as its first act for every
+  owner, live generation or not, so it is the earliest observable sign that a
+  cancellation has begun. Cancel-first is caught by the check, acquire-first by
+  the mark.
+  Cancel and the settling turn are the two possible publishers of a terminal
+  envelope, and they now *elect* one per settlement instead of each deciding
+  alone. The fork already elects a terminal publisher per generation through
+  `lifecycleState.claimTerminal`, which every `forkWork` publish point goes
+  through and which `acquireCancel` claims for a live generation; the
+  SessionPrompt continuation never joined it, because after the wake-routing
+  retirement it runs on an `ActorExecution` claim rather than a lifecycle
+  generation. That gap is what every interleaving in the review of this PR came
+  back to. `Actor.claimTerminalReport` closes it: exactly one caller wins per
+  settlement, a winner that wrote no envelope gives the right back through
+  `releaseTerminalReport` so a later retirement still reports, and a turn that
+  actually runs resets the right on admission. Three edges round it out. A
+  claim is rejected once retirement has *completed* — the registry tombstone
+  with no cancel episode still in flight — because retirement clears the map
+  and an empty map would otherwise let a turn whose outer exit runs afterwards
+  win a fresh claim and publish again; the episode has to be part of that test,
+  since the tombstone is written partway through cancel and several cancel
+  paths deliberately leave the envelope to the turn they interrupted. A release
+  whose actor is already retired has no later retirement to fall back on, so it
+  reports the settlement itself — forked into the service scope, because that
+  release runs inside the failing notify's own `ensuring` and re-entering the
+  notification path from there deadlocks under load. And a caller releases only
+  a claim it actually won, or it would hand back someone else's. Delivery is reported by
+  `Inbox.send` itself, through a `committed` flag it sets the moment the row
+  lands and unsets if its retirement re-check removes it again — inferring it
+  from how the call ended was wrong in both directions. Only persistent actors
+  contend, so the map stays bounded by the live standing peers.
+  Electing replaces a sequence of out-of-band reconstructions that each closed
+  one ordering and exposed the next: a flag set after the notifier returned,
+  then inside `Inbox.send`, then before the send, then an in-flight record a
+  cancel awaited, then that record as a per-turn token. None of them could be
+  made total, because the two publishers shared no point at which exactly one
+  of them could be chosen. Election needs no waiting at all, so the hazards
+  that came with awaiting — a cancel parked on a token a newer turn displaced,
+  or on one nobody would complete — do not arise.
+  Fourth, the marker set had no bound: `Actor.markTerminalNotified` records only
+  `persistent` actors, since an already-settled ephemeral actor's cancel returns
+  before the consuming branch, and every cancel branch clears the key through
+  `retire`, so the set is bounded by the live standing peers.
+  A third review round added the record's lifetime: it belonged to the actor, not
+  to the turn that produced it, so a later turn whose envelope dropped inherited
+  the previous turn's record and retirement suppressed the only notice that
+  settlement could still get. `Actor.resetTerminalNotified` now drops it wherever
+  a new turn is admitted — in `resume`'s `onCommitted`, since an admission that
+  fails on an invalid assistant message, a task-binding conflict or an abort
+  supersedes nothing; after `acquireWake` in `runPersistentTurn`; and in the
+  continuation past every no-turn exit, immediately before the turn runs. The continuation's reset sat right after
+  `ActorExecution.attach` at first, which is wrong for a continuation that
+  acquires the execution, finds its `inboxID` already drained by an earlier one,
+  and returns the previous assistant without running or reporting: it cleared a
+  record it did not replace, so retirement duplicated the envelope the earlier
+  continuation had already delivered. Only a turn that actually runs supersedes
+  the record.
+  A sixth review round moved where the spawn claim is taken. `forkWork`
+  reserved it itself, which is after registration has already published
+  `ActorRegistered`: a client that reacts by messaging the new actor produces a
+  wake that takes the key first, the reserve then fails, and the failure was
+  swallowed so the spawn turn ran unclaimed — the exact ordering the claim
+  exists to enforce. Both spawn paths now reserve before `actorReg.register`
+  and hand the claim to `forkWork`, releasing it if anything fails before the
+  work is forked. A key that is already active at that earlier point is a real
+  collision with a previous execution rather than this race, and is tolerated
+  as before.
+  Two coverage gaps are stated rather than papered over, both because the
+  harness cannot produce the required drop. The persistent-turn recording is
+  unpinned: `runPersistentTurn` has no caller outside `spawn.ts` since the
+  wake-routing retirement and the path is reachable in production only through
+  the `session.resume` route, so removing the recording fails no test; driving
+  `Actor.runPersistentTurn` directly admits the turn but its `notifyTerminal`
+  silently returns, because a test context resolves no notification target. The
+  turn-scoped reset is unpinned for the same reason: demonstrating it needs one
+  turn to deliver and the next to drop, and retiring the receiver's registry row
+  mid-sequence does not make `Inbox.send` fail from the notifier's instance
+  context, while an unregistered receiver drops every turn. Both fixes match the
+  continuation path's rule by construction and are kept.
+- 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
+  ownership to the real parent` polled the `InboxTable` row its assertion is
+  about. That row exists to wake the persistent peer it addresses, so the peer's
+  continuation drains it within milliseconds and the poll observes a state the
+  system is designed to erase. A drained row never returns, so the earlier
+  window widening (2s to 20s) only moved the failure from ~2.5s to ~21s. The
+  case now observes `InboxArrived`, published after the row commits and before
+  `wake()`, matching how `test/actor/cancel-notification.test.ts` already counts
+  envelopes. Behavior is unchanged and was verified identical with
+  `spawn.ts`/`prompt.ts` reverted to `e92d7a52`; the assertion is
+  mutation-checked against a suppressed notification and against one misrouted
+  to `main`. Prefer the bus envelope over inbox rows whenever a test asserts
+  notification routing.
 - 2026-09-12 quarantine: four upstream-new actor cases are skipped in place with
   an inline rationale — `inbox waits for the entire spawn execution before
   starting a continuation`, `[TP-R14-12] undeliverable terminal notification is

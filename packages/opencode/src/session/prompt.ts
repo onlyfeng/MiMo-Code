@@ -5761,10 +5761,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               (exec) =>
                 Effect.gen(function* () {
                   yield* executions.attach(exec)
+                  // `Actor.cancel` marks a live execution, but this claim may
+                  // have been created after that lookup, behind a cancellation
+                  // already in progress. Checking here closes the other half:
+                  // a cancel that started first is seen now, and one that starts
+                  // later finds this claim and marks it.
+                  const cancelling =
+                    (yield* (boundActor ?? spawnRef.current)?.isCancelling?.(input.sessionID, agentID) ??
+                      Effect.succeed(false)) === true
                   // Cancelled before drain: do not consume messages for a turn
                   // that will not run. isCancelled is re-checked inside drain
                   // just before commit, so a cancel mid-drain leaves rows durable.
-                  if (exec.cancelled) {
+                  if (exec.cancelled || cancelling) {
                     // fall through: `continued` interrupts and onExit notifies
                   } else if (
                     input.inboxID &&
@@ -5774,16 +5782,37 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     // does not notify on its own — only runTurn.onExit does.
                     if (!exec.cancelled) return yield* lastAssistant(input.sessionID, agentID)
                   }
+                  // Past every no-turn exit: this turn is a new settlement, so
+                  // no publisher has reported it yet. A continuation that
+                  // returns the previous assistant without running reported
+                  // nothing and must leave the earlier report standing.
+                  yield* (boundActor ?? spawnRef.current)?.resetTerminalReport?.(input.sessionID, agentID) ??
+                    Effect.void
                   // Capture the last delivery even when the turn dies with a
                   // settled error, so settle can persist a partial result.
                   let lastFinal: MessageV2.WithParts | undefined
+                  // Re-checked inside the runner, which is the first point at
+                  // which `Actor.cancel` can find this turn: until the runner is
+                  // registered, a cancel starting now only flips a flag already
+                  // read above and then returns for lack of a runner, leaving
+                  // the turn free to start its model call behind a completed
+                  // cancellation. Mirrors the same guard in runPersistentTurn.
+                  const guardedWork = Effect.gen(function* () {
+                    if (exec.cancelled) return yield* Effect.interrupt
+                    if (
+                      (yield* (boundActor ?? spawnRef.current)?.isCancelling?.(input.sessionID, agentID) ??
+                        Effect.succeed(false)) === true
+                    )
+                      return yield* Effect.interrupt
+                    return yield* work
+                  })
                   const continued = Effect.gen(function* () {
                     if (exec.cancelled) return yield* Effect.interrupt
                     const final = yield* state.ensureRunning(
                       input.sessionID,
                       agentID,
                       lastAssistant(input.sessionID, agentID),
-                      work,
+                      guardedWork,
                     )
                     lastFinal = final
                     if (final.info.role === "assistant" && final.info.error)
@@ -5833,7 +5862,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           : Cause.hasInterruptsOnly(failureCause)
                             ? ("cancelled" as const)
                             : ("failed" as const)
-                        yield* notifyTerminal({
+                        // Opened before the send and completed with its outcome,
+                        // so a cancel that interleaves with the send awaits the
+                        // result instead of guessing: it neither duplicates a
+                        // delivered envelope nor swallows the only notice a
+                        // dropped one could still get.
+                        // Elect before publishing: cancel is the other possible
+                        // publisher for this settlement, and exactly one of us
+                        // reports it. A claim that writes no envelope is given
+                        // back, so a later retirement still reports.
+                        const owner = boundActor ?? spawnRef.current
+                        const mayReport =
+                          (yield* owner?.claimTerminalReport?.(input.sessionID, agentID) ?? Effect.succeed(true)) ===
+                          true
+                        let delivered = false
+                        if (mayReport)
+                          yield* notifyTerminal({
                           sessionID: input.sessionID,
                           actorID: agentID,
                           source: "continuation",
@@ -5853,7 +5897,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                                 ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
                               }
                             : {}),
-                        })
+                        }).pipe(
+                            Effect.tap((written) => Effect.sync(() => (delivered = written))),
+                            Effect.ensuring(
+                              Effect.suspend(() =>
+                                mayReport && !delivered
+                                  ? (owner?.releaseTerminalReport?.(input.sessionID, agentID) ?? Effect.void)
+                                  : Effect.void,
+                              ),
+                            ),
+                          )
                       }),
                     ),
                   )
