@@ -184,7 +184,7 @@ where this delta does not change their implementation.
   exactly, and `config.llmServer`, `Util.Self`, upstream's `llm-server` CLI and
   upstream's `generateServerPassword`/`clearGeneratedServerPassword` come with
   it. Net −3548 lines.
-- Observable contract, what remains fork-owned: two boundaries, both kept
+- Observable contract, what remains fork-owned: three boundaries, all kept
   because upstream does not have them, not because the fork prefers them.
   1. `serve --llm-server` gates only the address advertisement. The route is
      always mounted and always demands a minted token, so credentials alone
@@ -192,6 +192,13 @@ where this delta does not change their implementation.
   2. The capability route reads its body through `ApiRequest.readBody`, capped
      at 25 MiB and honouring the request signal. Upstream calls `c.req.json()`
      unbounded on a route anything holding a token can reach.
+  3. `Server.listen` takes an optional `advertiseDirectory`. Upstream keys the
+     advertisement on `process.cwd()`, which holds when the process chdir'd
+     into the project; this fork's TUI worker serves a directory chosen at
+     startup that need not equal cwd, and an advertisement filed under the
+     wrong bucket is invisible to `mimo llm-server issue` in the project it
+     actually serves. Defaults to `process.cwd()`, so every other caller keeps
+     upstream's behaviour.
   The non-loopback bind guard still reads `MIMOCODE_SERVER_OPERATOR_PASSWORD`,
   so a worker-generated credential cannot satisfy it.
 - Adopted from upstream, including where it relaxes the fork:
@@ -217,6 +224,11 @@ where this delta does not change their implementation.
   `packages/opencode/src/cli/cmd/tui/worker-listener.ts`,
   `packages/opencode/src/flag/flag.ts`, `packages/opencode/src/llm-server/`,
   `packages/opencode/src/config/llm-server.ts`, `packages/opencode/src/util/self.ts`.
+- Fixture convention: this fork roots test fixtures outside `process.cwd()`
+  and asks cases that depend on the InstanceMiddleware containment check to opt
+  in with `root: "cwd"`, where upstream's preload roots every fixture under cwd.
+  Inherited upstream cases that address a fixture directory need that opt-in;
+  `implicit-listener.test.ts` carries it with a comment saying why.
 - Tests/evidence: upstream's `test/llm-server/{harness,implicit-listener,
   protocol,streaming,tokens}.test.ts`, `test/cli/cmd/serve-advertise.test.ts`
   and `test/util/self.test.ts` are inherited verbatim. The fork keeps
