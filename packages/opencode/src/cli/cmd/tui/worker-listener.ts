@@ -1,5 +1,4 @@
-import { randomBytes } from "node:crypto"
-import { Flag, installAutomaticServerPassword } from "@/flag/flag"
+import { Flag, clearGeneratedServerPassword, generateServerPassword } from "@/flag/flag"
 import { Server } from "@/server/server"
 import { serverAuthHeaders } from "@/server/auth"
 
@@ -16,19 +15,15 @@ export function createWorkerListener(input: { directory: string; listen?: typeof
   let pending: Promise<Server.Listener | undefined> | undefined
   let closing = false
   let stopping: Promise<void> | undefined
-  let release: (() => void) | undefined
-
   const clearAuthentication = () => {
-    release?.()
-    release = undefined
+    clearGeneratedServerPassword()
   }
 
   return {
     async start(options: WorkerListenerInput = {}): Promise<WorkerListenerResult> {
       if (closing) return { ok: false, error: "The model API listener is shutting down." }
       if (!active && !pending) {
-        if (!Flag.MIMOCODE_SERVER_PASSWORD)
-          release = installAutomaticServerPassword(randomBytes(32).toString("base64url"))
+        generateServerPassword()
         const { http, ...network } = options
         pending = Promise.resolve()
           .then(() =>
