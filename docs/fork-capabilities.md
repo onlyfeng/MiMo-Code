@@ -756,7 +756,9 @@ where this delta does not change their implementation.
   the claim it actually holds: claims carry identity, because a newer turn
   resets the record and takes its own, and an older notifier failing afterwards
   would otherwise hand back a claim it no longer owns and let a later cancel
-  publish for the newer settlement. In the retired case the claim is kept rather than released and re-elected:
+  publish for the newer settlement. A reset never runs while a cancellation is in progress, since that cancel may
+  already hold the claim and be sending under it. In the retired case the claim
+  is kept rather than released and re-elected:
   releasing first opens a window in which cancellation wins the election and
   publishes a bare `cancelled`, leaving the retry nothing to claim and the
   parent without this turn's real status. The fallback also reports the claim

@@ -2159,25 +2159,27 @@ export const layer = Layer.effect(
       settlement?: TerminalSettlement,
     ) {
       const key = actorKey(sessionID, actorID)
-      // Only the entry this claim still owns: a newer turn may already have
-      // reset the record and taken its own, and deleting that would let a
-      // later cancel publish a second envelope for the newer settlement.
-      if (terminalReports.get(key) !== claim) return
       const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       const retired = actor !== undefined && actor.status === "idle" && actor.lastOutcome === "cancelled"
-      // Hand the right back only when a later retirement can still use it.
       if (!retired) {
+        // Hand the right back so a later retirement can use it — but only if it
+        // is still ours: a newer turn may already have reset the record and
+        // taken its own, and dropping that would let a cancel publish a second
+        // envelope for the newer settlement.
         yield* Effect.sync(() => {
           if (terminalReports.get(key) === claim) terminalReports.delete(key)
         })
         return
       }
       // Retirement already happened while this send was in flight, so nothing
-      // is left to use the right. The claim is kept rather than released and
-      // re-elected: releasing first opens a window in which cancellation wins
-      // the election and publishes a bare `cancelled`, and the retry then finds
-      // nothing to claim — the parent would lose this turn's real status and
-      // payload.
+      // is left to use the right and this path has to report the settlement
+      // itself. It runs whether or not the token is still listed: retirement
+      // clears the map on its way out, and only a caller that won the election
+      // reaches this function at all — a cancellation that lost it has already
+      // skipped its own notification, so returning here would leave the parent
+      // with no terminal envelope. Re-listing rather than re-electing keeps
+      // cancellation from taking the claim in the gap and publishing a bare
+      // `cancelled` that loses this turn's real status and payload.
       // Forked into the service scope rather than published here: this runs in
       // the failing notify's own `ensuring`, and re-entering the notification
       // path from there deadlocks under load — reproduced as a 120s hang in
@@ -2218,11 +2220,21 @@ export const layer = Layer.effect(
      * Only an admission that actually runs a turn resets: one that returns
      * without running reported nothing and must leave the previous report
      * standing, or a retirement would publish a second envelope for it.
+     *
+     * Never while a cancellation is in progress. A cancel that began after this
+     * turn's own admission checks may already hold the claim and be sending
+     * under it; dropping it here would let the turn that same cancel is about
+     * to interrupt take a replacement in its exit handler, and both would
+     * publish a cancelled envelope.
      */
-    const resetTerminalReport = (sessionID: SessionID, actorID: string) =>
-      Effect.sync(() => {
-        terminalReports.delete(actorKey(sessionID, actorID))
-      })
+    const resetTerminalReport = Effect.fn("Actor.resetTerminalReport")(function* (
+      sessionID: SessionID,
+      actorID: string,
+    ) {
+      const key = actorKey(sessionID, actorID)
+      if (yield* lifecycleState.isCancelling(key)) return
+      yield* Effect.sync(() => terminalReports.delete(key))
+    })
 
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
