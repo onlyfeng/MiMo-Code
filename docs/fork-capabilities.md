@@ -759,8 +759,12 @@ where this delta does not change their implementation.
   publish for the newer settlement. A turn admission's reset never runs while a cancellation is in progress, since
   that cancel may already hold the claim and be sending under it, and it makes
   that check and its delete one synchronous step so a cancel starting between
-  them cannot have its claim taken afterwards. Retirement has its own
-  unconditional cleanup: a retirement always runs inside a cancel episode, so
+  them cannot have its claim taken afterwards. A claim is revalidated once held, because the registry read that admits it and
+  the election itself are separate steps: a cancellation can tombstone,
+  publish, retire and clear the map in between, after which the election wins on
+  an empty map. Registry reads and the in-memory map cannot be made atomic with
+  each other, so every decision taken from a snapshot is confirmed again before
+  it is acted on. Retirement has its own unconditional cleanup: a retirement always runs inside a cancel episode, so
   reusing the guarded reset there would never fire and the entry would outlive
   the actor — which is what keeps the map bounded. In the retired case the claim
   is kept rather than released and re-elected:

@@ -2140,12 +2140,26 @@ export const layer = Layer.effect(
       // and several cancel paths deliberately leave the envelope to the turn
       // they interrupted. Rejecting on the tombstone alone would suppress
       // exactly that turn and leave the settlement unreported.
-      const retired =
-        actor.status === "idle" &&
-        actor.lastOutcome === "cancelled" &&
-        !(yield* lifecycleState.isCancelling(key))
-      if (retired) return undefined
-      return yield* electTerminalReport(key)
+      const retiredNow = (row: Actor | undefined) =>
+        row !== undefined &&
+        row.status === "idle" &&
+        row.lastOutcome === "cancelled" &&
+        !lifecycleState.isCancellingNow(key)
+      if (retiredNow(actor)) return undefined
+      const claim = yield* electTerminalReport(key)
+      if (!claim) return undefined
+      // The read above is a snapshot and the election is a separate step. A
+      // cancellation can tombstone, publish, retire and clear the map in
+      // between, after which this election wins on an empty map and publishes a
+      // duplicate. Revalidate once the claim is held, and give it straight back
+      // if retirement completed while this was deciding.
+      if (retiredNow(yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined))))) {
+        yield* Effect.sync(() => {
+          if (terminalReports.get(key) === claim) terminalReports.delete(key)
+        })
+        return undefined
+      }
+      return claim
     })
 
     /**
