@@ -209,7 +209,13 @@ where this delta does not change their implementation.
   - `function.strict` passthrough is dropped; upstream's protocol schema has no
     such field and strips it.
   - `inInstance` is dropped; the route now sits behind `InstanceMiddleware`.
-  - The `--directory` and `--all-models` CLI flags go with upstream's CLI.
+  - The `--directory`, `--all-models`, `--capability` and `--audio-api` CLI
+    flags go with upstream's CLI, and `test/cli/llm-server.test.ts` — which
+    exercised them and has no upstream counterpart — is retired with them.
+    Losing `--directory` is a real reduction: a token is now issued for the
+    process's cwd, so callers `cd` into the project first. That is upstream's
+    cwd-keyed model and matches how `LLMServerTokens.verify` binds a token to
+    the request-resolved directory.
 - Breaking change for existing fork users: tokens already issued stop working.
   The fork wrote `version: 2` records at the same path upstream reads as
   `version: 1`, and upstream's reader treats an unknown version as an empty
