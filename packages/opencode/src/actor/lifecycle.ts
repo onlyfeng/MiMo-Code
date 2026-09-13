@@ -196,6 +196,8 @@ export function createActorLifecycle<Result, ContextValue, NotificationTarget = 
      * the earliest observable sign that a cancellation has begun.
      */
     isCancelling: (actorKey: string) => Effect.sync(() => cancelEpisodes.has(actorKey)),
+    /** Same answer, readable inside a caller's own synchronous step. */
+    isCancellingNow: (actorKey: string) => cancelEpisodes.has(actorKey),
     retainPersistent: (actorKey: string) => Effect.sync(() => persistentActors.add(actorKey)),
     releasePersistent: (actorKey: string) => Effect.sync(() => persistentActors.delete(actorKey)),
     setForkContext: (actorKey: string, context: ContextValue) => Effect.sync(() => forkContexts.set(actorKey, context)),

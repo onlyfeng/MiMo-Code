@@ -756,8 +756,13 @@ where this delta does not change their implementation.
   the claim it actually holds: claims carry identity, because a newer turn
   resets the record and takes its own, and an older notifier failing afterwards
   would otherwise hand back a claim it no longer owns and let a later cancel
-  publish for the newer settlement. A reset never runs while a cancellation is in progress, since that cancel may
-  already hold the claim and be sending under it. In the retired case the claim
+  publish for the newer settlement. A turn admission's reset never runs while a cancellation is in progress, since
+  that cancel may already hold the claim and be sending under it, and it makes
+  that check and its delete one synchronous step so a cancel starting between
+  them cannot have its claim taken afterwards. Retirement has its own
+  unconditional cleanup: a retirement always runs inside a cancel episode, so
+  reusing the guarded reset there would never fire and the entry would outlive
+  the actor — which is what keeps the map bounded. In the retired case the claim
   is kept rather than released and re-elected:
   releasing first opens a window in which cancellation wins the election and
   publishes a bare `cancelled`, leaving the retry nothing to claim and the

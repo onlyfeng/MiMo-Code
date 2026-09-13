@@ -1959,7 +1959,7 @@ export const layer = Layer.effect(
         const releaseEpisode = lifecycleState.releaseCancel(key, ownership.episode)
         const retire = lifecycleState
           .retire(key)
-          .pipe(Effect.ensuring(resetTerminalReport(sessionID, actorID)))
+          .pipe(Effect.ensuring(retireTerminalReport(sessionID, actorID)))
         const settleClaim =
           ownership.claimed && ownership.generation ? lifecycleState.settleTerminal(ownership.generation) : Effect.void
 
@@ -2159,17 +2159,27 @@ export const layer = Layer.effect(
       settlement?: TerminalSettlement,
     ) {
       const key = actorKey(sessionID, actorID)
-      const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-      const retired = actor !== undefined && actor.status === "idle" && actor.lastOutcome === "cancelled"
-      if (!retired) {
+      const isRetired = (row: Actor | undefined) =>
+        row !== undefined && row.status === "idle" && row.lastOutcome === "cancelled"
+      const readActor = actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      let actor = yield* readActor
+      if (!isRetired(actor)) {
         // Hand the right back so a later retirement can use it — but only if it
         // is still ours: a newer turn may already have reset the record and
         // taken its own, and dropping that would let a cancel publish a second
         // envelope for the newer settlement.
-        yield* Effect.sync(() => {
-          if (terminalReports.get(key) === claim) terminalReports.delete(key)
+        const dropped = yield* Effect.sync(() => {
+          if (terminalReports.get(key) !== claim) return false
+          terminalReports.delete(key)
+          return true
         })
-        return
+        if (!dropped) return
+        // The read above is a snapshot. A cancel can write its tombstone, lose
+        // the election to the claim just dropped, and retire, all in between —
+        // and it has skipped its own notification for having lost. Re-read
+        // before concluding that someone else will report this settlement.
+        actor = yield* readActor
+        if (!isRetired(actor)) return
       }
       // Retirement already happened while this send was in flight, so nothing
       // is left to use the right and this path has to report the settlement
@@ -2227,14 +2237,26 @@ export const layer = Layer.effect(
      * to interrupt take a replacement in its exit handler, and both would
      * publish a cancelled envelope.
      */
-    const resetTerminalReport = Effect.fn("Actor.resetTerminalReport")(function* (
-      sessionID: SessionID,
-      actorID: string,
-    ) {
-      const key = actorKey(sessionID, actorID)
-      if (yield* lifecycleState.isCancelling(key)) return
-      yield* Effect.sync(() => terminalReports.delete(key))
-    })
+    const resetTerminalReport = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => {
+        // Guard and delete in one step: as two effects, a cancellation starting
+        // between them could win the claim and begin publishing, and the delete
+        // would then hand it away to the continuation that cancel is about to
+        // interrupt — both would publish a cancelled envelope.
+        const key = actorKey(sessionID, actorID)
+        if (lifecycleState.isCancellingNow(key)) return
+        terminalReports.delete(key)
+      })
+
+    /**
+     * Retirement's own cleanup, which must not consult the cancel episode: a
+     * retirement always runs inside one, so the guarded reset would never fire
+     * and the entry would outlive the actor. Bounded growth depends on this.
+     */
+    const retireTerminalReport = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => {
+        terminalReports.delete(actorKey(sessionID, actorID))
+      })
 
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
