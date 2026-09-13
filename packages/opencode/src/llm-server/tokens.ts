@@ -1,393 +1,343 @@
-import path from "node:path"
-import fs from "node:fs/promises"
-import { Buffer } from "node:buffer"
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
-import z from "zod"
+import path from "path"
+import fs from "fs/promises"
+import { createHash, timingSafeEqual } from "node:crypto"
 import { Hash } from "@mimo-ai/shared/util/hash"
 import { Flock } from "@mimo-ai/shared/util/flock"
 import { Global } from "@/global"
-import { Filesystem } from "@/util"
-import { LLMServerScope } from "./scope"
+import { Filesystem, Log } from "@/util"
 
-const MAX_FILE = 1024 * 1024
-const MAX_TOKENS = 1024
-const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
-const timestamp = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-const time = {
-  created: timestamp,
-  last_used: timestamp.optional(),
-  idle_ms: positive.nullable(),
-  max_age_ms: positive.nullable(),
-}
-const fields = {
-  id: z.string().min(1).max(128),
-  hash: z.string().regex(/^[a-f0-9]{64}$/),
-  label: z.string().max(256).optional(),
-  created: timestamp,
-  last_used: timestamp.optional(),
-}
-const lifetimes = (value: z.infer<z.ZodObject<typeof time>>) =>
-  (value.last_used === undefined || value.last_used >= value.created) &&
-  (value.max_age_ms === null || Number.isSafeInteger(value.created + value.max_age_ms)) &&
-  (value.idle_ms === null || Number.isSafeInteger((value.last_used ?? value.created) + value.idle_ms))
-const lifetime = z.object(time).refine(lifetimes)
-// Historical v1 null/missing limits were invalid, so reading must never grant them new authority.
-const legacyRecord = z
-  .strictObject({
-    ...fields,
-    models: z.array(LLMServerScope.ModelRef).length(1),
-    idle_ms: positive,
-    max_age_ms: positive,
-  })
-  .refine(lifetimes)
-const legacySchema = z.strictObject({ version: z.literal(1), tokens: z.array(legacyRecord).max(MAX_TOKENS) })
-const record = z.strictObject({ ...fields, ...time, scope: LLMServerScope.Schema }).refine(lifetimes)
-const schema = z.strictObject({ version: z.literal(2), tokens: z.array(record).max(MAX_TOKENS) })
-type StoredRecord = z.infer<typeof record>
-type Store = z.infer<typeof schema>
-type PublicScope =
-  | { scope: Extract<LLMServerScope.Scope, { type: "models" }>; models: string[] }
-  | { scope: Extract<LLMServerScope.Scope, { type: "all" }>; models?: never }
-export type PublicRecord = Omit<StoredRecord, "hash" | "scope"> & PublicScope
-type FiniteRecord = Omit<StoredRecord, "hash" | "scope"> & Extract<PublicScope, { models: string[] }>
-export type Expiry = { idleMs: number | null; maxAgeMs: number | null }
-type Lifetime = z.infer<typeof lifetime>
+const log = Log.create({ service: "llm-server.tokens" })
 
-function bucket(directory: string) {
+/**
+ * Persistent registry of the temporary tokens this project's LLM server accepts.
+ *
+ * Persistence is not a convenience here, it is what makes a `mimo llm-server
+ * issue` subcommand possible at all: the process that MINTS a token is not the
+ * process that VALIDATES it, so the two have to meet somewhere outside memory.
+ *
+ * What lands on disk is only a SHA-256 of the token. The plaintext is printed once
+ * at issue time and never stored, so reading this file does not yield a usable
+ * credential. That is a stronger position than the original memory-only design,
+ * not a weaker one — and the thing being protected (a loopback-only, revocable,
+ * time-bounded stand-in) is far cheaper than the provider key it replaces, which
+ * already lives on disk in `auth.json`.
+ *
+ * Scoped per project directory, because the server is pinned to one directory and
+ * a token must not be replayable against a different project's provider config.
+ */
+
+export type Expiry = {
+  /**
+   * Sliding window in ms. The token dies this long after its LAST use, not after
+   * issue, so a skill that keeps working never has the endpoint pulled out from
+   * under it mid-task. `undefined` means no idle limit.
+   */
+  idleMs?: number
+  /**
+   * Hard ceiling in ms from issue. Survives any amount of activity, so an
+   * indefinitely busy token still has an end. `undefined` means no ceiling.
+   */
+  maxAgeMs?: number
+}
+
+export type Record_ = {
+  id: string
+  /** SHA-256 hex of the token. The token itself is never stored. */
+  hash: string
+  label?: string
+  /** Restricts this token to these `provider/model` refs. Empty means all. */
+  models: string[]
+  created: number
+  last_used?: number
+  idle_ms?: number
+  max_age_ms?: number
+}
+
+type Store = {
+  version: 1
+  tokens: Record_[]
+}
+
+const EMPTY: Store = { version: 1, tokens: [] }
+
+function dir(directory: string) {
+  // `Filesystem.resolve` and not `path.resolve`: the bucket is keyed by the directory
+  // STRING, and on macOS one directory has two spellings — `mkdtemp` and a shell hand
+  // back `/var/folders/…` while a process's own `cwd` resolves to `/private/var/…`. Two
+  // spellings meant two buckets, so a token issued seconds earlier came back invalid.
+  // Canonicalising here, at the single entry point, is what keeps issuer and verifier
+  // looking at the same file.
   return path.join(Global.Path.state, "llm-server", Hash.fast(Filesystem.resolve(directory)))
 }
 
 function file(directory: string) {
-  return path.join(bucket(directory), "tokens.json")
+  return path.join(dir(directory), "tokens.json")
 }
 
-async function readSmall(target: string, limit: number) {
-  const handle = await fs.open(target, "r").catch((error: unknown) => {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return undefined
-    throw error
-  })
-  if (!handle) return undefined
-  try {
-    const bytes = Buffer.alloc(limit + 1)
-    let size = 0
-    while (size <= limit) {
-      const next = await handle.read(bytes, size, bytes.length - size, null)
-      if (!next.bytesRead) return bytes.subarray(0, size).toString("utf8")
-      size += next.bytesRead
-    }
-    throw new Error("Token registry file exceeds its size limit")
-  } finally {
-    await handle.close()
+/**
+ * Where a running server advertises how to reach it, for `issue` to read.
+ *
+ * One file PER LISTENER (pid + port). pid alone collides when one process binds
+ * two sockets for the same directory — the first stop would withdraw both. The
+ * pid is also the liveness check (see `addresses`).
+ */
+export function addressFile(directory: string, pid = process.pid, port?: number) {
+  return path.join(dir(directory), port === undefined ? `server-${pid}.json` : `server-${pid}-${port}.json`)
+}
+
+export type Address = { pid: number; hostname: string; port: number; url: string; started: number }
+
+export async function publish(directory: string, address: Address) {
+  await fs.mkdir(dir(directory), { recursive: true, mode: 0o700 })
+  await fs.writeFile(addressFile(directory, address.pid, address.port), JSON.stringify(address), { mode: 0o600 })
+}
+
+/**
+ * Withdraw this process's advertisement.
+ *
+ * With `port`, only that listener is removed. Without it, every file for the pid
+ * goes — the form `stop()` uses when the caller did not track which socket died.
+ */
+export async function unpublish(directory: string, pid = process.pid, port?: number) {
+  if (port !== undefined) {
+    await fs.rm(addressFile(directory, pid, port), { force: true })
+    return
   }
-}
-
-async function read(directory: string): Promise<Store> {
-  const text = await readSmall(file(directory), MAX_FILE)
-  if (text === undefined) return { version: 2, tokens: [] }
-  const raw: unknown = await Promise.resolve()
-    .then(() => JSON.parse(text))
-    .catch(() => undefined)
-  const parsed = z.union([schema, legacySchema]).safeParse(raw)
-  if (!parsed.success) throw new Error("Invalid token store")
-  if (parsed.data.version === 2) return parsed.data
-  return {
-    version: 2,
-    tokens: parsed.data.tokens.map(({ models, ...value }) => ({ ...value, scope: { type: "models", models } })),
-  }
-}
-
-async function atomic(target: string, text: string) {
-  await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 })
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
-  try {
-    await fs.writeFile(temporary, text, { mode: 0o600, flag: "wx" })
-    await fs.rename(temporary, target)
-  } finally {
-    await fs.rm(temporary, { force: true })
-  }
-}
-
-function mutate<T>(directory: string, signal: AbortSignal | undefined, fn: (store: Store) => T) {
-  return Flock.withLock(
-    `llm-server-tokens:${bucket(directory)}`,
-    async () => {
-      signal?.throwIfAborted()
-      const store = await read(directory)
-      const before = JSON.stringify(store)
-      const result = fn(store)
-      if (!schema.safeParse(store).success) throw new Error("Invalid token store")
-      const after = JSON.stringify(store)
-      if (after !== before) {
-        if (Buffer.byteLength(after) > MAX_FILE) throw new Error("Token registry exceeds its size limit")
-        signal?.throwIfAborted()
-        await atomic(file(directory), after)
-      }
-      return result
-    },
-    { signal, timeoutMs: 1000, baseDelayMs: 10, maxDelayMs: 50 },
+  const names = await fs.readdir(dir(directory)).catch(() => [] as string[])
+  await Promise.all(
+    names
+      .filter((name) => name === `server-${pid}.json` || name.startsWith(`server-${pid}-`))
+      .map((name) => fs.rm(path.join(dir(directory), name), { force: true })),
   )
 }
 
-function publicRecord(value: StoredRecord): PublicRecord {
-  return {
-    id: value.id,
-    ...publicScope(value.scope),
-    label: value.label,
-    created: value.created,
-    last_used: value.last_used,
-    idle_ms: value.idle_ms,
-    max_age_ms: value.max_age_ms,
+/**
+ * Read a JSON file as `unknown`.
+ *
+ * Typed `unknown` rather than asserted into shape, because these files are state on
+ * disk that another process wrote: a truncated write or a version skew must be
+ * narrowed, not declared. A missing or unparseable file is simply absent.
+ */
+async function readJson(target: string): Promise<unknown> {
+  const text = await fs.readFile(target, "utf8").catch(() => undefined)
+  if (text === undefined) return undefined
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
   }
 }
 
-function publicScope(scope: LLMServerScope.Scope): PublicScope {
-  return scope.type === "models" ? { scope, models: scope.models } : { scope }
+/** A type predicate rather than a cast, so the narrowing is checked, not claimed. */
+function fields(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-export function expiresAt(value: Lifetime) {
-  const parsed = lifetime.parse(value)
-  const absolute = parsed.max_age_ms === null ? null : parsed.created + parsed.max_age_ms
-  const idle = parsed.idle_ms === null ? null : (parsed.last_used ?? parsed.created) + parsed.idle_ms
-  if (absolute === null) return idle
-  if (idle === null) return absolute
-  return Math.min(absolute, idle)
+/**
+ * Every live listener serving this project, newest first.
+ *
+ * A crashed server leaves its file behind, and handing that stale port to a skill
+ * would produce a connection error far away from the cause. `kill(pid, 0)` costs
+ * nothing and turns it into an honest "nothing is running"; the dead file is removed
+ * on the way past, so the directory does not accumulate one entry per crash.
+ */
+async function addressesInBucket(bucket: string): Promise<Address[]> {
+  const names = await fs.readdir(bucket).catch(() => [] as string[])
+  const found = await Promise.all(
+    names
+      .filter((name) => name.startsWith("server-") && name.endsWith(".json"))
+      .map(async (name) => {
+        const target = path.join(bucket, name)
+        const raw = await readJson(target)
+        if (!fields(raw)) return undefined
+        if (typeof raw["pid"] !== "number" || typeof raw["port"] !== "number") return undefined
+        if (typeof raw["hostname"] !== "string" || typeof raw["url"] !== "string") return undefined
+        try {
+          process.kill(raw["pid"], 0)
+        } catch {
+          // EPERM means a live process we do not own, which is still a live process —
+          // but it cannot be one of ours, and its port is not ours to advertise.
+          await fs.rm(target, { force: true }).catch(() => {})
+          return undefined
+        }
+        return {
+          pid: raw["pid"],
+          hostname: raw["hostname"],
+          port: raw["port"],
+          url: raw["url"],
+          started: typeof raw["started"] === "number" ? raw["started"] : 0,
+        }
+      }),
+  )
+  return found.filter((item): item is Address => item !== undefined)
 }
 
-export function expired(value: Lifetime, now = Date.now()) {
-  const end = expiresAt(value)
-  return end !== null && now >= end
+export async function addresses(directory: string): Promise<Address[]> {
+  return addressesInBucket(dir(directory)).then((list) => list.sort((a, b) => b.started - a.started))
 }
 
-type IssueOptions = {
+/**
+ * One live listener for this directory, or nothing.
+ *
+ * Cross-project discovery is deliberately NOT offered here. A multi-project host
+ * verifies tokens against the directory the request resolved to (`Instance.directory`,
+ * defaulting to the host's own cwd). An OpenAI-standard client sends only `base_url`
+ * and `Authorization`, so a cross-project fallback would print a URL that 401s —
+ * or 403s on `?directory=` unless the operator supplied a server password. Honest
+ * `null` beats a base_url that looks usable.
+ */
+export async function address(directory: string): Promise<Address | undefined> {
+  return (await addresses(directory))[0]
+}
+
+async function read(directory: string): Promise<Store> {
+  const raw = await readJson(file(directory))
+  if (!fields(raw) || raw["version"] !== 1 || !Array.isArray(raw["tokens"])) return { ...EMPTY }
+  // Records are filtered rather than trusted wholesale: one corrupt entry should
+  // cost its own token, not every token in the file.
+  return { version: 1, tokens: raw["tokens"].filter(isRecord) }
+}
+
+function isRecord(value: unknown): value is Record_ {
+  if (!fields(value)) return false
+  const raw = value
+  if (typeof raw["id"] !== "string" || typeof raw["hash"] !== "string") return false
+  if (typeof raw["created"] !== "number") return false
+  return Array.isArray(raw["models"])
+}
+
+async function write(directory: string, store: Store) {
+  await fs.mkdir(dir(directory), { recursive: true, mode: 0o700 })
+  // Write-then-rename so a concurrent reader never sees a half-written file.
+  const tmp = `${file(directory)}.${process.pid}.tmp`
+  await fs.writeFile(tmp, JSON.stringify(store, null, 2), { mode: 0o600 })
+  await fs.rename(tmp, file(directory))
+}
+
+/**
+ * Serialize read-modify-write so two `issue` calls cannot clobber each other.
+ *
+ * Writes only when the mutator actually changed something. Every request passes
+ * through `verify`, so writing unconditionally let an UNAUTHENTICATED caller drive
+ * an unbounded stream of file writes, and made read-only outcomes queue behind a
+ * write for no reason.
+ *
+ * A successful `verify` does still write, because sliding expiry has to persist the
+ * slide. Throttling that to a coarse granularity would be cheaper but is not safe in
+ * general: a token whose idle window is shorter than the granularity would expire
+ * while actively in use.
+ */
+function mutate<T>(directory: string, fn: (store: Store) => Promise<T> | T) {
+  return Flock.withLock(`llm-server-tokens:${dir(directory)}`, async () => {
+    const store = await read(directory)
+    const before = JSON.stringify(store)
+    const result = await fn(store)
+    if (JSON.stringify(store) !== before) await write(directory, store)
+    return result
+  })
+}
+
+function digest(token: string) {
+  return createHash("sha256").update(token).digest("hex")
+}
+
+/**
+ * Is this record dead as of `now`?
+ *
+ * Idle is measured from last use and falls back to creation for a token that has
+ * never been presented, so an issued-and-forgotten token still ages out.
+ */
+export function expired(record: Record_, now = Date.now()) {
+  if (record.max_age_ms !== undefined && now - record.created > record.max_age_ms) return true
+  if (record.idle_ms !== undefined && now - (record.last_used ?? record.created) > record.idle_ms) return true
+  return false
+}
+
+export function expiresAt(record: Record_) {
+  const idle = record.idle_ms === undefined ? undefined : (record.last_used ?? record.created) + record.idle_ms
+  const absolute = record.max_age_ms === undefined ? undefined : record.created + record.max_age_ms
+  const candidates = [idle, absolute].filter((v): v is number => v !== undefined)
+  if (candidates.length === 0) return undefined
+  return Math.min(...candidates)
+}
+
+export function generate() {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")
+}
+
+export async function issue(input: {
   directory: string
   expiry: Expiry
+  models?: readonly string[]
   label?: string
-  signal?: AbortSignal
-}
-type IssueScope = { models: readonly string[]; allModels?: never } | { allModels: true; models?: never }
-export function issue(
-  input: IssueOptions & { models: readonly string[]; allModels?: never },
-): Promise<{ token: string; record: FiniteRecord }>
-export function issue(
-  input: IssueOptions & { allModels: true; models?: never },
-): Promise<{ token: string; record: PublicRecord }>
-export function issue(input: IssueOptions & IssueScope): Promise<{ token: string; record: PublicRecord }>
-export async function issue(input: IssueOptions & IssueScope) {
-  input.signal?.throwIfAborted()
-  const selection = z
-    .union([
-      z.strictObject({
-        models: LLMServerScope.Models.refine((models) => models.every((model) => !model.includes("*"))),
-        allModels: z.never().optional(),
-      }),
-      z.strictObject({ allModels: z.literal(true), models: z.never().optional() }),
-    ])
-    .safeParse({ models: input.models, allModels: input.allModels })
-  if (!selection.success) throw new Error("Invalid token scope: specify 1–64 unique models or allModels: true")
-  const token = randomBytes(32).toString("base64url")
-  const parsed = record.safeParse({
-    id: `llmk_${randomUUID().replaceAll("-", "")}`,
-    hash: createHash("sha256").update(token).digest("hex"),
-    scope: selection.data.models ? { type: "models", models: selection.data.models } : { type: "all" },
+}) {
+  const token = generate()
+  const record: Record_ = {
+    id: `llmk_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
+    hash: digest(token),
     label: input.label,
+    models: [...(input.models ?? [])],
     created: Date.now(),
     idle_ms: input.expiry.idleMs,
     max_age_ms: input.expiry.maxAgeMs,
+  }
+  await mutate(input.directory, (store) => {
+    // Sweep on write: expired records have no purpose and an unbounded file would
+    // eventually make every request pay for them.
+    store.tokens = store.tokens.filter((t) => !expired(t)).concat(record)
   })
-  if (!parsed.success)
-    throw new Error("Invalid token request: specify a valid scope and explicit null or finite positive safe lifetimes")
-  await mutate(input.directory, input.signal, (store) => {
-    const live = store.tokens.filter((value) => !expired(value))
-    if (live.length >= MAX_TOKENS) throw new Error("Token registry reached its record limit")
-    store.tokens = live.concat(parsed.data)
-  })
-  return { token, record: publicRecord(parsed.data) }
+  log.info("issued", { id: record.id, models: record.models.length, label: record.label })
+  return { token, record }
 }
 
 export type Verdict =
-  | ({
-      ok: true
-      id: string
-      expiresAt: number | null
-      idle_ms: number | null
-      max_age_ms: number | null
-    } & PublicScope)
-  | { ok: false; reason: "unknown" | "expired" }
+  | { ok: true; record: Record_ }
+  | { ok: false; reason: "unknown" }
+  | { ok: false; reason: "expired"; record: Record_ }
 
-export async function verify(input: { directory: string; token: string; signal?: AbortSignal }): Promise<Verdict> {
-  input.signal?.throwIfAborted()
-  if (!/^[A-Za-z0-9_-]{43}$/.test(input.token)) return { ok: false, reason: "unknown" }
-  const digest = createHash("sha256").update(input.token).digest()
-  const matches = (value: StoredRecord) => timingSafeEqual(Buffer.from(value.hash, "hex"), digest)
-  // Unknown credentials do not acquire a disk lock or generate lock files.
-  if (!(await read(input.directory)).tokens.some(matches)) return { ok: false, reason: "unknown" }
-  return mutate(input.directory, input.signal, (store): Verdict => {
-    // Re-read under the same lock as revoke so verification cannot resurrect a key.
-    const found = store.tokens.find(matches)
-    if (!found) return { ok: false, reason: "unknown" }
+/**
+ * Check a presented token and, when it is good, slide its window forward.
+ *
+ * The comparison walks every record with `timingSafeEqual` on the HASHES rather
+ * than the tokens: hashes are fixed length, so there is no length side channel and
+ * no throw to guard against.
+ */
+export async function verify(directory: string, token: string): Promise<Verdict> {
+  const presented = Buffer.from(digest(token), "hex")
+  return mutate(directory, (store) => {
+    const found = store.tokens.find((t) => {
+      const stored = Buffer.from(t.hash, "hex")
+      return stored.length === presented.length && timingSafeEqual(stored, presented)
+    })
+    if (!found) return { ok: false, reason: "unknown" } as const
     if (expired(found)) {
-      store.tokens = store.tokens.filter((value) => value.id !== found.id)
-      return { ok: false, reason: "expired" }
+      store.tokens = store.tokens.filter((t) => t.id !== found.id)
+      return { ok: false, reason: "expired", record: found } as const
     }
-    found.last_used = Math.max(Date.now(), found.last_used ?? found.created)
-    return {
-      ok: true,
-      id: found.id,
-      ...publicScope(found.scope),
-      expiresAt: expiresAt(found),
-      idle_ms: found.idle_ms,
-      max_age_ms: found.max_age_ms,
-    }
+    found.last_used = Date.now()
+    return { ok: true, record: found } as const
   })
 }
 
 export async function list(directory: string) {
-  return (await read(directory)).tokens.map((value) => ({
-    ...publicRecord(value),
-    expired: expired(value),
-    expires_at: expiresAt(value),
-  }))
+  const store = await read(directory)
+  return store.tokens.map((t) => ({ ...t, expired: expired(t), expires_at: expiresAt(t) }))
 }
 
-export function revoke(input: { directory: string; id: string; signal?: AbortSignal }) {
-  return mutate(input.directory, input.signal, (store) => {
+export async function revoke(directory: string, id: string) {
+  return mutate(directory, (store) => {
     const before = store.tokens.length
-    store.tokens = store.tokens.filter((value) => value.id !== input.id)
+    store.tokens = store.tokens.filter((t) => t.id !== id)
     return store.tokens.length < before
   })
 }
 
-export function revokeAll(input: { directory: string; signal?: AbortSignal }) {
-  return mutate(input.directory, input.signal, (store) => {
+export async function revokeAll(directory: string) {
+  return mutate(directory, (store) => {
     const count = store.tokens.length
     store.tokens = []
     return count
   })
-}
-
-const listenerID = z
-  .string()
-  .min(1)
-  .max(128)
-  .regex(/^[A-Za-z0-9_-]+$/)
-const addressSchema = z.strictObject({
-  listenerID,
-  pid: positive.max(0x7fffffff),
-  hostname: z.enum(["127.0.0.1", "localhost", "::1"]),
-  port: positive.max(65535),
-  url: z.string(),
-  started: timestamp,
-})
-export type Address = z.infer<typeof addressSchema>
-
-export async function publish(input: {
-  directory: string
-  listenerID: string
-  pid?: number
-  hostname: string
-  port: number
-  started?: number
-}) {
-  const hostname = input.hostname === "0.0.0.0" || input.hostname === "::" ? "127.0.0.1" : input.hostname
-  if (!["127.0.0.1", "localhost", "::1"].includes(hostname)) return
-  const url = new URL("http://localhost")
-  url.hostname = hostname === "::1" ? "[::1]" : hostname
-  url.port = String(input.port)
-  const address = addressSchema.parse({
-    listenerID: input.listenerID,
-    pid: input.pid ?? process.pid,
-    hostname,
-    port: input.port,
-    url: url.origin,
-    started: input.started ?? Date.now(),
-  })
-  await atomic(path.join(bucket(input.directory), `server-${address.listenerID}.json`), JSON.stringify(address))
-}
-
-export async function unpublish(input: { directory: string; listenerID: string }) {
-  const id = listenerID.parse(input.listenerID)
-  await fs.rm(path.join(bucket(input.directory), `server-${id}.json`), { force: true })
-}
-
-async function identity(address: Address) {
-  const expected = new URL("http://localhost")
-  expected.hostname = address.hostname === "::1" ? "[::1]" : address.hostname
-  expected.port = String(address.port)
-  if (address.url !== expected.origin) return false
-  const response = await fetch(new URL("/v1/_mimocode", expected), {
-    redirect: "error",
-    signal: AbortSignal.timeout(500),
-    headers: { connection: "close" },
-  })
-  if (!response.ok || !response.body) {
-    await response.body?.cancel()
-    return false
-  }
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let size = 0
-  try {
-    while (true) {
-      const next = await reader.read()
-      if (next.done) break
-      size += next.value.byteLength
-      if (size > 4096) {
-        await reader.cancel()
-        return false
-      }
-      chunks.push(next.value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  const body: unknown = await Promise.resolve()
-    .then(() => JSON.parse(Buffer.concat(chunks).toString("utf8")))
-    .catch(() => undefined)
-  return typeof body === "object" && body !== null && "id" in body && body.id === address.listenerID
-}
-
-export async function addresses(directory: string): Promise<Address[]> {
-  const names: string[] = []
-  let scanned = 0
-  try {
-    for await (const entry of await fs.opendir(bucket(directory))) {
-      if (entry.isFile() && /^server-[A-Za-z0-9_-]+\.json$/.test(entry.name)) names.push(entry.name)
-      // Bound directory traversal and metadata reads separately from network probes.
-      if (++scanned >= 1024 || names.length >= 256) break
-    }
-  } catch (error) {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return []
-    throw error
-  }
-  const registered = await Promise.all(
-    names.map(async (name) => {
-      const text = await readSmall(path.join(bucket(directory), name), 4096).catch(() => undefined)
-      const raw: unknown = await Promise.resolve()
-        .then(() => (text ? JSON.parse(text) : undefined))
-        .catch(() => undefined)
-      const parsed = addressSchema.safeParse(raw)
-      if (!parsed.success || name !== `server-${parsed.data.listenerID}.json`) return undefined
-      return parsed.data
-    }),
-  )
-  const candidates = registered
-    .filter((value): value is Address => value !== undefined)
-    .sort((a, b) => b.started - a.started)
-    .slice(0, 64)
-  const found = await Promise.all(
-    candidates.map(async (address) => {
-      const live = await Promise.resolve()
-        .then(() => process.kill(address.pid, 0))
-        .then(() => true)
-        .catch(() => false)
-      if (!live) {
-        await unpublish({ directory, listenerID: address.listenerID })
-        return undefined
-      }
-      return (await identity(address).catch(() => false)) ? address : undefined
-    }),
-  )
-  return found.filter((value): value is Address => value !== undefined)
 }
 
 export * as LLMServerTokens from "./tokens"
