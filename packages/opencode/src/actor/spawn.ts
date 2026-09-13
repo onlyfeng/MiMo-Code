@@ -1965,7 +1965,17 @@ export const layer = Layer.effect(
           // — closing that needs cancel to contend for the execution claim
           // itself, which is upstream's shape and a separate change; today this
           // is strictly narrower than the unconditional publish it replaces.
+          //
+          // Requesting cancellation is what makes the suppression sound, not a
+          // courtesy: an execution acquired but not yet drained has no runner
+          // for `cancelActor` to interrupt, and if this cancel drains its row
+          // first it would return through the empty-drain path without
+          // notifying anyone — suppressed here, unpublished there, and the
+          // parent hears nothing. Marked, it takes the cancelled branch and
+          // publishes from its own `onExit`. `SessionPrompt.runSharedLoop` is
+          // the only acquirer, so this only ever marks a continuation.
           const execution = yield* executions.current(sessionID, actorID)
+          if (execution) yield* executions.requestCancel(execution)
           if (!execution && !notifiedSettlements.has(key))
             yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
           yield* retire
