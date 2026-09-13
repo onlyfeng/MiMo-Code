@@ -624,10 +624,14 @@ test("rejects images for a text-only model before downloading or invoking the pr
     { images: false },
   ))
 
+// Both rows are kept although they now expect the same endpoint: a PTC identity
+// used to select `/v1/responses` here, and upstream's pinning of every MiMo id to
+// `@ai-sdk/openai-compatible` retired that. The second row is the regression
+// guard for that retirement, not redundancy.
 test.each([
   ["mimo-v2.5", "/v1/chat/completions"],
-  ["mimo-v2-flash-ptc", "/v1/responses"],
-])("MiMo API identity %s preserves the fork endpoint selection", (apiID, expectedPath) =>
+  ["mimo-v2-flash-ptc", "/v1/chat/completions"],
+])("MiMo API identity %s uses upstream's pinned chat endpoint", (apiID, expectedPath) =>
   fixture(
     async (seen) => {
       expect(await rejected(request({ model: "xiaomi/chat" }, ["xiaomi/chat"]))).toMatchObject({ status: 502 })
