@@ -24,6 +24,11 @@ import { tmpdir } from "../fixture/fixture"
  * has to be asserted before `generateServerPassword()` is ever called.
  */
 
+// `root: "cwd"` is this fork's opt-in: upstream's preload roots every fixture
+// under `process.cwd()`, while this fork roots them outside it and asks tests
+// that depend on the InstanceMiddleware containment check to say so (see
+// test/preload.ts). Same assertions, same behaviour — only the fixture location
+// differs.
 const app = () => Server.Default().app
 
 // The password is process state, and `bun test` shares a process across files — leaving it
@@ -40,7 +45,7 @@ function get(path: string, headers: Record<string, string> = {}) {
 
 describe("before a password is generated", () => {
   test("an instance route answers with no credential at all", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     // This is today's default and the reason the listener has to be secured: `/config`
     // hands over the project's configuration to whoever asks.
     expect((await get(`/config?directory=${encodeURIComponent(tmp.path)}`)).status).toBe(200)
@@ -48,7 +53,7 @@ describe("before a password is generated", () => {
   })
 
   test("the capability routes refuse a request that carries no token", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     const response = await get(`/v1/models?directory=${encodeURIComponent(tmp.path)}`)
     expect(response.status).toBe(401)
     expect(((await response.json()) as { error: { code: string } }).error.code).toBe("invalid_api_key")
@@ -72,7 +77,7 @@ describe("after a password is generated", () => {
   })
 
   test("an instance route now demands basic auth", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     const response = await get(`/config?directory=${encodeURIComponent(tmp.path)}`)
     expect(response.status).toBe(401)
     expect(response.headers.get("www-authenticate")).toContain("Basic")
@@ -80,7 +85,7 @@ describe("after a password is generated", () => {
   })
 
   test("and reopens for a caller holding that password", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     const username = Flag.MIMOCODE_SERVER_USERNAME ?? "mimocode"
     const response = await get(`/config?directory=${encodeURIComponent(tmp.path)}`, {
       authorization: `Basic ${btoa(`${username}:${Flag.MIMOCODE_SERVER_PASSWORD}`)}`,
@@ -92,7 +97,7 @@ describe("after a password is generated", () => {
   })
 
   test("the capability routes stay reachable with a minted token", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     const issued = await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
     const response = await get(`/v1/models?directory=${encodeURIComponent(tmp.path)}`, {
       authorization: `Bearer ${issued.token}`,

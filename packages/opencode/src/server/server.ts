@@ -108,6 +108,14 @@ export async function listen(opts: {
    * Embedders that only need an in-process app can pass false.
    */
   advertise?: boolean
+  /**
+   * Bucket the advertisement lands in. Upstream keys it on `process.cwd()`,
+   * which holds when the process chdir'd into the project. This fork's TUI
+   * worker serves a directory chosen at startup that need not equal cwd, and
+   * an advertisement filed under the wrong bucket is invisible to
+   * `mimo llm-server issue` in the project it actually serves (FD-004 residual).
+   */
+  advertiseDirectory?: string
 }): Promise<Listener> {
   if (opts.childEnv) setChildProcessEnv(opts.childEnv)
   const isLoopback = opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
@@ -126,7 +134,7 @@ export async function listen(opts: {
   // from a project bucket: tokens verify against the request-resolved directory, so
   // a cross-project base_url 401s under OpenAI-standard clients.
   const advertise = opts.advertise !== false
-  const directory = process.cwd()
+  const directory = opts.advertiseDirectory ?? process.cwd()
   // `0.0.0.0`/`::` are bind addresses, not client URLs. Advertise loopback so the
   // printed base_url is usable on this machine.
   const advertisedHostname = opts.hostname === "0.0.0.0" || opts.hostname === "::" ? "127.0.0.1" : opts.hostname

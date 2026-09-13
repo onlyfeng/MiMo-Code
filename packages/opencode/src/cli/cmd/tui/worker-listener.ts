@@ -31,6 +31,7 @@ export function createWorkerListener(input: { directory: string; listen?: typeof
               ...network,
               port: options.port ?? 0,
               hostname: options.hostname ?? "127.0.0.1",
+              advertiseDirectory: input.directory,
             }),
           )
           .then(async (listener) => {
