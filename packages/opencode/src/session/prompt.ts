@@ -5761,12 +5761,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               (exec) =>
                 Effect.gen(function* () {
                   yield* executions.attach(exec)
-                  // A new turn supersedes whatever the previous one announced.
-                  yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
-                    input.sessionID,
-                    agentID,
-                    false,
-                  ) ?? Effect.void
                   // Cancelled before drain: do not consume messages for a turn
                   // that will not run. isCancelled is re-checked inside drain
                   // just before commit, so a cancel mid-drain leaves rows durable.
@@ -5780,6 +5774,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     // does not notify on its own — only runTurn.onExit does.
                     if (!exec.cancelled) return yield* lastAssistant(input.sessionID, agentID)
                   }
+                  // Past every exit that publishes nothing. Only a turn that
+                  // will settle supersedes the previous turn's notification;
+                  // clearing before the empty-drain return above would drop the
+                  // record of an envelope that still stands, and a later
+                  // retirement would then publish a conflicting one.
+                  yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
+                    input.sessionID,
+                    agentID,
+                    false,
+                  ) ?? Effect.void
                   // Capture the last delivery even when the turn dies with a
                   // settled error, so settle can persist a partial result.
                   let lastFinal: MessageV2.WithParts | undefined

@@ -74,12 +74,20 @@ where this delta does not change their implementation.
   for a settlement that had just been reported. FC-001 gains
   `Actor.markTerminalNotified(sessionID, actorID, notified)`: the continuation
   records the envelope it published, cancel consumes that record in place of its
-  own publish, and a new turn clears it so a settlement is only ever suppressed
-  by its own turn. Retiring a peer whose settlement was never announced still
-  announces it. One in-memory set, written at two points in
-  `SessionPrompt.runSharedLoop` and read at one point in `Actor.cancel`;
-  mutation-checked, removing the record fails exactly the two peer continuation
-  envelope-count cases and nothing else.
+  own publish, and a new turn clears it — past every exit that publishes
+  nothing, so a settlement is only ever superseded by a turn that will settle.
+  Retiring a peer whose settlement was never announced still announces it.
+  Cancel reads two conditions and they are complementary, not redundant:
+  `SessionPrompt` releases the continuation's `ActorExecution` outside the
+  `onExit` that both publishes and records, so `ActorExecution.current` covers
+  the window where a settlement is being announced and the mark is not yet set,
+  and the mark covers every moment after. Verified by probe rather than
+  inference: during a hung continuation `cancel` observes the execution, and
+  after the turn joins it observes only the mark — the two
+  `Layer.provide(ActorExecution.layer)` sites memoize to one instance.
+  Mutation-checked: removing the record fails exactly the two peer continuation
+  envelope-count cases and nothing else; the execution half closes a window no
+  case in the suite reaches.
 
 - Status: active
 - Canonical owner: fork `main` actor/inbox runtime

@@ -28,6 +28,7 @@ import { SessionRetry } from "@/session/retry"
 import { Inbox } from "@/inbox"
 import { renderActorNotification } from "@/inbox/render"
 import { Plugin, HookEvent } from "@/plugin"
+import { ActorExecution } from "./execution"
 import { parseReturnHeader, type ReturnStatus } from "./return-header"
 import { assistantFinalText, sessionErrorText } from "@/session/trajectory"
 import { Log } from "@/util"
@@ -379,6 +380,7 @@ export const layer = Layer.effect(
     const state = yield* SessionRunState.Service
     const plugin = yield* Plugin.Service
     const bus = yield* Bus.Service
+    const executions = yield* ActorExecution.Service
     const taskRegistry = yield* TaskRegistry.Service
     const scope = yield* Scope.Scope
 
@@ -1808,6 +1810,13 @@ export const layer = Layer.effect(
       const receiver = yield* lifecycleState.getForkContext(key)
       const inReceiver = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         receiver ? withNotificationTarget(receiver, effect) : effect
+      // A continuation holds its execution until after it has published and
+      // recorded, because `SessionPrompt` releases it outside the `onExit` that
+      // does both. So the execution covers the window where a settlement is
+      // still being announced and the mark is not yet set, and the mark covers
+      // every moment after — together they leave no gap, and neither alone is
+      // enough.
+      const execution = yield* executions.current(sessionID, actorID)
       const ownership = yield* lifecycleState.acquireCancel(key, expected)
       if (ownership._tag === "noop") return
       if (ownership._tag === "follower") {
@@ -1951,7 +1960,7 @@ export const layer = Layer.effect(
           // it leaves this mark instead, and this is the single place that
           // consumes it. Retiring a peer whose settlement was never announced
           // still announces it, which the durable idle-peer case asserts.
-          if (!notifiedSettlements.has(key))
+          if (!execution && !notifiedSettlements.has(key))
             yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
           yield* retire
         }).pipe(
@@ -2140,7 +2149,7 @@ export const layer = Layer.effect(
     )
     return impl
   }),
-)
+).pipe(Layer.provide(ActorExecution.layer))
 
 // Wrapped in Layer.suspend so the cross-module `.defaultLayer` reads defer to
 // first use instead of running at module load. Without this, the
