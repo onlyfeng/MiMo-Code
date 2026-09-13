@@ -155,6 +155,16 @@ const withNotificationTarget = <A, E, R>(
  */
 export type TerminalClaim = { readonly key: string }
 
+/**
+ * What the claim holder was reporting, carried so a fallback retry says the
+ * same thing. Without it a completed or failed settlement whose send failed
+ * would reach the parent as a bare cancellation, losing its result or error.
+ */
+export type TerminalSettlement = {
+  readonly status: TerminalStatus
+  readonly extra?: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string }
+}
+
 export type AgentOutcome =
   | {
       status: "success"
@@ -375,6 +385,7 @@ export interface Interface {
     sessionID: SessionID,
     actorID: string,
     claim: TerminalClaim,
+    settlement?: TerminalSettlement,
   ) => Effect.Effect<void>
   /**
    * Drop any record left by a previous turn. A new turn's settlement is the one
@@ -1511,12 +1522,8 @@ export const layer = Layer.effect(
                 // second envelope; a send that wrote nothing clears it again.
                 const mayReport = yield* claimTerminalReport(input.sessionID, input.actorID)
                 let delivered = false
-                if (mayReport)
-                  yield* notifyTerminal(
-                  input.sessionID,
-                  input.actorID,
-                  actor,
-                  status,
+                // Hoisted so a fallback retry reports the same settlement.
+                const reportExtra =
                   status === "completed"
                     ? {
                         result: finalText ?? "(no output)",
@@ -1525,16 +1532,19 @@ export const layer = Layer.effect(
                       }
                     : status === "failed"
                       ? { error }
-                      : {},
-                  source,
-                ).pipe(
+                      : {}
+                if (mayReport)
+                  yield* notifyTerminal(input.sessionID, input.actorID, actor, status, reportExtra, source).pipe(
                   Effect.tap((written) => Effect.sync(() => (delivered = written))),
                   // On every exit, interrupt included, or a cancel awaiting the
                   // outcome would wait forever.
                   Effect.ensuring(
                     Effect.suspend(() =>
                       mayReport && !delivered
-                        ? releaseTerminalReport(input.sessionID, input.actorID, mayReport)
+                        ? releaseTerminalReport(input.sessionID, input.actorID, mayReport, {
+                            status,
+                            extra: reportExtra,
+                          })
                         : Effect.void,
                     ),
                   ),
@@ -1606,12 +1616,8 @@ export const layer = Layer.effect(
                   : ("failed" as const)
               const mayReport = yield* claimTerminalReport(sessionID, actorID)
               let delivered = false
-              if (mayReport)
-                yield* notifyTerminal(
-                sessionID,
-                actorID,
-                actor,
-                status,
+              // Hoisted so a fallback retry reports the same settlement.
+              const reportExtra =
                 status === "completed"
                   ? {
                       result: text ?? "(no output)",
@@ -1620,12 +1626,15 @@ export const layer = Layer.effect(
                     }
                   : status === "failed"
                     ? { error: Cause.pretty(failureCause!), ...(text !== undefined ? { result: text } : {}) }
-                    : {},
-              ).pipe(
+                    : {}
+              if (mayReport)
+                yield* notifyTerminal(sessionID, actorID, actor, status, reportExtra).pipe(
                 Effect.tap((written) => Effect.sync(() => (delivered = written))),
                 Effect.ensuring(
                   Effect.suspend(() =>
-                    mayReport && !delivered ? releaseTerminalReport(sessionID, actorID, mayReport) : Effect.void,
+                    mayReport && !delivered
+                      ? releaseTerminalReport(sessionID, actorID, mayReport, { status, extra: reportExtra })
+                      : Effect.void,
                   ),
                 ),
               )
@@ -2147,6 +2156,7 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       actorID: string,
       claim: TerminalClaim,
+      settlement?: TerminalSettlement,
     ) {
       const key = actorKey(sessionID, actorID)
       // Only the entry this claim still owns: a newer turn may already have
@@ -2177,7 +2187,18 @@ export const layer = Layer.effect(
       // a disposal for the child directory, which the parent session rejects,
       // so without the layer's remembered target for that directory this retry
       // would resolve nothing and write nothing.
-      yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, undefined, true)
+      yield* notifyTerminal(
+        sessionID,
+        actorID,
+        actor,
+        // The claim holder's own settlement, not a synthetic cancellation: a
+        // completed or failed turn whose send failed must still reach the
+        // parent as what it was, with its result or error intact.
+        settlement?.status ?? "cancelled",
+        settlement?.extra ?? {},
+        undefined,
+        true,
+      )
         .pipe(
           Effect.tap((reported) =>
             reported

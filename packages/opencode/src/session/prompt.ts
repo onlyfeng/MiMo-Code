@@ -5876,34 +5876,38 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           (yield* owner?.claimTerminalReport?.(input.sessionID, agentID) ??
                             Effect.succeed({ key: "" })) ?? undefined
                         let delivered = false
+                        // Hoisted so a fallback retry reports the same settlement.
+                        const reportExtra =
+                            status === "completed"
+                              ? {
+                                  result: text ?? "(no output)",
+                                  ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                                  ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                                }
+                              : status === "failed"
+                                ? {
+                                    error: Cause.pretty(failureCause!),
+                                    ...(text !== undefined ? { result: text } : {}),
+                                    ...(parsed.status ? { reportedStatus: parsed.status } : {}),
+                                    ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
+                                  }
+                                : {}
                         if (mayReport)
                           yield* notifyTerminal({
-                          sessionID: input.sessionID,
-                          actorID: agentID,
-                          source: "continuation",
-                          status,
-                          ...(status === "completed"
-                            ? {
-                                result: text ?? "(no output)",
-                                ...(parsed.status ? { reportedStatus: parsed.status } : {}),
-                                ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
-                              }
-                            : {}),
-                          ...(status === "failed"
-                            ? {
-                                error: Cause.pretty(failureCause!),
-                                ...(text !== undefined ? { result: text } : {}),
-                                ...(parsed.status ? { reportedStatus: parsed.status } : {}),
-                                ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
-                              }
-                            : {}),
-                        }).pipe(
+                            sessionID: input.sessionID,
+                            actorID: agentID,
+                            source: "continuation",
+                            status,
+                            ...reportExtra,
+                          }).pipe(
                             Effect.tap((written) => Effect.sync(() => (delivered = written))),
                             Effect.ensuring(
                               Effect.suspend(() =>
                                 mayReport && !delivered
-                                  ? (owner?.releaseTerminalReport?.(input.sessionID, agentID, mayReport) ??
-                                    Effect.void)
+                                  ? (owner?.releaseTerminalReport?.(input.sessionID, agentID, mayReport, {
+                                      status,
+                                      extra: reportExtra,
+                                    }) ?? Effect.void)
                                   : Effect.void,
                               ),
                             ),
