@@ -742,7 +742,18 @@ where this delta does not change their implementation.
   back to. `Actor.claimTerminalReport` closes it: exactly one caller wins per
   settlement, a winner that wrote no envelope gives the right back through
   `releaseTerminalReport` so a later retirement still reports, and a turn that
-  actually runs resets the right on admission. Delivery is reported by
+  actually runs resets the right on admission. Three edges round it out. A
+  claim is rejected once retirement has *completed* — the registry tombstone
+  with no cancel episode still in flight — because retirement clears the map
+  and an empty map would otherwise let a turn whose outer exit runs afterwards
+  win a fresh claim and publish again; the episode has to be part of that test,
+  since the tombstone is written partway through cancel and several cancel
+  paths deliberately leave the envelope to the turn they interrupted. A release
+  whose actor is already retired has no later retirement to fall back on, so it
+  reports the settlement itself — forked into the service scope, because that
+  release runs inside the failing notify's own `ensuring` and re-entering the
+  notification path from there deadlocks under load. And a caller releases only
+  a claim it actually won, or it would hand back someone else's. Delivery is reported by
   `Inbox.send` itself, through a `committed` flag it sets the moment the row
   lands and unsets if its retirement re-check removes it again — inferring it
   from how the call ended was wrong in both directions. Only persistent actors

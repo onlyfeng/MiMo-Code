@@ -1491,7 +1491,8 @@ export const layer = Layer.effect(
                 // second envelope; a send that wrote nothing clears it again.
                 const mayReport = yield* claimTerminalReport(input.sessionID, input.actorID)
                 let delivered = false
-                const reported = yield* notifyTerminal(
+                if (mayReport)
+                  yield* notifyTerminal(
                   input.sessionID,
                   input.actorID,
                   actor,
@@ -1512,11 +1513,12 @@ export const layer = Layer.effect(
                   // outcome would wait forever.
                   Effect.ensuring(
                     Effect.suspend(() =>
-                      delivered ? Effect.void : releaseTerminalReport(input.sessionID, input.actorID),
+                      mayReport && !delivered
+                        ? releaseTerminalReport(input.sessionID, input.actorID)
+                        : Effect.void,
                     ),
                   ),
                 )
-                void reported
               }
             }).pipe(Effect.ensuring(lifecycleState.settleTerminal(owner)))
           } else {
@@ -1584,7 +1586,8 @@ export const layer = Layer.effect(
                   : ("failed" as const)
               const mayReport = yield* claimTerminalReport(sessionID, actorID)
               let delivered = false
-              const reported = yield* notifyTerminal(
+              if (mayReport)
+                yield* notifyTerminal(
                 sessionID,
                 actorID,
                 actor,
@@ -1601,10 +1604,11 @@ export const layer = Layer.effect(
               ).pipe(
                 Effect.tap((written) => Effect.sync(() => (delivered = written))),
                 Effect.ensuring(
-                  Effect.suspend(() => (delivered ? Effect.void : releaseTerminalReport(sessionID, actorID))),
+                  Effect.suspend(() =>
+                    mayReport && !delivered ? releaseTerminalReport(sessionID, actorID) : Effect.void,
+                  ),
                 ),
               )
-              void reported
             }),
           ),
         )
@@ -2054,7 +2058,7 @@ export const layer = Layer.effect(
             })
             .pipe(inReceiver, Effect.ignoreCause)
           yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-          if (yield* claimTerminalReport(sessionID, actorID)) {
+          if (yield* electTerminalReport(key)) {
             const reported = yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
             if (!reported) yield* releaseTerminalReport(sessionID, actorID)
           }
@@ -2078,6 +2082,13 @@ export const layer = Layer.effect(
      * returns from cancel before the publishing branch, so nothing can race it,
      * and leaving it unlisted keeps this map bounded by the live standing peers.
      */
+    const electTerminalReport = (key: string) =>
+      Effect.sync(() => {
+        if (terminalReports.get(key)?.claimed) return false
+        terminalReports.set(key, { claimed: true })
+        return true
+      })
+
     const claimTerminalReport = Effect.fn("Actor.claimTerminalReport")(function* (
       sessionID: SessionID,
       actorID: string,
@@ -2085,21 +2096,55 @@ export const layer = Layer.effect(
       const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       if (actor?.lifecycle !== "persistent") return true
       const key = actorKey(sessionID, actorID)
-      return yield* Effect.sync(() => {
-        if (terminalReports.get(key)?.claimed) return false
-        terminalReports.set(key, { claimed: true })
-        return true
-      })
+      // Retirement clears the map, so an empty map is not on its own evidence
+      // that nothing has reported this settlement: a turn whose outer exit runs
+      // after cancel finished would otherwise win a fresh claim for a retired
+      // actor and publish a second envelope. Reject once retirement has
+      // completed — the tombstone with no cancel episode still in flight.
+      //
+      // The episode matters: the tombstone is written partway through cancel,
+      // and several cancel paths deliberately leave the envelope to the turn
+      // they interrupted. Rejecting on the tombstone alone would suppress
+      // exactly that turn and leave the settlement unreported.
+      const retired =
+        actor.status === "idle" &&
+        actor.lastOutcome === "cancelled" &&
+        !(yield* lifecycleState.isCancelling(key))
+      if (retired) return false
+      return yield* electTerminalReport(key)
     })
 
     /**
      * Give the right back when the claim produced no envelope, so a later
      * retirement still reports a settlement the parent never heard about.
      */
-    const releaseTerminalReport = (sessionID: SessionID, actorID: string) =>
-      Effect.sync(() => {
-        terminalReports.delete(actorKey(sessionID, actorID))
-      })
+    const releaseTerminalReport = Effect.fn("Actor.releaseTerminalReport")(function* (
+      sessionID: SessionID,
+      actorID: string,
+    ) {
+      const key = actorKey(sessionID, actorID)
+      yield* Effect.sync(() => terminalReports.delete(key))
+      const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      // Handing the right back assumes a later retirement will use it. If
+      // retirement already happened while this send was in flight, there is no
+      // such retirement left, so the settlement would go unreported unless this
+      // path reports it now.
+      if (!actor) return
+      if (!(actor.status === "idle" && actor.lastOutcome === "cancelled")) return
+      if (!(yield* electTerminalReport(key))) return
+      // Forked into the service scope rather than published here: this runs in
+      // the failing notify's own `ensuring`, and re-entering the notification
+      // path from there deadlocks under load — reproduced as a 120s hang in
+      // `general bound to task_id writes progress.md when postStop re-prompts`.
+      yield* notifyTerminal(sessionID, actorID, actor, "cancelled")
+        .pipe(
+          Effect.tap((reported) =>
+            reported ? Effect.void : Effect.sync(() => terminalReports.delete(key)),
+          ),
+          Effect.ignoreCause,
+          Effect.forkIn(scope),
+        )
+    })
 
     /**
      * A newly admitted turn is a new settlement, so nobody has reported it yet.

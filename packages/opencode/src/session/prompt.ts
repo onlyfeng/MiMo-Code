@@ -5901,9 +5901,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                             Effect.tap((written) => Effect.sync(() => (delivered = written))),
                             Effect.ensuring(
                               Effect.suspend(() =>
-                                delivered
-                                  ? Effect.void
-                                  : (owner?.releaseTerminalReport?.(input.sessionID, agentID) ?? Effect.void),
+                                mayReport && !delivered
+                                  ? (owner?.releaseTerminalReport?.(input.sessionID, agentID) ?? Effect.void)
+                                  : Effect.void,
                               ),
                             ),
                           )
