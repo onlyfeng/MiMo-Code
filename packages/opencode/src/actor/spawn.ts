@@ -147,8 +147,6 @@ const withNotificationTarget = <A, E, R>(
  * an envelope was actually written. Identity matters: a later turn that opens
  * its own notice must not settle or strand this one.
  */
-export type TerminalNotice = { readonly done: Deferred.Deferred<boolean> }
-
 export type AgentOutcome =
   | {
       status: "success"
@@ -356,26 +354,20 @@ export interface Interface {
    * would otherwise start a turn behind a cancellation already in progress.
    */
   readonly isCancelling?: (sessionID: SessionID, actorID: string) => Effect.Effect<boolean>
-  readonly markTerminalNotified?: (
-    sessionID: SessionID,
-    actorID: string,
-  ) => Effect.Effect<TerminalNotice | undefined>
+  /**
+   * Claim the right to report this settlement's terminal envelope. Exactly one
+   * of cancel and the settling turn wins per settlement.
+   */
+  readonly claimTerminalReport?: (sessionID: SessionID, actorID: string) => Effect.Effect<boolean>
+  /** Give the right back when the claim produced no envelope. */
+  readonly releaseTerminalReport?: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
   /**
    * Drop any record left by a previous turn. A new turn's settlement is the one
    * a later retirement must not duplicate, so the record cannot outlive the turn
    * that produced it.
    */
-  readonly resetTerminalNotified?: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
-  /**
-   * Complete the in-flight record opened by `markTerminalNotified` with whether
-   * the send actually wrote an envelope. Must run on every exit of the notify.
-   */
-  readonly settleTerminalNotified?: (
-    sessionID: SessionID,
-    actorID: string,
-    notice: TerminalNotice | undefined,
-    delivered: boolean,
-  ) => Effect.Effect<void>
+  readonly resetTerminalReport?: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
+
   readonly runPersistentTurn?: (input: {
     sessionID: SessionID
     actorID: string
@@ -465,7 +457,7 @@ export const layer = Layer.effect(
     // only notice a dropped one could still get. Reset when a new turn is
     // admitted and dropped on retirement, so the map is bounded by the live
     // standing peers.
-    const notifiedTerminals = new Map<string, TerminalNotice>()
+    const terminalReports = new Map<string, { claimed: boolean }>()
     const lifecycleState = createActorLifecycle<MessageV2.WithParts, FrozenContext, NotificationTarget>()
     const retainForkContext = (
       key: string,
@@ -1497,7 +1489,7 @@ export const layer = Layer.effect(
                 // Recorded before the send so a cancel that interleaves with it
                 // already sees the record and retires without publishing a
                 // second envelope; a send that wrote nothing clears it again.
-                const notice = yield* markTerminalNotified(input.sessionID, input.actorID)
+                const mayReport = yield* claimTerminalReport(input.sessionID, input.actorID)
                 let delivered = false
                 const reported = yield* notifyTerminal(
                   input.sessionID,
@@ -1520,7 +1512,7 @@ export const layer = Layer.effect(
                   // outcome would wait forever.
                   Effect.ensuring(
                     Effect.suspend(() =>
-                      settleTerminalNotified(input.sessionID, input.actorID, notice, delivered),
+                      delivered ? Effect.void : releaseTerminalReport(input.sessionID, input.actorID),
                     ),
                   ),
                 )
@@ -1590,7 +1582,7 @@ export const layer = Layer.effect(
                 : Cause.hasInterruptsOnly(failureCause)
                   ? ("cancelled" as const)
                   : ("failed" as const)
-              const notice = yield* markTerminalNotified(sessionID, actorID)
+              const mayReport = yield* claimTerminalReport(sessionID, actorID)
               let delivered = false
               const reported = yield* notifyTerminal(
                 sessionID,
@@ -1609,7 +1601,7 @@ export const layer = Layer.effect(
               ).pipe(
                 Effect.tap((written) => Effect.sync(() => (delivered = written))),
                 Effect.ensuring(
-                  Effect.suspend(() => settleTerminalNotified(sessionID, actorID, notice, delivered)),
+                  Effect.suspend(() => (delivered ? Effect.void : releaseTerminalReport(sessionID, actorID))),
                 ),
               )
               void reported
@@ -1693,7 +1685,7 @@ export const layer = Layer.effect(
 
             const owner = ownership.owner
             // A new turn supersedes whatever the previous one reported.
-            yield* clearTerminalNotified(input.sessionID, input.actorID)
+            yield* resetTerminalReport(input.sessionID, input.actorID)
             const guardedWork = Effect.gen(function* () {
               if (!(yield* lifecycleState.isCurrentOpen(key, owner))) return yield* Effect.interrupt
               yield* actorReg
@@ -1820,9 +1812,9 @@ export const layer = Layer.effect(
               // task binding and old assistant settlement have actually committed.
               onCommitted: () => {
                 accepted.value = true
-                // Only an admission that commits supersedes the previous
-                // settlement; a failed one leaves its record intact.
-                notifiedTerminals.delete(key)
+                // Only an admission that commits starts a new settlement; a
+                // failed one leaves the previous report standing.
+                terminalReports.delete(key)
               },
               shouldCommit: () =>
                 !input.signal?.aborted &&
@@ -1934,7 +1926,7 @@ export const layer = Layer.effect(
         const releaseEpisode = lifecycleState.releaseCancel(key, ownership.episode)
         const retire = lifecycleState
           .retire(key)
-          .pipe(Effect.ensuring(clearTerminalNotified(sessionID, actorID)))
+          .pipe(Effect.ensuring(resetTerminalReport(sessionID, actorID)))
         const settleClaim =
           ownership.claimed && ownership.generation ? lifecycleState.settleTerminal(ownership.generation) : Effect.void
 
@@ -2062,8 +2054,10 @@ export const layer = Layer.effect(
             })
             .pipe(inReceiver, Effect.ignoreCause)
           yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-          if (!(yield* consumeTerminalNotified(sessionID, actorID)))
-            yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
+          if (yield* claimTerminalReport(sessionID, actorID)) {
+            const reported = yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
+            if (!reported) yield* releaseTerminalReport(sessionID, actorID)
+          }
           yield* retire
         }).pipe(Effect.ensuring(settleClaim), Effect.ensuring(releaseEpisode)),
       )
@@ -2073,80 +2067,51 @@ export const layer = Layer.effect(
     // marker: an ephemeral one that has already settled returns earlier, so
     // recording it would leave an entry nothing ever reads. Keyed per actor and
     // dropped on retirement, so the set is bounded by the live standing peers.
-    const markTerminalNotified = Effect.fn("Actor.markTerminalNotified")(function* (
+    /**
+     * Claim the right to report this settlement's terminal envelope. Cancel and
+     * the turn that settles are the two possible publishers, and before this
+     * election they each decided alone: every ordering between them had to be
+     * reconstructed out of band, which is what the review rounds on this PR kept
+     * finding holes in. Exactly one caller now wins per settlement.
+     *
+     * Only persistent actors contend. An ephemeral one that has already settled
+     * returns from cancel before the publishing branch, so nothing can race it,
+     * and leaving it unlisted keeps this map bounded by the live standing peers.
+     */
+    const claimTerminalReport = Effect.fn("Actor.claimTerminalReport")(function* (
       sessionID: SessionID,
       actorID: string,
     ) {
       const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-      if (actor?.lifecycle !== "persistent") return undefined
-      const notice: TerminalNotice = { done: yield* Deferred.make<boolean>() }
+      if (actor?.lifecycle !== "persistent") return true
       const key = actorKey(sessionID, actorID)
-      // Replacing the map entry only unlists the previous notice; it is left
-      // pending for its own notifier to complete with the real outcome. Forcing
-      // it to "undelivered" here would release a cancel waiting on it before
-      // that notifier had committed its envelope, and both would then publish.
-      yield* Effect.sync(() => notifiedTerminals.set(key, notice))
-      return notice
+      return yield* Effect.sync(() => {
+        if (terminalReports.get(key)?.claimed) return false
+        terminalReports.set(key, { claimed: true })
+        return true
+      })
     })
 
     /**
-     * Complete the in-flight record with the send's outcome. A send that wrote
-     * nothing drops the record, so a later retirement reports the settlement.
-     * Must run on every exit of the notify, including an interrupt, or a cancel
-     * awaiting the outcome would wait forever.
+     * Give the right back when the claim produced no envelope, so a later
+     * retirement still reports a settlement the parent never heard about.
      */
-    const settleTerminalNotified = (
-      sessionID: SessionID,
-      actorID: string,
-      notice: TerminalNotice | undefined,
-      delivered: boolean,
-    ) =>
-      Effect.gen(function* () {
-        if (!notice) return
-        // First completion wins and owns the map entry. A later call — the
-        // safety net that guarantees no notice is left pending — must then do
-        // nothing at all, or it would unlist a delivered envelope and let a
-        // retirement publish a second one.
-        if (yield* Deferred.isDone(notice.done)) return
-        const key = actorKey(sessionID, actorID)
-        // Only retire the map entry this notice still owns: a newer turn may
-        // already have replaced it, and that one settles itself.
-        if (notifiedTerminals.get(key) === notice && !delivered) notifiedTerminals.delete(key)
-        yield* Deferred.succeed(notice.done, delivered)
+    const releaseTerminalReport = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => {
+        terminalReports.delete(actorKey(sessionID, actorID))
       })
 
     /**
-     * Whether this settlement's envelope was already delivered. Waits out a send
-     * still in flight rather than deciding on incomplete information, then
-     * clears the record either way.
+     * A newly admitted turn is a new settlement, so nobody has reported it yet.
+     * Only an admission that actually runs a turn resets: one that returns
+     * without running reported nothing and must leave the previous report
+     * standing, or a retirement would publish a second envelope for it.
      */
-    const consumeTerminalNotified = (sessionID: SessionID, actorID: string) =>
-      Effect.gen(function* () {
-        const key = actorKey(sessionID, actorID)
-        for (;;) {
-          const notice = notifiedTerminals.get(key)
-          if (!notice) return false
-          const delivered = yield* Deferred.await(notice.done)
-          // A newer turn can replace the notice while this wait is parked. Its
-          // settlement, not the displaced one's, is what the retirement about to
-          // run must not duplicate — so follow the current token rather than
-          // answering with a result that no longer describes the actor. An entry
-          // that is gone rather than replaced was settled as undelivered, since
-          // only that case unlists it, and the next pass reports exactly that.
-          if (notifiedTerminals.get(key) !== notice) continue
-          notifiedTerminals.delete(key)
-          return delivered
-        }
+    const resetTerminalReport = (sessionID: SessionID, actorID: string) =>
+      Effect.sync(() => {
+        terminalReports.delete(actorKey(sessionID, actorID))
       })
 
-    const clearTerminalNotified = (sessionID: SessionID, actorID: string) =>
-      Effect.suspend(() => {
-        const key = actorKey(sessionID, actorID)
-        // Unlist only. A waiter keeps its own token, which the notifier that
-        // opened it still completes with the real outcome.
-        notifiedTerminals.delete(key)
-        return Effect.void
-      })
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
       return (yield* lifecycleState.getForkContext(actorKey(sessionID, actorID)))?.context
@@ -2301,7 +2266,7 @@ export const layer = Layer.effect(
       })
     const isCancelling = (sessionID: SessionID, actorID: string) =>
       lifecycleState.isCancelling(actorKey(sessionID, actorID))
-    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, isCancelling, markTerminalNotified, resetTerminalNotified: clearTerminalNotified, settleTerminalNotified, runPersistentTurn, scanStalledOnce })
+    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, isCancelling, resetTerminalReport, claimTerminalReport, releaseTerminalReport, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it

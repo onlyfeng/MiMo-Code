@@ -113,7 +113,7 @@ import {
 } from "./trajectory"
 import { prefixCaptureRef, prefixModelIdentity } from "./prefix-capture-ref"
 import { spawnRef } from "@/actor/spawn-ref"
-import type { Interface as ActorInterface, TerminalNotice } from "@/actor/spawn"
+import type { Interface as ActorInterface } from "@/actor/spawn"
 import { Inbox } from "@/inbox"
 import { sessionPromptRef, defaultModelRef } from "@/inbox/inbox-ref"
 import { Tool } from "@/tool"
@@ -5758,11 +5758,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input.notifyParentOnComplete === true && agentID !== "main"
           ? Effect.acquireUseRelease(
               executions.acquire(input.sessionID, agentID),
-              (exec) => {
-                // Hoisted so the completion below can see the notice this turn
-                // opened, whatever exit path it takes.
-                let notice: TerminalNotice | undefined
-                return Effect.gen(function* () {
+              (exec) =>
+                Effect.gen(function* () {
                   yield* executions.attach(exec)
                   // `Actor.cancel` marks a live execution, but this claim may
                   // have been created after that lookup, behind a cancellation
@@ -5785,18 +5782,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     // does not notify on its own — only runTurn.onExit does.
                     if (!exec.cancelled) return yield* lastAssistant(input.sessionID, agentID)
                   }
-                  // Opened here, past every no-turn exit and before the turn's
-                  // completion is observable to a cancel. A continuation that
+                  // Past every no-turn exit: this turn is a new settlement, so
+                  // no publisher has reported it yet. A continuation that
                   // returns the previous assistant without running reported
-                  // nothing and must leave the earlier turn's record intact;
-                  // only a turn that actually runs supersedes it. Opening this
-                  // early also means a cancel arriving any time during the turn
-                  // finds an in-flight notice to wait on rather than none.
-                  notice =
-                    (yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
-                      input.sessionID,
-                      agentID,
-                    ) ?? Effect.succeed(undefined)) ?? undefined
+                  // nothing and must leave the earlier report standing.
+                  yield* (boundActor ?? spawnRef.current)?.resetTerminalReport?.(input.sessionID, agentID) ??
+                    Effect.void
                   // Capture the last delivery even when the turn dies with a
                   // settled error, so settle can persist a partial result.
                   let lastFinal: MessageV2.WithParts | undefined
@@ -5876,9 +5867,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                         // result instead of guessing: it neither duplicates a
                         // delivered envelope nor swallows the only notice a
                         // dropped one could still get.
+                        // Elect before publishing: cancel is the other possible
+                        // publisher for this settlement, and exactly one of us
+                        // reports it. A claim that writes no envelope is given
+                        // back, so a later retirement still reports.
                         const owner = boundActor ?? spawnRef.current
+                        const mayReport =
+                          (yield* owner?.claimTerminalReport?.(input.sessionID, agentID) ?? Effect.succeed(true)) ===
+                          true
                         let delivered = false
-                        yield* notifyTerminal({
+                        if (mayReport)
+                          yield* notifyTerminal({
                           sessionID: input.sessionID,
                           actorID: agentID,
                           source: "continuation",
@@ -5899,40 +5898,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                               }
                             : {}),
                         }).pipe(
-                          Effect.tap((written) => Effect.sync(() => (delivered = written))),
-                          // On every exit, interrupt included, or a cancel
-                          // awaiting the outcome would wait forever.
-                          Effect.ensuring(
-                            Effect.suspend(
-                              () =>
-                                owner?.settleTerminalNotified?.(input.sessionID, agentID, notice, delivered) ??
-                                Effect.void,
+                            Effect.tap((written) => Effect.sync(() => (delivered = written))),
+                            Effect.ensuring(
+                              Effect.suspend(() =>
+                                delivered
+                                  ? Effect.void
+                                  : (owner?.releaseTerminalReport?.(input.sessionID, agentID) ?? Effect.void),
+                              ),
                             ),
-                          ),
-                        )
+                          )
                       }),
                     ),
                   )
-                })
-                  .pipe(
-                    // The notice this turn opened is always completed, even if
-                    // the turn dies before the notify's own completion is in
-                    // place. First completion wins, so a real delivered result
-                    // is never overridden.
-                    Effect.ensuring(
-                      Effect.suspend(
-                        () =>
-                          (boundActor ?? spawnRef.current)?.settleTerminalNotified?.(
-                            input.sessionID,
-                            agentID,
-                            notice,
-                            false,
-                          ) ?? Effect.void,
-                      ),
-                    ),
-                    Effect.uninterruptible,
-                  )
-              },
+                }).pipe(Effect.uninterruptible),
               (exec) => executions.release(exec),
             )
           : Effect.gen(function* () {

@@ -731,33 +731,30 @@ where this delta does not change their implementation.
   owner, live generation or not, so it is the earliest observable sign that a
   cancellation has begun. Cancel-first is caught by the check, acquire-first by
   the mark.
-  Delivery is reported by `Inbox.send` itself, through a `committed` flag it
-  sets the moment the row lands and unsets if its retirement re-check removes
-  it again — inferring it from how the call ended was wrong in both directions.
-  The notice is opened when the turn is *admitted*, not when it notifies, so a
-  cancel arriving any time during the turn finds an in-flight notice to wait on
-  rather than none: `state.cancelActor` waits only for the runner's inner fiber,
-  so a notice opened in the turn's exit handler could be published after a
-  cancel had already retired the actor. Each notice is its own token, settled by
-  identity: two settlements racing for one actor — an `Actor.resume` overlapping
-  an inbox continuation — replace rather than share the map entry, and a
-  displaced notice is only unlisted, never forced to "undelivered", because its
-  own notifier still completes it with the real outcome; forcing it would
-  release a cancel waiting on it before that envelope was committed and both
-  would publish. The first completion wins and owns the map entry, so the
-  guard that guarantees no notice is left pending is a no-op once the notifier
-  has settled. A cancel waiting on a notice also re-checks identity after the
-  wait, not only before deleting: a queued continuation can replace the notice
-  while that wait is parked, and the replacement's settlement — not the
-  displaced one's — is what the retirement about to run must not duplicate.
-  That shape settles the delivery questions together: a send that wrote nothing
-  completes the record as undelivered and drops it, so retirement still reports
-  a settlement the parent never heard about (pinned by `retirement reports a
-  settlement whose envelope was never delivered`, mutation-checked); a cancel
-  during the send blocks on the record rather than publishing a second
-  envelope; and `finishPersistentTurn` plus the persistent-turn exit path open
-  and complete the same record, so an accepted `Actor.resume` no longer leaves
-  retirement to publish an extra envelope.
+  Cancel and the settling turn are the two possible publishers of a terminal
+  envelope, and they now *elect* one per settlement instead of each deciding
+  alone. The fork already elects a terminal publisher per generation through
+  `lifecycleState.claimTerminal`, which every `forkWork` publish point goes
+  through and which `acquireCancel` claims for a live generation; the
+  SessionPrompt continuation never joined it, because after the wake-routing
+  retirement it runs on an `ActorExecution` claim rather than a lifecycle
+  generation. That gap is what every interleaving in the review of this PR came
+  back to. `Actor.claimTerminalReport` closes it: exactly one caller wins per
+  settlement, a winner that wrote no envelope gives the right back through
+  `releaseTerminalReport` so a later retirement still reports, and a turn that
+  actually runs resets the right on admission. Delivery is reported by
+  `Inbox.send` itself, through a `committed` flag it sets the moment the row
+  lands and unsets if its retirement re-check removes it again — inferring it
+  from how the call ended was wrong in both directions. Only persistent actors
+  contend, so the map stays bounded by the live standing peers.
+  Electing replaces a sequence of out-of-band reconstructions that each closed
+  one ordering and exposed the next: a flag set after the notifier returned,
+  then inside `Inbox.send`, then before the send, then an in-flight record a
+  cancel awaited, then that record as a per-turn token. None of them could be
+  made total, because the two publishers shared no point at which exactly one
+  of them could be chosen. Election needs no waiting at all, so the hazards
+  that came with awaiting — a cancel parked on a token a newer turn displaced,
+  or on one nobody would complete — do not arise.
   Fourth, the marker set had no bound: `Actor.markTerminalNotified` records only
   `persistent` actors, since an already-settled ephemeral actor's cancel returns
   before the consuming branch, and every cancel branch clears the key through
