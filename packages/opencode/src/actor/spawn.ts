@@ -371,6 +371,13 @@ export interface Interface {
    * execution through `requestCancel`, but a claim created *after* that lookup
    * would otherwise start a turn behind a cancellation already in progress.
    */
+  /**
+   * Whether a turn must not be admitted for this actor: a cancellation is in
+   * progress, or one has already completed and left its retirement tombstone.
+   * The tombstone matters because the episode and the execution's own flag both
+   * end with the cancel, while a successor queued behind a spawn's claim can
+   * acquire a fresh, uncancelled execution afterwards.
+   */
   readonly isCancelling?: (sessionID: SessionID, actorID: string) => Effect.Effect<boolean>
   /**
    * Claim the right to report this settlement's terminal envelope. Exactly one
@@ -2483,8 +2490,17 @@ export const layer = Layer.effect(
         if (!instance.disposing) yield* captureNotificationTarget(instance)
         yield* scanRememberedTargets
       })
-    const isCancelling = (sessionID: SessionID, actorID: string) =>
-      lifecycleState.isCancelling(actorKey(sessionID, actorID))
+    const isCancelling = Effect.fn("Actor.isCancelling")(function* (sessionID: SessionID, actorID: string) {
+      if (yield* lifecycleState.isCancelling(actorKey(sessionID, actorID))) return true
+      // Outlives the episode. A continuation queued behind a spawn's execution
+      // claim acquires its own execution once that spawn finishes, with
+      // `cancelled` false and the episode already closed, so neither in-memory
+      // signal is left to stop it — the tombstone is.
+      const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.exit)
+      if (!Exit.isSuccess(actor)) return false
+      const row = actor.value
+      return row?.lifecycle === "persistent" && row.status === "idle" && row.lastOutcome === "cancelled"
+    })
     const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, isCancelling, resetTerminalReport, claimTerminalReport, releaseTerminalReport, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })

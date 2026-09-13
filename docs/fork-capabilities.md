@@ -723,8 +723,12 @@ where this delta does not change their implementation.
   interleaving between them had to be reconstructed out of band. With the claim
   marked, a continuation that is admitted or already in flight observes the
   cancellation through the claim it holds, at the checks it already makes.
-  That lookup is a point in time, so it pairs with a check in the other
-  direction: a continuation asks `Actor.isCancelling` right after acquiring its
+  Admission also rejects an actor whose retirement has completed, which the
+  restored spawn claim made necessary: a continuation queued behind that claim
+  acquires its own execution only once the spawn finishes, by which time the
+  execution flag and the cancel episode are both gone. The registry tombstone
+  outlives them and is what stops it. That lookup is a point in time, so it
+  pairs with a check in the other direction: a continuation asks `Actor.isCancelling` right after acquiring its
   execution, because a claim created after cancel's lookup would otherwise start
   a turn behind a cancellation already in progress. The predicate reads the
   cancel episode, which `acquireCancel` registers as its first act for every
