@@ -4,7 +4,6 @@ import {
   isMcpToolSearchEnabled,
   resolveHarnessMode,
   usesGPTToolset,
-  usesMimoResponsesApi,
 } from "../../src/tool/gpt"
 
 const codexMode = process.env.MIMOCODE_CODEX_MODE
@@ -111,16 +110,6 @@ describe("resolveHarnessMode", () => {
     expect(
       resolveHarnessMode({ modelID: "deployment-primary", modelAPIID: "gpt-5.2", modelFamily: "gpt" }),
     ).toBe("default")
-  })
-})
-
-describe("usesMimoResponsesApi", () => {
-  test("keeps API transport separate from harness selection", () => {
-    expect(usesMimoResponsesApi("mimo-v2.6")).toBe(false)
-    expect(usesMimoResponsesApi("mimo-v2.6-ptc")).toBe(true)
-    expect(usesMimoResponsesApi("deployment-primary", "mimo-v2.6-ptc", "mimo")).toBe(true)
-    expect(usesMimoResponsesApi("mimo-v2.5", "mimo-v2.6-ptc", "mimo")).toBe(false)
-    expect(usesMimoResponsesApi("gpt-5.2-ptc")).toBe(false)
   })
 })
 
