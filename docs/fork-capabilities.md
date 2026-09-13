@@ -64,6 +64,51 @@ where this delta does not change their implementation.
   existing promptWork/send admission and queue handoff. Recovery alone does not
   retitle historical turns. This changes no Actor generation or task ownership.
 
+- 2026-09-13 terminal publisher: the fork publishes an actor's terminal envelope
+  from whichever turn settles it, and every settling path contends for that
+  right through the generation's terminal claim — so `Actor.cancel` either wins
+  the claim and publishes, or loses it and stays quiet. `SessionPrompt`'s
+  continuation is the one exception the wake-routing retirement created: it
+  settles on an `ActorExecution` with no generation for cancel to contend with,
+  so cancel read "nobody is running" and published a second `cancelled` envelope
+  for a settlement that had just been reported. FC-001 gains
+  `Actor.markTerminalNotified(sessionID, actorID, notified)`: the continuation
+  records the envelope it published, cancel consumes that record in place of its
+  own publish, and a new turn clears it — past every exit that publishes
+  nothing, so a settlement is only ever superseded by a turn that will settle.
+  The record is written only when an envelope actually was: `makeTerminalNotifier`
+  now reports whether it wrote one, deviating from upstream's void return, which
+  swallows every cause and so makes a failed send indistinguishable from a
+  delivered one. Recording a failed send would suppress the only notice the
+  parent could still get.
+  Retiring a peer whose settlement was never announced still announces it, and a
+  cancel that consumes queued rows drops the mark first: work it takes can no
+  longer be settled by the turn that would have run it — that wake finds nothing
+  and returns without publishing — so the previous settlement's mark stops
+  covering this one. Consumption is read from `Inbox.head` before the drain,
+  not from the drain's count: cancel writes the cancelled tombstone first, so
+  `Inbox.drain` takes its retired-persistent branch, deletes every queued row
+  and still returns 0. The head also covers both ways work is consumed —
+  rendered into a turn for an ephemeral actor, dropped for a retired persistent
+  one.
+  The mark is the only thing `Actor.cancel` consults, deliberately. It is set
+  only after an envelope was actually written, and cleared the moment this
+  settlement stops being the one it describes, so suppressing on it asserts
+  nothing about what another fiber is about to do. A revision in review also
+  suppressed while an `ActorExecution` was live, to cover the window between a
+  continuation publishing and recording; every further window review found came
+  from that assertion being false — an execution not yet inside a runner cannot
+  be stopped by `cancelActor`, is not obliged to publish, and may return through
+  an empty drain. Suppressing on a promise cancel cannot keep trades a duplicate
+  envelope for a missing one, and a missing one is the worse failure. Making the
+  promise true instead means cancel must interrupt and join the execution, which
+  is upstream's cancel shape and a separate change; until then the remaining
+  exposure is a duplicate in the microseconds between a continuation's publish
+  and its record, which is what `main` does unconditionally today.
+  Mutation-checked: removing the record fails exactly the two peer continuation
+  envelope-count cases and nothing else; the execution half closes windows no
+  case in the suite reaches.
+
 - Status: active
 - Canonical owner: fork `main` actor/inbox runtime
 - Observable contract: generation ownership, terminal claims, cancellation
@@ -260,8 +305,10 @@ where this delta does not change their implementation.
 - 2026-09-12 wake-routing retirement: the continuation path is retired from
   this entry. A woken non-main turn now runs on upstream's `ActorExecution`
   claim and settles through `runTurn`, instead of `Actor.runPersistentTurn`'s
-  wake generation. `spawn` reserves the same claim for its whole run so a
-  continuation waits behind an in-flight spawn, which is upstream's ordering.
+  wake generation. `spawn` takes no such claim: holding one across its whole
+  run (postStop included) deadlocks a nested ActorTool spawn, which shares the
+  claimed key, so upstream's spawn-before-continuation ordering is not adopted
+  and the case asserting it stays quarantined.
   The eight fork-owned tests that encoded behavior upstream's execution map
   does not model were removed with it: drain-once across six `resume drains`
   cases, cancel-race registry settlement, postStop wake ordering, and
@@ -683,6 +730,38 @@ where this delta does not change their implementation.
   `packages/opencode/src/tool/question.ts`;
   `test/question/lifecycle.test.ts` and real
   `test/cli/tui/question-lifecycle.test.tsx` cover these consumers.
+- 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
+  ownership to the real parent` polled the `InboxTable` row its assertion is
+  about. That row exists to wake the persistent peer it addresses, so the peer's
+  continuation drains it within milliseconds and the poll observes a state the
+  system is designed to erase. A drained row never returns, so the earlier
+  window widening (2s to 20s) only moved the failure from ~2.5s to ~21s. The
+  case now observes `InboxArrived`, published after the row commits and before
+  `wake()`, matching how `test/actor/cancel-notification.test.ts` already counts
+  envelopes. Behavior is unchanged and was verified identical with
+  `spawn.ts`/`prompt.ts` reverted to `e92d7a52`; the assertion is
+  mutation-checked against a suppressed notification and against one misrouted
+  to `main`. Prefer the bus envelope over inbox rows whenever a test asserts
+  notification routing.
+- 2026-09-13 quarantine follow-up: the peer `success`/`failure` continuation
+  envelope-count cases are fixed and unskipped; see the FC-001 terminal-publisher
+  entry. Three cases stay quarantined, all still `skip`ped in place with their
+  inline rationale:
+  `[TP-R14-07] postStop LLM failure preserves the successful result with a
+  warning` (`test/plugin/actor-hooks.test.ts`) and `inbox waits for the entire
+  spawn execution before starting a continuation`
+  (`test/actor/execution-integration.test.ts`) both reduce to one blocker — the
+  fork publishes an actor's outcome and leaves it idle *before* postStop, where
+  upstream publishes after — and the second additionally needs a spawn-side
+  execution claim held across the whole spawn. What holds these open is a
+  product decision, not a test conflict: publishing after postStop means a
+  spawn's caller, and a blocking `actor run`, resolves only once postStop
+  finishes. Exactly one fork case reads on the early publish, `delivered no-op
+  cancel preserves forkContext while postStop is still running`, and only in how
+  it sequences its awaits.
+  `[TP-R14-12] undeliverable terminal notification is logged`
+  (`test/actor/cancel-notification.test.ts`) is independent of that ordering and
+  is untouched by this PR.
 - 2026-09-12 quarantine: four upstream-new actor cases are skipped in place with
   an inline rationale — `inbox waits for the entire spawn execution before
   starting a continuation`, `[TP-R14-12] undeliverable terminal notification is

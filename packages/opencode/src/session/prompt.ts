@@ -5774,6 +5774,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     // does not notify on its own — only runTurn.onExit does.
                     if (!exec.cancelled) return yield* lastAssistant(input.sessionID, agentID)
                   }
+                  // Past every exit that publishes nothing. Only a turn that
+                  // will settle supersedes the previous turn's notification;
+                  // clearing before the empty-drain return above would drop the
+                  // record of an envelope that still stands, and a later
+                  // retirement would then publish a conflicting one.
+                  yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
+                    input.sessionID,
+                    agentID,
+                    false,
+                  ) ?? Effect.void
                   // Capture the last delivery even when the turn dies with a
                   // settled error, so settle can persist a partial result.
                   let lastFinal: MessageV2.WithParts | undefined
@@ -5833,7 +5843,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           : Cause.hasInterruptsOnly(failureCause)
                             ? ("cancelled" as const)
                             : ("failed" as const)
-                        yield* notifyTerminal({
+                        const written = yield* notifyTerminal({
                           sessionID: input.sessionID,
                           actorID: agentID,
                           source: "continuation",
@@ -5854,6 +5864,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                               }
                             : {}),
                         })
+                        // Recorded so the retirement `Actor.cancel` performs
+                        // next consumes it instead of publishing a second
+                        // envelope for the settlement this turn just reported —
+                        // but only when an envelope was actually written. The
+                        // notifier swallows its causes, so a send that failed
+                        // returns as cleanly as one that delivered; recording
+                        // that would suppress the only notice the parent could
+                        // still get.
+                        if (written)
+                          yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
+                            input.sessionID,
+                            agentID,
+                            true,
+                          ) ?? Effect.void
                       }),
                     ),
                   )

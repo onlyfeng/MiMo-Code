@@ -3,15 +3,14 @@ import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Actor } from "../../src/actor/spawn"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import { ActorRegistry } from "../../src/actor/registry"
-import { ActorRegistered } from "../../src/actor/events"
+import { ActorRegistered, InboxArrived } from "../../src/actor/events"
+import { Bus } from "../../src/bus"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { AppLayer } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
-import { InboxTable } from "../../src/inbox/inbox.sql"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { Session } from "../../src/session"
 import { MessageID } from "../../src/session/schema"
-import { Database, and, eq } from "../../src/storage"
 import { ActorTool } from "../../src/tool/actor"
 import type * as Tool from "../../src/tool/tool"
 import { provideTmpdirServer } from "../fixture/fixture"
@@ -383,48 +382,41 @@ it.live(
             },
           )
           const actorID = String(result.metadata.actorId)
+          // Observe the envelope on the bus, not the inbox row it lands in.
+          // InboxArrived is published after the row is committed and before
+          // wake(), so a drain cannot take it away. Subscribed before the child
+          // is released, so no envelope can be missed.
+          const envelopes: { receiverSessionID: string; receiverActorID: string }[] = []
+          const off = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
+            if (event.properties.senderSessionID !== fixture.session.id) return
+            if (event.properties.senderActorID !== actorID) return
+            envelopes.push({
+              receiverSessionID: event.properties.receiverSessionID,
+              receiverActorID: event.properties.receiverActorID,
+            })
+          })
           try {
             yield* llm.wait(1)
             fixture.controller.abort()
             expect((yield* fixture.registry.get(fixture.session.id, actorID))?.parentActorID).toBe("controller-1")
             expect((yield* fixture.registry.get(fixture.session.id, actorID))?.status).toBe("running")
             yield* Deferred.succeed(release, undefined)
-            // Delivery here is asynchronous: the aborted controller's child has to
-            // finish, settle its outcome and land an inbox row. Measured locally
-            // at ~1s (≈50 iterations), so the previous 100-iteration (2s) ceiling
-            // left only 2x headroom — which CI's four concurrent shards routinely
-            // exhaust. This test failed on four separate PRs in one day, every
-            // time at ~2.5s wall clock, i.e. the window running out rather than
-            // anything hanging.
-            //
-            // The test's own timeout is 30s, and that is the real bound. A 20s
-            // window still fails fast on a genuine hang while leaving the
-            // delivery path room to be slow under load.
+            // Delivery is asynchronous: the aborted controller's child has to
+            // finish and settle its outcome before the envelope is published.
+            // The test's own timeout is 30s, so a 20s window still fails fast on
+            // a genuine hang while leaving a loaded machine room to be slow.
             for (let count = 0; count < 1_000; count++) {
-              const rows = yield* Effect.sync(() =>
-                Database.use((db) =>
-                  db
-                    .select()
-                    .from(InboxTable)
-                    .where(
-                      and(
-                        eq(InboxTable.sender_session_id, fixture.session.id),
-                        eq(InboxTable.sender_actor_id, actorID),
-                      ),
-                    )
-                    .all(),
-                ),
-              )
-              if (rows.length > 0) {
-                expect(rows).toHaveLength(1)
-                expect(rows[0]?.receiver_actor_id).toBe("controller-1")
-                expect(rows[0]?.receiver_session_id).toBe(fixture.session.id)
+              if (envelopes.length > 0) {
+                expect(envelopes).toHaveLength(1)
+                expect(envelopes[0]?.receiverActorID).toBe("controller-1")
+                expect(envelopes[0]?.receiverSessionID).toBe(fixture.session.id)
                 return
               }
               yield* Effect.sleep("20 millis")
             }
             throw new Error("No terminal notification was delivered within 20s")
           } finally {
+            yield* Effect.sync(off)
             yield* Deferred.succeed(release, undefined)
             yield* fixture.actor.cancel(fixture.session.id, actorID, "forced")
           }

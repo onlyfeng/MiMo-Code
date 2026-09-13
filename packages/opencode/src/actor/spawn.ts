@@ -335,6 +335,18 @@ export interface Interface {
   }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>
   readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
   readonly getForkContext: (sessionID: SessionID, actorID: string) => Effect.Effect<ForkContext | undefined>
+  /**
+   * Record whether the parent has already been told about this actor's current
+   * settlement. `SessionPrompt`'s continuation publishes its own terminal
+   * envelope, so `cancel` consumes this instead of sending a second one; a new
+   * turn clears it, and a settlement that was never announced still is.
+   */
+  readonly markTerminalNotified?: (
+    sessionID: SessionID,
+    actorID: string,
+    notified: boolean,
+  ) => Effect.Effect<void>
+
   readonly runPersistentTurn?: (input: {
     sessionID: SessionID
     actorID: string
@@ -369,6 +381,11 @@ export const layer = Layer.effect(
     const bus = yield* Bus.Service
     const taskRegistry = yield* TaskRegistry.Service
     const scope = yield* Scope.Scope
+
+    // Actors whose current settlement the parent has already been told about.
+    // Bounded by the live actors: an entry is dropped when the next turn starts
+    // and when the cancel that consumes it finishes.
+    const notifiedSettlements = new Set<string>()
 
     const layerNotificationTargets = new Map<string, NotificationTarget>()
     const rememberNotificationTarget = (target: NotificationTarget) => {
@@ -1047,6 +1064,7 @@ export const layer = Layer.effect(
           yield* lifecycleState.settleTerminal(owner)
           yield* lifecycleState.finishFork(key, owner)
           yield* lifecycleState.retire(key)
+          yield* Effect.sync(() => notifiedSettlements.delete(key))
         }),
       )
 
@@ -1925,10 +1943,53 @@ export const layer = Layer.effect(
               lastError: undefined,
             })
             .pipe(inReceiver, Effect.ignoreCause)
+          // Asked before the drain, not counted after it: this cancel has
+          // already written the cancelled tombstone above, so `Inbox.drain`
+          // takes its retired-persistent branch, deletes every queued row and
+          // still returns 0. A count cannot see the rows it was meant to
+          // notice. The head can, and it covers both ways work is consumed —
+          // rendered into a turn for an ephemeral actor, dropped for a retired
+          // persistent one.
+          //
+          // Work this cancel consumes can no longer be settled by the turn that
+          // would have run it: that wake finds nothing and returns without
+          // publishing. The mark records that the *previous* settlement reached
+          // the parent, which says nothing about the one just discarded, so it
+          // stops covering this publish.
+          const pending = yield* inbox
+            .head(sessionID, actorID)
+            .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
           yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-          yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
+          if (pending) yield* Effect.sync(() => notifiedSettlements.delete(key))
+          // Report only what the parent has not already been told. The fork
+          // publishes an actor's terminal envelope from whichever turn settles
+          // it, and `SessionPrompt`'s continuation is the one path that settles
+          // without a lifecycle generation for this cancel to contend with — so
+          // it leaves this mark instead, and this is the single place that
+          // consumes it. Retiring a peer whose settlement was never announced
+          // still announces it, which the durable idle-peer case asserts.
+          //
+          // The mark is the only thing consulted here, deliberately. It is set
+          // only after an envelope was actually written, and cleared the moment
+          // this settlement stops being the one it describes, so suppressing on
+          // it asserts nothing about what another fiber is about to do. An
+          // earlier revision also suppressed while an `ActorExecution` was live,
+          // which asserted exactly that — and every window review found after it
+          // came from the assertion being false: an execution that is not yet
+          // in a runner cannot be stopped by `cancelActor`, is not obliged to
+          // publish, and may return through an empty drain. Suppressing on a
+          // promise this cancel cannot keep trades a duplicate envelope for a
+          // missing one, which is the worse failure. Making it true instead
+          // means cancel must interrupt and join the execution — upstream's
+          // cancel shape, and a separate change.
+          if (!notifiedSettlements.has(key))
+            yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
           yield* retire
-        }).pipe(Effect.ensuring(settleClaim), Effect.ensuring(releaseEpisode)),
+        }).pipe(
+          Effect.ensuring(Effect.sync(() => notifiedSettlements.delete(key))),
+          Effect.ensuring(settleClaim),
+          Effect.ensuring(releaseEpisode),
+        ),
       )
     })
 
@@ -2083,7 +2144,13 @@ export const layer = Layer.effect(
         if (!instance.disposing) yield* captureNotificationTarget(instance)
         yield* scanRememberedTargets
       })
-    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, runPersistentTurn, scanStalledOnce })
+    const markTerminalNotified = (sessionID: SessionID, actorID: string, notified: boolean) =>
+      Effect.sync(() => {
+        const key = actorKey(sessionID, actorID)
+        if (notified) notifiedSettlements.add(key)
+        else notifiedSettlements.delete(key)
+      })
+    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, runPersistentTurn, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it
