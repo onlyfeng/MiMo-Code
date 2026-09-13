@@ -199,13 +199,19 @@ where this delta does not change their implementation.
      wrong bucket is invisible to `mimo llm-server issue` in the project it
      actually serves. Defaults to `process.cwd()`, so every other caller keeps
      upstream's behaviour.
-  4. `AuthMiddleware` verifies a capability token before waving the request past
-     basic auth. Presence alone is what upstream checks, and `InstanceMiddleware`
-     runs next — on an operator-secured server its cwd containment is off by
-     design, so a junk bearer would pick any `?directory=` on the machine and pay
-     for a full `InstanceBootstrap` before the route answered 401. This is
-     FD-004's original "authenticate before body/bootstrap", which the retired
-     model API got for free by owning its own listener.
+  4. `InstanceMiddleware` verifies a capability token after its containment check
+     and before the bootstrap. Upstream verifies inside the route, which sits
+     after that bootstrap; on an operator-secured server, where containment is
+     off by design, `Bearer junk` therefore bought a full `InstanceBootstrap` —
+     config, plugins, LSP, watcher, index — for any directory on the machine
+     before being refused. This restores FD-004's "authenticate before
+     body/bootstrap", which the retired model API got for free by owning its own
+     listener. The order matters and is load-bearing: containment still answers
+     first, so an outside directory is 403 rather than 401, which is what
+     upstream's `the cwd containment rule survives the password` asserts. Note
+     upstream is already safe for its own implicit listener — containment keys on
+     an *operator*-supplied password, not on one existing — so this closes only
+     the operator-secured case.
   5. The capability route keeps the retired route's bounded admission: at most
      two concurrent requests (429 with `Retry-After`) and a 120s server-owned
      deadline combined with the client signal. Upstream passes only the client's

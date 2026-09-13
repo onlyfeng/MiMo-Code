@@ -10,6 +10,8 @@ import { Filesystem } from "@/util"
 import { Global } from "@/global"
 import path from "node:path"
 import { DIRECTORY_DENIED_CODE } from "./access"
+import { CAPABILITY_PREFIX, presentedToken } from "./capability"
+import { LLMServerTokens } from "@/llm-server/tokens"
 
 /**
  * The directory a request addresses, resolved exactly as this middleware does.
@@ -55,6 +57,31 @@ export function InstanceMiddleware(workspaceID?: WorkspaceID): MiddlewareHandler
             directory,
           },
           403,
+        )
+      }
+    }
+
+    // Authenticate a capability request BEFORE the bootstrap below, which starts
+    // config, plugins, LSP, watcher and index work. Upstream verifies inside the
+    // route, which sits after that bootstrap, so on an operator-secured server —
+    // where the containment check above is off by design — `Bearer junk` bought a
+    // full instance start for any directory on the machine before being refused.
+    // Deliberately after containment, so an outside directory is still refused
+    // first and answers 403 rather than 401 (FD-004 residual).
+    if (c.req.path.startsWith(CAPABILITY_PREFIX + "/")) {
+      const token = presentedToken(c)
+      const verdict = token ? await LLMServerTokens.verify(directory, token) : undefined
+      if (!verdict?.ok) {
+        c.header("WWW-Authenticate", "Bearer")
+        return c.json(
+          {
+            error: {
+              message: "Invalid or expired model API credential",
+              type: "invalid_request_error",
+              code: "invalid_api_key",
+            },
+          },
+          401,
         )
       }
     }
