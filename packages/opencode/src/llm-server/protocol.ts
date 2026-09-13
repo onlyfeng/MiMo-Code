@@ -1,6 +1,10 @@
 import z from "zod"
 import type { FinishReason, LanguageModelUsage, ModelMessage } from "ai"
 
+import { Log } from "@/util"
+
+const log = Log.create({ service: "llm-server.protocol" })
+
 /**
  * OpenAI Chat Completions wire protocol, and its translation to/from the AI SDK
  * shapes MiMoCode already speaks.
@@ -327,6 +331,14 @@ export function finishReason(reason: FinishReason | undefined) {
   if (reason === "tool-calls") return "tool_calls"
   if (reason === "length") return "length"
   if (reason === "content-filter") return "content_filter"
+  if (reason === "stop") return "stop"
+  // Everything else collapses to stop: OpenAI has no vocabulary for them, and the
+  // schema requires one of the enum values on a completed response. An errored
+  // stream already throws before reaching here, so what is left is a stream that
+  // ended cleanly without saying why — most often a truncated upstream SSE. The
+  // caller cannot tell that from a real stop, so log it for the operator who can
+  // (a warning rather than a failure: upstream's mapping is the conformant one).
+  log.warn("provider ended without a terminal finish reason; reporting stop", { reason })
   return "stop"
 }
 

@@ -28,6 +28,9 @@ const log = Log.create({ service: "llm-server.completions" })
  */
 export type ModelScope = readonly string[] | undefined
 
+/** Ceiling on one buffered non-streaming reply. Retained from the fork's model API. */
+const OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
+
 export class RequestError extends Error {
   constructor(
     // Typed as hono's contentful status so the error handler can hand it to
@@ -78,7 +81,7 @@ function notFound(ref: string) {
   }
 }
 
-export function resolveLanguageModel(ref: string, allowlist: ModelScope) {
+export function resolveLanguageModel(ref: string, allowlist: ModelScope, signal?: AbortSignal) {
   const found = lookupModel(ref, allowlist)
   return AppRuntime.runPromise(
     Effect.gen(function* () {
@@ -86,6 +89,10 @@ export function resolveLanguageModel(ref: string, allowlist: ModelScope) {
       const model = yield* provider.getModel(found.parsed.providerID, found.parsed.modelID)
       return { model, language: yield* provider.getLanguage(model) }
     }),
+    // Initialization counts against the request deadline. Without this a stalled
+    // `getLanguage` holds an admission slot forever and the 120s controller never
+    // reaches it (FD-004 residual).
+    signal ? { signal } : undefined,
   ).catch(notFound(ref))
 }
 
@@ -157,7 +164,7 @@ export async function start(input: {
   allowlist: ModelScope
   abort: AbortSignal
 }) {
-  const resolved = await resolveLanguageModel(input.req.model, input.allowlist)
+  const resolved = await resolveLanguageModel(input.req.model, input.allowlist, input.abort)
   const model = resolved.model
 
   // A synthetic per-request id stands in for a session. Providers that key a
@@ -226,6 +233,9 @@ export async function start(input: {
       )
       return { params, headers }
     }),
+      // Same deadline as the provider call: a hook that stalls must not hold an
+    // admission slot past the 120s controller (FD-004 residual).
+    input.abort ? { signal: input.abort } : undefined,
   )
 
   return {
@@ -294,12 +304,21 @@ export async function collect(input: {
   const text: string[] = []
   const reasoning: string[] = []
   const toolCalls: EmittedToolCall[] = []
+  // A non-streaming reply is buffered whole before it is sent, and the caller may
+  // ask for an unbounded `max_completion_tokens` against a permissive or custom
+  // provider. Bounding the accumulation keeps one request from driving the process
+  // out of memory well inside the 120s deadline (FD-004 residual).
+  let bytes = 0
 
   for await (const part of input.result.fullStream) {
     if (part.type === "text-delta") text.push(part.text)
     else if (part.type === "reasoning-delta") reasoning.push(part.text)
     else if (part.type === "tool-call") toolCalls.push({ id: part.toolCallId, name: part.toolName, input: part.input })
     else if (part.type === "error") throw part.error
+    else continue
+    if (part.type === "text-delta" || part.type === "reasoning-delta") bytes += Buffer.byteLength(part.text)
+    else bytes += Buffer.byteLength(JSON.stringify(part))
+    if (bytes > OUTPUT_LIMIT_BYTES) throw new RequestError(502, "Provider output exceeded the proxy limit", "api_error")
   }
 
   return completion({

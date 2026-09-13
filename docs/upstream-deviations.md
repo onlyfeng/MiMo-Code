@@ -184,7 +184,7 @@ where this delta does not change their implementation.
   exactly, and `config.llmServer`, `Util.Self`, upstream's `llm-server` CLI and
   upstream's `generateServerPassword`/`clearGeneratedServerPassword` come with
   it. Net −3548 lines.
-- Observable contract, what remains fork-owned: five boundaries, all kept
+- Observable contract, what remains fork-owned: seven boundaries, all kept
   because upstream does not have them, not because the fork prefers them.
   1. `serve --llm-server` gates only the address advertisement. The route is
      always mounted and always demands a minted token, so credentials alone
@@ -217,6 +217,29 @@ where this delta does not change their implementation.
      deadline combined with the client signal. Upstream passes only the client's
      signal, so a token holder can open unbounded streams and a hung provider
      call has nothing to end it — both spend real credits.
+  6. Provider and plugin exception text is not returned to the caller. A provider
+     SDK or a `chat.params` hook throws whatever it likes — request headers, an
+     API key, a prompt, an upstream body — and this reply goes to anyone holding
+     a token. The detail stays in the server log. One line, and the highest
+     trigger rate of any residual here.
+  7. A buffered non-streaming reply is capped at 16 MiB. The caller may ask for an
+     unbounded `max_completion_tokens` against a permissive or custom provider,
+     and the whole reply is held in memory before it is sent.
+  Two further items were assessed and deliberately NOT restored, because the
+  simplest sufficient answer was cheaper than the retired mechanism:
+  - `provider_options` validation. The retired 239-line validator checked
+     reasoning-effort enums, thinking-budget ranges and output-versus-capacity —
+     it turns a confusing provider 400 into a clear one, and is not a security
+     boundary, since a token holder can already spend credits. Dropped; the
+     provider rejects what it will not accept.
+  - Endpoint liveness probing. The retired registry proved an advertised address
+     still belonged to MiMoCode by calling an identity route on it. Reaching a
+     stranger now needs a crash that skipped unpublication, the pid reused, and
+     the same port taken by that process — records are keyed on both. `issue`
+     prints a one-line caution instead of paying a network round trip per address.
+  A non-terminal finish reason keeps upstream's mapping to `stop`, which is the
+  API-conformant answer, and logs a warning so the operator can see a truncated
+  upstream that the caller cannot.
   The non-loopback bind guard still reads `MIMOCODE_SERVER_OPERATOR_PASSWORD`,
   so a worker-generated credential cannot satisfy it. An IPv6 literal is
   bracketed before it is advertised, which upstream omits and `URL.hostname`

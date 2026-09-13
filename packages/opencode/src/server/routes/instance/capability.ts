@@ -198,8 +198,12 @@ export const CapabilityRoutes = lazy(() =>
       // Bounded rather than upstream's `c.req.json()`: this route is reachable by
       // anything holding a minted token, and an unbounded read lets one request
       // buffer the process out of memory. FD-004 residual.
-      const raw = await readBody(c.req.raw, c.req.raw.signal)
-        .then((buffer) => JSON.parse(buffer.toString("utf8")) as unknown)
+      // Only malformed JSON is tolerated here. `readBody` throws `RequestError(413)`
+      // past the cap, and swallowing that would answer 400 for an oversized body —
+      // indistinguishable from bad syntax, and a lie about which limit was hit.
+      const buffer = await readBody(c.req.raw, c.req.raw.signal)
+      const raw = await Promise.resolve()
+        .then(() => JSON.parse(buffer.toString("utf8")) as unknown)
         .catch(() => undefined)
       const parsed = ChatCompletionRequest.safeParse(raw)
       if (!parsed.success) {
@@ -261,9 +265,11 @@ export const CapabilityRoutes = lazy(() =>
       // 502, not 500: from the caller's point of view an upstream provider failure is this
       // server's problem, but they still need to tell "MiMoCode broke" from "the provider
       // broke". A bare 500 collapses that distinction.
-      return c.json(
-        errorBody({ message: err instanceof Error ? err.message : "Internal Server Error", type: "api_error" }),
-        502,
-      )
+      //
+      // The message is generic on purpose. A provider SDK or a `chat.params` hook throws
+      // whatever it likes — request headers, an API key, the prompt, an upstream response
+      // body — and this reply goes to anyone holding a token. The detail is in the log
+      // above, where the operator can see it and the caller cannot (FD-004 residual).
+      return c.json(errorBody({ message: "Model API request failed", type: "api_error" }), 502)
     }),
 )

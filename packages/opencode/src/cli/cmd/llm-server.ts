@@ -157,6 +157,15 @@ const issue = cmd({
       // URL that will refuse connections.
       if (!address) {
         UI.println("Start a session in this directory (or `mimo serve --port <n>`) and issue again.")
+      } else {
+        // Liveness here is the advertising process still existing, not the socket
+        // still answering. A crash that skipped unpublication, followed by the pid
+        // AND the port both being reused, would leave this pointing at a stranger.
+        // The fork's retired registry probed the endpoint to rule that out, which
+        // needed an identity route and a network round trip per address; the
+        // combination is rare enough that saying so costs less than proving it
+        // (FD-004 residual, deliberately a warning rather than a probe).
+        UI.println("If a request is refused or answered by something unexpected, restart the session and issue again.")
       }
     }),
 })

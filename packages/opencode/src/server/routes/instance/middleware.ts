@@ -73,12 +73,19 @@ export function InstanceMiddleware(workspaceID?: WorkspaceID): MiddlewareHandler
       const verdict = token ? await LLMServerTokens.verify(directory, token) : undefined
       if (!verdict?.ok) {
         c.header("WWW-Authenticate", "Bearer")
+        // Expiry keeps its own code. A client documented to renew on
+        // `expired_api_key` would otherwise read a normally aged-out token as an
+        // unknown credential and stop retrying, so verifying earlier than the
+        // route must not flatten the two.
+        const expired = verdict?.reason === "expired"
         return c.json(
           {
             error: {
-              message: "Invalid or expired model API credential",
+              message: expired
+                ? "Token expired; request a new one with `llm-server issue`"
+                : "Invalid or expired model API credential",
               type: "invalid_request_error",
-              code: "invalid_api_key",
+              code: expired ? "expired_api_key" : "invalid_api_key",
             },
           },
           401,
