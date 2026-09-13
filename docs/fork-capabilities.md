@@ -760,8 +760,14 @@ where this delta does not change their implementation.
   the claim it actually holds: claims carry identity, because a newer turn
   resets the record and takes its own, and an older notifier failing afterwards
   would otherwise hand back a claim it no longer owns and let a later cancel
-  publish for the newer settlement. A turn admission's reset never runs while a cancellation is in progress, since
-  that cancel may already hold the claim and be sending under it, and it makes
+  publish for the newer settlement. A turn admission's reset preserves only a claim cancellation actually holds —
+  claims carry their owner for exactly this. An open episode is not evidence of
+  one, because cancel elects late, after its status update and drain, so an
+  entry found mid-episode usually belongs to an earlier delivered turn;
+  preserving that blocked the interrupted continuation from claiming, made
+  cancel's own election fail against it, and left nobody reporting the new
+  cancellation. The reset still stands off a claim the cancel does hold and is
+  sending under, and it makes
   that check and its delete one synchronous step so a cancel starting between
   them cannot have its claim taken afterwards. Where a registry read cannot be completed, the coordination resolves the
   uncertainty toward reporting: a claim whose revalidation defects is kept,

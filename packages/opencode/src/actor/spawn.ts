@@ -153,7 +153,7 @@ const withNotificationTarget = <A, E, R>(
  * resets the record and takes its own, and an older notifier failing afterwards
  * must not hand back a claim it no longer owns.
  */
-export type TerminalClaim = { readonly key: string }
+export type TerminalClaim = { readonly key: string; readonly owner: "turn" | "cancel" }
 
 /**
  * What the claim holder was reporting, carried so a fallback retry says the
@@ -2102,7 +2102,7 @@ export const layer = Layer.effect(
             })
             .pipe(inReceiver, Effect.ignoreCause)
           yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-          const claim = yield* electTerminalReport(key)
+          const claim = yield* electTerminalReport(key, "cancel")
           if (claim) {
             const reported = yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
             if (!reported) yield* releaseTerminalReport(sessionID, actorID, claim)
@@ -2127,10 +2127,10 @@ export const layer = Layer.effect(
      * returns from cancel before the publishing branch, so nothing can race it,
      * and leaving it unlisted keeps this map bounded by the live standing peers.
      */
-    const electTerminalReport = (key: string) =>
+    const electTerminalReport = (key: string, owner: TerminalClaim["owner"]) =>
       Effect.sync((): TerminalClaim | undefined => {
         if (terminalReports.has(key)) return undefined
-        const claim: TerminalClaim = { key }
+        const claim: TerminalClaim = { key, owner }
         terminalReports.set(key, claim)
         return claim
       })
@@ -2150,7 +2150,7 @@ export const layer = Layer.effect(
       // Unlisted: nothing contends with an ephemeral actor, whose cancel returns
       // before the publishing branch. The claim is still an object so callers
       // need no special case, and releasing it matches nothing.
-      if (!unknown && actor?.lifecycle !== "persistent") return { key } satisfies TerminalClaim
+      if (!unknown && actor?.lifecycle !== "persistent") return { key, owner: "turn" } satisfies TerminalClaim
       // An unknown lifecycle contends like a persistent one and takes the same
       // revalidation below, rather than electing straight away: skipping it let
       // a defect on this read grant a claim for an actor cancellation had
@@ -2171,7 +2171,7 @@ export const layer = Layer.effect(
         row.lastOutcome === "cancelled" &&
         !lifecycleState.isCancellingNow(key)
       if (!unknown && retiredNow(actor)) return undefined
-      const claim = yield* electTerminalReport(key)
+      const claim = yield* electTerminalReport(key, "turn")
       if (!claim) return undefined
       // The read above is a snapshot and the election is a separate step. A
       // cancellation can tombstone, publish, retire and clear the map in
@@ -2323,8 +2323,16 @@ export const layer = Layer.effect(
         // between them could win the claim and begin publishing, and the delete
         // would then hand it away to the continuation that cancel is about to
         // interrupt — both would publish a cancelled envelope.
+        //
+        // Only a claim cancellation actually holds is preserved. An open
+        // episode is not evidence of one: cancel elects late, after its status
+        // update and drain, so an entry found during an episode usually belongs
+        // to an earlier, already delivered turn. Keeping that one blocked the
+        // interrupted continuation from claiming, made cancel's own election
+        // fail against it, and left episode cleanup to remove it with nobody
+        // having reported the new cancellation.
         const key = actorKey(sessionID, actorID)
-        if (lifecycleState.isCancellingNow(key)) return
+        if (lifecycleState.isCancellingNow(key) && terminalReports.get(key)?.owner === "cancel") return
         terminalReports.delete(key)
       })
 

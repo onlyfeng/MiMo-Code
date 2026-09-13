@@ -113,7 +113,7 @@ import {
 } from "./trajectory"
 import { prefixCaptureRef, prefixModelIdentity } from "./prefix-capture-ref"
 import { spawnRef } from "@/actor/spawn-ref"
-import type { Interface as ActorInterface } from "@/actor/spawn"
+import type { Interface as ActorInterface, TerminalClaim } from "@/actor/spawn"
 import { Inbox } from "@/inbox"
 import { sessionPromptRef, defaultModelRef } from "@/inbox/inbox-ref"
 import { Tool } from "@/tool"
@@ -5874,7 +5874,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                         const owner = boundActor ?? spawnRef.current
                         const mayReport =
                           (yield* owner?.claimTerminalReport?.(input.sessionID, agentID) ??
-                            Effect.succeed({ key: "" })) ?? undefined
+                            Effect.succeed<TerminalClaim | undefined>({ key: "", owner: "turn" })) ?? undefined
                         let delivered = false
                         // Hoisted so a fallback retry reports the same settlement.
                         const reportExtra =
