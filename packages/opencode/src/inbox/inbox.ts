@@ -287,10 +287,22 @@ export const layer: Layer.Layer<
       // Close the get→insert retirement race. If cancel committed its tombstone
       // after the first ESRCH check, remove this just-inserted row before publish.
       if (isRetiredPersistent(yield* reg.get(input.receiverSessionID, input.receiverActorID))) {
-        yield* Effect.sync(() => {
-          Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.id, row.id)).run())
-          if (input.committed) input.committed.current = false
-        })
+        yield* Effect.sync(() =>
+          Database.use((db) => {
+            // Whether this delete is what removes the row, read in the same
+            // synchronous step so nothing can drain in between. A wake already
+            // running can consume this row before the check above, rendering
+            // the envelope into the receiver's turn: the row is then gone
+            // because it was delivered, not because this undid it. Reporting
+            // that as undelivered would release the sender's terminal claim and
+            // let a retirement publish a duplicate.
+            const present =
+              db.select({ id: InboxTable.id }).from(InboxTable).where(eq(InboxTable.id, row.id)).limit(1).get() !==
+              undefined
+            db.delete(InboxTable).where(eq(InboxTable.id, row.id)).run()
+            if (input.committed && present) input.committed.current = false
+          }),
+        )
         return yield* Effect.fail(
           new InboxReceiverNotFound({
             receiverSessionID: input.receiverSessionID,

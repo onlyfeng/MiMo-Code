@@ -2162,21 +2162,22 @@ export const layer = Layer.effect(
       // Only the entry this claim still owns: a newer turn may already have
       // reset the record and taken its own, and deleting that would let a
       // later cancel publish a second envelope for the newer settlement.
-      const owned = yield* Effect.sync(() => {
-        if (terminalReports.get(key) !== claim) return false
-        terminalReports.delete(key)
-        return true
-      })
-      if (!owned) return
+      if (terminalReports.get(key) !== claim) return
       const actor = yield* actorReg.get(sessionID, actorID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-      // Handing the right back assumes a later retirement will use it. If
-      // retirement already happened while this send was in flight, there is no
-      // such retirement left, so the settlement would go unreported unless this
-      // path reports it now.
-      if (!actor) return
-      if (!(actor.status === "idle" && actor.lastOutcome === "cancelled")) return
-      const fallback = yield* electTerminalReport(key)
-      if (!fallback) return
+      const retired = actor !== undefined && actor.status === "idle" && actor.lastOutcome === "cancelled"
+      // Hand the right back only when a later retirement can still use it.
+      if (!retired) {
+        yield* Effect.sync(() => {
+          if (terminalReports.get(key) === claim) terminalReports.delete(key)
+        })
+        return
+      }
+      // Retirement already happened while this send was in flight, so nothing
+      // is left to use the right. The claim is kept rather than released and
+      // re-elected: releasing first opens a window in which cancellation wins
+      // the election and publishes a bare `cancelled`, and the retry then finds
+      // nothing to claim — the parent would lose this turn's real status and
+      // payload.
       // Forked into the service scope rather than published here: this runs in
       // the failing notify's own `ensuring`, and re-entering the notification
       // path from there deadlocks under load — reproduced as a 120s hang in
@@ -2204,7 +2205,7 @@ export const layer = Layer.effect(
             reported
               ? Effect.void
               : Effect.sync(() => {
-                  if (terminalReports.get(key) === fallback) terminalReports.delete(key)
+                  if (terminalReports.get(key) === claim) terminalReports.delete(key)
                 }),
           ),
           Effect.ignoreCause,
