@@ -1945,16 +1945,24 @@ export const layer = Layer.effect(
               lastError: undefined,
             })
             .pipe(inReceiver, Effect.ignoreCause)
-          // Counted, because work this cancel consumes can no longer be settled
-          // by the turn that would have run it: that wake drains zero rows and
-          // returns without publishing. The mark records that the *previous*
-          // settlement reached the parent, which says nothing about the one
-          // this cancel just discarded, so it stops covering this publish.
-          // `undefined` when the receiver's run was disposing and the drain
-          // never ran, which consumed nothing and so leaves the mark standing.
-          const drained: number =
-            (yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.catchCause(() => Effect.succeed(0)))) ?? 0
-          if (drained > 0) yield* Effect.sync(() => notifiedSettlements.delete(key))
+          // Asked before the drain, not counted after it: this cancel has
+          // already written the cancelled tombstone above, so `Inbox.drain`
+          // takes its retired-persistent branch, deletes every queued row and
+          // still returns 0. A count cannot see the rows it was meant to
+          // notice. The head can, and it covers both ways work is consumed —
+          // rendered into a turn for an ephemeral actor, dropped for a retired
+          // persistent one.
+          //
+          // Work this cancel consumes can no longer be settled by the turn that
+          // would have run it: that wake finds nothing and returns without
+          // publishing. The mark records that the *previous* settlement reached
+          // the parent, which says nothing about the one just discarded, so it
+          // stops covering this publish.
+          const pending = yield* inbox
+            .head(sessionID, actorID)
+            .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+          yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+          if (pending) yield* Effect.sync(() => notifiedSettlements.delete(key))
           // Report only what the parent has not already been told. The fork
           // publishes an actor's terminal envelope from whichever turn settles
           // it, and `SessionPrompt`'s continuation is the one path that settles

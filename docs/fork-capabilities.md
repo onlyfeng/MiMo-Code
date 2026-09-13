@@ -82,10 +82,15 @@ where this delta does not change their implementation.
   delivered one. Recording a failed send would suppress the only notice the
   parent could still get.
   Retiring a peer whose settlement was never announced still announces it, and a
-  cancel that drains queued rows drops the mark first: work it consumes can no
-  longer be settled by the turn that would have run it — that wake drains zero
-  rows and returns without publishing — so the previous settlement's mark stops
-  covering this one.
+  cancel that consumes queued rows drops the mark first: work it takes can no
+  longer be settled by the turn that would have run it — that wake finds nothing
+  and returns without publishing — so the previous settlement's mark stops
+  covering this one. Consumption is read from `Inbox.head` before the drain,
+  not from the drain's count: cancel writes the cancelled tombstone first, so
+  `Inbox.drain` takes its retired-persistent branch, deletes every queued row
+  and still returns 0. The head also covers both ways work is consumed —
+  rendered into a turn for an ephemeral actor, dropped for a retired persistent
+  one.
   Cancel reads two conditions at one point, after the runner is interrupted and
   the inbox drained, and they are complementary rather than redundant:
   `SessionPrompt` releases the continuation's `ActorExecution` outside the
