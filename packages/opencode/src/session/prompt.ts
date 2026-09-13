@@ -5843,7 +5843,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           : Cause.hasInterruptsOnly(failureCause)
                             ? ("cancelled" as const)
                             : ("failed" as const)
-                        yield* notifyTerminal({
+                        const written = yield* notifyTerminal({
                           sessionID: input.sessionID,
                           actorID: agentID,
                           source: "continuation",
@@ -5866,12 +5866,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                         })
                         // Recorded so the retirement `Actor.cancel` performs
                         // next consumes it instead of publishing a second
-                        // envelope for the settlement this turn just reported.
-                        yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
-                          input.sessionID,
-                          agentID,
-                          true,
-                        ) ?? Effect.void
+                        // envelope for the settlement this turn just reported —
+                        // but only when an envelope was actually written. The
+                        // notifier swallows its causes, so a send that failed
+                        // returns as cleanly as one that delivered; recording
+                        // that would suppress the only notice the parent could
+                        // still get.
+                        if (written)
+                          yield* (boundActor ?? spawnRef.current)?.markTerminalNotified?.(
+                            input.sessionID,
+                            agentID,
+                            true,
+                          ) ?? Effect.void
                       }),
                     ),
                   )

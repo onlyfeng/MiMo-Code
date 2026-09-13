@@ -76,6 +76,11 @@ where this delta does not change their implementation.
   records the envelope it published, cancel consumes that record in place of its
   own publish, and a new turn clears it — past every exit that publishes
   nothing, so a settlement is only ever superseded by a turn that will settle.
+  The record is written only when an envelope actually was: `makeTerminalNotifier`
+  now reports whether it wrote one, deviating from upstream's void return, which
+  swallows every cause and so makes a failed send indistinguishable from a
+  delivered one. Recording a failed send would suppress the only notice the
+  parent could still get.
   Retiring a peer whose settlement was never announced still announces it.
   Cancel reads two conditions at one point, after the runner is interrupted and
   the inbox drained, and they are complementary rather than redundant:
