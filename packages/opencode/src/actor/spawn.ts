@@ -1064,6 +1064,7 @@ export const layer = Layer.effect(
           yield* lifecycleState.settleTerminal(owner)
           yield* lifecycleState.finishFork(key, owner)
           yield* lifecycleState.retire(key)
+          yield* Effect.sync(() => notifiedSettlements.delete(key))
         }),
       )
 
