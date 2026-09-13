@@ -77,16 +77,22 @@ where this delta does not change their implementation.
   own publish, and a new turn clears it — past every exit that publishes
   nothing, so a settlement is only ever superseded by a turn that will settle.
   Retiring a peer whose settlement was never announced still announces it.
-  Cancel reads two conditions and they are complementary, not redundant:
+  Cancel reads two conditions at one point, after the runner is interrupted and
+  the inbox drained, and they are complementary rather than redundant:
   `SessionPrompt` releases the continuation's `ActorExecution` outside the
   `onExit` that both publishes and records, so `ActorExecution.current` covers
   the window where a settlement is being announced and the mark is not yet set,
   and the mark covers every moment after. Verified by probe rather than
-  inference: during a hung continuation `cancel` observes the execution, and
-  after the turn joins it observes only the mark — the two
-  `Layer.provide(ActorExecution.layer)` sites memoize to one instance.
+  inference, since this only holds if the two
+  `Layer.provide(ActorExecution.layer)` sites memoize to one instance: during a
+  hung continuation `cancel` does observe that execution. Reading both at the
+  publish decision rather than at cancel entry also means a continuation that
+  admitted while this cancel was running is seen. A turn admitted after that
+  read still races; closing it needs cancel to contend for the execution claim
+  itself, which is upstream's shape and deliberately out of scope here — the
+  unconditional publish this replaces raced far more widely.
   Mutation-checked: removing the record fails exactly the two peer continuation
-  envelope-count cases and nothing else; the execution half closes a window no
+  envelope-count cases and nothing else; the execution half closes windows no
   case in the suite reaches.
 
 - Status: active

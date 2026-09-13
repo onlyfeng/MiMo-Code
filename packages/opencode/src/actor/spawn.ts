@@ -1810,13 +1810,6 @@ export const layer = Layer.effect(
       const receiver = yield* lifecycleState.getForkContext(key)
       const inReceiver = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         receiver ? withNotificationTarget(receiver, effect) : effect
-      // A continuation holds its execution until after it has published and
-      // recorded, because `SessionPrompt` releases it outside the `onExit` that
-      // does both. So the execution covers the window where a settlement is
-      // still being announced and the mark is not yet set, and the mark covers
-      // every moment after — together they leave no gap, and neither alone is
-      // enough.
-      const execution = yield* executions.current(sessionID, actorID)
       const ownership = yield* lifecycleState.acquireCancel(key, expected)
       if (ownership._tag === "noop") return
       if (ownership._tag === "follower") {
@@ -1960,6 +1953,19 @@ export const layer = Layer.effect(
           // it leaves this mark instead, and this is the single place that
           // consumes it. Retiring a peer whose settlement was never announced
           // still announces it, which the durable idle-peer case asserts.
+          //
+          // Two conditions, complementary rather than redundant: `SessionPrompt`
+          // releases a continuation's execution outside the `onExit` that both
+          // publishes and records, so the execution covers the window where a
+          // settlement is being announced and the mark is not yet set, and the
+          // mark covers every moment after. Both are read here, after the runner
+          // has been interrupted and the inbox drained, so a continuation that
+          // admitted while this cancel was running has already installed its
+          // execution and is seen. A turn admitted after this read still races
+          // — closing that needs cancel to contend for the execution claim
+          // itself, which is upstream's shape and a separate change; today this
+          // is strictly narrower than the unconditional publish it replaces.
+          const execution = yield* executions.current(sessionID, actorID)
           if (!execution && !notifiedSettlements.has(key))
             yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
           yield* retire
