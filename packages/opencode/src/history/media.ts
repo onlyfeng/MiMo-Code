@@ -117,7 +117,7 @@ export function detail(data: Data, collect = true) {
     !collect &&
     data.state?.attachments?.length === 1 &&
     data.state.attachments[0]?.mime === attachmentListOmitted &&
-    !data.state.attachments[0].url
+    !Object.hasOwn(data.state.attachments[0], "url")
   const clean = (value: string) => cleanDataUrls(value, collect ? attachments : undefined)
   const json = (value: unknown) =>
     clean(JSON.stringify(value, (_key, item: unknown) => (typeof item === "string" ? clean(item) : item)))

@@ -7,6 +7,7 @@ import { Database, sql } from "../../src/storage"
 import { History } from "../../src/history"
 import { backfillAll } from "./fixtures/seed-index"
 import { projection } from "../../src/history/projection"
+import { attachmentListOmitted } from "../../src/history/media"
 import { PartTable } from "../../src/session/session.sql"
 import { HistoryTool } from "../../src/tool/history"
 import { Provider } from "../../src/provider"
@@ -326,6 +327,7 @@ it.live("SQL preview preserves small attachment metadata and decoded filename bo
         { type: "file", filename: "😀".repeat(1000), mime: "image/png" },
         { type: "file", filename: "😀".repeat(1000) + "a", mime: "image/png" },
         { type: "file", filename: "\u0000".repeat(4000), mime: "image/png" },
+        { type: "tool", state: { attachments: [{ mime: attachmentListOmitted, url: "data:image/png;base64,YWJj" }] } },
       ])
       const rows = Database.use((db) => db.select(projection(true)).from(PartTable).orderBy(PartTable.id).all())
       expect(rows[0].data).toMatchObject({ state: { attachments: [attachments[0], { filename: "inline.png", mime: "image/png", source: null, url: null }] } })
@@ -335,6 +337,9 @@ it.live("SQL preview preserves small attachment metadata and decoded filename bo
       const context = yield* (yield* History.Service).around({ message_id: "msg_detail", before: 0, after: 0 })
       expect(context.messages[0].parts[0].text).toContain("attachment=tool:0")
       expect(context.messages[0].parts[0].text).toContain("attachment=tool:1")
+      // MIME is an arbitrary stored string; stripped inline URLs still have a
+      // url key, unlike the synthetic omission notice.
+      expect(context.messages[0].parts[4].text).toContain("attachment=tool:0")
     }),
   ),
 )
