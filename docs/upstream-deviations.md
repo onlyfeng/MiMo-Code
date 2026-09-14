@@ -208,8 +208,14 @@ where this delta does not change their implementation.
   the trigger is uncommon or the impact small. Revisit only with evidence that
   one of them actually fired.
   - An unbounded `c.req.json()` body read, and no server-owned concurrency cap
-    or request deadline on the route.
+    or request deadline on the route. Non-streaming collection likewise
+    accumulates every text and reasoning delta with no output ceiling, and
+    `InstanceMiddleware` awaits a pending `InstanceBootstrap` without racing it
+    against the request signal, so a disconnected client cannot settle early.
   - Provider and plugin exception text reaches the caller verbatim.
+  - `provider_options` is merged as an unrestricted provider-native map, after
+    the configured defaults and the selected variant, so a token holder can
+    override either.
   - A remote `image_url` is handed to the SDK unvalidated, so the process can be
     made to fetch loopback, RFC1918 or metadata addresses. Preflight validation
     does not close this — the SDK fetches again later — and closing it properly
@@ -224,9 +230,17 @@ where this delta does not change their implementation.
     non-expiring tokens accumulate without a ceiling; the address registry trusts
     pid liveness rather than probing the endpoint; a non-terminal finish reason
     is reported as `stop`.
-  A follow-up PR may take the cheap and frequently-reachable ones — the
-  exception redaction and the `model.options` merge are each one line. The rest
-  stay as recorded.
+  - `Server.listen` assigns the bind hostname to `URL.hostname` unbracketed, so
+    an explicit `--hostname ::1` is silently discarded by the WHATWG parser and
+    advertised as `http://localhost:<port>/`. Verified in Bun: `::1` and
+    `fe80::1` both yield `"localhost"`, `[::1]` yields `"[::1]"`. The common
+    IPv6 case is unaffected — `::` is already mapped to `127.0.0.1` first.
+  A follow-up PR takes the two that are one line and silently wrong: the
+  `model.options` merge and the IPv6 bracket. Exception redaction was
+  considered and dropped — the recipient already holds an operator-issued token
+  for this model, the leak needs a provider that echoes credential material
+  into an error body, and redacting costs every legitimate caller the reason
+  their request failed. The rest stay as recorded.
 - Watch surfaces: `packages/opencode/src/server/routes/instance/capability.ts`,
   `packages/opencode/src/server/middleware.ts`,
   `packages/opencode/src/server/routes/instance/middleware.ts`,
