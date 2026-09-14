@@ -3729,13 +3729,13 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   `test/flag/`) 111 pass / 0 fail; the compat-owned surfaces most likely to
   interact (`test/actor/`, `test/inbox/`) 317 pass / 2 skip / 0 fail.
 
-## 2026-09-14 — revoke guard inheritance (PR #114)
+## 2026-09-14 — revoke guard inheritance (PRs #114, #116)
 
-- Accepted main tip/shared audit: `a9cc028b433bf6b7f88a438c2e3c7df8cba601f4`;
-  inherited source/tests: `367c1653e28cd0e546db5b8457b047d7a1563798`; reviewed
+- Accepted main tip/shared audit: `8f94a80c54bfdf630f95767a7e46d5c5977bea1c`;
+  inherited source/tests: `bbac42b72bc63ebe52cb74a153c248b4e51a09d2`; reviewed
   upstream and bundled guidance unchanged from the entry above.
 - Compat source/test behavior and inheritance merge:
-  `6a6e2fa17420a360905255697a2ed319bb2ef7bd`; prior tip:
+  `644eddc4bbbcf6f10acb2cb00ee28dbc498b50b9`; prior tip:
   `5e6662f7216f0a4c1063e788aec89108c2478e80`.
 - **Direct inherit, no compat override, no owner added or retired.** One source
   file and one new test. `mimo llm-server revoke <id> --all` answered `--all`
@@ -3744,6 +3744,12 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   fails. The guard tests presence (`args.id != null`) rather than truthiness,
   because yargs binds an empty positional as `""` and
   `revoke "$TOKEN_ID" --all` with the variable unset is the case it exists for.
+  #116 closes the last shape: `parserConfiguration({ "populate--": true })` puts
+  an id after `--` in `args["--"]`, never in the positional, so
+  `revoke --all -- llmk_...` named a token and still deleted every one. The test
+  harness shared that blind spot — it built its own yargs without that
+  configuration and so measured a parse shape the real CLI never produces; it now
+  sets it explicitly, and dropping it again fails the terminator case.
 - The overlap check produced a false positive on the first pass, recorded here
   because it is the previous propagation's trap in a new form: the compat-owned
   set was taken as `main..dev/compat` while `main` already carried the incoming

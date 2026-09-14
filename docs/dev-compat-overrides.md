@@ -227,9 +227,21 @@ Source evidence and the final result row are recorded in the latest
 
 ## 2026-09-14 revoke guard (second propagation, same day)
 
-Direct inherit, no compat override, no owner added or retired. One source file
-and one new test: `llm-server revoke <id> --all` deleted every token for the
+Direct inherit, no compat override, no owner added or retired. Covers PRs #114
+and #116, the second folded in before this merged so compat never carries the
+incomplete guard: `llm-server revoke <id> --all` deleted every token for the
 directory instead of the one named, and now refuses the ambiguous form.
+
+The guard took three rounds to close, which is worth recording because each
+round was a different way of naming a token that it did not see. It was missing
+entirely; then it tested truthiness, so an empty positional from an unset shell
+variable walked past; then it read only the positional, while
+`parserConfiguration({ "populate--": true })` in `src/index.ts` puts an id after
+`--` in `args["--"]` instead. The test harness had the same blind spot — it
+built its own yargs without that configuration, so it was measuring a parse
+shape the real CLI never produces. Every argument shape is now enumerated
+against the production parser, and the four that still pass through were each
+checked to be non-destructive.
 
 The overlap check flagged `cli/cmd/llm-server.ts` on a first pass, and that false
 positive is worth recording because it is the same trap as the previous
@@ -249,12 +261,12 @@ byte-identical to `main`.
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-14
 - Reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Accepted `main` tip: `a9cc028b433bf6b7f88a438c2e3c7df8cba601f4`
-- Inherited main behavior: `367c1653e28cd0e546db5b8457b047d7a1563798`
-- Compat behavior: `6a6e2fa17420a360905255697a2ed319bb2ef7bd`
+- Accepted `main` tip: `8f94a80c54bfdf630f95767a7e46d5c5977bea1c`
+- Inherited main behavior: `bbac42b72bc63ebe52cb74a153c248b4e51a09d2`
+- Compat behavior: `644eddc4bbbcf6f10acb2cb00ee28dbc498b50b9`
 - Prior compat tip: `5e6662f7216f0a4c1063e788aec89108c2478e80`
-- Main source inheritance merge: `6a6e2fa17420a360905255697a2ed319bb2ef7bd`
-- Shared audit commit: `a9cc028b433bf6b7f88a438c2e3c7df8cba601f4`
+- Main source inheritance merge: `644eddc4bbbcf6f10acb2cb00ee28dbc498b50b9`
+- Shared audit commit: `8f94a80c54bfdf630f95767a7e46d5c5977bea1c`
 - Inherited bundled guidance content: `11833785` (bundled `mimocode-docs`: `model-api.md` retired, `capability-api.md` added, the `serve --llm-server` row dropped)
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
