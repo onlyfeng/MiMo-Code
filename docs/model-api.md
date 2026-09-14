@@ -18,8 +18,11 @@
   (它假设进程已 chdir 进项目);fork 的 TUI worker 服务的是启动时选定的目录,
   未必等于 cwd,通告落错桶会让 `mimo llm-server issue` 找不到它。
 
-`--llm-server` 仍然只控制是否通告,不控制路由是否存在——路由始终挂载,且始终要求
-已签发的令牌。
+`mimo serve --llm-server` 已随本次对齐移除(`src/index.ts` 启用了 yargs `.strict()`,
+所以旧命令会直接报未知选项)。`mimo serve` 现在与 upstream 一致,**默认通告**;而
+`mimo acp` 与 `mimo web` 与 upstream 一致传 `advertise: false`,不进地址注册表。
+通告与否从来只决定 `mimo llm-server issue` 能否解析出 `base_url`:`/v1` 路由始终
+挂载,且始终要求已签发的令牌。
 
 upstream 在这条路径上的若干已知行为(无界请求体、无并发上限与超时、provider 异常
 原文透出、远程图片 URL 未校验即交给 SDK 等)按上游原样保留,理由与取舍记录在

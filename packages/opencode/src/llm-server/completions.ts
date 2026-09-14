@@ -168,12 +168,19 @@ export async function start(input: {
   // `ProviderTransform.providerOptions` below is what nests the result under the
   // SDK's namespace. Merging a per-provider-keyed object in here would survive
   // typechecking and then be silently dropped by the provider.
-  // Same layering as `session/llm.ts`: derived options first, then the variant that
-  // reasoning effort selects, then the caller's explicit escape hatch. `mergeDeep`
-  // rather than a spread because variant values are nested (a thinking budget lives
-  // under its own object) and a shallow merge would drop siblings.
+  // Same layering as `session/llm.ts`: derived options first, then what the model's
+  // own config asks for, then the variant that reasoning effort selects, then the
+  // caller's explicit escape hatch. `mergeDeep` rather than a spread because variant
+  // values are nested (a thinking budget lives under its own object) and a shallow
+  // merge would drop siblings.
+  //
+  // `model.options` is the layer to check when this list changes: it carries what
+  // `provider.<id>.models.<id>.options` set in the config, and dropping it makes a
+  // configured model behave differently over `/v1` than in a session — silently,
+  // since neither side reports which options it used.
   const merged = pipe(
     ProviderTransform.options({ model, sessionID: requestID }),
+    mergeDeep(model.options),
     mergeDeep(input.req.reasoning_effort ? variantFor(model, input.req.reasoning_effort) : {}),
     mergeDeep(input.req.provider_options ?? {}),
   )
