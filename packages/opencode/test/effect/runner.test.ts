@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Cause, Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Ref, Scheduler, Scope } from "effect"
 import { Runner } from "../../src/effect"
 import { it } from "../lib/effect"
 
@@ -14,6 +14,31 @@ describe("Runner", () => {
   }))
 
   // --- ensureRunning semantics ---
+
+  it.live(
+    "cancel before the runner fiber starts settles its caller and permits the next run",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const started = yield* Ref.make(false)
+      const runner = Runner.make<string>(s)
+      const caller = yield* runner.ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected"))).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      )
+      const state = runner.state
+      expect(state._tag).toBe("Running")
+      if (state._tag !== "Running") return yield* Effect.die("expected a published runner")
+      expect(yield* Deferred.isDone(state.run.start)).toBe(true)
+      expect(yield* Deferred.isDone(state.run.entered)).toBe(false)
+
+      yield* runner.cancel.pipe(Effect.timeout("250 millis"))
+      const exit = yield* Fiber.await(caller).pipe(Effect.timeout("250 millis"))
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(yield* Ref.get(started)).toBe(false)
+      expect(yield* Deferred.isDone(state.run.done)).toBe(true)
+      expect(runner.state._tag).toBe("Idle")
+      expect(yield* runner.ensureRunning(Effect.succeed("next"))).toBe("next")
+    }).pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true)),
+  )
 
   it.live(
     "ensureRunning starts work and returns result",

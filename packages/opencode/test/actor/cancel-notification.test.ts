@@ -1,7 +1,7 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, describe, expect } from "bun:test"
-import { Deferred, Effect, Exit, Fiber, Layer, Logger } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, Scheduler } from "effect"
 import { eq, and } from "drizzle-orm"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
@@ -539,13 +539,13 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           if (terminal === "failure") yield* llm.error(401, { error: { message: "invalid credential", type: "authentication_error" } })
           if (terminal === "cancelled") yield* llm.hang
           yield* prompt.prompt({ sessionID: spawned.sessionID, agentID: spawned.actorID, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "continue" }] })
-          const execution = yield* prompt.loop({ sessionID: spawned.sessionID, agentID: spawned.actorID, notifyParentOnComplete: true }).pipe(Effect.exit, Effect.forkChild)
+          const execution = yield* prompt.loop({ sessionID: spawned.sessionID, agentID: spawned.actorID, notifyParentOnComplete: true }).pipe(Effect.forkChild)
           if (terminal === "cancelled") {
             for (let i = 0; i < 400 && (yield* llm.calls) === before; i++) yield* Effect.sleep("10 millis")
             expect(yield* llm.calls).toBeGreaterThan(before)
             yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
           }
-          const exit = yield* Fiber.join(execution)
+          const exit = yield* Fiber.await(execution)
           expect(Exit.isSuccess(exit)).toBe(terminal === "success")
           const entry = yield* registry.get(spawned.sessionID, spawned.actorID)
           expect(entry?.status).toBe("idle")
@@ -577,6 +577,92 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
       ))
     }
   }
+
+  for (const queued of [false, true])
+  it.live(`cancel joins a continuation between terminal publication and its receipt (queued=${queued})`, () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const sessions = yield* Session.Service
+        const registry = yield* ActorRegistry.Service
+        const prompt = yield* SessionPrompt.Service
+        const bus = yield* Bus.Service
+        const inbox = yield* Inbox.Service
+        const parent = yield* sessions.create({ title: "terminal publication race" })
+        yield* llm.text("first result")
+        const child = yield* actor.spawn({
+          mode: "peer",
+          sessionID: parent.id,
+          agentType: "build",
+          task: "first",
+          context: "none",
+          tools: [],
+          background: true,
+          model: ref,
+        })
+        yield* Deferred.await(child.outcome)
+        const published = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const cancelled = yield* Deferred.make<void>()
+        const notices: string[] = []
+        const unsubscribe = yield* bus.subscribeCallback(InboxArrived, (event) => {
+          if (event.properties.senderSessionID !== child.sessionID || event.properties.senderActorID !== child.actorID) return
+          const row = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, event.properties.inboxID)).get())
+          notices.push((row?.content as { text?: string } | undefined)?.text ?? "")
+        })
+        const restore = prompt.bindActor?.({
+          ...actor,
+          markTerminalNotified: (sessionID, actorID, notified) => Effect.gen(function* () {
+            if (sessionID === child.sessionID && actorID === child.actorID && notified) {
+              yield* Deferred.succeed(published, undefined)
+              yield* Deferred.await(release)
+            }
+            yield* actor.markTerminalNotified!(sessionID, actorID, notified)
+          }),
+        })
+        yield* Effect.addFinalizer(() => Effect.gen(function* () {
+          yield* Deferred.succeed(release, undefined)
+          unsubscribe()
+          restore?.()
+        }))
+        yield* llm.text("second result")
+        yield* prompt.prompt({ sessionID: child.sessionID, agentID: child.actorID, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "continue" }] })
+        const running = yield* prompt.loop({ sessionID: child.sessionID, agentID: child.actorID, notifyParentOnComplete: true }).pipe(Effect.forkChild)
+        yield* Deferred.await(published).pipe(Effect.timeout("5 seconds"))
+        const calls = yield* llm.calls
+        const pending = queued ? yield* inbox.send({
+          receiverSessionID: child.sessionID,
+          receiverActorID: child.actorID,
+          senderSessionID: parent.id,
+          senderActorID: "main",
+          content: "must not run after cancellation",
+        }) : undefined
+        const cancelling = yield* actor.cancel(child.sessionID, child.actorID, "forced").pipe(
+          Effect.andThen(Deferred.succeed(cancelled, undefined)),
+          Effect.forkChild,
+        )
+        try {
+          yield* Effect.sleep("50 millis")
+          expect(yield* Deferred.isDone(cancelled)).toBe(false)
+          expect(notices).toHaveLength(1)
+        } finally {
+          yield* Deferred.succeed(release, undefined)
+        }
+        yield* Fiber.await(running)
+        yield* Fiber.join(cancelling).pipe(Effect.timeout("5 seconds"))
+        expect(yield* llm.calls).toBe(calls)
+        if (pending) expect(yield* inbox.has(pending.inboxID)).toBe(false)
+        expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
+        // Queued work is a new settlement: cancelling it must not be hidden by
+        // the preceding successful turn's receipt, and must not call the model.
+        expect(notices).toHaveLength(queued ? 2 : 1)
+        expect(notices.filter((text) => text.includes("completed"))).toHaveLength(1)
+        expect(notices.filter((text) => text.includes("cancelled"))).toHaveLength(queued ? 1 : 0)
+      }),
+      { git: true, config: providerCfg },
+    ),
+    20_000,
+  )
 
   // Regression guard: successful completion still notifies exactly once (no
   // double-notify introduced by the bridge). Read immediately after the outcome
@@ -835,6 +921,14 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           expect(yield* Deferred.isDone(result.outcome)).toBe(false)
           expect(yield* Deferred.isDone(followerDone)).toBe(false)
 
+          const interruptedFollower = yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(
+            Effect.forkChild({ startImmediately: true }),
+          )
+          yield* Fiber.interrupt(interruptedFollower).pipe(Effect.timeout("1 second"))
+          const interruptedExit = yield* Fiber.await(interruptedFollower)
+          expect(Exit.isFailure(interruptedExit)).toBe(true)
+          expect(yield* Deferred.isDone(result.outcome)).toBe(false)
+
           yield* Deferred.succeed(releaseFirst, undefined)
           yield* Fiber.join(first)
           yield* Fiber.join(follower)
@@ -896,6 +990,54 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         { git: true, config: providerCfg },
       ),
     15_000,
+  )
+
+  it.live("scheduler interruption during cancel acquisition cannot leak an owner episode", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* () {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const registry = yield* ActorRegistry.Service
+        const parent = yield* session.create({ title: "cancel scheduler boundary" })
+        const leaked: number[] = []
+        // Sweep early scheduler budgets instead of binding the regression to
+        // a particular instruction count in cancellation's acquisition path.
+        for (const threshold of Array.from({ length: 32 }, (_, index) => index + 1)) {
+          const actorID = `cancel-scheduler-${threshold}`
+          yield* registry.register({
+            sessionID: parent.id,
+            actorID,
+            mode: "subagent",
+            agent: "build",
+            description: "scheduler boundary",
+            contextMode: "none",
+            background: false,
+            lifecycle: "ephemeral",
+          })
+          const scheduler = new Scheduler.MixedScheduler()
+          let interrupted = false
+          scheduler.shouldYield = (fiber) => {
+            if (interrupted || fiber.currentOpCount < threshold) return false
+            interrupted = true
+            queueMicrotask(() => fiber.interruptUnsafe())
+            return true
+          }
+          const owner = yield* actor.cancel(parent.id, actorID, "forced").pipe(
+            Effect.provideService(Scheduler.Scheduler, scheduler),
+            Effect.forkChild({ startImmediately: true }),
+          )
+          yield* Fiber.await(owner).pipe(Effect.timeout("1 second"))
+          expect(interrupted).toBe(true)
+          const follower = yield* actor.cancel(parent.id, actorID, "forced").pipe(
+            Effect.timeout("100 millis"),
+            Effect.exit,
+          )
+          if (Exit.isFailure(follower)) leaked.push(threshold)
+        }
+        expect(leaked).toEqual([])
+      }),
+      { git: true, config: providerCfg },
+    ),
   )
 
   it.live("real failure winning a cancel race sends one failed terminal notification", () =>

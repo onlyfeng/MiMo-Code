@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { eq } from "drizzle-orm"
+import { Database } from "../../src/storage"
+import { InboxTable } from "../../src/inbox/inbox.sql"
+import { InboxArrived } from "../../src/actor/events"
+import { ActorRegistry } from "../../src/actor/registry"
 import { Deferred, Effect, Layer, Stream } from "effect"
 import path from "path"
 import { pathToFileURL } from "url"
@@ -617,13 +622,8 @@ describe("actor.postStop ReAct loop", () => {
     }
   })
 
-  // QUARANTINED (fork): upstream runs the postStop ReAct loop before publishing
-  // the outcome, so a postStop warning reaches it. This fork publishes the
-  // outcome first and runs postStop as housekeeping afterwards - a behaviour
-  // its own "delivered no-op cancel preserves forkContext while postStop is
-  // still running" case asserts. Reconciling the two orderings is tracked for a
-  // dedicated follow-up fork PR; see FC-008 and the 2026-09-12 record.
-  test.skip("[TP-R14-07] postStop LLM failure preserves the successful result with a warning", async () => {
+  for (const background of [false, true])
+  test(`[TP-R14-07] postStop LLM failure preserves the successful result with a warning (background=${background})`, async () => {
     const server = startScriptedLLMServer([
       { lines: textStopResponse("delivered") },     // delivery turn
       { lines: [], status: 400 },                   // postStop turn — HTTP 400 triggers LLM error (no retry)
@@ -678,6 +678,14 @@ describe("actor.postStop ReAct loop", () => {
               const actor = yield* Actor.Service
               const session = yield* Session.Service
               const sess = yield* session.create({ title: "postStop-fail" })
+              const notices: unknown[] = []
+              const unsubscribe = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
+                if (event.properties.receiverSessionID !== sess.id || event.properties.type !== "actor_notification") return
+                // InboxArrived precedes wake/drain, so capture the committed
+                // envelope while it is still available rather than polling it.
+                notices.push(Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, event.properties.inboxID)).get()?.content))
+              })
+              yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
               const result = yield* actor.spawn({
                 mode: "subagent",
                 sessionID: sess.id,
@@ -685,7 +693,7 @@ describe("actor.postStop ReAct loop", () => {
                 task: "go",
                 context: "none",
                 tools: [],
-                background: false,
+                background,
               })
               const outcome = yield* Deferred.await(result.outcome)
               expect(outcome.status).toBe("success")
@@ -694,8 +702,21 @@ describe("actor.postStop ReAct loop", () => {
                 .pipe(Effect.provide(ActorWaiter.defaultLayer))
               expect(waited.result).toBe("delivered")
               expect(waited.warnings?.join(" ")).toContain("postStop")
+              const entry = yield* (yield* ActorRegistry.Service).get(result.sessionID, result.actorID)
+              const messages = yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })
+              const persisted = messages.find((message) => message.info.id === entry?.resultMessageID)
+              expect(persisted?.info.role).toBe("assistant")
+              if (persisted?.info.role === "assistant") {
+                expect(persisted.info.actorResult?.finalText).toBe("delivered")
+                expect(persisted.info.actorResult?.warnings?.join(" ")).toContain("postStop")
+              }
+              expect(notices).toHaveLength(background ? 1 : 0)
+              if (background) {
+                expect(JSON.stringify(notices[0])).toContain("delivered")
+                expect(JSON.stringify(notices[0])).toContain("postStop")
+              }
               return outcome.status === "success" ? outcome.finalText : undefined
-            }),
+            }).pipe(Effect.scoped),
           ),
       })
 
