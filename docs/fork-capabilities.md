@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-12
-- Upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
-- Prior reviewed upstream: `f11e35ede439df5555ca1f0309ffea8e9b49f06e`
-- Main behavior (runtime/tests): `bca24711ed37d3620cd7304603b81e98849642e5`
-- Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
-- Prior fork `main` tip: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`
+- Last reviewed: 2026-09-14
+- Upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
+- Prior reviewed upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
+- Main behavior (runtime/tests): `bbac42b72bc63ebe52cb74a153c248b4e51a09d2`
+- Bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
+- Prior fork `main` tip: `72064c41ec7311a4d3ca05dc480956f73463c0ff`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -28,8 +28,17 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-12 (98702641) capability inventory](upstream-sync-2026-09-12-98702641.md),
-continuing the [2026-09-11 (f11e35ed) inventory](upstream-sync-2026-09-11-f11e35ed.md) and the
+Latest synchronization: 2026-09-14, upstream `98702641..6fbb1732` (PRs #109–#117).
+It has no separate capability inventory. The range is four commits and one merge
+across two capabilities — MiMo model ids pinned to `@ai-sdk/openai-compatible`,
+and port `0` bound as OS-ephemeral — both adopted in #109 and recorded in
+[the registry history](fork-registry-history.md). The same round closed a
+divergence older than the range: upstream has shipped its capability route since
+`b4bbe81c` (2026-08-18), and #110–#116 retired the fork's parallel model API in
+its favour. That decision, and every behaviour left as upstream ships it, is
+owned by FD-004's 2026-09-14 structural retirement. This continues the
+[2026-09-12 (98702641) capability inventory](upstream-sync-2026-09-12-98702641.md),
+the [2026-09-11 (f11e35ed) inventory](upstream-sync-2026-09-11-f11e35ed.md) and the
 [2026-09-11 (7641dbbd) inventory](upstream-sync-2026-09-11-7641dbbd.md).
 The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
@@ -855,6 +864,17 @@ where this delta does not change their implementation.
   `.test.ts` input and therefore enters the existing stable path-hash shard 1/4.
   Its local pass is supporting evidence; the final published `main` SHA remains
   subject to the strict XML/count and exact-file CI gates.
+- 2026-09-14 capability route disposition: the 2026-09-07 model API lifecycle
+  review, the selected model API evidence and the model API clauses of the
+  POLICY-03 lifecycle review above describe the retired fork model API and are
+  historical. FD-004 now owns `/v1` and adopts upstream's capability route
+  whole: token verification runs in the route after `InstanceMiddleware` has
+  bootstrapped the instance, instance waiting is not cancellation-aware, and
+  there is no admission, server-owned deadline or bounded upload. None of that
+  is to be restored during a sync. The retirement condition below governs this
+  entry's workflow and process bounds; the model API bounds were retired by
+  FD-004's decision rather than by an upstream settlement, and FD-004 records
+  each resulting behaviour.
 - Retirement condition: runtime bounds may retire only with equivalent upstream
   settlement. The single test skip retires after the disposer is fixed and
   bounded exact-SHA CI proves process exit.
