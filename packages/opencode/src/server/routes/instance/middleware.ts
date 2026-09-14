@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler } from "hono"
+import type { MiddlewareHandler } from "hono"
 import { Instance } from "@/project/instance"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { AppRuntime } from "@/effect/app-runtime"
@@ -10,31 +10,19 @@ import { Filesystem } from "@/util"
 import { Global } from "@/global"
 import path from "node:path"
 import { DIRECTORY_DENIED_CODE } from "./access"
-import { CAPABILITY_PREFIX, admitCapabilityRequest, presentedToken } from "./capability"
-import { LLMServerTokens } from "@/llm-server/tokens"
-
-/**
- * The directory a request addresses, resolved exactly as this middleware does.
- *
- * Exported so `AuthMiddleware` can authenticate a capability token against it
- * BEFORE this middleware bootstraps an instance for it.
- */
-export function requestedDirectory(c: Context) {
-  const raw = c.req.query("directory") || c.req.header("x-mimocode-directory") || process.cwd()
-  return AppFileSystem.resolve(
-    (() => {
-      try {
-        return decodeURIComponent(raw)
-      } catch {
-        return raw
-      }
-    })(),
-  )
-}
 
 export function InstanceMiddleware(workspaceID?: WorkspaceID): MiddlewareHandler {
   return async (c, next) => {
-    const directory = requestedDirectory(c)
+    const raw = c.req.query("directory") || c.req.header("x-mimocode-directory") || process.cwd()
+    const directory = AppFileSystem.resolve(
+      (() => {
+        try {
+          return decodeURIComponent(raw)
+        } catch {
+          return raw
+        }
+      })(),
+    )
 
     if (!Flag.MIMOCODE_SERVER_OPERATOR_PASSWORD) {
       const cwd = Filesystem.resolve(process.cwd())
@@ -61,78 +49,17 @@ export function InstanceMiddleware(workspaceID?: WorkspaceID): MiddlewareHandler
       }
     }
 
-    // Authenticate a capability request BEFORE the bootstrap below, which starts
-    // config, plugins, LSP, watcher and index work. Upstream verifies inside the
-    // route, which sits after that bootstrap, so on an operator-secured server —
-    // where the containment check above is off by design — `Bearer junk` bought a
-    // full instance start for any directory on the machine before being refused.
-    // Deliberately after containment, so an outside directory is still refused
-    // first and answers 403 rather than 401 (FD-004 residual).
-    const capability = c.req.path.startsWith(CAPABILITY_PREFIX + "/")
-    if (capability) {
-      const token = presentedToken(c)
-      const verdict = token ? await LLMServerTokens.verify(directory, token) : undefined
-      if (!verdict?.ok) {
-        c.header("WWW-Authenticate", "Bearer")
-        // Expiry keeps its own code. A client documented to renew on
-        // `expired_api_key` would otherwise read a normally aged-out token as an
-        // unknown credential and stop retrying, so verifying earlier than the
-        // route must not flatten the two.
-        const expired = verdict?.reason === "expired"
-        return c.json(
-          {
-            error: {
-              message: expired
-                ? "Token expired; request a new one with `llm-server issue`"
-                : "Invalid or expired model API credential",
-              type: "invalid_request_error",
-              code: expired ? "expired_api_key" : "invalid_api_key",
-            },
+    return WorkspaceContext.provide({
+      workspaceID,
+      async fn() {
+        return Instance.provide({
+          directory,
+          init: () => AppRuntime.runPromise(InstanceBootstrap),
+          async fn() {
+            return next()
           },
-          401,
-        )
-      }
-    }
-
-    const enter = () =>
-      WorkspaceContext.provide({
-        workspaceID,
-        async fn() {
-          return Instance.provide({
-            directory,
-            init: () => AppRuntime.runPromise(InstanceBootstrap),
-            async fn() {
-              return next()
-            },
-          })
-        },
-      })
-
-    if (!capability) return enter()
-
-    // Admission is taken HERE, not inside the capability route, because the
-    // bootstrap below sits between the two. A gate downstream of it cannot bound
-    // requests that are stuck waiting on a slow or already-pending bootstrap —
-    // which is the case that accumulates — and the deadline signal would be
-    // installed too late to cover that wait at all.
-    const release = admitCapabilityRequest(c.req.raw)
-    if (!release) {
-      c.header("Retry-After", "1")
-      return c.json(
-        {
-          error: {
-            message: "Model API allows at most 2 concurrent requests",
-            type: "rate_limit_error",
-            code: "rate_limit_exceeded",
-          },
-        },
-        429,
-      )
-    }
-    try {
-      return await enter()
-    } finally {
-      release()
-    }
+        })
+      },
+    })
   }
 }

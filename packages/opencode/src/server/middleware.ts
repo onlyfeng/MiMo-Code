@@ -41,8 +41,11 @@ export const ErrorMiddleware: ErrorHandler = (err, c) => {
 }
 
 /**
- * Any of the headers a task token may ride in. Presence, not validity — the
- * capability handler validates it; this only decides whether basic auth applies.
+ * Does this request carry something that could be a task token?
+ *
+ * Only a presence check — validity is the route's job. Deciding here would duplicate the
+ * token store's logic in a middleware that runs for every request, including ones that have
+ * nothing to do with models.
  */
 function presentsToken(...headers: (string | undefined)[]) {
   return headers.some((value) => (value ?? "").trim().length > 0)
@@ -62,10 +65,7 @@ export const AuthMiddleware: MiddlewareHandler = (c, next) => {
   // this middleware waves everything through. A task holds that token and not the server
   // password, so requiring basic auth here would make the surface unreachable by the only
   // clients it exists for.
-  if (
-    path.startsWith(CAPABILITY_PREFIX + "/") &&
-    presentsToken(c.req.header("authorization"), c.req.header("x-api-key"), c.req.header("api-key"))
-  ) {
+  if (path.startsWith(CAPABILITY_PREFIX + "/") && presentsToken(c.req.header("authorization"), c.req.header("x-api-key"), c.req.header("api-key"))) {
     return next()
   }
 

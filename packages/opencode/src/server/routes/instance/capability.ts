@@ -7,8 +7,6 @@ import { Log } from "@/util"
 import { lazy } from "@/util/lazy"
 import { Instance } from "@/project/instance"
 import { LLMServerTokens } from "@/llm-server/tokens"
-import { assertSafeUrl } from "@/util/ssrf"
-import { readBody } from "@/server/api-request"
 import { RequestError, collect, start, stream, type ModelScope } from "@/llm-server/completions"
 import { ChatCompletionRequest, unsupported } from "@/llm-server/protocol"
 
@@ -37,7 +35,7 @@ export const CAPABILITY_PREFIX = "/v1"
  * `authorization` is the OpenAI convention; `x-api-key` is Anthropic's, and clients
  * configured for either reach the same place. `api-key` is Azure's.
  */
-export function presentedToken(c: { req: { header: (name: string) => string | undefined } }) {
+function presented(c: { req: { header: (name: string) => string | undefined } }) {
   const authorization = c.req.header("authorization")
   if (authorization) {
     const bearer = /^Bearer\s+(.+)$/i.exec(authorization)
@@ -72,48 +70,6 @@ function errorBody(input: { message: string; type: string; code?: string; param?
  */
 const scopes = new WeakMap<Request, { models: ModelScope }>()
 
-/**
- * Bounded admission, kept from the fork's retired model API (FD-004 residual).
- *
- * Upstream hands the provider only the client's own signal, so a caller holding a
- * minted token can open unbounded concurrent streams and a hung provider call has
- * nothing to end it. Both cost real credits. Two in flight is what the retired
- * route allowed, and the deadline is its 120s.
- */
-const MAX_CONCURRENT = 2
-const REQUEST_DEADLINE_MS = 120_000
-const active = new Set<AbortController>()
-
-/** Server-owned signal for one request: the client's, plus our own deadline. */
-const deadlines = new WeakMap<Request, AbortSignal>()
-
-/**
- * Take an admission slot, or `undefined` when the surface is full.
- *
- * Called from `InstanceMiddleware` rather than from a route middleware here,
- * because the instance bootstrap happens between the two: a gate installed
- * downstream of it can never bound requests that are stuck waiting *on* it, and
- * the deadline signal would be installed too late to be worth anything.
- */
-export function admitCapabilityRequest(request: Request) {
-  if (active.size >= MAX_CONCURRENT) return undefined
-  const controller = new AbortController()
-  const timer = setTimeout(
-    () => controller.abort(new DOMException("Model request timed out", "TimeoutError")),
-    REQUEST_DEADLINE_MS,
-  )
-  active.add(controller)
-  deadlines.set(request, AbortSignal.any([request.signal, controller.signal]))
-  return () => {
-    clearTimeout(timer)
-    active.delete(controller)
-  }
-}
-
-function deadlineFor(request: Request) {
-  return deadlines.get(request) ?? request.signal
-}
-
 function scopeFor(request: Request): ModelScope {
   const found = scopes.get(request)
   if (!found) {
@@ -135,7 +91,7 @@ export const CapabilityRoutes = lazy(() =>
      * carries the model scope that Basic auth has no concept of.
      */
     .use(async (c, next) => {
-      const token = presentedToken(c)
+      const token = presented(c)
       if (!token) {
         return c.json(
           errorBody({ message: "Missing bearer token", type: "invalid_request_error", code: "invalid_api_key" }),
@@ -179,9 +135,6 @@ export const CapabilityRoutes = lazy(() =>
             Object.keys(provider.models).map((modelID) => `${providerID}/${modelID}`),
           )
         }),
-        // Discovery initializes provider state and can run a plugin-backed loader.
-        // Without the deadline a stalled one holds its admission slot forever.
-        { signal: deadlineFor(c.req.raw) },
       )
       const scope = scopeFor(c.req.raw)
       const visible = scope ? all.filter((id) => scope.includes(id)) : all
@@ -196,17 +149,7 @@ export const CapabilityRoutes = lazy(() =>
       })
     })
     .post("/chat/completions", async (c) => {
-      // Bounded rather than upstream's `c.req.json()`: this route is reachable by
-      // anything holding a minted token, and an unbounded read lets one request
-      // buffer the process out of memory. FD-004 residual.
-      // Only malformed JSON is tolerated here. `readBody` throws `RequestError(413)`
-      // past the cap, and swallowing that would answer 400 for an oversized body —
-      // indistinguishable from bad syntax, and a lie about which limit was hit.
-      const buffer = await readBody(c.req.raw, c.req.raw.signal)
-      const raw = await Promise.resolve()
-        .then(() => JSON.parse(buffer.toString("utf8")) as unknown)
-        .catch(() => undefined)
-      const parsed = ChatCompletionRequest.safeParse(raw)
+      const parsed = ChatCompletionRequest.safeParse(await c.req.json().catch(() => undefined))
       if (!parsed.success) {
         const issue = parsed.error.issues[0]
         throw new RequestError(400, `${issue?.path.join(".") || "body"}: ${issue?.message}`, "invalid_request_error")
@@ -215,26 +158,7 @@ export const CapabilityRoutes = lazy(() =>
       const rejection = unsupported(req)
       if (rejection) throw new RequestError(400, rejection, "invalid_request_error")
 
-      // A caller-supplied `image_url` is fetched by the AI SDK from THIS process for
-      // adapters that cannot take a URL, so accepting any parseable URL hands a token
-      // holder a request forge into loopback, RFC1918 and cloud metadata. The scope a
-      // token grants is model access, not network reach. Reuses FC-010's classifier
-      // rather than restoring the fork's retired image pipeline.
-      for (const message of req.messages) {
-        if (!Array.isArray(message.content)) continue
-        for (const part of message.content) {
-          if (part.type !== "image_url") continue
-          const url = part.image_url.url
-          if (url.startsWith("data:")) continue
-          if (!/^https?:$/.test(new URL(url).protocol))
-            throw new RequestError(400, "image_url must be http(s) or a data: URL", "invalid_request_error")
-          await assertSafeUrl(url, undefined, { blockLoopback: true }).catch((error) => {
-            throw new RequestError(400, error instanceof Error ? error.message : "image_url is not reachable", "invalid_request_error")
-          })
-        }
-      }
-
-      const started = await start({ req, allowlist: scopeFor(c.req.raw), abort: deadlineFor(c.req.raw) })
+      const started = await start({ req, allowlist: scopeFor(c.req.raw), abort: c.req.raw.signal })
       if (req.stream !== true) {
         return c.json(await collect({ id: started.id, ref: started.ref, result: started.result }))
       }
@@ -285,11 +209,9 @@ export const CapabilityRoutes = lazy(() =>
       // 502, not 500: from the caller's point of view an upstream provider failure is this
       // server's problem, but they still need to tell "MiMoCode broke" from "the provider
       // broke". A bare 500 collapses that distinction.
-      //
-      // The message is generic on purpose. A provider SDK or a `chat.params` hook throws
-      // whatever it likes — request headers, an API key, the prompt, an upstream response
-      // body — and this reply goes to anyone holding a token. The detail is in the log
-      // above, where the operator can see it and the caller cannot (FD-004 residual).
-      return c.json(errorBody({ message: "Model API request failed", type: "api_error" }), 502)
+      return c.json(
+        errorBody({ message: err instanceof Error ? err.message : "Internal Server Error", type: "api_error" }),
+        502,
+      )
     }),
 )

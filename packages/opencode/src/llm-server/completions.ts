@@ -6,8 +6,6 @@ import { AppRuntime } from "@/effect/app-runtime"
 import { Provider, ProviderTransform } from "@/provider"
 import { Plugin } from "@/plugin"
 import { Log } from "@/util"
-import { MessageID, SessionID } from "@/session/schema"
-import type { User } from "@/session/message-v2"
 import {
   ChatCompletionRequest,
   chunk,
@@ -29,9 +27,6 @@ const log = Log.create({ service: "llm-server.completions" })
  * one-directional; `server.ts` re-exports the same shape.
  */
 export type ModelScope = readonly string[] | undefined
-
-/** Ceiling on one buffered non-streaming reply. Retained from the fork's model API. */
-const OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
 
 export class RequestError extends Error {
   constructor(
@@ -83,7 +78,7 @@ function notFound(ref: string) {
   }
 }
 
-export function resolveLanguageModel(ref: string, allowlist: ModelScope, signal?: AbortSignal) {
+export function resolveLanguageModel(ref: string, allowlist: ModelScope) {
   const found = lookupModel(ref, allowlist)
   return AppRuntime.runPromise(
     Effect.gen(function* () {
@@ -91,10 +86,6 @@ export function resolveLanguageModel(ref: string, allowlist: ModelScope, signal?
       const model = yield* provider.getModel(found.parsed.providerID, found.parsed.modelID)
       return { model, language: yield* provider.getLanguage(model) }
     }),
-    // Initialization counts against the request deadline. Without this a stalled
-    // `getLanguage` holds an admission slot forever and the 120s controller never
-    // reaches it (FD-004 residual).
-    signal ? { signal } : undefined,
   ).catch(notFound(ref))
 }
 
@@ -161,53 +152,18 @@ function toolSet(tools: NonNullable<ChatCompletionRequest["tools"]>): ToolSet {
  */
 const HOOK_AGENT = "llm-api"
 
-function carries(req: ChatCompletionRequest, type: "input_audio" | "image_url") {
-  return req.messages.some(
-    (message) => Array.isArray(message.content) && message.content.some((part) => part.type === type),
-  )
-}
-
 export async function start(input: {
   req: ChatCompletionRequest
   allowlist: ModelScope
   abort: AbortSignal
 }) {
-  const resolved = await resolveLanguageModel(input.req.model, input.allowlist, input.abort)
+  const resolved = await resolveLanguageModel(input.req.model, input.allowlist)
   const model = resolved.model
-
-  // A text-only model does not reject media, it ignores it — and the caller gets a
-  // fluent answer produced without hearing the recording or seeing the image, which
-  // is the one failure they cannot detect. Refuse before generating. Format and
-  // transport compatibility is deliberately left to the provider: that failure is
-  // loud, this one is silent.
-  for (const [type, supported, noun] of [
-    ["input_audio", model.capabilities.input.audio, "audio"],
-    ["image_url", model.capabilities.input.image, "image"],
-  ] as const) {
-    if (!supported && carries(input.req, type))
-      throw new RequestError(
-        400,
-        `Model \`${input.req.model}\` does not accept ${noun} input`,
-        "invalid_request_error",
-      )
-  }
 
   // A synthetic per-request id stands in for a session. Providers that key a
   // prompt cache on it (Azure) then scope that cache to one request instead of
   // sharing it across unrelated callers of this server.
   const requestID = completionID()
-  // `chat.params` and `chat.headers` declare `message` as a required `UserMessage`,
-  // so a plugin that reads it throws on `undefined` before the provider is reached.
-  // There is no real turn here, which is why the agent names this surface rather
-  // than pretending to be one — but the shape has to exist.
-  const hookMessage: User = {
-    id: MessageID.ascending(),
-    sessionID: SessionID.descending(),
-    role: "user",
-    time: { created: Date.now() },
-    agent: HOOK_AGENT,
-    model: { providerID: model.providerID, modelID: model.id, variant: input.req.reasoning_effort },
-  }
   // Both sides of this merge are FLAT provider-native option maps;
   // `ProviderTransform.providerOptions` below is what nests the result under the
   // SDK's namespace. Merging a per-provider-keyed object in here would survive
@@ -218,11 +174,6 @@ export async function start(input: {
   // under its own object) and a shallow merge would drop siblings.
   const merged = pipe(
     ProviderTransform.options({ model, sessionID: requestID }),
-    // The model's own configured options, at the same precedence `session/llm.ts`
-    // gives them. Omitting these made a model configured in `mimocode.json` — a
-    // service tier, a cache control, a reasoning setting — behave differently over
-    // `/v1` than in a session, with nothing in the reply to say so.
-    mergeDeep(model.options ?? {}),
     mergeDeep(input.req.reasoning_effort ? variantFor(model, input.req.reasoning_effort) : {}),
     mergeDeep(input.req.provider_options ?? {}),
   )
@@ -252,7 +203,7 @@ export async function start(input: {
       const provider = (yield* (yield* Provider.Service).list())[model.providerID]
       const params = yield* plugin.trigger(
         "chat.params",
-        { sessionID: requestID, agent: HOOK_AGENT, model, provider, message: hookMessage },
+        { sessionID: requestID, agent: HOOK_AGENT, model, provider, message: undefined },
         {
           // Seeded with the CALLER's value where given, falling back to the derived
           // default — so a hook adjusts an explicit request rather than replacing it with
@@ -270,14 +221,11 @@ export async function start(input: {
       )
       const { headers } = yield* plugin.trigger(
         "chat.headers",
-        { sessionID: requestID, agent: HOOK_AGENT, model, provider, message: hookMessage },
+        { sessionID: requestID, agent: HOOK_AGENT, model, provider, message: undefined },
         { headers: {} as Record<string, string> },
       )
       return { params, headers }
     }),
-      // Same deadline as the provider call: a hook that stalls must not hold an
-    // admission slot past the 120s controller (FD-004 residual).
-    input.abort ? { signal: input.abort } : undefined,
   )
 
   return {
@@ -346,25 +294,8 @@ export async function collect(input: {
   const text: string[] = []
   const reasoning: string[] = []
   const toolCalls: EmittedToolCall[] = []
-  // A non-streaming reply is buffered whole before it is sent, and the caller may
-  // ask for an unbounded `max_completion_tokens` against a permissive or custom
-  // provider. Bounding the accumulation keeps one request from driving the process
-  // out of memory well inside the 120s deadline (FD-004 residual).
-  let bytes = 0
 
   for await (const part of input.result.fullStream) {
-    // Every part counts, including `tool-input-delta`, which the SDK accumulates
-    // internally and only materializes as one `tool-call` at the end — measuring
-    // solely the finished object would notice the memory after it was spent.
-    // `start-step` echoes the serialized upstream request, inline media included.
-    // That is input, it already has the 25 MiB body cap, and counting it here made a
-    // large-but-legal request fail as though the provider had overrun.
-    bytes +=
-      part.type === "text-delta" || part.type === "reasoning-delta"
-        ? Buffer.byteLength(part.text)
-        : Buffer.byteLength(JSON.stringify(part.type === "start-step" ? { ...part, request: undefined } : part))
-    if (bytes > OUTPUT_LIMIT_BYTES) throw new RequestError(502, "Provider output exceeded the proxy limit", "api_error")
-
     if (part.type === "text-delta") text.push(part.text)
     else if (part.type === "reasoning-delta") reasoning.push(part.text)
     else if (part.type === "tool-call") toolCalls.push({ id: part.toolCallId, name: part.toolName, input: part.input })

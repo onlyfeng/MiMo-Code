@@ -109,16 +109,17 @@ export async function listen(opts: {
    */
   advertise?: boolean
   /**
-   * Bucket the advertisement lands in. Upstream keys it on `process.cwd()`,
-   * which holds when the process chdir'd into the project. This fork's TUI
-   * worker serves a directory chosen at startup that need not equal cwd, and
-   * an advertisement filed under the wrong bucket is invisible to
-   * `mimo llm-server issue` in the project it actually serves (FD-004 residual).
+   * Bucket the advertisement lands in. Upstream keys it on `process.cwd()`, which
+   * holds when the process chdir'd into the project. This fork's TUI worker serves
+   * a directory chosen at startup that need not equal cwd, and an advertisement
+   * filed under the wrong bucket is invisible to `mimo llm-server issue` in the
+   * project it actually serves.
    */
   advertiseDirectory?: string
 }): Promise<Listener> {
   if (opts.childEnv) setChildProcessEnv(opts.childEnv)
-  const isLoopback = opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
+  const isLoopback =
+    opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
   if (!isLoopback && !Flag.MIMOCODE_SERVER_OPERATOR_PASSWORD && !opts.noAuth) {
     throw new Error(
       "Refusing to bind to non-loopback address without MIMOCODE_SERVER_PASSWORD. " +
@@ -128,44 +129,6 @@ export async function listen(opts: {
 
   const built = create(opts)
   const server = await built.runtime.listen(opts)
-
-  // Who owns the `/v1` capability surface must also say where it is. Keyed by cwd —
-  // TUI/serve chdir to the project. A multi-project host is NOT auto-discoverable
-  // from a project bucket: tokens verify against the request-resolved directory, so
-  // a cross-project base_url 401s under OpenAI-standard clients.
-  const advertise = opts.advertise !== false
-  const directory = opts.advertiseDirectory ?? process.cwd()
-  // `0.0.0.0`/`::` are bind addresses, not client URLs. Advertise loopback so the
-  // printed base_url is usable on this machine.
-  const advertisedHostname = opts.hostname === "0.0.0.0" || opts.hostname === "::" ? "127.0.0.1" : opts.hostname
-  const advertised = new URL("http://localhost")
-  // A bare IPv6 literal is silently ignored by `URL.hostname`, which would leave
-  // this as `localhost` and print a base_url that resolves to IPv4 and cannot
-  // reach an IPv6-only listener. Brackets make it a valid host.
-  advertised.hostname = advertisedHostname.includes(":") ? `[${advertisedHostname}]` : advertisedHostname
-  advertised.port = String(server.port)
-  if (advertise) {
-    const published = LLMServerTokens.publish(directory, {
-      pid: process.pid,
-      hostname: advertisedHostname,
-      port: server.port,
-      url: advertised.toString(),
-      started: Date.now(),
-    })
-    // An operator who asked for the advertisement gets an error rather than a
-    // listener that claims to be discoverable and is not: `llm-server issue`
-    // would resolve `base_url: null` with nothing to explain it. Upstream logs
-    // and continues, which is right for its always-on default but wrong for an
-    // explicit request (FD-004 residual).
-    if (opts.advertise === true) {
-      await published.catch(async (error) => {
-        await server.stop(true)
-        throw error
-      })
-    } else {
-      await published.catch((error) => log.warn("failed to advertise llm-server address", { error: String(error) }))
-    }
-  }
 
   const next = new URL("http://localhost")
   next.hostname = opts.hostname
@@ -182,6 +145,28 @@ export async function listen(opts: {
     MDNS.publish(server.port, opts.mdnsDomain)
   } else if (opts.mdns) {
     log.warn("mDNS enabled but hostname is loopback; skipping mDNS publish")
+  }
+
+  // Who owns the `/v1` capability surface must also say where it is. Keyed by cwd —
+  // TUI/serve chdir to the project. A multi-project host is NOT auto-discoverable
+  // from a project bucket: tokens verify against the request-resolved directory, so
+  // a cross-project base_url 401s under OpenAI-standard clients.
+  const advertise = opts.advertise !== false
+  const directory = opts.advertiseDirectory ?? process.cwd()
+  // `0.0.0.0`/`::` are bind addresses, not client URLs. Advertise loopback so the
+  // printed base_url is usable on this machine.
+  const advertisedHostname = opts.hostname === "0.0.0.0" || opts.hostname === "::" ? "127.0.0.1" : opts.hostname
+  const advertised = new URL("http://localhost")
+  advertised.hostname = advertisedHostname
+  advertised.port = String(server.port)
+  if (advertise) {
+    await LLMServerTokens.publish(directory, {
+      pid: process.pid,
+      hostname: advertisedHostname,
+      port: server.port,
+      url: advertised.toString(),
+      started: Date.now(),
+    }).catch((error) => log.warn("failed to advertise llm-server address", { error: String(error) }))
   }
 
   let closing: Promise<void> | undefined

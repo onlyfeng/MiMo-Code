@@ -1,10 +1,6 @@
 import z from "zod"
 import type { FinishReason, LanguageModelUsage, ModelMessage } from "ai"
 
-import { Log } from "@/util"
-
-const log = Log.create({ service: "llm-server.protocol" })
-
 /**
  * OpenAI Chat Completions wire protocol, and its translation to/from the AI SDK
  * shapes MiMoCode already speaks.
@@ -60,11 +56,7 @@ const ContentPart = z.discriminatedUnion("type", [
       url: z
         .string()
         .refine(acceptableImageUrl, "must be an absolute URL or a base64-encoded `data:` URL"),
-      // `detail` is accepted only where it changes nothing. The converter passes the
-      // URL alone, so "high"/"low" would be taken and then dropped — and detail moves
-      // resolution, cost and recognition accuracy, which the caller cannot see in the
-      // reply. Refusing says so; accepting would not.
-      detail: z.literal("auto").optional(),
+      detail: z.string().optional(),
     }),
   }),
 ])
@@ -191,23 +183,6 @@ export function unsupported(req: ChatCompletionRequest): string | undefined {
   // is the one outcome that must not happen.
   if (req.verbosity != null)
     return "verbosity is not supported; pass the provider's own option through `provider_options`"
-  // Same rule: a required tool choice with nothing declared is dropped on the way to
-  // the provider, which is then free to answer in prose. A client tool loop has no
-  // way to see that its requirement was discarded.
-  if (req.tool_choice === "required" && !req.tools?.length)
-    return "tool_choice `required` needs at least one tool in `tools`"
-  // Bare base64 carries no container, so `format` is what names it. `toModelMessages`
-  // throws for a direct caller, but that throw reaches the route's generic handler and
-  // is reported as a redacted 502 — an upstream outage, for input the caller can fix.
-  // Asked here, where the route already collects reasons to answer 400.
-  for (const message of req.messages) {
-    if (!Array.isArray(message.content)) continue
-    for (const part of message.content) {
-      if (part.type !== "input_audio") continue
-      if (!part.input_audio.format && !DATA_URL.test(part.input_audio.data))
-        return "input_audio requires `format` when `data` is not a data: URL"
-    }
-  }
   return undefined
 }
 
@@ -352,14 +327,6 @@ export function finishReason(reason: FinishReason | undefined) {
   if (reason === "tool-calls") return "tool_calls"
   if (reason === "length") return "length"
   if (reason === "content-filter") return "content_filter"
-  if (reason === "stop") return "stop"
-  // Everything else collapses to stop: OpenAI has no vocabulary for them, and the
-  // schema requires one of the enum values on a completed response. An errored
-  // stream already throws before reaching here, so what is left is a stream that
-  // ended cleanly without saying why — most often a truncated upstream SSE. The
-  // caller cannot tell that from a real stop, so log it for the operator who can
-  // (a warning rather than a failure: upstream's mapping is the conformant one).
-  log.warn("provider ended without a terminal finish reason; reporting stop", { reason })
   return "stop"
 }
 

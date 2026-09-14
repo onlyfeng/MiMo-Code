@@ -53,17 +53,6 @@ function isBlockedIPv6(ip: string): boolean {
   return false
 }
 
-/**
- * Loopback is deliberately NOT in the blocked sets: WebFetch on a development
- * machine legitimately reaches `localhost:3000`, and DC-NET-001 approves private
- * destinations there. A caller that is only trusted with model access is a
- * different matter, so it asks for this explicitly.
- */
-function isLoopback(host: string) {
-  const value = host.replace(/^\[|\]$/g, "").toLowerCase()
-  return value === "localhost" || value === "::1" || value === "0:0:0:0:0:0:0:1" || /^127\./.test(value)
-}
-
 const MAX_REDIRECTS = 5
 
 export async function safeFetch(
@@ -94,17 +83,12 @@ export async function safeFetch(
 export async function assertSafeUrl(
   url: string,
   lookupImpl: (hostname: string) => Promise<{ address: string; family: number }> = lookup,
-  options?: { blockLoopback?: boolean },
 ): Promise<void> {
   const parsed = new URL(url)
   const hostname = parsed.hostname.replace(/^\[|\]$/g, "")
 
   if (BLOCKED_HOSTNAMES.has(hostname)) {
     throw new Error(`SSRF protection: blocked hostname "${hostname}"`)
-  }
-
-  if (options?.blockLoopback && isLoopback(hostname)) {
-    throw new Error(`SSRF protection: blocked loopback host "${hostname}"`)
   }
 
   // Numeric IPv4 check (before DNS)
@@ -126,9 +110,6 @@ export async function assertSafeUrl(
   // DNS resolution check to prevent DNS rebinding
   try {
     const { address, family } = await lookupImpl(hostname)
-    if (options?.blockLoopback && isLoopback(address)) {
-      throw new Error(`SSRF protection: hostname "${hostname}" resolves to loopback "${address}"`)
-    }
     if (family === 4 && isBlockedIPv4(address)) {
       throw new Error(`SSRF protection: hostname "${hostname}" resolves to blocked IP "${address}"`)
     }

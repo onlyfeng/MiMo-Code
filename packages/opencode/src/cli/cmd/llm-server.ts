@@ -40,12 +40,7 @@ export function duration(input: string | undefined, fallback: string): number | 
   const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec(value)
   if (!match) throw new Error(`Invalid duration \`${input}\`; use forms like 30m, 12h, 7d, or none`)
   const scale = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[match[2] ?? "ms"]!
-  const ms = Number(match[1]) * scale
-  // `Infinity` survives the regex and then JSON-serializes to `null`, which
-  // `expired()` reads as a present zero-length limit — the token would be minted
-  // and then die on first use. Reject it where it is still explicable.
-  if (!Number.isFinite(ms)) throw new Error(`Invalid duration \`${input}\`; value is too large`)
-  return ms
+  return Number(match[1]) * scale
 }
 
 function defaults() {
@@ -162,15 +157,6 @@ const issue = cmd({
       // URL that will refuse connections.
       if (!address) {
         UI.println("Start a session in this directory (or `mimo serve --port <n>`) and issue again.")
-      } else {
-        // Liveness here is the advertising process still existing, not the socket
-        // still answering. A crash that skipped unpublication, followed by the pid
-        // AND the port both being reused, would leave this pointing at a stranger.
-        // The fork's retired registry probed the endpoint to rule that out, which
-        // needed an identity route and a network round trip per address; the
-        // combination is rare enough that saying so costs less than proving it
-        // (FD-004 residual, deliberately a warning rather than a probe).
-        UI.println("If a request is refused or answered by something unexpected, restart the session and issue again.")
       }
     }),
 })

@@ -168,179 +168,82 @@ where this delta does not change their implementation.
   HTTP/SDK/tool publication and actual provider/transaction regressions are
   recorded in the shared history; no cross-restart recovery is introduced.
 
-## FD-004 — bounded admission on upstream's capability route
+## FD-004 — upstream's capability route, adopted whole
 
-- Status: active (narrowed 2026-09-14)
+- Status: active (reduced to near-nothing 2026-09-14)
 - Canonical owner: fork `main` instance-server boundary
-- 2026-09-14 structural retirement: the fork's parallel model API is gone. It
-  had built `server/model-api.ts` as its own sub-app with its own listener id
-  and registry entry, plus `src/llm-server/{images,input-audio,provider-options,
-  sdk,scope,models,error}.ts`. Upstream mounts `CapabilityRoutes` inside
-  `InstanceRoutes` at `/v1`, exposing the same two routes with the same
-  mandatory scoped bearer token, and its `protocol.ts` already accepts
-  `image_url` and `input_audio` and converts both through `toModelMessages`.
-  Checked rather than assumed: those modules were a second implementation, not
-  a capability upstream lacks. `src/llm-server/` is now upstream's three files
-  exactly, and `config.llmServer`, `Util.Self`, upstream's `llm-server` CLI and
-  upstream's `generateServerPassword`/`clearGeneratedServerPassword` come with
-  it. Net −3548 lines.
-- Observable contract, what remains fork-owned: twelve boundaries, all kept
-  because upstream does not have them, not because the fork prefers them.
-  1. `serve --llm-server` gates only the address advertisement. The route is
-     always mounted and always demands a minted token, so credentials alone
-     never produce a *discoverable* service. Upstream advertises by default.
-  2. The capability route reads its body through `ApiRequest.readBody`, capped
-     at 25 MiB and honouring the request signal. Upstream calls `c.req.json()`
-     unbounded on a route anything holding a token can reach.
-  3. `Server.listen` takes an optional `advertiseDirectory`. Upstream keys the
-     advertisement on `process.cwd()`, which holds when the process chdir'd
-     into the project; this fork's TUI worker serves a directory chosen at
-     startup that need not equal cwd, and an advertisement filed under the
-     wrong bucket is invisible to `mimo llm-server issue` in the project it
-     actually serves. Defaults to `process.cwd()`, so every other caller keeps
-     upstream's behaviour.
-  4. `InstanceMiddleware` verifies a capability token after its containment check
-     and before the bootstrap. Upstream verifies inside the route, which sits
-     after that bootstrap; on an operator-secured server, where containment is
-     off by design, `Bearer junk` therefore bought a full `InstanceBootstrap` —
-     config, plugins, LSP, watcher, index — for any directory on the machine
-     before being refused. This restores FD-004's "authenticate before
-     body/bootstrap", which the retired model API got for free by owning its own
-     listener. The order matters and is load-bearing: containment still answers
-     first, so an outside directory is 403 rather than 401, which is what
-     upstream's `the cwd containment rule survives the password` asserts. Note
-     upstream is already safe for its own implicit listener — containment keys on
-     an *operator*-supplied password, not on one existing — so this closes only
-     the operator-secured case.
-  5. The capability route keeps the retired route's bounded admission: at most
-     two concurrent requests (429 with `Retry-After`) and a 120s server-owned
-     deadline combined with the client signal. Upstream passes only the client's
-     signal, so a token holder can open unbounded streams and a hung provider
-     call has nothing to end it — both spend real credits.
-  6. Provider and plugin exception text is not returned to the caller. A provider
-     SDK or a `chat.params` hook throws whatever it likes — request headers, an
-     API key, a prompt, an upstream body — and this reply goes to anyone holding
-     a token. The detail stays in the server log. One line, and the highest
-     trigger rate of any residual here.
-  7. A buffered non-streaming reply is capped at 16 MiB. The caller may ask for an
-     unbounded `max_completion_tokens` against a permissive or custom provider,
-     and the whole reply is held in memory before it is sent.
-  8. A caller-supplied `image_url` is classified before it reaches the SDK, which
-     fetches it from this process for adapters that cannot take a URL. Upstream
-     accepts any parseable URL, so a token would otherwise carry a request forge
-     into loopback, RFC1918 and cloud metadata. Reuses FC-010's `assertSafeUrl`
-     rather than the fork's retired 246-line image pipeline, and additionally
-     rejects non-http(s) schemes. `assertSafeUrl` gains an opt-in
-     `blockLoopback`, used only here: loopback is deliberately reachable for
-     WebFetch (a dev machine's `localhost:3000`, and DC-NET-001 approves private
-     destinations), but a caller trusted only with model access is a different
-     matter. Verified rather than assumed — the classifier blocks RFC1918,
-     link-local and metadata but allowed `127.0.0.1`, `::1` and `localhost`
-     until this flag, and the DNS-resolved address is checked too.
-  9. `mimo llm-server` refuses a non-finite duration and refuses to issue past
-     1024 live tokens. Upstream's parser accepts a value large enough to reach
-     `Infinity`, which JSON-serializes to `null`, and `expired()` compares with
-     `!== undefined` — so the token would be minted and die on first use. Its
-     sweep-on-write only reaches records that expire, so `--ttl none --max-age
-     none` in a loop grows the file without bound and every verification rewrites
-     it.
-  10. Audio sent to a model whose `capabilities.input.audio` is false is refused
-     before generation. A text-only model does not reject audio, it ignores it,
-     and the caller gets a fluent answer produced without hearing the recording —
-     the one failure they cannot detect. Format and transport compatibility is
-     deliberately left to the provider: that failure is loud, this one is silent,
-     and the retired `audioRejection` matrix is not worth restoring for the loud
-     half. The image half of the same check is there too: a text-only adapter
-     ignores an `image_url` just as quietly.
-  11. Three request shapes that upstream accepts and then discards are refused
-     instead, all for the reason `unsupported()` already gives for `verbosity`:
-     silently dropping something that changes the answer is the one outcome that
-     must not happen. `tool_choice: "required"` with no tools (the provider is
-     then free to answer in prose, and a client tool loop cannot see that its
-     requirement was dropped); `image_url.detail` other than `auto` (the
-     converter passes the URL alone, and detail moves resolution, cost and
-     accuracy); and `input_audio` with bare base64 and no `format` (which
-     `toModelMessages` throws on, reaching the route's generic handler as a
-     redacted 502 — an upstream outage, for input the caller can fix).
-  12. A model's own configured options are merged at the precedence
-     `session/llm.ts` gives them, and the plugin hooks receive a real
-     `UserMessage`. Upstream omits `model.options` here — despite a comment
-     claiming session parity — so a service tier, cache control or reasoning
-     setting written in `mimocode.json` applied in a session and silently did not
-     over `/v1`; and it passes `message: undefined` where the public hook
-     contract declares the field required, so a plugin that reads it throws
-     before the provider is reached. The synthetic message is labelled
-     `llm-api`, not dressed up as a real turn.
-  Admission is taken in `InstanceMiddleware`, not inside the capability route,
-  because the instance bootstrap sits between them: a gate downstream of it
-  cannot bound requests stuck waiting *on* it, and the deadline would be
-  installed too late to cover that wait. What remains unbounded is the bootstrap
-  wait itself for a client that disconnects — the wait is not cancellable — but
-  it is now capped at two, which is the same exposure upstream carries on every
-  other instance route.
-  Two further items were assessed and deliberately NOT restored, because the
-  simplest sufficient answer was cheaper than the retired mechanism:
-  - `provider_options` validation. The retired 239-line validator checked
-     reasoning-effort enums, thinking-budget ranges and output-versus-capacity —
-     it turns a confusing provider 400 into a clear one, and is not a security
-     boundary, since a token holder can already spend credits. Dropped; the
-     provider rejects what it will not accept.
-  - Endpoint liveness probing. The retired registry proved an advertised address
-     still belonged to MiMoCode by calling an identity route on it. Reaching a
-     stranger now needs a crash that skipped unpublication, the pid reused, and
-     the same port taken by that process — records are keyed on both. `issue`
-     prints a one-line caution instead of paying a network round trip per address.
-  A non-terminal finish reason keeps upstream's mapping to `stop`, which is the
-  API-conformant answer, and logs a warning so the operator can see a truncated
-  upstream that the caller cannot.
-  The non-loopback bind guard still reads `MIMOCODE_SERVER_OPERATOR_PASSWORD`,
-  so a worker-generated credential cannot satisfy it. An IPv6 literal is
-  bracketed before it is advertised, which upstream omits and `URL.hostname`
-  silently ignores, leaving a base_url that resolves to IPv4.
-- Adopted from upstream, including where it relaxes the fork:
-  - An empty `models` array now means "all configured models". Upstream maps it
-    to `undefined` and documents the intent; the fork had required an explicit
-    `all` and treated empty as invalid. This is a relaxation, taken because it
-    is upstream's product decision rather than a defect.
-  - `function.strict` passthrough is dropped; upstream's protocol schema has no
-    such field and strips it.
-  - `inInstance` is dropped; the route now sits behind `InstanceMiddleware`.
-  - The `--directory`, `--all-models`, `--capability` and `--audio-api` CLI
-    flags go with upstream's CLI, and `test/cli/llm-server.test.ts` — which
-    exercised them and has no upstream counterpart — is retired with them.
-    Losing `--directory` is a real reduction: a token is now issued for the
-    process's cwd, so callers `cd` into the project first. That is upstream's
-    cwd-keyed model and matches how `LLMServerTokens.verify` binds a token to
-    the request-resolved directory.
+- 2026-09-14 structural retirement: the fork's parallel model API is gone.
+  `server/model-api.ts`, `server/api-request.ts` and
+  `src/llm-server/{images,input-audio,provider-options,sdk,scope,models,error}.ts`
+  are removed. Upstream mounts `CapabilityRoutes` inside `InstanceRoutes` at
+  `/v1` with the same two routes, the same mandatory scoped bearer token, and a
+  `protocol.ts` that already accepts `image_url` and `input_audio`. Checked
+  rather than assumed: those modules were a second implementation of what
+  upstream ships.
+- Observable contract: identical to upstream. `src/llm-server/`,
+  `routes/instance/capability.ts`, `cli/cmd/llm-server.ts`, `config/llm-server.ts`
+  and `util/self.ts` are byte-for-byte upstream. Three deltas remain on this
+  surface and **all three predate this change**:
+  - `MIMOCODE_SERVER_OPERATOR_PASSWORD` rather than upstream's
+    `MIMOCODE_SERVER_PASSWORD_SUPPLIED` in the containment and non-loopback
+    guards, so a worker-generated credential cannot satisfy either.
+  - `Server.listen` takes `advertiseDirectory`. Upstream keys the advertisement
+    on `process.cwd()`, which holds when the process chdir'd into the project;
+    this fork's TUI worker serves a directory chosen at startup that need not
+    equal cwd, and an advertisement in the wrong bucket is invisible to
+    `mimo llm-server issue` in the project it actually serves.
+  - `util/ssrf.ts` blocks the complete `fe80::/10` range (FC-010).
+- Adopted from upstream, including where it relaxes the fork: an empty `models`
+  array now means "all configured models"; `function.strict` passthrough is
+  dropped; the `--directory`, `--all-models`, `--capability` and `--audio-api`
+  CLI flags go with upstream's CLI, so a token is issued for the process's cwd
+  and callers `cd` into the project first.
 - Breaking change for existing fork users: tokens already issued stop working.
   The fork wrote `version: 2` records at the same path upstream reads as
   `version: 1`, and upstream's reader treats an unknown version as an empty
-  store. Tokens are short-lived by design (default 1d sliding lifetime) and
-  re-issuing with `mimo llm-server issue` is the remedy.
+  store. Tokens are short-lived by design (default 1d sliding lifetime);
+  `mimo llm-server issue` is the remedy.
+- Known upstream behaviours, recorded rather than corrected. Each was measured
+  during the 2026-09-14 review and left alone: upstream ships it this way, and
+  the trigger is uncommon or the impact small. Revisit only with evidence that
+  one of them actually fired.
+  - An unbounded `c.req.json()` body read, and no server-owned concurrency cap
+    or request deadline on the route.
+  - Provider and plugin exception text reaches the caller verbatim.
+  - A remote `image_url` is handed to the SDK unvalidated, so the process can be
+    made to fetch loopback, RFC1918 or metadata addresses. Preflight validation
+    does not close this — the SDK fetches again later — and closing it properly
+    needs a proxy download with per-hop checks.
+  - Media sent to a model that cannot accept it is ignored rather than refused;
+    `tool_choice: "required"` with no tools, and `image_url.detail`, are accepted
+    and discarded; bare `input_audio` without `format` surfaces as a 502.
+  - `model.options` from `mimocode.json` is not merged into a capability request,
+    so a model configured there behaves differently over `/v1` than in a session.
+  - The plugin hooks receive `message: undefined` where the contract declares it
+    required; a non-finite `--ttl` becomes `null` and expires the token at once;
+    non-expiring tokens accumulate without a ceiling; the address registry trusts
+    pid liveness rather than probing the endpoint; a non-terminal finish reason
+    is reported as `stop`.
+  A follow-up PR may take the cheap and frequently-reachable ones — the
+  exception redaction and the `model.options` merge are each one line. The rest
+  stay as recorded.
 - Watch surfaces: `packages/opencode/src/server/routes/instance/capability.ts`,
   `packages/opencode/src/server/middleware.ts`,
-  `packages/opencode/src/server/api-request.ts`,
+  `packages/opencode/src/server/routes/instance/middleware.ts`,
   `packages/opencode/src/server/server.ts`,
-  `packages/opencode/src/cli/cmd/serve.ts`,
   `packages/opencode/src/cli/cmd/llm-server.ts`,
   `packages/opencode/src/cli/cmd/tui/worker-listener.ts`,
   `packages/opencode/src/flag/flag.ts`, `packages/opencode/src/llm-server/`,
   `packages/opencode/src/config/llm-server.ts`, `packages/opencode/src/util/self.ts`.
-- Fixture convention: this fork roots test fixtures outside `process.cwd()`
-  and asks cases that depend on the InstanceMiddleware containment check to opt
-  in with `root: "cwd"`, where upstream's preload roots every fixture under cwd.
-  Inherited upstream cases that address a fixture directory need that opt-in;
-  `implicit-listener.test.ts` carries it with a comment saying why.
-- Tests/evidence: upstream's `test/llm-server/{harness,implicit-listener,
-  protocol,streaming,tokens}.test.ts`, `test/cli/cmd/serve-advertise.test.ts`
-  and `test/util/self.test.ts` are inherited verbatim. The fork keeps
-  `test/cli/tui/worker-listener.test.ts` and `test/fixture/
-  tui-worker-default-child.ts` for the two boundaries above. Retired with their
-  subject: the v2 store, strict-scope and v1-migration token cases, the fork's
-  chat-completions/chat-protocol/images/models cases, `model-api.test.ts` and
-  `model-bootstrap-cancel.test.ts`.
-- Upstream relationship: the fork now tracks upstream on this surface and adds
-  only the advertisement gate and the bounded body read.
+- Fixture convention: this fork roots test fixtures outside `process.cwd()` and
+  asks cases that depend on the InstanceMiddleware containment check to opt in
+  with `root: "cwd"`, where upstream's preload roots every fixture under cwd.
+  `implicit-listener.test.ts` carries that opt-in with a comment saying why.
+- Tests/evidence: upstream's `test/llm-server/`, `test/cli/cmd/serve-advertise.test.ts`,
+  `test/util/self.test.ts` and `test/flag/dynamic-system-prompt-flag.test.ts` are
+  inherited verbatim. The fork keeps `test/cli/tui/worker-listener.test.ts` and
+  `test/fixture/tui-worker-default-child.ts` for the advertise-directory delta.
+- Upstream relationship: the fork tracks upstream on this surface.
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
 

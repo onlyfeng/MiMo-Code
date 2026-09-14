@@ -8,25 +8,22 @@
 完整的接口说明、请求形态与客户端示例见随内置技能分发的
 `mimocode-docs/reference/capability-api.md`。本文只记录 fork 与 upstream 的差别。
 
-## 与 upstream 的两处差别
+## 与 upstream 的差别
 
-**1. `--llm-server` 控制的是「是否对外通告」，不是「是否启用」**
+行为与 upstream 完全一致,仅保留两项本 PR 之前就存在的 fork 边界:
 
-```sh
-mimo serve --llm-server      # 把本监听器登记到地址簿，issue 才能解析出 base_url
-mimo serve                   # 路由同样挂载、同样要令牌，但不登记
-```
+- 非 loopback 绑定守卫读取 `MIMOCODE_SERVER_OPERATOR_PASSWORD`,因此 worker
+  自生成的凭据无法满足它。
+- `Server.listen` 接受 `advertiseDirectory`。upstream 以 `process.cwd()` 作通告键
+  (它假设进程已 chdir 进项目);fork 的 TUI worker 服务的是启动时选定的目录,
+  未必等于 cwd,通告落错桶会让 `mimo llm-server issue` 找不到它。
 
-upstream 默认通告（`advertise` 缺省为 true）。fork 保留显式开关，使「仅持有凭据」
-不会产生一个**可被发现**的服务。
+`--llm-server` 仍然只控制是否通告,不控制路由是否存在——路由始终挂载,且始终要求
+已签发的令牌。
 
-**2. 请求体读取有界**
-
-capability 路由经 `ApiRequest.readBody` 读取请求体，上限 25 MiB 并遵守请求的取消
-信号；upstream 在这条任何持令牌者都能触达的路由上使用无界的 `c.req.json()`。
-
-非 loopback 绑定守卫读取的是 `MIMOCODE_SERVER_OPERATOR_PASSWORD`，因此 worker
-自生成的凭据无法满足该守卫。
+upstream 在这条路径上的若干已知行为(无界请求体、无并发上限与超时、provider 异常
+原文透出、远程图片 URL 未校验即交给 SDK 等)按上游原样保留,理由与取舍记录在
+[upstream-deviations.md](upstream-deviations.md) 的 FD-004。
 
 ## 令牌
 
