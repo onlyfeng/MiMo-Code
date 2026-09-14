@@ -3158,3 +3158,9 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - FC-003 retires with removal of its gate. FC-002 memory wording converges; FD-002 identity separation remains. Main removes model context and dependent persistent creation, while FD-009 still owns checkpoint, session-ask and runtime-created frozen-context recovery. Compat keeps its complete model extension under DC-ACTOR-001.
 - Six incoming capabilities are implemented and locally validated; the separately approved lifecycle contract is a subsequent PR. No additional skip was introduced.
 - Full capability decisions, history recovery boundary, commands, counts and publication status are recorded in [the synchronization report](upstream-sync-2026-09-15-5198ff54.md). This entry does not claim pending remote CI or compat publication.
+
+### PR 121 review correction
+
+- Current behavior reference: `ee03fe5e9c9c7abd8edb2e28dd6189d903b2ba62`.
+- Separate image attachment/recompression limits from audio/video encoded limits in model-facing Read guidance; replace operation-specific branches in the five incoming Compose specs with synthetic values.
+- Existing media-description matrix: 4 pass, 21 assertions. The prior eight successful CI checks belong to `2ef6ff4f`; the revised head requires new CI.
