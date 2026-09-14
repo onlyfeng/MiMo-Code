@@ -159,9 +159,9 @@ function toolSet(tools: NonNullable<ChatCompletionRequest["tools"]>): ToolSet {
  */
 const HOOK_AGENT = "llm-api"
 
-function hasAudio(req: ChatCompletionRequest) {
+function carries(req: ChatCompletionRequest, type: "input_audio" | "image_url") {
   return req.messages.some(
-    (message) => Array.isArray(message.content) && message.content.some((part) => part.type === "input_audio"),
+    (message) => Array.isArray(message.content) && message.content.some((part) => part.type === type),
   )
 }
 
@@ -173,16 +173,21 @@ export async function start(input: {
   const resolved = await resolveLanguageModel(input.req.model, input.allowlist, input.abort)
   const model = resolved.model
 
-  // A text-only model does not reject audio, it ignores it — and the caller gets a
-  // fluent answer produced without hearing the recording, which is the one failure
-  // they cannot detect. Refuse before generating. Format/transport compatibility is
-  // deliberately left to the provider: that failure is loud, this one is silent.
-  if (!model.capabilities.input.audio && hasAudio(input.req)) {
-    throw new RequestError(
-      400,
-      `Model \`${input.req.model}\` does not accept audio input`,
-      "invalid_request_error",
-    )
+  // A text-only model does not reject media, it ignores it — and the caller gets a
+  // fluent answer produced without hearing the recording or seeing the image, which
+  // is the one failure they cannot detect. Refuse before generating. Format and
+  // transport compatibility is deliberately left to the provider: that failure is
+  // loud, this one is silent.
+  for (const [type, supported, noun] of [
+    ["input_audio", model.capabilities.input.audio, "audio"],
+    ["image_url", model.capabilities.input.image, "image"],
+  ] as const) {
+    if (!supported && carries(input.req, type))
+      throw new RequestError(
+        400,
+        `Model \`${input.req.model}\` does not accept ${noun} input`,
+        "invalid_request_error",
+      )
   }
 
   // A synthetic per-request id stands in for a session. Providers that key a

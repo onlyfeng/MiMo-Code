@@ -184,7 +184,7 @@ where this delta does not change their implementation.
   exactly, and `config.llmServer`, `Util.Self`, upstream's `llm-server` CLI and
   upstream's `generateServerPassword`/`clearGeneratedServerPassword` come with
   it. Net −3548 lines.
-- Observable contract, what remains fork-owned: ten boundaries, all kept
+- Observable contract, what remains fork-owned: eleven boundaries, all kept
   because upstream does not have them, not because the fork prefers them.
   1. `serve --llm-server` gates only the address advertisement. The route is
      always mounted and always demands a minted token, so credentials alone
@@ -250,7 +250,18 @@ where this delta does not change their implementation.
      the one failure they cannot detect. Format and transport compatibility is
      deliberately left to the provider: that failure is loud, this one is silent,
      and the retired `audioRejection` matrix is not worth restoring for the loud
-     half.
+     half. The image half of the same check is there too: a text-only adapter
+     ignores an `image_url` just as quietly.
+  11. Three request shapes that upstream accepts and then discards are refused
+     instead, all for the reason `unsupported()` already gives for `verbosity`:
+     silently dropping something that changes the answer is the one outcome that
+     must not happen. `tool_choice: "required"` with no tools (the provider is
+     then free to answer in prose, and a client tool loop cannot see that its
+     requirement was dropped); `image_url.detail` other than `auto` (the
+     converter passes the URL alone, and detail moves resolution, cost and
+     accuracy); and `input_audio` with bare base64 and no `format` (which
+     `toModelMessages` throws on, reaching the route's generic handler as a
+     redacted 502 — an upstream outage, for input the caller can fix).
   Admission is taken in `InstanceMiddleware`, not inside the capability route,
   because the instance bootstrap sits between them: a gate downstream of it
   cannot bound requests stuck waiting *on* it, and the deadline would be
