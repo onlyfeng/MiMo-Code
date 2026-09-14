@@ -3778,3 +3778,25 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   review-record headers still named upstream `98702641` rather than `6fbb1732`.
   All seven active DC entries were re-reviewed; none depends on the corrected
   rows.
+
+## 2026-09-14 — TP-R14-12 unquarantine inheritance (PR #119)
+
+- Accepted main tip/shared audit: `a197d4a84939f36a813cb39750a5fb86cce6b37d`; inherited source/tests:
+  `f45cf4f69c3368fb83eb1efe4a989c8f4969c553`.
+- Compat source/test behavior and inheritance merge: `c797fa738d86d54eacf26d184d5cd78c4b4e9409`; prior tip:
+  `0c480aa95af2b2bb2dbe752242cfa5334ead5d56`.
+- **Direct inherit, no compat override, no owner added or retired.** #119 aligns
+  the fork's inbox-send log message in `spawn.ts` with upstream's
+  `actor terminal notification failed`, which is what `[TP-R14-12] undeliverable
+  terminal notification is logged` asserts, and unskips that case. The
+  quarantine rationale — a pipeline gap — was wrong.
+- Overlap from the shared merge-base `a2d8d886` is `src/actor/spawn.ts` and
+  `test/actor/cancel-notification.test.ts`, both DC-ACTOR-001 surfaces. Compat's
+  own hunks there add `turnContext` to `ForkContext` and to two fixtures; none
+  touches the log line or the case. The merge applied without conflicts and
+  DC-ACTOR-001 keeps its override unedited.
+- Verified on the merged tree: a known-good neighbour passes; TP-R14-12 passes
+  with no timeout; `cancel-notification.test.ts` 28 pass / 0 fail;
+  `test/actor` + `test/inbox` + `actor-hooks` + `actor-owned-lifecycle` 347 pass /
+  2 skip / 0 fail; `bun typecheck` 0 errors. The remaining skips are the two
+  cases still quarantined on the postStop publish-ordering decision.
