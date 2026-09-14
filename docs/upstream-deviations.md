@@ -261,6 +261,14 @@ where this delta does not change their implementation.
     avoid; a caller who needs certainty can read the response back.
   - `model.options` from `mimocode.json` is not merged into a capability request,
     so a model configured there behaves differently over `/v1` than in a session.
+  - A completed `tool-call` the SDK marked `invalid` (malformed JSON arguments
+    from the model) is appended like any other, so the response is a 200 with
+    `finish_reason: "tool_calls"` and arguments the caller cannot execute. The
+    caller's own `JSON.parse` is where this surfaces.
+  - `renew_argv`/`renew_command` serialize only what was passed on the command
+    line, so a lifetime that came from `mimocode.json` is not pinned; if the
+    config changes before expiry, the advertised renewal mints a token with
+    different expiry semantics than the one it replaces.
   - The plugin hooks receive `message: undefined` where the contract declares it
     required; a non-finite `--ttl` becomes `null` and expires the token at once;
     non-expiring tokens accumulate without a ceiling; the address registry trusts
