@@ -3172,6 +3172,15 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - Nine new real-data regressions were red on the prior source. Final history suite: 68 pass, 5 existing benchmark skips, 0 fail, 612 assertions. Package typecheck and focused lint pass.
 - [The synchronization report](upstream-sync-2026-09-15-5198ff54.md#shared-history-preview-correction-discovered-in-compat-review) records the exact budget semantics and remaining scope limits. The actor C07 follow-up remains separate.
 
+### PR 123 omission locator correction
+
+- Current main behavior: `ad411e322c54f2fd0c29a57e4f7ddb29002ee4df`; upstream remains `5198ff54`.
+- Preview formatting distinguishes the array-shaped omission notice from an actual attachment. It directs callers to `history get part_id` without fabricating `tool:0`; small previews and complete get keep original locators.
+- Five real around-path assertions reproduced the bug before the fix. Final history suite: 68 pass, five benchmark skips, 0 fail, 624 assertions. Package typecheck and focused lint pass.
+- The prior preview-budget candidate passed CI at `4544294d`; this corrected source requires fresh PR-head CI before merge.
+
+- Independent marker-collision follow-up: `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d` distinguishes a missing URL key from a projected null URL. Genuine attachments whose stored MIME equals the notice retain their locator. The added real around-path assertion is red before the fix; final history is 68 pass, five benchmark skips, 0 fail, 625 assertions. Typecheck passes.
+
 ### 2026-09-15 C07 actor lifecycle alignment
 
 - Implementation: `30b9df3d51bc912e8f3efb3122f66cb81fa5daaf`; integrated source/test behavior: `577fc25060ed31e8ece68ee02ca5b1bced2cddcf`.

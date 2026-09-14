@@ -1,3 +1,4 @@
+import { ActorExecution } from "../../src/actor/execution"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, describe, expect } from "bun:test"
@@ -423,7 +424,7 @@ function makeLayer() {
   ).pipe(Layer.provide(summary))
 }
 
-const it = testEffect(makeLayer())
+const it = testEffect(makeLayer().pipe(Layer.provideMerge(ActorExecution.layer)))
 
 const ref = {
   providerID: ProviderID.make("test"),
@@ -2153,3 +2154,300 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
     ),
   )
 })
+
+for (const mode of ["graceful", "forced"] as const) {
+  it.live(
+    `cancel closes blocked inbox admission until retirement (${mode})`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const actor = yield* Actor.Service
+          const sessions = yield* Session.Service
+          const registry = yield* ActorRegistry.Service
+          const prompt = yield* SessionPrompt.Service
+          const inbox = yield* Inbox.Service
+          const bus = yield* Bus.Service
+          const executions = yield* ActorExecution.Service
+          const parent = yield* sessions.create({ title: "blocked inbox admission" })
+          yield* llm.text("first result")
+          const child = yield* actor.spawn({
+            mode: "peer",
+            sessionID: parent.id,
+            agentType: "build",
+            task: "first",
+            context: "none",
+            tools: [],
+            background: true,
+            model: ref,
+          })
+          yield* Deferred.await(child.outcome)
+          const published = yield* Deferred.make<void>()
+          const releaseReceipt = yield* Deferred.make<void>()
+          const waiterEntered = yield* Deferred.make<void>()
+          const oldJoined = yield* Deferred.make<void>()
+          const releaseCancel = yield* Deferred.make<void>()
+          const interruptEntered = yield* Deferred.make<void>()
+          const wakeDecision = yield* Deferred.make<"blocked" | "model">()
+          const escapedPublished = yield* Deferred.make<void>()
+          const response = Promise.withResolvers<void>()
+          const notices: string[] = []
+          let receiptPaused = false
+          const restoreActor = prompt.bindActor?.({
+            ...actor,
+            markTerminalNotified: (sessionID, actorID, notified) =>
+              Effect.gen(function* () {
+                if (sessionID === child.sessionID && actorID === child.actorID && notified && !receiptPaused) {
+                  receiptPaused = true
+                  yield* Deferred.succeed(published, undefined)
+                  yield* Deferred.await(releaseReceipt)
+                }
+                yield* actor.markTerminalNotified!(sessionID, actorID, notified)
+              }),
+          })
+          const unsubscribe = yield* bus.subscribeCallback(InboxArrived, (event) => {
+            if (
+              event.properties.senderSessionID !== child.sessionID ||
+              event.properties.senderActorID !== child.actorID
+            )
+              return
+            const row = Database.use((db) =>
+              db.select().from(InboxTable).where(eq(InboxTable.id, event.properties.inboxID)).get(),
+            )
+            const text = (row?.content as { text?: string } | undefined)?.text ?? ""
+            notices.push(text)
+            if (text.includes("escaped queued result")) Deferred.doneUnsafe(escapedPublished, Effect.void)
+          })
+          // Bind the actual wake path to this fixture's prompt; parent notification
+          // delivery stays observable without starting an unrelated parent model.
+          const restoreInbox = inbox.bindPrompt?.({
+            loop: (input) => (input.agentID === child.actorID ? prompt.loop(input) : Effect.interrupt),
+          })
+          const originalAcquire = executions.acquire
+          const originalInterrupt = executions.interrupt
+          yield* Effect.addFinalizer(() =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(releaseReceipt, undefined)
+              yield* Deferred.succeed(releaseCancel, undefined)
+              response.resolve()
+              Object.assign(executions, { acquire: originalAcquire, interrupt: originalInterrupt })
+              restoreActor?.()
+              restoreInbox?.()
+              unsubscribe()
+            }),
+          )
+          yield* llm.text("old continuation result")
+          yield* prompt.prompt({
+            sessionID: child.sessionID,
+            agentID: child.actorID,
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [{ type: "text", text: "old continuation" }],
+          })
+          const running = yield* prompt
+            .loop({ sessionID: child.sessionID, agentID: child.actorID, notifyParentOnComplete: true })
+            .pipe(Effect.forkChild)
+          yield* Deferred.await(published).pipe(Effect.timeout("5 seconds"))
+          const old = yield* executions.current(child.sessionID, child.actorID)
+          expect(old).toBeDefined()
+          Object.assign(executions, {
+            acquire: (sessionID: SessionID, actorID: string) =>
+              Effect.gen(function* () {
+                if (sessionID === child.sessionID && actorID === child.actorID) {
+                  expect(yield* executions.current(sessionID, actorID)).toBe(old)
+                  yield* Deferred.succeed(waiterEntered, undefined)
+                }
+                return yield* originalAcquire(sessionID, actorID).pipe(
+                  Effect.onExit((exit) =>
+                    Exit.isFailure(exit) ? Deferred.succeed(wakeDecision, "blocked").pipe(Effect.asVoid) : Effect.void,
+                  ),
+                )
+              }),
+            interrupt: (execution: NonNullable<typeof old>) =>
+              Effect.gen(function* () {
+                if (execution === old) yield* Deferred.succeed(interruptEntered, undefined)
+                yield* originalInterrupt(execution)
+                if (execution === old) {
+                  yield* Deferred.succeed(oldJoined, undefined)
+                  yield* Deferred.await(releaseCancel)
+                }
+              }),
+          })
+          yield* llm.pushMatch((hit) => {
+            if (!JSON.stringify(hit.body).includes("queued before cancellation")) return false
+            Deferred.doneUnsafe(wakeDecision, Effect.succeed("model"))
+            return true
+          }, reply().wait(response.promise).text("escaped queued result").stop())
+          const calls = yield* llm.calls
+          const pending = yield* inbox.send({
+            receiverSessionID: child.sessionID,
+            receiverActorID: child.actorID,
+            senderSessionID: parent.id,
+            senderActorID: "main",
+            content: "queued before cancellation",
+          })
+          yield* Deferred.await(waiterEntered).pipe(Effect.timeout("5 seconds"))
+          expect(yield* executions.current(child.sessionID, child.actorID)).toBe(old)
+          const cancelling = yield* actor.cancel(child.sessionID, child.actorID, mode).pipe(Effect.forkChild)
+          yield* Deferred.await(interruptEntered).pipe(Effect.timeout("5 seconds"))
+          yield* Deferred.succeed(releaseReceipt, undefined)
+          yield* Deferred.await(oldJoined).pipe(Effect.timeout("5 seconds"))
+          const decision = yield* Deferred.await(wakeDecision).pipe(Effect.timeout("5 seconds"))
+          yield* Deferred.succeed(releaseCancel, undefined)
+          yield* Fiber.join(cancelling).pipe(Effect.timeout("5 seconds"))
+          response.resolve()
+          if (decision === "model") yield* Deferred.await(escapedPublished).pipe(Effect.timeout("5 seconds"))
+          yield* Fiber.await(running)
+          expect(decision).toBe("blocked")
+          expect(yield* llm.calls).toBe(calls)
+          expect(yield* inbox.has(pending.inboxID)).toBe(false)
+          expect(yield* executions.current(child.sessionID, child.actorID)).toBeUndefined()
+          expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
+          expect(notices.some((text) => text.includes("escaped queued result"))).toBe(false)
+          Object.assign(executions, { acquire: originalAcquire, interrupt: originalInterrupt })
+          // An explicit later generation can still run; cancellation is not a
+          // permanent execution tombstone (including for main-session callers).
+          yield* llm.text("new valid generation")
+          yield* prompt.prompt({
+            sessionID: child.sessionID,
+            agentID: child.actorID,
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [{ type: "text", text: "explicit new generation" }],
+          })
+          yield* prompt.loop({ sessionID: child.sessionID, agentID: child.actorID, notifyParentOnComplete: true })
+          expect(yield* llm.calls).toBe(calls + 1)
+          expect(notices.some((text) => text.includes("new valid generation"))).toBe(true)
+        }),
+        { git: true, config: providerCfg },
+      ),
+    30000,
+  )
+}
+
+it.live(
+  "rejected execution reservation leaves no lifecycle generation for later cancellation",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const sessions = yield* Session.Service
+        const executions = yield* ActorExecution.Service
+        const parent = yield* sessions.create({ title: "rejected execution admission" })
+        const reserve = executions.reserve
+        Object.assign(executions, {
+          reserve: (sessionID: SessionID, actorID: string) =>
+            executions.withCancellation(sessionID, actorID, reserve(sessionID, actorID)),
+        })
+        yield* Effect.addFinalizer(() => Effect.sync(() => Object.assign(executions, { reserve })))
+        const result = yield* actor
+          .spawn({
+            mode: "peer",
+            sessionID: parent.id,
+            agentType: "build",
+            task: "blocked reservation",
+            context: "none",
+            tools: [],
+            background: true,
+            model: ref,
+          })
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(result)).toBe(true)
+        const children = yield* sessions.children(parent.id)
+        expect(children).toHaveLength(1)
+        expect(yield* executions.current(children[0].id, children[0].id)).toBeUndefined()
+        expect(yield* llm.calls).toBe(0)
+        Object.assign(executions, { reserve })
+        // A leaked generation would leave the second cancel waiting forever on
+        // generation.done, even though reservation never admitted an execution.
+        yield* actor.cancel(children[0].id, children[0].id, "forced").pipe(Effect.timeout("2 seconds"))
+        yield* actor.cancel(children[0].id, children[0].id, "forced").pipe(Effect.timeout("2 seconds"))
+        yield* llm.text("later admission succeeds")
+        const next = yield* actor.spawn({
+          mode: "peer",
+          sessionID: parent.id,
+          agentType: "build",
+          task: "later admission",
+          context: "none",
+          tools: [],
+          background: true,
+          model: ref,
+        })
+        expect((yield* Deferred.await(next.outcome)).status).toBe("success")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  10000,
+)
+
+for (const mode of ["graceful", "forced"] as const) {
+  it.live(
+    `cancelled reservation cannot start a later worker (${mode})`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const actor = yield* Actor.Service
+          const sessions = yield* Session.Service
+          const executions = yield* ActorExecution.Service
+          const registry = yield* ActorRegistry.Service
+          const parent = yield* sessions.create({ title: "cancel before worker attachment" })
+          const reserved = yield* Deferred.make<{ sessionID: SessionID; actorID: string }>()
+          const releaseAdmission = yield* Deferred.make<void>()
+          const joinEntered = yield* Deferred.make<void>()
+          const reserve = executions.reserve
+          const interrupt = executions.interrupt
+          Object.assign(executions, {
+            reserve: (sessionID: SessionID, actorID: string) =>
+              reserve(sessionID, actorID).pipe(
+                Effect.tap(() =>
+                  Deferred.succeed(reserved, { sessionID, actorID }).pipe(
+                    Effect.andThen(Deferred.await(releaseAdmission)),
+                  ),
+                ),
+              ),
+            interrupt: (execution: Parameters<typeof interrupt>[0]) =>
+              Deferred.succeed(joinEntered, undefined).pipe(Effect.andThen(interrupt(execution))),
+          })
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              Object.assign(executions, { reserve, interrupt })
+              Deferred.doneUnsafe(releaseAdmission, Effect.void)
+            }),
+          )
+          yield* llm.text("worker must not run")
+          const calls = yield* llm.calls
+          const spawning = yield* actor
+            .spawn({
+              mode: "peer",
+              sessionID: parent.id,
+              agentType: "build",
+              task: "cancel before attachment",
+              context: "none",
+              tools: [],
+              background: true,
+              model: ref,
+            })
+            .pipe(Effect.forkChild)
+          const admitted = yield* Deferred.await(reserved).pipe(Effect.timeout("5 seconds"))
+          const cancelling = yield* actor.cancel(admitted.sessionID, admitted.actorID, mode).pipe(Effect.forkChild)
+          yield* Deferred.await(joinEntered).pipe(Effect.timeout("5 seconds"))
+          yield* Deferred.succeed(releaseAdmission, undefined)
+          const child = yield* Fiber.join(spawning).pipe(Effect.timeout("5 seconds"))
+          const outcome = yield* Deferred.await(child.outcome).pipe(Effect.timeout("5 seconds"))
+          yield* Fiber.join(cancelling).pipe(Effect.timeout("5 seconds"))
+          expect(outcome.status).toBe("cancelled")
+          expect(yield* llm.calls).toBe(calls)
+          expect(yield* executions.current(child.sessionID, child.actorID)).toBeUndefined()
+          expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
+          yield* actor.cancel(child.sessionID, child.actorID, mode).pipe(Effect.timeout("2 seconds"))
+          Object.assign(executions, { reserve, interrupt })
+          const next = yield* executions.reserve(child.sessionID, child.actorID)
+          expect(next.cancelled).toBe(false)
+          yield* executions.release(next)
+        }),
+        { git: true, config: providerCfg },
+      ),
+    20000,
+  )
+}

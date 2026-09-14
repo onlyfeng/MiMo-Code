@@ -106,7 +106,7 @@ const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
 const run = SessionRunState.layer.pipe(Layer.provide(status))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 
-export function makeLayer() {
+export function makeLayer(plugin = Plugin.defaultLayer) {
   const deps = Layer.mergeAll(
     Session.defaultLayer,
     Snapshot.defaultLayer,
@@ -115,7 +115,7 @@ export function makeLayer() {
     AgentSvc.defaultLayer,
     Command.defaultLayer,
     Permission.defaultLayer,
-    Plugin.defaultLayer,
+    plugin,
     Config.defaultLayer,
     ProviderSvc.defaultLayer,
     lsp,

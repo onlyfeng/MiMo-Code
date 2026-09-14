@@ -716,6 +716,9 @@ export const layer = Layer.effect(
           })
 
         const work = Effect.gen(function* () {
+          // Cancellation can arrive after reservation but before this worker attaches.
+          // Enter through the protected work so its terminal and release finalizers run.
+          if (input.execution.cancelled) return yield* Effect.interrupt
           let finalText: string | undefined
           let structured: unknown | undefined
           let iteration = 0
@@ -1097,9 +1100,11 @@ export const layer = Layer.effect(
         const key = actorKey(sessionID, actorID)
         // Create lifecycle ownership inside the same masked admission that
         // registers the actor; interruption cannot strand a pre-acquire token.
+        // A cancellation barrier can reject reservation; do not create a
+        // lifecycle generation until execution admission succeeds.
+        const execution = yield* executions.reserve(sessionID, actorID)
         if (lifecycle === "persistent") yield* lifecycleState.retainPersistent(key)
         const generation = yield* lifecycleState.startFork(key)
-        const execution = yield* executions.reserve(sessionID, actorID)
         const work = yield* setup(generation, execution).pipe(
           Effect.catchCause((cause) =>
             abortSetup(key, generation, sessionID, actorID, cause).pipe(
@@ -1823,210 +1828,231 @@ export const layer = Layer.effect(
       actorID: string,
       mode: "graceful" | "forced",
       expected?: ForkGenerationOwner,
-    ) => Effect.Effect<void> = Effect.fn("Actor.cancel")((
-      sessionID: SessionID,
-      actorID: string,
-      mode: "graceful" | "forced",
-      expected?: ForkGenerationOwner,
-    ) => Effect.uninterruptibleMask((restore) => Effect.gen(function* () {
-      const key = actorKey(sessionID, actorID)
-      const receiver = yield* lifecycleState.getForkContext(key)
-      const inReceiver = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-        receiver ? withNotificationTarget(receiver, effect) : effect
-      const ownership = yield* lifecycleState.acquireCancel(key, expected)
-      if (ownership._tag === "noop") return
-      if (ownership._tag === "follower") {
-        yield* restore(Deferred.await(ownership.episode.done))
-        return
-      }
-
-      // Capture this execution before any child cancellation can yield. Neither
-      // an old generation's cleanup nor a follower may interrupt its successor.
-      const execution = ownership.generation && !ownership.claimed
-        ? undefined
-        : yield* executions.current(sessionID, actorID)
-      const releaseEpisode = lifecycleState.releaseCancel(key, ownership.episode)
-      const settleClaim =
-        ownership.claimed && ownership.generation ? lifecycleState.settleTerminal(ownership.generation) : Effect.void
-      const join = execution ? executions.interrupt(execution) : Effect.void
-      const retire = lifecycleState.retire(key)
-
-      yield* Effect.uninterruptible(
-        Effect.gen(function* () {
-          const children = yield* actorReg.listByParent(sessionID, actorID).pipe(
-            Effect.catchCause((cause) =>
-              Effect.sync(() =>
-                log.warn("actor child lookup failed during cancel; continuing parent cleanup", {
-                  sessionID,
-                  actorID,
-                  cause: Cause.pretty(cause),
-                }),
-              ).pipe(Effect.as([] as Actor[])),
-            ),
-          )
-          yield* Effect.forEach(
-            children,
-            (child) =>
-              cancel(sessionID, child.actorID, mode).pipe(
-                Effect.catchCause((cause) =>
-                  Effect.sync(() =>
-                    log.warn("actor child cancellation failed; continuing parent cleanup", {
-                      sessionID,
-                      actorID,
-                      childActorID: child.actorID,
-                      cause: Cause.pretty(cause),
-                    }),
-                  ),
-                ),
-              ),
-            {
-              concurrency: "unbounded",
-              discard: true,
-            },
-          )
-          if (ownership.generation?.terminal && !ownership.claimed) {
-            yield* Deferred.await(ownership.generation.done)
-            return
-          }
-          if (execution) yield* executions.requestCancel(execution)
-          const stop =
-            mode === "graceful" && !execution
-              ? state.cancelActorDetached(sessionID, actorID)
-              : state.cancelActor(sessionID, actorID)
-          yield* (
-            receiver
-              ? stop.pipe(
-                  Effect.provideService(InstanceRef, receiver.instance),
-                  Effect.provideService(RunDisposal, receiver.disposal),
-                )
-              : stop
-          ).pipe(Effect.ignoreCause({ log: "Warn", message: "actor runner interrupt failed during cancel" }))
-          // Both spawn and continuation executions publish after their work and
-          // hook finalizers finish. Joining also closes the continuation's
-          // publish-to-receipt window before retirement reads that receipt.
-          if (execution) yield* join
-          if (receiver && isRunDisposing(receiver.disposal)) {
-            yield* retire
-            return
-          }
-          const actor = yield* actorReg.get(sessionID, actorID).pipe(
-            Effect.catchCause((cause) => {
-              log.warn("actor lookup failed during cancel; retrying before cleanup", {
-                sessionID,
-                actorID,
-                cause: Cause.pretty(cause),
-              })
-              return actorReg.get(sessionID, actorID).pipe(
-                Effect.catchCause((retryCause) =>
-                  Effect.sync(() =>
-                    log.error("actor lookup retry failed during cancel; continuing without notification", {
-                      sessionID,
-                      actorID,
-                      cause: Cause.pretty(retryCause),
-                    }),
-                  ).pipe(Effect.as(undefined)),
-                ),
-              )
-            }),
-          )
-          if (receiver && isRunDisposing(receiver.disposal)) {
-            yield* retire
-            return
-          }
-          if (!actor) {
-            if (actorID === "main") return
-            yield* actorReg
-              .updateStatus(sessionID, actorID, {
-                status: "idle",
-                lastOutcome: "cancelled",
-                lastError: undefined,
-              })
-              .pipe(inReceiver, Effect.ignoreCause)
-            yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-            yield* retire
-            return
-          }
-
-          // Main-session cancellation is an execution concern, never a
-          // persistent-actor retirement. It must not leave a durable tombstone.
-          if (actor.mode === "main") return
-
-          if (ownership.claimed && ownership.generation) {
-            if (execution && (yield* Deferred.isDone(ownership.generation.terminalDone))) {
-              yield* retire
+    ) => Effect.Effect<void> = Effect.fn("Actor.cancel")(
+      (sessionID: SessionID, actorID: string, mode: "graceful" | "forced", expected?: ForkGenerationOwner) =>
+        Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const key = actorKey(sessionID, actorID)
+            const receiver = yield* lifecycleState.getForkContext(key)
+            const inReceiver = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+              receiver ? withNotificationTarget(receiver, effect) : effect
+            const ownership = yield* lifecycleState.acquireCancel(key, expected)
+            if (ownership._tag === "noop") return
+            if (ownership._tag === "follower") {
+              yield* restore(Deferred.await(ownership.episode.done))
               return
             }
-            // A setup failure or never-started fiber has no terminal publisher.
-            yield* Effect.gen(function* () {
-              yield* actorReg
-                .updateStatus(sessionID, actorID, {
-                  status: "idle",
-                  lastOutcome: "cancelled",
-                  lastError: undefined,
-                })
-                .pipe(inReceiver, Effect.ignoreCause)
-              yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-              yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
-              yield* retire
-            })
-            return
-          }
 
-          const live = yield* lifecycleState.hasGeneration(key)
-          if (actor.lifecycle !== "persistent" && actor.status === "idle" && actor.lastOutcome != null && !live) return
-          if (actor.lifecycle === "persistent" && actor.status === "idle" && actor.lastOutcome === "cancelled") {
-            yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-            yield* retire
-            return
-          }
-          yield* actorReg
-            .updateStatus(sessionID, actorID, {
-              status: "idle",
-              lastOutcome: "cancelled",
-              lastError: undefined,
-            })
-            .pipe(inReceiver, Effect.ignoreCause)
-          // Asked before the drain, not counted after it: this cancel has
-          // already written the cancelled tombstone above, so `Inbox.drain`
-          // takes its retired-persistent branch, deletes every queued row and
-          // still returns 0. A count cannot see the rows it was meant to
-          // notice. The head can, and it covers both ways work is consumed —
-          // rendered into a turn for an ephemeral actor, dropped for a retired
-          // persistent one.
-          //
-          // Work this cancel consumes can no longer be settled by the turn that
-          // would have run it: that wake finds nothing and returns without
-          // publishing. The mark records that the *previous* settlement reached
-          // the parent, which says nothing about the one just discarded, so it
-          // stops covering this publish.
-          const pending = yield* inbox
-            .head(sessionID, actorID)
-            .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-          yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-          if (pending && !execution) yield* Effect.sync(() => notifiedSettlements.delete(key))
-          // Report only what the parent has not already been told. The fork
-          // publishes an actor's terminal envelope from whichever turn settles
-          // it, and `SessionPrompt`'s continuation is the one path that settles
-          // without a lifecycle generation for this cancel to contend with — so
-          // it leaves this mark instead, and this is the single place that
-          // consumes it. Retiring a peer whose settlement was never announced
-          // still announces it, which the durable idle-peer case asserts.
-          //
-          // The execution has now finished publishing, so the receipt cannot
-          // race this decision. A failed send still leaves retirement able to
-          // notify, while cancelling queued rows with no execution supersedes
-          // the preceding settlement's receipt.
-          if (!notifiedSettlements.has(key))
-            yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
-          yield* retire
-        }).pipe(
-          Effect.ensuring(settleClaim),
-          Effect.ensuring(join),
-          Effect.ensuring(Effect.sync(() => notifiedSettlements.delete(key))),
-          Effect.ensuring(releaseEpisode),
+            return yield* executions
+              .withCancellation(
+                sessionID,
+                actorID,
+                Effect.gen(function* () {
+                  // Capture this execution before any child cancellation can yield. Neither
+                  // an old generation's cleanup nor a follower may interrupt its successor.
+                  const execution =
+                    ownership.generation && !ownership.claimed
+                      ? undefined
+                      : yield* executions.current(sessionID, actorID)
+                  const settleClaim =
+                    ownership.claimed && ownership.generation
+                      ? lifecycleState.settleTerminal(ownership.generation)
+                      : Effect.void
+                  const join = execution ? executions.interrupt(execution) : Effect.void
+                  const retire = lifecycleState.retire(key)
+
+                  yield* Effect.uninterruptible(
+                    Effect.gen(function* () {
+                      const children = yield* actorReg.listByParent(sessionID, actorID).pipe(
+                        Effect.catchCause((cause) =>
+                          Effect.sync(() =>
+                            log.warn("actor child lookup failed during cancel; continuing parent cleanup", {
+                              sessionID,
+                              actorID,
+                              cause: Cause.pretty(cause),
+                            }),
+                          ).pipe(Effect.as([] as Actor[])),
+                        ),
+                      )
+                      yield* Effect.forEach(
+                        children,
+                        (child) =>
+                          cancel(sessionID, child.actorID, mode).pipe(
+                            Effect.catchCause((cause) =>
+                              Effect.sync(() =>
+                                log.warn("actor child cancellation failed; continuing parent cleanup", {
+                                  sessionID,
+                                  actorID,
+                                  childActorID: child.actorID,
+                                  cause: Cause.pretty(cause),
+                                }),
+                              ),
+                            ),
+                          ),
+                        {
+                          concurrency: "unbounded",
+                          discard: true,
+                        },
+                      )
+                      if (ownership.generation?.terminal && !ownership.claimed) {
+                        yield* Deferred.await(ownership.generation.done)
+                        return
+                      }
+                      if (execution) yield* executions.requestCancel(execution)
+                      const stop =
+                        mode === "graceful" && !execution
+                          ? state.cancelActorDetached(sessionID, actorID)
+                          : state.cancelActor(sessionID, actorID)
+                      yield* (
+                        receiver
+                          ? stop.pipe(
+                              Effect.provideService(InstanceRef, receiver.instance),
+                              Effect.provideService(RunDisposal, receiver.disposal),
+                            )
+                          : stop
+                      ).pipe(
+                        Effect.ignoreCause({ log: "Warn", message: "actor runner interrupt failed during cancel" }),
+                      )
+                      // Both spawn and continuation executions publish after their work and
+                      // hook finalizers finish. Joining also closes the continuation's
+                      // publish-to-receipt window before retirement reads that receipt.
+                      if (execution) yield* join
+                      if (receiver && isRunDisposing(receiver.disposal)) {
+                        yield* retire
+                        return
+                      }
+                      const actor = yield* actorReg.get(sessionID, actorID).pipe(
+                        Effect.catchCause((cause) => {
+                          log.warn("actor lookup failed during cancel; retrying before cleanup", {
+                            sessionID,
+                            actorID,
+                            cause: Cause.pretty(cause),
+                          })
+                          return actorReg.get(sessionID, actorID).pipe(
+                            Effect.catchCause((retryCause) =>
+                              Effect.sync(() =>
+                                log.error("actor lookup retry failed during cancel; continuing without notification", {
+                                  sessionID,
+                                  actorID,
+                                  cause: Cause.pretty(retryCause),
+                                }),
+                              ).pipe(Effect.as(undefined)),
+                            ),
+                          )
+                        }),
+                      )
+                      if (receiver && isRunDisposing(receiver.disposal)) {
+                        yield* retire
+                        return
+                      }
+                      if (!actor) {
+                        if (actorID === "main") return
+                        yield* actorReg
+                          .updateStatus(sessionID, actorID, {
+                            status: "idle",
+                            lastOutcome: "cancelled",
+                            lastError: undefined,
+                          })
+                          .pipe(inReceiver, Effect.ignoreCause)
+                        yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+                        yield* retire
+                        return
+                      }
+
+                      // Main-session cancellation is an execution concern, never a
+                      // persistent-actor retirement. It must not leave a durable tombstone.
+                      if (actor.mode === "main") return
+
+                      if (ownership.claimed && ownership.generation) {
+                        if (execution && (yield* Deferred.isDone(ownership.generation.terminalDone))) {
+                          yield* retire
+                          return
+                        }
+                        // A setup failure or never-started fiber has no terminal publisher.
+                        yield* Effect.gen(function* () {
+                          yield* actorReg
+                            .updateStatus(sessionID, actorID, {
+                              status: "idle",
+                              lastOutcome: "cancelled",
+                              lastError: undefined,
+                            })
+                            .pipe(inReceiver, Effect.ignoreCause)
+                          yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+                          yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
+                          yield* retire
+                        })
+                        return
+                      }
+
+                      const live = yield* lifecycleState.hasGeneration(key)
+                      if (
+                        actor.lifecycle !== "persistent" &&
+                        actor.status === "idle" &&
+                        actor.lastOutcome != null &&
+                        !live
+                      )
+                        return
+                      if (
+                        actor.lifecycle === "persistent" &&
+                        actor.status === "idle" &&
+                        actor.lastOutcome === "cancelled"
+                      ) {
+                        yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+                        yield* retire
+                        return
+                      }
+                      yield* actorReg
+                        .updateStatus(sessionID, actorID, {
+                          status: "idle",
+                          lastOutcome: "cancelled",
+                          lastError: undefined,
+                        })
+                        .pipe(inReceiver, Effect.ignoreCause)
+                      // Asked before the drain, not counted after it: this cancel has
+                      // already written the cancelled tombstone above, so `Inbox.drain`
+                      // takes its retired-persistent branch, deletes every queued row and
+                      // still returns 0. A count cannot see the rows it was meant to
+                      // notice. The head can, and it covers both ways work is consumed —
+                      // rendered into a turn for an ephemeral actor, dropped for a retired
+                      // persistent one.
+                      //
+                      // Work this cancel consumes can no longer be settled by the turn that
+                      // would have run it: that wake finds nothing and returns without
+                      // publishing. The mark records that the *previous* settlement reached
+                      // the parent, which says nothing about the one just discarded, so it
+                      // stops covering this publish.
+                      const pending = yield* inbox
+                        .head(sessionID, actorID)
+                        .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+                      yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+                      if (pending) yield* Effect.sync(() => notifiedSettlements.delete(key))
+                      // Report only what the parent has not already been told. The fork
+                      // publishes an actor's terminal envelope from whichever turn settles
+                      // it, and `SessionPrompt`'s continuation is the one path that settles
+                      // without a lifecycle generation for this cancel to contend with — so
+                      // it leaves this mark instead, and this is the single place that
+                      // consumes it. Retiring a peer whose settlement was never announced
+                      // still announces it, which the durable idle-peer case asserts.
+                      //
+                      // The execution has now finished publishing, so the receipt cannot
+                      // race this decision. A failed send still leaves retirement able to
+                      // notify, while cancelling queued rows supersedes the receipt of the
+                      // preceding execution that has already been joined.
+                      if (!notifiedSettlements.has(key))
+                        yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
+                      yield* retire
+                    }).pipe(
+                      Effect.ensuring(settleClaim),
+                      Effect.ensuring(join),
+                      Effect.ensuring(Effect.sync(() => notifiedSettlements.delete(key))),
+                    ),
+                  )
+                }),
+              )
+              .pipe(Effect.ensuring(lifecycleState.releaseCancel(key, ownership.episode)))
+          }),
         ),
-      )
-    })))
+    )
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {
       return (yield* lifecycleState.getForkContext(actorKey(sessionID, actorID)))?.context

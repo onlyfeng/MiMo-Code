@@ -642,9 +642,10 @@ export const layer = Layer.effect(
       // opts.timeoutMs overrides it. Resolved per agent() call since opts is per-call.
       const runAgentTimeoutMs = input.agentTimeoutMs
       // Race a child's outcome-await against the effective per-agent timeout. On a
-      // TRUE timeout: gracefully cancel that one child (the lever reclaim uses) and
-      // yield null — the never-throw sentinel the guest already tolerates, so a hung
-      // agent can't stall a parallel/pipeline barrier. A genuine null deliverable
+      // TRUE timeout: gracefully cancel that one child (the lever reclaim uses),
+      // allowing at most the reclaim grace period for its cleanup before yielding
+      // null. Detached cancellation keeps cleaning up if that grace expires, so a
+      // hung finalizer cannot stall a parallel/pipeline barrier. A null deliverable
       // (agent failed fast) is NOT a timeout → no cancel. No timeout configured
       // (undefined / <=0) ⇒ await unbounded (current behavior, only scriptDeadline bounds).
       const awaitWithTimeout = <A>(
@@ -665,7 +666,15 @@ export const layer = Layer.effect(
           Effect.flatMap((r) =>
             r === (STRAGGLER_TIMEOUT as unknown)
               ? (spawnRef.current
-                  ? spawnRef.current.cancel(input.sessionID, actorID, "graceful").pipe(Effect.ignore)
+                  ? awaitWithHardTimeout(
+                      spawnRef.current.cancel(input.sessionID, actorID, "graceful"),
+                      RECLAIM_ACTOR_TIMEOUT_MS,
+                    ).pipe(
+                      Effect.catchTag("TimeoutError", () =>
+                        Effect.sync(() => log.warn("actor cancel timed out after workflow agent timeout", { runID, actorID })),
+                      ),
+                      Effect.ignoreCause({ log: "Warn", message: "actor cancel failed after workflow agent timeout" }),
+                    )
                   : Effect.void
                 ).pipe(
                   Effect.tap(() =>
