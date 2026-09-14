@@ -12,7 +12,7 @@
 - 子会话 peer：可从直接父会话寻址，也可使用 peer 自己的会话 ID 和注册 ID。请求的 `directory` 必须属于所寻址的会话；peer 继续在原接收实例、独立目录或工作树中执行。
 
 陌生会话不能借用其他 peer 的冻结上下文。服务沿用已有 HTTP 认证和目录访问规则；`agentID` 是目标选择参数。普通 subagent 工具调用者仍不能获得恢复操作权限。
-完整上下文的持久 actor 可通过 `actor spawn` 的显式 `--lifecycle persistent --context full` 创建。普通 spawn 的默认生命周期不变；API 不会将已有短生命周期或无完整上下文的 actor 自动升级。
+dev/compat 可通过 `actor spawn` 的显式 `--lifecycle persistent --context full` 创建完整上下文的持久 actor。main 的模型侧 spawn/run 不接受这两个参数；共享运行时的系统调用方仍可创建符合条件的 actor。普通 spawn 的默认生命周期不变；恢复 API 不会将已有短生命周期或无完整上下文的 actor 自动升级。
 
 ## 请求与结果
 

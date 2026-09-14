@@ -3148,3 +3148,35 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - #109 adopts both capabilities in range. MiMo model ids are pinned to `@ai-sdk/openai-compatible` through upstream's `isMimoOrSmartModel`/`resolveModelNpm`, retiring the fork's `usesMimoResponsesApi`, `isMimoModel` and `xiaomi` loader; port `0` binds an OS-ephemeral port instead of preferring 4096.
 - #110–#116 close a divergence older than the range: upstream has shipped its capability route since `b4bbe81c` (2026-08-18). The fork's parallel model API is retired in its favour; FD-004 is rewritten as that adoption, keeps two pre-existing boundaries and three corrections, and records each upstream behaviour left as shipped. No owner retires.
 - The registry headers were not advanced when the round merged; a later audit (#117) caught that, together with two lifecycle contracts — FD-004's sync index row and FC-008's 2026-09-07 model API review — that still required the retired behaviour. Pure registry commits do not advance the snapshot above; final branch-tip CI and remote ancestry are checked separately after publication.
+
+## 2026-09-15 selected upstream 5198ff54
+
+- Scope: specified execution of `6fbb1732232c9d0ecefee209798a8586d78cb70d` to `5198ff540efb5ca9fff2baa64555324d43a721b9`; newer upstream is excluded.
+- Prior fork main: `a197d4a84939f36a813cb39750a5fb86cce6b37d`.
+- Main runtime/test and generated API behavior: `271c5da8df61dff14adb743e85abbf1de09f48af`.
+- Bundled guidance content remains `118337857661a3fde59cd0406a598a4aa9d79688`; this round changes runtime-owned tool descriptions, not the bundled guidance snapshot.
+- FC-003 retires with removal of its gate. FC-002 memory wording converges; FD-002 identity separation remains. Main removes model context and dependent persistent creation, while FD-009 still owns checkpoint, session-ask and runtime-created frozen-context recovery. Compat keeps its complete model extension under DC-ACTOR-001.
+- Six incoming capabilities are implemented and locally validated; the separately approved lifecycle contract is a subsequent PR. No additional skip was introduced.
+- Full capability decisions, history recovery boundary, commands, counts and publication status are recorded in [the synchronization report](upstream-sync-2026-09-15-5198ff54.md). This entry does not claim pending remote CI or compat publication.
+
+### PR 121 review correction
+
+- Current behavior reference: `ee03fe5e9c9c7abd8edb2e28dd6189d903b2ba62`.
+- Separate image attachment/recompression limits from audio/video encoded limits in model-facing Read guidance; replace operation-specific branches in the five incoming Compose specs with synthetic values.
+- Existing media-description matrix: 4 pass, 21 assertions. The prior eight successful CI checks belong to `2ef6ff4f`; the revised head requires new CI.
+
+### 2026-09-15 shared C05 preview budget correction
+
+- Main behavior: `54deac139e638c4b72b6337cdaac0c27ad537749`; prior main: `321e70c9f491e2f9ff406bf56614c955fc5294de`. Upstream remains `5198ff54`.
+- The review finding on compat PR #122 also exists on main, so main owns the fix before propagation. Field and total attachment-metadata SQL preview bounds prevent large values crossing the driver boundary; complete get/locators and raw data remain unchanged.
+- Nine new real-data regressions were red on the prior source. Final history suite: 68 pass, 5 existing benchmark skips, 0 fail, 612 assertions. Package typecheck and focused lint pass.
+- [The synchronization report](upstream-sync-2026-09-15-5198ff54.md#shared-history-preview-correction-discovered-in-compat-review) records the exact budget semantics and remaining scope limits. The actor C07 follow-up remains separate.
+
+### PR 123 omission locator correction
+
+- Current main behavior: `ad411e322c54f2fd0c29a57e4f7ddb29002ee4df`; upstream remains `5198ff54`.
+- Preview formatting distinguishes the array-shaped omission notice from an actual attachment. It directs callers to `history get part_id` without fabricating `tool:0`; small previews and complete get keep original locators.
+- Five real around-path assertions reproduced the bug before the fix. Final history suite: 68 pass, five benchmark skips, 0 fail, 624 assertions. Package typecheck and focused lint pass.
+- The prior preview-budget candidate passed CI at `4544294d`; this corrected source requires fresh PR-head CI before merge.
+
+- Independent marker-collision follow-up: `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d` distinguishes a missing URL key from a projected null URL. Genuine attachments whose stored MIME equals the notice retain their locator. The added real around-path assertion is red before the fix; final history is 68 pass, five benchmark skips, 0 fail, 625 assertions. Typecheck passes.

@@ -15,6 +15,7 @@ import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { ActorTool, type ActorPromptOps } from "../../src/tool/actor"
+import { shellWrap } from "../../src/tool/shell-wrap"
 import { ActorRegistry } from "../../src/actor/registry"
 import { TaskRegistry } from "../../src/task/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
@@ -1183,6 +1184,141 @@ describe("Actor tool full context", () => {
       ),
     )
   }
+})
+
+describe("Actor tool default context", () => {
+  for (const action of ["run", "spawn"] as const) {
+    it.live(`${action} uses only the supplied prompt without prefix capture`, () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          prefixCaptureRef.current = () => Effect.die("Model-facing spawn must not capture parent context")
+          const { chat, assistant } = yield* seed()
+          const def = yield* (yield* ActorTool).init()
+          const ctx = {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: {},
+            messages: yield* (yield* Session.Service).messages({ sessionID: chat.id }),
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          }
+          yield* def.execute({ operation: { action, subagent_type: "general", description: "Brief task", prompt: "Only this briefing" } }, ctx)
+          yield* shellWrap({ ...def, id: "actor" }).execute({ script: `actor ${action} general "Brief task" "Only this briefing"` }, ctx)
+          expect(spawned).toHaveLength(2)
+          for (const input of spawned) {
+            expect(input.context).toBe("none")
+            expect(input.forkContext).toBeUndefined()
+            expect(input.lifecycle).toBeUndefined()
+            expect(input.task).toBe("Only this briefing")
+          }
+        }),
+      ),
+    )
+
+  }
+})
+
+describe("Actor tool recovered context", () => {
+  it.live("valid recovered modes and persistent full context reach the spawn implementation", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const spawned: SpawnInput[] = []
+        yield* installMockSpawn((input) => spawned.push(input))
+        const { chat, assistant } = yield* seed()
+        const messages = yield* (yield* Session.Service).messages({ sessionID: chat.id })
+        const inheritedMessages = [{ role: "user" as const, content: "frozen parent history" }]
+        prefixCaptureRef.current = () => Effect.succeed({
+          system: ["frozen system"], turnContext: "frozen turn context", tools: {},
+          activeTools: [], loadedMcpTools: [], inheritedMessages, parentPermission: [],
+        })
+        const def = yield* (yield* ActorTool).init()
+        const wrapped = shellWrap({ ...def, id: "actor" })
+        const ctx = {
+          sessionID: chat.id, messageID: assistant.id, agent: "build",
+          abort: new AbortController().signal, extra: {}, messages,
+          metadata: () => Effect.void, ask: () => Effect.void,
+        }
+        for (const mode of [
+          { context: "none" }, { context: "state" }, { context: "full" },
+          { context: "full", lifecycle: "persistent" },
+        ] as const) {
+          const base = { action: "spawn", subagent_type: "general", description: "Recovered briefing", prompt: "Brief task" }
+          const operation = { ...base, ...mode }
+          for (const raw of [
+            operation, { operation }, { operation: JSON.stringify(operation) },
+            { operation: base, ...mode }, { operation: JSON.stringify(base), ...mode },
+          ]) {
+            const result = yield* wrapped.execute(raw as never, ctx)
+            expect(result.metadata.success).toBe(1)
+            const input = spawned.at(-1)!
+            expect(input.context).toBe(mode.context)
+            expect(input.lifecycle).toBe("lifecycle" in mode ? mode.lifecycle : undefined)
+            if (mode.context === "full") {
+              expect(input.forkContext?.inheritedMessages).toEqual(inheritedMessages)
+              expect(input.forkContext?.system).toEqual(["frozen system"])
+              expect(input.forkContext?.turnContext).toBe("frozen turn context")
+              expect(input.forkContext?.watermarkMsgID).toBe(messages.at(-1)!.info.id)
+            } else expect(input.forkContext).toBeUndefined()
+          }
+        }
+        expect(spawned).toHaveLength(20)
+      }),
+    ),
+  )
+
+  it.live("malformed recovered context or lifecycle fails before capture or spawn", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        let spawnCount = 0
+        let captureCount = 0
+        yield* installMockSpawn(() => { spawnCount += 1 })
+        prefixCaptureRef.current = () => Effect.sync(() => {
+          captureCount += 1
+          return { system: ["frozen"], turnContext: undefined, tools: {}, inheritedMessages: [], parentPermission: [] }
+        })
+        const { chat, assistant } = yield* seed()
+        const def = yield* (yield* ActorTool).init()
+        const wrapped = shellWrap({ ...def, id: "actor" })
+        const ctx = {
+          sessionID: chat.id, messageID: assistant.id, agent: "build",
+          abort: new AbortController().signal, extra: {}, messages: [],
+          metadata: () => Effect.void, ask: () => Effect.void,
+        }
+        const base = { action: "spawn", subagent_type: "general", description: "Recovered briefing", prompt: "Brief task" }
+        for (const extra of [
+          { context: null }, { context: false }, { context: 1 }, { context: {} }, { context: "invalid" },
+          { lifecycle: null }, { lifecycle: false }, { lifecycle: "ephemeral" },
+          { lifecycle: "persistent" }, { context: "none", lifecycle: "persistent" },
+          { context: "state", lifecycle: "persistent" },
+        ]) {
+          const operation = { ...base, ...extra }
+          for (const raw of [
+            operation, { operation }, { operation: JSON.stringify(operation) },
+            { operation: base, ...extra }, { operation: JSON.stringify(base), ...extra },
+          ]) {
+            const result = yield* wrapped.execute(raw as never, ctx)
+            expect(result.metadata.success).toBe(0)
+            expect(result.output).toMatch(/context|lifecycle|Persistent/)
+          }
+        }
+        for (const raw of [
+          { operation: { ...base, context: "full" }, context: "none" },
+          { operation: JSON.stringify({ ...base, context: "full" }), context: "none" },
+          { operation: { ...base, context: "full", lifecycle: "persistent" }, lifecycle: "ephemeral" },
+        ]) {
+          const result = yield* wrapped.execute(raw as never, ctx)
+          expect(result.metadata.success).toBe(0)
+          expect(result.output).toMatch(/context|lifecycle/)
+        }
+        expect(spawnCount).toBe(0)
+        expect(captureCount).toBe(0)
+      }),
+    ),
+  )
 })
 
 describe("Actor tool task_id degradation", () => {

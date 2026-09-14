@@ -293,20 +293,59 @@ timeout, the whole `cancel-notification.test.ts` is 28 pass / 0 fail, and
 `test/actor` + `test/inbox` + `actor-hooks` + `actor-owned-lifecycle` are 347
 pass / 2 skip / 0 fail. The two skips are the cases that stay quarantined.
 
+## 2026-09-15 selected upstream 5198ff54
+
+This specified propagation inherits the six incoming capabilities through fork
+main. It excludes upstream commits after `5198ff54`. No DC owner retires; the
+complete model-facing actor context interface is now explicitly compat-owned.
+Shared FD/FC records are inherited byte-for-byte.
+
+| Owner | Disposition | Evidence and boundary |
+| --- | --- | --- |
+| DC-NET-001 | Retain private-network WebFetch | No owned implementation change; finite Read media MIME changes do not replace per-request private WebFetch approval |
+| DC-NET-002 | Retain RFC1918 HTTP(S) MCP guarantee | Production remains inherited from main; existing mocked lifecycle evidence is not a new real-private-network or OAuth validation |
+| DC-PLATFORM-001 | Retain restricted-network and Windows fallbacks | Ripgrep/archive production overlay unchanged; no upstream equivalent in this range |
+| DC-MODEL-001 | Retain per-agent MaxMode | Agent selector tests pass; regenerated SDK/OpenAPI preserve maxMode |
+| DC-CONTEXT-001 | Retain UTF-8 content caps, preflight and checkpoint coverage | History's local result budget does not replace these capabilities; bounds, frozen catalog, server coverage and TUI synchronization tests pass |
+| DC-ACTOR-001 | Retain and adapt none/state/full and persistent creation | Preserve complete capture/execute chain and bounded state; repair input recovery without dropping explicit values; validate runtime-created and model-created persistent recovery |
+| DC-TUI-001 | Retain provider/model/variant display | Metadata and coverage synchronization tests pass; no equivalent upstream UI replaces this overlay |
+
+The actor overlay includes JSON schema, shell parser, no-script argument
+recovery, execution, tool descriptions and public creation tests. Missing
+captured history or a prefix captor still fails before admission. Captured
+system, tool schemas, active/loaded MCP membership, permissions, model identity,
+turnContext, watermark and cwd remain tied to the same frozen request. State
+uses the existing UTF-8 cap; persistent creation requires full context.
+
+Recovery preserves valid context/lifecycle fields in all supported envelope
+forms. Malformed values are rejected; conflicting inner/outer copies are
+rejected instead of choosing an actor lifetime silently. The shared generic
+shell wrapper's mixed script/outer-field policy is unchanged.
+
+The shared history preview follow-up is inherited from accepted main PR #123.
+Its SQL byte budgets and structural omission formatting preserve raw parts and
+original attachment locators, including arbitrary stored MIME text. It does not
+replace compat context caps or frozen-prefix behavior; all seven owners above
+retain their dispositions.
+
+This stage retains the existing actor lifecycle quarantine. The approved C07
+postStop/execution/cancel follow-up is reviewed and published separately; this
+propagation does not claim that pending work is solved.
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
-- Last reviewed: 2026-09-14
-- Reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Accepted `main` tip: `a197d4a84939f36a813cb39750a5fb86cce6b37d`
-- Inherited main behavior: `f45cf4f69c3368fb83eb1efe4a989c8f4969c553`
-- Compat behavior: `c797fa738d86d54eacf26d184d5cd78c4b4e9409`
-- Prior compat tip: `0c480aa95af2b2bb2dbe752242cfa5334ead5d56`
-- Main source inheritance merge: `c797fa738d86d54eacf26d184d5cd78c4b4e9409`
-- Shared audit commit: `a197d4a84939f36a813cb39750a5fb86cce6b37d`
-- Inherited bundled guidance content: `11833785` (bundled `mimocode-docs`: `model-api.md` retired, `capability-api.md` added, the `serve --llm-server` row dropped)
-- Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
+- Last reviewed: 2026-09-15
+- Reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
+- Accepted `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
+- Inherited main behavior: `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d`
+- Compat behavior: `967b340faa1389741f08d45cff0ada2a09f52463`
+- Prior compat tip: `51591791c592a21513e7703e3109c9a6d12def9a`
+- Main source inheritance merge: `967b340faa1389741f08d45cff0ada2a09f52463`
+- Shared audit commit: `90eef40fc1268bece3e63a7db64180a4a75bd7b2`
+- Inherited bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
+- Publication state: locally validated specified propagation; final remote-tip CI is verified after publication. C07 is a separate subsequent change.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -1220,6 +1259,14 @@ files remain byte-identical to the accepted main correction.
   same request-aware, active-tool preflight without weakening FD-002 delivery.
 
 ## DC-ACTOR-001 — full-context actor and static-prefix overflow extensions
+
+- 2026-09-15 ownership adaptation: inherited main now creates only none-context
+  ephemeral model actors. Compat explicitly owns the complete none/state/full
+  schema, shell and no-script recovery interfaces, descriptions and persistent
+  creation, together with its existing bounded state and frozen turnContext.
+  Main retains the shared FD-009 system full-context runtime. Valid recovered
+  values are preserved, malformed or conflicting copies are rejected, and both
+  runtime-created and model-created persistent actors retain recovery coverage.
 
 - 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
 

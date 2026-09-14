@@ -3800,3 +3800,55 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   `test/actor` + `test/inbox` + `actor-hooks` + `actor-owned-lifecycle` 347 pass /
   2 skip / 0 fail; `bun typecheck` 0 errors. The remaining skips are the two
   cases still quarantined on the postStop publish-ordering decision.
+
+## 2026-09-15 selected upstream 5198ff54 propagation
+
+- Scope: specified range through `5198ff540efb5ca9fff2baa64555324d43a721b9`, with newer upstream excluded.
+- Prior compat: `51591791c592a21513e7703e3109c9a6d12def9a`; accepted main: `321e70c9f491e2f9ff406bf56614c955fc5294de` (PR #121).
+- Main source/test behavior: `ee03fe5e9c9c7abd8edb2e28dd6189d903b2ba62`; shared audit: `0d1311eefe5c5c7cb2028425b880d5a659ad5dc5`.
+- Compat runtime/test behavior: `bd47323d3c375be255d0c0ca0319d4e5882847e3`; accepted-main ancestry merge: `208f0cb0c9082e5a7706c15d322daa42e37febac` (no source-tree change).
+- PR #121 current-head CI passed at `0d1311ee`: [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/34879017303), [typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/34879017290), [lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/34879017320). Two review findings were technically corrected at `ee03fe5e`; thread UI state is separate from that evidence.
+
+### Final capability results for this stage (N = 7)
+
+| ID | Selected behavior | Main result | Compat result | Decisive evidence |
+| --- | --- | --- | --- | --- |
+| C01 | Finite Read MIME | Adopted | Inherited, including corrected format-specific size guidance | Shared Read/media source, descriptions and tests |
+| C02 | Remove prior-read gate | FC-003 retired | Inherited | Gate and obsolete state tests absent; permissions/path/media tests retained |
+| C03 | Model actor context ownership | none-context model creation, system full runtime retained | Adapted: explicit none/state/full and persistent interface retained | Tool/recovery/state tests, both creation-to-resume paths, real HTTP frozen turnContext and native schema tests |
+| C04 | Memory independent of checkpoint | Converged FC-002 clause adopted | Inherited with frozen prefix overlay | llm changes are comments only relative to prior compat; identity and prefix semantics retained |
+| C05 | Versioned uniform history | Adopted with NUL correction | Inherited | History/migration/API matrix; generated Config.history absent |
+| C06 | Plugin SDK npm identity | Adopted | Inherited in core/TUI config | Semver helper source and tests unchanged from accepted main |
+| C07 | postStop, execution and cancellation | Separate follow-up pending | Separate inheritance pending | Existing quarantine retained in this stage |
+
+All seven DC owners were reconciled in [the override registry](dev-compat-overrides.md#2026-09-15-selected-upstream-5198ff54); none retires. Production files without incoming owner changes were compared directly, not declared behaviorally re-tested. NET-002 has no new real-private-network/OAuth evidence.
+
+### Validation
+
+Commands ran in `packages/opencode` under Bun 1.3.14 with ambient experimental, MCP-search and Codex selectors removed. Default integration matrices also removed compaction ratio/context and checkpoint-disable selectors. Package preload still owns `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`. These initial local runs inherited shell `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL=1`; they are not preload-only default-path evidence. `bun ci` preserved the lockfile.
+
+| Matrix | Actual result |
+| --- | --- |
+| Actor tools/recovery/descriptions | 95 pass, 478 assertions |
+| Runtime and model persistent creation-to-resume | 2 pass, 52 assertions |
+| Real HTTP actor recovery | 14 pass, 233 assertions |
+| Frozen native Actor contract | 4 pass, 34 assertions |
+| MaxMode, overflow, UTF-8 caps, TUI metadata/coverage, server coverage and frozen catalog (8 files) | 144 pass, 372 assertions |
+| History, history tool, JSON/prefix migration and OpenAPI refs (14 files) | 93 pass, 5 existing benchmark skips, 758 assertions |
+| Package `bun typecheck` | Exit 0 |
+| Root `bun lint` | Exit 0; 4,563 warnings, 0 errors |
+| SDK build and OpenAPI generation | Exit 0; byte-identical to semantic merge generated artifacts |
+| Independent recovery/state-cap review tests | 5 pass, 250 assertions |
+
+Two initial frozen-contract cases timed out under concurrent load; the unchanged four-case suite passed serially without increasing timeouts. Full and malformed recovery regressions fail against the old recovery implementation. The SDK/OpenAPI retain per-agent MaxMode and callable checkpoint coverage while removing history configuration. Shared FD/FC/history blobs are identical to accepted main.
+
+Independent review of `bd47323d3c375be255d0c0ca0319d4e5882847e3` found no P1/P2; source files remained fixed during review. Publication and final remote-tip CI are subsequent gates, not inferred from these local results.
+
+## 2026-09-15 shared history preview follow-up
+
+- Accepted main: `e4075dfc141df0b4141fdd817b309bb52b3bca91` (PR #123); main behavior: `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d`; shared audit: `90eef40fc1268bece3e63a7db64180a4a75bd7b2`.
+- Compat inheritance and behavior: `967b340faa1389741f08d45cff0ada2a09f52463`. Its only incoming production changes are shared history projection and formatting. All seven DC dispositions and the C03 model interface remain unchanged.
+- The initial PR #122 preview-budget finding is corrected through main: SQLite bounds total attachment metadata, previews omit without fabricating a locator, and structural marker recognition preserves real attachments with identical MIME text. Raw get, original locators and delivery remain intact.
+- Main PR #123 passed all eight checks at `90eef40f`: [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/34884042595), [typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/34884042999), [lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/34884042628). The old locator review thread is technically fixed; its UI resolution state is separate.
+- On the compat inheritance tree, `bun test test/history` passes 68 tests, with five benchmark skips, 0 failures and 625 assertions. This run explicitly unsets WORKFLOW_TOOL in addition to umbrella/MCP/Codex selectors; package ORCHESTRATOR preload remains active. History source/tests, shared FD/FC/history and lockfile are byte-identical to accepted main.
+- This advances C05's result in the seven-row stage inventory above. C07 remains a separately reviewed lifecycle change; the new compat PR head still requires fresh CI before merge.

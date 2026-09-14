@@ -2750,15 +2750,6 @@ export type Config = {
      */
     cc_index?: boolean
   }
-  /**
-   * Trajectory (conversation history) FTS index configuration.
-   */
-  history?: {
-    /**
-     * Which part kinds the history FTS index should cover. Defaults to text (user/assistant) + tool input + tool errors. Add 'reasoning' or 'tool_output' to grow recall at the cost of database size. Note: enabling 'tool_output' reclassifies completed tools from kind='tool_input' to kind='tool_output' (input remains searchable in the body, but kind:['tool_input'] filter will then only match pending/error tools).
-     */
-    kinds?: Array<"user_text" | "assistant_text" | "tool_input" | "tool_error" | "reasoning" | "tool_output">
-  }
   dream?: {
     /**
      * Auto-trigger dream memory consolidation on new session start. Default: false.

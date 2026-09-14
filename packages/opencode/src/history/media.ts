@@ -2,6 +2,8 @@ export type Attachment = { id: string; mime: string; url: string; filename?: str
 
 export type CleanStyle = "display" | "index"
 
+export const attachmentListOmitted = "[large attachment list omitted; use history get part_id]"
+
 // Forward-only scans recognize explicit base64 data URLs, never ordinary long tokens.
 export function cleanDataUrls(text: string, attachments?: Attachment[], style: CleanStyle = "display") {
   const chunks: string[] = []
@@ -100,6 +102,7 @@ type Data = {
   mime?: string
   url?: string
   filename?: string
+  source?: unknown
   state?: {
     input?: unknown
     output?: unknown
@@ -110,6 +113,11 @@ type Data = {
 
 export function detail(data: Data, collect = true) {
   const attachments: Attachment[] = []
+  const omitted =
+    !collect &&
+    data.state?.attachments?.length === 1 &&
+    data.state.attachments[0]?.mime === attachmentListOmitted &&
+    !Object.hasOwn(data.state.attachments[0], "url")
   const clean = (value: string) => cleanDataUrls(value, collect ? attachments : undefined)
   const json = (value: unknown) =>
     clean(JSON.stringify(value, (_key, item: unknown) => (typeof item === "string" ? clean(item) : item)))
@@ -118,7 +126,15 @@ export function detail(data: Data, collect = true) {
       ? clean(data.text ?? "")
       : data.type === "tool"
         ? `tool: ${clean(data.tool ?? "")}\ninput: ${json(data.state?.input ?? {})}\noutput: ${json(data.state?.output ?? "")}\nerror: ${clean(data.state?.error ?? "")}`
-        : `[${data.type}]`
+        : data.type === "file"
+          ? json({
+              type: data.type,
+              filename: data.filename,
+              mime: data.mime,
+              source: data.source,
+              url: data.url && !/^data:/i.test(data.url) ? data.url : undefined,
+            })
+          : json(data)
   const inlineCount = attachments.length
   if (data.type === "file" && data.url)
     attachments.push({
@@ -127,16 +143,19 @@ export function detail(data: Data, collect = true) {
       url: data.url,
       filename: data.filename,
     })
-  data.state?.attachments?.forEach((a, i) =>
-    attachments.push({ id: `tool:${i}`, mime: a.mime, url: a.url, filename: a.filename }),
-  )
+  if (!omitted)
+    data.state?.attachments?.forEach((a, i) =>
+      attachments.push({ id: `tool:${i}`, mime: a.mime, url: a.url, filename: a.filename }),
+    )
   return {
     text:
       text +
-      attachments
-        .slice(inlineCount)
-        .map((a) => `\n[media ${cleanDataUrls(a.mime)}; attachment=${a.id}; call history get attachment=${a.id}]`)
-        .join(""),
+      (omitted
+        ? `\n${attachmentListOmitted}`
+        : attachments
+            .slice(inlineCount)
+            .map((a) => `\n[media ${cleanDataUrls(a.mime)}; attachment=${a.id}; call history get attachment=${a.id}]`)
+            .join("")),
     attachments: collect ? attachments : [],
   }
 }
