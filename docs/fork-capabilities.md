@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-09-15
 - Upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
 - Prior reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Main behavior (runtime/tests): `54deac139e638c4b72b6337cdaac0c27ad537749`
+- Main behavior (runtime/tests): `ad411e322c54f2fd0c29a57e4f7ddb29002ee4df`
 - Bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
 - Prior fork `main` tip: `321e70c9f491e2f9ff406bf56614c955fc5294de`
 - History: [fork-registry-history.md](fork-registry-history.md)

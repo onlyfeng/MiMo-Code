@@ -3171,3 +3171,10 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - The review finding on compat PR #122 also exists on main, so main owns the fix before propagation. Field and total attachment-metadata SQL preview bounds prevent large values crossing the driver boundary; complete get/locators and raw data remain unchanged.
 - Nine new real-data regressions were red on the prior source. Final history suite: 68 pass, 5 existing benchmark skips, 0 fail, 612 assertions. Package typecheck and focused lint pass.
 - [The synchronization report](upstream-sync-2026-09-15-5198ff54.md#shared-history-preview-correction-discovered-in-compat-review) records the exact budget semantics and remaining scope limits. The actor C07 follow-up remains separate.
+
+### PR 123 omission locator correction
+
+- Current main behavior: `ad411e322c54f2fd0c29a57e4f7ddb29002ee4df`; upstream remains `5198ff54`.
+- Preview formatting distinguishes the array-shaped omission notice from an actual attachment. It directs callers to `history get part_id` without fabricating `tool:0`; small previews and complete get keep original locators.
+- Five real around-path assertions reproduced the bug before the fix. Final history suite: 68 pass, five benchmark skips, 0 fail, 624 assertions. Package typecheck and focused lint pass.
+- The prior preview-budget candidate passed CI at `4544294d`; this corrected source requires fresh PR-head CI before merge.
