@@ -54,14 +54,30 @@ const copy = process.env["MIMOCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"]
 let operatorServerPassword = process.env["MIMOCODE_SERVER_PASSWORD"]
 let automaticServerPassword: { password: string } | undefined
 
-// Worker-owned credentials never enter process.env or child-process options.
-// A retired owner cannot clear a later worker credential.
-export function installAutomaticServerPassword(password: string) {
-  const owner = { password }
-  automaticServerPassword = owner
-  return () => {
-    if (automaticServerPassword === owner) automaticServerPassword = undefined
+/**
+ * Mint a credential for a listener the user did not ask for.
+ *
+ * Deliberately NOT written to `process.env`: every child we spawn inherits the
+ * environment, and a subprocess is supposed to hold a scoped task token, never the
+ * credential that opens the whole instance API. An operator-configured password
+ * always wins — the user has already said what auth should be.
+ */
+export function generateServerPassword() {
+  if (operatorServerPassword) return
+  automaticServerPassword ??= {
+    password: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
   }
+}
+
+/**
+ * Disarm the generated password once its listener is gone.
+ *
+ * A credential outliving the socket it was minted for is state with no owner: nothing can
+ * present it any more, but every in-process request still has to satisfy it. Clearing it
+ * belongs with `stop()` for the same reason unpublishing the address does.
+ */
+export function clearGeneratedServerPassword() {
+  automaticServerPassword = undefined
 }
 
 export const Flag = {
@@ -276,6 +292,15 @@ export const Flag = {
   },
   get MIMOCODE_SERVER_OPERATOR_PASSWORD() {
     return operatorServerPassword
+  },
+  /**
+   * Did the OPERATOR configure auth, as opposed to us generating a password for a
+   * listener we opened on our own initiative? Load-bearing for `InstanceMiddleware`:
+   * a user-secured server may serve directories outside its cwd, while an implicit
+   * listener stays pinned to one project no matter what credential guards it.
+   */
+  get MIMOCODE_SERVER_PASSWORD_SUPPLIED() {
+    return Boolean(operatorServerPassword)
   },
   MIMOCODE_SERVER_USERNAME: process.env["MIMOCODE_SERVER_USERNAME"],
   MIMOCODE_ENABLE_QUESTION_TOOL: truthy("MIMOCODE_ENABLE_QUESTION_TOOL"),

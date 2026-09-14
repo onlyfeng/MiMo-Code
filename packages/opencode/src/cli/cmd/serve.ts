@@ -3,16 +3,10 @@ import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
 import { Log } from "../../util"
-import { Instance } from "../../project/instance"
 
 export const ServeCommand = cmd({
   command: "serve",
-  builder: (yargs) =>
-    withNetworkOptions(yargs).option("llm-server", {
-      type: "boolean",
-      default: false,
-      describe: "enable the model API with directory-scoped temporary tokens",
-    }),
+  builder: (yargs) => withNetworkOptions(yargs),
   describe: "starts a headless mimocode server",
   handler: async (args) => {
     const opts = await resolveNetworkOptions(args)
@@ -28,23 +22,21 @@ export const ServeCommand = cmd({
       console.log("Warning: MIMOCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
 
-    const server = await Server.listen({
-      ...opts,
-      llm: args["llm-server"] ? { directory: process.cwd() } : undefined,
-    })
+    // Server.listen publishes this process into the llm-server address registry
+    // (cwd) and unpublishes on stop, so `mimo llm-server issue` can resolve base_url.
+    const server = await Server.listen(opts)
     console.log(`mimocode server listening on http://${server.hostname}:${server.port}`)
 
-    if (args["llm-server"]) console.log("Model API enabled at /v1 (temporary Bearer token required)")
-    await new Promise<void>((resolve) => {
-      const stop = () => {
-        process.off("SIGINT", stop)
-        process.off("SIGTERM", stop)
-        resolve()
-      }
-      process.once("SIGINT", stop)
-      process.once("SIGTERM", stop)
-    })
-    await server.stop(true)
-    await Instance.disposeAll()
+    // Force-close: graceful stop waits on live SSE/WS streams, and Ctrl-C would hang.
+    const shutdown = () => server.stop(true)
+    const onSignal = () => {
+      void shutdown()
+        .then(() => process.exit(0))
+        .catch(() => process.exit(1))
+    }
+    process.once("SIGINT", onSignal)
+    process.once("SIGTERM", onSignal)
+
+    await new Promise(() => {})
   },
 })

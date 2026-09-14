@@ -1,360 +1,268 @@
 import { describe, expect, test } from "bun:test"
-import fs from "node:fs/promises"
-import path from "node:path"
-import { randomUUID } from "node:crypto"
-import { setTimeout as sleep } from "node:timers/promises"
-import { Hash } from "@mimo-ai/shared/util/hash"
-import { Flock } from "@mimo-ai/shared/util/flock"
-import { Global } from "../../src/global"
-import { Filesystem } from "../../src/util"
+import fs from "fs/promises"
+import { LLMServerTokens } from "../../src/llm-server/tokens"
+import { duration } from "../../src/cli/cmd/llm-server"
 import { tmpdir } from "../fixture/fixture"
-import { LLMServerTokens as api } from "../../src/llm-server/tokens"
 
-const expiry = { idleMs: 3_600_000, maxAgeMs: 86_400_000 }
-const bucket = (directory: string) =>
-  path.join(Global.Path.state, "llm-server", Hash.fast(Filesystem.resolve(directory)))
-const file = (directory: string) => path.join(bucket(directory), "tokens.json")
+/**
+ * The store is keyed by project directory, so a fresh tmpdir is a fresh store and
+ * these tests do not interfere with each other or with a real installation.
+ */
 
-describe("temporary model tokens", () => {
-  test("persists only hashes with private file permissions and returns one model scope", async () => {
+describe("duration parsing", () => {
+  test("reads the unit suffixes", () => {
+    expect(duration("30m", "1d")).toBe(1_800_000)
+    expect(duration("12h", "1d")).toBe(43_200_000)
+    expect(duration("7d", "1d")).toBe(604_800_000)
+    expect(duration("500ms", "1d")).toBe(500)
+    expect(duration("90s", "1d")).toBe(90_000)
+  })
+
+  test("treats an absent value as the configured fallback", () => {
+    expect(duration(undefined, "1d")).toBe(86_400_000)
+    expect(duration(undefined, "none")).toBeUndefined()
+  })
+
+  test("spells unlimited as a value, not an absence", () => {
+    // `undefined` here means "no limit", which is why `none` has to be expressible:
+    // otherwise unlimited would be indistinguishable from a forgotten flag.
+    expect(duration("none", "1d")).toBeUndefined()
+    expect(duration("never", "1d")).toBeUndefined()
+    expect(duration("0", "1d")).toBeUndefined()
+  })
+
+  test("rejects nonsense rather than silently defaulting", () => {
+    expect(() => duration("soon", "1d")).toThrow(/Invalid duration/)
+    expect(() => duration("1w", "1d")).toThrow(/Invalid duration/)
+    expect(() => duration("-5m", "1d")).toThrow(/Invalid duration/)
+  })
+})
+
+describe("token store", () => {
+  test("stores only a hash, never the token", async () => {
     await using tmp = await tmpdir()
-    const issued = await api.issue({ directory: tmp.path, models: ["provider/model"], expiry, label: "task" })
-    expect(issued.token).toMatch(/^[A-Za-z0-9_-]{43}$/)
-    expect(issued.record).toMatchObject({ models: ["provider/model"], label: "task", idle_ms: expiry.idleMs })
-    expect(issued.record).not.toHaveProperty("hash")
-    const raw = await fs.readFile(file(tmp.path), "utf8")
+    const issued = await LLMServerTokens.issue({ directory: tmp.path, expiry: { idleMs: 60_000 } })
+    const records = await LLMServerTokens.list(tmp.path)
+    expect(records).toHaveLength(1)
+    expect(records[0]!.hash).toMatch(/^[0-9a-f]{64}$/)
+    // The point of hashing: reading the file must not yield a usable credential.
+    const raw = await fs.readFile(await pathOf(tmp.path), "utf8")
     expect(raw).not.toContain(issued.token)
-    expect(JSON.parse(raw).tokens[0].hash).toMatch(/^[a-f0-9]{64}$/)
-    if (process.platform !== "win32") {
-      expect((await fs.stat(file(tmp.path))).mode & 0o777).toBe(0o600)
-      expect((await fs.stat(bucket(tmp.path))).mode & 0o777).toBe(0o700)
-    }
-    expect(await api.verify({ directory: tmp.path, token: issued.token })).toMatchObject({
-      ok: true,
-      id: issued.record.id,
-      models: ["provider/model"],
-    })
+    expect(raw).toContain(records[0]!.hash)
   })
 
-  test("separates directories and canonicalizes symlink aliases", async () => {
-    await using one = await tmpdir()
-    await using two = await tmpdir()
-    const alias = path.join(two.path, "alias")
-    await fs.symlink(one.path, alias, process.platform === "win32" ? "junction" : "dir")
-    const issued = await api.issue({ directory: alias, models: ["provider/model"], expiry })
-    expect(await api.verify({ directory: one.path, token: issued.token })).toMatchObject({ ok: true })
-    expect(await api.verify({ directory: two.path, token: issued.token })).toEqual({ ok: false, reason: "unknown" })
-  })
-
-  test("rejects empty duplicate or malformed model scopes before writing", async () => {
+  test("verifies a good token and rejects an unknown one", async () => {
     await using tmp = await tmpdir()
-    for (const models of [
-      [],
-      ["one/a", "one/a"],
-      ["no-provider"],
-      ["provider/"],
-      ["/model"],
-      ["provider/model with spaces"],
-    ]) {
-      await expect(api.issue({ directory: tmp.path, models, expiry })).rejects.toThrow()
-    }
-    expect(await fs.stat(file(tmp.path)).catch(() => undefined)).toBeUndefined()
+    const issued = await LLMServerTokens.issue({ directory: tmp.path, expiry: { idleMs: 60_000 } })
+    expect(await LLMServerTokens.verify(tmp.path, issued.token)).toMatchObject({ ok: true })
+    expect(await LLMServerTokens.verify(tmp.path, "not-a-real-token")).toEqual({ ok: false, reason: "unknown" })
   })
 
-  test("requires finite positive safe numbers for enabled lifetimes without timestamp overflow", async () => {
+  test("a token scoped to a directory is not valid for another directory", async () => {
+    await using a = await tmpdir()
+    await using b = await tmpdir()
+    const issued = await LLMServerTokens.issue({ directory: a.path, expiry: { idleMs: 60_000 } })
+    expect(await LLMServerTokens.verify(a.path, issued.token)).toMatchObject({ ok: true })
+    expect(await LLMServerTokens.verify(b.path, issued.token)).toEqual({ ok: false, reason: "unknown" })
+  })
+
+  test("issues distinct tokens that coexist", async () => {
     await using tmp = await tmpdir()
-    for (const value of [0, -1, Infinity, NaN, 0.5, Number.MAX_SAFE_INTEGER]) {
-      await expect(
-        api.issue({ directory: tmp.path, models: ["p/m"], expiry: { ...expiry, idleMs: value } }),
-      ).rejects.toThrow()
-      await expect(
-        api.issue({ directory: tmp.path, models: ["p/m"], expiry: { ...expiry, maxAgeMs: value } }),
-      ).rejects.toThrow()
-    }
-  })
-
-  test("expires at the exact idle or absolute boundary", async () => {
-    const record = { id: "llmk_test", models: ["p/m"], created: 1000, last_used: 1500, idle_ms: 100, max_age_ms: 1000 }
-    expect(api.expired(record, 1599)).toBe(false)
-    expect(api.expired(record, 1600)).toBe(true)
-    expect(api.expired({ ...record, last_used: 1999 }, 2000)).toBe(true)
-    expect(api.expiresAt(record)).toBe(1600)
-  })
-
-  test("persists a successful idle slide and removes an expired token", async () => {
-    await using tmp = await tmpdir()
-    const issued = await api.issue({ directory: tmp.path, models: ["p/m"], expiry })
-    await sleep(5)
-    await api.verify({ directory: tmp.path, token: issued.token })
-    const saved = JSON.parse(await fs.readFile(file(tmp.path), "utf8"))
-    expect(saved.tokens[0].last_used).toBeGreaterThan(issued.record.created)
-    saved.tokens[0].created = 1
-    saved.tokens[0].last_used = 1
-    await fs.writeFile(file(tmp.path), JSON.stringify(saved))
-    expect(await api.verify({ directory: tmp.path, token: issued.token })).toEqual({ ok: false, reason: "expired" })
-    expect(await api.list(tmp.path)).toEqual([])
-  })
-
-  test("unknown tokens do not create lock files or rewrite the token store", async () => {
-    await using tmp = await tmpdir()
-    await api.issue({ directory: tmp.path, models: ["p/m"], expiry })
-    const before = await fs.readFile(file(tmp.path), "utf8")
-    const timestamp = (await fs.stat(file(tmp.path))).mtimeMs
-    await using lease = await Flock.acquire(`llm-server-tokens:${bucket(tmp.path)}`)
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 100)
-    try {
-      expect(await api.verify({ directory: tmp.path, token: "x".repeat(43), signal: controller.signal })).toEqual({
-        ok: false,
-        reason: "unknown",
-      })
-    } finally {
-      clearTimeout(timer)
-    }
-    expect(await fs.readFile(file(tmp.path), "utf8")).toBe(before)
-    expect((await fs.stat(file(tmp.path))).mtimeMs).toBe(timestamp)
-  })
-
-  test("cancels known-token verification while its mutation lock is held", async () => {
-    await using tmp = await tmpdir()
-    const issued = await api.issue({ directory: tmp.path, models: ["p/m"], expiry })
-    await using lease = await Flock.acquire(`llm-server-tokens:${bucket(tmp.path)}`)
-    const controller = new AbortController()
-    const pending = api.verify({ directory: tmp.path, token: issued.token, signal: controller.signal })
-    controller.abort()
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
-  })
-
-  test("revokes one token without reviving it during verification and revokes all remaining tokens", async () => {
-    await using tmp = await tmpdir()
-    const one = await api.issue({ directory: tmp.path, models: ["p/a"], expiry })
-    const two = await api.issue({ directory: tmp.path, models: ["p/b"], expiry })
-    await Promise.all([
-      api.verify({ directory: tmp.path, token: one.token }),
-      api.revoke({ directory: tmp.path, id: one.record.id }),
-    ])
-    expect(await api.verify({ directory: tmp.path, token: one.token })).toEqual({ ok: false, reason: "unknown" })
-    expect(await api.verify({ directory: tmp.path, token: two.token })).toMatchObject({ ok: true })
-    expect(await api.revoke({ directory: tmp.path, id: "absent" })).toBe(false)
-    expect(await api.revokeAll({ directory: tmp.path })).toBe(1)
-    expect(await api.list(tmp.path)).toEqual([])
-  })
-
-  test("serializes concurrent issuance without losing records", async () => {
-    await using tmp = await tmpdir()
-    const issued = await Promise.all(
-      Array.from({ length: 8 }, () => api.issue({ directory: tmp.path, models: ["p/m"], expiry })),
-    )
-    expect(await api.list(tmp.path)).toHaveLength(8)
-    expect(new Set(issued.map((item) => item.token)).size).toBe(8)
-    expect((await fs.readdir(bucket(tmp.path))).filter((name) => name.endsWith(".tmp"))).toEqual([])
-  })
-
-  test("serializes token writes from independent processes", async () => {
-    await using tmp = await tmpdir()
-    const children = Array.from({ length: 4 }, () =>
-      Bun.spawn({
-        cmd: [process.execPath, path.join(import.meta.dir, "tokens-child.ts"), tmp.path],
-        env: process.env,
-        stdout: "pipe",
-        stderr: "pipe",
-      }),
-    )
-    try {
-      const results = await Promise.all(
-        children.map(async (child) => {
-          const [code, stdout, stderr] = await Promise.all([
-            child.exited,
-            new Response(child.stdout).text(),
-            new Response(child.stderr).text(),
-          ])
-          expect(code, stderr).toBe(0)
-          return JSON.parse(stdout) as string[]
-        }),
-      )
-      expect((await api.list(tmp.path)).map((record) => record.id).sort()).toEqual(results.flat().sort())
-      expect(results.flat()).toHaveLength(8)
-      expect((await fs.readdir(bucket(tmp.path))).filter((name) => name.endsWith(".tmp"))).toEqual([])
-    } finally {
-      children.forEach((child) => child.kill())
-    }
-  })
-
-  test("fails closed on corrupt records instead of weakening scope or expiry", async () => {
-    await using tmp = await tmpdir()
-    const issued = await api.issue({ directory: tmp.path, models: ["p/m"], expiry })
-    const saved = JSON.parse(await fs.readFile(file(tmp.path), "utf8"))
-    for (const extra of [
-      { idle_ms: "broken" },
-      { scope: { type: "models", models: [] } },
-      { scope: { type: "models", models: [1] } },
-      { max_age_ms: "none" },
-      { last_used: "yesterday" },
-      { hash: "00" },
-    ]) {
-      const body = JSON.stringify({ ...saved, tokens: [{ ...saved.tokens[0], ...extra }] })
-      await fs.writeFile(file(tmp.path), body)
-      await expect(api.verify({ directory: tmp.path, token: issued.token })).rejects.toThrow("Invalid token store")
-      await expect(api.issue({ directory: tmp.path, models: ["p/m"], expiry })).rejects.toThrow("Invalid token store")
-      expect(await fs.readFile(file(tmp.path), "utf8")).toBe(body)
-    }
-  })
-
-  test("rejects malformed or oversized files and a full live registry", async () => {
-    await using tmp = await tmpdir()
-    const issued = await api.issue({ directory: tmp.path, models: ["p/m"], expiry })
-    const saved = JSON.parse(await fs.readFile(file(tmp.path), "utf8"))
-    for (const body of ["{", " ".repeat(1024 * 1024 + 1)]) {
-      await fs.writeFile(file(tmp.path), body)
-      await expect(api.list(tmp.path)).rejects.toThrow()
-    }
-    await fs.writeFile(
-      file(tmp.path),
-      JSON.stringify({
-        version: saved.version,
-        tokens: Array.from({ length: 1024 }, (_, i) => ({ ...saved.tokens[0], id: `llmk_${i}` })),
-      }),
-    )
-    await expect(api.issue({ directory: tmp.path, models: ["p/m"], expiry })).rejects.toThrow("limit")
-    expect(await api.list(tmp.path)).toHaveLength(1024)
-    expect(issued.token.length).toBe(43)
-  })
-
-  test("refuses an idle slide that would overflow persisted timestamp arithmetic", async () => {
-    await using tmp = await tmpdir()
-    const issued = await api.issue({ directory: tmp.path, models: ["p/m"], expiry })
-    const saved = JSON.parse(await fs.readFile(file(tmp.path), "utf8"))
-    const original = JSON.stringify({
-      version: saved.version,
-      tokens: [
-        {
-          ...saved.tokens[0],
-          created: 1,
-          last_used: 1,
-          idle_ms: Number.MAX_SAFE_INTEGER - 1,
-          max_age_ms: Number.MAX_SAFE_INTEGER - 1,
-        },
-      ],
-    })
-    await fs.writeFile(file(tmp.path), original)
-    // The public expiry helper now rejects unsafe sums before mutate's final store validation.
-    await expect(api.verify({ directory: tmp.path, token: issued.token })).rejects.toMatchObject({
-      name: "ZodError",
-      issues: [expect.objectContaining({ code: "custom" })],
-    })
-    expect(await fs.readFile(file(tmp.path), "utf8")).toBe(original)
+    const one = await LLMServerTokens.issue({ directory: tmp.path, expiry: { idleMs: 60_000 }, label: "skill-a" })
+    const two = await LLMServerTokens.issue({ directory: tmp.path, expiry: { idleMs: 60_000 }, label: "skill-b" })
+    expect(one.token).not.toBe(two.token)
+    expect(one.record.id).not.toBe(two.record.id)
+    // Both remain valid: re-issuing for one skill must not revoke another's key.
+    expect(await LLMServerTokens.verify(tmp.path, one.token)).toMatchObject({ ok: true })
+    expect(await LLMServerTokens.verify(tmp.path, two.token)).toMatchObject({ ok: true })
   })
 })
 
-describe("explicit listener addresses", () => {
-  test("prioritizes recent registrations before its bounded identity probes", async () => {
+describe("write discipline", () => {
+  test("a rejected token does not rewrite the store", async () => {
+    // Every request goes through verify, so writing unconditionally let an
+    // unauthenticated caller drive unbounded disk writes.
     await using tmp = await tmpdir()
-    const current = { id: "" }
-    const probes: string[] = []
-    const server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch(req) {
-        probes.push(req.url)
-        return Response.json({ id: current.id })
-      },
-    })
-    try {
-      await Promise.all(
-        Array.from({ length: 65 }, (_, index) =>
-          api.publish({
-            directory: tmp.path,
-            listenerID: `listener-${index}`,
-            hostname: "127.0.0.1",
-            port: server.port!,
-            started: 1,
-          }),
-        ),
-      )
-      const last = path.join(bucket(tmp.path), (await fs.readdir(bucket(tmp.path)))[64]!)
-      const saved = JSON.parse(await fs.readFile(last, "utf8"))
-      current.id = saved.listenerID
-      await fs.writeFile(last, JSON.stringify({ ...saved, started: 2 }))
-      expect((await api.addresses(tmp.path)).map((entry) => entry.listenerID)).toEqual([current.id])
-      expect(probes.length).toBeLessThanOrEqual(64)
-    } finally {
-      await server.stop(true)
-    }
+    await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
+    const target = await pathOf(tmp.path)
+    const before = (await fs.stat(target)).mtimeMs
+
+    await Bun.sleep(20)
+    expect(await LLMServerTokens.verify(tmp.path, "never-issued")).toEqual({ ok: false, reason: "unknown" })
+
+    expect((await fs.stat(target)).mtimeMs).toBe(before)
   })
 
-  test("only returns a live matching identity and never sends a credential to the probe", async () => {
+  test("a successful verify does persist the slide", async () => {
+    // The counterpart: the sliding window is only meaningful if it survives.
     await using tmp = await tmpdir()
-    const id = randomUUID()
-    const seen: { url: string; headers: Headers }[] = []
-    const server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch(req) {
-        seen.push({ url: req.url, headers: new Headers(req.headers) })
-        return Response.json({ id })
-      },
-    })
-    try {
-      await api.publish({ directory: tmp.path, listenerID: id, hostname: "127.0.0.1", port: server.port! })
-      expect(await api.addresses(tmp.path)).toMatchObject([{ listenerID: id, port: server.port }])
-      expect(new URL(seen[0]!.url).pathname).toBe("/v1/_mimocode")
-      expect(seen[0]!.headers.get("authorization")).toBeNull()
-      expect(seen[0]!.headers.get("x-api-key")).toBeNull()
-      await api.unpublish({ directory: tmp.path, listenerID: id })
-      expect(await api.addresses(tmp.path)).toEqual([])
-    } finally {
-      await server.stop(true)
-    }
-  })
+    const issued = await LLMServerTokens.issue({ directory: tmp.path, expiry: { idleMs: 60_000 } })
+    const target = await pathOf(tmp.path)
+    const before = await fs.readFile(target, "utf8")
 
-  test("keeps same-process listeners separate and withdraws only the specified identity", async () => {
-    await using tmp = await tmpdir()
-    const ids = [randomUUID(), randomUUID()]
-    const servers = ids.map((id) => Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json({ id }) }))
-    try {
-      for (const [i, server] of servers.entries())
-        await api.publish({
-          directory: tmp.path,
-          listenerID: ids[i]!,
-          hostname: "127.0.0.1",
-          port: server.port!,
-          started: 100 + i,
-        })
-      expect((await api.addresses(tmp.path)).map((entry) => entry.listenerID)).toEqual(ids.toReversed())
-      await api.unpublish({ directory: tmp.path, listenerID: ids[0]! })
-      expect((await api.addresses(tmp.path)).map((entry) => entry.listenerID)).toEqual([ids[1]!])
-    } finally {
-      await Promise.all(servers.map((server) => server.stop(true)))
-    }
-  })
+    await Bun.sleep(20)
+    expect(await LLMServerTokens.verify(tmp.path, issued.token)).toMatchObject({ ok: true })
 
-  test("rejects stale ports and mismatched listener identities even while the PID lives", async () => {
-    await using tmp = await tmpdir()
-    const id = randomUUID()
-    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json({ id: "another-listener" }) })
-    await api.publish({ directory: tmp.path, listenerID: id, hostname: "127.0.0.1", port: server.port! })
-    try {
-      expect(await api.addresses(tmp.path)).toEqual([])
-    } finally {
-      await server.stop(true)
-    }
-    expect(await api.addresses(tmp.path)).toEqual([])
-  })
-
-  test("does not advertise non-loopback endpoints or follow identity redirects", async () => {
-    await using tmp = await tmpdir()
-    await api.publish({ directory: tmp.path, listenerID: randomUUID(), hostname: "example.test", port: 443 })
-    expect(await api.addresses(tmp.path)).toEqual([])
-    const server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch: () => Response.redirect("https://example.test/"),
-    })
-    try {
-      await api.publish({ directory: tmp.path, listenerID: randomUUID(), hostname: "127.0.0.1", port: server.port! })
-      expect(await api.addresses(tmp.path)).toEqual([])
-    } finally {
-      await server.stop(true)
-    }
+    expect(await fs.readFile(target, "utf8")).not.toBe(before)
   })
 })
+
+describe("expiry", () => {
+  test("no limits means it never expires", async () => {
+    await using tmp = await tmpdir()
+    const issued = await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
+    expect(LLMServerTokens.expiresAt(issued.record)).toBeUndefined()
+    // Far in the future, with no activity at all.
+    expect(LLMServerTokens.expired(issued.record, Date.now() + 10 * 365 * 86_400_000)).toBe(false)
+  })
+
+  test("the idle window is measured from the last use, so activity keeps it alive", async () => {
+    await using tmp = await tmpdir()
+    const issued = await LLMServerTokens.issue({ directory: tmp.path, expiry: { idleMs: 1_000 } })
+
+    // Two uses spaced under the window each slide it forward, carrying the token
+    // past the point where a fixed lifetime would already have killed it.
+    await Bun.sleep(600)
+    expect(await LLMServerTokens.verify(tmp.path, issued.token)).toMatchObject({ ok: true })
+    await Bun.sleep(600)
+    expect(await LLMServerTokens.verify(tmp.path, issued.token)).toMatchObject({ ok: true })
+
+    // Then go quiet for longer than the window.
+    await Bun.sleep(1_300)
+    expect(await LLMServerTokens.verify(tmp.path, issued.token)).toMatchObject({ ok: false, reason: "expired" })
+  })
+
+  test("an issued-but-never-used token still ages out", async () => {
+    await using tmp = await tmpdir()
+    const issued = await LLMServerTokens.issue({ directory: tmp.path, expiry: { idleMs: 200 } })
+    await Bun.sleep(500)
+    expect(await LLMServerTokens.verify(tmp.path, issued.token)).toMatchObject({ ok: false, reason: "expired" })
+  })
+
+  test("the absolute ceiling wins over any amount of activity", async () => {
+    await using tmp = await tmpdir()
+    const issued = await LLMServerTokens.issue({
+      directory: tmp.path,
+      expiry: { idleMs: 60_000, maxAgeMs: 500 },
+    })
+    await Bun.sleep(200)
+    expect(await LLMServerTokens.verify(tmp.path, issued.token)).toMatchObject({ ok: true })
+    await Bun.sleep(500)
+    // The idle window is nowhere near elapsed; the ceiling is what ends it.
+    expect(await LLMServerTokens.verify(tmp.path, issued.token)).toMatchObject({ ok: false, reason: "expired" })
+  })
+
+  test("reports the nearer of the two limits", async () => {
+    await using tmp = await tmpdir()
+    const issued = await LLMServerTokens.issue({
+      directory: tmp.path,
+      expiry: { idleMs: 86_400_000, maxAgeMs: 60_000 },
+    })
+    expect(LLMServerTokens.expiresAt(issued.record)).toBe(issued.record.created + 60_000)
+  })
+
+  test("an expired record is dropped on the verify that discovers it", async () => {
+    await using tmp = await tmpdir()
+    const issued = await LLMServerTokens.issue({ directory: tmp.path, expiry: { idleMs: 50 } })
+    await Bun.sleep(120)
+    await LLMServerTokens.verify(tmp.path, issued.token)
+    expect(await LLMServerTokens.list(tmp.path)).toHaveLength(0)
+  })
+})
+
+describe("revocation", () => {
+  test("revokes one token and leaves the rest", async () => {
+    await using tmp = await tmpdir()
+    const keep = await LLMServerTokens.issue({ directory: tmp.path, expiry: { idleMs: 60_000 } })
+    const drop = await LLMServerTokens.issue({ directory: tmp.path, expiry: { idleMs: 60_000 } })
+    expect(await LLMServerTokens.revoke(tmp.path, drop.record.id)).toBe(true)
+    expect(await LLMServerTokens.verify(tmp.path, drop.token)).toEqual({ ok: false, reason: "unknown" })
+    expect(await LLMServerTokens.verify(tmp.path, keep.token)).toMatchObject({ ok: true })
+  })
+
+  test("reports an unknown id rather than pretending to succeed", async () => {
+    await using tmp = await tmpdir()
+    expect(await LLMServerTokens.revoke(tmp.path, "llmk_nope")).toBe(false)
+  })
+
+  test("revokes everything at once", async () => {
+    await using tmp = await tmpdir()
+    await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
+    await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
+    expect(await LLMServerTokens.revokeAll(tmp.path)).toBe(2)
+    expect(await LLMServerTokens.list(tmp.path)).toHaveLength(0)
+  })
+})
+
+describe("server address", () => {
+  test("absent until published, and gone again once removed", async () => {
+    await using tmp = await tmpdir()
+    expect(await LLMServerTokens.address(tmp.path)).toBeUndefined()
+    await LLMServerTokens.publish(tmp.path, {
+      pid: process.pid,
+      hostname: "127.0.0.1",
+      port: 1234,
+      url: "http://127.0.0.1:1234/v1",
+      started: Date.now(),
+    })
+    expect(await LLMServerTokens.address(tmp.path)).toMatchObject({ port: 1234 })
+    await LLMServerTokens.unpublish(tmp.path)
+    expect(await LLMServerTokens.address(tmp.path)).toBeUndefined()
+  })
+
+  test("treats a dead pid as nothing running", async () => {
+    // A crashed server leaves its file behind; handing that port to a skill would
+    // produce a connection error far away from the cause.
+    await using tmp = await tmpdir()
+    await LLMServerTokens.publish(tmp.path, {
+      pid: 0x7ffffffe,
+      hostname: "127.0.0.1",
+      port: 1234,
+      url: "http://127.0.0.1:1234/v1",
+      started: Date.now(),
+    })
+    expect(await LLMServerTokens.address(tmp.path)).toBeUndefined()
+    // And the file is gone, so a directory does not accumulate one entry per crash.
+    expect(await Bun.file(LLMServerTokens.addressFile(tmp.path, 0x7ffffffe)).exists()).toBe(false)
+  })
+
+  test("keeps every live listener, newest first, without one overwriting another", async () => {
+    // Several sessions can be open on one project and each binds its own port. A single
+    // shared file would hand a caller whichever session happened to write last.
+    await using tmp = await tmpdir()
+    const now = Date.now()
+    await LLMServerTokens.publish(tmp.path, {
+      pid: process.pid,
+      hostname: "127.0.0.1",
+      port: 1111,
+      url: "http://127.0.0.1:1111/",
+      started: now - 5000,
+    })
+    await LLMServerTokens.publish(tmp.path, {
+      pid: process.ppid,
+      hostname: "127.0.0.1",
+      port: 2222,
+      url: "http://127.0.0.1:2222/",
+      started: now,
+    })
+
+    expect(await LLMServerTokens.addresses(tmp.path)).toMatchObject([{ port: 2222 }, { port: 1111 }])
+    // The newest, because with several sessions open that is the one just started.
+    expect(await LLMServerTokens.address(tmp.path)).toMatchObject({ port: 2222 })
+
+    // Withdrawing one leaves the other reachable.
+    await LLMServerTokens.unpublish(tmp.path, process.ppid)
+    expect(await LLMServerTokens.addresses(tmp.path)).toMatchObject([{ port: 1111 }])
+  })
+})
+
+/** The store file for a directory, derived the same way the module derives it. */
+async function pathOf(directory: string) {
+  const { Hash } = await import("@mimo-ai/shared/util/hash")
+  const { Global } = await import("../../src/global")
+  const { Filesystem } = await import("../../src/util")
+  const path = await import("path")
+  // `Filesystem.resolve`, matching the module: it canonicalises symlinks, so on macOS
+  // `/var/…` and `/private/var/…` land in one bucket instead of two.
+  return path.join(Global.Path.state, "llm-server", Hash.fast(Filesystem.resolve(directory)), "tokens.json")
+}

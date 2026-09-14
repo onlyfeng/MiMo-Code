@@ -1,215 +1,53 @@
-# 模型 API
+# 模型 API（Capability API）
 
-在项目目录中启动普通 `mimo` TUI，会为该 TUI 的固定启动目录自动运行一个模型 API
-监听器，默认绑定 `127.0.0.1` 并自动选择可用端口。它提供模型列表和支持音频输入的聊天接口；退出该 TUI 时关闭。`mimo attach` 只连接现有服务，不启动本地监听器。
+每个 MiMoCode 服务都会在 `/v1` 上提供 OpenAI 兼容的模型列表与聊天接口，路由随
+`InstanceRoutes` 一起挂载，始终存在。访问**始终**需要一枚已签发的作用域令牌：
+该校验由路由自身完成，与服务器的 Basic 认证无关，即使未设置
+`MIMOCODE_SERVER_PASSWORD` 也不会放行。
 
-无需 TUI 时，仍可执行 `mimo serve --llm-server`，在现有服务端口启用相同接口。
-ACP、嵌入式实例以及不带显式 API 参数的 `serve` 保持默认关闭；供应商凭据或模型令牌
-本身不会启动服务。TUI 自动启动监听器也不会自动签发模型令牌。
+完整的接口说明、请求形态与客户端示例见随内置技能分发的
+`mimocode-docs/reference/capability-api.md`。本文只记录 fork 与 upstream 的差别。
 
-## 启动、选模与签发
+## 与 upstream 的差别
 
-```sh
-# 终端一：普通 TUI 自动启动该项目的模型 API
-mimo /absolute/project/path
+行为与 upstream 完全一致,仅保留两项本 PR 之前就存在的 fork 边界:
 
-# 或者在该项目目录中使用无 TUI 的显式服务
-mimo serve --port 4096 --llm-server
+- 非 loopback 绑定守卫读取 `MIMOCODE_SERVER_OPERATOR_PASSWORD`,因此 worker
+  自生成的凭据无法满足它。
+- `Server.listen` 接受 `advertiseDirectory`。upstream 以 `process.cwd()` 作通告键
+  (它假设进程已 chdir 进项目);fork 的 TUI worker 服务的是启动时选定的目录,
+  未必等于 cwd,通告落错桶会让 `mimo llm-server issue` 找不到它。
 
-# 终端二：选择同一个项目，明确选择自己的 provider/model
-mimo llm-server issue --directory /absolute/project/path --model provider/model --ttl 1h --max-age 24h --json
+`mimo serve --llm-server` 已随本次对齐移除(`src/index.ts` 启用了 yargs `.strict()`,
+所以旧命令会直接报未知选项)。`mimo serve` 现在与 upstream 一致,**默认通告**;而
+`mimo acp` 与 `mimo web` 与 upstream 一致传 `advertise: false`,不进地址注册表。
+通告与否从来只决定 `mimo llm-server issue` 能否解析出 `base_url`:`/v1` 路由始终
+挂载,且始终要求已签发的令牌。
 
-# 有限模型列表：重复 --model
-mimo llm-server issue --directory /absolute/project/path --model provider/chat --model provider/other-chat --json
+upstream 在这条路径上的若干已知行为(无界请求体、无并发上限与超时、provider 异常
+原文透出、远程图片 URL 未校验即交给 SDK 等)按上游原样保留,理由与取舍记录在
+[upstream-deviations.md](upstream-deviations.md) 的 FD-004。
 
-# 显式授权该项目当前及后续生效配置中的全部模型
-mimo llm-server issue --directory /absolute/project/path --all-models --json
-```
-
-`--model` 与 `--all-models` 必须且只能使用一种。模型发现与 upstream 一致，
-从该项目当前生效、经过插件及配置过滤的 provider registry 中枚举模型，并按标识排序；
-不按语音能力分类，不调用 SDK 工厂或发送生成请求。因此列表表示登记与授权范围，
-不证明聊天传输可用、供应商在线、账户余额或远端参数支持。
-
-有限列表接受 1 至 64 个不重复的完整 `provider/model`，签发时逐个检查是否存在于当前登记，
-拒绝空列表和通配符。`--all-models` 使用显式全部范围，不把当前目录的模型展开成快照。
-
-`--json` 签发结果包含 `api_key`、`scope`、`base_url` 和固定目录/范围/期限的
-`renew_argv`。有限范围继续返回 `models`，仅单模型时返回 `model`；全部范围使用
-`scope:{"type":"all"}`，不伪造空 `models`。续签保留实际授权范围。调用方应使用完整
-`provider/model`；全部范围可从 `GET /v1/models` 查询当前登记列表。找不到该目录对应的
-存活监听器时，`base_url` 为 `null`；命令不会自动启动监听器。
-
-地址发现只探测本机地址，使用不携带令牌的监听器身份检查，拒绝旧登记和重定向。
-绑定指定局域网地址时，请手动填写服务地址。`GET /v1/_mimocode` 只返回随机监听器
-标识，不读取项目配置或返回模型、令牌；这是地址确认专用的无凭据端点。
-
-## TUI 服务认证与生命周期
-
-TUI worker 为普通服务 API 使用内存中的随机 Basic 凭据；已配置的
-`MIMOCODE_SERVER_PASSWORD` 和用户名优先。自动密码不写入环境变量、项目配置、模型
-令牌文件、地址记录或公开输出。默认 TUI 的内部 RPC 请求由 worker 补上认证头，显式
-HTTP transport 的认证头只经受信任的 worker/host 通道传递。
-
-这份 Basic 凭据不授予模型访问权限。模型调用仍需以下显式签发的 Bearer 令牌；模型
-令牌也不提供通用服务 API 或 `attach` 权限。需要另一个 TUI 使用 `attach` 连接时，
-在服务启动前配置 operator 密码，并让连接端提供同一密码。
-
-自动密码不会放宽普通 API 的目录限制，也不会自动许可非回环绑定。显式绑定其他地址
-仍遵守原来的 operator 密码或 `--no-auth` 网络准入规则；模型令牌始终只认固定项目目录。
-多个 TUI 分别拥有自己的监听器和自动凭据，退出其中一个不会关闭其它 TUI 的服务。
-
-默认监听器启动失败时会显示错误，TUI 继续使用内部 RPC；显式 HTTP 启动失败则退出并
-清理资源。关闭先停止模型 API 接收并取消在途请求，等待尚未完成的监听器启动收敛，
-再排空 checkpoint 和清理项目实例；自动凭据最后释放。关闭监听器不删除已签发令牌，
-其范围、期限与撤销规则继续生效。
-
-## 调用与授权范围
-
-| 接口                            | 行为                                             |
-| ------------------------------- | ------------------------------------------------ |
-| `GET /v1/models`                | 返回该令牌授权且当前有效配置中的模型             |
-| `POST /v1/chat/completions`     | 非流式 JSON 或 SSE，支持文本、图片、输入音频和客户端工具调用协议 |
-
-把签发结果中的 `api_key` 作为 `Authorization: Bearer ...`，将 `base_url`
-配置为客户端的 API 基址（已经包含 `/v1`）。例如将签发结果保存在调用方的秘密配置
-中，再传入客户端；不要提交令牌到项目文件。
-
-令牌授权**固定项目目录及显式模型范围**。有限范围精确匹配模型标识；全部范围只包含
-该目录当前生效配置中的模型，后续增加或删除模型也随有效配置变化，不扩大到
-其他目录。空范围和通配符都不表示全部模型。
-HTTP 参数不能切换目录或 workspace。
-
-代理使用项目已有供应商凭据；客户端令牌不会成为供应商请求的认证头。聊天路径沿用
-provider 配置和聊天插件钩子，构造不持久化的请求上下文；只把工具调用返回给客户端，
-不执行 TUI 的工具、MaxMode、actor、checkpoint 或压缩工作流。
-
-与 upstream `1c13f051` 保持一致，不提供独立语音合成或转录端点。
-`/v1/audio/speech` 和 `/v1/audio/transcriptions` 在有效模型令牌下也返回 404；
-`serve --audio-api`、`MIMOCODE_AUDIO_API_KEY` 和 `issue --capability` 已移除。
-聊天内 `input_audio`、TUI 语音输入及 MCP sampling 保持各自现有行为。
-
-## 有效期、查询与撤销
-
-默认闲置期限为一小时，绝对期限为一天。有效令牌验证会刷新闲置期限；绝对期限从签发
-时间计算，不随使用刷新。`--ttl` 和 `--max-age` 可设为正安全整数毫秒对应的时长，或
-分别使用 `none` 取消该期限。零、负值、无效时长及时间戳溢出仍会拒绝。
-
-| 签发参数 | 到期规则 |
-| --- | --- |
-| 省略两项，或 `--ttl 1h --max-age 24h` | 闲置一小时或签发一天，先到者生效 |
-| `--ttl none --max-age 24h` | 仅签发后一天到期 |
-| `--ttl 1h --max-age none` | 仅闲置一小时到期，使用会刷新 |
-| `--ttl none --max-age none` | 无到期时间，仍可撤销 |
-
-例如显式签发固定项目的永久全部模型令牌：
+## 令牌
 
 ```sh
-mimo llm-server issue --directory /absolute/project/path --all-models --ttl none --max-age none --json
+mimo llm-server issue --model provider/model --ttl 1d --json
+mimo llm-server list
+mimo llm-server revoke <id>
 ```
 
-签发和列表 JSON 分别用 `idle_ms`、`max_age_ms` 的 `null` 表示已取消的期限；只有两项
-都取消，`expires_at` 才为 `null`。终端用 `never` 显示无到期时间，并列出两项期限。
-`renew_argv` 分别保留每个 `none`。无到期时间不会取消每次请求的资源和超时限制。
-嵌入库对应 `expiry:{idleMs:null,maxAgeMs:null}`；v2 存储的两项期限必须存在且为正安全
-整数或显式 `null`，缺字段不代表永久，v1 记录仍只接受原来的有限期限。
-新签发令牌的明文仅在签发结果中返回，磁盘只保存 SHA-256 哈希；查询不返回明文。
+- 令牌按目录绑定：为 A 目录签发的令牌在 B 目录无效。
+- 存储只保存哈希，不保存令牌本身。
+- `ttl` 为从最后一次使用起算的滑动有效期，`maxAge` 为自签发起的绝对上限；两者都
+  可写 `none`。默认值可在 `mimocode.json` 的 `llmServer` 中配置。
+- **空的 `models` 列表表示「全部已配置模型」**（upstream 的设计）。需要限定范围时
+  必须显式传 `--model`。
 
-```sh
-mimo llm-server list --directory /absolute/project/path --json
-mimo llm-server revoke TOKEN_ID --directory /absolute/project/path
-```
+## 2026-09-14 变更
 
-撤销阻止之后的请求准入，已经授权的在途请求由请求取消/期限/服务关闭管理。重新
-签发产生新的令牌，旧令牌不会自动撤销。列表与撤销直接操作该目录的令牌存储，
-不初始化项目或插件。
+fork 原有的并行实现（`server/model-api.ts` 与 `src/llm-server/` 下的六个模块）已退役，
+改用 upstream 的 capability 路由。**此前签发的令牌全部失效**：fork 写入的是
+`version: 2` 记录，而 upstream 按 `version: 1` 读取，遇到未知版本视为空存储。
+令牌本身是短期凭据（默认 1 天滑动有效期），重新 `issue` 即可。
 
-旧 v1 单模型令牌可等价读取，范围与期限不变；只有真正修改记录时才在同一文件锁内
-原子写成 v2。查询、未知令牌及无变化的撤销不会仅因版本旧而改写存储。旧记录中合法的
-字面 `*` 模型标识仍按原字符串精确匹配，不变成通配授权；新签发不接受该字符。
-磁盘只保存 canonical `scope`，有限范围的公共库结果保留旧 `models` 投影；读取可能是
-全部范围的结果时，应按 `scope.type` 区分，不能假设始终存在 `models` 数组。
-
-## 协议范围与资源限制
-
-请求体按实际读取量限制为 25 MiB；同一监听器最多两个在途请求，每个请求的取消
-期限为 120 秒。流式请求直到响应结束或取消被底层处理后才释放名额。客户端断开和
-服务关闭传播取消信号；关闭先停止接收并取消在途工作。`serve` CLI 收到
-SIGINT/SIGTERM 后再清理项目实例；嵌入宿主调用 `Server.stop()` 后仍负责实例生命周期。
-
-聊天图片支持请求体内的 `data:image/...;base64,...` 和 HTTP(S) `image_url`，每张
-解码后最多 5 MiB，支持 PNG、JPEG、WebP、GIF；全部图片与音频合计最多 25 MiB。
-远程图片在认证、模型范围、图片能力和参数校验之后下载，逐跳检查所有 DNS 结果并
-固定连接到已校验的公网 IP，保留原 Host 与 TLS 主机名校验。最多五次重定向，拒绝
-URL 用户凭据、私网/回环/特殊地址、压缩响应及图片类型不匹配；取消后清理连接。
-下载请求不携带客户端或供应商凭据，SDK 只收到下载后的图片数据。此限制同样适用于
-dev/compat，独立于它的 WebFetch 私网规则。
-
-聊天的用户消息还可包含音频，与文字、图片按原顺序交给模型：
-
-```json
-{
-  "model": "provider/audio-capable-chat-model",
-  "messages": [{ "role": "user", "content": [
-    { "type": "text", "text": "请说明这段音频的内容。" },
-    { "type": "input_audio", "input_audio": { "data": "<WAV 文件的 Base64>", "format": "wav" } }
-  ] }]
-}
-```
-
-`data` 接受规范 Base64；裸 Base64 必须提供 `format`，`data:audio/...;base64,...`
-可以推断格式，同时提供 `format` 时两者必须一致。不接受远程音频 URL。格式集合为
-`wav/mp3/mpeg/mpga/m4a/mp4/flac/ogg/webm`，其中别名会归一化。单个音频解码后最多
-20 MiB，所有媒体共用上述 25 MiB 总额；HTTP 请求体的 25 MiB 额度另计 Base64 开销。
-模型必须声明音频输入能力，且实际 SDK 传输支持该格式：OpenAI/Azure Chat 和
-OpenAI-compatible Chat 只接收 WAV/MP3；Google/Vertex GenerateContent 可承载上述容器。
-这里要求配置实际选中 Chat 传输，仅使用 OpenAI/Azure 包名并不代表启用了 Chat。
-OpenAI Responses、已知不支持音频的适配器及未经验证的适配器会提前拒绝。SDK 能编码
-音频不代表供应商当前在线或每个模型都能理解该音频。
-
-聊天累计 SDK 输出事件限制为 16 MiB（含事件字段，不重复计算 SDK 回带的输入请求）。
-供应商错误脱敏；未收到有效结束事件的流不会被标成正常 `stop`。聊天请求不自动重试。
-
-## 客户端供应商选项
-
-聊天请求的 `provider_options` 接受下列按模型和实际 SDK 传输验证的白名单，字段直接
-放在该对象内，不再套 `openai` 等供应商命名空间。未知字段（包括嵌套对象中的未知键）、错误类型或
-不支持的模型/传输组合返回 400；校验发生在图片下载和生成之前。模型、消息、工具、
-URL、认证头及 `forceReasoning` 等保留字段不能由此覆盖。
-
-| 模型及传输                       | 可用字段与范围                                                                                                                                                                                        |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAI / Azure Chat 或 Responses | `reasoningEffort`: `none/minimal/low/medium/high/xhigh`；`textVerbosity`: `low/medium/high`。要求实际 SDK 能消费该模型的字段；Responses 另支持 `reasoningSummary`: `auto/detailed`，Chat 拒绝 summary |
-| 已支持的 Anthropic Claude        | `thinking`: `{type:"enabled",budgetTokens:N}`、`{type:"disabled"}`，或支持模型上的 `{type:"adaptive",display?:"omitted"\|"summarized"}`；`effort` 只能取该模型已有 adaptive 变体支持的值              |
-| Google / Vertex Gemini 2.5       | `thinkingConfig.thinkingBudget`：Pro 为 `-1` 或 `128..32768`；Flash 为 `-1` 或 `0..24576`；Flash-Lite 为 `-1`、`0` 或 `512..24576`。另支持布尔 `includeThoughts`                                      |
-| Google / Vertex Gemini 3 / 3.1   | `thinkingConfig.thinkingLevel`：3 Pro 为 `low/high`；3.1 Pro 为 `low/medium/high`；3 Flash 为 `minimal/low/medium/high`。另支持布尔 `includeThoughts`                                                 |
-| Xiaomi MiMo Chat                 | 实际 `xiaomi` 供应商的 `mimo-v2.5` / `mimo-v2.5-pro`：`thinking:{type:"enabled"\|"disabled"}`；本地 Responses 传输不在此白名单中                                                                      |
-| DeepSeek v4 Chat                 | 实际 `deepseek` 供应商的 `deepseek-v4-pro` / `deepseek-v4-flash`：`thinking` 开关及 `reasoningEffort:low/high/max`                                                                                    |
-
-例如支持推理的 OpenAI Responses 模型可以使用：
-
-```json
-{ "provider_options": { "reasoningEffort": "high", "reasoningSummary": "detailed" } }
-```
-
-Anthropic 显式思考预算为 `1024..31999`，还受模型可用输出容量限制。SDK 会把预算加进
-输出令牌上限，因此两者合计不能超过模型配置与 SDK 已知上限；显式输出超限返回 400，
-省略输出上限时为思考预算预留容量。Gemini 的 budget 与 level 互斥，切换时清除旧选择器，
-独立的 `includeThoughts` 设置会保留。
-
-非空选项的覆盖顺序为供应商默认 → 模型配置 → 已校验客户端选项 → 顶层
-`reasoning_effort` 对应的既有模型变体 → 可信项目插件。顶层变体仍需存在，其附带的
-summary 等默认值也会覆盖客户端字段；要独立组合推理强度和摘要，可只使用
-`provider_options`。切换 thinking 类型会替换旧类型的字段。MiMo 的顶层 low/medium/high
-在这条路径都表示开启 thinking，不承诺不同强度；DeepSeek 显式关闭 thinking 时不能
-同时指定 effort，若顶层变体开启 thinking 则按该变体处理。
-
-省略 `provider_options` 或传 `{}` 保持此前的配置和变体合并行为，不自动启用新参数。
-白名单证明本地 SDK 的编码和校验范围，不保证远端接受所有模型与参数组合。
-其他影响行为但未支持的参数也明确拒绝。旧音频接口的迁移说明见 [音频接口调整](audio-api.md)。
-
-普通 OpenAPI 和生成 SDK 仍不包含这组可选接口；可使用兼容客户端或直接 HTTP
-调用。Node 入口导出 `LLMServerTokens` 供嵌入端显式管理令牌，只有传入
-`Server.listen({ ..., llm: { directory } })` 才开启代理。普通 TUI 在自身 worker 中传入
-该选项；其它入口不会因此默认启用。
-接口按 [FD-004](upstream-deviations.md) 保留显式令牌、提前鉴权、固定目录与可取消关闭的要求。
+背景与完整取舍见 [upstream-deviations.md](upstream-deviations.md) 的 FD-004。
