@@ -13,7 +13,6 @@ import { Global } from "@/global"
 import { LSP } from "@/lsp"
 import { Command } from "@/command"
 import { QuestionRoutes } from "./question"
-import { CapabilityRoutes, CAPABILITY_PREFIX } from "./capability"
 import { PermissionRoutes } from "./permission"
 import { WorkflowRoutes } from "./workflows"
 import { BashInteractiveRoutes } from "./bash-interactive"
@@ -28,6 +27,7 @@ import { ConfigRoutes } from "./config"
 import { ExperimentalRoutes } from "./experimental"
 import { ProviderRoutes } from "./provider"
 import { EventRoutes } from "./event"
+import { CapabilityRoutes, CAPABILITY_PREFIX } from "./capability"
 import { SyncRoutes } from "./sync"
 import { InstanceMiddleware } from "./middleware"
 import { jsonRequest } from "./trace"
@@ -63,8 +63,8 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
     .route("/question", QuestionRoutes())
     .route("/bash-interactive", BashInteractiveRoutes())
     .route("/provider", ProviderRoutes())
-    .route("/sync", SyncRoutes())
     .route(CAPABILITY_PREFIX, CapabilityRoutes())
+    .route("/sync", SyncRoutes())
     .route("/", FileRoutes())
     .route("/", EventRoutes())
     .route("/mcp", McpRoutes())

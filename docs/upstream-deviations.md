@@ -180,19 +180,33 @@ where this delta does not change their implementation.
   `protocol.ts` that already accepts `image_url` and `input_audio`. Checked
   rather than assumed: those modules were a second implementation of what
   upstream ships.
-- Observable contract: identical to upstream. `src/llm-server/`,
-  `routes/instance/capability.ts`, `cli/cmd/llm-server.ts`, `config/llm-server.ts`
-  and `util/self.ts` are byte-for-byte upstream. Three deltas remain on this
-  surface and **all three predate this change**:
-  - `MIMOCODE_SERVER_OPERATOR_PASSWORD` rather than upstream's
-    `MIMOCODE_SERVER_PASSWORD_SUPPLIED` in the containment and non-loopback
-    guards, so a worker-generated credential cannot satisfy either.
-  - `Server.listen` takes `advertiseDirectory`. Upstream keys the advertisement
-    on `process.cwd()`, which holds when the process chdir'd into the project;
-    this fork's TUI worker serves a directory chosen at startup that need not
-    equal cwd, and an advertisement in the wrong bucket is invisible to
-    `mimo llm-server issue` in the project it actually serves.
-  - `util/ssrf.ts` blocks the complete `fe80::/10` range (FC-010).
+- Observable contract: identical to upstream. Byte-for-byte upstream:
+  `src/llm-server/`, `routes/instance/{capability,middleware,index}.ts`,
+  `routes/instance/httpapi/server.ts`, `cli/cmd/{llm-server,serve,acp,web}.ts`,
+  `config/llm-server.ts`, `util/self.ts`. Two files still differ, and **both
+  predate this change**:
+  - `server/server.ts` (+10/-2): the non-loopback bind guard reads
+    `MIMOCODE_SERVER_OPERATOR_PASSWORD` rather than upstream's
+    `MIMOCODE_SERVER_PASSWORD`, so a credential this process generated for a
+    listener nobody asked for cannot authorize a non-loopback bind; and
+    `Server.listen` takes `advertiseDirectory`, because upstream keys the
+    advertisement on `process.cwd()` while this fork's TUI worker serves a
+    directory chosen at startup, and an advertisement in the wrong bucket is
+    invisible to `mimo llm-server issue` in the project it actually serves.
+    This is now the ONLY use of `MIMOCODE_SERVER_OPERATOR_PASSWORD` in `src`.
+  - `server/middleware.ts` (+1/-1) and `util/ssrf.ts` (+1/-1):
+    `RecoveryConflictError`, and FC-010's complete `fe80::/10` range.
+- Two containment call sites were aligned rather than kept. Both
+  `routes/instance/middleware.ts` and `routes/instance/httpapi/server.ts` read
+  `MIMOCODE_SERVER_OPERATOR_PASSWORD` where upstream reads
+  `MIMOCODE_SERVER_PASSWORD_SUPPLIED`. Checked rather than assumed: in
+  `flag/flag.ts` both getters read the same `operatorServerPassword` variable,
+  one returning the string and the other `Boolean()` of it, so the two guards
+  are the same test. The fork's spelling bought nothing and cost upstream's
+  comment, which is the only place the "who supplied the credential" rule is
+  written down — including its reasoning about `/v1` bypassing basic auth.
+  `routes/instance/index.ts` differed only in where the capability import and
+  route sat in their lists; that is pure future conflict, so it is aligned too.
 - Adopted from upstream, including where it relaxes the fork: an empty `models`
   array now means "all configured models"; `function.strict` passthrough is
   dropped; the `--directory`, `--all-models`, `--capability` and `--audio-api`
