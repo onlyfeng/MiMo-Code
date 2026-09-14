@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-09-15
 - Upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
 - Prior reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Main behavior (runtime/tests): `1ae374852cedd3426b73618ad787f7e077fd1fe3`
+- Main behavior (runtime/tests): `4eacc84dccf83c22f533c35bea282d4c5a38cacd`
 - Bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -83,7 +83,11 @@ not change their implementation. The preceding review is retained in the
   Notification receipts are read after that join. A completed turn cannot hide
   cancellation of subsequently queued work; an already-cancelled turn does not
   receive a duplicate notice. Failed-send fallback remains. Owner acquisition and cleanup installation are
-  masked together, while a follower's wait remains interruptible.
+  masked together, while a follower's wait remains interruptible. Direct Effect
+  hooks on an active execution fiber delegate cancellation to the existing
+  service scope and wait interruptibly, including self/ancestor cancellation
+  from a finalizer. External callers still join complete cleanup. Model tool
+  calls already use independent Promise-bridge fibers; their interface is unchanged.
   Runner installs its exit finalizer before its child can be interrupted, then
   keeps the start wait and actual work interruptible. This prevents a child that
   exits before its first instruction from leaving the runner's done signal open.
@@ -663,7 +667,8 @@ not change their implementation. The preceding review is retained in the
   foreground/background and outcome/wait/persistence/parent notice. No new skip
   replaces either case. Final cancellation regressions cover the Runner
   pre-first-instruction exit, owner-acquisition interruption, queued execution
-  admission and cancellation before worker startup. Workflow agent timeouts
+  admission, cancellation before worker startup and direct Effect hook
+  self/ancestor cancellation. Workflow agent timeouts
   bound the cancellation join to the existing reclaim grace while detached
   cleanup continues; shared cancellation retains interrupt/join semantics.
   The dated quarantine entries below describe their historical snapshots.
