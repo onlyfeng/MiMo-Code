@@ -59,6 +59,26 @@ describe("Server.listen llm-server advertisement", () => {
     }
   })
 
+  test("bind ::1 advertises a bracketed URL that parses back to the bind address", async () => {
+    // A bare IPv6 literal is not a valid URL host. Assigning one to `URL.hostname`
+    // is silently ignored by the WHATWG parser — the URL keeps its previous host —
+    // so an unbracketed assignment advertised `http://localhost:<port>/`, which
+    // commonly resolves to IPv4 and cannot reach an IPv6-only listener.
+    //
+    // The assertion is the round trip, not the string: what `llm-server issue`
+    // hands a client has to parse back to the address actually bound.
+    const cwd = process.cwd()
+    const server = await Server.listen({ port: 0, hostname: "::1" })
+    try {
+      const address = await LLMServerTokens.address(cwd)
+      expect(address?.url).toContain("[::1]")
+      expect(new URL(address!.url).hostname).toBe("[::1]")
+      expect(address?.url).not.toContain("localhost")
+    } finally {
+      await server.stop()
+    }
+  })
+
   test("two listeners in one process keep independent advertisements", async () => {
     const cwd = process.cwd()
     const a = await Server.listen({ port: 0, hostname: "127.0.0.1" })

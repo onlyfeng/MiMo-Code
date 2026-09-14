@@ -38,6 +38,17 @@ async function withUpstream<T>(
                 // heuristics, so this asserts OUR merge, not transform's guesswork.
                 variants: { high: { reasoningEffort: "high" }, low: { reasoningEffort: "low" } },
               },
+              // Same model with per-model `options` set, which is what
+              // `provider.<id>.models.<id>.options` produces in a real config.
+              // Kept separate so the rows above keep asserting the un-configured
+              // default — a configured option there would mask a dropped merge.
+              "configured-model": {
+                name: "Configured Model",
+                modalities: { input: ["text" as const], output: ["text" as const] },
+                reasoning: true,
+                options: { reasoningEffort: "low" },
+                variants: { high: { reasoningEffort: "high" } },
+              },
             },
           },
         },
@@ -372,6 +383,42 @@ describe("what actually reaches the provider", () => {
     const body = (await res.json()) as { error: { message: string } }
     expect(body.error.message).toContain("ludicrous")
     expect(body.error.message).toContain("high")
+  })
+
+  test("configured model options reach the wire, and stay overridable", async () => {
+    // `session/llm.ts:542-551` layers base -> model.options -> agent -> variant.
+    // Skipping `model.options` here made a configured model behave differently over
+    // `/v1` than in a session, and neither side reports which options it used, so
+    // the divergence was silent. Asserted on the wire rather than on our merge.
+    const configured = await sentBody({
+      model: "test/configured-model",
+      messages: [{ role: "user", content: "hi" }],
+    })
+    expect(configured.reasoning_effort).toBe("low")
+
+    // The un-configured model is the control: without it, a transform-level
+    // default would satisfy the assertion above and the merge could still be dead.
+    const control = await sentBody({
+      model: "test/chat-model",
+      messages: [{ role: "user", content: "hi" }],
+    })
+    expect(control.reasoning_effort).toBeUndefined()
+
+    // Precedence, both directions. Config is a default, not a ceiling: the variant
+    // the caller selects and their explicit escape hatch each still win.
+    const byVariant = await sentBody({
+      model: "test/configured-model",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+    })
+    expect(byVariant.reasoning_effort).toBe("high")
+
+    const byEscapeHatch = await sentBody({
+      model: "test/configured-model",
+      messages: [{ role: "user", content: "hi" }],
+      provider_options: { reasoningEffort: "high" },
+    })
+    expect(byEscapeHatch.reasoning_effort).toBe("high")
   })
 
   test("provider_options reaches the wire, merged flat and never provider-keyed", async () => {

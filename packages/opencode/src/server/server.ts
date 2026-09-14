@@ -157,7 +157,11 @@ export async function listen(opts: {
   // printed base_url is usable on this machine.
   const advertisedHostname = opts.hostname === "0.0.0.0" || opts.hostname === "::" ? "127.0.0.1" : opts.hostname
   const advertised = new URL("http://localhost")
-  advertised.hostname = advertisedHostname
+  // A bare IPv6 literal is not a valid URL host: the WHATWG parser rejects it and
+  // leaves the previous value, so `--hostname ::1` would advertise
+  // `http://localhost:<port>/`, which commonly resolves to IPv4 and cannot reach an
+  // IPv6-only listener. `::` never arrives here — it is mapped to `127.0.0.1` above.
+  advertised.hostname = advertisedHostname.includes(":") ? `[${advertisedHostname}]` : advertisedHostname
   advertised.port = String(server.port)
   if (advertise) {
     await LLMServerTokens.publish(directory, {
