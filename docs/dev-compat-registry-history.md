@@ -3760,3 +3760,21 @@ the final publication gates. Prior main/compat evidence is not re-dated.
 - All seven active DC entries were re-reviewed; none names the CLI token
   commands. The merge applied with no conflicts and `cli/cmd/llm-server.ts` is
   byte-identical to `main` on this branch.
+
+## 2026-09-14 — registry reconciliation inheritance (PR #117)
+
+- Accepted main tip/shared audit: `a2d8d88638c6b898ce36c93f88d66e9a54ea4636`; inherited source/tests remain
+  `bbac42b72bc63ebe52cb74a153c248b4e51a09d2` because the change is registry-only.
+- Compat source/test behavior and inheritance merge are unchanged at
+  `644eddc4bbbcf6f10acb2cb00ee28dbc498b50b9`; this propagation merges `main`
+  at `15ed8252da7784c4e61a5c782c78430cb32faa0a` on top of compat tip `8dc952058f9052bd374801b9d26146e6b932200e`.
+- **Registry-only inherit, no compat override, no owner added or retired.** The
+  three incoming files are the shared FD/FC registries and their history, none
+  of which compat changes on its own; measured from the shared merge-base
+  `8f94a80c`, the overlap is empty and all three are byte-identical to `main`.
+- The inherited content corrects instructions both branches read at the start
+  of a sync: FD-004's sync index row and FC-008's 2026-09-07 model API lifecycle
+  review still required behaviour FD-004 records as retired, and the FD/FC
+  review-record headers still named upstream `98702641` rather than `6fbb1732`.
+  All seven active DC entries were re-reviewed; none depends on the corrected
+  rows.

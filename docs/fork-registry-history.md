@@ -3138,3 +3138,13 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - C02 adopts local-first models-catalog reads with fail-closed `MIMOCODE_MODELS_PATH` and TUI hot-reload; C03 adopts audio/video inline reading with capability-described read guidance; C04 adopts the TaskRegistry Bus-event Instance fix. None had fork divergence beyond two union merges in `read.ts`/`registry.ts`.
 - The fork carried an actual bug upstream had just fixed: a non-main runner observed the caller's `lastAssistant` instead of cancellation. Ported as `interruptFor()` at the fork's per-start entry points.
 - Four upstream-new actor cases are quarantined in place under FC-008 for a dedicated follow-up fork PR; no upstream PR is opened. Pure registry commits do not advance the snapshot above; final branch-tip CI and remote ancestry are checked separately after publication.
+
+## 2026-09-14 — MiMo transport pinning, OS-ephemeral port 0, and upstream's capability route
+
+- Reviewed upstream `98702641a985fd2a3b81e407f58df7cbcee1f248..6fbb1732232c9d0ecefee209798a8586d78cb70d`
+  (five commits including one merge; 12 files, 227 insertions, 95 deletions upstream-to-upstream). No separate capability inventory was written for this round.
+- Prior fork main: `72064c41ec7311a4d3ca05dc480956f73463c0ff`; shared runtime/test snapshot `bbac42b72bc63ebe52cb74a153c248b4e51a09d2`.
+- Bundled guidance content advances to `118337857661a3fde59cd0406a598a4aa9d79688` (`model-api.md` retired, `capability-api.md` added, the `serve --llm-server` row dropped).
+- #109 adopts both capabilities in range. MiMo model ids are pinned to `@ai-sdk/openai-compatible` through upstream's `isMimoOrSmartModel`/`resolveModelNpm`, retiring the fork's `usesMimoResponsesApi`, `isMimoModel` and `xiaomi` loader; port `0` binds an OS-ephemeral port instead of preferring 4096.
+- #110–#116 close a divergence older than the range: upstream has shipped its capability route since `b4bbe81c` (2026-08-18). The fork's parallel model API is retired in its favour; FD-004 is rewritten as that adoption, keeps two pre-existing boundaries and three corrections, and records each upstream behaviour left as shipped. No owner retires.
+- The registry headers were not advanced when the round merged; a later audit (#117) caught that, together with two lifecycle contracts — FD-004's sync index row and FC-008's 2026-09-07 model API review — that still required the retired behaviour. Pure registry commits do not advance the snapshot above; final branch-tip CI and remote ancestry are checked separately after publication.

@@ -255,18 +255,36 @@ Both sides have to be measured against the same merge-base. Against `5979dfa3`,
 changes. The merge applied with no conflicts, and `cli/cmd/llm-server.ts` is now
 byte-identical to `main`.
 
+## 2026-09-14 registry reconciliation (third propagation, same day)
+
+Registry-only inherit, no compat override, no owner added or retired, and no
+runtime or test change. #117 touches `docs/upstream-deviations.md`,
+`docs/fork-capabilities.md` and `docs/fork-registry-history.md` and nothing
+else, so the inherited source/test behavior reference stays at `bbac42b7`.
+Measured from the shared merge-base `8f94a80c`, none of the three is among
+compat's own changes, and all three are byte-identical to `main` after the
+merge.
+
+What compat inherits is a correction to its instructions. FD-004's sync index
+row still required authentication-before-bootstrap and the TUI-owned listener,
+FC-008's 2026-09-07 model API lifecycle review still read as a live contract,
+and the FD/FC review-record headers still named upstream `98702641`. A sync on
+either branch would have started from the wrong baseline and could have
+restored hardening that FD-004 records as retired. The four review findings the
+#110 scope reset left unwritten are recorded as well.
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-14
 - Reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Accepted `main` tip: `8f94a80c54bfdf630f95767a7e46d5c5977bea1c`
+- Accepted `main` tip: `a2d8d88638c6b898ce36c93f88d66e9a54ea4636`
 - Inherited main behavior: `bbac42b72bc63ebe52cb74a153c248b4e51a09d2`
 - Compat behavior: `644eddc4bbbcf6f10acb2cb00ee28dbc498b50b9`
 - Prior compat tip: `5e6662f7216f0a4c1063e788aec89108c2478e80`
 - Main source inheritance merge: `644eddc4bbbcf6f10acb2cb00ee28dbc498b50b9`
-- Shared audit commit: `8f94a80c54bfdf630f95767a7e46d5c5977bea1c`
+- Shared audit commit: `a2d8d88638c6b898ce36c93f88d66e9a54ea4636`
 - Inherited bundled guidance content: `11833785` (bundled `mimocode-docs`: `model-api.md` retired, `capability-api.md` added, the `serve --llm-server` row dropped)
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
