@@ -3728,3 +3728,35 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   (`test/llm-server/`, `serve-advertise`, `worker-listener`, `util/self`,
   `test/flag/`) 111 pass / 0 fail; the compat-owned surfaces most likely to
   interact (`test/actor/`, `test/inbox/`) 317 pass / 2 skip / 0 fail.
+
+## 2026-09-14 — revoke guard inheritance (PRs #114, #116)
+
+- Accepted main tip/shared audit: `8f94a80c54bfdf630f95767a7e46d5c5977bea1c`;
+  inherited source/tests: `bbac42b72bc63ebe52cb74a153c248b4e51a09d2`; reviewed
+  upstream and bundled guidance unchanged from the entry above.
+- Compat source/test behavior and inheritance merge:
+  `644eddc4bbbcf6f10acb2cb00ee28dbc498b50b9`; prior tip:
+  `5e6662f7216f0a4c1063e788aec89108c2478e80`.
+- **Direct inherit, no compat override, no owner added or retired.** One source
+  file and one new test. `mimo llm-server revoke <id> --all` answered `--all`
+  first, so the id was discarded in silence and every token for the directory
+  was deleted while the caller had named exactly one; the ambiguous form now
+  fails. The guard tests presence (`args.id != null`) rather than truthiness,
+  because yargs binds an empty positional as `""` and
+  `revoke "$TOKEN_ID" --all` with the variable unset is the case it exists for.
+  #116 closes the last shape: `parserConfiguration({ "populate--": true })` puts
+  an id after `--` in `args["--"]`, never in the positional, so
+  `revoke --all -- llmk_...` named a token and still deleted every one. The test
+  harness shared that blind spot — it built its own yargs without that
+  configuration and so measured a parse shape the real CLI never produces; it now
+  sets it explicitly, and dropping it again fails the terminator case.
+- The overlap check produced a false positive on the first pass, recorded here
+  because it is the previous propagation's trap in a new form: the compat-owned
+  set was taken as `main..dev/compat` while `main` already carried the incoming
+  fix, so the change being propagated appeared as a compat delta in reverse.
+  Measured from the shared merge-base `5979dfa3`, `main` changed only
+  `src/cli/cmd/llm-server.ts` and `test/cli/llm-server-revoke.test.ts`, and
+  neither is among compat's own changes.
+- All seven active DC entries were re-reviewed; none names the CLI token
+  commands. The merge applied with no conflicts and `cli/cmd/llm-server.ts` is
+  byte-identical to `main` on this branch.

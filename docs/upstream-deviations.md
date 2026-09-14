@@ -183,12 +183,17 @@ where this delta does not change their implementation.
 - Observable contract: identical to upstream apart from the two corrections
   below. Byte-for-byte upstream: `src/llm-server/{protocol,tokens}.ts`,
   `routes/instance/{capability,middleware,index}.ts`,
-  `routes/instance/httpapi/server.ts`, `cli/cmd/{llm-server,serve,acp,web}.ts`,
+  `routes/instance/httpapi/server.ts`, `cli/cmd/{serve,acp,web}.ts`,
   `config/llm-server.ts`, `util/self.ts`, `node.ts`.
-  `llm-server/completions.ts` carries one added line (the `model.options`
-  merge) and `server/server.ts` one changed line (the IPv6 bracket); both are
-  recorded as corrections below rather than as fork boundaries. Two further
-  deltas **predate this change**:
+  Three files carry a correction rather than a fork boundary:
+  `llm-server/completions.ts` one added line (the `model.options` merge),
+  `server/server.ts` one changed line (the IPv6 bracket), and
+  `cli/cmd/llm-server.ts` a guard on `revoke` — `--all` was answered before the
+  id, so naming a token and passing `--all` deleted every one of them in
+  silence. The guard tests presence rather than truthiness and also consults
+  `args["--"]`, because `index.ts` sets `parserConfiguration({ "populate--": true })`
+  and an id after the option terminator never reaches the positional.
+  Two further deltas **predate this change**:
   - `server/server.ts` (+10/-2): the non-loopback bind guard reads
     `MIMOCODE_SERVER_OPERATOR_PASSWORD` rather than upstream's
     `MIMOCODE_SERVER_PASSWORD`, so a credential this process generated for a
@@ -267,6 +272,26 @@ where this delta does not change their implementation.
     from the model) is appended like any other, so the response is a 200 with
     `finish_reason: "tool_calls"` and arguments the caller cannot execute. The
     caller's own `JSON.parse` is where this surfaces.
+  - `llm-server issue --model` writes the requested scope without checking it
+    against configured models, so a typo mints a credential that authorizes
+    nothing and `token issued` still prints. Self-correcting: the next request
+    returns `model_not_found`, naming the scope.
+  - `test/fixture/skills/llm-endpoint-demo/SKILL.md` instructs a reader to run
+    `llm-server status` and a bare `llm-server &`, neither of which exists —
+    the command registers only `issue`, `list` and `revoke` behind
+    `demandCommand(1)` — and offers a `--port` that belongs to `serve`. Inert:
+    the fixture is not listed in `test/fixture/skills/index.json`, so discovery
+    never surfaces it, and nothing else references it.
+  - Inherited content collides with this fork's synthetic-value rule in two
+    places, and both are left as upstream wrote them. `test/util/self.test.ts`
+    asserts on install-shaped paths (`/opt`, `/Applications/My App`,
+    `/home/o'brien`) rather than `/tmp/example` forms; they are generic rather
+    than machine-specific, which is what the rule guards against, and they are
+    chosen to exercise quoting. Bundled docs name real models — `capability-api.md`
+    once, `config.md` seven times, all predating this work — so correcting the
+    one this surface owns would leave it inconsistent with the corpus around it,
+    and correcting all of them is a documentation-convention change rather than
+    a sync.
   - `renew_argv`/`renew_command` serialize only what was passed on the command
     line, so a lifetime that came from `mimocode.json` is not pinned; if the
     config changes before expiry, the advertised renewal mints a token with
