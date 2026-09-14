@@ -170,12 +170,12 @@ projection is published.
 Source evidence and the four final result rows are recorded in the latest
 [compat history entry](dev-compat-registry-history.md).
 
-## 2026-09-14 capability route adoption and MiMo transport pinning
+## 2026-09-14 capability route adoption, MiMo transport pinning, and two capability corrections
 
-Direct inherit, no compat override, no owner added or retired. The merge applied
-with no conflicts, and the intersection that matters is empty: of the 41 `src`
-files this propagation newly inherits, **none** is a file where `dev/compat`
-holds a delta of its own. Measured from the real base — `git merge-base
+Direct inherit, no compat override, no owner added or retired. Covers PRs #109,
+#110 and #111. Both merges applied with no conflicts, and the intersection that
+matters is empty: of the 41 `src` files this propagation newly inherits,
+**none** is a file where `dev/compat` holds a delta of its own. Measured from the real base — `git merge-base
 origin/dev/compat origin/main`, which is `72064c41`, the previous propagation —
 rather than from the compat tip, which would have counted every override in
 reverse and reported all 39 as overlapping.
@@ -214,6 +214,14 @@ wrote `version: 2` records where upstream reads `version: 1`, and upstream's
 reader treats an unknown version as an empty store. `mimo llm-server issue` is
 the remedy.
 
+#111 rides along with two one-line corrections to the surface #110 adopted, so
+compat inherits them at the same time rather than a round later: `model.options`
+is merged at upstream's own precedence point, so a model configured in
+`mimocode.json` no longer behaves differently over `/v1` than in a session; and
+`Server.listen` brackets an IPv6 literal before assigning it to `URL.hostname`,
+which the WHATWG parser otherwise discards. Both carry a mutation-checked test.
+Neither touches a compat-owned surface.
+
 Source evidence and the final result row are recorded in the latest
 [compat history entry](dev-compat-registry-history.md).
 
@@ -223,12 +231,12 @@ Source evidence and the final result row are recorded in the latest
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-14
 - Reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Accepted `main` tip: `ecb965dd50ddf3fabb350513762ac283f9debac2`
-- Inherited main behavior: `37f32865152fd0010a46cc319bd41b85fdc3b1dd`
-- Compat behavior: `3787ccbc8515bb7d2bd2b9bff8e3076877ea3ebf`
+- Accepted `main` tip: `8015e6122fc8b299dceaf89a7f7f6dba0172240f`
+- Inherited main behavior: `4cf8ff6105655df5aea1c26d73d97ab2b9f6ce30`
+- Compat behavior: `88070423363c191e209b60db441f63f9eed31cb8`
 - Prior compat tip: `c1ee9ecbeda90224d4a7abbcfc877b9016b1117e`
-- Main source inheritance merge: `3787ccbc8515bb7d2bd2b9bff8e3076877ea3ebf`
-- Shared audit commit: `ecb965dd50ddf3fabb350513762ac283f9debac2`
+- Main source inheritance merge: `88070423363c191e209b60db441f63f9eed31cb8`
+- Shared audit commit: `8015e6122fc8b299dceaf89a7f7f6dba0172240f`
 - Inherited bundled guidance content: `11833785` (bundled `mimocode-docs`: `model-api.md` retired, `capability-api.md` added, the `serve --llm-server` row dropped)
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)

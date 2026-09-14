@@ -3676,15 +3676,15 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   before starting a continuation`, and `[TP-R14-12] undeliverable terminal
   notification is logged`.
 
-## 2026-09-14 — capability route adoption and MiMo transport pinning (PRs #109, #110)
+## 2026-09-14 — capability route adoption, MiMo transport pinning, and two capability corrections (PRs #109, #110, #111)
 
-- Accepted main tip/shared audit: `ecb965dd50ddf3fabb350513762ac283f9debac2`;
-  inherited source/tests: `37f32865152fd0010a46cc319bd41b85fdc3b1dd`; reviewed
+- Accepted main tip/shared audit: `8015e6122fc8b299dceaf89a7f7f6dba0172240f`;
+  inherited source/tests: `4cf8ff6105655df5aea1c26d73d97ab2b9f6ce30`; reviewed
   upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`; bundled guidance advances
   to `11833785` (`model-api.md` retired, `capability-api.md` added, the
   `serve --llm-server` row dropped).
 - Compat source/test behavior and inheritance merge:
-  `3787ccbc8515bb7d2bd2b9bff8e3076877ea3ebf`; prior tip:
+  `88070423363c191e209b60db441f63f9eed31cb8`; prior tip:
   `c1ee9ecbeda90224d4a7abbcfc877b9016b1117e`.
 - **Direct inherit, no compat override, no owner added or retired.** Main
   retired the fork's parallel model API — `server/model-api.ts`,
@@ -3720,6 +3720,10 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   working: the fork wrote `version: 2` records where upstream reads
   `version: 1`, and upstream's reader treats an unknown version as an empty
   store. `mimo llm-server issue` is the remedy for both.
+- #111 rides along rather than waiting a round: `model.options` is merged at
+  upstream's own precedence point, and `Server.listen` brackets an IPv6 literal
+  before assigning it to `URL.hostname`. Both carry a mutation-checked test and
+  neither touches a compat-owned surface.
 - Verification on the merge: `bun typecheck` 0 errors; the inherited surface
   (`test/llm-server/`, `serve-advertise`, `worker-listener`, `util/self`,
   `test/flag/`) 111 pass / 0 fail; the compat-owned surfaces most likely to
