@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm"
 import { PartTable } from "../session/session.sql"
+import { attachmentListOmitted } from "./media"
 
 // Project in SQLite so unused media and metadata never cross the driver boundary.
 export function projection(preview = false) {
@@ -14,6 +15,15 @@ export function projection(preview = false) {
     const size = sql`length(CAST(json_extract(replace(${value}, ${"\\u0000"}, ${"\\u0001"}), '$') AS BLOB))`
     return sql`json(CASE WHEN ${size} > 4000 THEN '"[large field omitted; use history get part_id]"' ELSE ${value} END)`
   }
+  const attachments = sql`(SELECT json_group_array(json_object(
+    'filename', json(value -> '$.filename'),
+    'mime', json(value -> '$.mime'),
+    'source', json(value -> '$.source'),
+    'url', CASE WHEN lower(substr(json_extract(value, '$.url'), 1, 5)) != 'data:' THEN json(value -> '$.url') END
+  )) FROM json_each(${PartTable.data}, '$.state.attachments'))`
+  // Preview bounds the entire serialized metadata list below: even tiny
+  // attachments form an unbounded driver payload when the list is long. Keep
+  // an array-shaped notice for preview consumers; get reads original parts.
   return {
     id: PartTable.id,
     message_id: PartTable.message_id,
@@ -22,8 +32,8 @@ export function projection(preview = false) {
     data: sql<string>`json_object(
       'type', json_extract(${PartTable.data}, '$.type'),
       'text', ${field("$.text")},
-      'filename', json_extract(${PartTable.data}, '$.filename'),
-      'mime', json_extract(${PartTable.data}, '$.mime'),
+      'filename', ${field("$.filename")},
+      'mime', ${field("$.mime")},
       'url', CASE WHEN lower(substr(json_extract(${PartTable.data}, '$.url'), 1, 5)) != 'data:' THEN ${field("$.url")} END,
       'source', ${field("$.source")},
       'prompt', ${field("$.prompt")},
@@ -41,13 +51,17 @@ export function projection(preview = false) {
       'reason', ${field("$.reason")},
       'cost', ${field("$.cost")},
       'tokens', ${field("$.tokens")},
-      'tool', json_extract(${PartTable.data}, '$.tool'),
+      'tool', ${field("$.tool")},
       'state', json_object(
         'status', json_extract(${PartTable.data}, '$.state.status'),
         'input', ${field("$.state.input")},
         'output', ${field("$.state.output")},
         'error', ${field("$.state.error")},
-        'attachments', json((SELECT json_group_array(json_object('filename', json_extract(value, '$.filename'), 'mime', json_extract(value, '$.mime'), 'source', json_extract(value, '$.source'), 'url', CASE WHEN lower(substr(json_extract(value, '$.url'), 1, 5)) != 'data:' THEN json_extract(value, '$.url') END)) FROM json_each(${PartTable.data}, '$.state.attachments')))
+        'attachments', json(${preview
+          ? sql`CASE WHEN length(CAST(${attachments} AS BLOB)) > 4000
+              THEN json_array(json_object('mime', ${attachmentListOmitted}))
+              ELSE ${attachments} END`
+          : attachments})
       ))`.mapWith((value: string) => JSON.parse(value) as typeof PartTable.$inferSelect.data),
   }
 }

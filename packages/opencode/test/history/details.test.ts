@@ -3,10 +3,11 @@ import { indexImportedParts } from "../../src/history/import"
 import { migrateIndexBatch } from "../../src/history/migration"
 import { afterEach, expect } from "bun:test"
 import { Effect, Layer } from "effect"
-import { Database } from "../../src/storage"
+import { Database, sql } from "../../src/storage"
 import { History } from "../../src/history"
 import { backfillAll } from "./fixtures/seed-index"
 import { projection } from "../../src/history/projection"
+import { attachmentListOmitted } from "../../src/history/media"
 import { PartTable } from "../../src/session/session.sql"
 import { HistoryTool } from "../../src/tool/history"
 import { Provider } from "../../src/provider"
@@ -251,6 +252,94 @@ it.live("SQL preview bounds NUL-containing fields without losing get details", (
       expect(
         Database.use((db) => db.select({ data: PartTable.data }).from(PartTable).orderBy(PartTable.id).all()),
       ).toEqual(stored)
+    }),
+  ),
+)
+
+for (const field of ["filename", "mime", "tool"] as const) {
+  it.live(`SQL preview bounds oversized ${field} metadata before the driver`, () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const value = "中".repeat(20000)
+        seed([{ type: field === "tool" ? "tool" : "file", [field]: value }])
+        const projected = Database.use((db) => db.select(projection(true)).from(PartTable).get())!
+        expect(Buffer.byteLength(JSON.stringify(projected.data))).toBeLessThan(5000)
+        expect(projected.data).toMatchObject({ [field]: "[large field omitted; use history get part_id]" })
+        expect(Database.use((db) => db.select(projection()).from(PartTable).get())?.data).toMatchObject({ [field]: value })
+        expect(Database.use((db) => db.select({ data: PartTable.data }).from(PartTable).get())?.data).toMatchObject({ [field]: value })
+      }),
+    ),
+  )
+}
+
+for (const field of ["filename", "mime", "source", "url", "list"] as const) {
+  it.live(`SQL preview bounds attachment ${field} before the driver and preserves original locators`, () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const attachment = {
+          filename: "example.png",
+          mime: "image/png",
+          url: "https://example.com/image.png",
+          source: {
+            type: "file",
+            path: "/tmp/example",
+            text: {
+              value: field === "source" ? "\u0000" + "中".repeat(20000) : "reference",
+              start: 0,
+              end: field === "source" ? 20001 : 9,
+            },
+          },
+          ...(field === "source" || field === "list" ? {} : { [field]: "https://example.com/" + "x".repeat(100000) }),
+        }
+        const attachments = Array.from({ length: field === "list" ? 1200 : 1 }, () => attachment)
+        seed([{ type: "tool", tool: "read", state: { input: {}, output: "result", attachments } }])
+        const stored = Database.use((db) => db.select({ data: PartTable.data }).from(PartTable).get())
+        // Measure the actual SQL result before Drizzle's JSON.parse mapper, not
+        // the later around formatter that already has the oversized value.
+        const size = Database.use((db) => db.select({ bytes: sql<number>`length(CAST(${projection(true).data} AS BLOB))` }).from(PartTable).get())!
+        expect(size.bytes).toBeLessThan(5000)
+        const projected = Database.use((db) => db.select(projection(true)).from(PartTable).get())!
+        expect(JSON.stringify(projected.data)).toContain("omitted")
+        expect(Database.use((db) => db.select(projection()).from(PartTable).get())?.data).toMatchObject({ state: { attachments } })
+        const history = yield* History.Service
+        const context = yield* history.around({ message_id: "msg_detail", before: 0, after: 0 })
+        expect(context.messages[0].parts[0].text).toContain("omitted; use history get part_id")
+        expect(context.messages[0].parts[0].text).not.toContain("attachment=tool:")
+        expect(context.messages[0].parts[0].part_id).toBe("prt_0000")
+        const detail = yield* history.get({ part_id: "prt_0000" })
+        expect(detail?.attachments).toHaveLength(attachments.length)
+        expect(detail?.attachments.at(-1)).toMatchObject({ id: `tool:${attachments.length - 1}`, filename: attachment.filename, mime: attachment.mime, url: attachment.url })
+        expect(Database.use((db) => db.select({ data: PartTable.data }).from(PartTable).get())).toEqual(stored)
+      }),
+    ),
+  )
+}
+
+it.live("SQL preview preserves small attachment metadata and decoded filename boundaries", () =>
+  provideTmpdirInstance(() =>
+    Effect.gen(function* () {
+      const attachments = [
+        { filename: "before\u0000after.png", mime: "image/png", url: "https://example.com/image.png", source: { text: { value: "before\u0000after" } } },
+        { filename: "inline.png", mime: "image/png", url: "data:image/png;base64,YWJj" },
+      ]
+      seed([
+        { type: "tool", tool: "read", state: { attachments } },
+        { type: "file", filename: "😀".repeat(1000), mime: "image/png" },
+        { type: "file", filename: "😀".repeat(1000) + "a", mime: "image/png" },
+        { type: "file", filename: "\u0000".repeat(4000), mime: "image/png" },
+        { type: "tool", state: { attachments: [{ mime: attachmentListOmitted, url: "data:image/png;base64,YWJj" }] } },
+      ])
+      const rows = Database.use((db) => db.select(projection(true)).from(PartTable).orderBy(PartTable.id).all())
+      expect(rows[0].data).toMatchObject({ state: { attachments: [attachments[0], { filename: "inline.png", mime: "image/png", source: null, url: null }] } })
+      expect(rows[1].data).toMatchObject({ filename: "😀".repeat(1000) })
+      expect(rows[2].data).toMatchObject({ filename: "[large field omitted; use history get part_id]" })
+      expect(rows[3].data).toMatchObject({ filename: "\u0000".repeat(4000) })
+      const context = yield* (yield* History.Service).around({ message_id: "msg_detail", before: 0, after: 0 })
+      expect(context.messages[0].parts[0].text).toContain("attachment=tool:0")
+      expect(context.messages[0].parts[0].text).toContain("attachment=tool:1")
+      // MIME is an arbitrary stored string; stripped inline URLs still have a
+      // url key, unlike the synthetic omission notice.
+      expect(context.messages[0].parts[4].text).toContain("attachment=tool:0")
     }),
   ),
 )
