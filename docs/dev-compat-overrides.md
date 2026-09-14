@@ -328,9 +328,36 @@ original attachment locators, including arbitrary stored MIME text. It does not
 replace compat context caps or frozen-prefix behavior; all seven owners above
 retain their dispositions.
 
-This stage retains the existing actor lifecycle quarantine. The approved C07
-postStop/execution/cancel follow-up is reviewed and published separately; this
-propagation does not claim that pending work is solved.
+The initial propagation retained the actor lifecycle quarantine. The final C07
+inheritance below supersedes that initial-stage status.
+
+## 2026-09-15 final lifecycle inheritance
+
+Accepted main `648f7cdf100b30ff046db7518d8f832473b61481` (PR #124) is inherited
+at `3cf81dabd6efc66d7cbd037292eee742a2a33728`. Runtime/test behavior remains
+`1a072e7aa3b142fc9804974bd8142729817c92db`; later documentation and empty-tree
+ancestry merges do not change that behavior. Both registered actor quarantine
+cases now run, and the shared execution claim extends through postStop,
+terminal publication and cancellation cleanup. Admission, reserved-worker and
+receipt fixes prevent cancelled work from starting or being hidden by old
+notifications. Direct Effect execution-hook self/ancestor cancellation uses
+the existing service scope; external callers still join full cleanup.
+
+All seven DC dispositions in the table above remain. DC-ACTOR-001 retains its
+complete model context/lifecycle interface, captured tools and frozen
+turnContext through execution and recovery. Shared execution, Runner and
+workflow files match main; actor spawn retains only its existing turnContext
+and watermark explanation. The other six owners have no additional owned
+production change from this lifecycle inheritance. SDK/OpenAPI and bun.lock
+remain unchanged from the accepted first-stage compat branch.
+
+Final default-path validation passes 372 actor/inbox/hook/lifecycle tests,
+14 real HTTP recovery tests and 4 frozen native Actor cases: 390 passes,
+1,849 assertions, no failures or skips. Package typecheck passes. Seven ambient
+selectors are removed and the package ORCHESTRATOR preload is retained. The
+source/test/harness manifest and entire packages tree remain unchanged during
+validation. Final seven capability results and source boundaries are in
+[the history](dev-compat-registry-history.md#2026-09-15-final-lifecycle-inheritance-and-capability-results).
 
 ## Review record
 
@@ -338,14 +365,14 @@ propagation does not claim that pending work is solved.
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-15
 - Reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Accepted `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
-- Inherited main behavior: `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d`
-- Compat behavior: `967b340faa1389741f08d45cff0ada2a09f52463`
-- Prior compat tip: `51591791c592a21513e7703e3109c9a6d12def9a`
-- Main source inheritance merge: `967b340faa1389741f08d45cff0ada2a09f52463`
-- Shared audit commit: `90eef40fc1268bece3e63a7db64180a4a75bd7b2`
+- Accepted `main` tip: `648f7cdf100b30ff046db7518d8f832473b61481`
+- Inherited main behavior: `4eacc84dccf83c22f533c35bea282d4c5a38cacd`
+- Compat behavior: `1a072e7aa3b142fc9804974bd8142729817c92db`
+- Prior compat tip: `b277f8efa0dd379997c40a50798c9086d88c6480`
+- Main source inheritance merge: `3cf81dabd6efc66d7cbd037292eee742a2a33728`
+- Shared audit commit: `5f06049e568276cd1cea9012f6b114e6ddb2fac2`
 - Inherited bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
-- Publication state: locally validated specified propagation; final remote-tip CI is verified after publication. C07 is a separate subsequent change.
+- Publication state: accepted main inherited and all seven capability results locally validated; final PR and remote-tip CI are verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
