@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-09-15
 - Upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
 - Prior reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Main behavior (runtime/tests): `54deac139e638c4b72b6337cdaac0c27ad537749`
+- Main behavior (runtime/tests): `577fc25060ed31e8ece68ee02ca5b1bced2cddcf`
 - Bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
 - Prior fork `main` tip: `321e70c9f491e2f9ff406bf56614c955fc5294de`
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -69,57 +69,35 @@ not change their implementation. The preceding review is retained in the
   existing promptWork/send admission and queue handoff. Recovery alone does not
   retitle historical turns. This changes no Actor generation or task ownership.
 
-- 2026-09-13 terminal publisher: the fork publishes an actor's terminal envelope
-  from whichever turn settles it, and every settling path contends for that
-  right through the generation's terminal claim — so `Actor.cancel` either wins
-  the claim and publishes, or loses it and stays quiet. `SessionPrompt`'s
-  continuation is the one exception the wake-routing retirement created: it
-  settles on an `ActorExecution` with no generation for cancel to contend with,
-  so cancel read "nobody is running" and published a second `cancelled` envelope
-  for a settlement that had just been reported. FC-001 gains
-  `Actor.markTerminalNotified(sessionID, actorID, notified)`: the continuation
-  records the envelope it published, cancel consumes that record in place of its
-  own publish, and a new turn clears it — past every exit that publishes
-  nothing, so a settlement is only ever superseded by a turn that will settle.
-  The record is written only when an envelope actually was: `makeTerminalNotifier`
-  now reports whether it wrote one, deviating from upstream's void return, which
-  swallows every cause and so makes a failed send indistinguishable from a
-  delivered one. Recording a failed send would suppress the only notice the
-  parent could still get.
-  Retiring a peer whose settlement was never announced still announces it, and a
-  cancel that consumes queued rows drops the mark first: work it takes can no
-  longer be settled by the turn that would have run it — that wake finds nothing
-  and returns without publishing — so the previous settlement's mark stops
-  covering this one. Consumption is read from `Inbox.head` before the drain,
-  not from the drain's count: cancel writes the cancelled tombstone first, so
-  `Inbox.drain` takes its retired-persistent branch, deletes every queued row
-  and still returns 0. The head also covers both ways work is consumed —
-  rendered into a turn for an ephemeral actor, dropped for a retired persistent
-  one.
-  The mark is the only thing `Actor.cancel` consults, deliberately. It is set
-  only after an envelope was actually written, and cleared the moment this
-  settlement stops being the one it describes, so suppressing on it asserts
-  nothing about what another fiber is about to do. A revision in review also
-  suppressed while an `ActorExecution` was live, to cover the window between a
-  continuation publishing and recording; every further window review found came
-  from that assertion being false — an execution not yet inside a runner cannot
-  be stopped by `cancelActor`, is not obliged to publish, and may return through
-  an empty drain. Suppressing on a promise cancel cannot keep trades a duplicate
-  envelope for a missing one, and a missing one is the worse failure. Making the
-  promise true instead means cancel must interrupt and join the execution, which
-  is upstream's cancel shape and a separate change; until then the remaining
-  exposure is a duplicate in the microseconds between a continuation's publish
-  and its record, which is what `main` does unconditionally today.
-  Mutation-checked: removing the record fails exactly the two peer continuation
-  envelope-count cases and nothing else; the execution half closes windows no
-  case in the suite reaches.
+- 2026-09-15 execution completion: spawn reserves an ActorExecution during
+  admission and retains it through postStop and terminal publication. Blocking
+  run/outcome/wait, persistence and parent notification observe the preserved
+  main result with postStop warnings after housekeeping; background spawn still
+  returns its identity after admission. Inbox continuations cannot overtake it.
+  Cancellation captures the selected execution, requests interruption and joins
+  its cleanup before retirement. A cancellation-owned generation is published
+  by the execution; the cancelling owner waits rather than publishing early.
+  Notification receipts remain authoritative after that join, including queued
+  work and failed-send fallback. Owner acquisition and cleanup installation are
+  masked together, while a follower's wait remains interruptible.
+  Runner installs its exit finalizer before its child can be interrupted, then
+  keeps the start wait and actual work interruptible. This prevents a child that
+  exits before its first instruction from leaving the runner's done signal open.
+  See [the lifecycle evidence](actor-lifecycle-alignment-2026-09-15.md).
+
+- 2026-09-13 terminal publisher (historical partial fix): continuations gained
+  a receipt recording whether their terminal envelope was actually published;
+  failed sends do not suppress fallback notification. That receipt and its
+  queued-work distinction remain. The former unjoined publication-to-receipt
+  window is closed by the 2026-09-15 execution join, replacing the earlier
+  decision to defer upstream's cancellation shape.
 
 - Status: active
 - Canonical owner: fork `main` actor/inbox runtime
 - Observable contract: generation ownership, terminal claims, cancellation
   episodes, main prompt/command/init/shell/summarize/recovery/resume admission,
-  busy/idle publication, persistent wake owner/follower behavior, detached
-  graceful cancellation, inbox retirement tombstones, and parent notification
+  busy/idle publication, persistent wake owner/follower behavior,
+  execution-aware cancellation, inbox retirement tombstones, and parent notification
   are linearized per session and actor. `SessionPrompt.startPrompt`,
   `startCommand`, `startSummarize`, and `startResume` share
   `SessionRunState.startRunning` atomic admission; outer entry points report a
@@ -308,22 +286,16 @@ not change their implementation. The preceding review is retained in the
   guarantees plus positive known-peer evidence for parent identity replacement,
   with behavior-focused regressions.
 
-- 2026-09-12 wake-routing retirement: the continuation path is retired from
-  this entry. A woken non-main turn now runs on upstream's `ActorExecution`
-  claim and settles through `runTurn`, instead of `Actor.runPersistentTurn`'s
-  wake generation. `spawn` takes no such claim: holding one across its whole
-  run (postStop included) deadlocks a nested ActorTool spawn, which shares the
-  claimed key, so upstream's spawn-before-continuation ordering is not adopted
-  and the case asserting it stays quarantined.
-  The eight fork-owned tests that encoded behavior upstream's execution map
-  does not model were removed with it: drain-once across six `resume drains`
-  cases, cancel-race registry settlement, postStop wake ordering, and
-  disposed-parent retargeting. None of them existed upstream. Generation
-  ownership, terminal claims and disposal provenance remain this entry's
-  contract for the spawn and actor-resume paths, which are unchanged.
-  Four upstream-new cases are quarantined under FC-008 for a dedicated
-  follow-up fork PR rather than fixed in this synchronization; no upstream PR
-  is opened for them.
+- 2026-09-12 wake-routing retirement (historical): a woken non-main turn moved
+  to ActorExecution and runTurn instead of the fork wake generation. Spawn's
+  execution claim was deferred after a timeout was attributed to a nested actor
+  sharing its key. The 2026-09-15 review withdraws that causal claim: with the
+  corrected InboxArrived observation, the nested primary case and actual
+  spawn-before-continuation ordering pass. Spawn now holds the same execution
+  claim. Earlier removed wake-generation-specific tests remain historical;
+  generation ownership, terminal claims and disposal provenance remain shared
+  contracts for spawn and actor resume. The two remaining quarantines are now
+  active; no upstream PR is opened for this fork correction.
 - 2026-09-11 recovery-predicate and resume-override review: adopted the part of
   upstream's allowlist predicate that is a genuine fix — a step-level
   `time.completed` does not prove the round finished, so a turn that stopped on
@@ -681,6 +653,14 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-09-15 quarantine closure: both remaining registered actor cases run
+  normally: postStop failure preserves a successful result with warnings, and
+  inbox waits for the entire spawn execution. The warning test now covers
+  foreground/background and outcome/wait/persistence/parent notice. No new skip
+  replaces either case. Final cancellation regressions cover the Runner
+  pre-first-instruction exit and scheduler interruption during owner acquisition.
+  The dated quarantine entries below describe their historical snapshots.
+
 - Status: active process/runtime contract
 - Canonical owner: fork `main` workflow runtime and repository CI
 - Observable contract: non-success workflow cleanup bounds caller wait even
@@ -750,13 +730,13 @@ not change their implementation. The preceding review is retained in the
   that one message is the whole fix, mutation-checked: with the fork wording the
   case fails its assertion, with upstream's it passes. #107 had passed it from
   its first commit (CI run 34693434562, shard 4/4), which the 2026-09-13
-  follow-up below did not record. Two cases stay quarantined, both reducing to
+  follow-up below did not record. At that snapshot two cases stayed quarantined, both reducing to
   the postStop publish-ordering product decision recorded there: `[TP-R14-07]
   postStop LLM failure preserves the successful result with a warning` and
   `inbox waits for the entire spawn execution before starting a continuation`.
 - 2026-09-13 quarantine follow-up: the peer `success`/`failure` continuation
   envelope-count cases are fixed and unskipped; see the FC-001 terminal-publisher
-  entry. Three cases stay quarantined, all still `skip`ped in place with their
+  entry. At that snapshot three cases stayed quarantined, all `skip`ped in place with their
   inline rationale:
   `[TP-R14-07] postStop LLM failure preserves the successful result with a
   warning` (`test/plugin/actor-hooks.test.ts`) and `inbox waits for the entire
