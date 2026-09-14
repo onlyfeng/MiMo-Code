@@ -18,9 +18,9 @@ authority.
 - Last reviewed: 2026-09-15
 - Upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
 - Prior reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Main behavior (runtime/tests): `577fc25060ed31e8ece68ee02ca5b1bced2cddcf`
+- Main behavior (runtime/tests): `1ae374852cedd3426b73618ad787f7e077fd1fe3`
 - Bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
-- Prior fork `main` tip: `321e70c9f491e2f9ff406bf56614c955fc5294de`
+- Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -74,11 +74,15 @@ not change their implementation. The preceding review is retained in the
   run/outcome/wait, persistence and parent notification observe the preserved
   main result with postStop warnings after housekeeping; background spawn still
   returns its identity after admission. Inbox continuations cannot overtake it.
-  Cancellation captures the selected execution, requests interruption and joins
-  its cleanup before retirement. A cancellation-owned generation is published
+  Cancellation closes execution admission, invalidates queued acquisition
+  tickets, captures the selected execution, and interrupts/joins it through
+  retirement. Old tickets cannot restart after the barrier opens; fresh valid
+  generations and other sessions remain independent. A reserved worker cancelled
+  before startup skips its model call through the protected finalizer path. A cancellation-owned generation is published
   by the execution; the cancelling owner waits rather than publishing early.
-  Notification receipts remain authoritative after that join, including queued
-  work and failed-send fallback. Owner acquisition and cleanup installation are
+  Notification receipts are read after that join. A completed turn cannot hide
+  cancellation of subsequently queued work; an already-cancelled turn does not
+  receive a duplicate notice. Failed-send fallback remains. Owner acquisition and cleanup installation are
   masked together, while a follower's wait remains interruptible.
   Runner installs its exit finalizer before its child can be interrupted, then
   keeps the start wait and actual work interruptible. This prevents a child that
@@ -658,7 +662,10 @@ not change their implementation. The preceding review is retained in the
   inbox waits for the entire spawn execution. The warning test now covers
   foreground/background and outcome/wait/persistence/parent notice. No new skip
   replaces either case. Final cancellation regressions cover the Runner
-  pre-first-instruction exit and scheduler interruption during owner acquisition.
+  pre-first-instruction exit, owner-acquisition interruption, queued execution
+  admission and cancellation before worker startup. Workflow agent timeouts
+  bound the cancellation join to the existing reclaim grace while detached
+  cleanup continues; shared cancellation retains interrupt/join semantics.
   The dated quarantine entries below describe their historical snapshots.
 
 - Status: active process/runtime contract
