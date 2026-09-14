@@ -3685,7 +3685,7 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   `serve --llm-server` row dropped).
 - Compat source/test behavior and inheritance merge:
   `88070423363c191e209b60db441f63f9eed31cb8`; prior tip:
-  `c1ee9ecbeda90224d4a7abbcfc877b9016b1117e`.
+  `331e850481d9e960263e9289c2a2219684c3f7ae`.
 - **Direct inherit, no compat override, no owner added or retired.** Main
   retired the fork's parallel model API — `server/model-api.ts`,
   `server/api-request.ts` and seven `src/llm-server/` modules — and mounted

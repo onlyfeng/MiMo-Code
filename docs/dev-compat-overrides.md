@@ -234,7 +234,7 @@ Source evidence and the final result row are recorded in the latest
 - Accepted `main` tip: `8015e6122fc8b299dceaf89a7f7f6dba0172240f`
 - Inherited main behavior: `4cf8ff6105655df5aea1c26d73d97ab2b9f6ce30`
 - Compat behavior: `88070423363c191e209b60db441f63f9eed31cb8`
-- Prior compat tip: `c1ee9ecbeda90224d4a7abbcfc877b9016b1117e`
+- Prior compat tip: `331e850481d9e960263e9289c2a2219684c3f7ae`
 - Main source inheritance merge: `88070423363c191e209b60db441f63f9eed31cb8`
 - Shared audit commit: `8015e6122fc8b299dceaf89a7f7f6dba0172240f`
 - Inherited bundled guidance content: `11833785` (bundled `mimocode-docs`: `model-api.md` retired, `capability-api.md` added, the `serve --llm-server` row dropped)
