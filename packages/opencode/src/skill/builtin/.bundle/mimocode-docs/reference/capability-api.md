@@ -25,14 +25,18 @@ exist without anyone asking for one. Two consequences:
   is carved out: a minted token gets through. Containment also stays in force, so an
   implicit listener serves exactly one project.
 
-Pass a network flag when a *fixed* port is wanted instead. That is the explicit case and
-behaves as it always did, credential-free on loopback — it is what `mimo attach` over SSH
-uses:
+Pass a network flag when a *fixed* port is wanted instead:
 
 ```bash
 mimo --port 4096                 # TUI plus a listener on a port you chose
 mimo serve --port 4096           # headless, same endpoints
 ```
+
+A TUI listener is not credential-free in this fork: it mints a password of its own when the
+operator has not set one, and that value is handed only to the TUI that opened it. Set
+`MIMOCODE_SERVER_PASSWORD` before starting if another process — `mimo attach` over SSH, for
+instance — has to reach the same server, since attach can only take a credential from its
+own option or the environment.
 
 Launch from the project directory either way: the instance directory is the process's cwd,
 and a request naming a directory outside it is refused with 403.

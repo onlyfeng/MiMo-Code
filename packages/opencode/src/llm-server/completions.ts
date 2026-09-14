@@ -159,6 +159,12 @@ function toolSet(tools: NonNullable<ChatCompletionRequest["tools"]>): ToolSet {
  */
 const HOOK_AGENT = "llm-api"
 
+function hasAudio(req: ChatCompletionRequest) {
+  return req.messages.some(
+    (message) => Array.isArray(message.content) && message.content.some((part) => part.type === "input_audio"),
+  )
+}
+
 export async function start(input: {
   req: ChatCompletionRequest
   allowlist: ModelScope
@@ -166,6 +172,18 @@ export async function start(input: {
 }) {
   const resolved = await resolveLanguageModel(input.req.model, input.allowlist, input.abort)
   const model = resolved.model
+
+  // A text-only model does not reject audio, it ignores it — and the caller gets a
+  // fluent answer produced without hearing the recording, which is the one failure
+  // they cannot detect. Refuse before generating. Format/transport compatibility is
+  // deliberately left to the provider: that failure is loud, this one is silent.
+  if (!model.capabilities.input.audio && hasAudio(input.req)) {
+    throw new RequestError(
+      400,
+      `Model \`${input.req.model}\` does not accept audio input`,
+      "invalid_request_error",
+    )
+  }
 
   // A synthetic per-request id stands in for a session. Providers that key a
   // prompt cache on it (Azure) then scope that cache to one request instead of
