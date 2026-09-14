@@ -965,11 +965,16 @@ where this delta does not change their implementation.
   can return an image attachment but does not persist a local path for
   `python-pptx`; generation is conditional on a listed image tool, local
   downloads create their parent directory and fail closed, and shape/text is a
-  valid fallback. Bundled `mimocode-docs` also documents the TUI-owned default
-  model API, explicit `serve`/embedding modes and explicit token issuance,
-  bounded public image and inline audio inputs, registry model discovery,
-  provider option whitelist, explicit model scopes, and independent lifetime
-  controls; the content snapshot is recorded separately from runtime/tests.
+  valid fallback. Bundled `mimocode-docs` also documents the capability API
+  upstream mounts at `/v1` on every instance server: the implicit loopback
+  listener, the carve-out that lets a minted token past the generated Basic
+  credential, scoped token issuance and lifetime controls, and image/audio
+  inputs on upstream's terms. Its attach guidance is the one place the fork's
+  text diverges from upstream's, because this fork's TUI worker serves a
+  directory chosen at startup and upstream's wording would hand these users a
+  401. The retired fork model API's whitelist, `--all-models`/`--directory`
+  flags and TUI-owned listener are no longer described because they no longer
+  exist; the content snapshot is recorded separately from runtime/tests.
 - Upstream relationship: fork-facing guidance plus selectively adopted upstream
   documentation improvements.
 - Watch surfaces: `packages/opencode/src/session/prompt/default.txt`,
