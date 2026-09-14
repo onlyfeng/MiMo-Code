@@ -311,14 +311,19 @@ export async function collect(input: {
   let bytes = 0
 
   for await (const part of input.result.fullStream) {
+    // Every part counts, including `tool-input-delta`, which the SDK accumulates
+    // internally and only materializes as one `tool-call` at the end — measuring
+    // solely the finished object would notice the memory after it was spent.
+    bytes +=
+      part.type === "text-delta" || part.type === "reasoning-delta"
+        ? Buffer.byteLength(part.text)
+        : Buffer.byteLength(JSON.stringify(part))
+    if (bytes > OUTPUT_LIMIT_BYTES) throw new RequestError(502, "Provider output exceeded the proxy limit", "api_error")
+
     if (part.type === "text-delta") text.push(part.text)
     else if (part.type === "reasoning-delta") reasoning.push(part.text)
     else if (part.type === "tool-call") toolCalls.push({ id: part.toolCallId, name: part.toolName, input: part.input })
     else if (part.type === "error") throw part.error
-    else continue
-    if (part.type === "text-delta" || part.type === "reasoning-delta") bytes += Buffer.byteLength(part.text)
-    else bytes += Buffer.byteLength(JSON.stringify(part))
-    if (bytes > OUTPUT_LIMIT_BYTES) throw new RequestError(502, "Provider output exceeded the proxy limit", "api_error")
   }
 
   return completion({

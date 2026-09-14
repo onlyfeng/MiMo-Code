@@ -228,7 +228,7 @@ export const CapabilityRoutes = lazy(() =>
           if (url.startsWith("data:")) continue
           if (!/^https?:$/.test(new URL(url).protocol))
             throw new RequestError(400, "image_url must be http(s) or a data: URL", "invalid_request_error")
-          await assertSafeUrl(url).catch((error) => {
+          await assertSafeUrl(url, undefined, { blockLoopback: true }).catch((error) => {
             throw new RequestError(400, error instanceof Error ? error.message : "image_url is not reachable", "invalid_request_error")
           })
         }

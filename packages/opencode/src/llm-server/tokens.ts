@@ -58,6 +58,8 @@ type Store = {
   tokens: Record_[]
 }
 
+const MAX_TOKENS = 1024
+
 const EMPTY: Store = { version: 1, tokens: [] }
 
 function dir(directory: string) {
@@ -284,7 +286,14 @@ export async function issue(input: {
   await mutate(input.directory, (store) => {
     // Sweep on write: expired records have no purpose and an unbounded file would
     // eventually make every request pay for them.
-    store.tokens = store.tokens.filter((t) => !expired(t)).concat(record)
+    const live = store.tokens.filter((t) => !expired(t))
+    // Sweeping only reaches records that expire. A caller minting `--ttl none
+    // --max-age none` in a loop is never swept, and every later verification
+    // rewrites the whole file to update `last_used`, so latency grows with the
+    // count. Refuse rather than degrade.
+    if (live.length >= MAX_TOKENS)
+      throw new Error(`llm-server holds ${MAX_TOKENS} live tokens for this directory; revoke some before issuing more`)
+    store.tokens = live.concat(record)
   })
   log.info("issued", { id: record.id, models: record.models.length, label: record.label })
   return { token, record }

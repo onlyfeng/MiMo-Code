@@ -40,7 +40,12 @@ export function duration(input: string | undefined, fallback: string): number | 
   const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec(value)
   if (!match) throw new Error(`Invalid duration \`${input}\`; use forms like 30m, 12h, 7d, or none`)
   const scale = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[match[2] ?? "ms"]!
-  return Number(match[1]) * scale
+  const ms = Number(match[1]) * scale
+  // `Infinity` survives the regex and then JSON-serializes to `null`, which
+  // `expired()` reads as a present zero-length limit — the token would be minted
+  // and then die on first use. Reject it where it is still explicable.
+  if (!Number.isFinite(ms)) throw new Error(`Invalid duration \`${input}\`; value is too large`)
+  return ms
 }
 
 function defaults() {

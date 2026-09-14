@@ -184,7 +184,7 @@ where this delta does not change their implementation.
   exactly, and `config.llmServer`, `Util.Self`, upstream's `llm-server` CLI and
   upstream's `generateServerPassword`/`clearGeneratedServerPassword` come with
   it. Net −3548 lines.
-- Observable contract, what remains fork-owned: eight boundaries, all kept
+- Observable contract, what remains fork-owned: nine boundaries, all kept
   because upstream does not have them, not because the fork prefers them.
   1. `serve --llm-server` gates only the address advertisement. The route is
      always mounted and always demands a minted token, so credentials alone
@@ -230,7 +230,20 @@ where this delta does not change their implementation.
      accepts any parseable URL, so a token would otherwise carry a request forge
      into loopback, RFC1918 and cloud metadata. Reuses FC-010's `assertSafeUrl`
      rather than the fork's retired 246-line image pipeline, and additionally
-     rejects non-http(s) schemes.
+     rejects non-http(s) schemes. `assertSafeUrl` gains an opt-in
+     `blockLoopback`, used only here: loopback is deliberately reachable for
+     WebFetch (a dev machine's `localhost:3000`, and DC-NET-001 approves private
+     destinations), but a caller trusted only with model access is a different
+     matter. Verified rather than assumed — the classifier blocks RFC1918,
+     link-local and metadata but allowed `127.0.0.1`, `::1` and `localhost`
+     until this flag, and the DNS-resolved address is checked too.
+  9. `mimo llm-server` refuses a non-finite duration and refuses to issue past
+     1024 live tokens. Upstream's parser accepts a value large enough to reach
+     `Infinity`, which JSON-serializes to `null`, and `expired()` compares with
+     `!== undefined` — so the token would be minted and die on first use. Its
+     sweep-on-write only reaches records that expire, so `--ttl none --max-age
+     none` in a loop grows the file without bound and every verification rewrites
+     it.
   Admission is taken in `InstanceMiddleware`, not inside the capability route,
   because the instance bootstrap sits between them: a gate downstream of it
   cannot bound requests stuck waiting *on* it, and the deadline would be
