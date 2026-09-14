@@ -273,18 +273,38 @@ either branch would have started from the wrong baseline and could have
 restored hardening that FD-004 records as retired. The four review findings the
 #110 scope reset left unwritten are recorded as well.
 
+## 2026-09-14 TP-R14-12 unquarantine (fourth propagation, same day)
+
+Direct inherit, no compat override, no owner added or retired. #119 changes one
+log message in `src/actor/spawn.ts`, unskips `[TP-R14-12] undeliverable terminal
+notification is logged` in `test/actor/cancel-notification.test.ts`, and adds an
+FC-008 row. The case was quarantined as a pipeline gap; it was the fork's
+`actor inbox notification failed` wording on its inbox send, where upstream's
+case asserts `actor terminal notification failed`.
+
+Unlike the previous three propagations today, the overlap is not empty: both
+source files are DC-ACTOR-001 surfaces and compat carries its own delta on each
+— `turnContext` on `ForkContext` in `spawn.ts`, and `turnContext: undefined` in
+two fixtures in the test file. Neither hunk touches the log line or the
+TP-R14-12 case, the merge applied without conflicts, and DC-ACTOR-001 keeps its
+override unedited. Verified on the merged tree rather than inferred from the
+clean merge: after a known-good neighbour passed there, TP-R14-12 passed with no
+timeout, the whole `cancel-notification.test.ts` is 28 pass / 0 fail, and
+`test/actor` + `test/inbox` + `actor-hooks` + `actor-owned-lifecycle` are 347
+pass / 2 skip / 0 fail. The two skips are the cases that stay quarantined.
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-14
 - Reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Accepted `main` tip: `a2d8d88638c6b898ce36c93f88d66e9a54ea4636`
-- Inherited main behavior: `bbac42b72bc63ebe52cb74a153c248b4e51a09d2`
-- Compat behavior: `644eddc4bbbcf6f10acb2cb00ee28dbc498b50b9`
-- Prior compat tip: `5e6662f7216f0a4c1063e788aec89108c2478e80`
-- Main source inheritance merge: `644eddc4bbbcf6f10acb2cb00ee28dbc498b50b9`
-- Shared audit commit: `a2d8d88638c6b898ce36c93f88d66e9a54ea4636`
+- Accepted `main` tip: `a197d4a84939f36a813cb39750a5fb86cce6b37d`
+- Inherited main behavior: `f45cf4f69c3368fb83eb1efe4a989c8f4969c553`
+- Compat behavior: `c797fa738d86d54eacf26d184d5cd78c4b4e9409`
+- Prior compat tip: `0c480aa95af2b2bb2dbe752242cfa5334ead5d56`
+- Main source inheritance merge: `c797fa738d86d54eacf26d184d5cd78c4b4e9409`
+- Shared audit commit: `a197d4a84939f36a813cb39750a5fb86cce6b37d`
 - Inherited bundled guidance content: `11833785` (bundled `mimocode-docs`: `model-api.md` retired, `capability-api.md` added, the `serve --llm-server` row dropped)
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)

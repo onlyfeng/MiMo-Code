@@ -503,10 +503,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
       expect((rows[0].content as { text: string }).text).toContain("failed.")
     }), { git: true, config: providerCfg },
   ))
-  // QUARANTINED (fork): upstream behaviour not yet reproduced on the fork's
-  // actor pipeline. Tracked for a dedicated fork PR; see FC-008 and the
-  // 2026-09-12 synchronization record. No upstream PR is opened for this.
-  it.live.skip("[TP-R14-12] undeliverable terminal notification is logged", () => {
+  it.live("[TP-R14-12] undeliverable terminal notification is logged", () => {
     const messages: string[] = []
     return provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
       const actor = yield* Actor.Service
