@@ -3178,3 +3178,5 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - Preview formatting distinguishes the array-shaped omission notice from an actual attachment. It directs callers to `history get part_id` without fabricating `tool:0`; small previews and complete get keep original locators.
 - Five real around-path assertions reproduced the bug before the fix. Final history suite: 68 pass, five benchmark skips, 0 fail, 624 assertions. Package typecheck and focused lint pass.
 - The prior preview-budget candidate passed CI at `4544294d`; this corrected source requires fresh PR-head CI before merge.
+
+- Independent marker-collision follow-up: `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d` distinguishes a missing URL key from a projected null URL. Genuine attachments whose stored MIME equals the notice retain their locator. The added real around-path assertion is red before the fix; final history is 68 pass, five benchmark skips, 0 fail, 625 assertions. Typecheck passes.
