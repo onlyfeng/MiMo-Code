@@ -39,6 +39,22 @@ describe("recoverActorArgs", () => {
     expect(recovered.operation.actor_id).toBe("explore-1")
   })
 
+  test("explicit context and lifecycle survive recovery for schema validation", () => {
+    const base = { action: "spawn" as const, subagent_type: "general", description: "d", prompt: "p" }
+    for (const extra of [{ context: "full" }, { context: null }, { context: false }, { lifecycle: "persistent" }, { lifecycle: null }]) {
+      for (const raw of [base, { operation: base }, { operation: JSON.stringify(base) }]) {
+        expect(recoverActorArgs({ ...raw, ...extra }) as unknown).toEqual({ operation: { ...base, ...extra } })
+      }
+    }
+  })
+
+  test("conflicting recovered envelope fields stay visible for strict rejection", () => {
+    const operation = { action: "spawn", subagent_type: "general", description: "d", prompt: "p", context: "full" }
+    for (const raw of [{ operation, context: "none" }, { operation: JSON.stringify(operation), context: "none" }]) {
+      expect(recoverActorArgs(raw) as unknown).toEqual({ operation, context: "none" })
+    }
+  })
+
   test("stringified operation envelope → parsed nested object", () => {
     expect(recoverActorArgs({ operation: '{"action":"run","subagent_type":"explore","description":"d","prompt":"p"}' })).toEqual({
       operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p" },

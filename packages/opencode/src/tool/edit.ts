@@ -18,7 +18,6 @@ import { Instance } from "../project/instance"
 import { SessionCwd } from "./session-cwd"
 import { Snapshot } from "@/snapshot"
 import { assertWriteAllowed, askEditUnlessMemory } from "./external-directory"
-import { assertFileRead } from "./read-state"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { Flag } from "@/flag/flag"
 import { resolveCurrentSessionPath } from "@/session/memory-path-template"
@@ -79,13 +78,6 @@ export const EditTool = Tool.define(
           const inputPath = resolveCurrentSessionPath(params.file_path, ctx.sessionID)
           const filePath = path.isAbsolute(inputPath) ? inputPath : path.join(SessionCwd.get(ctx.sessionID), inputPath)
           yield* assertWriteAllowed(ctx, filePath)
-
-          // The "create new file" branch (oldString === "") is effectively a
-          // write, so a prior Read isn't meaningful there. For real edits we
-          // require Read first so the model is operating on current contents.
-          if (params.old_string !== "") {
-            assertFileRead(ctx, filePath, "edit")
-          }
 
           let diff = ""
           let contentOld = ""

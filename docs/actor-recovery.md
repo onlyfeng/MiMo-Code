@@ -1,6 +1,8 @@
 # 恢复持有冻结上下文的 actor
 
-需要为新子任务保留恢复能力时，在创建时显式选择已有的 persistent 生命周期：
+main 的模型侧 `actor spawn/run` 不接受 `context` 或 `lifecycle`。共享运行时仍支持系统调用方创建的完整上下文 actor，并保留符合条件的恢复入口。
+
+在 dev/compat 中，需要为新子任务保留恢复能力时，在创建时显式选择 persistent 生命周期：
 
 ```text
 actor spawn general "检查实现" "检查指定模块并报告结果" --context full --lifecycle persistent

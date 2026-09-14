@@ -364,25 +364,34 @@ export function recoverActorArgs(rawArgs: unknown): ActorShellArgs | undefined {
   if (typeof obj.operation === "string") {
     try {
       const inner = JSON.parse(obj.operation)
-      if (inner && typeof inner === "object" && !Array.isArray(inner)) obj = { operation: inner }
+      if (inner && typeof inner === "object" && !Array.isArray(inner)) obj = { ...obj, operation: inner }
     } catch {}
   }
-  if (obj.operation && typeof obj.operation === "object" && !Array.isArray(obj.operation))
-    return { operation: obj.operation } as ActorShellArgs
+  if (obj.operation && typeof obj.operation === "object" && !Array.isArray(obj.operation)) {
+    const operation = obj.operation as Record<string, unknown>
+    // Conflicting copies cannot choose a different context or lifetime silently.
+    // Keep the extra root fields so the native strict schema rejects this shape.
+    if (["context", "lifecycle"].some((key) =>
+      Object.hasOwn(obj, key) && Object.hasOwn(operation, key) && obj[key] !== operation[key],
+    )) return { ...obj, operation } as ActorShellArgs
+    return {
+      operation: {
+        ...operation,
+        ...(Object.hasOwn(obj, "context") ? { context: obj.context } : {}),
+        ...(Object.hasOwn(obj, "lifecycle") ? { lifecycle: obj.lifecycle } : {}),
+      },
+    } as ActorShellArgs
+  }
   const subagent_type = obj.subagent_type
   const description = obj.description
   const prompt = obj.prompt
   if (typeof subagent_type === "string" && typeof description === "string" && typeof prompt === "string") {
     const op: Record<string, unknown> = { action: inferAction(obj), subagent_type, description, prompt }
-    // Carry only the optional fields a confused model plausibly puts at top level
-    // alongside the bare Task-prior triple. This is a deliberate subset of the
-    // run/spawn schema's optionals (model, timeout_ms, command, context,
-    // task_id, output_schema) — the others (timeout_ms/command/context/output_schema)
-    // are dropped here, falling back to their schema defaults. Low risk in practice:
-    // the bare shape mimo emits is the 3 required fields, rarely with extras. When
-    // adding an actor schema field, decide whether bare-shape recover should carry
-    // it here, or this whitelist silently drifts from the schema. (The actor_id
-    // carry just below is the one deliberate exception — a field NOT in the schema.)
+    // Preserve explicit context and lifetime requests, including malformed
+    // values, for the native schema and persistent/full admission guard. Dropping
+    // them would silently create a plain ephemeral actor instead.
+    if (Object.hasOwn(obj, "context")) op.context = obj.context
+    if (Object.hasOwn(obj, "lifecycle")) op.lifecycle = obj.lifecycle
     if (typeof obj.model === "string") op.model = obj.model
     if (typeof obj.task_id === "string") op.task_id = obj.task_id
     // Carried on purpose even though no action accepts it, so the strict schema

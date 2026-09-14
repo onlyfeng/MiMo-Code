@@ -3393,6 +3393,189 @@ for (const pause of ["cancel runner exit", "terminal status write"] as const) {
 }
 
 it.live(
+  "resume tool recovers a persistent full-context actor created by the runtime",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm, dir }) {
+        const actor = yield* Actor.Service
+        const sessions = yield* Session.Service
+        const reg = yield* ActorRegistry.Service
+        const parent = yield* sessions.create({ title: "user-accessible persistent recovery" })
+        const user: MessageV2.User = {
+          id: MessageID.ascending(),
+          sessionID: parent.id,
+          agentID: "main",
+          role: "user",
+          agent: "build",
+          model: ref,
+          time: { created: Date.now() },
+          system: "persistent-entry-frozen-system",
+          systemMode: "replace-agent",
+        }
+        yield* sessions.updateMessage(user)
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          sessionID: parent.id,
+          messageID: user.id,
+          type: "text",
+          text: "parent history inherited by the persistent actor",
+        })
+        const assistant: MessageV2.Assistant = {
+          id: MessageID.ascending(),
+          sessionID: parent.id,
+          agentID: "main",
+          role: "assistant",
+          time: { created: Date.now(), completed: Date.now() },
+          parentID: user.id,
+          modelID: ref.modelID,
+          providerID: ref.providerID,
+          mode: "build",
+          agent: "build",
+          path: { cwd: dir, root: dir },
+          cost: 0,
+          finish: "stop",
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }
+        yield* sessions.updateMessage(assistant)
+        const tools = yield* (yield* ToolRegistry.Service).tools({
+          providerID: ref.providerID,
+          modelID: ref.modelID,
+          agent: (yield* (yield* AgentSvc.Service).get("build"))!,
+        })
+        const tool = tools.find((tool) => tool.id === "actor")!
+        const previousActor = spawnRef.current
+        spawnRef.current = actor
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            spawnRef.current = previousActor
+          }),
+        )
+        const task = yield* Effect.gen(function* () {
+          const tasks = yield* TaskRegistry.Service
+          return yield* tasks.create({ session_id: parent.id, summary: "original delegated recovery task" })
+        }).pipe(Effect.provide(TaskRegistry.defaultLayer))
+        const ctx = {
+          sessionID: parent.id,
+          messageID: assistant.id,
+          agent: "build",
+          actorID: "main",
+          abort: new AbortController().signal,
+          messages: yield* sessions.messages({ sessionID: parent.id }),
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        }
+        // Runtime callers retain the frozen-context API after model-facing
+        // spawn/run stop accepting context and lifecycle parameters.
+        const capture = prefixCaptureRef.current
+        if (!capture) return yield* Effect.die("Missing actual prefix captor")
+        const prefix = yield* capture({
+          sessionID: parent.id,
+          agentName: "build",
+          providerID: ref.providerID,
+          modelID: ref.modelID,
+          msgs: ctx.messages,
+        })
+        expect(yield* llm.calls).toBe(0)
+        const isActorRequest = (request: Record<string, unknown>) =>
+          (request.messages as { role: string; content: string | { type: string; text?: string }[] }[]).some(
+            (message) =>
+              message.role === "user" &&
+              (typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content).some(
+                (part) => part.type === "text" && part.text?.startsWith("original delegated recovery task"),
+              ),
+          )
+        // Parent notifications may request the same server concurrently. Bind
+        // both responses to the delegated user input, not the shared FIFO.
+        yield* llm.pushMatch((hit) => isActorRequest(hit.body), {
+          type: "http-error",
+          status: 400,
+          body: { error: { message: "persistent tool actor interrupted" } },
+        })
+        const created = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          parentActorID: "main",
+          description: "Persistent recovery fixture",
+          task: "original delegated recovery task",
+          agentType: "general",
+          lifecycle: "persistent",
+          context: "full",
+          tools: "INHERIT",
+          background: true,
+          model: ref,
+          forkContext: { ...prefix, watermarkMsgID: ctx.messages.at(-1)!.info.id, model: ref },
+          task_id: task.id,
+        })
+        const actorID = created.actorID
+        const failed = yield* tool.execute({ operation: { action: "wait", actor_id: actorID, timeout_ms: 5000 } }, ctx)
+        expect(JSON.parse(failed.output)).toMatchObject({ status: "idle", lastOutcome: "failure" })
+        yield* Effect.yieldNow
+        expect(yield* reg.get(parent.id, actorID)).toMatchObject({ lifecycle: "persistent", contextMode: "full" })
+        const frozen = yield* actor.getForkContext(parent.id, actorID)
+        expect(frozen?.system.join("\n")).toContain("persistent-entry-frozen-system")
+        expect(frozen?.turnContext).toBe("persistent-entry-frozen-system")
+        expect(frozen?.modelIdentity).toBeDefined()
+        const interrupted = yield* sessions.messages({ sessionID: parent.id, agentID: actorID })
+        const originalUsers = interrupted.filter((message) => message.info.role === "user")
+        expect(originalUsers).toHaveLength(1)
+        expect(originalUsers[0].info).toMatchObject({ task_id: task.id })
+        // The first provider turn can initialize the global app graph too.
+        // Keep both tool calls on the actual Actor service owning this fixture.
+        spawnRef.current = actor
+        const finished = yield* Deferred.make<void>()
+        const off = yield* (yield* Bus.Service).subscribeCallback(ActorStatusChanged, (event) => {
+          if (
+            event.properties.actorID === actorID &&
+            event.properties.sessionID === parent.id &&
+            event.properties.status === "idle" &&
+            event.properties.lastOutcome === "success"
+          )
+            Deferred.doneUnsafe(finished, Effect.void)
+        })
+        yield* Effect.addFinalizer(() => Effect.sync(off))
+        yield* llm.textMatch((hit) => isActorRequest(hit.body), "recovered persistent tool result")
+        const resumed = yield* tool.execute({ operation: { action: "resume", actor_id: actorID } }, ctx)
+        expect(JSON.parse(resumed.output)).toEqual({ actor_id: actorID, status: "running" })
+        // Persistent success stays idle; wait keeps waiting for attention.
+        yield* Deferred.await(finished).pipe(Effect.timeout("5 seconds"))
+        const completed = yield* tool.execute({ operation: { action: "status", actor_id: actorID } }, ctx)
+        expect(JSON.parse(completed.output)).toMatchObject({ status: "idle" })
+        expect(yield* reg.get(parent.id, actorID)).toMatchObject({ lastOutcome: "success" })
+        yield* Effect.yieldNow
+        const after = yield* sessions.messages({ sessionID: parent.id, agentID: actorID })
+        expect(after.filter((message) => message.info.role === "user")).toEqual(originalUsers)
+        expect(after.at(-1)?.info).toMatchObject({ role: "assistant", parentID: originalUsers[0].info.id })
+        expect(
+          after.at(-1)?.parts.some((part) => part.type === "text" && part.text === "recovered persistent tool result"),
+        ).toBe(true)
+        expect(yield* actor.getForkContext(parent.id, actorID)).toBe(frozen)
+        // Parent notification wakes are separate requests. Match the actor's
+        // original user text rather than counting every call on the provider.
+        const requests = (yield* llm.inputs).filter(isActorRequest)
+        expect(requests).toHaveLength(2)
+        expect(JSON.stringify(requests[1])).toContain("parent history inherited by the persistent actor")
+        expect(JSON.stringify(requests[1])).toContain("original delegated recovery task")
+        const systems = requests.map((request) =>
+          (request.messages as { role: string; content: unknown }[]).filter((message) => message.role === "system"),
+        )
+        expect(JSON.stringify(systems[1])).toContain("persistent-entry-frozen-system")
+        expect(systems[1]).toEqual(systems[0])
+        // replace-agent keeps its frozen context in system messages only.
+        expect(
+          JSON.stringify(
+            (requests[1].messages as { role: string; content: unknown }[]).filter((message) => message.role === "user"),
+          ).split("persistent-entry-frozen-system"),
+        ).toHaveLength(1)
+        yield* tool.execute({ operation: { action: "cancel", actor_id: actorID } }, ctx)
+        expect(!!(yield* actor.getForkContext(parent.id, actorID))).toBe(false)
+        expect(yield* reg.get(parent.id, actorID)).toMatchObject({ status: "idle", lastOutcome: "cancelled" })
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
+)
+
+it.live(
   "resume tool recovers a persistent full-context actor created by the spawn tool",
   () =>
     provideTmpdirServer(
