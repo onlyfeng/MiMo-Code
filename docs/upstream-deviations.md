@@ -198,6 +198,20 @@ where this delta does not change their implementation.
   dropped; the `--directory`, `--all-models`, `--capability` and `--audio-api`
   CLI flags go with upstream's CLI, so a token is issued for the process's cwd
   and callers `cd` into the project first.
+- Every `Server.listen` call site now matches upstream. `acp.ts` and `web.ts`
+  pass `advertise: false` and `serve.ts` carries no `--llm-server` flag, all
+  three byte-identical to upstream. This was not cosmetic: adopting upstream's
+  `advertise` default without upstream's opt-out call sites silently made
+  `mimo acp` and `mimo web` discoverable through `llm-server issue`, because the
+  fork's previous `listen` published only when the retired `llm` option was
+  passed and neither command passes it. Half of upstream's design is not
+  alignment. The fork-only `tui/worker-listener.ts` still advertises on purpose,
+  which is what `advertiseDirectory` exists for.
+- Breaking change for existing fork users: `mimo serve --llm-server` is gone.
+  The flag gated only the address advertisement of a route that is always
+  mounted and always demands a minted token, and it was a remnant of the
+  retired fork model API. `mimo serve` now advertises like upstream, which is
+  also what the bundled `capability-api.md` this fork ships already told users.
 - Breaking change for existing fork users: tokens already issued stop working.
   The fork wrote `version: 2` records at the same path upstream reads as
   `version: 1`, and upstream's reader treats an unknown version as an empty
