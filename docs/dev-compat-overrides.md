@@ -225,18 +225,36 @@ Neither touches a compat-owned surface.
 Source evidence and the final result row are recorded in the latest
 [compat history entry](dev-compat-registry-history.md).
 
+## 2026-09-14 revoke guard (second propagation, same day)
+
+Direct inherit, no compat override, no owner added or retired. One source file
+and one new test: `llm-server revoke <id> --all` deleted every token for the
+directory instead of the one named, and now refuses the ambiguous form.
+
+The overlap check flagged `cli/cmd/llm-server.ts` on a first pass, and that false
+positive is worth recording because it is the same trap as the previous
+propagation wearing a different face. The compat-owned set was computed as
+`main..dev/compat` while `main` already carried the incoming fix, so the change
+being propagated showed up as a compat delta in reverse.
+
+Both sides have to be measured against the same merge-base. Against `5979dfa3`,
+`main` changed `src/cli/cmd/llm-server.ts` and
+`test/cli/llm-server-revoke.test.ts`, and neither appears among compat's own
+changes. The merge applied with no conflicts, and `cli/cmd/llm-server.ts` is now
+byte-identical to `main`.
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-14
 - Reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Accepted `main` tip: `5979dfa34d07dc595d3084cbf4e79038c1220df5`
-- Inherited main behavior: `4cf8ff6105655df5aea1c26d73d97ab2b9f6ce30`
-- Compat behavior: `627aa5c204584ff40ce082c52a69988471c86b66`
-- Prior compat tip: `331e850481d9e960263e9289c2a2219684c3f7ae`
-- Main source inheritance merge: `627aa5c204584ff40ce082c52a69988471c86b66`
-- Shared audit commit: `5979dfa34d07dc595d3084cbf4e79038c1220df5`
+- Accepted `main` tip: `a9cc028b433bf6b7f88a438c2e3c7df8cba601f4`
+- Inherited main behavior: `367c1653e28cd0e546db5b8457b047d7a1563798`
+- Compat behavior: `6a6e2fa17420a360905255697a2ed319bb2ef7bd`
+- Prior compat tip: `5e6662f7216f0a4c1063e788aec89108c2478e80`
+- Main source inheritance merge: `6a6e2fa17420a360905255697a2ed319bb2ef7bd`
+- Shared audit commit: `a9cc028b433bf6b7f88a438c2e3c7df8cba601f4`
 - Inherited bundled guidance content: `11833785` (bundled `mimocode-docs`: `model-api.md` retired, `capability-api.md` added, the `serve --llm-server` row dropped)
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
