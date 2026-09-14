@@ -27,6 +27,11 @@ async function revoke(directory: string, ...argv: string[]) {
   process.exitCode = 0
   try {
     await yargs(["llm-server", "revoke", ...argv])
+      // Production sets this in `src/index.ts`, and it changes where an argument
+      // after `--` lands: in `argv["--"]` rather than in the positional. A harness
+      // that omits it parses a shape the real CLI never sees, so the guard could
+      // pass here and still be walked past by `mimo`.
+      .parserConfiguration({ "populate--": true })
       .command(LlmServerCommand)
       .exitProcess(false)
       .fail(() => {})
@@ -65,6 +70,20 @@ test("an empty id with --all is still both forms, not --all alone", async () => 
   const b = await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
 
   expect(await revoke(tmp.path, "", "--all")).toBe(1)
+
+  const survivors = (await LLMServerTokens.list(tmp.path)).map((t) => t.id).sort()
+  expect(survivors).toEqual([a.record.id, b.record.id].sort())
+})
+
+test("an id after the option terminator still counts as naming one", async () => {
+  // `populate--` puts everything after `--` in `argv["--"]`, so `id` stays absent
+  // and a guard that only looks at the positional lets `revoke --all -- llmk_...`
+  // delete every token while the caller plainly named one.
+  await using tmp = await tmpdir({ git: true })
+  const a = await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
+  const b = await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
+
+  expect(await revoke(tmp.path, "--all", "--", a.record.id)).toBe(1)
 
   const survivors = (await LLMServerTokens.list(tmp.path)).map((t) => t.id).sort()
   expect(survivors).toEqual([a.record.id, b.record.id].sort())
