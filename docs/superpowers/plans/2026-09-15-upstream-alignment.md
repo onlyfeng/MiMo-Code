@@ -16,7 +16,7 @@
 - This is specified-range execution. Exclude newer upstream commits, including observed remote tip `b4cc11cd652195af9a80297ed543218f3172e6c4`.
 - Publish only to `onlyfeng/MiMo-Code`, through feature PRs to main and compat. Preserve unrelated worktrees and branches.
 - Install only with `bun ci`; retain `bun.lock`. Run tests and `bun typecheck` from package directories.
-- Clear ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and `MIMOCODE_CODEX_MODE`; preserve package preload flags. Clear compaction/checkpoint selectors for default-path matrices.
+- Clear ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and `MIMOCODE_CODEX_MODE`; preserve package preload flags. Clear compaction/checkpoint and WORKFLOW_TOOL selectors for default-path matrices; workflow-specific checks report their explicit target selector.
 - Keep FD/FC shared registries identical on both branches; update all seven compat DC dispositions separately.
 - Runtime validation precedes publication; final remote SHAs, exact-SHA CI, ancestry, and exclusion proof precede completion.
 - Comments, docs, shipped skill content and test assertions use synthetic values, never machine-specific ones.
@@ -35,34 +35,34 @@
 
 ## Task 1: Integrate C01-C06 on main
 
-- [ ] Confirm unchanged fork baselines and preserve the primary checkout; create operation-owned worktrees.
-- [ ] Merge exactly the selected upstream commit without committing until semantic conflicts are resolved.
-- [ ] Resolve C02 by deleting gate references and obsolete scope-only tests. Preserve placeholder resolution and attachment delivery assertions in their owning suites.
-- [ ] Resolve C03 across schema, shell parsing, bare-argument recovery, execute and descriptions. Reject removed context/persistent requests explicitly; keep actor resume and shared frozen-context consumers.
-- [ ] Resolve C04 while preserving distinct memory eligibility and fail-closed replace-agent identity.
-- [ ] Resolve history fixture cleanup around instance disposal, database close and migration cancellation. Retain session-scoped assertions and add the incoming restart/rollback/import tests.
-- [ ] Generate SDK/OpenAPI from final source; verify history configuration is absent.
-- [ ] Run focused changed and downstream tests, package typecheck and lint; record commands, environment and actual results.
-- [ ] Update FC-003 retirement, FD-009 ownership, history recovery limits, review headers and shared history.
-- [ ] Independently review the exact diff; publish and merge the fork main PR with current-head CI and thread checks.
+- [x] Confirm unchanged fork baselines and preserve the primary checkout; create operation-owned worktrees.
+- [x] Merge exactly the selected upstream commit without committing until semantic conflicts are resolved.
+- [x] Resolve C02 by deleting gate references and obsolete scope-only tests. Preserve placeholder resolution and attachment delivery assertions in their owning suites.
+- [x] Resolve C03 across schema, shell parsing, bare-argument recovery, execute and descriptions. Reject removed context/persistent requests explicitly; keep actor resume and shared frozen-context consumers.
+- [x] Resolve C04 while preserving distinct memory eligibility and fail-closed replace-agent identity.
+- [x] Resolve history fixture cleanup around instance disposal, database close and migration cancellation. Retain session-scoped assertions and add the incoming restart/rollback/import tests.
+- [x] Generate SDK/OpenAPI from final source; verify history configuration is absent.
+- [x] Run focused changed and downstream tests, package typecheck and lint; record commands, environment and actual results.
+- [x] Update FC-003 retirement, FD-009 ownership, history recovery limits, review headers and shared history.
+- [x] Independently review the exact diff; publish and merge the fork main PR with current-head CI and thread checks.
 
 ## Task 2: Propagate C01-C06 to dev/compat
 
-- [ ] Start from the current fork compat tip and merge the accepted main commit.
-- [ ] Restore the full actor model interface and implementation as a compat-owned overlay, including lifecycle, context repair and checkpoint description.
-- [ ] Preserve bounded state, forkContext/turnContext, frozen native/active tools, memory/system/cwd and static-prefix overflow behavior.
-- [ ] Exercise none/state/full, JSON/shell, run/spawn and persistent recovery/cancel. Missing captor or history must fail before actor admission.
-- [ ] Reconcile all seven DC owners; regenerate branch-specific SDK/OpenAPI without losing MaxMode or checkpoint coverage.
-- [ ] Run the affected compat matrix and independent review, then publish and merge the compat PR with exact-head gates.
+- [x] Start from the current fork compat tip and merge the accepted main commit.
+- [x] Restore the full actor model interface and implementation as a compat-owned overlay, including lifecycle, context repair and checkpoint description.
+- [x] Preserve bounded state, forkContext/turnContext, frozen native/active tools, memory/system/cwd and static-prefix overflow behavior.
+- [x] Exercise none/state/full, JSON/shell, run/spawn and persistent recovery/cancel. Missing captor or history must fail before actor admission.
+- [x] Reconcile all seven DC owners; regenerate branch-specific SDK/OpenAPI without losing MaxMode or checkpoint coverage.
+- [x] Run the affected compat matrix and independent review, then publish and merge the compat PR with exact-head gates.
 
 ## Task 3: Align C07 after the selected sync
 
-- [ ] Reproduce the two quarantined contracts using real hook/execution fixtures before changing production behavior.
-- [ ] Re-evaluate the earlier claim timeout using the corrected InboxArrived observation; document a real wait dependency if a failure persists.
-- [ ] Hold spawn execution ownership through postStop and keep continuation inbox consumption serialized.
-- [ ] Publish one coherent terminal result after postStop across persistence, registry, parent notification, ActorWaiter and outcome; preserve successful results with warnings when postStop fails.
-- [ ] Interrupt and join the selected execution on cancellation; retain generation isolation, successor protection, persistent retirement, disposal and background admission responsiveness.
-- [ ] Unquarantine the two cases and cover the cancellation/publish race, warnings, nested actors, hook failure, queued wakes and disposal.
+- [x] Reproduce the two quarantined contracts using real hook/execution fixtures before changing production behavior.
+- [x] Re-evaluate the earlier claim timeout using the corrected InboxArrived observation; document a real wait dependency if a failure persists.
+- [x] Hold spawn execution ownership through postStop and keep continuation inbox consumption serialized.
+- [x] Publish one coherent terminal result after postStop across persistence, registry, parent notification, ActorWaiter and outcome; preserve successful results with warnings when postStop fails.
+- [x] Interrupt and join the selected execution on cancellation; retain generation isolation, successor protection, persistent retirement, disposal and background admission responsiveness.
+- [x] Unquarantine the two cases and cover the cancellation/publish race, warnings, nested actors, hook failure, queued wakes and disposal.
 - [ ] Independently review and merge the lifecycle main PR; propagate it through a compat PR and validate its frozen-context consumers.
 
 ## Task 4: Final evidence and cleanup

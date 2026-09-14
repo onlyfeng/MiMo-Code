@@ -123,6 +123,7 @@ export const make = <A, E = never, B = never>(
       const fiber = yield* Deferred.await(start).pipe(
         Effect.andThen(Deferred.succeed(entered, undefined)),
         Effect.andThen(work),
+        Effect.interruptible,
         Effect.onExit((exit) =>
           (opts?._testHooks?.onRunExit ?? Effect.void).pipe(
             Effect.andThen(Deferred.await(start)),
@@ -130,7 +131,9 @@ export const make = <A, E = never, B = never>(
             Effect.uninterruptible,
           ),
         ),
-        Effect.forkIn(scope),
+        // Install the finalizer even if cancellation precedes the first
+        // instruction; the start wait and actual work remain interruptible.
+        Effect.forkIn(scope, { uninterruptible: true }),
       )
       if (opts?._testHooks?.beforeRunPublish) yield* opts._testHooks.beforeRunPublish
       return { id, done, start, entered, fiber, onInterrupt } satisfies RunHandle<A, E>

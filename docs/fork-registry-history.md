@@ -3180,3 +3180,30 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - The prior preview-budget candidate passed CI at `4544294d`; this corrected source requires fresh PR-head CI before merge.
 
 - Independent marker-collision follow-up: `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d` distinguishes a missing URL key from a projected null URL. Genuine attachments whose stored MIME equals the notice retain their locator. The added real around-path assertion is red before the fix; final history is 68 pass, five benchmark skips, 0 fail, 625 assertions. Typecheck passes.
+
+### 2026-09-15 C07 actor lifecycle alignment
+
+- Implementation: `30b9df3d51bc912e8f3efb3122f66cb81fa5daaf`; integrated source/test behavior: `577fc25060ed31e8ece68ee02ca5b1bced2cddcf`.
+- Integration sources: accepted main `321e70c9`, shared C05 correction `54deac13`; upstream remains `5198ff54`. Merge order remains shared history correction, initial compat propagation, lifecycle main, lifecycle compat.
+- FC-001 adopts spawn execution ownership through postStop, coherent result/warning publication, cancellation interrupt/join, masked cancellation ownership and reliable Runner pre-start finalization. FC-008 enables the two remaining actor quarantine contracts. Shared FD-009 frozen-context identity and compat-only model context ownership are retained.
+- Earlier nested-claim deadlock attribution is withdrawn following real InboxArrived observation. Distinct, reproducible Runner and owner-acquisition cancellation gaps were fixed without relaxing those regression timeouts.
+- Before final mask patch: actor matrix 353 pass and HTTP recovery 13 pass. Final mask source: 122 pass cancellation/Runner/plugin/tool matrix, 6 postStop/cross-session cases and 3 owner/follower/scheduler cases; typecheck passes. Independent final scheduler/follower probes pass. Integrated main's runtime-created recovery case passes; full final-tree CI remains a publication gate.
+- Full commands and evidence boundaries: [lifecycle record](actor-lifecycle-alignment-2026-09-15.md).
+
+### 2026-09-15 C07 publication review corrections
+
+- Final main source/test behavior: `1ae374852cedd3426b73618ad787f7e077fd1fe3`, including workflow timeout `66cfbf17`, execution admission `65c84b90`, and queued receipt correction. Accepted prior main is `e4075dfc`; selected upstream remains `5198ff54`.
+- FC-001 now closes acquire/reserve admission for the whole cancellation episode, permanently invalidates that episode's waiting tickets, and prevents a reserved but not started worker from calling the model after cancellation. Fresh valid generations and cross-session independence remain. Joined completed receipts cannot suppress queued cancellation; prior cancelled receipts retain single-notification behavior.
+- FC-008's workflow timeout caller bounds the cancellation join to the existing five-second reclaim grace while detached cleanup continues. Shared Actor.cancel remains interrupt/join. Worktree disposal retains its own existing limits and is not covered by an absolute five-second call deadline.
+- Final default-path matrix: 130 pass, 0 fail, 569 assertions; postStop/cross-session 6 pass, 35 assertions. Final workflow-specific matrix: 7 pass, 23 assertions. Typecheck and focused lint pass. Independent real Actor/Inbox/finalizer probes reproduced and verified every review correction.
+- Earlier local runs inherited WORKFLOW_TOOL=1; final actor matrices explicitly remove it, while workflow-specific tests explicitly enable it. Package ORCHESTRATOR preload is unchanged. The lifecycle record distinguishes intermediate failures and prior snapshots from final evidence.
+- Before C07 publication, selected upstream propagation and shared C05 follow-up were accepted through PR #121, #123 and #122; compat is `b277f8efa0dd379997c40a50798c9086d88c6480`. Its PR head `6a7f6cbe` passed all eight checks. Lifecycle publication and final remote-tip CI remain subsequent gates.
+
+### 2026-09-15 direct Effect hook cancellation correction
+
+- Main source/test behavior: `4eacc84dccf83c22f533c35bea282d4c5a38cacd`; accepted prior main `e4075dfc` and selected upstream `5198ff54` remain unchanged.
+- Actual model/tool cancellation does not share its target Runner fiber. Frozen `21a8fbbd` actor/session continuation probes pass (2 cases, 22 assertions); the automated self-tool deadlock premise is withdrawn.
+- A direct Effect postStop hook does hang when cancelling itself, also on the old `a197d4a8` baseline after early outcome publication. FC-001 now detects the actual active execution owner fiber and transfers that caller's complete cancellation to the existing service scope, with interruptible waiting even from a finalizer. External cancellation still joins complete cleanup; child-to-ancestor cancellation retains recursive cleanup. No bridge, Runner or tool interface changes are added.
+- Final source: 132 default-path execution/Runner/Actor/plugin/tool cases pass (586 assertions), plus 9 postStop/cross-session/hook cases (50 assertions). Typecheck and focused lint pass. Independent finalizer reentry and context-preservation probes pass 2 cases/16 assertions. Earlier matrices above retain their original snapshot boundary.
+- The final workflow-specific timeout/cancel/worktree matrix is also repeated on `4eacc84d`: 7 pass, 23 assertions, with WORKFLOW_TOOL explicitly enabled and the other six selectors removed.
+- Main PR #124 acceptance, compat inheritance and exact merged-tip CI follow this source validation; the lifecycle record remains the detailed evidence owner.

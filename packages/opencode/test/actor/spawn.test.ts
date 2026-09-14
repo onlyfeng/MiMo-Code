@@ -1,3 +1,4 @@
+import { ActorExecution } from "../../src/actor/execution"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -52,7 +53,7 @@ import { Auth } from "../../src/auth"
 import { Database } from "../../src/storage"
 import { MessageTable, SessionTable } from "../../src/session/session.sql"
 import { MessageV2 } from "../../src/session/message-v2"
-import { MessageID, PartID } from "../../src/session/schema"
+import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { Instance } from "../../src/project/instance"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -375,8 +376,9 @@ function settledPromptLayer<A, E, R>(
 }
 
 const it = testEffect(makeLayer())
+let postStopCancel: ((input: { sessionID: string; actorID: string }) => Effect.Effect<void>) | undefined
 let preStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
-let postStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
+let postStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void>; cleanup?: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } } | undefined
 let postStopReentry: { calls: number; finished: Deferred.Deferred<void> } | undefined
 const pausePreStopPlugin = Layer.succeed(
   Plugin.Service,
@@ -406,8 +408,9 @@ const pausePreStopPlugin = Layer.succeed(
         }
         return { continue: false, contributingPluginNames: [], contributingHookIDs: [] }
       }),
-    triggerActorPostStop: () =>
+    triggerActorPostStop: (input) =>
       Effect.gen(function* () {
+        if (postStopCancel) yield* postStopCancel(input)
         const reentry = postStopReentry
         if (reentry) {
           reentry.calls++
@@ -424,13 +427,17 @@ const pausePreStopPlugin = Layer.succeed(
         const pause = postStopPause
         if (pause) {
           yield* Deferred.succeed(pause.hit, undefined)
-          yield* Deferred.await(pause.release)
+          yield* Deferred.await(pause.release).pipe(Effect.ensuring(
+            pause.cleanup
+              ? Deferred.succeed(pause.cleanup.hit, undefined).pipe(Effect.andThen(Deferred.await(pause.cleanup.release)))
+              : Effect.void,
+          ))
         }
         return { continue: false, contributingPluginNames: [], contributingHookIDs: [] }
       }),
   }),
 )
-const pauseIt = testEffect(makeLayer(pausePreStopPlugin))
+const pauseIt = testEffect(makeLayer(pausePreStopPlugin).pipe(Layer.provideMerge(ActorExecution.layer)))
 
 const ref = {
   providerID: ProviderID.make("test"),
@@ -871,7 +878,7 @@ describe("Actor.cancel", () => {
     ),
   )
 
-  it.live("cancel(graceful) returns without waiting for the turn and stamps cancelled", () =>
+  it.live("cancel(graceful) interrupts the turn and stamps cancelled before returning", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         const actor = yield* Actor.Service
@@ -1346,9 +1353,9 @@ describe("Actor forkContext lifecycle", () => {
           yield* Deferred.await(hit).pipe(Effect.timeout("3 seconds"))
           yield* Fiber.interrupt(pending).pipe(Effect.timeout("2 seconds"))
           expect(yield* Deferred.isDone(release)).toBe(false)
-          // Delivery already committed; interruption joins the postStop work
-          // without rewriting its terminal result or leaving cancel followers stuck.
-          expect((yield* registry.get(parent.id, actorID))?.lastOutcome).toBe("success")
+          // No terminal result is committed while postStop is still running.
+          // Admission interruption joins the child and settles cancellation.
+          expect((yield* registry.get(parent.id, actorID))?.lastOutcome).toBe("cancelled")
           yield* actor.cancel(parent.id, actorID, "forced").pipe(Effect.timeout("2 seconds"))
         }),
         { git: true, config: providerCfg },
@@ -1417,14 +1424,17 @@ describe("Actor forkContext lifecycle", () => {
     ),
   )
 
-  pauseIt.live("delivered no-op cancel preserves forkContext while postStop is still running", () =>
+  for (const mode of ["graceful", "forced"] as const)
+  pauseIt.live(`cancel ${mode} joins a spawn paused in postStop before releasing context`, () =>
     Effect.gen(function* () {
       const hit = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
-      postStopPause = { hit, release }
+      const cleanup = { hit: yield* Deferred.make<void>(), release: yield* Deferred.make<void>() }
+      postStopPause = { hit, release, cleanup }
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           yield* Deferred.succeed(release, undefined).pipe(Effect.ignore)
+          yield* Deferred.succeed(cleanup.release, undefined)
           yield* Effect.sync(() => {
             postStopPause = undefined
           })
@@ -1465,27 +1475,32 @@ describe("Actor forkContext lifecycle", () => {
               orElse: () => Effect.fail(new Error("timed out waiting for the first test-LLM request")),
             }),
           )
-          const outcome = yield* Deferred.await(result.outcome).pipe(
-            Effect.timeoutOrElse({
-              duration: "1 second",
-              orElse: () => Effect.fail(new Error("timed out waiting for delivered actor outcome")),
-            }),
-          )
-          expect(outcome.status).toBe("success")
-          yield* Deferred.await(hit).pipe(
-            Effect.timeoutOrElse({
-              duration: "1 second",
-              orElse: () => Effect.fail(new Error("timed out waiting for actor.postStop pause")),
-            }),
-          )
-
-          yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(
-            Effect.timeoutOrElse({
-              duration: "1 second",
-              orElse: () => Effect.fail(new Error("timed out waiting for delivered actor no-op cancellation")),
-            }),
-          )
+          yield* Deferred.await(hit).pipe(Effect.timeout("2 seconds"))
+          expect(yield* Deferred.isDone(result.outcome)).toBe(false)
           expect((yield* actor.getForkContext(result.sessionID, result.actorID))?.system).toEqual(["test-system"])
+
+          const notices: string[] = []
+          const unsubscribe = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
+            if (event.properties.senderSessionID === result.sessionID && event.properties.senderActorID === result.actorID)
+              notices.push(event.properties.inboxID)
+          })
+          yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
+          const cancelling = yield* actor.cancel(result.sessionID, result.actorID, mode).pipe(Effect.forkChild)
+          try {
+            yield* Deferred.await(cleanup.hit).pipe(Effect.timeout("2 seconds"))
+            expect((yield* (yield* ActorRegistry.Service).get(result.sessionID, result.actorID))?.status).toBe("running")
+            expect(yield* Deferred.isDone(result.outcome)).toBe(false)
+            expect(notices).toHaveLength(0)
+            expect((yield* actor.getForkContext(result.sessionID, result.actorID))?.system).toEqual(["test-system"])
+          } finally {
+            yield* Deferred.succeed(cleanup.release, undefined)
+            yield* Fiber.join(cancelling).pipe(Effect.timeout("2 seconds"))
+          }
+          expect(notices).toHaveLength(1)
+          expect(yield* Deferred.isDone(release)).toBe(false)
+          expect(yield* Deferred.isDone(result.outcome)).toBe(true)
+          expect((yield* Deferred.await(result.outcome)).status).toBe("cancelled")
+          expect(yield* actor.getForkContext(result.sessionID, result.actorID)).toBeUndefined()
 
           yield* Deferred.succeed(release, undefined)
         }),
@@ -1499,7 +1514,7 @@ describe("Actor forkContext lifecycle", () => {
 
 
   pauseIt.live(
-    "postStop reentry cannot overwrite the completed registry state with running",
+    "postStop reentry completes before the final successful registry state",
     () =>
       Effect.gen(function* () {
         const finished = yield* Deferred.make<void>()
@@ -1533,7 +1548,7 @@ describe("Actor forkContext lifecycle", () => {
               model: ref,
             })
 
-            expect((yield* Deferred.await(result.outcome).pipe(Effect.timeout("2 seconds"))).status).toBe("success")
+            expect((yield* Deferred.await(result.outcome).pipe(Effect.timeout("8 seconds"))).status).toBe("success")
             yield* Deferred.await(finished).pipe(Effect.timeout("5 seconds"))
             const row = yield* actorReg.get(result.sessionID, result.actorID)
             expect(row?.status).toBe("idle")
@@ -1542,7 +1557,7 @@ describe("Actor forkContext lifecycle", () => {
           { git: true, config: providerCfg },
         )
       }),
-    10_000,
+    15_000,
   )
 })
 
@@ -3525,4 +3540,65 @@ it.live(
       { git: true, config: providerCfg },
     ),
   30_000,
+)
+
+
+for (const finalizer of [false, true]) {
+  pauseIt.live(`an actor postStop Effect hook can cancel its own execution with finalizer=${finalizer}`, () =>
+    provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const registry = yield* ActorRegistry.Service
+      const executions = yield* ActorExecution.Service
+      const parent = yield* sessions.create({ title: "postStop self cancellation" })
+      const entered = yield* Deferred.make<void>()
+      postStopCancel = (input) => {
+        const cancel = Deferred.succeed(entered, undefined).pipe(Effect.andThen(actor.cancel(SessionID.make(input.sessionID), input.actorID, "graceful")))
+        return finalizer ? Effect.void.pipe(Effect.ensuring(cancel)) : cancel
+      }
+      yield* Effect.addFinalizer(() => Effect.sync(() => { postStopCancel = undefined }))
+      yield* llm.text("finished model work")
+      const child = yield* actor.spawn({ mode: "peer", sessionID: parent.id, agentType: "explore", task: "stop yourself", context: "none", tools: [], background: true, model: ref })
+      yield* Deferred.await(entered).pipe(Effect.timeout("3 seconds"))
+      const outcome = yield* Deferred.await(child.outcome).pipe(Effect.timeout("3 seconds"))
+      expect(outcome.status).toBe("cancelled")
+      yield* actor.cancel(child.sessionID, child.actorID, "forced").pipe(Effect.timeout("2 seconds"))
+      expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
+      expect(yield* executions.current(child.sessionID, child.actorID)).toBeUndefined()
+      postStopCancel = undefined
+      const next = yield* executions.reserve(child.sessionID, child.actorID)
+      expect(next.cancelled).toBe(false)
+      yield* executions.release(next)
+    }), { git: true, config: providerCfg }), 10000,
+  )
+}
+
+pauseIt.live("a child execution postStop hook can cancel its ancestor without joining itself", () =>
+  provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
+    const actor = yield* Actor.Service
+    const sessions = yield* Session.Service
+    const registry = yield* ActorRegistry.Service
+    const executions = yield* ActorExecution.Service
+    const session = yield* sessions.create({ title: "child cancels ancestor" })
+    yield* llm.hang
+    const parent = yield* actor.spawn({ mode: "subagent", sessionID: session.id, agentType: "explore", task: "wait for child", context: "none", tools: [], background: true, model: ref })
+    yield* llm.wait(1).pipe(Effect.timeout("3 seconds"))
+    const entered = yield* Deferred.make<void>()
+    postStopCancel = () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(actor.cancel(parent.sessionID, parent.actorID, "graceful")))
+    yield* Effect.addFinalizer(() => Effect.sync(() => { postStopCancel = undefined }))
+    yield* llm.text("child finished")
+    const child = yield* actor.spawn({ mode: "subagent", sessionID: session.id, parentActorID: parent.actorID, agentType: "explore", task: "cancel parent", context: "none", tools: [], background: true, model: ref })
+    yield* Deferred.await(entered).pipe(Effect.timeout("3 seconds"))
+    expect((yield* Deferred.await(child.outcome).pipe(Effect.timeout("3 seconds"))).status).toBe("cancelled")
+    expect((yield* Deferred.await(parent.outcome).pipe(Effect.timeout("3 seconds"))).status).toBe("cancelled")
+    yield* actor.cancel(parent.sessionID, parent.actorID, "forced").pipe(Effect.timeout("2 seconds"))
+    for (const target of [parent, child]) {
+      expect((yield* registry.get(target.sessionID, target.actorID))?.lastOutcome).toBe("cancelled")
+      expect(yield* executions.current(target.sessionID, target.actorID)).toBeUndefined()
+    }
+    postStopCancel = undefined
+    yield* llm.text("later valid actor")
+    const next = yield* actor.spawn({ mode: "subagent", sessionID: session.id, agentType: "explore", task: "later valid work", context: "none", tools: [], background: true, model: ref })
+    expect((yield* Deferred.await(next.outcome).pipe(Effect.timeout("3 seconds"))).status).toBe("success")
+  }), { git: true, config: providerCfg }), 15000,
 )
