@@ -3852,3 +3852,41 @@ Independent review of `bd47323d3c375be255d0c0ca0319d4e5882847e3` found no P1/P2;
 - Main PR #123 passed all eight checks at `90eef40f`: [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/34884042595), [typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/34884042999), [lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/34884042628). The old locator review thread is technically fixed; its UI resolution state is separate.
 - On the compat inheritance tree, `bun test test/history` passes 68 tests, with five benchmark skips, 0 failures and 625 assertions. This run explicitly unsets WORKFLOW_TOOL in addition to umbrella/MCP/Codex selectors; package ORCHESTRATOR preload remains active. History source/tests, shared FD/FC/history and lockfile are byte-identical to accepted main.
 - This advances C05's result in the seven-row stage inventory above. C07 remains a separately reviewed lifecycle change; the new compat PR head still requires fresh CI before merge.
+
+## 2026-09-15 final lifecycle inheritance and capability results
+
+- Selected upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`; newer upstream, including `b4cc11cd`, remains excluded.
+- Accepted main: `648f7cdf100b30ff046db7518d8f832473b61481` (PR #124); inherited main source/test behavior: `4eacc84dccf83c22f533c35bea282d4c5a38cacd`; shared audit: `5f06049e568276cd1cea9012f6b114e6ddb2fac2`.
+- Prior accepted compat: `b277f8efa0dd379997c40a50798c9086d88c6480` (PR #122). Final compat source/test behavior: `1a072e7aa3b142fc9804974bd8142729817c92db`; accepted-main ancestry merge: `3cf81dabd6efc66d7cbd037292eee742a2a33728`. Later documentation and empty-tree ancestry merges do not advance runtime behavior.
+- Direct Effect execution-hook callers coordinate self/ancestor cancellation in the existing service scope. External callers still join full cleanup; model tool calls already use independent bridge fibers. All seven DC owners retain their contracts. Relative to the completed first stage, only four production files change: actor execution, actor spawn, Effect Runner and workflow runtime. Shared execution/Runner/workflow files are identical to main; spawn differs only by the existing frozen turnContext field and watermark explanation. Full-context Actor tool/recovery, context bounds, MaxMode, TUI, network and platform source overlays remain unchanged. SDK/OpenAPI and bun.lock are unchanged.
+
+### Final capability results (N = 7)
+
+| ID | Selected behavior | Main result | Compat result | Decisive evidence |
+| --- | --- | --- | --- | --- |
+| C01 | Finite Read MIME allowlist | Adopted with modality and size guards | Inherited | Shared Read/media source and existing permission/path/attachment tests |
+| C02 | Remove prior-read gate | FC-003 retired with its gate | Inherited | Gate and obsolete state tests absent; remaining file-integrity guards retained |
+| C03 | Actor context ownership | Model interface has none-context ephemeral creation; shared system full runtime and resume retained | Explicit none/state/full and persistent full creation retained and recovery adapted | JSON/shell/recovery tools, UTF-8 state caps, runtime/model persistent recovery, real HTTP and frozen native contract |
+| C04 | Memory independent of checkpoint | Converged FC-002 rule adopted; FD-002 identity distinction retained | Inherited with frozen prefix behavior | llm system-prompt and frozen-context tests |
+| C05 | Uniform resumable history indexing | Adopted with NUL and SQL metadata-budget/locator fixes | Inherited | History/migration/API matrix; final default history 68 pass/625 assertions; raw get and locators preserved |
+| C06 | Plugin SDK npm identity | Valid non-local semver pinned | Inherited | Shared semver helper and core/TUI configuration tests |
+| C07 | Whole execution completion and cancellation | Accepted postStop result/warnings, interrupt/join, admission barrier, pre-start guard, receipt correction, direct Effect hook self/ancestor cancellation and bounded workflow cancellation wait | Inherited while preserving full-context lifecycle | Final 372-case compat matrix, HTTP14/native4, main132/postStop9/workflow7 and independent real race probes; both formerly quarantined cases enabled |
+
+### Final-source validation
+
+Commands ran from packages/opencode with Bun 1.3.14. The default matrix explicitly unsets umbrella EXPERIMENTAL, MCP_TOOL_SEARCH, CODEX_MODE, WORKFLOW_TOOL, COMPACTION_MAX_CONTEXT, COMPACTION_TRIGGER_RATIO and DISABLE_CHECKPOINT selectors. Package preload retains ORCHESTRATOR=true. This replaces the earlier ambient WORKFLOW_TOOL=1 boundary for the final lifecycle matrix, while retaining those earlier results as historical evidence.
+
+| Check | Actual result |
+| --- | --- |
+| Actor, inbox, actor hooks, owned lifecycle and exec lifecycle (40 files) | 372 pass, 0 fail, 0 skip, 1,582 assertions |
+| Real HTTP actor recovery, separate process | 14 pass, 0 fail, 233 assertions |
+| Frozen native Actor shell contract, serial after HTTP | 4 pass, 0 fail, 34 assertions; existing 15-second test timeouts unchanged |
+| Package bun typecheck | Exit 0 |
+| Final source manifest | 1,254 source/test/harness files in the validation manifest unchanged throughout validation |
+| C03 tool input/recovery/descriptions default-path check on unchanged five source/test files | 95 pass, 0 fail, 478 assertions |
+
+The first three runtime groups total 390 passes and 1,849 assertions. The C03 group is separate evidence on unchanged tool-interface files, not part of that total. Shared FD/FC/history registries are byte-identical to main. These source checks do not claim a distributable binary, a new private-network/OAuth acceptance test, or automatic repair of future asynchronous history-index misses after migration completion.
+
+Main acceptance precedes this compat publication. The resulting PR head and actual merged compat SHA require their own CI; final remote-tip ancestry and exact-SHA CI are verified after publication and reported with the operation result.
+
+Main PR #124 passed all eight checks at `5f06049e`: [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/34889363962), [typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/34889363859), [lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/34889363855). Its latest automated review completed without new findings. The older tool self-cancellation thread is technically disproved by real frozen-source calls; UI resolution is separate. Direct Effect hook cancellation was independently reproduced and corrected.
