@@ -55,6 +55,32 @@ test("revoke refuses an id and --all together instead of revoking everything", a
   expect(survivors).toEqual([kept.record.id, other.record.id].sort())
 })
 
+test("an empty id with --all is still both forms, not --all alone", async () => {
+  // `revoke "$TOKEN_ID" --all` with the variable unset is the shape this guard
+  // exists for, and it is the one a truthy test misses: yargs binds the empty
+  // positional as `""`, not as absent. Verified against yargs 18 — `["revoke","",
+  // "--all"]` reaches the handler with `id=""` and `all=true`.
+  await using tmp = await tmpdir({ git: true })
+  const a = await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
+  const b = await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
+
+  expect(await revoke(tmp.path, "", "--all")).toBe(1)
+
+  const survivors = (await LLMServerTokens.list(tmp.path)).map((t) => t.id).sort()
+  expect(survivors).toEqual([a.record.id, b.record.id].sort())
+})
+
+test("--all with no positional at all is still honored", async () => {
+  // The other side of the same line: an ABSENT positional is `undefined`, and
+  // `!= null` has to let it through or `--all` stops working entirely.
+  await using tmp = await tmpdir({ git: true })
+  await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
+  await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })
+
+  expect(await revoke(tmp.path, "--all")).toBe(0)
+  expect(await LLMServerTokens.list(tmp.path)).toEqual([])
+})
+
 test("each form still works on its own", async () => {
   await using tmp = await tmpdir({ git: true })
   const one = await LLMServerTokens.issue({ directory: tmp.path, expiry: {} })

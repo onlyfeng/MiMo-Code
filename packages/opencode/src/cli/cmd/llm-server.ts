@@ -210,7 +210,12 @@ const revoke = cmd({
       // nothing: `id` is a positional, and the conflict never fires. Checked against
       // yargs 18 rather than assumed — `revoke <id> --all` still reaches the handler
       // with both set.
-      if (args.all && args.id) {
+      //
+      // Presence, not truthiness: yargs binds an empty positional as `""`, so
+      // `revoke "$TOKEN_ID" --all` with the variable unset is the exact case this
+      // guard exists for and a truthy test walks straight past it. An absent
+      // positional is `undefined`, which `!= null` still lets through.
+      if (args.all && args.id != null) {
         UI.error("pass a token id or --all, not both")
         process.exitCode = 1
         return
