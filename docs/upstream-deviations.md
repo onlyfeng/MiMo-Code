@@ -184,7 +184,7 @@ where this delta does not change their implementation.
   exactly, and `config.llmServer`, `Util.Self`, upstream's `llm-server` CLI and
   upstream's `generateServerPassword`/`clearGeneratedServerPassword` come with
   it. Net −3548 lines.
-- Observable contract, what remains fork-owned: seven boundaries, all kept
+- Observable contract, what remains fork-owned: eight boundaries, all kept
   because upstream does not have them, not because the fork prefers them.
   1. `serve --llm-server` gates only the address advertisement. The route is
      always mounted and always demands a minted token, so credentials alone
@@ -225,6 +225,19 @@ where this delta does not change their implementation.
   7. A buffered non-streaming reply is capped at 16 MiB. The caller may ask for an
      unbounded `max_completion_tokens` against a permissive or custom provider,
      and the whole reply is held in memory before it is sent.
+  8. A caller-supplied `image_url` is classified before it reaches the SDK, which
+     fetches it from this process for adapters that cannot take a URL. Upstream
+     accepts any parseable URL, so a token would otherwise carry a request forge
+     into loopback, RFC1918 and cloud metadata. Reuses FC-010's `assertSafeUrl`
+     rather than the fork's retired 246-line image pipeline, and additionally
+     rejects non-http(s) schemes.
+  Admission is taken in `InstanceMiddleware`, not inside the capability route,
+  because the instance bootstrap sits between them: a gate downstream of it
+  cannot bound requests stuck waiting *on* it, and the deadline would be
+  installed too late to cover that wait. What remains unbounded is the bootstrap
+  wait itself for a client that disconnects — the wait is not cancellable — but
+  it is now capped at two, which is the same exposure upstream carries on every
+  other instance route.
   Two further items were assessed and deliberately NOT restored, because the
   simplest sufficient answer was cheaper than the retired mechanism:
   - `provider_options` validation. The retired 239-line validator checked

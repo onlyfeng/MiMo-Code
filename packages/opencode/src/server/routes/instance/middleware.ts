@@ -10,7 +10,7 @@ import { Filesystem } from "@/util"
 import { Global } from "@/global"
 import path from "node:path"
 import { DIRECTORY_DENIED_CODE } from "./access"
-import { CAPABILITY_PREFIX, presentedToken } from "./capability"
+import { CAPABILITY_PREFIX, admitCapabilityRequest, presentedToken } from "./capability"
 import { LLMServerTokens } from "@/llm-server/tokens"
 
 /**
@@ -68,7 +68,8 @@ export function InstanceMiddleware(workspaceID?: WorkspaceID): MiddlewareHandler
     // full instance start for any directory on the machine before being refused.
     // Deliberately after containment, so an outside directory is still refused
     // first and answers 403 rather than 401 (FD-004 residual).
-    if (c.req.path.startsWith(CAPABILITY_PREFIX + "/")) {
+    const capability = c.req.path.startsWith(CAPABILITY_PREFIX + "/")
+    if (capability) {
       const token = presentedToken(c)
       const verdict = token ? await LLMServerTokens.verify(directory, token) : undefined
       if (!verdict?.ok) {
@@ -93,17 +94,45 @@ export function InstanceMiddleware(workspaceID?: WorkspaceID): MiddlewareHandler
       }
     }
 
-    return WorkspaceContext.provide({
-      workspaceID,
-      async fn() {
-        return Instance.provide({
-          directory,
-          init: () => AppRuntime.runPromise(InstanceBootstrap),
-          async fn() {
-            return next()
+    const enter = () =>
+      WorkspaceContext.provide({
+        workspaceID,
+        async fn() {
+          return Instance.provide({
+            directory,
+            init: () => AppRuntime.runPromise(InstanceBootstrap),
+            async fn() {
+              return next()
+            },
+          })
+        },
+      })
+
+    if (!capability) return enter()
+
+    // Admission is taken HERE, not inside the capability route, because the
+    // bootstrap below sits between the two. A gate downstream of it cannot bound
+    // requests that are stuck waiting on a slow or already-pending bootstrap —
+    // which is the case that accumulates — and the deadline signal would be
+    // installed too late to cover that wait at all.
+    const release = admitCapabilityRequest(c.req.raw)
+    if (!release) {
+      c.header("Retry-After", "1")
+      return c.json(
+        {
+          error: {
+            message: "Model API allows at most 2 concurrent requests",
+            type: "rate_limit_error",
+            code: "rate_limit_exceeded",
           },
-        })
-      },
-    })
+        },
+        429,
+      )
+    }
+    try {
+      return await enter()
+    } finally {
+      release()
+    }
   }
 }

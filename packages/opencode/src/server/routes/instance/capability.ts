@@ -7,6 +7,7 @@ import { Log } from "@/util"
 import { lazy } from "@/util/lazy"
 import { Instance } from "@/project/instance"
 import { LLMServerTokens } from "@/llm-server/tokens"
+import { assertSafeUrl } from "@/util/ssrf"
 import { readBody } from "@/server/api-request"
 import { RequestError, collect, start, stream, type ModelScope } from "@/llm-server/completions"
 import { ChatCompletionRequest, unsupported } from "@/llm-server/protocol"
@@ -86,6 +87,29 @@ const active = new Set<AbortController>()
 /** Server-owned signal for one request: the client's, plus our own deadline. */
 const deadlines = new WeakMap<Request, AbortSignal>()
 
+/**
+ * Take an admission slot, or `undefined` when the surface is full.
+ *
+ * Called from `InstanceMiddleware` rather than from a route middleware here,
+ * because the instance bootstrap happens between the two: a gate installed
+ * downstream of it can never bound requests that are stuck waiting *on* it, and
+ * the deadline signal would be installed too late to be worth anything.
+ */
+export function admitCapabilityRequest(request: Request) {
+  if (active.size >= MAX_CONCURRENT) return undefined
+  const controller = new AbortController()
+  const timer = setTimeout(
+    () => controller.abort(new DOMException("Model request timed out", "TimeoutError")),
+    REQUEST_DEADLINE_MS,
+  )
+  active.add(controller)
+  deadlines.set(request, AbortSignal.any([request.signal, controller.signal]))
+  return () => {
+    clearTimeout(timer)
+    active.delete(controller)
+  }
+}
+
 function deadlineFor(request: Request) {
   return deadlines.get(request) ?? request.signal
 }
@@ -147,32 +171,6 @@ export const CapabilityRoutes = lazy(() =>
       })
       return next()
     })
-    .use(async (c, next) => {
-      if (active.size >= MAX_CONCURRENT) {
-        c.header("Retry-After", "1")
-        return c.json(
-          errorBody({
-            message: `Model API allows at most ${MAX_CONCURRENT} concurrent requests`,
-            type: "rate_limit_error",
-            code: "rate_limit_exceeded",
-          }),
-          429,
-        )
-      }
-      const controller = new AbortController()
-      const timer = setTimeout(
-        () => controller.abort(new DOMException("Model request timed out", "TimeoutError")),
-        REQUEST_DEADLINE_MS,
-      )
-      active.add(controller)
-      deadlines.set(c.req.raw, AbortSignal.any([c.req.raw.signal, controller.signal]))
-      try {
-        return await next()
-      } finally {
-        clearTimeout(timer)
-        active.delete(controller)
-      }
-    })
     .get("/models", async (c) => {
       const all = await AppRuntime.runPromise(
         Effect.gen(function* () {
@@ -181,6 +179,9 @@ export const CapabilityRoutes = lazy(() =>
             Object.keys(provider.models).map((modelID) => `${providerID}/${modelID}`),
           )
         }),
+        // Discovery initializes provider state and can run a plugin-backed loader.
+        // Without the deadline a stalled one holds its admission slot forever.
+        { signal: deadlineFor(c.req.raw) },
       )
       const scope = scopeFor(c.req.raw)
       const visible = scope ? all.filter((id) => scope.includes(id)) : all
@@ -213,6 +214,25 @@ export const CapabilityRoutes = lazy(() =>
       const req = parsed.data
       const rejection = unsupported(req)
       if (rejection) throw new RequestError(400, rejection, "invalid_request_error")
+
+      // A caller-supplied `image_url` is fetched by the AI SDK from THIS process for
+      // adapters that cannot take a URL, so accepting any parseable URL hands a token
+      // holder a request forge into loopback, RFC1918 and cloud metadata. The scope a
+      // token grants is model access, not network reach. Reuses FC-010's classifier
+      // rather than restoring the fork's retired image pipeline.
+      for (const message of req.messages) {
+        if (!Array.isArray(message.content)) continue
+        for (const part of message.content) {
+          if (part.type !== "image_url") continue
+          const url = part.image_url.url
+          if (url.startsWith("data:")) continue
+          if (!/^https?:$/.test(new URL(url).protocol))
+            throw new RequestError(400, "image_url must be http(s) or a data: URL", "invalid_request_error")
+          await assertSafeUrl(url).catch((error) => {
+            throw new RequestError(400, error instanceof Error ? error.message : "image_url is not reachable", "invalid_request_error")
+          })
+        }
+      }
 
       const started = await start({ req, allowlist: scopeFor(c.req.raw), abort: deadlineFor(c.req.raw) })
       if (req.stream !== true) {
