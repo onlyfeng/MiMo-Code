@@ -29,7 +29,7 @@ THE EXCEPTION — `run` blocks the conversation; only for a tiny lookup that gat
           Use it for essentially all delegation: investigation, analysis, review,
           implementation, long searches — anything that takes real time.
           required: subagent_type, description, prompt
-          optional: command, context, lifecycle="persistent" (requires context="full")
+          optional: command
 - run:    **RARE EXCEPTION.** Same launch, but BLOCKS the whole conversation until
           the subagent finishes; result returned inline. Allowed ONLY when you
           cannot make your very next decision without the result in THIS turn, and
@@ -37,7 +37,7 @@ THE EXCEPTION — `run` blocks the conversation; only for a tiny lookup that gat
           ordinary analysis, review, or implementation work — those go to `spawn`.
           If you are unsure, use `spawn`.
           required: subagent_type, description, prompt
-          optional: timeout_ms, command, context
+          optional: timeout_ms, command
 - status: poll actor state without blocking. required: actor_id.
           Returns: { status: "pending"|"running"|"idle"|"unknown", actor_id, turnCount, ... }
 - wait:   block until actor completes (success/failure/cancelled) or timeout (default 10 min).
@@ -92,11 +92,6 @@ You are the subagent's only briefing — it hasn't seen this conversation.
 - If you need short output, say so ("report in under 200 words").
 - For investigation: hand over the question; prescribed steps become dead weight.
 
-## Context inheritance
-
-- `context="full"`: subagent sees your full conversation history (for state writers, evaluators).
-- `context="none"` (default): clean context, only the prompt.
-
 ## Actor ID vs Task ID
 
 `actor_id` identifies a live subagent. It is returned by `spawn`/`run` and accepted by
@@ -117,12 +112,10 @@ addressed from its own session; unrelated sessions remain unavailable.
 Only persistent full-context actors retaining their original context qualify;
 ordinary ephemeral subagents require a new spawn after termination.
 
-Opt in when creating the actor:
-`{"operation":{"action":"spawn","subagent_type":"general","description":"Recoverable review","prompt":"Review the specified module","context":"full","lifecycle":"persistent"}}`.
-This spawn-only option retains frozen context until cancellation; omit it for the
-normal ephemeral lifecycle. Use `status` for progress and `cancel` when finished
-with the actor to release its retained context. Resume retries interruption,
-not a successfully completed turn.
+Persistent full-context actors are created by the runtime. `spawn` and `run`
+accept neither context nor lifecycle options. Use `status` for existing actors
+and `cancel` when finished to release retained context. Resume retries an
+interrupted turn, not a successfully completed one.
 
 ## Following up with an existing subagent
 
@@ -132,8 +125,8 @@ To give more work to a subagent you already have, `send` it a message:
 
 `send` appends your message to that subagent's own history and wakes it when the
 actor remains reusable, so an eligible idle actor keeps its prior messages and
-tool outputs. A completed ephemeral `context: "full"` actor has released its
-frozen context and cannot safely resume; spawn a new full-context actor instead.
+tool outputs. An actor whose frozen context has been released cannot safely
+resume; start a new task with a complete briefing.
 `send` returns as soon as the message is queued; the woken turn's result reaches
 you as a completion notification.
 
@@ -155,8 +148,8 @@ postStop check then becomes a no-op.
 
 - **`spawn` vs `run` result delivery**: `spawn` returns the actor_id immediately; when the background actor finishes, its result appears as a notification in this conversation — your turn does NOT auto-wake to process it; you'll see it the next time you respond to the user. Use `wait` to block on the actor_id explicitly. `run` instead blocks the conversation and returns the result inline — that stall is exactly why it's the exception.
 - **`wait` on persistent peers caveat**: `wait` is designed for ephemeral subagents you spawned via `spawn`/`run`. Persistent peers idle between turns and never produce a "done" outcome on success — `wait` on a peer will block until that peer fails or is cancelled. Use `send` + `status` to coordinate with peers instead.
-- **`send` semantics**: fire-and-forget; returns within ~5 ms regardless of receiver load. It wakes a reusable receiver for another turn on its own history, so `send` is the follow-up mechanism for eligible idle actors. A completed ephemeral `context: "full"` actor fails closed after its frozen context is released; spawn a new full-context actor rather than expecting live-context fallback. The woken turn's result reaches you as a completion notification, not from the `send` call. On unknown `to_actor_id`, `send` returns `{inboxID: null, error: "receiver not found"}` rather than throwing — handle the error path.
-- Trust the subagent's outputs generally, but the subagent doesn't see your full context (unless you pass `context="full"`); brief it accordingly.
+- **`send` semantics**: fire-and-forget; returns within ~5 ms regardless of receiver load. It wakes a reusable receiver for another turn on its own history, so `send` is the follow-up mechanism for eligible idle actors. An actor whose frozen context was released fails closed; start a new task with a complete briefing. The woken turn's result reaches you as a completion notification, not from the `send` call. On unknown `to_actor_id`, `send` returns `{inboxID: null, error: "receiver not found"}` rather than throwing — handle the error path.
+- Trust the subagent's outputs generally, but the subagent only sees the prompt you wrote; brief it accordingly.
 
 
 ## Examples

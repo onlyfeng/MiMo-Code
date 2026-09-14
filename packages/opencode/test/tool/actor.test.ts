@@ -15,12 +15,13 @@ import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { ActorTool, type ActorPromptOps } from "../../src/tool/actor"
+import { shellWrap } from "../../src/tool/shell-wrap"
 import { ActorRegistry } from "../../src/actor/registry"
 import { TaskRegistry } from "../../src/task/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import type { SpawnInput, AgentOutcome } from "../../src/actor/spawn"
-import { prefixCaptureRef, type PrefixCaptureFn } from "../../src/session/prefix-capture-ref"
+import { prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 import { Team } from "../../src/team"
 import { Inbox } from "../../src/inbox"
 import { Truncate } from "../../src/tool"
@@ -822,6 +823,10 @@ describe("Actor tool subagent_type enum (F36)", () => {
         // reaching for it gets a validation error instead of a silently fresh actor.
         expect(wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general", actor_id: "general-1" } }).success).toBe(false)
         expect(wrap({ operation: { action: "spawn", description: "x", prompt: "y", subagent_type: "general", actor_id: "general-1" } }).success).toBe(false)
+        // Model-facing spawn/run cannot request fork/context inheritance (system-only).
+        expect(wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general", context: "full" } }).success).toBe(false)
+        expect(wrap({ operation: { action: "spawn", description: "x", prompt: "y", subagent_type: "general", context: "state" } }).success).toBe(false)
+        expect(wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general", context: "none" } }).success).toBe(false)
         expect(wrap({ operation: { action: "run", description: "x", prompt: "y" } }).success).toBe(false) // missing subagent_type
         expect(wrap({ operation: { action: "run", prompt: "y", subagent_type: "general" } }).success).toBe(false) // missing description
         expect(wrap({ description: "x", prompt: "y", subagent_type: "general" }).success).toBe(false) // missing operation envelope
@@ -920,139 +925,81 @@ describe("Actor tool subagent_type enum (F36)", () => {
   )
 })
 
-describe("Actor tool full context", () => {
-  it.live("captures the caller-visible prefix at the context watermark", () =>
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        let capturedInput: SpawnInput | undefined
-        let capturedPrefixInput: Parameters<PrefixCaptureFn>[0] | undefined
-        yield* installMockSpawn((input) => {
-          capturedInput = input
-        })
-
-        const { chat, assistant } = yield* seed()
-        const session = yield* Session.Service
-        const watermark = yield* session.updateMessage({
-          id: MessageID.ascending(),
-          role: "user",
-          sessionID: chat.id,
-          agent: "build",
-          model: ref,
-          time: { created: Date.now() + 1 },
-        })
-        yield* session.updatePart({
-          id: PartID.ascending(),
-          messageID: watermark.id,
-          sessionID: chat.id,
-          type: "text",
-          text: "visible after the tool-call message",
-        })
-        const messages = yield* session.messages({ sessionID: chat.id })
-        const inheritedMessages = [{ role: "user" as const, content: "captured parent prefix" } as never]
-        prefixCaptureRef.current = (input) =>
-          Effect.sync(() => {
-            capturedPrefixInput = input
-            return {
-              system: ["captured system"],
-              tools: {},
-              inheritedMessages,
-              parentPermission: [],
-            }
-          })
-
-        const tool = yield* ActorTool
-        const def = yield* tool.init()
-        yield* def.execute(
-          {
-            operation: {
-              action: "run",
-              description: "inspect with context",
-              prompt: "continue from the visible transcript",
-              subagent_type: "general",
-              context: "full",
-            },
-          },
-          {
+describe("Actor tool model context boundary", () => {
+  for (const action of ["run", "spawn"] as const) {
+    it.live(`${action} uses only the supplied prompt without prefix capture`, () =>
+      provideTmpdirInstance(() =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          prefixCaptureRef.current = () => Effect.die("Model-facing spawn must not capture parent context")
+          const { chat, assistant } = yield* seed()
+          const def = yield* (yield* ActorTool).init()
+          const ctx = {
             sessionID: chat.id,
             messageID: assistant.id,
             agent: "build",
             abort: new AbortController().signal,
             extra: {},
-            messages,
+            messages: yield* (yield* Session.Service).messages({ sessionID: chat.id }),
             metadata: () => Effect.void,
             ask: () => Effect.void,
-          },
-        )
+          }
+          yield* def.execute({ operation: { action, subagent_type: "general", description: "Brief task", prompt: "Only this briefing" } }, ctx)
+          yield* shellWrap({ ...def, id: "actor" }).execute({ script: `actor ${action} general "Brief task" "Only this briefing"` }, ctx)
+          expect(spawned).toHaveLength(2)
+          for (const input of spawned) {
+            expect(input.context).toBe("none")
+            expect(input.forkContext).toBeUndefined()
+            expect(input.lifecycle).toBeUndefined()
+            expect(input.task).toBe("Only this briefing")
+          }
+        }),
+      ),
+    )
 
-        expect(capturedPrefixInput).toEqual({
-          sessionID: chat.id,
-          agentName: "build",
-          providerID: ref.providerID,
-          modelID: ref.modelID,
-          msgs: messages,
-        })
-        expect(capturedInput?.forkContext).toEqual({
-          system: ["captured system"],
-          tools: {},
-          inheritedMessages,
-          parentPermission: [],
-          watermarkMsgID: watermark.id,
-          model: ref,
-        })
-      }),
-    ),
-  )
-
-  for (const scenario of ["missing capture ref", "empty inherited messages"] as const) {
-    it.live(`${scenario} fails before spawning`, () =>
+    it.live(`${action} rejects context and lifecycle through JSON and shell recovery before admission`, () =>
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           let spawnCount = 0
-          yield* installMockSpawn(() => {
-            spawnCount += 1
-          })
+          let approvalCount = 0
+          yield* installMockSpawn(() => { spawnCount += 1 })
           const { chat, assistant } = yield* seed()
-          const session = yield* Session.Service
-          const messages = yield* session.messages({ sessionID: chat.id })
-          prefixCaptureRef.current =
-            scenario === "missing capture ref"
-              ? undefined
-              : () =>
-                  Effect.succeed({
-                    system: ["captured system"],
-                    tools: {},
-                    inheritedMessages: [],
-                    parentPermission: [],
-                  })
-
-          const tool = yield* ActorTool
-          const def = yield* tool.init()
-          const exit = yield* def
-            .execute(
-              {
-                operation: {
-                  action: "run",
-                  description: "inspect with context",
-                  prompt: "continue from the visible transcript",
-                  subagent_type: "general",
-                  context: "full",
-                },
-              },
-              {
-                sessionID: chat.id,
-                messageID: assistant.id,
-                agent: "build",
-                abort: new AbortController().signal,
-                extra: {},
-                messages,
-                metadata: () => Effect.void,
-                ask: () => Effect.void,
-              },
-            )
-            .pipe(Effect.exit)
-
-          expect(Exit.isFailure(exit)).toBe(true)
+          const def = yield* (yield* ActorTool).init()
+          const wrapped = shellWrap({ ...def, id: "actor" })
+          const ctx = {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: {},
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.sync(() => { approvalCount += 1 }),
+          }
+          const base = { action, subagent_type: "general", description: "Brief task", prompt: "Only this briefing" }
+          for (const extra of [
+            { context: "none" }, { context: "state" }, { context: "full" },
+            { context: null }, { context: false }, { context: 1 }, { context: {} },
+            { lifecycle: "persistent" }, { lifecycle: null },
+            { context: "full", lifecycle: "persistent" },
+          ]) {
+            const operation = { ...base, ...extra }
+            expect(Exit.isFailure(yield* Effect.exit(def.execute({ operation }, ctx)))).toBe(true)
+            for (const raw of [
+              operation,
+              { operation },
+              { operation: JSON.stringify(operation) },
+              { operation: base, ...extra },
+              { operation: JSON.stringify(base), ...extra },
+            ]) {
+              const result = yield* wrapped.execute(raw as never, ctx)
+              expect(result.metadata.success).toBe(0)
+              expect(result.output).toMatch(/context|lifecycle/)
+            }
+          }
           expect(spawnCount).toBe(0)
+          expect(approvalCount).toBe(0)
         }),
       ),
     )

@@ -3352,7 +3352,7 @@ for (const pause of ["cancel runner exit", "terminal status write"] as const) {
 }
 
 it.live(
-  "resume tool recovers a persistent full-context actor created by the spawn tool",
+  "resume tool recovers a persistent full-context actor created by the runtime",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm, dir }) {
@@ -3423,23 +3423,17 @@ it.live(
           metadata: () => Effect.void,
           ask: () => Effect.void,
         }
-        const operation = {
-          action: "spawn",
-          description: "Persistent recovery fixture",
-          prompt: "original delegated recovery task",
-          subagent_type: "general",
-          lifecycle: "persistent",
-          context: "full",
-          task_id: task.id,
-        } as const
-        const parsed = tool.parameters.safeParse({ operation })
-        if (!parsed.success) return yield* Effect.die(parsed.error)
-        const before = yield* reg.listBySession(parent.id)
-        for (const context of [undefined, "none", "state"] as const) {
-          const rejected = yield* tool.execute({ operation: { ...operation, context } }, ctx).pipe(Effect.exit)
-          expect(rejected._tag).toBe("Failure")
-          expect(yield* reg.listBySession(parent.id)).toEqual(before)
-        }
+        // Runtime callers retain the frozen-context API after model-facing
+        // spawn/run stop accepting context and lifecycle parameters.
+        const capture = prefixCaptureRef.current
+        if (!capture) return yield* Effect.die("Missing actual prefix captor")
+        const prefix = yield* capture({
+          sessionID: parent.id,
+          agentName: "build",
+          providerID: ref.providerID,
+          modelID: ref.modelID,
+          msgs: ctx.messages,
+        })
         expect(yield* llm.calls).toBe(0)
         const isActorRequest = (request: Record<string, unknown>) =>
           (request.messages as { role: string; content: string | { type: string; text?: string }[] }[]).some(
@@ -3456,9 +3450,22 @@ it.live(
           status: 400,
           body: { error: { message: "persistent tool actor interrupted" } },
         })
-        const created = yield* tool.execute({ operation }, ctx)
-        const actorID = created.metadata.actorId
-        if (typeof actorID !== "string") return yield* Effect.die("spawn tool did not return actorId")
+        const created = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          parentActorID: "main",
+          description: "Persistent recovery fixture",
+          task: "original delegated recovery task",
+          agentType: "general",
+          lifecycle: "persistent",
+          context: "full",
+          tools: "INHERIT",
+          background: true,
+          model: ref,
+          forkContext: { ...prefix, watermarkMsgID: ctx.messages.at(-1)!.info.id, model: ref },
+          task_id: task.id,
+        })
+        const actorID = created.actorID
         const failed = yield* tool.execute({ operation: { action: "wait", actor_id: actorID, timeout_ms: 5000 } }, ctx)
         expect(JSON.parse(failed.output)).toMatchObject({ status: "idle", lastOutcome: "failure" })
         yield* Effect.yieldNow

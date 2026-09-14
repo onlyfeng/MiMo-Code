@@ -12,7 +12,7 @@ import { Auth } from "../auth"
 import { Env } from "../env"
 import { applyEdits, modify } from "jsonc-parser"
 import { Instance, type InstanceContext } from "../project/instance"
-import { InstallationLocal, InstallationVersion } from "@/installation/version"
+import { PluginSdkNpmVersion } from "@/installation/version"
 import { existsSync } from "fs"
 import { GlobalBus } from "@/bus/global"
 import { Event } from "../server/event"
@@ -30,7 +30,6 @@ import { ConfigCommand } from "./command"
 import { ConfigCompose } from "./compose"
 import { ConfigFormatter } from "./formatter"
 import { MIMOCODE_GITIGNORE_ENTRIES } from "./gitignore"
-import { ConfigHistory } from "./history"
 import { ConfigLayout } from "./layout"
 import { ConfigLSP } from "./lsp"
 import { ConfigManaged } from "./managed"
@@ -62,6 +61,8 @@ function mergeConfigConcatArrays(target: Info, source: Info): Info {
 function normalizeLoadedConfig(data: unknown, source: string) {
   if (!isRecord(data)) return data
   const copy = { ...data }
+  // History indexing is uniform; ignore settings written by older releases.
+  delete copy.history
   const hadLegacy = "theme" in copy || "keybinds" in copy || "tui" in copy
   if (!hadLegacy) return copy
   delete copy.theme
@@ -370,9 +371,6 @@ const InfoSchema = Schema.Struct({
       }),
     }),
   ),
-  history: Schema.optional(ConfigHistory.Info).annotate({
-    description: "Trajectory (conversation history) FTS index configuration.",
-  }),
   dream: Schema.optional(
     Schema.Struct({
       auto: Schema.optional(Schema.Boolean).annotate({
@@ -887,7 +885,7 @@ export const layer = Layer.effect(
               add: [
                 {
                   name: "@mimo-ai/plugin",
-                  version: InstallationLocal ? undefined : InstallationVersion,
+                  version: PluginSdkNpmVersion,
                 },
               ],
             })
@@ -1130,13 +1128,13 @@ export const layer = Layer.effect(
 
       let next: Info
       if (!file.endsWith(".jsonc")) {
-        const existing = ConfigParse.schema(Info, ConfigParse.jsonc(before, file), file)
+        const existing = ConfigParse.schema(Info, normalizeLoadedConfig(ConfigParse.jsonc(before, file), file), file)
         const merged = mergeDeep(writable(existing), writable(config))
         yield* fs.writeFileString(file, JSON.stringify(merged, null, 2)).pipe(Effect.orDie)
         next = merged
       } else {
         const updated = patchJsonc(before, writable(config))
-        next = ConfigParse.schema(Info, ConfigParse.jsonc(updated, file), file)
+        next = ConfigParse.schema(Info, normalizeLoadedConfig(ConfigParse.jsonc(updated, file), file), file)
         yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
       }
 

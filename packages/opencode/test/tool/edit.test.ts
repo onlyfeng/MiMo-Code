@@ -2,20 +2,20 @@ import { afterAll, afterEach, describe, test, expect } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { Effect, Layer, ManagedRuntime } from "effect"
+import { Agent } from "../../src/agent/agent"
 import { EditTool } from "../../src/tool/edit"
 import { MultiEditTool } from "../../src/tool/multiedit"
+import { WriteTool } from "../../src/tool/write"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import { LSP } from "../../src/lsp"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { Format } from "../../src/format"
-import { Agent } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
 import { BusEvent } from "../../src/bus/bus-event"
 import { Truncate } from "../../src/tool"
-import { SessionID, MessageID, PartID } from "../../src/session/schema"
+import { SessionID, MessageID } from "../../src/session/schema"
 import type { MessageV2 } from "../../src/session/message-v2"
-import { clearReadState, markFileRead } from "../../src/tool/read-state"
 
 const baseCtx = {
   sessionID: SessionID.make("ses_test-edit-session"),
@@ -28,46 +28,9 @@ const baseCtx = {
   ask: () => Effect.void,
 }
 
-type EditCtx = typeof baseCtx
-
-function withRead(filePath: string, ctx: EditCtx = baseCtx): EditCtx {
-  const messageID = MessageID.make("msg_read")
-  return {
-    ...ctx,
-    messages: [
-      {
-        info: {
-          id: messageID,
-          sessionID: ctx.sessionID,
-          role: "assistant",
-        },
-        parts: [
-          {
-            id: PartID.make("part_read"),
-            messageID,
-            sessionID: ctx.sessionID,
-            type: "tool",
-            tool: "read",
-            callID: "call_read",
-            state: {
-              status: "completed",
-              input: { file_path: filePath },
-              output: "",
-              title: `Read ${filePath}`,
-              metadata: {},
-              time: { start: 0, end: 0 },
-            },
-          },
-        ],
-      },
-    ] as unknown as MessageV2.WithParts[],
-  }
-}
-
 const ctx = baseCtx
 
 afterEach(async () => {
-  clearReadState(ctx.sessionID)
   await Instance.disposeAll()
 })
 
@@ -102,10 +65,16 @@ const resolveMulti = () =>
     }),
   )
 
+const resolveWrite = () =>
+  runtime.runPromise(
+    Effect.gen(function* () {
+      const info = yield* WriteTool
+      return yield* info.init()
+    }),
+  )
+
 const subscribeBus = <D extends BusEvent.Definition>(def: D, callback: () => unknown) =>
   runtime.runPromise(Bus.Service.use((bus) => bus.subscribeCallback(def, callback)))
-
-const markRead = (filePath: string) => markFileRead(ctx, filePath)
 
 async function onceBus<D extends BusEvent.Definition>(def: D) {
   const result = Promise.withResolvers<void>()
@@ -120,13 +89,12 @@ async function onceBus<D extends BusEvent.Definition>(def: D) {
 }
 
 describe("tool.edit", () => {
-  test("resolves the stable current-session placeholder before read-state validation", async () => {
+  test("resolves the stable current-session placeholder before editing", async () => {
     await using tmp = await tmpdir()
     const template = path.join(tmp.path, "{current_session_id}", "memory.txt")
     const filepath = path.join(tmp.path, ctx.sessionID, "memory.txt")
     await fs.mkdir(path.dirname(filepath), { recursive: true })
     await fs.writeFile(filepath, "before", "utf-8")
-    markRead(filepath)
 
     await Instance.provide({
       directory: tmp.path,
@@ -239,7 +207,6 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "existing.txt")
       await fs.writeFile(filepath, "old content here", "utf-8")
-      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -252,7 +219,7 @@ describe("tool.edit", () => {
                 old_string: "old content",
                 new_string: "new content",
               },
-              withRead(filepath),
+              ctx,
             ),
           )
 
@@ -264,11 +231,111 @@ describe("tool.edit", () => {
       })
     })
 
+    test("replaces text without a prior read tool call in the conversation", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "existing.txt")
+      await fs.writeFile(filepath, "old content here", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const edit = await resolve()
+          const result = await Effect.runPromise(
+            edit.execute(
+              {
+                file_path: filepath,
+                old_string: "old content",
+                new_string: "new content",
+              },
+              baseCtx,
+            ),
+          )
+
+          expect(result.output).toContain("Edit applied successfully")
+
+          const content = await fs.readFile(filepath, "utf-8")
+          expect(content).toBe("new content here")
+        },
+      })
+    })
+
+    test("edits a file the session just wrote via the write tool, without a prior read", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "self-written.txt")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const write = await resolveWrite()
+          await Effect.runPromise(
+            write.execute(
+              {
+                file_path: filepath,
+                content: "self written draft",
+              },
+              baseCtx,
+            ),
+          )
+
+          const edit = await resolve()
+          const result = await Effect.runPromise(
+            edit.execute(
+              {
+                file_path: filepath,
+                old_string: "draft",
+                new_string: "final",
+              },
+              baseCtx,
+            ),
+          )
+
+          expect(result.output).toContain("Edit applied successfully")
+          expect(await fs.readFile(filepath, "utf-8")).toBe("self written final")
+        },
+      })
+    })
+
+    test("edits a file created via edit old_string=\"\" without a prior read", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "via-edit-create.txt")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const edit = await resolve()
+          await Effect.runPromise(
+            edit.execute(
+              {
+                file_path: filepath,
+                old_string: "",
+                new_string: "created by edit",
+              },
+              baseCtx,
+            ),
+          )
+
+          const result = await Effect.runPromise(
+            edit.execute(
+              {
+                file_path: filepath,
+                old_string: "created",
+                new_string: "updated",
+              },
+              baseCtx,
+            ),
+          )
+
+          expect(result.output).toContain("Edit applied successfully")
+          expect(await fs.readFile(filepath, "utf-8")).toBe("updated by edit")
+        },
+      })
+    })
+
     test("throws error when file does not exist", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "nonexistent.txt")
       await fs.writeFile(filepath, "old", "utf-8")
-      markRead(filepath)
+
       await fs.unlink(filepath)
 
       await Instance.provide({
@@ -283,7 +350,7 @@ describe("tool.edit", () => {
                   old_string: "old",
                   new_string: "new",
                 },
-                withRead(filepath),
+                ctx,
               ),
             ),
           ).rejects.toThrow("not found")
@@ -320,7 +387,6 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "actual content", "utf-8")
-      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -334,7 +400,7 @@ describe("tool.edit", () => {
                   old_string: "not in file",
                   new_string: "replacement",
                 },
-                withRead(filepath),
+                ctx,
               ),
             ),
           ).rejects.toThrow()
@@ -346,7 +412,6 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "foo bar foo baz foo", "utf-8")
-      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -360,7 +425,7 @@ describe("tool.edit", () => {
                 new_string: "qux",
                 replace_all: true,
               },
-              withRead(filepath),
+              ctx,
             ),
           )
 
@@ -374,7 +439,6 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "original", "utf-8")
-      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -392,7 +456,7 @@ describe("tool.edit", () => {
                   old_string: "original",
                   new_string: "modified",
                 },
-                withRead(filepath),
+                ctx,
               ),
             )
 
@@ -410,7 +474,6 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "line1\nline2\nline3", "utf-8")
-      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -423,7 +486,7 @@ describe("tool.edit", () => {
                 old_string: "line2",
                 new_string: "new line 2\nextra line",
               },
-              withRead(filepath),
+              ctx,
             ),
           )
 
@@ -437,7 +500,6 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "line1\r\nold\r\nline3", "utf-8")
-      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -450,7 +512,7 @@ describe("tool.edit", () => {
                 old_string: "old",
                 new_string: "new",
               },
-              withRead(filepath),
+              ctx,
             ),
           )
 
@@ -489,7 +551,6 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const dirpath = path.join(tmp.path, "adir")
       await fs.mkdir(dirpath)
-      markRead(dirpath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -503,7 +564,7 @@ describe("tool.edit", () => {
                   old_string: "old",
                   new_string: "new",
                 },
-                withRead(dirpath),
+                ctx,
               ),
             ),
           ).rejects.toThrow("directory")
@@ -515,7 +576,6 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "line1\nline2\nline3", "utf-8")
-      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -528,7 +588,7 @@ describe("tool.edit", () => {
                 old_string: "line2",
                 new_string: "new line a\nnew line b",
               },
-              withRead(filepath),
+              ctx,
             ),
           )
 
@@ -591,7 +651,7 @@ describe("tool.edit", () => {
         fn: async () => {
           const edit = await resolve()
           const filePath = path.join(tmp.path, "test.txt")
-          markRead(filePath)
+
           await Effect.runPromise(
             edit.execute(
               {
@@ -600,7 +660,7 @@ describe("tool.edit", () => {
                 new_string: input.new_string,
                 replace_all: input.replace_all,
               },
-              withRead(filePath),
+              ctx,
             ),
           )
           return await Bun.file(filePath).text()
@@ -730,7 +790,6 @@ describe("tool.edit", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "top = 0\nmiddle = keep\nbottom = 0\n", "utf-8")
-      markRead(filepath)
 
       await Instance.provide({
         directory: tmp.path,
@@ -739,7 +798,7 @@ describe("tool.edit", () => {
           let asks = 0
           const firstAsk = Promise.withResolvers<void>()
           const delayedCtx = {
-            ...withRead(filepath),
+            ...ctx,
             ask: () =>
               Effect.gen(function* () {
                 asks++
@@ -789,7 +848,6 @@ describe("tool.multiedit", () => {
     const filepath = path.join(tmp.path, "nested", "file.txt")
     await fs.mkdir(path.dirname(filepath), { recursive: true })
     await fs.writeFile(filepath, "alpha beta", "utf-8")
-    markRead(filepath)
 
     await Instance.provide({
       directory: tmp.path,

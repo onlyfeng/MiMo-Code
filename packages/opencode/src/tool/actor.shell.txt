@@ -23,13 +23,13 @@ appends them at request time per-agent).
 #   - $vars are preserved as literal text (no expansion)
 
 # DEFAULT — return actor_id immediately, run in the background, stay responsive:
-    actor spawn <subagent_type> "<description>" "<prompt>" [--model <ref>] [--command <cmd>] [--context none|state|full] [--lifecycle persistent] [--output-schema '<json>']
+    actor spawn <subagent_type> "<description>" "<prompt>" [--model <ref>] [--command <cmd>] [--output-schema '<json>']
     # bind it to one of your `task` tool tasks (TID from the `task` tool, e.g. T4):
     actor spawn <subagent_type> "<description>" "<prompt>" --task <TID>
 
 # EXCEPTION — block the whole conversation until done, return the final message inline.
 # Only for a tiny, fast lookup whose answer gates your very next decision this turn:
-    actor run <subagent_type> "<description>" "<prompt>" [--model <ref>] [--timeout <ms>] [--command <cmd>] [--context none|state|full] [--output-schema '<json>']
+    actor run <subagent_type> "<description>" "<prompt>" [--model <ref>] [--timeout <ms>] [--command <cmd>] [--output-schema '<json>']
     # bind it to one of your `task` tool tasks (TID from the `task` tool, e.g. T4):
     actor run <subagent_type> "<description>" "<prompt>" --task <TID>
 
@@ -47,17 +47,14 @@ appends them at request time per-agent).
     # Omit --task to retain the persisted task. Unrelated sessions are unavailable.
     # Returns after admission; queued messages wait until recovery completes.
 
-# opt into interrupted-work recovery when creating an actor (spawn only):
-    actor spawn general "Recoverable review" "Review the specified module" --context full --lifecycle persistent
-    # Default spawn/run actors are ephemeral. Persistent requires full context and
-    # retains that frozen context until cancelled. Use status for progress; cancel
-    # when no longer needed to release it. Resume retries interruption, not completion.
-    # On success use notifications/status; wait returns only on failure/cancel/timeout.
+# Runtime-created persistent full-context actors retain their frozen context until
+# cancelled. Model-facing spawn/run are ephemeral and do not accept context or
+# lifecycle options. Use status for progress and cancel to release retained context.
+# Resume retries interruption, not completion; wait returns on failure/cancel/timeout.
 
-# deliver a message to another actor's inbox, waking it when it remains reusable. A
-# completed ephemeral context=full actor needs a fresh spawn after its frozen context is
-# released. Returns once queued, not when the woken turn ends; that turn's result arrives
-# as a completion notification:
+# Deliver a message to a reusable actor's inbox. An actor whose frozen context was
+# released cannot resume; start a new task with a complete briefing. Returns once
+# queued; the woken turn's result arrives as a completion notification:
     actor send <to_actor_id> "<content>" [--session <id>] [--type <t>]
     # to_actor_id: 'main' for a session's main agent, or a subagent id like 'explore-1'
     # --session: target session id (defaults to current); --type: 'text' (default) or 'actor_notification'
@@ -87,7 +84,7 @@ Examples:
 # When using a heredoc prompt, put all actor flags before <<EOF; never append
 # flags after the closing EOF marker. The heredoc must be the LAST token on the
 # opener line and the closing EOF must stand alone on its own line.
-    actor spawn general "Type checker review" --context state <<EOF
+    actor spawn general "Type checker review" --model lite <<EOF
     Read docs/spec.md §3 then src/types.ts.
     Report missing implementations + coverage gaps.
     Regex check: /\bnew \w+Provider\b/  (paths like C:\Users\... are fine)
@@ -97,10 +94,10 @@ Examples:
 # INVALID — flags after the closing EOF fail before the tool ever runs:
 #     actor spawn general "Type checker review" <<EOF
 #     ...body...
-#     EOF --context state       # -> parse error: unclosed heredoc <<EOF
+#     EOF --model lite       # -> parse error: unclosed heredoc <<EOF
 #   and a flag on the line AFTER EOF is read as a separate, non-actor command:
 #     EOF
-#     --context state           # -> error: every command must start with 'actor'
+#     --model lite           # -> error: every command must start with 'actor'
 
 # fire-and-forget when you don't need the result inline:
     actor spawn general "Background log collection" "..."
@@ -109,8 +106,7 @@ Examples:
     actor run explore "Is the field public API" "Is `retryLimit` re-exported from src/index.ts? yes/no + file:line."
 
 # spawn/run flags: --timeout ms before giving up (run only); --command the command that
-#   triggered this; --context none|state|full
-#   (default none); --output-schema a JSON Schema STRING (single-quote it) — forces the
+#   triggered this; --output-schema a JSON Schema STRING (single-quote it) — forces the
 #   subagent to return a matching object instead of free text.
 
 When to use what:
