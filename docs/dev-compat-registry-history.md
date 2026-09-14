@@ -3675,3 +3675,52 @@ the final publication gates. Prior main/compat evidence is not re-dated.
   successful result with a warning`, `inbox waits for the entire spawn execution
   before starting a continuation`, and `[TP-R14-12] undeliverable terminal
   notification is logged`.
+
+## 2026-09-14 — capability route adoption and MiMo transport pinning (PRs #109, #110)
+
+- Accepted main tip/shared audit: `ecb965dd50ddf3fabb350513762ac283f9debac2`;
+  inherited source/tests: `37f32865152fd0010a46cc319bd41b85fdc3b1dd`; reviewed
+  upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`; bundled guidance advances
+  to `11833785` (`model-api.md` retired, `capability-api.md` added, the
+  `serve --llm-server` row dropped).
+- Compat source/test behavior and inheritance merge:
+  `3787ccbc8515bb7d2bd2b9bff8e3076877ea3ebf`; prior tip:
+  `c1ee9ecbeda90224d4a7abbcfc877b9016b1117e`.
+- **Direct inherit, no compat override, no owner added or retired.** Main
+  retired the fork's parallel model API — `server/model-api.ts`,
+  `server/api-request.ts` and seven `src/llm-server/` modules — and mounted
+  upstream's `CapabilityRoutes` at `/v1` inside `InstanceRoutes` instead, then
+  adopted upstream's pinning of every MiMo model id to
+  `@ai-sdk/openai-compatible`, which retires `usesMimoResponsesApi`,
+  `isMimoModel` and the `xiaomi` loader.
+- The overlap check was run from `git merge-base origin/dev/compat origin/main`
+  (`72064c41`, the previous propagation), not from the compat tip. Measuring
+  from the tip counts every compat override in reverse and reports all 39 as
+  overlapping; from the real base, **none** of the 41 newly inherited `src`
+  files is one compat holds a delta on.
+- Two compat-only carryings resolve without a decision. `src/server/server.ts`
+  had lost upstream's `/** Bind port. ... */` JSDoc on compat alone, and main's
+  copy — rebuilt from upstream — restores it. `test/llm-server/chat-completions.test.ts`
+  still asserted `mimo-v2-flash-ptc` -> `/v1/responses`, which #109 retired; the
+  file is deleted by #110, so the stale assertion leaves with it. Confirmed this
+  is not a lost override rather than assumed: `dev/compat` against
+  `main@72064c41` shows zero delta on `provider/provider.ts` and `tool/gpt.ts`,
+  so that divergence was un-propagated main history, not a compat decision.
+- All seven active DC entries were re-reviewed against the incoming surfaces.
+  None names a file on the capability path: that path is
+  `routes/instance/capability.ts` plus `src/llm-server/`, and the one `server/`
+  file compat owns, `routes/instance/session.ts`, is not on it. DC-NET-001's
+  seam is unmoved — `util/ssrf.ts` is touched by neither inherited PR. The merge
+  applied with no conflicts.
+- Two user-visible consequences arrive with the inheritance. `mimo serve
+  --llm-server` is gone; the flag gated only the address advertisement of a
+  route that is always mounted and always demands a minted token, and `mimo
+  serve` now advertises like upstream while `mimo acp` and `mimo web` pass
+  `advertise: false` like upstream. Previously issued capability tokens stop
+  working: the fork wrote `version: 2` records where upstream reads
+  `version: 1`, and upstream's reader treats an unknown version as an empty
+  store. `mimo llm-server issue` is the remedy for both.
+- Verification on the merge: `bun typecheck` 0 errors; the inherited surface
+  (`test/llm-server/`, `serve-advertise`, `worker-listener`, `util/self`,
+  `test/flag/`) 111 pass / 0 fail; the compat-owned surfaces most likely to
+  interact (`test/actor/`, `test/inbox/`) 317 pass / 2 skip / 0 fail.

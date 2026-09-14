@@ -170,19 +170,66 @@ projection is published.
 Source evidence and the four final result rows are recorded in the latest
 [compat history entry](dev-compat-registry-history.md).
 
+## 2026-09-14 capability route adoption and MiMo transport pinning
+
+Direct inherit, no compat override, no owner added or retired. The merge applied
+with no conflicts, and the intersection that matters is empty: of the 41 `src`
+files this propagation newly inherits, **none** is a file where `dev/compat`
+holds a delta of its own. Measured from the real base — `git merge-base
+origin/dev/compat origin/main`, which is `72064c41`, the previous propagation —
+rather than from the compat tip, which would have counted every override in
+reverse and reported all 39 as overlapping.
+
+Two things `dev/compat` was carrying resolve themselves rather than needing a
+decision:
+
+- `src/server/server.ts` had lost upstream's `/** Bind port. ... */` JSDoc on
+  compat only. Main's copy was rebuilt from upstream and carries it, so the
+  merge restores it.
+- `test/llm-server/chat-completions.test.ts` still asserted the fork's
+  `mimo-v2-flash-ptc` -> `/v1/responses` selection, which `main` retired in #109
+  when it adopted upstream's pinning of every MiMo id to
+  `@ai-sdk/openai-compatible`. The file is deleted by #110, so the stale
+  assertion leaves with it. Verified this is not a lost override: `dev/compat`
+  against `main@72064c41` shows **zero** delta on `provider/provider.ts` and
+  `tool/gpt.ts`, so compat's divergence there was un-propagated main history,
+  not a compat decision. `usesMimoResponsesApi`, `isMimoModel` and the `xiaomi`
+  loader go with it.
+
+All seven active DC entries were re-reviewed against the incoming behavior.
+DC-ACTOR-001, DC-CONTEXT-001, DC-MODEL-001, DC-TUI-001, DC-NET-001/002 and
+DC-PLATFORM-001 have no incoming owned implementation change: the capability
+route lives at `routes/instance/capability.ts` and `src/llm-server/`, and
+`routes/instance/session.ts` — the one `server/` file compat does own — is not
+on that path. DC-NET-001's seam is unmoved; `util/ssrf.ts` is touched by neither
+inherited PR.
+
+`mimo serve --llm-server` is gone on compat too, as a consequence of inheriting
+it: the flag gated only the address advertisement of a route that is always
+mounted and always demands a minted token. `mimo serve` now advertises like
+upstream, while `mimo acp` and `mimo web` pass `advertise: false` like upstream.
+
+Previously issued capability tokens stop working here as on `main` — the fork
+wrote `version: 2` records where upstream reads `version: 1`, and upstream's
+reader treats an unknown version as an empty store. `mimo llm-server issue` is
+the remedy.
+
+Source evidence and the final result row are recorded in the latest
+[compat history entry](dev-compat-registry-history.md).
+
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
-- Last reviewed: 2026-09-13
-- Reviewed upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
-- Accepted `main` tip: `72064c41ec7311a4d3ca05dc480956f73463c0ff`
-- Inherited main behavior: `070100b0357c53d8417af5f93a81cf7414283221`
-- Compat behavior: `4d3abe9ee44d3f87ed62a5636d5e1e4f4b3c7e6e`
-- Prior compat tip: `7c710d74f7bd6cbc10684292ebfe58f382770e64`
-- Main source inheritance merge: `4d3abe9ee44d3f87ed62a5636d5e1e4f4b3c7e6e`
-- Shared audit commit: `72064c41ec7311a4d3ca05dc480956f73463c0ff`
-- Inherited bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
+- Last reviewed: 2026-09-14
+- Reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
+- Accepted `main` tip: `ecb965dd50ddf3fabb350513762ac283f9debac2`
+- Inherited main behavior: `37f32865152fd0010a46cc319bd41b85fdc3b1dd`
+- Compat behavior: `3787ccbc8515bb7d2bd2b9bff8e3076877ea3ebf`
+- Prior compat tip: `c1ee9ecbeda90224d4a7abbcfc877b9016b1117e`
+- Main source inheritance merge: `3787ccbc8515bb7d2bd2b9bff8e3076877ea3ebf`
+- Shared audit commit: `ecb965dd50ddf3fabb350513762ac283f9debac2`
+- Inherited bundled guidance content: `11833785` (bundled `mimocode-docs`: `model-api.md` retired, `capability-api.md` added, the `serve --llm-server` row dropped)
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
