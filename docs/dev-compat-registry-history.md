@@ -3825,7 +3825,7 @@ All seven DC owners were reconciled in [the override registry](dev-compat-overri
 
 ### Validation
 
-Commands ran in `packages/opencode` under Bun 1.3.14 with ambient experimental, MCP-search and Codex selectors removed. Default integration matrices also removed compaction ratio/context and checkpoint-disable selectors. Package preload still owns `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`; no extra opt-in was enabled. `bun ci` preserved the lockfile.
+Commands ran in `packages/opencode` under Bun 1.3.14 with ambient experimental, MCP-search and Codex selectors removed. Default integration matrices also removed compaction ratio/context and checkpoint-disable selectors. Package preload still owns `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`. These initial local runs inherited shell `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL=1`; they are not preload-only default-path evidence. `bun ci` preserved the lockfile.
 
 | Matrix | Actual result |
 | --- | --- |
@@ -3843,3 +3843,12 @@ Commands ran in `packages/opencode` under Bun 1.3.14 with ambient experimental, 
 Two initial frozen-contract cases timed out under concurrent load; the unchanged four-case suite passed serially without increasing timeouts. Full and malformed recovery regressions fail against the old recovery implementation. The SDK/OpenAPI retain per-agent MaxMode and callable checkpoint coverage while removing history configuration. Shared FD/FC/history blobs are identical to accepted main.
 
 Independent review of `bd47323d3c375be255d0c0ca0319d4e5882847e3` found no P1/P2; source files remained fixed during review. Publication and final remote-tip CI are subsequent gates, not inferred from these local results.
+
+## 2026-09-15 shared history preview follow-up
+
+- Accepted main: `e4075dfc141df0b4141fdd817b309bb52b3bca91` (PR #123); main behavior: `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d`; shared audit: `90eef40fc1268bece3e63a7db64180a4a75bd7b2`.
+- Compat inheritance and behavior: `967b340faa1389741f08d45cff0ada2a09f52463`. Its only incoming production changes are shared history projection and formatting. All seven DC dispositions and the C03 model interface remain unchanged.
+- The initial PR #122 preview-budget finding is corrected through main: SQLite bounds total attachment metadata, previews omit without fabricating a locator, and structural marker recognition preserves real attachments with identical MIME text. Raw get, original locators and delivery remain intact.
+- Main PR #123 passed all eight checks at `90eef40f`: [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/34884042595), [typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/34884042999), [lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/34884042628). The old locator review thread is technically fixed; its UI resolution state is separate.
+- On the compat inheritance tree, `bun test test/history` passes 68 tests, with five benchmark skips, 0 failures and 625 assertions. This run explicitly unsets WORKFLOW_TOOL in addition to umbrella/MCP/Codex selectors; package ORCHESTRATOR preload remains active. History source/tests, shared FD/FC/history and lockfile are byte-identical to accepted main.
+- This advances C05's result in the seven-row stage inventory above. C07 remains a separately reviewed lifecycle change; the new compat PR head still requires fresh CI before merge.
