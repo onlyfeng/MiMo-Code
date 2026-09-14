@@ -302,7 +302,9 @@ for (const field of ["filename", "mime", "source", "url", "list"] as const) {
         expect(Database.use((db) => db.select(projection()).from(PartTable).get())?.data).toMatchObject({ state: { attachments } })
         const history = yield* History.Service
         const context = yield* history.around({ message_id: "msg_detail", before: 0, after: 0 })
-        expect(context.messages[0].parts[0].text).toContain("omitted")
+        expect(context.messages[0].parts[0].text).toContain("omitted; use history get part_id")
+        expect(context.messages[0].parts[0].text).not.toContain("attachment=tool:")
+        expect(context.messages[0].parts[0].part_id).toBe("prt_0000")
         const detail = yield* history.get({ part_id: "prt_0000" })
         expect(detail?.attachments).toHaveLength(attachments.length)
         expect(detail?.attachments.at(-1)).toMatchObject({ id: `tool:${attachments.length - 1}`, filename: attachment.filename, mime: attachment.mime, url: attachment.url })
@@ -330,6 +332,9 @@ it.live("SQL preview preserves small attachment metadata and decoded filename bo
       expect(rows[1].data).toMatchObject({ filename: "😀".repeat(1000) })
       expect(rows[2].data).toMatchObject({ filename: "[large field omitted; use history get part_id]" })
       expect(rows[3].data).toMatchObject({ filename: "\u0000".repeat(4000) })
+      const context = yield* (yield* History.Service).around({ message_id: "msg_detail", before: 0, after: 0 })
+      expect(context.messages[0].parts[0].text).toContain("attachment=tool:0")
+      expect(context.messages[0].parts[0].text).toContain("attachment=tool:1")
     }),
   ),
 )
