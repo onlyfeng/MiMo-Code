@@ -184,7 +184,7 @@ where this delta does not change their implementation.
   exactly, and `config.llmServer`, `Util.Self`, upstream's `llm-server` CLI and
   upstream's `generateServerPassword`/`clearGeneratedServerPassword` come with
   it. Net −3548 lines.
-- Observable contract, what remains fork-owned: eleven boundaries, all kept
+- Observable contract, what remains fork-owned: twelve boundaries, all kept
   because upstream does not have them, not because the fork prefers them.
   1. `serve --llm-server` gates only the address advertisement. The route is
      always mounted and always demands a minted token, so credentials alone
@@ -262,6 +262,15 @@ where this delta does not change their implementation.
      accuracy); and `input_audio` with bare base64 and no `format` (which
      `toModelMessages` throws on, reaching the route's generic handler as a
      redacted 502 — an upstream outage, for input the caller can fix).
+  12. A model's own configured options are merged at the precedence
+     `session/llm.ts` gives them, and the plugin hooks receive a real
+     `UserMessage`. Upstream omits `model.options` here — despite a comment
+     claiming session parity — so a service tier, cache control or reasoning
+     setting written in `mimocode.json` applied in a session and silently did not
+     over `/v1`; and it passes `message: undefined` where the public hook
+     contract declares the field required, so a plugin that reads it throws
+     before the provider is reached. The synthetic message is labelled
+     `llm-api`, not dressed up as a real turn.
   Admission is taken in `InstanceMiddleware`, not inside the capability route,
   because the instance bootstrap sits between them: a gate downstream of it
   cannot bound requests stuck waiting *on* it, and the deadline would be
