@@ -2,7 +2,7 @@
 feature: memory-prompt-decouple
 status: delivered
 updated: 2026-09-14
-branch: feat/memory-prompt-decouple
+branch: feat/example
 commits: e485a2a..9780b2e
 ---
 

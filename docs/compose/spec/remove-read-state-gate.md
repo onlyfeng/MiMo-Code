@@ -2,7 +2,7 @@
 feature: remove-read-state-gate
 status: delivered
 updated: 2026-09-14
-branch: feat/remove-read-state-gate
+branch: feat/example
 commits: e485a2a5e096a077e381e6df56c332d8150629ae..HEAD
 ---
 

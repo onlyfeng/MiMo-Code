@@ -2,7 +2,7 @@
 feature: actor-drop-context
 status: delivered
 updated: 2026-09-14
-branch: feat/actor-drop-context
+branch: feat/example
 commits: bceb411c..655fa209
 ---
 

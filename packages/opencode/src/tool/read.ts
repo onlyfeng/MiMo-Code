@@ -73,7 +73,17 @@ export function describeMedia(model: Provider.Model | undefined) {
   if (kinds.length === 0) return undefined
   return [
     `- You can read and understand ${kinds.join(" and ")} files directly: this tool returns them as file attachments, and you can then describe, transcribe, summarize, or answer questions about their content yourself, without an external transcription or vision service.`,
-    `- Media is inlined when small enough (about 37 MB on disk, 50 MB once base64-encoded); otherwise the tool explains why the file was not read. Read the file first, then analyze its content in the same turn.`,
+    ...(image
+      ? [
+          "- Images use the configured attachment byte limit and may be recompressed; images that cannot fit are refused.",
+        ]
+      : []),
+    ...(audio || video
+      ? [
+          `- ${[audio && "Audio", video && "Video"].filter(Boolean).join(" and ")} files are inlined when small enough (about 37 MiB on disk, 50 MiB once base64-encoded); otherwise the tool explains why the file was not read.`,
+        ]
+      : []),
+    "- Read the file first, then analyze its content in the same turn.",
   ].join("\n")
 }
 const MAX_LINE_LENGTH = 2000
@@ -283,7 +293,13 @@ export const ReadTool = Tool.define(
 
       if (!inMedia && looksLikeMediaMime(mime) && isBinaryFile(filepath, sample)) {
         const allowlist = readMimeAllowlist(mime)
-        const kind = mime.startsWith("audio/") ? "audio" : mime.startsWith("video/") ? "video" : mime === "application/pdf" ? "PDF" : "image"
+        const kind = mime.startsWith("audio/")
+          ? "audio"
+          : mime.startsWith("video/")
+            ? "video"
+            : mime === "application/pdf"
+              ? "PDF"
+              : "image"
         const accepted = allowlist ? [...allowlist].join(", ") : ""
         const hintExt = kind === "audio" ? "wav" : kind === "video" ? "mp4" : kind === "PDF" ? "pdf" : "png"
         const warning = [

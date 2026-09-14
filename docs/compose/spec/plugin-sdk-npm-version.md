@@ -2,7 +2,7 @@
 feature: plugin-sdk-npm-version
 status: delivered
 updated: 2026-09-14
-branch: feat/plugin-sdk-npm-version
+branch: feat/example
 commits: 4b1dfe2fa68bd6cf4d086244617ccac4146fc43a..aca33f1fd83637c83c26bc837d65b3068d697019
 ---
 
