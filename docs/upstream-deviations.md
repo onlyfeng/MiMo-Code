@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-12
-- Upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
-- Prior reviewed upstream: `f11e35ede439df5555ca1f0309ffea8e9b49f06e`
-- Main behavior (runtime/tests): `bca24711ed37d3620cd7304603b81e98849642e5`
-- Bundled guidance content: `c35c34d45a2e24ab6e48a7a3fd438d1c456352ed`
-- Prior fork `main` tip: `4fa2402fdb51c1c5fcfacc5f4471a6c4005ea0cb`
+- Last reviewed: 2026-09-14
+- Upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
+- Prior reviewed upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
+- Main behavior (runtime/tests): `bbac42b72bc63ebe52cb74a153c248b4e51a09d2`
+- Bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
+- Prior fork `main` tip: `72064c41ec7311a4d3ca05dc480956f73463c0ff`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -27,8 +27,17 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Full synchronization review: [2026-09-12 (98702641) capability inventory](upstream-sync-2026-09-12-98702641.md),
-continuing the [2026-09-11 (f11e35ed) inventory](upstream-sync-2026-09-11-f11e35ed.md) and the
+Latest synchronization: 2026-09-14, upstream `98702641..6fbb1732` (PRs #109–#117).
+It has no separate capability inventory. The range is four commits and one merge
+across two capabilities — MiMo model ids pinned to `@ai-sdk/openai-compatible`,
+and port `0` bound as OS-ephemeral — both adopted in #109 and recorded in
+[the registry history](fork-registry-history.md). The same round closed a
+divergence older than the range: upstream has shipped its capability route since
+`b4bbe81c` (2026-08-18), and #110–#116 retired the fork's parallel model API in
+its favour. That decision, and every behaviour left as upstream ships it, is
+owned by FD-004's 2026-09-14 structural retirement. This continues the
+[2026-09-12 (98702641) capability inventory](upstream-sync-2026-09-12-98702641.md),
+the [2026-09-11 (f11e35ed) inventory](upstream-sync-2026-09-11-f11e35ed.md) and the
 [2026-09-11 (7641dbbd) inventory](upstream-sync-2026-09-11-7641dbbd.md).
 The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
 All active owners remain; earlier per-owner behavior references remain historical
@@ -40,7 +49,7 @@ where this delta does not change their implementation.
 | ------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | FD-001 | yolo, permission, Bash delete                                         | Adopts startup delete approval; rejects run-driven shared switch mutation                                         | Preserve deny precedence and live invocation isolation                               |
 | FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries               | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
-| FD-004 | TUI listener, chat model API, `/v1`, SDK/OpenAPI | Adopts TUI-owned default listener with explicit model tokens; retains other entrypoint and admission boundaries | Preserve token scope, operator-origin limits, authentication-before-bootstrap and bounded shutdown |
+| FD-004 | `/v1` capability route, `llm-server` CLI, listener advertisement, TUI worker listener | Adopts upstream's capability route whole; retired the fork model API with its admission, deadline and authentication-before-bootstrap hardening | Keep the operator-password bind guard, `advertiseDirectory` and the three corrections; do not restore retired hardening — recorded behaviours stay as upstream ships them |
 | FD-005 | model identity, prompt, discovery, tools, retry                       | Adapts inconsistent upstream classification                                                                       | Preserve one resolved identity                                                        |
 | FD-006 | compact Codex declarations and nested execution                       | Adopts compact registration and full authorized nested Actor/interactive composition                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
 | FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
@@ -303,6 +312,27 @@ where this delta does not change their implementation.
     emits `renew_argv` beside it as the unquoted array a consumer should use,
     and `self.ts` says so. DC-PLATFORM-001 was checked and does not extend here;
     its scope is the ripgrep and archive fallbacks.
+  - A bearer is checked for presence, not validity, before the request reaches
+    the route: `AuthMiddleware` waves any non-empty `Authorization`, `x-api-key`
+    or `api-key` through for `/v1`, and `CapabilityRoutes` sits inside
+    `InstanceRoutes`, so `InstanceMiddleware` bootstraps the instance before the
+    route's token check returns 401. On an implicit listener containment pins
+    that to the served project, so the cost is one bootstrap that would happen
+    anyway. On an operator-password server containment is off by upstream's
+    stated choice, and a bogus bearer can aim `?directory=` at another project
+    and make it bootstrap before being refused.
+  - A failed address advertisement is logged, not raised: `Server.listen` wraps
+    `LLMServerTokens.publish` in `.catch(log.warn)`, so the listener keeps
+    serving while `llm-server issue` resolves no `base_url` for it. The miss
+    surfaces there, at issue time.
+  - An object-form `tool_choice` naming a tool is passed through without
+    checking the name is among the declared `tools`: `toToolChoice` maps
+    `{ function: { name } }` straight to `{ type: "tool", toolName }`. Whether
+    the provider then errors — surfacing as the route's generic provider
+    failure — or ignores the choice is the provider's decision.
+  - Token verification takes no abort signal and can wait on the per-directory
+    store lock (`Flock.withLock` in `tokens.ts`), so a client that disconnects
+    mid-verification does not release its wait early.
   - The plugin hooks receive `message: undefined` where the contract declares it
     required; a non-finite `--ttl` becomes `null` and expires the token at once;
     non-expiring tokens accumulate without a ceiling; the address registry trusts
