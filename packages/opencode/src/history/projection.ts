@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm"
 import { PartTable } from "../session/session.sql"
+import { attachmentListOmitted } from "./media"
 
 // Project in SQLite so unused media and metadata never cross the driver boundary.
 export function projection(preview = false) {
@@ -58,7 +59,7 @@ export function projection(preview = false) {
         'error', ${field("$.state.error")},
         'attachments', json(${preview
           ? sql`CASE WHEN length(CAST(${attachments} AS BLOB)) > 4000
-              THEN json_array(json_object('mime', '[large attachment list omitted; use history get part_id]'))
+              THEN json_array(json_object('mime', ${attachmentListOmitted}))
               ELSE ${attachments} END`
           : attachments})
       ))`.mapWith((value: string) => JSON.parse(value) as typeof PartTable.$inferSelect.data),
