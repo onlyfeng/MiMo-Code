@@ -3164,3 +3164,19 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - Current behavior reference: `ee03fe5e9c9c7abd8edb2e28dd6189d903b2ba62`.
 - Separate image attachment/recompression limits from audio/video encoded limits in model-facing Read guidance; replace operation-specific branches in the five incoming Compose specs with synthetic values.
 - Existing media-description matrix: 4 pass, 21 assertions. The prior eight successful CI checks belong to `2ef6ff4f`; the revised head requires new CI.
+
+### 2026-09-15 shared C05 preview budget correction
+
+- Main behavior: `54deac139e638c4b72b6337cdaac0c27ad537749`; prior main: `321e70c9f491e2f9ff406bf56614c955fc5294de`. Upstream remains `5198ff54`.
+- The review finding on compat PR #122 also exists on main, so main owns the fix before propagation. Field and total attachment-metadata SQL preview bounds prevent large values crossing the driver boundary; complete get/locators and raw data remain unchanged.
+- Nine new real-data regressions were red on the prior source. Final history suite: 68 pass, 5 existing benchmark skips, 0 fail, 612 assertions. Package typecheck and focused lint pass.
+- [The synchronization report](upstream-sync-2026-09-15-5198ff54.md#shared-history-preview-correction-discovered-in-compat-review) records the exact budget semantics and remaining scope limits. The actor C07 follow-up remains separate.
+
+### 2026-09-15 C07 actor lifecycle alignment
+
+- Implementation: `30b9df3d51bc912e8f3efb3122f66cb81fa5daaf`; integrated source/test behavior: `577fc25060ed31e8ece68ee02ca5b1bced2cddcf`.
+- Integration sources: accepted main `321e70c9`, shared C05 correction `54deac13`; upstream remains `5198ff54`. Merge order remains shared history correction, initial compat propagation, lifecycle main, lifecycle compat.
+- FC-001 adopts spawn execution ownership through postStop, coherent result/warning publication, cancellation interrupt/join, masked cancellation ownership and reliable Runner pre-start finalization. FC-008 enables the two remaining actor quarantine contracts. Shared FD-009 frozen-context identity and compat-only model context ownership are retained.
+- Earlier nested-claim deadlock attribution is withdrawn following real InboxArrived observation. Distinct, reproducible Runner and owner-acquisition cancellation gaps were fixed without relaxing those regression timeouts.
+- Before final mask patch: actor matrix 353 pass and HTTP recovery 13 pass. Final mask source: 122 pass cancellation/Runner/plugin/tool matrix, 6 postStop/cross-session cases and 3 owner/follower/scheduler cases; typecheck passes. Independent final scheduler/follower probes pass. Integrated main's runtime-created recovery case passes; full final-tree CI remains a publication gate.
+- Full commands and evidence boundaries: [lifecycle record](actor-lifecycle-alignment-2026-09-15.md).
