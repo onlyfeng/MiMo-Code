@@ -303,6 +303,27 @@ where this delta does not change their implementation.
     emits `renew_argv` beside it as the unquoted array a consumer should use,
     and `self.ts` says so. DC-PLATFORM-001 was checked and does not extend here;
     its scope is the ripgrep and archive fallbacks.
+  - A bearer is checked for presence, not validity, before the request reaches
+    the route: `AuthMiddleware` waves any non-empty `Authorization`, `x-api-key`
+    or `api-key` through for `/v1`, and `CapabilityRoutes` sits inside
+    `InstanceRoutes`, so `InstanceMiddleware` bootstraps the instance before the
+    route's token check returns 401. On an implicit listener containment pins
+    that to the served project, so the cost is one bootstrap that would happen
+    anyway. On an operator-password server containment is off by upstream's
+    stated choice, and a bogus bearer can aim `?directory=` at another project
+    and make it bootstrap before being refused.
+  - A failed address advertisement is logged, not raised: `Server.listen` wraps
+    `LLMServerTokens.publish` in `.catch(log.warn)`, so the listener keeps
+    serving while `llm-server issue` resolves no `base_url` for it. The miss
+    surfaces there, at issue time.
+  - An object-form `tool_choice` naming a tool is passed through without
+    checking the name is among the declared `tools`: `toToolChoice` maps
+    `{ function: { name } }` straight to `{ type: "tool", toolName }`. Whether
+    the provider then errors — surfacing as the route's generic provider
+    failure — or ignores the choice is the provider's decision.
+  - Token verification takes no abort signal and can wait on the per-directory
+    store lock (`Flock.withLock` in `tokens.ts`), so a client that disconnects
+    mid-verification does not release its wait early.
   - The plugin hooks receive `message: undefined` where the contract declares it
     required; a non-finite `--ttl` becomes `null` and expires the token at once;
     non-expiring tokens accumulate without a ceiling; the address registry trusts
