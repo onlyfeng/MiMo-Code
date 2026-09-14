@@ -183,12 +183,17 @@ where this delta does not change their implementation.
 - Observable contract: identical to upstream apart from the two corrections
   below. Byte-for-byte upstream: `src/llm-server/{protocol,tokens}.ts`,
   `routes/instance/{capability,middleware,index}.ts`,
-  `routes/instance/httpapi/server.ts`, `cli/cmd/{llm-server,serve,acp,web}.ts`,
+  `routes/instance/httpapi/server.ts`, `cli/cmd/{serve,acp,web}.ts`,
   `config/llm-server.ts`, `util/self.ts`, `node.ts`.
-  `llm-server/completions.ts` carries one added line (the `model.options`
-  merge) and `server/server.ts` one changed line (the IPv6 bracket); both are
-  recorded as corrections below rather than as fork boundaries. Two further
-  deltas **predate this change**:
+  Three files carry a correction rather than a fork boundary:
+  `llm-server/completions.ts` one added line (the `model.options` merge),
+  `server/server.ts` one changed line (the IPv6 bracket), and
+  `cli/cmd/llm-server.ts` a guard on `revoke` — `--all` was answered before the
+  id, so naming a token and passing `--all` deleted every one of them in
+  silence. The guard tests presence rather than truthiness and also consults
+  `args["--"]`, because `index.ts` sets `parserConfiguration({ "populate--": true })`
+  and an id after the option terminator never reaches the positional.
+  Two further deltas **predate this change**:
   - `server/server.ts` (+10/-2): the non-loopback bind guard reads
     `MIMOCODE_SERVER_OPERATOR_PASSWORD` rather than upstream's
     `MIMOCODE_SERVER_PASSWORD`, so a credential this process generated for a
