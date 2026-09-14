@@ -248,9 +248,17 @@ where this delta does not change their implementation.
     made to fetch loopback, RFC1918 or metadata addresses. Preflight validation
     does not close this — the SDK fetches again later — and closing it properly
     needs a proxy download with per-hop checks.
-  - Media sent to a model that cannot accept it is ignored rather than refused;
-    `tool_choice: "required"` with no tools, and `image_url.detail`, are accepted
-    and discarded; bare `input_audio` without `format` surfaces as a 502.
+  - The request schema is non-strict, so a field it does not declare is stripped
+    before anything can refuse it, and the caller's explicit constraint is
+    silently dropped: `parallel_tool_calls: false` from a client whose executor
+    handles one call per turn, `modalities`/`audio` asking for audio output, and
+    a message `name` distinguishing participants (declared, then discarded by
+    `toModelMessages` for every role). Media sent to a model that cannot accept
+    it is ignored rather than refused; `tool_choice: "required"` with no tools,
+    and `image_url.detail`, are accepted and discarded; bare `input_audio`
+    without `format` surfaces as a 502. Declaring and rejecting each is the
+    retired validator rebuilt, which is the direction this entry exists to
+    avoid; a caller who needs certainty can read the response back.
   - `model.options` from `mimocode.json` is not merged into a capability request,
     so a model configured there behaves differently over `/v1` than in a session.
   - The plugin hooks receive `message: undefined` where the contract declares it
