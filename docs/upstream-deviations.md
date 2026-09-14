@@ -168,123 +168,132 @@ where this delta does not change their implementation.
   HTTP/SDK/tool publication and actual provider/transaction regressions are
   recorded in the shared history; no cross-restart recovery is introduced.
 
-## FD-004 — TUI-owned model listener with scoped tokens and bounded admission
+## FD-004 — upstream's capability route, adopted whole
 
-- Status: active
-- Canonical owner: fork `main` instance-server and generated API boundary
-- Observable contract: ordinary TUI startup creates one worker-owned model API
-  listener for its fixed startup directory, using loopback and automatic port
-  selection unless explicit network options select another bind. Concurrent
-  starts share the listener; TUI exit closes it. `mimo attach` only connects to
-  an existing server and does not start a local listener. Plain `serve`, ACP and
-  embedded instances retain explicit API enablement; credentials or tokens alone
-  do not start a service. `mimo serve --llm-server` uses its existing socket.
-  Both TUI and explicit mode provide registry discovery and chat with input audio using
-  directory-bound tokens with explicit single,
-  multiple, or all-model scope. Defaults remain one-hour idle and one-day absolute
-  lifetime; either limit may be explicitly disabled, and only disabling both
-  produces no expiry. Missing stored lifetime fields never grant permanence.
-  Requests authenticate before body/bootstrap, fix the startup directory, bound
-  bodies/concurrency, propagate cancellation, and close intake before retirement.
-  Model credentials do not replace generic API Basic auth.
-- Authentication origin: worker-generated Basic credentials stay in memory and
-  protect ordinary server routes; they do not enter process.env, token storage,
-  address records or public output. Existing operator credentials take priority.
-  Automatic authentication does not relax directory containment or non-loopback
-  admission; those policies still require operator credentials, or the existing
-  explicit noAuth bind option where applicable. Default TUI RPC supplies Basic
-  internally, while explicit HTTP transport receives headers through trusted
-  host/worker RPC. Model tokens remain explicitly issued Bearer credentials;
-  Basic authentication never grants model access.
-- 2026-09-09 audio convergence supersedes the initial full-sync rejection:
-  adopt upstream `534f32d8` at the existing `1c13f051` baseline. Remove standalone
-  speech/transcription routes, static-key audio mode, capability-based selection,
-  modality classification and provider speech factories. Discovery enumerates the
-  current registry without SDK probing. Preserve chat input audio, scoped tokens,
-  TUI voice and the listener lifecycle. See [audio alignment](audio-upstream-alignment-2026-09-09.md).
-- Upstream relationship: POLICY-03 adopts ordinary TUI listener startup from
-  release `2a0eb706e95a77cba34a319e9f11f33f26d4450c` and upstream snapshot
-  `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, replacing only the former TUI
-  explicit-start requirement. N=1; the overall upstream baseline is unchanged.
-  Residual boundaries cover scoped admission, other entrypoints, and resource
-  ownership. The earlier explicit token management and standard chat proxy adoption from
-  `6203ea2e` remains; audio convergence replaces its dedicated audio behavior. The selected `v0.1.14` capability set additionally
-  supplies public HTTP(S) image inputs, inline chat audio, constrained client `provider_options`, explicit
-  multi/all-model scope, and independent lifetime disabling. Empty model lists
-  never mean all; legacy v1 keeps its exact scope and finite deadlines on read
-  and migrates atomically only with a real mutation. Chat input audio retains its actual SDK transport gate. Voice design and cloning remain absent.
-- Media/options boundary: image downloads validate every DNS answer and redirect,
-  pin the destination while preserving native TLS hostname checks, and enforce
-  5 MiB per image / 25 MiB combined media limits. Within each fully validated
-  public DNS answer set, downloads try addresses sequentially only after
-  `ECONNREFUSED`, `ENETUNREACH`, `EHOSTUNREACH`, or `EADDRNOTAVAIL`, with
-  `syscall` absent or equal to `connect`. Failed attempts close before advancing;
-  cancellation stops advancement. TLS, HTTP response, and body failures do not
-  trigger address fallback, and SDK generation retries remain disabled. This
-  does not re-resolve the same hop or inherit WebFetch private-network exceptions.
-  Inline audio requires validated bytes, format and
-  SDK transport. Client options use a model/transport-aware whitelist; existing
-  provider defaults, selected variant, trusted hooks and zero SDK retries remain.
-  Request deadlines, output limits, cancellation and revocation apply even when
-  token expiry is disabled.
-- Watch surfaces: `packages/opencode/src/cli/cmd/tui/thread.ts`,
-  `packages/opencode/src/cli/cmd/tui/worker.ts`,
-  `packages/opencode/src/cli/cmd/tui/worker-listener.ts`,
-  `packages/opencode/src/cli/cmd/tui/context/sdk.tsx`,
-  `packages/opencode/src/flag/flag.ts`, `packages/opencode/src/server/auth.ts`,
-  `packages/opencode/src/cli/cmd/llm-server.ts`, `packages/opencode/src/index.ts`,
-  `packages/opencode/src/node.ts`,
-  `packages/opencode/src/llm-server/`,
-  `packages/opencode/src/llm-server/input-audio.ts`, `packages/opencode/src/provider/provider.ts`,
-  `packages/opencode/src/cli/cmd/serve.ts`,
-  `packages/opencode/src/server/model-api.ts`,
-  `packages/opencode/src/server/api-request.ts`, `packages/opencode/src/server/server.ts`,
+- Status: active (reduced to near-nothing 2026-09-14)
+- Canonical owner: fork `main` instance-server boundary
+- 2026-09-14 structural retirement: the fork's parallel model API is gone.
+  `server/model-api.ts`, `server/api-request.ts` and
+  `src/llm-server/{images,input-audio,provider-options,sdk,scope,models,error}.ts`
+  are removed. Upstream mounts `CapabilityRoutes` inside `InstanceRoutes` at
+  `/v1` with the same two routes, the same mandatory scoped bearer token, and a
+  `protocol.ts` that already accepts `image_url` and `input_audio`. Checked
+  rather than assumed: those modules were a second implementation of what
+  upstream ships.
+- Observable contract: identical to upstream. Byte-for-byte upstream:
+  `src/llm-server/`, `routes/instance/{capability,middleware,index}.ts`,
+  `routes/instance/httpapi/server.ts`, `cli/cmd/{llm-server,serve,acp,web}.ts`,
+  `config/llm-server.ts`, `util/self.ts`. Two files still differ, and **both
+  predate this change**:
+  - `server/server.ts` (+10/-2): the non-loopback bind guard reads
+    `MIMOCODE_SERVER_OPERATOR_PASSWORD` rather than upstream's
+    `MIMOCODE_SERVER_PASSWORD`, so a credential this process generated for a
+    listener nobody asked for cannot authorize a non-loopback bind; and
+    `Server.listen` takes `advertiseDirectory`, because upstream keys the
+    advertisement on `process.cwd()` while this fork's TUI worker serves a
+    directory chosen at startup, and an advertisement in the wrong bucket is
+    invisible to `mimo llm-server issue` in the project it actually serves.
+    This is now the ONLY use of `MIMOCODE_SERVER_OPERATOR_PASSWORD` in `src`.
+  - `server/middleware.ts` (+1/-1) and `util/ssrf.ts` (+1/-1):
+    `RecoveryConflictError`, and FC-010's complete `fe80::/10` range.
+- Two containment call sites were aligned rather than kept. Both
+  `routes/instance/middleware.ts` and `routes/instance/httpapi/server.ts` read
+  `MIMOCODE_SERVER_OPERATOR_PASSWORD` where upstream reads
+  `MIMOCODE_SERVER_PASSWORD_SUPPLIED`. Checked rather than assumed: in
+  `flag/flag.ts` both getters read the same `operatorServerPassword` variable,
+  one returning the string and the other `Boolean()` of it, so the two guards
+  are the same test. The fork's spelling bought nothing and cost upstream's
+  comment, which is the only place the "who supplied the credential" rule is
+  written down — including its reasoning about `/v1` bypassing basic auth.
+  `routes/instance/index.ts` differed only in where the capability import and
+  route sat in their lists; that is pure future conflict, so it is aligned too.
+- Adopted from upstream, including where it relaxes the fork: an empty `models`
+  array now means "all configured models"; `function.strict` passthrough is
+  dropped; the `--directory`, `--all-models`, `--capability` and `--audio-api`
+  CLI flags go with upstream's CLI, so a token is issued for the process's cwd
+  and callers `cd` into the project first.
+- Every `Server.listen` call site now matches upstream. `acp.ts` and `web.ts`
+  pass `advertise: false` and `serve.ts` carries no `--llm-server` flag, all
+  three byte-identical to upstream. This was not cosmetic: adopting upstream's
+  `advertise` default without upstream's opt-out call sites silently made
+  `mimo acp` and `mimo web` discoverable through `llm-server issue`, because the
+  fork's previous `listen` published only when the retired `llm` option was
+  passed and neither command passes it. Half of upstream's design is not
+  alignment. The fork-only `tui/worker-listener.ts` still advertises on purpose,
+  which is what `advertiseDirectory` exists for.
+- Breaking change for existing fork users: `mimo serve --llm-server` is gone.
+  The flag gated only the address advertisement of a route that is always
+  mounted and always demands a minted token, and it was a remnant of the
+  retired fork model API. `mimo serve` now advertises like upstream, which is
+  also what the bundled `capability-api.md` this fork ships already told users.
+- Breaking change for existing fork users: tokens already issued stop working.
+  The fork wrote `version: 2` records at the same path upstream reads as
+  `version: 1`, and upstream's reader treats an unknown version as an empty
+  store. Tokens are short-lived by design (default 1d sliding lifetime);
+  `mimo llm-server issue` is the remedy.
+- Known upstream behaviours, recorded rather than corrected. Each was measured
+  during the 2026-09-14 review and left alone: upstream ships it this way, and
+  the trigger is uncommon or the impact small. Revisit only with evidence that
+  one of them actually fired.
+  - An unbounded `c.req.json()` body read, and no server-owned concurrency cap
+    or request deadline on the route. Non-streaming collection likewise
+    accumulates every text and reasoning delta with no output ceiling, and
+    `InstanceMiddleware` awaits a pending `InstanceBootstrap` without racing it
+    against the request signal, so a disconnected client cannot settle early.
+  - Provider and plugin exception text reaches the caller verbatim.
+  - `provider_options` is merged as an unrestricted provider-native map, after
+    the configured defaults and the selected variant, so a token holder can
+    override either.
+  - A remote `image_url` is handed to the SDK unvalidated, so the process can be
+    made to fetch loopback, RFC1918 or metadata addresses. Preflight validation
+    does not close this — the SDK fetches again later — and closing it properly
+    needs a proxy download with per-hop checks.
+  - The request schema is non-strict, so a field it does not declare is stripped
+    before anything can refuse it, and the caller's explicit constraint is
+    silently dropped: `parallel_tool_calls: false` from a client whose executor
+    handles one call per turn, `modalities`/`audio` asking for audio output, and
+    a message `name` distinguishing participants (declared, then discarded by
+    `toModelMessages` for every role). Media sent to a model that cannot accept
+    it is ignored rather than refused; `tool_choice: "required"` with no tools,
+    and `image_url.detail`, are accepted and discarded; bare `input_audio`
+    without `format` surfaces as a 502. Declaring and rejecting each is the
+    retired validator rebuilt, which is the direction this entry exists to
+    avoid; a caller who needs certainty can read the response back.
+  - `model.options` from `mimocode.json` is not merged into a capability request,
+    so a model configured there behaves differently over `/v1` than in a session.
+  - The plugin hooks receive `message: undefined` where the contract declares it
+    required; a non-finite `--ttl` becomes `null` and expires the token at once;
+    non-expiring tokens accumulate without a ceiling; the address registry trusts
+    pid liveness rather than probing the endpoint; a non-terminal finish reason
+    is reported as `stop`.
+  - `Server.listen` assigns the bind hostname to `URL.hostname` unbracketed, so
+    an explicit `--hostname ::1` is silently discarded by the WHATWG parser and
+    advertised as `http://localhost:<port>/`. Verified in Bun: `::1` and
+    `fe80::1` both yield `"localhost"`, `[::1]` yields `"[::1]"`. The common
+    IPv6 case is unaffected — `::` is already mapped to `127.0.0.1` first.
+  A follow-up PR takes the two that are one line and silently wrong: the
+  `model.options` merge and the IPv6 bracket. Exception redaction was
+  considered and dropped — the recipient already holds an operator-issued token
+  for this model, the leak needs a provider that echoes credential material
+  into an error body, and redacting costs every legitimate caller the reason
+  their request failed. The rest stay as recorded.
+- Watch surfaces: `packages/opencode/src/server/routes/instance/capability.ts`,
   `packages/opencode/src/server/middleware.ts`,
-  `packages/opencode/src/server/routes/instance/`, `packages/sdk/openapi.json`,
-  `packages/sdk/js/src/v2/gen/`, and `script/generate.ts`.
-- Tests/evidence: instance-server, model-discovery/token, middleware, shutdown, and
-  generated-artifact checks at the reviewed main behavior; the JavaScript SDK
-  is regenerated with `./packages/sdk/js/script/build.ts` rather than copied
-  from upstream. `packages/opencode/test/server/openapi-refs.test.ts` checks both
-  runtime and published OpenAPI recovery/resume operations expose the same
-  constrained `agentID` selector owned by FC-001/FD-009, omit caller task
-  replacement, and expose the same compaction projection contract.
-- POLICY-03 evidence: `test/cli/tui/worker-listener.test.ts` uses actual sockets
-  for pending-start/stop, bind failure/retry and operator-origin checks;
-  `worker-model-api.test.ts` drives two real worker RPC/HTTP instances.
-  `thread.test.ts` separately checks host wiring and startup-failure fallback.
-  These package tests do not by themselves prove the actual ordinary CLI TUI
-  startup or attach path; POSIX PTY validation has a separate publication record.
-- Audio evidence: `packages/opencode/test/server/model-api.test.ts` verifies
-  removed routes reject before body/bootstrap even with valid scoped tokens.
-  Its isolated non-test child keeps plain serve disabled despite a legacy static
-  audio key. Chat protocol/completion tests cover retained inline audio and SDK
-  transport validation. [Audio migration](audio-api.md) replaces the retired
-  endpoint guide. Ordinary OpenAPI/SDK artifacts omit these optional protocols.
-  [Model API](model-api.md),
-  `packages/opencode/test/llm-server/`, `packages/opencode/test/server/model-api.test.ts`,
-  and `packages/opencode/test/server/model-bootstrap-cancel.test.ts` cover discovery,
-  token persistence/expiry/revocation, scoped requests, and streaming lifetime.
-- 2026-09-05 Node-export review: upstream adds a `LLMServerTokens` re-export
-  but the fork has already removed its implementation with the implicit
-  capability subsystem. Omitted the dangling export; no listener, token
-  implementation, route, OpenAPI, or SDK surface was restored in that review.
-- 2026-09-07 selected adoption: the explicit model/token implementation is now
-  present under the narrower contract above. The September 5 Node-export note
-  records its historical absence; the Node entry now restores the functional
-  LLMServerTokens export for explicit embedding alongside Server.listen.
-- 2026-09-11 generated-artifact review: upstream shipped hand-updated
-  `packages/sdk/js/src/v2/gen/` entries for the new resume query parameters and
-  left `packages/sdk/openapi.json` behind. Both artifacts were regenerated from
-  the merged fork route instead, so the published OpenAPI and the JavaScript SDK
-  carry the fork's constrained parameter schemas and descriptions and stay
-  consistent with each other.
-- Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
-- Retirement condition: upstream preserves the TUI-owned listener lifecycle,
-  explicit enabling on other entrypoints, operator-origin directory/bind limits,
-  and explicit token scope; authentication precedes bootstrap, resources are
-  bounded, and shutdown closes intake before draining and retiring instances.
+  `packages/opencode/src/server/routes/instance/middleware.ts`,
+  `packages/opencode/src/server/server.ts`,
+  `packages/opencode/src/cli/cmd/llm-server.ts`,
+  `packages/opencode/src/cli/cmd/tui/worker-listener.ts`,
+  `packages/opencode/src/flag/flag.ts`, `packages/opencode/src/llm-server/`,
+  `packages/opencode/src/config/llm-server.ts`, `packages/opencode/src/util/self.ts`.
+- Fixture convention: this fork roots test fixtures outside `process.cwd()` and
+  asks cases that depend on the InstanceMiddleware containment check to opt in
+  with `root: "cwd"`, where upstream's preload roots every fixture under cwd.
+  `implicit-listener.test.ts` carries that opt-in with a comment saying why.
+- Tests/evidence: upstream's `test/llm-server/`, `test/cli/cmd/serve-advertise.test.ts`,
+  `test/util/self.test.ts` and `test/flag/dynamic-system-prompt-flag.test.ts` are
+  inherited verbatim. The fork keeps `test/cli/tui/worker-listener.test.ts` and
+  `test/fixture/tui-worker-default-child.ts` for the advertise-directory delta.
+- Upstream relationship: the fork tracks upstream on this surface.
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
 
