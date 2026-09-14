@@ -543,6 +543,7 @@ describe("session.llm system prompt — memory-instructions guard", () => {
             .map((m) => m.content)
             .join("\n")
 
+          // Memory write/read contract is NOT gated on checkpoint.
           expect(allSys).toContain("# Memory system")
           expect(allSys).toContain("Notes scratchpad")
           expect(allSys).toContain("Subagent return format")
@@ -551,9 +552,17 @@ describe("session.llm system prompt — memory-instructions guard", () => {
           )
           expect(allSys).toContain(path.join(Global.Path.data, "memory", "global", "MEMORY.md"))
           expect(allSys).not.toContain("checkpoint.md")
+          expect(allSys).toContain("Two file types")
+          expect(allSys).toContain("When to Edit MEMORY.md directly")
+          expect(allSys).toContain("search first via Grep / Read")
+
+          // Checkpoint-write ownership extras stay off when the flag is on.
+          // (Base agent.prompt may mention the checkpoint-writer agent name;
+          // assert on memory-system-specific copy instead.)
           expect(allSys).not.toContain("Active recall protocol")
           expect(allSys).not.toContain("sole curator")
           expect(allSys).not.toContain("Session checkpoint")
+          expect(allSys).not.toContain(path.join(Global.Path.data, "memory", "sessions", "current_session_id", "checkpoint.md"))
         },
       })
     } finally {

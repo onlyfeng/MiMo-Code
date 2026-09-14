@@ -39,6 +39,15 @@ describe("recoverActorArgs", () => {
     expect(recovered.operation.actor_id).toBe("explore-1")
   })
 
+  test("restricted context and lifecycle survive recovery for strict rejection", () => {
+    const base = { action: "spawn" as const, subagent_type: "general", description: "d", prompt: "p" }
+    for (const extra of [{ context: "full" }, { context: null }, { context: false }, { lifecycle: "persistent" }, { lifecycle: null }]) {
+      for (const raw of [base, { operation: base }, { operation: JSON.stringify(base) }]) {
+        expect(recoverActorArgs({ ...raw, ...extra })).toEqual({ operation: { ...base, ...extra } })
+      }
+    }
+  })
+
   test("stringified operation envelope → parsed nested object", () => {
     expect(recoverActorArgs({ operation: '{"action":"run","subagent_type":"explore","description":"d","prompt":"p"}' })).toEqual({
       operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p" },

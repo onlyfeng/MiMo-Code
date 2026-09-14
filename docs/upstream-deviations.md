@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-14
-- Upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Prior reviewed upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
-- Main behavior (runtime/tests): `bbac42b72bc63ebe52cb74a153c248b4e51a09d2`
+- Last reviewed: 2026-09-15
+- Upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
+- Prior reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
+- Main behavior (runtime/tests): `ee03fe5e9c9c7abd8edb2e28dd6189d903b2ba62`
 - Bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
-- Prior fork `main` tip: `72064c41ec7311a4d3ca05dc480956f73463c0ff`
+- Prior fork `main` tip: `a197d4a84939f36a813cb39750a5fb86cce6b37d`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -27,21 +27,18 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest synchronization: 2026-09-14, upstream `98702641..6fbb1732` (PRs #109–#117).
-It has no separate capability inventory. The range is four commits and one merge
-across two capabilities — MiMo model ids pinned to `@ai-sdk/openai-compatible`,
-and port `0` bound as OS-ephemeral — both adopted in #109 and recorded in
-[the registry history](fork-registry-history.md). The same round closed a
-divergence older than the range: upstream has shipped its capability route since
-`b4bbe81c` (2026-08-18), and #110–#116 retired the fork's parallel model API in
-its favour. That decision, and every behaviour left as upstream ships it, is
-owned by FD-004's 2026-09-14 structural retirement. This continues the
-[2026-09-12 (98702641) capability inventory](upstream-sync-2026-09-12-98702641.md),
-the [2026-09-11 (f11e35ed) inventory](upstream-sync-2026-09-11-f11e35ed.md) and the
-[2026-09-11 (7641dbbd) inventory](upstream-sync-2026-09-11-7641dbbd.md).
-The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
-All active owners remain; earlier per-owner behavior references remain historical
-where this delta does not change their implementation.
+Latest synchronization: 2026-09-15, the specified upstream range
+`6fbb1732..5198ff54` (21 commits, 17 non-merge). The
+[capability inventory](upstream-sync-2026-09-15-5198ff54.md) records six incoming
+capabilities and the separately approved actor lifecycle follow-up. FC-003 is
+retired by an explicit behavior decision. FD-009 retains the system frozen-context
+contract; only compat exposes full-context model creation. History adopts uniform
+content and one-time resumable migration, with a bounded SQLite NUL projection
+correction. FD-004's previously accepted upstream behaviors remain unchanged.
+This is alignment to the selected SHA, not to newer upstream commits.
+Earlier per-owner behavior references remain historical where this range does
+not change their implementation. The preceding review is retained in the
+[shared history](fork-registry-history.md).
 
 ## Sync index
 
@@ -660,9 +657,9 @@ where this delta does not change their implementation.
 ## FD-009 — frozen-context capture fails closed before actor execution
 
 - Status: active
-- Canonical owner: fork `main` actor/checkpoint capture authority boundary
-- Observable contract: a `context: "full"` actor and every checkpoint-writer
-  mode validate the required captor, non-empty inherited messages, and
+- Canonical owner: fork `main` frozen-context runtime authority boundary
+- Observable contract: internal `context: "full"` actors (including session-ask
+  fork queries) and every checkpoint-writer mode validate the required captor, non-empty inherited messages, and
   mode-specific agent metadata before child creation or watermark advancement.
   The captured system, tools, MCP membership, permissions, watermark, and model
   identity remain frozen; a qualifying child cannot fall back to live context.
@@ -698,6 +695,14 @@ where this delta does not change their implementation.
   without recapturing its frozen context. Their exact conditional-write receipt
   advances only this runner's current parent; another hook user or a failed
   conditional write cannot grant recovery authority.
+- 2026-09-15 model-entry alignment: main adopts upstream `799bc409` and
+  exposes neither `context` nor dependent persistent creation on actor spawn/run.
+  The earlier upstream model-entry failure (missing `ForkContext`) was already
+  corrected here; the removal follows the approved branch ownership policy.
+  Dev/compat owns the explicit model-facing extension. Checkpoint writers,
+  session-ask fork queries and qualifying existing actor recovery continue to
+  use this shared frozen-context contract; removing the model parameter does
+  not retire their admission or native-schema checks.
 - Upstream relationship: rejects the log-and-spawn fallback anchored at
   `8e5cc8a84b91af38eefde2d2bf054216d880d82f`; fork behavior is anchored at
   `3a4a244c8af1cd455518e0226c4df12d50b9b5e9` and refined through

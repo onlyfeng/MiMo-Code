@@ -12587,6 +12587,28 @@
             "required": ["input", "output", "reasoning", "cache"]
           },
           "structured": {},
+          "actorResult": {
+            "type": "object",
+            "properties": {
+              "finalText": {
+                "type": "string"
+              },
+              "structured": {},
+              "reportedStatus": {
+                "type": "string",
+                "enum": ["success", "partial", "failed", "blocked"]
+              },
+              "reportedSummary": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "variant": {
             "type": "string"
           },
@@ -14731,6 +14753,20 @@
           }
         }
       },
+      "LLMServerConfig": {
+        "description": "Token lifetime defaults for the temporary local LLM server (mimo llm-server)",
+        "type": "object",
+        "properties": {
+          "ttl": {
+            "description": "Default sliding lifetime for issued tokens, measured from last use (e.g. '30m', '12h', '1d', or 'none'). Default '1d'.",
+            "type": "string"
+          },
+          "maxAge": {
+            "description": "Absolute ceiling from issue, regardless of activity (e.g. '7d', or 'none'). Default 'none', so an actively used token is not cut off.",
+            "type": "string"
+          }
+        }
+      },
       "PermissionActionConfig": {
         "type": "string",
         "enum": ["ask", "allow", "deny"]
@@ -15668,6 +15704,9 @@
           },
           "server": {
             "$ref": "#/components/schemas/ServerConfig"
+          },
+          "llmServer": {
+            "$ref": "#/components/schemas/LLMServerConfig"
           },
           "command": {
             "description": "Command configuration, see https://mimo.xiaomi.com/mimocode/commands",
@@ -16659,20 +16698,6 @@
               "cc_index": {
                 "description": "Index Claude Code memory (~/.claude/projects/<slug>/memory) and expose under scope='cc'. Default: false. Note: when enabled, every mimocode agent (build/explore/subagents) can search these memories via the builtin `memory` tool — including CC's `type: user` (your role/preferences) and `type: feedback` (your guidance) categories. CC originally writes them for future CC sessions; flipping this on widens the consumer set to mimocode agents on the same machine. Leave disabled (default) if you don't want personal context recallable from a prompt-injection-vulnerable agent.",
                 "type": "boolean"
-              }
-            }
-          },
-          "history": {
-            "description": "Trajectory (conversation history) FTS index configuration.",
-            "type": "object",
-            "properties": {
-              "kinds": {
-                "description": "Which part kinds the history FTS index should cover. Defaults to text (user/assistant) + tool input + tool errors. Add 'reasoning' or 'tool_output' to grow recall at the cost of database size. Note: enabling 'tool_output' reclassifies completed tools from kind='tool_input' to kind='tool_output' (input remains searchable in the body, but kind:['tool_input'] filter will then only match pending/error tools).",
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": ["user_text", "assistant_text", "tool_input", "tool_error", "reasoning", "tool_output"]
-                }
               }
             }
           },

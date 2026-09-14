@@ -3148,3 +3148,19 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - #109 adopts both capabilities in range. MiMo model ids are pinned to `@ai-sdk/openai-compatible` through upstream's `isMimoOrSmartModel`/`resolveModelNpm`, retiring the fork's `usesMimoResponsesApi`, `isMimoModel` and `xiaomi` loader; port `0` binds an OS-ephemeral port instead of preferring 4096.
 - #110–#116 close a divergence older than the range: upstream has shipped its capability route since `b4bbe81c` (2026-08-18). The fork's parallel model API is retired in its favour; FD-004 is rewritten as that adoption, keeps two pre-existing boundaries and three corrections, and records each upstream behaviour left as shipped. No owner retires.
 - The registry headers were not advanced when the round merged; a later audit (#117) caught that, together with two lifecycle contracts — FD-004's sync index row and FC-008's 2026-09-07 model API review — that still required the retired behaviour. Pure registry commits do not advance the snapshot above; final branch-tip CI and remote ancestry are checked separately after publication.
+
+## 2026-09-15 selected upstream 5198ff54
+
+- Scope: specified execution of `6fbb1732232c9d0ecefee209798a8586d78cb70d` to `5198ff540efb5ca9fff2baa64555324d43a721b9`; newer upstream is excluded.
+- Prior fork main: `a197d4a84939f36a813cb39750a5fb86cce6b37d`.
+- Main runtime/test and generated API behavior: `271c5da8df61dff14adb743e85abbf1de09f48af`.
+- Bundled guidance content remains `118337857661a3fde59cd0406a598a4aa9d79688`; this round changes runtime-owned tool descriptions, not the bundled guidance snapshot.
+- FC-003 retires with removal of its gate. FC-002 memory wording converges; FD-002 identity separation remains. Main removes model context and dependent persistent creation, while FD-009 still owns checkpoint, session-ask and runtime-created frozen-context recovery. Compat keeps its complete model extension under DC-ACTOR-001.
+- Six incoming capabilities are implemented and locally validated; the separately approved lifecycle contract is a subsequent PR. No additional skip was introduced.
+- Full capability decisions, history recovery boundary, commands, counts and publication status are recorded in [the synchronization report](upstream-sync-2026-09-15-5198ff54.md). This entry does not claim pending remote CI or compat publication.
+
+### PR 121 review correction
+
+- Current behavior reference: `ee03fe5e9c9c7abd8edb2e28dd6189d903b2ba62`.
+- Separate image attachment/recompression limits from audio/video encoded limits in model-facing Read guidance; replace operation-specific branches in the five incoming Compose specs with synthetic values.
+- Existing media-description matrix: 4 pass, 21 assertions. The prior eight successful CI checks belong to `2ef6ff4f`; the revised head requires new CI.
