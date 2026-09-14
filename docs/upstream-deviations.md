@@ -180,11 +180,15 @@ where this delta does not change their implementation.
   `protocol.ts` that already accepts `image_url` and `input_audio`. Checked
   rather than assumed: those modules were a second implementation of what
   upstream ships.
-- Observable contract: identical to upstream. Byte-for-byte upstream:
-  `src/llm-server/`, `routes/instance/{capability,middleware,index}.ts`,
+- Observable contract: identical to upstream apart from the two corrections
+  below. Byte-for-byte upstream: `src/llm-server/{protocol,tokens}.ts`,
+  `routes/instance/{capability,middleware,index}.ts`,
   `routes/instance/httpapi/server.ts`, `cli/cmd/{llm-server,serve,acp,web}.ts`,
-  `config/llm-server.ts`, `util/self.ts`. Two files still differ, and **both
-  predate this change**:
+  `config/llm-server.ts`, `util/self.ts`, `node.ts`.
+  `llm-server/completions.ts` carries one added line (the `model.options`
+  merge) and `server/server.ts` one changed line (the IPv6 bracket); both are
+  recorded as corrections below rather than as fork boundaries. Two further
+  deltas **predate this change**:
   - `server/server.ts` (+10/-2): the non-loopback bind guard reads
     `MIMOCODE_SERVER_OPERATOR_PASSWORD` rather than upstream's
     `MIMOCODE_SERVER_PASSWORD`, so a credential this process generated for a
@@ -259,8 +263,6 @@ where this delta does not change their implementation.
     without `format` surfaces as a 502. Declaring and rejecting each is the
     retired validator rebuilt, which is the direction this entry exists to
     avoid; a caller who needs certainty can read the response back.
-  - `model.options` from `mimocode.json` is not merged into a capability request,
-    so a model configured there behaves differently over `/v1` than in a session.
   - A completed `tool-call` the SDK marked `invalid` (malformed JSON arguments
     from the model) is appended like any other, so the response is a 200 with
     `finish_reason: "tool_calls"` and arguments the caller cannot execute. The
@@ -274,17 +276,21 @@ where this delta does not change their implementation.
     non-expiring tokens accumulate without a ceiling; the address registry trusts
     pid liveness rather than probing the endpoint; a non-terminal finish reason
     is reported as `stop`.
-  - `Server.listen` assigns the bind hostname to `URL.hostname` unbracketed, so
-    an explicit `--hostname ::1` is silently discarded by the WHATWG parser and
-    advertised as `http://localhost:<port>/`. Verified in Bun: `::1` and
-    `fe80::1` both yield `"localhost"`, `[::1]` yields `"[::1]"`. The common
-    IPv6 case is unaffected — `::` is already mapped to `127.0.0.1` first.
-  A follow-up PR takes the two that are one line and silently wrong: the
-  `model.options` merge and the IPv6 bracket. Exception redaction was
-  considered and dropped — the recipient already holds an operator-issued token
-  for this model, the leak needs a provider that echoes credential material
-  into an error body, and redacting costs every legitimate caller the reason
-  their request failed. The rest stay as recorded.
+  Two were taken rather than recorded, because each is one line and each was
+  silently wrong, and both now have a mutation-checked test:
+  - `model.options` is merged at upstream's own precedence point, so a model
+    configured in `mimocode.json` no longer behaves differently over `/v1` than
+    in a session.
+  - `Server.listen` brackets an IPv6 literal before assigning it to
+    `URL.hostname`, which the WHATWG parser otherwise discards — verified in
+    Bun: `::1` and `fe80::1` both left `"localhost"`, `[::1]` assigns. `::` was
+    never affected; it is mapped to `127.0.0.1` first.
+
+  Exception redaction was considered for the same pass and dropped: the
+  recipient already holds an operator-issued token for this model, the leak
+  needs a provider that echoes credential material into an error body, and
+  redacting costs every legitimate caller the reason their request failed.
+  Everything else above stays as recorded.
 - Watch surfaces: `packages/opencode/src/server/routes/instance/capability.ts`,
   `packages/opencode/src/server/middleware.ts`,
   `packages/opencode/src/server/routes/instance/middleware.ts`,
