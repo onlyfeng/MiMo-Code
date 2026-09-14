@@ -322,6 +322,12 @@ forms. Malformed values are rejected; conflicting inner/outer copies are
 rejected instead of choosing an actor lifetime silently. The shared generic
 shell wrapper's mixed script/outer-field policy is unchanged.
 
+The shared history preview follow-up is inherited from accepted main PR #123.
+Its SQL byte budgets and structural omission formatting preserve raw parts and
+original attachment locators, including arbitrary stored MIME text. It does not
+replace compat context caps or frozen-prefix behavior; all seven owners above
+retain their dispositions.
+
 This stage retains the existing actor lifecycle quarantine. The approved C07
 postStop/execution/cancel follow-up is reviewed and published separately; this
 propagation does not claim that pending work is solved.
@@ -332,12 +338,12 @@ propagation does not claim that pending work is solved.
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-15
 - Reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Accepted `main` tip: `321e70c9f491e2f9ff406bf56614c955fc5294de`
-- Inherited main behavior: `ee03fe5e9c9c7abd8edb2e28dd6189d903b2ba62`
-- Compat behavior: `bd47323d3c375be255d0c0ca0319d4e5882847e3`
+- Accepted `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
+- Inherited main behavior: `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d`
+- Compat behavior: `967b340faa1389741f08d45cff0ada2a09f52463`
 - Prior compat tip: `51591791c592a21513e7703e3109c9a6d12def9a`
-- Main source inheritance merge: `208f0cb0c9082e5a7706c15d322daa42e37febac`
-- Shared audit commit: `0d1311eefe5c5c7cb2028425b880d5a659ad5dc5`
+- Main source inheritance merge: `967b340faa1389741f08d45cff0ada2a09f52463`
+- Shared audit commit: `90eef40fc1268bece3e63a7db64180a4a75bd7b2`
 - Inherited bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
 - Publication state: locally validated specified propagation; final remote-tip CI is verified after publication. C07 is a separate subsequent change.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
