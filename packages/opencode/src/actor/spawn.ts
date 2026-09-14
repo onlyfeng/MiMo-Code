@@ -1817,6 +1817,16 @@ export const layer = Layer.effect(
       )
     })
 
+    const coordinateCancellation = (work: Effect.Effect<void>) =>
+      Effect.gen(function* () {
+        if (!(yield* executions.ownsCurrentFiber)) return yield* work
+        // A direct Effect hook cannot join its own execution, including when
+        // cancelling an ancestor that cascades back to it. The service owns the
+        // complete cleanup; the dependent caller can leave even from a finalizer.
+        const coordinator = yield* work.pipe(Effect.forkIn(scope, { uninterruptible: true }))
+        return yield* Fiber.join(coordinator).pipe(Effect.interruptible)
+      })
+
     // Acquisition and cleanup share one mask: even a synchronous execution
     // lookup can admit a scheduler yield after the episode has been claimed.
     // A follower restores caller interruption while the owner keeps cleaning up.
@@ -2049,6 +2059,7 @@ export const layer = Layer.effect(
               .pipe(Effect.ensuring(lifecycleState.releaseCancel(key, ownership.episode)))
           }),
         ),
+      coordinateCancellation,
     )
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (sessionID: SessionID, actorID: string) {

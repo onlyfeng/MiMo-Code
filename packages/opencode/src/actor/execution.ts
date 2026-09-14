@@ -17,6 +17,7 @@ export interface Interface {
     actorID: string,
     work: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E, R>
+  readonly ownsCurrentFiber: Effect.Effect<boolean>
   readonly current: (sessionID: SessionID, actorID: string) => Effect.Effect<Execution | undefined>
   readonly attach: (execution: Execution) => Effect.Effect<void>
   readonly fork: (
@@ -62,6 +63,9 @@ export const layer = Layer.effect(
       }).pipe(Effect.asVoid, Effect.uninterruptible)
     return Service.of({
       reserve,
+      ownsCurrentFiber: Effect.withFiber((fiber) =>
+        Effect.sync(() => [...active.values()].some((execution) => execution.fiber === fiber)),
+      ),
       acquire: (sessionID, actorID) =>
         Effect.acquireUseRelease(
           Effect.sync(() => {

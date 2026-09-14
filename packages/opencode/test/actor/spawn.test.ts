@@ -1,3 +1,4 @@
+import { ActorExecution } from "../../src/actor/execution"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -52,7 +53,7 @@ import { Auth } from "../../src/auth"
 import { Database } from "../../src/storage"
 import { MessageTable, SessionTable } from "../../src/session/session.sql"
 import { MessageV2 } from "../../src/session/message-v2"
-import { MessageID, PartID } from "../../src/session/schema"
+import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { Instance } from "../../src/project/instance"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -375,6 +376,7 @@ function settledPromptLayer<A, E, R>(
 }
 
 const it = testEffect(makeLayer())
+let postStopCancel: ((input: { sessionID: string; actorID: string }) => Effect.Effect<void>) | undefined
 let preStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | undefined
 let postStopPause: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void>; cleanup?: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void> } } | undefined
 let postStopReentry: { calls: number; finished: Deferred.Deferred<void> } | undefined
@@ -406,8 +408,9 @@ const pausePreStopPlugin = Layer.succeed(
         }
         return { continue: false, contributingPluginNames: [], contributingHookIDs: [] }
       }),
-    triggerActorPostStop: () =>
+    triggerActorPostStop: (input) =>
       Effect.gen(function* () {
+        if (postStopCancel) yield* postStopCancel(input)
         const reentry = postStopReentry
         if (reentry) {
           reentry.calls++
@@ -434,7 +437,7 @@ const pausePreStopPlugin = Layer.succeed(
       }),
   }),
 )
-const pauseIt = testEffect(makeLayer(pausePreStopPlugin))
+const pauseIt = testEffect(makeLayer(pausePreStopPlugin).pipe(Layer.provideMerge(ActorExecution.layer)))
 
 const ref = {
   providerID: ProviderID.make("test"),
@@ -3537,4 +3540,65 @@ it.live(
       { git: true, config: providerCfg },
     ),
   30_000,
+)
+
+
+for (const finalizer of [false, true]) {
+  pauseIt.live(`an actor postStop Effect hook can cancel its own execution with finalizer=${finalizer}`, () =>
+    provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const registry = yield* ActorRegistry.Service
+      const executions = yield* ActorExecution.Service
+      const parent = yield* sessions.create({ title: "postStop self cancellation" })
+      const entered = yield* Deferred.make<void>()
+      postStopCancel = (input) => {
+        const cancel = Deferred.succeed(entered, undefined).pipe(Effect.andThen(actor.cancel(SessionID.make(input.sessionID), input.actorID, "graceful")))
+        return finalizer ? Effect.void.pipe(Effect.ensuring(cancel)) : cancel
+      }
+      yield* Effect.addFinalizer(() => Effect.sync(() => { postStopCancel = undefined }))
+      yield* llm.text("finished model work")
+      const child = yield* actor.spawn({ mode: "peer", sessionID: parent.id, agentType: "explore", task: "stop yourself", context: "none", tools: [], background: true, model: ref })
+      yield* Deferred.await(entered).pipe(Effect.timeout("3 seconds"))
+      const outcome = yield* Deferred.await(child.outcome).pipe(Effect.timeout("3 seconds"))
+      expect(outcome.status).toBe("cancelled")
+      yield* actor.cancel(child.sessionID, child.actorID, "forced").pipe(Effect.timeout("2 seconds"))
+      expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
+      expect(yield* executions.current(child.sessionID, child.actorID)).toBeUndefined()
+      postStopCancel = undefined
+      const next = yield* executions.reserve(child.sessionID, child.actorID)
+      expect(next.cancelled).toBe(false)
+      yield* executions.release(next)
+    }), { git: true, config: providerCfg }), 10000,
+  )
+}
+
+pauseIt.live("a child execution postStop hook can cancel its ancestor without joining itself", () =>
+  provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
+    const actor = yield* Actor.Service
+    const sessions = yield* Session.Service
+    const registry = yield* ActorRegistry.Service
+    const executions = yield* ActorExecution.Service
+    const session = yield* sessions.create({ title: "child cancels ancestor" })
+    yield* llm.hang
+    const parent = yield* actor.spawn({ mode: "subagent", sessionID: session.id, agentType: "explore", task: "wait for child", context: "none", tools: [], background: true, model: ref })
+    yield* llm.wait(1).pipe(Effect.timeout("3 seconds"))
+    const entered = yield* Deferred.make<void>()
+    postStopCancel = () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(actor.cancel(parent.sessionID, parent.actorID, "graceful")))
+    yield* Effect.addFinalizer(() => Effect.sync(() => { postStopCancel = undefined }))
+    yield* llm.text("child finished")
+    const child = yield* actor.spawn({ mode: "subagent", sessionID: session.id, parentActorID: parent.actorID, agentType: "explore", task: "cancel parent", context: "none", tools: [], background: true, model: ref })
+    yield* Deferred.await(entered).pipe(Effect.timeout("3 seconds"))
+    expect((yield* Deferred.await(child.outcome).pipe(Effect.timeout("3 seconds"))).status).toBe("cancelled")
+    expect((yield* Deferred.await(parent.outcome).pipe(Effect.timeout("3 seconds"))).status).toBe("cancelled")
+    yield* actor.cancel(parent.sessionID, parent.actorID, "forced").pipe(Effect.timeout("2 seconds"))
+    for (const target of [parent, child]) {
+      expect((yield* registry.get(target.sessionID, target.actorID))?.lastOutcome).toBe("cancelled")
+      expect(yield* executions.current(target.sessionID, target.actorID)).toBeUndefined()
+    }
+    postStopCancel = undefined
+    yield* llm.text("later valid actor")
+    const next = yield* actor.spawn({ mode: "subagent", sessionID: session.id, agentType: "explore", task: "later valid work", context: "none", tools: [], background: true, model: ref })
+    expect((yield* Deferred.await(next.outcome).pipe(Effect.timeout("3 seconds"))).status).toBe("success")
+  }), { git: true, config: providerCfg }), 15000,
 )
