@@ -201,6 +201,25 @@ const revoke = cmd({
       .option("all", { type: "boolean", describe: "revoke every token for this directory", default: false }),
   handler: (args) =>
     inInstance(async () => {
+      // `--all` is answered first, so without this an id passed alongside it is
+      // discarded in silence and every token for the directory goes instead of the
+      // one that was named. Revocation is not recoverable, so the ambiguous command
+      // has to fail rather than pick.
+      //
+      // A yargs `.conflicts("all", "id")` looks like the tidier answer and does
+      // nothing: `id` is a positional, and the conflict never fires. Checked against
+      // yargs 18 rather than assumed — `revoke <id> --all` still reaches the handler
+      // with both set.
+      //
+      // Presence, not truthiness: yargs binds an empty positional as `""`, so
+      // `revoke "$TOKEN_ID" --all` with the variable unset is the exact case this
+      // guard exists for and a truthy test walks straight past it. An absent
+      // positional is `undefined`, which `!= null` still lets through.
+      if (args.all && args.id != null) {
+        UI.error("pass a token id or --all, not both")
+        process.exitCode = 1
+        return
+      }
       if (args.all) {
         UI.println(`revoked ${await LLMServerTokens.revokeAll(process.cwd())} token(s)`)
         return
