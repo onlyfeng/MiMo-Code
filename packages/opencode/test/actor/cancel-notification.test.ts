@@ -332,7 +332,12 @@ function makeLayer() {
             })
           }
           const gate = failureWriteGate
-          if (!gate || gate.sessionID !== sessionID || gate.actorID !== actorID || patch.lastOutcome !== "failure") {
+          if (
+            !gate ||
+            gate.sessionID !== sessionID ||
+            gate.actorID !== actorID ||
+            patch.lastOutcome !== "failure"
+          ) {
             return registry.updateStatus(sessionID, actorID, patch)
           }
           return Effect.gen(function* () {
@@ -483,287 +488,182 @@ const parentInboxRows = (parentID: SessionID, parentActorID = "main") =>
   )
 
 describe("Actor cancel notification (T41 unified terminal-status bridge)", () => {
-  it.live("[TP-R14-07] a spawn provider error produces one failed notification and a failed wait", () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ llm }) {
-        const actor = yield* Actor.Service
-        const sessions = yield* Session.Service
-        const parent = yield* sessions.create({ title: "provider failure" })
-        yield* llm.error(401, { error: { message: "invalid credential", type: "authentication_error" } })
-        const child = yield* actor.spawn({
-          mode: "subagent",
-          sessionID: parent.id,
-          agentType: "build",
-          task: "fail",
-          context: "none",
-          tools: [],
-          background: true,
-          model: ref,
-        })
-        expect((yield* Deferred.await(child.outcome)).status).toBe("failure")
-        const rows = yield* parentInboxRows(parent.id)
-        const result = yield* ActorWaiter.Service.use((waiter) =>
-          waiter.wait({ sessionID: child.sessionID, actor_id: child.actorID }),
-        ).pipe(Effect.provide(ActorWaiter.defaultLayer))
-        expect(result.lastOutcome).toBe("failure")
-        expect(result.error).toBeDefined()
-        expect(rows).toHaveLength(1)
-        expect((rows[0].content as { text: string }).text).toContain("failed.")
-      }),
-      { git: true, config: providerCfg },
-    ),
-  )
+  it.live("[TP-R14-07] a spawn provider error produces one failed notification and a failed wait", () => provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "provider failure" })
+      yield* llm.error(401, { error: { message: "invalid credential", type: "authentication_error" } })
+      const child = yield* actor.spawn({ mode: "subagent", sessionID: parent.id, agentType: "build", task: "fail", context: "none", tools: [], background: true, model: ref })
+      expect((yield* Deferred.await(child.outcome)).status).toBe("failure")
+      const rows = yield* parentInboxRows(parent.id)
+      const result = yield* ActorWaiter.Service.use(waiter => waiter.wait({ sessionID: child.sessionID, actor_id: child.actorID })).pipe(Effect.provide(ActorWaiter.defaultLayer))
+      expect(result.lastOutcome).toBe("failure")
+      expect(result.error).toBeDefined()
+      expect(rows).toHaveLength(1)
+      expect((rows[0].content as { text: string }).text).toContain("failed.")
+    }), { git: true, config: providerCfg },
+  ))
   it.live("[TP-R14-12] undeliverable terminal notification is logged", () => {
     const messages: string[] = []
-    return provideTmpdirServer(
-      Effect.fnUntraced(function* ({ llm }) {
-        const actor = yield* Actor.Service
-        const sessions = yield* Session.Service
-        const parent = yield* sessions.create({ title: "missing receiver" })
-        yield* llm.text("finished")
-        const child = yield* actor.spawn({
-          mode: "subagent",
-          sessionID: parent.id,
-          parentActorID: "missing-parent",
-          agentType: "build",
-          task: "finish",
-          context: "none",
-          tools: [],
-          background: true,
-          model: ref,
-        })
-        const outcome = yield* Deferred.await(child.outcome)
-        expect(outcome.status).toBe("success")
-        expect((yield* parentInboxRows(parent.id, "missing-parent")).length).toBe(0)
-        expect(messages.some((message) => message.includes("actor terminal notification failed"))).toBe(true)
-      }),
-      { git: true, config: providerCfg },
-    ).pipe(
-      Effect.provide(
-        Logger.layer([
-          Logger.make((options) => {
-            messages.push(String(options.message))
-          }),
-        ]),
-      ),
+    return provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "missing receiver" })
+      yield* llm.text("finished")
+      const child = yield* actor.spawn({ mode: "subagent", sessionID: parent.id, parentActorID: "missing-parent", agentType: "build", task: "finish", context: "none", tools: [], background: true, model: ref })
+      const outcome = yield* Deferred.await(child.outcome)
+      expect(outcome.status).toBe("success")
+      expect((yield* parentInboxRows(parent.id, "missing-parent")).length).toBe(0)
+      expect(messages.some((message) => message.includes("actor terminal notification failed"))).toBe(true)
+    }), { git: true, config: providerCfg }).pipe(
+      Effect.provide(Logger.layer([Logger.make((options) => { messages.push(String(options.message)) })])),
     )
   })
   // Desktop tool-step-schema: real inbox-woken execution entry, isolated LLM.
   for (const mode of ["subagent", "peer"] as const) {
     for (const terminal of ["success", "failure", "cancelled"] as const) {
-      it.live(`[TP-R14-08] [TP-R14-09] ${mode} continuation settles ${terminal} once`, () =>
-        provideTmpdirServer(
-          Effect.fnUntraced(function* ({ llm }) {
-            const actor = yield* Actor.Service
-            const sessions = yield* Session.Service
-            const registry = yield* ActorRegistry.Service
-            const prompt = yield* SessionPrompt.Service
-            const parent = yield* sessions.create({
-              title: "continued child",
-              permission: [{ permission: "*", pattern: "*", action: "allow" }],
-            })
-            yield* registry.register({
-              sessionID: parent.id,
-              actorID: "owner",
-              mode: "subagent",
-              agent: "build",
-              description: "creating parent",
-              contextMode: "none",
-              background: true,
-              lifecycle: "ephemeral",
-            })
-            yield* llm.text("first result")
-            const spawned = yield* actor.spawn({
-              mode,
-              sessionID: parent.id,
-              parentActorID: "owner",
-              agentType: "build",
-              task: "first",
-              context: "none",
-              tools: ["read"],
-              background: true,
-              model: ref,
-            })
-            yield* Deferred.await(spawned.outcome)
-            expect((yield* parentInboxRows(parent.id, "owner")).length).toBe(1)
-            const before = yield* llm.calls
-            if (terminal === "success") yield* llm.text("second result")
-            if (terminal === "failure")
-              yield* llm.error(401, { error: { message: "invalid credential", type: "authentication_error" } })
-            if (terminal === "cancelled") yield* llm.hang
-            yield* prompt.prompt({
-              sessionID: spawned.sessionID,
-              agentID: spawned.actorID,
-              agent: "build",
-              model: ref,
-              noReply: true,
-              parts: [{ type: "text", text: "continue" }],
-            })
-            const execution = yield* prompt
-              .loop({ sessionID: spawned.sessionID, agentID: spawned.actorID, notifyParentOnComplete: true })
-              .pipe(Effect.forkChild)
-            if (terminal === "cancelled") {
-              for (let i = 0; i < 400 && (yield* llm.calls) === before; i++) yield* Effect.sleep("10 millis")
-              expect(yield* llm.calls).toBeGreaterThan(before)
-              yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
-            }
-            const exit = yield* Fiber.await(execution)
-            expect(Exit.isSuccess(exit)).toBe(terminal === "success")
-            const entry = yield* registry.get(spawned.sessionID, spawned.actorID)
-            expect(entry?.status).toBe("idle")
-            expect(entry?.lastOutcome).toBe(terminal)
-            if (terminal === "failure") expect(entry?.lastError).toContain("invalid credential")
-            // Continuation settle must rewrite result_message_id after the running
-            // transition cleared it. Success always has a delivery. A pure API
-            // error with no partial text intentionally leaves it null (TP-R14-11).
-            if (terminal === "success") expect(entry?.resultMessageID).toBeDefined()
-            if (terminal === "failure") expect(entry?.resultMessageID).toBeUndefined()
+      it.live(`[TP-R14-08] [TP-R14-09] ${mode} continuation settles ${terminal} once`, () => provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const actor = yield* Actor.Service
+          const sessions = yield* Session.Service
+          const registry = yield* ActorRegistry.Service
+          const prompt = yield* SessionPrompt.Service
+          const parent = yield* sessions.create({ title: "continued child", permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+          yield* registry.register({ sessionID: parent.id, actorID: "owner", mode: "subagent", agent: "build", description: "creating parent", contextMode: "none", background: true, lifecycle: "ephemeral" })
+          yield* llm.text("first result")
+          const spawned = yield* actor.spawn({ mode, sessionID: parent.id, parentActorID: "owner", agentType: "build", task: "first", context: "none", tools: ["read"], background: true, model: ref })
+          yield* Deferred.await(spawned.outcome)
+          expect((yield* parentInboxRows(parent.id, "owner")).length).toBe(1)
+          const before = yield* llm.calls
+          if (terminal === "success") yield* llm.text("second result")
+          if (terminal === "failure") yield* llm.error(401, { error: { message: "invalid credential", type: "authentication_error" } })
+          if (terminal === "cancelled") yield* llm.hang
+          yield* prompt.prompt({ sessionID: spawned.sessionID, agentID: spawned.actorID, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "continue" }] })
+          const execution = yield* prompt.loop({ sessionID: spawned.sessionID, agentID: spawned.actorID, notifyParentOnComplete: true }).pipe(Effect.forkChild)
+          if (terminal === "cancelled") {
+            for (let i = 0; i < 400 && (yield* llm.calls) === before; i++) yield* Effect.sleep("10 millis")
+            expect(yield* llm.calls).toBeGreaterThan(before)
             yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
-            const rows = yield* parentInboxRows(parent.id, "owner")
-            // Inbox delivery consumes the previous turn's envelope; the new
-            // execution must leave exactly one newly addressed notification.
-            expect(rows.length).toBe(1)
-            expect((yield* parentInboxRows(parent.id)).length).toBe(0)
-            const content = rows[0].content as { text?: string }
-            expect(content.text).toContain(
-              terminal === "success" ? "completed" : terminal === "failure" ? "failed" : "cancelled",
-            )
-            if (terminal === "success") expect(content.text).toContain("second result")
-            if (terminal === "cancelled") {
-              yield* llm.textMatch(
-                ({ body }) => JSON.stringify(body.messages).includes('"content":"new turn"'),
-                "after cancellation",
-              )
-              yield* prompt.prompt({
-                sessionID: spawned.sessionID,
-                agentID: spawned.actorID,
-                agent: "build",
-                model: ref,
-                noReply: true,
-                parts: [{ type: "text", text: "new turn" }],
-              })
-              yield* prompt.loop({
-                sessionID: spawned.sessionID,
-                agentID: spawned.actorID,
-                notifyParentOnComplete: true,
-              })
-              const next = yield* parentInboxRows(parent.id, "owner")
-              expect(next.length).toBe(1)
-              expect((next[0].content as { text?: string }).text).toContain("after cancellation")
-            }
-          }),
-          { git: true, config: providerCfg },
-        ),
-      )
+          }
+          const exit = yield* Fiber.await(execution)
+          expect(Exit.isSuccess(exit)).toBe(terminal === "success")
+          const entry = yield* registry.get(spawned.sessionID, spawned.actorID)
+          expect(entry?.status).toBe("idle")
+          expect(entry?.lastOutcome).toBe(terminal)
+          if (terminal === "failure") expect(entry?.lastError).toContain("invalid credential")
+          // Continuation settle must rewrite result_message_id after the running
+          // transition cleared it. Success always has a delivery. A pure API
+          // error with no partial text intentionally leaves it null (TP-R14-11).
+          if (terminal === "success") expect(entry?.resultMessageID).toBeDefined()
+          if (terminal === "failure") expect(entry?.resultMessageID).toBeUndefined()
+          yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
+          const rows = yield* parentInboxRows(parent.id, "owner")
+          // Inbox delivery consumes the previous turn's envelope; the new
+          // execution must leave exactly one newly addressed notification.
+          expect(rows.length).toBe(1)
+          expect((yield* parentInboxRows(parent.id)).length).toBe(0)
+          const content = rows[0].content as { text?: string }
+          expect(content.text).toContain(terminal === "success" ? "completed" : terminal === "failure" ? "failed" : "cancelled")
+          if (terminal === "success") expect(content.text).toContain("second result")
+          if (terminal === "cancelled") {
+            yield* llm.textMatch(({ body }) => JSON.stringify(body.messages).includes('"content":"new turn"'), "after cancellation")
+            yield* prompt.prompt({ sessionID: spawned.sessionID, agentID: spawned.actorID, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "new turn" }] })
+            yield* prompt.loop({ sessionID: spawned.sessionID, agentID: spawned.actorID, notifyParentOnComplete: true })
+            const next = yield* parentInboxRows(parent.id, "owner")
+            expect(next.length).toBe(1)
+            expect((next[0].content as { text?: string }).text).toContain("after cancellation")
+          }
+        }), { git: true, config: providerCfg },
+      ))
     }
   }
 
   for (const queued of [false, true])
-    it.live(
-      `cancel joins a continuation between terminal publication and its receipt (queued=${queued})`,
-      () =>
-        provideTmpdirServer(
-          Effect.fnUntraced(function* ({ llm }) {
-            const actor = yield* Actor.Service
-            const sessions = yield* Session.Service
-            const registry = yield* ActorRegistry.Service
-            const prompt = yield* SessionPrompt.Service
-            const bus = yield* Bus.Service
-            const inbox = yield* Inbox.Service
-            const parent = yield* sessions.create({ title: "terminal publication race" })
-            yield* llm.text("first result")
-            const child = yield* actor.spawn({
-              mode: "peer",
-              sessionID: parent.id,
-              agentType: "build",
-              task: "first",
-              context: "none",
-              tools: [],
-              background: true,
-              model: ref,
-            })
-            yield* Deferred.await(child.outcome)
-            const published = yield* Deferred.make<void>()
-            const release = yield* Deferred.make<void>()
-            const cancelled = yield* Deferred.make<void>()
-            const notices: string[] = []
-            const unsubscribe = yield* bus.subscribeCallback(InboxArrived, (event) => {
-              if (
-                event.properties.senderSessionID !== child.sessionID ||
-                event.properties.senderActorID !== child.actorID
-              )
-                return
-              const row = Database.use((db) =>
-                db.select().from(InboxTable).where(eq(InboxTable.id, event.properties.inboxID)).get(),
-              )
-              notices.push((row?.content as { text?: string } | undefined)?.text ?? "")
-            })
-            const restore = prompt.bindActor?.({
-              ...actor,
-              markTerminalNotified: (sessionID, actorID, notified) =>
-                Effect.gen(function* () {
-                  if (sessionID === child.sessionID && actorID === child.actorID && notified) {
-                    yield* Deferred.succeed(published, undefined)
-                    yield* Deferred.await(release)
-                  }
-                  yield* actor.markTerminalNotified!(sessionID, actorID, notified)
-                }),
-            })
-            yield* Effect.addFinalizer(() =>
-              Effect.gen(function* () {
-                yield* Deferred.succeed(release, undefined)
-                unsubscribe()
-                restore?.()
-              }),
-            )
-            yield* llm.text("second result")
-            yield* prompt.prompt({
-              sessionID: child.sessionID,
-              agentID: child.actorID,
-              agent: "build",
-              model: ref,
-              noReply: true,
-              parts: [{ type: "text", text: "continue" }],
-            })
-            const running = yield* prompt
-              .loop({ sessionID: child.sessionID, agentID: child.actorID, notifyParentOnComplete: true })
-              .pipe(Effect.forkChild)
-            yield* Deferred.await(published).pipe(Effect.timeout("5 seconds"))
-            const calls = yield* llm.calls
-            const pending = queued
-              ? yield* inbox.send({
-                  receiverSessionID: child.sessionID,
-                  receiverActorID: child.actorID,
-                  senderSessionID: parent.id,
-                  senderActorID: "main",
-                  content: "must not run after cancellation",
-                })
-              : undefined
-            const cancelling = yield* actor
-              .cancel(child.sessionID, child.actorID, "forced")
-              .pipe(Effect.andThen(Deferred.succeed(cancelled, undefined)), Effect.forkChild)
-            try {
-              yield* Effect.sleep("50 millis")
-              expect(yield* Deferred.isDone(cancelled)).toBe(false)
-              expect(notices).toHaveLength(1)
-            } finally {
-              yield* Deferred.succeed(release, undefined)
+  it.live(`cancel joins a continuation between terminal publication and its receipt (queued=${queued})`, () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const sessions = yield* Session.Service
+        const registry = yield* ActorRegistry.Service
+        const prompt = yield* SessionPrompt.Service
+        const bus = yield* Bus.Service
+        const inbox = yield* Inbox.Service
+        const parent = yield* sessions.create({ title: "terminal publication race" })
+        yield* llm.text("first result")
+        const child = yield* actor.spawn({
+          mode: "peer",
+          sessionID: parent.id,
+          agentType: "build",
+          task: "first",
+          context: "none",
+          tools: [],
+          background: true,
+          model: ref,
+        })
+        yield* Deferred.await(child.outcome)
+        const published = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const cancelled = yield* Deferred.make<void>()
+        const notices: string[] = []
+        const unsubscribe = yield* bus.subscribeCallback(InboxArrived, (event) => {
+          if (event.properties.senderSessionID !== child.sessionID || event.properties.senderActorID !== child.actorID) return
+          const row = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, event.properties.inboxID)).get())
+          notices.push((row?.content as { text?: string } | undefined)?.text ?? "")
+        })
+        const restore = prompt.bindActor?.({
+          ...actor,
+          markTerminalNotified: (sessionID, actorID, notified) => Effect.gen(function* () {
+            if (sessionID === child.sessionID && actorID === child.actorID && notified) {
+              yield* Deferred.succeed(published, undefined)
+              yield* Deferred.await(release)
             }
-            yield* Fiber.await(running)
-            yield* Fiber.join(cancelling).pipe(Effect.timeout("5 seconds"))
-            expect(yield* llm.calls).toBe(calls)
-            if (pending) expect(yield* inbox.has(pending.inboxID)).toBe(false)
-            expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
-            // Queued work is a new settlement: cancelling it must not be hidden by
-            // the preceding successful turn's receipt, and must not call the model.
-            expect(notices).toHaveLength(queued ? 2 : 1)
-            expect(notices.filter((text) => text.includes("completed"))).toHaveLength(1)
-            expect(notices.filter((text) => text.includes("cancelled"))).toHaveLength(queued ? 1 : 0)
+            yield* actor.markTerminalNotified!(sessionID, actorID, notified)
           }),
-          { git: true, config: providerCfg },
-        ),
-      20_000,
-    )
+        })
+        yield* Effect.addFinalizer(() => Effect.gen(function* () {
+          yield* Deferred.succeed(release, undefined)
+          unsubscribe()
+          restore?.()
+        }))
+        yield* llm.text("second result")
+        yield* prompt.prompt({ sessionID: child.sessionID, agentID: child.actorID, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "continue" }] })
+        const running = yield* prompt.loop({ sessionID: child.sessionID, agentID: child.actorID, notifyParentOnComplete: true }).pipe(Effect.forkChild)
+        yield* Deferred.await(published).pipe(Effect.timeout("5 seconds"))
+        const calls = yield* llm.calls
+        const pending = queued ? yield* inbox.send({
+          receiverSessionID: child.sessionID,
+          receiverActorID: child.actorID,
+          senderSessionID: parent.id,
+          senderActorID: "main",
+          content: "must not run after cancellation",
+        }) : undefined
+        const cancelling = yield* actor.cancel(child.sessionID, child.actorID, "forced").pipe(
+          Effect.andThen(Deferred.succeed(cancelled, undefined)),
+          Effect.forkChild,
+        )
+        try {
+          yield* Effect.sleep("50 millis")
+          expect(yield* Deferred.isDone(cancelled)).toBe(false)
+          expect(notices).toHaveLength(1)
+        } finally {
+          yield* Deferred.succeed(release, undefined)
+        }
+        yield* Fiber.await(running)
+        yield* Fiber.join(cancelling).pipe(Effect.timeout("5 seconds"))
+        expect(yield* llm.calls).toBe(calls)
+        if (pending) expect(yield* inbox.has(pending.inboxID)).toBe(false)
+        expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
+        // Queued work is a new settlement: cancelling it must not be hidden by
+        // the preceding successful turn's receipt, and must not call the model.
+        expect(notices).toHaveLength(queued ? 2 : 1)
+        expect(notices.filter((text) => text.includes("completed"))).toHaveLength(1)
+        expect(notices.filter((text) => text.includes("cancelled"))).toHaveLength(queued ? 1 : 0)
+      }),
+      { git: true, config: providerCfg },
+    ),
+    20_000,
+  )
 
   // Regression guard: successful completion still notifies exactly once (no
   // double-notify introduced by the bridge). Read immediately after the outcome
@@ -944,8 +844,12 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         yield* Effect.addFinalizer(() => Deferred.succeed(releaseCancel, undefined).pipe(Effect.ignore))
         const cancels = yield* Effect.all(
           [
-            Deferred.await(start).pipe(Effect.andThen(actor.cancel(result.sessionID, result.actorID, "forced"))),
-            Deferred.await(start).pipe(Effect.andThen(actor.cancel(result.sessionID, result.actorID, "forced"))),
+            Deferred.await(start).pipe(
+              Effect.andThen(actor.cancel(result.sessionID, result.actorID, "forced")),
+            ),
+            Deferred.await(start).pipe(
+              Effect.andThen(actor.cancel(result.sessionID, result.actorID, "forced")),
+            ),
           ],
           { concurrency: "unbounded", discard: true },
         ).pipe(Effect.forkChild)
@@ -1018,9 +922,9 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           expect(yield* Deferred.isDone(result.outcome)).toBe(false)
           expect(yield* Deferred.isDone(followerDone)).toBe(false)
 
-          const interruptedFollower = yield* actor
-            .cancel(result.sessionID, result.actorID, "forced")
-            .pipe(Effect.forkChild({ startImmediately: true }))
+          const interruptedFollower = yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(
+            Effect.forkChild({ startImmediately: true }),
+          )
           yield* Fiber.interrupt(interruptedFollower).pipe(Effect.timeout("1 second"))
           const interruptedExit = yield* Fiber.await(interruptedFollower)
           expect(Exit.isFailure(interruptedExit)).toBe(true)
@@ -1119,14 +1023,16 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
             queueMicrotask(() => fiber.interruptUnsafe())
             return true
           }
-          const owner = yield* actor
-            .cancel(parent.id, actorID, "forced")
-            .pipe(Effect.provideService(Scheduler.Scheduler, scheduler), Effect.forkChild({ startImmediately: true }))
+          const owner = yield* actor.cancel(parent.id, actorID, "forced").pipe(
+            Effect.provideService(Scheduler.Scheduler, scheduler),
+            Effect.forkChild({ startImmediately: true }),
+          )
           yield* Fiber.await(owner).pipe(Effect.timeout("1 second"))
           expect(interrupted).toBe(true)
-          const follower = yield* actor
-            .cancel(parent.id, actorID, "forced")
-            .pipe(Effect.timeout("100 millis"), Effect.exit)
+          const follower = yield* actor.cancel(parent.id, actorID, "forced").pipe(
+            Effect.timeout("100 millis"),
+            Effect.exit,
+          )
           if (Exit.isFailure(follower)) leaked.push(threshold)
         }
         expect(leaked).toEqual([])
@@ -1277,6 +1183,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
       { git: true, config: providerCfg },
     ),
   )
+
 
   it.live(
     "a previous failed generation does not let cancel overwrite the next generation's claimed failure",
@@ -1911,7 +1818,9 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
             // is intentionally a no-op; its return is the generation-exit barrier.
             yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.timeout("5 seconds"))
             yield* Effect.sync(() =>
-              Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).run()),
+              Database.use((db) =>
+                db.delete(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).run(),
+              ),
             )
 
             if (kind === "list") {
@@ -1953,6 +1862,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
       ),
     30_000,
   )
+
 
   it.live(
     "forced cancel in the wake-generation to Runner gap never starts the work",
@@ -2172,7 +2082,9 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         yield* Deferred.await(promptEntered)
         yield* Deferred.succeed(releasePrompt, undefined)
         expect((yield* Deferred.await(failed.outcome)).status).toBe("failure")
-        expect((yield* actor.getForkContext(failed.sessionID, failed.actorID))?.system).toEqual(["failure-context"])
+        expect((yield* actor.getForkContext(failed.sessionID, failed.actorID))?.system).toEqual([
+          "failure-context",
+        ])
         yield* actor.cancel(failed.sessionID, failed.actorID, "forced")
         expect((yield* actorReg.get(failed.sessionID, failed.actorID))?.lastOutcome).toBe("failure")
         expect((yield* actor.getForkContext(failed.sessionID, failed.actorID))?.system).toEqual(["failure-context"])
