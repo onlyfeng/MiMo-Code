@@ -64,7 +64,7 @@ describe("actor.shell.parse: spawn variants", () => {
   // model that writes "EOF --flag" or "EOF\n--flag" gets a clear failure.
   test("run with flags before <<EOF parses; heredoc body lands in prompt", async () => {
     const script = [
-      `actor run explore "d" --timeout 30000 --context state <<EOF`,
+      `actor run explore "d" --timeout 30000 <<EOF`,
       `prompt body`,
       `EOF`,
     ].join("\n")
@@ -77,7 +77,6 @@ describe("actor.shell.parse: spawn variants", () => {
           description: "d",
           prompt: "prompt body",
           timeout_ms: 30000,
-          context: "state",
         },
       },
     ])
@@ -327,12 +326,22 @@ describe("actor.shell.parse: full parity flags", () => {
     ])
   })
 
-  test("run with --context (enum)", async () => {
-    const out = await parse('actor run explore "d" "p" --context full')
-    expect(out).toEqual([
-      { operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p", context: "full" } },
-    ])
-  })
+  for (const script of [
+    'actor run explore "d" "p" --context full',
+    'actor run explore "d" "p" --context=state',
+    'actor spawn general "d" "p" --context none',
+  ]) {
+    test(`rejects --context (model cannot request fork/context): ${script}`, async () => {
+      const exit = await Effect.runPromise(Effect.exit(parseActorScript(script)))
+      expect(exit._tag).toBe("Failure")
+      const cause: any = (exit as any).cause
+      const fail = cause.reasons?.find?.((r: any) => r._tag === "Fail") ?? cause
+      const err = fail.error ?? fail
+      expect(err.kind).toBe("flag")
+      expect(err.detail).toContain("unknown flag --context")
+      expect(err.detail).toContain("system-only")
+    })
+  }
 
   test("run with --command", async () => {
     const out = await parse('actor run explore "d" "p" --command "/review"')
@@ -355,10 +364,10 @@ describe("actor.shell.parse: full parity flags", () => {
     ])
   })
 
-  test("multiple flags combine on run", async () => {
-    const out = await parse('actor run explore "d" "p" --model lite --context state --timeout 5000')
+  test("multiple flags combine on run (no context)", async () => {
+    const out = await parse('actor run explore "d" "p" --model lite --timeout 5000')
     expect(out).toEqual([
-      { operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p", model: "lite", context: "state", timeout_ms: 5000 } },
+      { operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p", model: "lite", timeout_ms: 5000 } },
     ])
   })
 
@@ -377,22 +386,29 @@ describe("actor.shell.parse: full parity flags", () => {
   })
 })
 
-describe("actor.shell.parse: resume", () => {
-  test("spawn explicitly opts into persistent full context for later recovery", async () => {
-    expect(await parse('actor spawn general "lookup" "read it" --context full --lifecycle persistent')).toEqual([
-      {
-        operation: {
-          action: "spawn",
-          subagent_type: "general",
-          description: "lookup",
-          prompt: "read it",
-          context: "full",
-          lifecycle: "persistent",
-        },
-      },
-    ])
-  })
+describe("actor.shell.parse: literal removed flags", () => {
+  for (const prompt of ["--context", "--context=full", "--lifecycle", "--lifecycle=persistent"]) {
+    test(`keeps a literal prompt ${prompt} with supported flags`, async () => {
+      expect(await parse(`actor run general "description" --model lite "${prompt}"`)).toEqual([
+        { operation: { action: "run", subagent_type: "general", description: "description", prompt, model: "lite" } },
+      ])
+    })
+  }
+})
 
+describe("actor.shell.parse: resume", () => {
+  for (const script of [
+    'actor spawn general "lookup" "read it" --lifecycle persistent',
+    'actor run general "lookup" "read it" --lifecycle=persistent',
+    'actor spawn general "lookup" --context full <<EOF\nread it\nEOF',
+    'actor spawn general "lookup" --lifecycle persistent <<EOF\nread it\nEOF',
+  ]) {
+    test(`rejects model context or lifecycle flags: ${script}`, async () => {
+      const exit = await Effect.runPromise(Effect.exit(parseActorScript(script)))
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") expect(String(exit.cause)).toMatch(/unknown flag --(?:context|lifecycle)/)
+    })
+  }
   test("resume selects one registered actor without a task selector", async () => {
     expect(await parse("actor resume explore-1")).toEqual([{ operation: { action: "resume", actor_id: "explore-1" } }])
   })

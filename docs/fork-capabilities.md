@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-14
-- Upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Prior reviewed upstream: `98702641a985fd2a3b81e407f58df7cbcee1f248`
-- Main behavior (runtime/tests): `bbac42b72bc63ebe52cb74a153c248b4e51a09d2`
+- Last reviewed: 2026-09-15
+- Upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
+- Prior reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
+- Main behavior (runtime/tests): `ee03fe5e9c9c7abd8edb2e28dd6189d903b2ba62`
 - Bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
-- Prior fork `main` tip: `72064c41ec7311a4d3ca05dc480956f73463c0ff`
+- Prior fork `main` tip: `a197d4a84939f36a813cb39750a5fb86cce6b37d`
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -28,21 +28,18 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest synchronization: 2026-09-14, upstream `98702641..6fbb1732` (PRs #109–#117).
-It has no separate capability inventory. The range is four commits and one merge
-across two capabilities — MiMo model ids pinned to `@ai-sdk/openai-compatible`,
-and port `0` bound as OS-ephemeral — both adopted in #109 and recorded in
-[the registry history](fork-registry-history.md). The same round closed a
-divergence older than the range: upstream has shipped its capability route since
-`b4bbe81c` (2026-08-18), and #110–#116 retired the fork's parallel model API in
-its favour. That decision, and every behaviour left as upstream ships it, is
-owned by FD-004's 2026-09-14 structural retirement. This continues the
-[2026-09-12 (98702641) capability inventory](upstream-sync-2026-09-12-98702641.md),
-the [2026-09-11 (f11e35ed) inventory](upstream-sync-2026-09-11-f11e35ed.md) and the
-[2026-09-11 (7641dbbd) inventory](upstream-sync-2026-09-11-7641dbbd.md).
-The earlier [audio convergence](audio-upstream-alignment-2026-09-09.md) remains the audio boundary.
-All active owners remain; earlier per-owner behavior references remain historical
-where this delta does not change their implementation.
+Latest synchronization: 2026-09-15, the specified upstream range
+`6fbb1732..5198ff54` (21 commits, 17 non-merge). The
+[capability inventory](upstream-sync-2026-09-15-5198ff54.md) records six incoming
+capabilities and the separately approved actor lifecycle follow-up. FC-003 is
+retired by an explicit behavior decision. FD-009 retains the system frozen-context
+contract; only compat exposes full-context model creation. History adopts uniform
+content and one-time resumable migration, with a bounded SQLite NUL projection
+correction. FD-004's previously accepted upstream behaviors remain unchanged.
+This is alignment to the selected SHA, not to newer upstream commits.
+Earlier per-owner behavior references remain historical where this range does
+not change their implementation. The preceding review is retained in the
+[shared history](fork-registry-history.md).
 
 ## Sync index
 
@@ -50,7 +47,6 @@ where this delta does not change their implementation.
 | --- | --- | --- | --- |
 | FC-001 | actor, inbox, runner, session state, recovery/resume | Typed upstream admission plus stronger fork lifecycle | Preserve synchronous admission and async queue persistence |
 | FC-002 | checkpoint writer and frozen request prefix | Extension plus adaptation | Preserve writer-mode semantics |
-| FC-003 | read/edit state and instance disposal | Fork hardening | Preserve actor/instance scope |
 | FC-004 | MCP configuration, connection state, and local exit diagnostics | Explicit imported-server auto-connect plus fork hardening | Preserve validation, redaction, and isolation |
 | FC-005 | skill discovery and invocation | Stronger shared gates | Preserve permission parity |
 | FC-006 | plugin progress-checker configuration | Fork integration hardening | Preserve instance-local decision |
@@ -163,10 +159,11 @@ where this delta does not change their implementation.
   original task state, including historical archived bindings. GET stays read-only.
   No detached `resumeBackground` path is introduced. Unknown or ambiguous
   lifecycle callers fail closed.
-  Only `actor spawn --context full --lifecycle persistent` explicitly selects
-  the existing persistent lifecycle for a full-context subagent; ordinary
-  spawn and run retain their ephemeral defaults. No context-free persistent
-  creation option is introduced through the actor tool.
+  Explicit internal full-context persistent creation retains the existing
+  lifecycle. The model-facing `actor spawn --context full --lifecycle persistent`
+  extension belongs only to dev/compat after the 2026-09-15 alignment; main's
+  spawn/run expose neither selector and retain their ephemeral defaults.
+  No context-free persistent creation option is introduced through the tool.
   Separately, `actor resume <actor-id>` admits only a controllable registered
   persistent full-context actor retaining its original frozen context and
   receiver generation. It uses the persisted interrupted candidate's parent
@@ -409,36 +406,28 @@ where this delta does not change their implementation.
   incoming change to `src/session/checkpoint.ts`; the writer modes, frozen
   context, watermark advancement and token budget are untouched.
 
-## FC-003 — actor- and instance-scoped read-before-edit state
+- 2026-09-15 memory convergence: upstream `9780b2e5` adopts the fork's
+  disabled-checkpoint memory behavior. Only that clause converges: canonical
+  writer modes, frozen prefix authority and stable filesystem placeholders remain
+  shared. FD-002 still separates memory eligibility from fail-closed actor
+  identity replacement.
 
-- Status: active
-- Canonical owner: fork `main` read/edit tool runtime
-- Observable contract: successful reads are remembered by session, actor, and
-  owning directory instance. Edit validation consumes only matching state, and
-  instance disposal removes only that directory's state. One actor or project
-  cannot authorize another to edit an unread file.
-- Upstream relationship: fork hardening beyond upstream read-before-edit state.
-- Watch surfaces: `packages/opencode/src/tool/read-state.ts`,
-  `packages/opencode/src/tool/read.ts`, `packages/opencode/src/tool/edit.ts`, and
-  `packages/opencode/src/project/instance.ts`.
-- Tests/evidence: `packages/opencode/test/tool/read-state.test.ts`,
-  `packages/opencode/test/tool/edit.test.ts`, and instance-disposal regressions
-  at the reviewed main behavior. Its `tool.read-state attachment gate` cases
-  cover both directions of the attachment-gate interaction above; moving
-  `markFileRead` back above the shrink result fails the refusal case.
-- 2026-09-11 attachment-gate review: the read tool can now read an image's
-  bytes and still refuse to deliver them, when the upstream size gate cannot
-  recompress it under `MIMOCODE_MAX_ATTACHMENT_SIZE`. Read state follows what
-  the model actually received, matching the existing no-vision branch, which
-  also returns a warning without marking: `markFileRead` sits on the image
-  success path, after the shrink result is known, so a refused attachment
-  authorizes no later edit while a recompressed one still does. The stat-based
-  reject and the PDF capability refusal return before any bytes are read.
-- Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`; attachment-gate
-  behavior `6407d53ccbf883c0b6ad3b2ef9370d33e2ed56e4`.
-- Retirement condition: upstream provides equivalent session/actor/instance
-  scoping, consumption, and disposal behavior with cross-actor/project tests.
+## FC-003 — actor- and instance-scoped read-before-edit state (retired)
+
+- Status: retired by the approved 2026-09-15 behavior change.
+- Scope: shared main and inherited dev/compat.
+- Decision: adopt upstream `99a5f9eb` through `5198ff54`, removing the
+  read-before-edit gate itself. Actor/instance-scoped evidence no longer has a
+  consumer. This supersedes the former requirement for equivalent upstream
+  scoping; it does not claim that upstream supplied that implementation.
+- Retired surfaces: `src/tool/read-state.ts`, Read's `markFileRead` calls,
+  Edit/NotebookEdit's prior-read checks, and scope-only read-state tests.
+- Retained behavior: permission and path checks, current-file edit matching,
+  stable current-session path resolution, finite media types, and attachment
+  refusal/compression. The latter assertions remain in `test/tool/read.test.ts`;
+  path, no-prior-read, and self-written-file edits remain in `test/tool/edit.test.ts`.
+- Historical isolation and attachment-gate reviews remain in the shared registry
+  history. Reintroducing a gate would require a new explicit behavior decision.
 
 ## FC-004 — MCP configuration and connection lifecycle
 
