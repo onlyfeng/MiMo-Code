@@ -16,7 +16,7 @@
 - This is specified-range execution. Exclude newer upstream commits, including observed remote tip `b4cc11cd652195af9a80297ed543218f3172e6c4`.
 - Publish only to `onlyfeng/MiMo-Code`, through feature PRs to main and compat. Preserve unrelated worktrees and branches.
 - Install only with `bun ci`; retain `bun.lock`. Run tests and `bun typecheck` from package directories.
-- Clear ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and `MIMOCODE_CODEX_MODE`; preserve package preload flags. Clear compaction/checkpoint selectors for default-path matrices.
+- Clear ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and `MIMOCODE_CODEX_MODE`; preserve package preload flags. Clear compaction/checkpoint and WORKFLOW_TOOL selectors for default-path matrices; workflow-specific checks report their explicit target selector.
 - Keep FD/FC shared registries identical on both branches; update all seven compat DC dispositions separately.
 - Runtime validation precedes publication; final remote SHAs, exact-SHA CI, ancestry, and exclusion proof precede completion.
 - Comments, docs, shipped skill content and test assertions use synthetic values, never machine-specific ones.
@@ -44,7 +44,7 @@
 - [x] Generate SDK/OpenAPI from final source; verify history configuration is absent.
 - [x] Run focused changed and downstream tests, package typecheck and lint; record commands, environment and actual results.
 - [x] Update FC-003 retirement, FD-009 ownership, history recovery limits, review headers and shared history.
-- [ ] Independently review the exact diff; publish and merge the fork main PR with current-head CI and thread checks.
+- [x] Independently review the exact diff; publish and merge the fork main PR with current-head CI and thread checks.
 
 ## Task 2: Propagate C01-C06 to dev/compat
 
@@ -53,7 +53,7 @@
 - [x] Preserve bounded state, forkContext/turnContext, frozen native/active tools, memory/system/cwd and static-prefix overflow behavior.
 - [x] Exercise none/state/full, JSON/shell, run/spawn and persistent recovery/cancel. Missing captor or history must fail before actor admission.
 - [x] Reconcile all seven DC owners; regenerate branch-specific SDK/OpenAPI without losing MaxMode or checkpoint coverage.
-- [ ] Run the affected compat matrix and independent review, then publish and merge the compat PR with exact-head gates.
+- [x] Run the affected compat matrix and independent review, then publish and merge the compat PR with exact-head gates.
 
 ## Task 3: Align C07 after the selected sync
 
