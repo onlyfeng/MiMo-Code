@@ -10,7 +10,8 @@ postStop fails. Persistence and parent notification carry the same warning.
 - Initial implementation: `30b9df3d51bc912e8f3efb3122f66cb81fa5daaf`.
 - Review corrections: workflow `66cfbf17`, execution admission `65c84b90`,
   and queued receipt/final formatting `1ae37485`.
-- Final integrated main source/test tree: `1ae374852cedd3426b73618ad787f7e077fd1fe3`.
+- Final integrated main source/test tree: `4eacc84dccf83c22f533c35bea282d4c5a38cacd`.
+- Direct execution-hook cancellation coordination: `4eacc84d`.
 - Integration includes accepted main `e4075dfc` and final shared history
   behavior `64e47eb7`; selected upstream remains `5198ff54`.
 - FC-001 owns lifecycle/execution correctness; FC-008 owns quarantine closure
@@ -161,14 +162,14 @@ The original assertion was retained. Independent real continuation probes for
 both cancellation modes verify exactly one notice when the prior execution
 itself was already cancelled (2 pass, 18 assertions).
 
-The intermediate 129-pass/one-failure matrix is not final evidence. The final
-checks below run on `1ae37485`, including all review fixes. Actor default-path
+The intermediate 129-pass/one-failure matrix is not final evidence. The admission/receipt
+checks below run on `1ae37485`, before the direct-hook follow-up below. Actor default-path
 runs remove WORKFLOW_TOOL as well as the umbrella/MCP/Codex and
 compaction/checkpoint selectors, retaining the package ORCHESTRATOR preload.
 The integrated workflow-specific matrix explicitly enables WORKFLOW_TOOL and
 passes 7 tests, 0 failures and 23 assertions on the same source.
 
-| Final stable-source check | Actual result |
+| Stable admission/receipt source check | Actual result |
 | --- | --- |
 | `bun test` execution, cancel-notification, Runner, Runner warnings, execution-integration, actor-hooks, actor-owned-lifecycle and actor-exec-lifecycle (8 files) | 130 pass, 0 fail, 569 assertions |
 | PostStop joins/reentry and two cross-session cases | 6 pass, 0 fail, 35 assertions |
@@ -180,3 +181,48 @@ Independent review covers the blocked-acquire and reserve-before-generation
 reproductions, ten execution-barrier assertions and both already-cancelled
 receipt cases. The final runtime tree retains these fixes while removing
 unrelated formatter changes; TypeScript AST comparison confirms equivalence.
+
+## PR 124 direct execution-hook cancellation follow-up
+
+The automated tool self-cancellation finding assumed the model tool ran on its
+own Runner fiber. Actual calls disprove that premise: the initial peer and both
+actor/session continuation tools enter cancellation from independent
+EffectBridge fibers. The two continuation probes pass on a frozen `21a8fbbd`
+archive (22 assertions), including actual cancellation, execution release,
+registry settlement, repeated cancel and fresh admission. An initial failed
+probe had its service reference replaced during bootstrap and never invoked
+cancellation; it is not product failure evidence.
+
+A different supported path does reproduce a hang: a direct Effect postStop hook
+awaits cancellation of its own execution. It also hangs on the old `a197d4a8`
+baseline, after that implementation has already published outcome. The stricter
+execution join exposes the existing cleanup defect before outcome publication.
+
+At `4eacc84dccf83c22f533c35bea282d4c5a38cacd`, ActorExecution identifies whether
+the current fiber actually owns an active execution. Only such direct callers
+transfer the complete cancellation to the existing Actor service scope and
+wait interruptibly, even inside a finalizer. External callers keep the masked
+owner and strict execution join. The same transfer handles a child hook
+cancelling its ancestor, whose recursive cancellation reaches that child. No
+Runner, tool schema, Promise bridge or cross-context marker change is needed.
+
+Final default-path validation on that exact source clears all seven ambient
+selectors listed above and retains the package ORCHESTRATOR preload:
+
+| Final execution-hook source check | Actual result |
+| --- | --- |
+| Execution, real none/full tool self-cancel, cancel-notification, Runner, Runner warnings, execution-integration, hooks and lifecycle tools (9 files) | 132 pass, 0 fail, 586 assertions |
+| Existing postStop/cross-session cases plus direct hook, finalizer and ancestor cancellation | 9 pass, 0 fail, 50 assertions |
+| Workflow timeout/cancel/worktree integration, explicit WORKFLOW_TOOL=1 | 7 pass, 0 fail, 23 assertions |
+| Package `bun typecheck` | Exit 0 |
+| Focused four-file lint | Exit 0; 48 warnings, 0 errors |
+
+The two default actor groups total 141 passes and 636 assertions; the separate
+workflow group explicitly enables WORKFLOW_TOOL with the other six selectors
+removed and package ORCHESTRATOR retained. Source/test hashes
+remain fixed throughout. Independent real Actor probes pass two additional
+cases with 16 assertions: external cancellation followed by finalizer
+self-cancellation preserves the external join, and the coordinator retains
+caller Effect context and InstanceRef. These probes are separate evidence, not
+added to the matrix total. Whole-tree PR CI and actual merged branch CI remain
+publication requirements.

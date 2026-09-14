@@ -3198,3 +3198,12 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - Final default-path matrix: 130 pass, 0 fail, 569 assertions; postStop/cross-session 6 pass, 35 assertions. Final workflow-specific matrix: 7 pass, 23 assertions. Typecheck and focused lint pass. Independent real Actor/Inbox/finalizer probes reproduced and verified every review correction.
 - Earlier local runs inherited WORKFLOW_TOOL=1; final actor matrices explicitly remove it, while workflow-specific tests explicitly enable it. Package ORCHESTRATOR preload is unchanged. The lifecycle record distinguishes intermediate failures and prior snapshots from final evidence.
 - Before C07 publication, selected upstream propagation and shared C05 follow-up were accepted through PR #121, #123 and #122; compat is `b277f8efa0dd379997c40a50798c9086d88c6480`. Its PR head `6a7f6cbe` passed all eight checks. Lifecycle publication and final remote-tip CI remain subsequent gates.
+
+### 2026-09-15 direct Effect hook cancellation correction
+
+- Main source/test behavior: `4eacc84dccf83c22f533c35bea282d4c5a38cacd`; accepted prior main `e4075dfc` and selected upstream `5198ff54` remain unchanged.
+- Actual model/tool cancellation does not share its target Runner fiber. Frozen `21a8fbbd` actor/session continuation probes pass (2 cases, 22 assertions); the automated self-tool deadlock premise is withdrawn.
+- A direct Effect postStop hook does hang when cancelling itself, also on the old `a197d4a8` baseline after early outcome publication. FC-001 now detects the actual active execution owner fiber and transfers that caller's complete cancellation to the existing service scope, with interruptible waiting even from a finalizer. External cancellation still joins complete cleanup; child-to-ancestor cancellation retains recursive cleanup. No bridge, Runner or tool interface changes are added.
+- Final source: 132 default-path execution/Runner/Actor/plugin/tool cases pass (586 assertions), plus 9 postStop/cross-session/hook cases (50 assertions). Typecheck and focused lint pass. Independent finalizer reentry and context-preservation probes pass 2 cases/16 assertions. Earlier matrices above retain their original snapshot boundary.
+- The final workflow-specific timeout/cancel/worktree matrix is also repeated on `4eacc84d`: 7 pass, 23 assertions, with WORKFLOW_TOOL explicitly enabled and the other six selectors removed.
+- Main PR #124 acceptance, compat inheritance and exact merged-tip CI follow this source validation; the lifecycle record remains the detailed evidence owner.
