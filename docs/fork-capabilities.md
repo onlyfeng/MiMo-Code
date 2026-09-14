@@ -752,6 +752,19 @@ where this delta does not change their implementation.
   mutation-checked against a suppressed notification and against one misrouted
   to `main`. Prefer the bus envelope over inbox rows whenever a test asserts
   notification routing.
+- 2026-09-14 TP-R14-12 unquarantined: `[TP-R14-12] undeliverable terminal
+  notification is logged` runs again, and the rationale it was quarantined under
+  — upstream behaviour the fork's actor pipeline does not yet reproduce — was
+  wrong. The case asserts upstream's log wording, `actor terminal notification
+  failed`; the fork's own inbox send in `spawn.ts` logged
+  `actor inbox notification failed`, a line upstream does not have. Aligning
+  that one message is the whole fix, mutation-checked: with the fork wording the
+  case fails its assertion, with upstream's it passes. #107 had passed it from
+  its first commit (CI run 34693434562, shard 4/4), which the 2026-09-13
+  follow-up below did not record. Two cases stay quarantined, both reducing to
+  the postStop publish-ordering product decision recorded there: `[TP-R14-07]
+  postStop LLM failure preserves the successful result with a warning` and
+  `inbox waits for the entire spawn execution before starting a continuation`.
 - 2026-09-13 quarantine follow-up: the peer `success`/`failure` continuation
   envelope-count cases are fixed and unskipped; see the FC-001 terminal-publisher
   entry. Three cases stay quarantined, all still `skip`ped in place with their

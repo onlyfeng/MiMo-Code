@@ -581,7 +581,7 @@ export const layer = Layer.effect(
                     })
                     .pipe(
                       (effect) => withNotificationTarget(notificationTarget, effect, source),
-                      Effect.ignoreCause({ log: "Warn", message: "actor inbox notification failed" }),
+                      Effect.ignoreCause({ log: "Warn", message: "actor terminal notification failed" }),
                     ),
                   bus
                     .publish(TuiEvent.ToastShow, {
