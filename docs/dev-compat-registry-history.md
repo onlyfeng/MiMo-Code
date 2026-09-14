@@ -3678,13 +3678,13 @@ the final publication gates. Prior main/compat evidence is not re-dated.
 
 ## 2026-09-14 — capability route adoption, MiMo transport pinning, and two capability corrections (PRs #109, #110, #111)
 
-- Accepted main tip/shared audit: `8015e6122fc8b299dceaf89a7f7f6dba0172240f`;
+- Accepted main tip/shared audit: `5979dfa34d07dc595d3084cbf4e79038c1220df5`;
   inherited source/tests: `4cf8ff6105655df5aea1c26d73d97ab2b9f6ce30`; reviewed
   upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`; bundled guidance advances
   to `11833785` (`model-api.md` retired, `capability-api.md` added, the
   `serve --llm-server` row dropped).
 - Compat source/test behavior and inheritance merge:
-  `88070423363c191e209b60db441f63f9eed31cb8`; prior tip:
+  `627aa5c204584ff40ce082c52a69988471c86b66`; prior tip:
   `331e850481d9e960263e9289c2a2219684c3f7ae`.
 - **Direct inherit, no compat override, no owner added or retired.** Main
   retired the fork's parallel model API — `server/model-api.ts`,

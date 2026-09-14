@@ -231,12 +231,12 @@ Source evidence and the final result row are recorded in the latest
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-14
 - Reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Accepted `main` tip: `8015e6122fc8b299dceaf89a7f7f6dba0172240f`
+- Accepted `main` tip: `5979dfa34d07dc595d3084cbf4e79038c1220df5`
 - Inherited main behavior: `4cf8ff6105655df5aea1c26d73d97ab2b9f6ce30`
-- Compat behavior: `88070423363c191e209b60db441f63f9eed31cb8`
+- Compat behavior: `627aa5c204584ff40ce082c52a69988471c86b66`
 - Prior compat tip: `331e850481d9e960263e9289c2a2219684c3f7ae`
-- Main source inheritance merge: `88070423363c191e209b60db441f63f9eed31cb8`
-- Shared audit commit: `8015e6122fc8b299dceaf89a7f7f6dba0172240f`
+- Main source inheritance merge: `627aa5c204584ff40ce082c52a69988471c86b66`
+- Shared audit commit: `5979dfa34d07dc595d3084cbf4e79038c1220df5`
 - Inherited bundled guidance content: `11833785` (bundled `mimocode-docs`: `model-api.md` retired, `capability-api.md` added, the `serve --llm-server` row dropped)
 - Publication state: full synchronization through the reviewed upstream; this record identifies source/test evidence. Exact final-tip CI is independently verified after publication.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
