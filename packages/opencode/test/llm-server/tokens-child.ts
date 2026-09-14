@@ -2,9 +2,9 @@ import { LLMServerTokens } from "../../src/llm-server/tokens"
 
 async function run() {
   const directory = process.argv[2]!
-  if (process.argv[3] === "revoke") return LLMServerTokens.revoke({ directory, id: process.argv[4]! })
+  if (process.argv[3] === "revoke") return LLMServerTokens.revoke(directory, process.argv[4]!)
   if (process.argv[3] === "verify")
-    return Promise.all(Array.from({ length: 3 }, () => LLMServerTokens.verify({ directory, token: process.argv[4]! })))
+    return Promise.all(Array.from({ length: 3 }, () => LLMServerTokens.verify(directory, process.argv[4]!)))
   const records = await Promise.all(
     Array.from({ length: 2 }, () =>
       LLMServerTokens.issue({

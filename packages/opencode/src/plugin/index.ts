@@ -242,7 +242,7 @@ export const layer = Layer.effect(
         const { Server } = yield* Effect.promise(() => import("../server/server"))
 
         const client = createOpencodeClient({
-          baseUrl: "http://localhost:4096",
+          baseUrl: "http://mimocode.internal",
           directory: ctx.directory,
           headers: Flag.MIMOCODE_SERVER_PASSWORD
             ? {
@@ -263,7 +263,8 @@ export const layer = Layer.effect(
             },
           },
           get serverUrl(): URL {
-            return Server.url ?? new URL("http://localhost:4096")
+            // Real URL after listen; placeholder origin has no conventional port hardcode.
+            return Server.url ?? new URL("http://mimocode.internal")
           },
           // @ts-expect-error
           $: typeof Bun === "undefined" ? undefined : Bun.$,
