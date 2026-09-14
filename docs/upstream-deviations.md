@@ -270,7 +270,14 @@ where this delta does not change their implementation.
   - `renew_argv`/`renew_command` serialize only what was passed on the command
     line, so a lifetime that came from `mimocode.json` is not pinned; if the
     config changes before expiry, the advertised renewal mints a token with
-    different expiry semantics than the one it replaces.
+    different expiry semantics than the one it replaces. `renew_command` is also
+    POSIX-only: `Self.quote` sends anything outside `[A-Za-z0-9_@%+=:,./-]`
+    through single-quote escaping, so a Windows path — backslashes, usually a
+    space — comes back as `'C:\Program Files\...'`, which `cmd.exe` reads as
+    literal characters rather than delimiters. Bounded on purpose: upstream
+    emits `renew_argv` beside it as the unquoted array a consumer should use,
+    and `self.ts` says so. DC-PLATFORM-001 was checked and does not extend here;
+    its scope is the ripgrep and archive fallbacks.
   - The plugin hooks receive `message: undefined` where the contract declares it
     required; a non-finite `--ttl` becomes `null` and expires the token at once;
     non-expiring tokens accumulate without a ceiling; the address registry trusts
