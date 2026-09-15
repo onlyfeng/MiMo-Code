@@ -77,10 +77,11 @@ describe("WorkflowRuntime cleanup defects", () => {
             GlobalBus.on("event", onDisposed)
             yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", onDisposed)))
             const finished = yield* Deferred.make<{ status: string; error?: string }>()
-            yield* bus.subscribeCallback(WorkflowFinished, (event) => {
+            const unsubscribe = yield* bus.subscribeCallback(WorkflowFinished, (event) => {
               if (event.properties.sessionID === parent.id)
                 Deferred.doneUnsafe(finished, Effect.succeed(event.properties))
             })
+            yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
             const { runID } = yield* runtime.start({
               script: [
                 `export const meta = { name: "cleanup", description: "d" }`,
