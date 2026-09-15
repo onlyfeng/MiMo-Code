@@ -10,13 +10,17 @@
 
 ## 与 upstream 的差别
 
-行为与 upstream 完全一致,仅保留两项本 PR 之前就存在的 fork 边界:
+主体采用 upstream 的 capability 路由；截至已接受的 `5198ff54` 基线，仍保留以下边界与修正：
 
 - 非 loopback 绑定守卫读取 `MIMOCODE_SERVER_OPERATOR_PASSWORD`,因此 worker
   自生成的凭据无法满足它。
 - `Server.listen` 接受 `advertiseDirectory`。upstream 以 `process.cwd()` 作通告键
   (它假设进程已 chdir 进项目);fork 的 TUI worker 服务的是启动时选定的目录,
   未必等于 cwd,通告落错桶会让 `mimo llm-server issue` 找不到它。
+
+此外还有三项修正：`/v1` 请求合入模型自身的 `model.options`；IPv6 字面量通告使用
+方括号；`llm-server revoke` 同时指定令牌 ID 与 `--all` 时拒绝执行，涵盖空 ID
+及 `--` 后的位置参数。共享恢复冲突映射与 SSRF 分类分别由 FC-001、FC-010 维护。
 
 `mimo serve --llm-server` 已随本次对齐移除(`src/index.ts` 启用了 yargs `.strict()`,
 所以旧命令会直接报未知选项)。`mimo serve` 现在与 upstream 一致,**默认通告**;而
@@ -45,7 +49,7 @@ mimo llm-server revoke <id>
 
 ## 2026-09-14 变更
 
-fork 原有的并行实现（`server/model-api.ts` 与 `src/llm-server/` 下的六个模块）已退役，
+fork 原有的并行实现（`server/model-api.ts` 与 `src/llm-server/` 下的配套模块）已退役，
 改用 upstream 的 capability 路由。**此前签发的令牌全部失效**：fork 写入的是
 `version: 2` 记录，而 upstream 按 `version: 1` 读取，遇到未知版本视为空存储。
 令牌本身是短期凭据（默认 1 天滑动有效期），重新 `issue` 即可。
