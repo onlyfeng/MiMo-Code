@@ -1,17 +1,19 @@
-# 2026-09-15 插件、MCP/OAuth 与 Windows 验收
+# 2026-09-15 插件、MCP/OAuth、Windows 验收与资源清理
 
 本轮先完成 Inbox 崩溃一致性修正，再补充实际调用链与目标平台证据。
 不追加 upstream 提交，不整体合并 dev/compat 能力到 main。
 main 继续承载共享正确性修正；compat 的产品保证和环境适配保留各自归属。
 
-## 固定来源与归属（N = 3）
+## 固定来源与归属（N = 4）
 
 - 选定 upstream：`b4cc11cd652195af9a80297ed543218f3172e6c4`。
 - 起始 main：`370d12295f4c4628e10012ae46f3bcb454a5b587`；compat：`49dce5816792e95050cd64561080d3257b714b7f`。
 - Inbox 实现：`74d4bfb6008071fca87c245c7791530660d64876`，经 [PR #134](https://github.com/onlyfeng/MiMo-Code/pull/134) 接受为 main `d11a9652981e7b5953584205474249775ee54236`。
 - 本批测试/CI：`b23c278e51ab0cc34c47c2d20406d69e57d24f2f`；继承已接受 Inbox 后的集成源码/测试：`a9e4458e62632d65ccdef38152e757730ac102db`。
 - PR #136 复审后的测试源码：`5165307c8a97c448de252a33b9eb2a1feb393545`，为新增插件 child 设置明确的 15 秒测试预算，25 秒进程 watchdog 和 30 秒 wrapper 预算保持原值。
-- 共享 CI 安装修正：`9bf2b8bcc696abf8797487b090c342a5a64f7a7c`，从 `package.json` 选择 Bun 并使用 `bun ci`；runtime/test 行为引用仍为上面的 `5165307c`。
+- PR #137 复审后的共享插件夹具源码：`15ca0f83a466f0581ce4e1add6883e0e204318ed`，使用 Effect-aware 多实例夹具，按作用域释放两个测试实例与临时资源。
+- 共享 CI 安装修正：`9bf2b8bcc696abf8797487b090c342a5a64f7a7c`，从 `package.json` 选择 Bun 并使用 `bun ci`；该安装提交不改变 runtime/test；当前夹具引用为上面的 `15ca0f83`。
+- 独立实验资源清理源码：`f20e91358da8ba4feef8d669ae1b105486e2566f`，关闭 standalone CLI 自己初始化的日志流；该提交是当前 runtime/test 快照，插件夹具内容仍为 `15ca0f83`。
 - 本批新增两个测试 wrapper、两个子进程夹具和共享 Windows job，并收敛共享安装步骤；没有插件、MCP 或平台生产实现改动。
 
 | ID | 能力及归属 | main 结果 | dev/compat 处理与证据归属 |
@@ -19,6 +21,7 @@ main 继续承载共享正确性修正；compat 的产品保证和环境适配�
 | RV01 | FC-006：实例配置、内置插件、Actor、Write 整链 | 三个实际应用场景通过，模型由 scripted SSE 服务驱动 | 继承同一入口；分支执行及发布记录由 compat 当前登记维护 |
 | RV02 | FC-004：实际 MCP SDK HTTP/OAuth 协议链 | Loopback 与本机自有 RFC1918 接口通过 | 保留 DC-NET-002 的 compat 保证；不因实验结果自动退休或上移政策 |
 | RV03 | FC-008：共享 Windows 调度设施；DC-PLATFORM-001：compat 平台能力 | 工作流静态检查通过；main 不运行 compat 专属平台入口 | 实际 Windows 结果由 [compat 平台登记](https://github.com/onlyfeng/MiMo-Code/blob/dev/compat/docs/dev-compat-overrides.md#dc-platform-001--restricted-network-and-windows-ripgreparchive-fallback)维护；本 main 报告不把设施就绪称为平台验收通过 |
+| RV04 | FD-006 的独立实验载体：退出时关闭自有日志流 | 确定红绿及完整实验测试通过；原 15 秒自然退出预算保留 | 继承共享修正，不改变七项 DC 产品策略 |
 
 这是一份固定源码的验收记录。它不改写[此前完整差异审计](https://github.com/onlyfeng/MiMo-Code/blob/370d12295f4c4628e10012ae46f3bcb454a5b587/docs/fork-difference-closure-2026-09-15.md)的树、inventory 数量或历史结论。
 Inbox 的实际进程崩溃/重启边界见[专项记录](inbox-crash-consistency-2026-09-15.md)。
@@ -130,3 +133,19 @@ PR #136 的 P2 指出新启动的 Bun test 不继承 wrapper 的预算。实际 
 限定为 15 秒，保留外层终止与清理余量，不放宽已有测试或应用时限。
 同 PR 的首轮 stdio job 因固定依赖下载返回 HTTP 504 而未执行测试，属于独立安装失败；
 同源成功运行的 stdio JUnit 为 6 pass / 0 fail / 20 assertions，未修改 stdio 代码。
+
+## 多实例夹具复审收敛
+
+PR #137 的 [scoped fixture 反馈](https://github.com/onlyfeng/MiMo-Code/pull/137#discussion_r4015271088) 指出共享子测试应遵循 `test/AGENTS.md` 的多目录 Effect 夹具约定。`15ca0f83` 使用 `testEffect`/`it.live`、真实 `AppLayer` 与 `tmpdirScoped`/`provideInstance`，替换手写 `AppRuntime.runPromise` 嵌套和进程全局 `Instance.disposeAll`。低层 `provideInstance` 只绑定上下文，不负责释放，因此分别捕获两个 owned instance 并登记释放；订阅先结束，实例在恢复 cwd、关闭 scripted server、删除相邻 worktree 和 checkout 前释放。
+
+三个应用场景和 35 处既有断言保留，15/25/30 秒预算不变，无生产服务替换或新增生产改动。最终同一 wrapper 复验为 3 pass、0 fail、6 次外层断言，30.69 秒；包 `bun typecheck` exit 0，focused lint 为 0 warnings / 0 errors。原隔离进程中未证明存在生产泄漏；本次修正处理仓库测试约定与资源作用域，不把结构调整写成已发现的应用缺陷。此前固定 SHA 的运行结果仍有效，不移称为该夹具重构后的重跑。共享修正先在 main 接受，再传播到 compat。
+
+## RV04：独立实验日志资源清理
+
+PR #138 首轮 CI 中，已有 standalone experiment 退出用例完成了清理标记，但子进程在从启动算起的 15 秒 watchdog 内没有自然退出，被终止为 143。旧日志没有标记时刻，无法判断标记后的等待长度；本机原样单例未复现该失败，相关六个文件与此前通过的 main 相同。新插件夹具在另一 CI job 执行，不能把这次失败归因于它。
+
+资源审查发现一个确定遗漏：`runExperiment` 初始化文件日志，standalone `disposeExperimentRuntime` 只关闭 AppRuntime 和数据库，没有关闭它自己创建的日志流。临时顺序诊断中，双管道读取的基线在标记后 5.932 秒自然退出；加 `Log.shutdown()` 的一次变体为 38ms，stderr 均为零字节。这只是一次对照观察，未复现 CI 143，也不构成普遍性能或原失败根因证明。
+
+`f20e9135` 在 standalone 全局清理末尾增加 `await Log.shutdown()`，复用的 `runExperiment` 调用不关闭整个运行时。已有隔离子进程测试增强为实际文件断言：排队的合成日志完整落盘，active 文件转为 completed，原 active 路径消失，清理后的合成日志不再追加。父进程并行消费 stdout/stderr 并等待终态，继续要求自然 exit 0，保留 15 秒进程 watchdog 和 30 秒外层预算；没有强制成功退出。
+
+旧实现确定红例中，子进程自然 exit 0，但 completed、activeRemoved、closedSink 均为 false，证明回归断言不依赖重现超时。修正后完整 `test/experiments/tool-schema-runner.test.ts` 为 **11 pass、0 fail、69 assertions，23.03 秒**；standalone 用例为 5.836 秒。包 typecheck exit 0，focused lint exit 0 / 0 errors；七条 unsafe-assertion 警告逐条确认为修改前已存在。原间歇退出失败与确定的日志清理遗漏分别记录，不将后者修复包装为前者根因已证。

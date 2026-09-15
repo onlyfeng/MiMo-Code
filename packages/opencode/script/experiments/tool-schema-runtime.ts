@@ -67,10 +67,11 @@ type Run = {
   statusCode: number | null
 }
 
-/** The standalone CLI owns the global runtime; reusable test runs do not. */
+/** The standalone CLI owns the global runtime and log sink; reusable test runs do not. */
 export async function disposeExperimentRuntime() {
   await AppRuntime.dispose()
   Database.close()
+  await Log.shutdown()
 }
 
 export function experimentProviderOptions(input: {

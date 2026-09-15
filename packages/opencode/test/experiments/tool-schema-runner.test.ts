@@ -183,8 +183,24 @@ test("report identifies the catalog model and honest serialized wire coverage", 
 test("standalone experiment cleanup releases the global runtime and exits naturally", async () => {
   const source = `
     const experiment = await import(${JSON.stringify(path.resolve("script/experiments/tool-schema-runtime.ts"))});
+    const Log = await import(${JSON.stringify(path.resolve("src/util/log.ts"))});
+    const fs = await import("node:fs/promises");
     await experiment.runExperiment({ mode: "offline", cases: 1, repeats: 1 });
+    const active = Log.file();
+    Log.Default.info("synthetic queued shutdown record");
     await experiment.disposeExperimentRuntime?.();
+    const completed = Log.file();
+    const content = await fs.readFile(completed, "utf8");
+    Log.Default.info("synthetic record after shutdown");
+    await Log.flush();
+    const after = await fs.readFile(completed, "utf8");
+    console.log("experiment-log-cleanup:" + JSON.stringify({
+      startedActive: active.endsWith(".active.log"),
+      completed: completed === active.replace(/\\.active\\.log$/, ".log"),
+      activeRemoved: !(await fs.stat(active).then(() => true, () => false)),
+      queuedRecord: content.includes("synthetic queued shutdown record"),
+      closedSink: after === content && !after.includes("synthetic record after shutdown"),
+    }));
     console.log("experiment-cleanup-finished");
   `
   const child = Bun.spawn([process.execPath, "--eval", source], {
@@ -195,11 +211,25 @@ test("standalone experiment cleanup releases the global runtime and exits natura
   })
   const timeout = setTimeout(() => child.kill(), 15000)
   try {
-    const [code, output] = await Promise.all([child.exited, new Response(child.stdout).text()])
+    const [code, output, error] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    expect(code, `${output}\n${error}`).toBe(0)
     expect(output).toContain("experiment-cleanup-finished")
-    expect(code).toBe(0)
+    const cleanup = output.split("\n").find((line) => line.startsWith("experiment-log-cleanup:"))
+    expect(cleanup).toBeDefined()
+    expect(JSON.parse(cleanup!.slice("experiment-log-cleanup:".length))).toEqual({
+      startedActive: true,
+      completed: true,
+      activeRemoved: true,
+      queuedRecord: true,
+      closedSink: true,
+    })
   } finally {
     clearTimeout(timeout)
     child.kill()
+    await child.exited
   }
 }, 30000)
