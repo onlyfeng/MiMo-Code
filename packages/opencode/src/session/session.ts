@@ -530,6 +530,12 @@ export interface Interface {
     parts: MessageV2.Part[],
     options?: { generatedPartIDs: ReadonlySet<PartID> },
   ) => Effect.Effect<MessageV2.User>
+  /** Internal synchronous storage composition; joins an enclosing transaction and defers publication until commit. */
+  readonly commitUserMessageSync: (
+    msg: MessageV2.User,
+    parts: MessageV2.Part[],
+    options?: { generatedPartIDs: ReadonlySet<PartID> },
+  ) => MessageV2.User
   /** Patch only live message metadata; never overwrite task/source fields from an old read. */
   readonly patchMessageMetadata: (input: {
     sessionID: SessionID
@@ -950,14 +956,15 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       return committed
     }
 
+    const commitUserMessageSync: Interface["commitUserMessageSync"] = (msg, parts, options) => {
+      const parsed = parseUserMessage(msg, parts)
+      return Database.transaction(
+        (tx) => commitUserMessageInTransaction(tx, parsed.message, parsed.parts, options?.generatedPartIDs),
+        { behavior: "immediate" },
+      )
+    }
     const commitUserMessage: Interface["commitUserMessage"] = (msg, parts, options) =>
-      Effect.sync(() => {
-        const parsed = parseUserMessage(msg, parts)
-        return Database.transaction(
-          (tx) => commitUserMessageInTransaction(tx, parsed.message, parsed.parts, options?.generatedPartIDs),
-          { behavior: "immediate" },
-        )
-      }).pipe(Effect.withSpan("Session.commitUserMessage"))
+      Effect.sync(() => commitUserMessageSync(msg, parts, options)).pipe(Effect.withSpan("Session.commitUserMessage"))
     const patchMessageMetadata: Interface["patchMessageMetadata"] = Effect.fn("Session.patchMessageMetadata")((input) =>
       Effect.sync(() => {
         Database.transaction(
@@ -1418,6 +1425,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       updateMessage,
       createMessage,
       commitUserMessage,
+      commitUserMessageSync,
       commitUserMessageIfLatest,
       commitRecoveryCandidate,
       patchMessageMetadata,
