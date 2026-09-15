@@ -17,10 +17,11 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-15
 - Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
 - Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `cdfd1a804599eda21fdc5bced9c0d1de025d07da`
+- Main behavior (runtime/tests): `3a12d1800d9bfd002f543764e4ec72047e6e6bb3`
 - Bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
-- Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
+- Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
+- Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
