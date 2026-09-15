@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-09-15
 - Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
 - Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `8d5ac893cafafa529abf0644c6d68de615374d93`
+- Main behavior (runtime/tests): `cdfd1a804599eda21fdc5bced9c0d1de025d07da`
 - Bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
@@ -737,6 +737,12 @@ not change their implementation. The preceding review is retained in the
   A separate Runner reentry fixture now uses explicit started/reentered/release
   signals instead of five/fifty-millisecond timer ordering, preserving the
   assertion that both waiters share the first execution and emit one warning.
+
+- SDK generation validation captures stdout in a temporary file, matching the
+  standard root/SDK build redirect. The pipe fixture could remain alive after
+  delivering a complete document on Bun; file capture preserves the actual
+  generator, full-document/callable/HTTP assertions and original child deadline.
+  This does not claim to fix every production pipe or Bun callback/exit path.
 
 - Status: active process/runtime contract
 - Canonical owner: fork `main` workflow runtime and repository CI
