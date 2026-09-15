@@ -174,8 +174,12 @@ export function messageInsertIndex(messages: readonly OrderedMessage[], message:
 export function upsertChronologicalMessage<M extends OrderedMessage>(messages: readonly M[], message: M, limit = 100) {
   const next = messages.filter((current) => current.id !== message.id)
   next.splice(messageInsertIndex(next, message), 0, message)
-  const removed = next.length > limit && next.length > messages.length ? next.shift() : undefined
-  return { messages: next, removed }
+  return trimChronologicalMessages(next, limit)
+}
+
+function trimChronologicalMessages<M>(messages: readonly M[], limit = 100) {
+  const start = Math.max(0, messages.length - limit)
+  return { messages: messages.slice(start), removed: messages.slice(0, start) }
 }
 
 export function removeMessageByID<M extends { id: string }>(messages: readonly M[], id: string) {
@@ -472,11 +476,31 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       if (deletedSessions.has(incoming.id)) return
       const next = mergedSession(incoming)
       const found = Binary.search(store.session, incoming.id, item => item.id)
-      if (found.found) setStore("session", found.index, reconcile(next))
-      else setStore("session", produce(draft => { draft.splice(found.index, 0, next) }))
+      batch(() => {
+        if (found.found) setStore("session", found.index, reconcile(next))
+        else setStore("session", produce(draft => { draft.splice(found.index, 0, next) }))
+        trimSessionMessages(next)
+      })
     }
     function applySessions(incoming: Session[]) {
-      setStore("session", reconcile(incoming.filter(item => !deletedSessions.has(item.id)).map(mergedSession)))
+      const next = incoming.filter(item => !deletedSessions.has(item.id)).map(mergedSession)
+      batch(() => {
+        setStore("session", reconcile(next))
+        next.forEach(trimSessionMessages)
+      })
+    }
+    function trimSessionMessages(session: Session) {
+      if (session.revert || !store.message[session.id]) return
+      // Undo can hydrate many pages. Release them with the authoritative session
+      // update, including its HTTP refresh path, even if no new message arrives.
+      setStore(produce(draft => {
+        for (const [aid, messages] of Object.entries(draft.message[session.id])) {
+          if (messages.length <= 100) continue
+          const result = trimChronologicalMessages(messages)
+          draft.message[session.id][aid] = result.messages
+          for (const message of result.removed) delete draft.part[message.id]
+        }
+      }))
     }
     let syncedWorkspace = project.workspace.current()
     let syncedDirectory = sdk.directory
@@ -703,14 +727,13 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             event.properties.info,
             session?.revert ? Infinity : 100,
           )
-          const removed = result.removed
           batch(() => {
             setStore("message", sid, aid, reconcile(result.messages))
-            if (!removed) return
+            if (!result.removed.length) return
             setStore(
               "part",
               produce((draft) => {
-                delete draft[removed.id]
+                for (const removed of result.removed) delete draft[removed.id]
               }),
             )
           })
