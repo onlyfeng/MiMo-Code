@@ -3256,3 +3256,9 @@ with package typecheck passing. New final-tip CI is required on both branches.
 
 - CI implementation `9bf2b8bcc696abf8797487b090c342a5a64f7a7c` makes the shared setup-bun composite select Bun from package.json and install with `bun ci`, matching the repository convention and the new standalone Windows job. Source/test behavior remains `5165307c8a97c448de252a33b9eb2a1feb393545`; no package manifest or lockfile changes.
 - Review of earlier Linux logs found `bun install` and Saved lockfile, so identical checked-in sources could not establish identical post-install dependency state. This correction makes final CI reject lock drift instead of silently accepting it. Local frozen install exits 0 without changes; YAML formatting and diff checks pass. Linux installation and full tests remain final-head CI gates; no test selection, quarantine or timeout change is bundled with the installation correction.
+
+## 2026-09-15 shared plugin fixture scope review
+
+- PR #137 的多实例夹具反馈由共享源码 `15ca0f83a466f0581ce4e1add6883e0e204318ed` 处理，基于已接受运行验收 main `c643adf9dffa57191153cc4452003ba03e3cab32`。遵循包测试指引使用 `testEffect`/`it.live`、真实 AppLayer、tmpdirScoped/provideInstance，并显式释放两个捕获的实例；没有全局实例清理或生产修改。
+- 原 A-B-A-B、真实跨目录 403、三个 Actor/Write 场景及 35 处断言保留，子测试和外层预算仍为 15/25/30 秒。3 wrappers pass / 0 fail / 6 assertions，30.69 秒；包 typecheck exit 0，focused lint 无警告错误。详见[共享运行验收](runtime-validation-2026-09-15.md#多实例夹具复审收敛)。
+- FC-006 的测试来源前进至该源码；共享 CI 安装仍由 `9bf2b8bc` 提供，bundled guidance 与选定 upstream `b4cc11cd` 不变。七项 DC 政策保持 compat 归属，后续接受 SHA 的 CI、审核及传播另行验收。
