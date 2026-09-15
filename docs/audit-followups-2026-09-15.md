@@ -16,7 +16,7 @@
 | --- | --------------------------------------------- | ---------------- | -------------------- | ------------------------------------------------------------------------- |
 | F01 | upstream 网关错误别名                         | 已接受 #128      | 已集成，PR #129审核  | provider/error.ts；别名、大小写、421/441与非网关隔离                      |
 | F02 | 可信模型身份传到 debug；FD-005                | 已接受 #128      | 已集成，PR #129审核  | debug agent真实入口、harness resolver及负向/显式模式                      |
-| F03 | workflow deadline真实执行与释放；FC-008       | 已接受 #128，追查 CI 复现 | PR #129 超时，暂缓合并 | runtime-worktree、LLM进入、child Instance释放、测试及 fixture 退出      |
+| F03 | workflow deadline真实执行与释放；FC-008       | 已修复，PR #130 待验收 | 已继承，待最终 CI | runtime-worktree、真实清理 defect、终态持久化/通知与 Instance 释放 |
 | F04 | 请求估算及序列化失败策略；DC-CONTEXT-001      | 无对应预检扩展   | 本地修复，待发布     | 完整tool schema、实际prompt预检、有效工具集合及保守失败                   |
 | F05 | 通用SDK示例生成正确性；FC-008                 | 已集成，待发布   | 已继承，待最终验证 | 生成器、OpenAPI code samples、实际v2调用；不混入compat schema             |
 | F06 | 消息时序与原子用户提交；FC-001/DC-CONTEXT-001 | 已集成，待发布   | 已收敛，待最终验证 | createMessage、UTF8排序、producer、fork/revert/checkpoint及TUI消费        |
@@ -42,6 +42,8 @@ PR #126 初始 CI 暴露 Runner 重入测试的 5/50ms 竞争：父测试被调�
 
 第二轮同 head 的[Linux 观察](https://github.com/onlyfeng/MiMo-Code/actions/runs/34932109523/job/104262298746) 捕获 child Instance 在约 10 秒释放，但 `runtime.wait` 未返回，直到 120 秒测试时限。第三轮[深层观察](https://github.com/onlyfeng/MiMo-Code/actions/runs/34933167224/job/104265451092) 完整退出，同时证实 reclaim 与 isolated disposer 会并行删除 worktree。该轮没有捕获 Git 缺陷异常，不能把具体竞争错误写成直接观察事实。
 
+独立真实 Git 门控让两次 remove 都先读到同一 worktree，实际执行的 `git branch -D` 返回 `[0,1]`，第二次从真实删除分支抛出 `WorktreeRemoveFailedError`；1 pass、4 断言。探针只控制真实命令调度，没有伪造输出或退出码。这验证竞争机制能够产生该缺陷，仍不冒称捕获了原 Linux 那一次的异常。
+
 源码确认 `Worktree.remove` 的 Git/文件错误以 Effect defect 抛出，原 `Effect.ignore` 只吞 typed error，缺陷会跳过后续终态持久化和 Deferred 完成。真实删除目录后注入同类 `RemoveFailedError`，旧实现稳定复现 deadline 等待超时及 cancel 直接抛错。修复 `a748c5f0`（main 整合 `97b69a20`）只在该清理项捕获并记录 defect，保留原始终态、纯中断和所有生产时限。两例由 0 pass/2 fail 转为 2 pass、26 断言，检查 outcome、DB、WorkflowFinished、真实目录和完整 Instance 释放；fixture 仅在全部断言之后释放挂起响应，不代替生产取消。
 
 作者完整 worktree 文件为 8 pass、49 断言、39.03 秒；runtime 取消/失败/代际/deadline 五例为 5 pass、17 断言、9.37 秒，package typecheck 通过。两组清除八项 selector 后仅显式启用 workflow，属于 opt-in。诊断分支保持独立，不合入生产。另一个纯挂起 HTTP fixture 的失败清理会遮盖原断言，但它发生在资源清理阶段，不能用于解释第二轮已定位的 `runtime.wait` 卡住。
@@ -59,6 +61,8 @@ F05/F09/F11 整合源码快照 `99297fa6`。SDK 示例改用 `@mimo-ai/sdk/v2` �
 F09 删除仅供旧测试调用的 Actor wake 入口及其专属上下文注入，保留 resume 仍用的执行/通知路径。旧十例逐项映射至真实 Inbox 路径或明确退役旧 DTO 注入/owner-follower 结果共享语义。当前真实 continuation 向父 Inbox 通知且不发 toast，没有伪称保留已删除入口的 toast。作者默认 Actor 矩阵 143 pass、工具/worker/provider 消费者 131 pass、Inbox 24 pass、串行 main/队列 6 pass（其中两例与 Actor 组重复）；独立十目标例为 10 pass、64 断言。package typecheck 通过。main late-row 用例在并发负载下曾超时，未改源码，独立复跑和最终串行矩阵通过；保留该时序敏感性记录。
 
 F11 取消根生成脚本隐式全仓格式化，保留 SDK 及 OpenAPI 自身格式化。隔离探针执行真实脚本并替换生成子命令，前后成功码均 0、任一步失败码均 1，SDK→OpenAPI 顺序、cwd 和重定向不变。`0.5/0.7` 与 upstream `0.50/0.70` 等价，保留 formatter 规范；default prompt 也保留无尾空格写法。这些机械差异没有额外行为待同步。
+
+冻结 catalog 的五轮真实请求测试还移除了无关 npm 安装等待：通过既有 `prepareConfigDependencies` 准备隔离的配置目录，保留真实插件、Git 与五次模型请求。原默认 5 秒先在依赖等待处零断言失败；准备依赖后推进到 13 个断言仍超时。有界阶段观察确认测试体约 6.54 秒、15 个断言自然完成，因此仅本用例使用 15 秒测试壳，生产时限不变。`df02208e` 只调整该测试。root 在最终运行时/测试快照 `37b97a7b` 无观察器运行 SDK samples 与 frozen catalog 两文件，2 pass、1139 断言、14.44 秒自然退出；SDK 保留原 child 30 秒、test 45 秒限制，catalog 使用明确的 15 秒测试壳。
 
 ### 共享消息时序
 
