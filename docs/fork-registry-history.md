@@ -3221,3 +3221,12 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - FD/FC/DC wording was corrected against code; FC-017 now explicitly owns existing history projection fidelity and budget fixes. Open debug identity, workflow quarantine, estimator and serialization gaps are recommendations, not implemented fixes.
 - Bundled guidance content is `3fa41ad98ac15668b2b3be899767c6498772ad4b`: implicit listener startup may fall back to RPC; directory selection depends on operator authentication and containment, with the fixed Orchestrator exception. Runtime/test behavior references are unchanged.
 - This documentation work has its own commits. Accepted runtime CI remains evidence only for the earlier main/compat SHAs; see the report for the new documentation checks and scope.
+
+## 2026-09-15 F01–F11 implementation acceptance and closure
+
+- 选定 upstream 为 `b4cc11cd652195af9a80297ed543218f3172e6c4`。第一批经 PR #128、共享修正经 PR #130 接受；#130 head `555598ab4c257aa0b99d337366cd56e6886aa6e9` 八项检查成功、Codex 无 findings，接受 `806a11e430ae7f90d6a9c50143cb11e6f4123adc` 的 test/typecheck/lint 均成功。
+- PR #129 的 bb6d4049 复审新增有效缓存 P2。共享修正先经 #131 接受为 main `89866569ee21e106f3c31c39072d8ec3e976d20a`，runtime/test 为 `3a12d1800d9bfd002f543764e4ec72047e6e6bb3`；bundled guidance 仍为 `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`。#131 head 八项检查与 Codex 复审通过，接受 SHA 的 test/typecheck/lint 均成功。后续纯文档修改不推进行为引用。
+- Compat #129 最终 head `c407439ff4d213977acf3986d79a4e31627cf9db` 八项检查成功，Codex 2026-09-15 07:15 UTC 复审未新增 findings；接受为 `ab81af7293ac5ea1ee219bb6aab491d4fd665307`，真实继承 main `89866569ee21e106f3c31c39072d8ec3e976d20a`，全树与 compat runtime/test `02cd25b5385dbaffcc629693ca1df2da15af68f2` 相同。接受 SHA 的 CI：[test 成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940948422)、[typecheck 成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940948433)、[lint 成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940948413)。
+- F03 修复清理 defect 阻断终态持久化/通知，保留原始中断及生产时限；F05/F06/F07 共享生成器、消息时序/有限原子提交与并发压缩保护；F09 清理退役入口；F11 取消隐式全仓格式化。F04/F10 的请求预检及旧快照读取留在 compat；F08 保留完整 coverage 协议，不向 main 单边上移。撤销结束后恢复每 actor 缓存上限，并保留 compat 晚到 coverage 候选。9 项有效 FD、16 项有效 FC、7 项 DC 继续按各自契约维护。
+- 早期 debug、workflow、估算和序列化缺口已处理；之前章节中的待实施/隔离/接受语句仍是历史。Inbox 创建消息、parts 与删除队列仍分三步，shell 与流式 assistant/tool 写入也不在 `commitUserMessage*` 事务中。
+- 具体精确 SHA 的 CI 链接及讨论处理见[实施记录](audit-followups-2026-09-15.md)；[收尾报告](fork-difference-closure-2026-09-15.md)提供当前完整清单、残差决定与文档自引用边界。[原审计](fork-difference-audit-2026-09-15.md)的 529 pairs/470 paths 及 coverage 保持原快照，不将旧验证移称为新接受 SHA 验证。
