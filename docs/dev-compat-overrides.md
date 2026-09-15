@@ -365,25 +365,37 @@ The selected propagation is accepted at `90abf6e447d7a5e5b405aba301bf1a951f469bf
 (PR #125), with exact-SHA test/typecheck/lint and main ancestry verified.
 The [shared accepted result](upstream-sync-2026-09-15-5198ff54.md#accepted-result-and-publication-evidence)
 is the publication summary; dated staging gates below remain historical.
-The workflow deadline/disposer case remains skipped under shared FC-008.
-Closing both actor quarantine cases did not close that independent debt.
+At that historical runtime snapshot the workflow deadline/disposer case was
+still skipped. The audit follow-up below supersedes this remaining debt.
+
+## 2026-09-15 audit implementation, first batch
+
+Accepted main `f10fddb67d830b82890206759c53cef4d8710460` (PR #128)
+is inherited at `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`. Gateway alias
+errors and debug trusted harness identity are shared; workflow deadline coverage
+is restored with a real-startup gate, and the Runner reentry test uses explicit
+synchronization. No production cleanup/lifecycle policy changed in this batch.
+Compat adds complete schema estimation, terminal serialization failure handling,
+tiny content budgets and single-format snapshot writes with legacy reads.
+The seven owner dispositions and evidence are recorded in
+[the compat implementation report](compat-audit-followups-2026-09-15.md).
 
 ## Review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-15
-- Reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Accepted `main` tip: `648f7cdf100b30ff046db7518d8f832473b61481`
-- Inherited main behavior: `4eacc84dccf83c22f533c35bea282d4c5a38cacd`
-- Compat behavior: `1a072e7aa3b142fc9804974bd8142729817c92db`
-- Prior compat tip: `b277f8efa0dd379997c40a50798c9086d88c6480`
-- Main source inheritance merge: `3cf81dabd6efc66d7cbd037292eee742a2a33728`
-- Shared audit commit: `5f06049e568276cd1cea9012f6b114e6ddb2fac2`
+- Reviewed upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
+- Accepted `main` tip: `f10fddb67d830b82890206759c53cef4d8710460`
+- Inherited main behavior: `0b12e39ebfae5e0a01e623de1b4f58e96c86cb09`
+- Compat behavior: `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`
+- Prior compat tip: `b3b32061cfcf997d3fb1cac0a73302e551678a96`
+- Main source inheritance merge: `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`
+- Prior shared audit commit: `5f06049e568276cd1cea9012f6b114e6ddb2fac2`
 - Inherited bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
-- Publication state: accepted at `90abf6e447d7a5e5b405aba301bf1a951f469bf6` through PR #125; exact merged-SHA test, typecheck and lint passed. See the shared synchronization record for run links and ancestry evidence.
+- Publication state: the initial implementation is local and pending its compat PR. The preceding documentation tip `b3b32061cfcf997d3fb1cac0a73302e551678a96` (PR #127) has successful exact-SHA test, typecheck and lint.
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
-- Shared documentation inheritance: main `818457d08e9d39f561cdd2bcb86ee4a73bcf5fbf` through PR #126; the source/test references above remain unchanged.
+- Shared documentation inheritance: accepted main `f10fddb67d830b82890206759c53cef4d8710460`; FD/FC and shared reports are inherited unchanged.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
