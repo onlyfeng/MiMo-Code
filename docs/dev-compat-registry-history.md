@@ -3935,3 +3935,12 @@ All seven capability results in that entry remain valid; runtime/test behavior s
 - 先前 `b7e3f850` 候选的九项 CI 全绿，实际 Windows run `34965350598` 再次证明 11 个解压场景和 8 个 no-rg 用例；因新 review feedback 仍保留 draft。新集成 head 和最终接受 SHA 需要自己的 CI/审核；实际 scope、原始 Windows 来源与平台边界见[compat 运行验收](compat-runtime-validation-2026-09-15.md)。
 
 - 同一 main PR #138 还修复独立实验自有日志流遗漏关闭的问题，源码 `f20e91358da8ba4feef8d669ae1b105486e2566f`。旧实现自然退出仍在真实文件关闭断言确定失败；compat `c7b2fdc59d5852c97131f4a4db4b809d1cc06d88` 完整实验文件复验 11 pass / 0 fail / 69 assertions，13.00 秒。保留 15/30 秒预算，父端并行消费两个管道。旧 `31365b8a` 的单次 exit143 与其成功重跑作为历史间歇现象记录，不声称该次 CI 根因已证，详见 compat RV04。
+
+## 2026-09-15 exact tool-name synchronization
+
+- Selected upstream: `26aa00fc7e243a90586f5895ddcad2b7ce76b935`.
+- Accepted main: `a288fb47233e390d8cb984dfcf78108918501011`; source/content `0b8c5d634077f19c2d8c03179f2c869a01a18cec`.
+- Starting compat: `1caf307ff8c26137cfd095fe9fa5374293e2e208`; source integration `252f81e93973671580b139a4d55b7bddd5aa4d3b`.
+- C01 inherits exact ordinary/GitLab/nested MCP lookup and authoritative checkpoint guidance. Main's control guards and argument normalization remain, as do all seven compat policies. The package overlay is unchanged apart from blob identities and hunk positions.
+- Validation: 118 tool and 127 request/checkpoint/prefix/overflow tests pass; package typecheck passes; lint reports 4565 warnings and zero errors. Full commands/environment and the single result row are in the [shared sync record](upstream-sync-2026-09-15-26aa00fc.md).
+- Shared registry files are inherited unchanged. This documentation commit advances no runtime/test snapshot; final CI and remote proof are checked after publication.

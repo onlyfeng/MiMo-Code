@@ -10,6 +10,19 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
+- Status: active; all seven DC owners remain compat-owned.
+- Last reviewed: 2026-09-15, full upstream synchronization through `26aa00fc7e243a90586f5895ddcad2b7ce76b935`.
+- Prior upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`.
+- Starting compat: `1caf307ff8c26137cfd095fe9fa5374293e2e208`.
+- Accepted main: `a288fb47233e390d8cb984dfcf78108918501011`.
+- Main runtime/tests and inherited guidance: `0b8c5d634077f19c2d8c03179f2c869a01a18cec`.
+- Compat source integration: `252f81e93973671580b139a4d55b7bddd5aa4d3b`.
+- Review: [exact tool-name synchronization](upstream-sync-2026-09-15-26aa00fc.md), C01, inherited with no compat-specific code correction.
+- Evidence: 245 relevant tests pass, package typecheck and lint pass. The complete package overlay against main is unchanged. DC-CONTEXT-001 retains the active wire-schema helpers and passing request-budget tests; remaining DC owners retain their existing source contracts. No SDK generation inputs changed.
+- Publication: final-tip CI and remote/ancestry proof follow this record; the earlier Windows/runtime acceptance evidence below remains bound to its historical snapshots.
+
+## Previous runtime review record
+
 - Status: active；七项 DC 政策继续由 `dev/compat` 维护。
 - Last reviewed: 2026-09-15，继承共享运行验收并补充 compat 实际调用链和 Windows 证据。
 - Selected upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`；本轮不追加 upstream 同步。
