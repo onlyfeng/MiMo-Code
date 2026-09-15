@@ -64,4 +64,12 @@ F08 的 checkpoint-coverage route、schema、SDK 与 TUI 缓存作为完整协�
 
 文档 PR [#126](https://github.com/onlyfeng/MiMo-Code/pull/126) 已合并至 main `818457d08e9d39f561cdd2bcb86ee4a73bcf5fbf`。Codex 提出的 FD-004 历史锚点问题通过显式保留旧锚点修复；最终 PR head 的八项检查和自动复审通过，合并 SHA 的 test/lint/typecheck 均成功。文档传播 PR [#127](https://github.com/onlyfeng/MiMo-Code/pull/127) 的八项检查和自动审核通过，已合并为 `b3b32061cfcf997d3fb1cac0a73302e551678a96`；合并后的 test/lint/typecheck 均通过。第一批 main PR [#128](https://github.com/onlyfeng/MiMo-Code/pull/128) 已接受为 `f10fddb67d830b82890206759c53cef4d8710460`；最终 head `6eb559b86b10b5e6bcf7eea50b873eb714c9b137` 的八项检查通过。Codex 在旧 head 指出的两处 runtime 快照引用已于 `6eb559b8` 修正到完整 `0b12e39e`，当前内容已复核；该 discussion 的 UI 状态仍未手动解决。没有把旧 head 审查描述成新 head 的自动复审。第一批 compat PR 为 [#129](https://github.com/onlyfeng/MiMo-Code/pull/129)，本地完整快照 `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`。
 
-本页区分本地已实现与远端接受。后续 runtime PR、compat 传播及最终 SHA 的 CI 结果在接受后更新，不引用旧 SHA 绿灯替代。
+已接受提交的 CI 证据：
+
+| PR / 分支          | 接受 SHA   | test                                                                   | typecheck                                                              | lint                                                                   |
+| ------------------ | ---------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| #126 / main 文档   | `818457d0` | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34927357463) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34927357520) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34927357464) |
+| #127 / compat 文档 | `b3b32061` | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34928314593) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34928314523) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34928314603) |
+| #128 / main 第一批 | `f10fddb6` | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34929143930) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34929143952) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34929144107) |
+
+本页区分本地已实现与远端接受。后续共享能力 PR、compat 传播及最终 SHA 的 CI 结果在接受后更新，不引用旧 SHA 绿灯替代。
