@@ -16,15 +16,15 @@
 | --- | --------------------------------------------- | ---------------- | -------------------- | ------------------------------------------------------------------------- |
 | F01 | upstream 网关错误别名                         | 已接受 #128      | 已集成，PR #129审核  | provider/error.ts；别名、大小写、421/441与非网关隔离                      |
 | F02 | 可信模型身份传到 debug；FD-005                | 已接受 #128      | 已集成，PR #129审核  | debug agent真实入口、harness resolver及负向/显式模式                      |
-| F03 | workflow deadline真实执行与释放；FC-008       | 已接受 #128      | 已集成，PR #129审核  | runtime-worktree、LLM进入、child Instance释放、进程自然退出               |
+| F03 | workflow deadline真实执行与释放；FC-008       | 已接受 #128，追查 CI 复现 | PR #129 超时，暂缓合并 | runtime-worktree、LLM进入、child Instance释放、测试及 fixture 退出      |
 | F04 | 请求估算及序列化失败策略；DC-CONTEXT-001      | 无对应预检扩展   | 本地修复，待发布     | 完整tool schema、实际prompt预检、有效工具集合及保守失败                   |
-| F05 | 通用SDK示例生成正确性；FC-008                 | 已集成，待发布   | 待继承并删除重复差异 | 生成器、OpenAPI code samples、实际v2调用；不混入compat schema             |
-| F06 | 消息时序与原子用户提交；FC-001/DC-CONTEXT-001 | 已集成，待发布   | 待以共享实现收敛     | createMessage、UTF8排序、producer、fork/revert/checkpoint及TUI消费        |
-| F07 | 并发压缩保留新请求；FC-015/DC-CONTEXT-001     | 待提升           | 待以共享实现收敛     | compaction、pending external admission、continuation前后检查              |
+| F05 | 通用SDK示例生成正确性；FC-008                 | 已集成，待发布   | 已继承，待最终验证 | 生成器、OpenAPI code samples、实际v2调用；不混入compat schema             |
+| F06 | 消息时序与原子用户提交；FC-001/DC-CONTEXT-001 | 已集成，待发布   | 已收敛，待最终验证 | createMessage、UTF8排序、producer、fork/revert/checkpoint及TUI消费        |
+| F07 | 并发压缩保留新请求；FC-015/DC-CONTEXT-001     | 已集成，待发布   | 已继承，补充 gate 测试 | compaction、pending external admission、continuation前后检查          |
 | F08 | checkpoint coverage协议归属；DC-CONTEXT-001   | 评估完成，不上移 | 保留完整现有协议     | route/schema/SDK/TUI缓存；不允许只移动单边载体                            |
-| F09 | 退役入口及无调用残留；FC-001/008、FD-004/005  | 已清理，待发布   | 待继承               | 旧wake入口、三helper、loader参数、worker与Actor注释；保留resume仍使用路径 |
+| F09 | 退役入口及无调用残留；FC-001/008、FD-004/005  | 已清理，待发布   | 已继承，待最终验证 | 旧wake入口、三helper、loader参数、worker与Actor注释；保留resume仍使用路径 |
 | F10 | 旧工具mask存储及无用重载；DC-CONTEXT-001      | 不引入旧扩展     | 本地收敛，待发布     | tools.active、旧行读取、空mask、migration和独立MCP hash                   |
-| F11 | 机械差异与生成格式化策略；FC-008/015          | 已收敛，待发布   | 待继承               | root generate与已收敛overflow/default prompt；不改运行策略                |
+| F11 | 机械差异与生成格式化策略；FC-008/015          | 已收敛，待发布   | 已继承，待最终验证 | root generate与已收敛overflow/default prompt；不改运行策略                |
 
 私网 WebFetch、每 Agent MaxMode、模型侧 full Actor 和 TUI 元数据仍按七项 DC 的现有政策保留；NET-002 的生产 MCP 实现已经共享。通用正确性上移不能顺带改变这些产品选择。
 
@@ -34,7 +34,9 @@
 
 源码/测试快照：`0b12e39ebfae5e0a01e623de1b4f58e96c86cb09`。F01 采纳的生产文件与 upstream `b4cc11cd` 完全一致。六组 alias 回归在旧实现上失败，新实现 provider error 集为 25 pass、45 断言，涵盖四组非网关近似名称。定向 lint 为 0 error、6 warning（继承的 upstream 源码），不宣称零警告。
 
-F02 将可信 `harness_model` 传入 debug 工具发现。八个真实 CLI 子进程检查 agent/default 模型、可信与不可信 alias、模型家族 veto 及显式开关。F03 恢复 deadline 实例回收测试，新增真实启动、准确 deadline 原因及 Instance 释放断言；历史 disposer hang 未在现有实现复现，未修改生产清理策略。四个 workflow/disposal 文件同进程 44 pass、0 skip、262 断言、64.08 秒自然退出。该矩阵显式启用 workflow 开关，属于 opt-in 验证。
+F02 将可信 `harness_model` 传入 debug 工具发现。八个真实 CLI 子进程检查 agent/default 模型、可信与不可信 alias、模型家族 veto 及显式开关。F03 恢复 deadline 实例回收测试，新增真实启动、准确 deadline 原因及 Instance 释放断言；当时本地没有复现历史 disposer hang，未修改生产清理策略。四个 workflow/disposal 文件同进程 44 pass、0 skip、262 断言、64.08 秒自然退出。该矩阵显式启用 workflow 开关，属于 opt-in 验证。
+
+随后 PR #129 的 `eaf99b8b` 在 Linux [shard 1](https://github.com/onlyfeng/MiMo-Code/actions/runs/34929548424/job/104254710256) 复现该用例 120 秒超时，之后其他测试仍在执行，最终触及分片八分钟总时限。没有据此认定进程退出或 Instance disposer 就是根因。独立观察提交 `e2713ca1` 仅记录原执行及 fixture/layer 的阶段，不改变挂起方式、取消策略或时限；[同工作流诊断](https://github.com/onlyfeng/MiMo-Code/actions/runs/34931078604) 用于定位，临时观察代码不进入接受分支。PR #129 在原因和修复验证完成前暂缓合并。
 
 PR #126 初始 CI 暴露 Runner 重入测试的 5/50ms 竞争：父测试被调度晚时首执行可能已结束。现在通过 started/reentered/finish 信号确保正在执行时重入，再放行首任务；生产 Runner 未改。
 
@@ -55,6 +57,14 @@ F11 取消根生成脚本隐式全仓格式化，保留 SDK 及 OpenAPI 自身�
 F06 原提交 `b2dad34ea1cde4509d9f6ce4143c8b6a0094f858`，整合为 `8cfc6eca`。消息提交、fork/revert/checkpoint、usage recovery、loop-streak 和 TUI 统一按提交时间与 UTF-8 ID tie-break 处理；用户消息与 parts 原子提交并拒绝身份冲突。新增行为不包含 compat 的内容上限、预检、MaxMode 或模型侧 full Actor。
 
 独立审核发现并修复两项组合问题：缺失 checkpoint watermark 不得被后续 collapse 当作有效范围；撤销分页加载的边界不得被 live message update 挤出缓存。最终相关十文件 155 pass，真实 prompt 子矩阵 19 pass；独立六文件 103 pass、287 断言，以及原子准入六例 6 pass、34 断言。整合后 root 默认五文件再验证 85 pass、239 断言。两个 package typecheck 通过。更早全量相关矩阵为 356 pass、2 个既有 skip；最后补丁后按影响范围复验，未把旧全量结果移称为最终完整矩阵。TUI 证据是状态 helper 测试和事件接线核验，未运行交互终端。
+
+### 并发压缩与请求准入
+
+F07 生产实现由 `7fd795db` 整合为 `79df88f0`，额外 gate 测试由 `f5750b6a` 整合为 `313ca1dd`。新外部 user/spawn 请求与其后缀必须保留，即使可选旧轮次预算为零；其成本先占用可选预算。synthetic/hook 消息不因此获得外部请求身份。压缩按同 session/actor 等待尚未结束的外部准入，并在自动 continuation 写入前后核对，精确清除被新请求替代的消息及 parts。失败和中断释放等待，其他 actor 不受阻塞。
+
+真实 MCP gate 覆盖同 actor 成功/失败、其他 actor、写入后清理和中断后连续两次压缩。补充测试在删除 post-insert 清理和 admission 完成通知的受控反例中分别捕获残留消息与 join 超时；反例源码已恢复。作者最终默认 admission 矩阵 11 pass、96 断言、18.02 秒，package typecheck 通过。root 在 `313ca1dd` 的默认五文件整合矩阵为 183 pass、2 个既有 skip、892 断言、197.63 秒自然退出，包含完整 prompt-effect、projection、message filter、revert 和 loop-streak。两个 skip 为 upstream 已有的 Bash 取消与排队 shell 取消用例，未新增 skip。
+
+`c6e30d0b` 同步配置 schema、内置指南及生成 SDK/OpenAPI，明确必留新请求不受可选预算截断；标准生成正常完成，变动限定为描述。随后 SDK/OpenAPI 两文件验证 5 pass、1154 断言，opencode、sdk、shared 三包 typecheck 通过。运行与生成描述分开记录，没有把此前源码测试移称为描述改动后的整套重跑。
 
 ### 协议归属决定
 
