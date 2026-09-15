@@ -1077,13 +1077,14 @@ files remain byte-identical to the accepted main correction.
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
 
 - 2026-09-15 implementation snapshot: compat
-  `c38078f7eb99d7ba68478808abbd616cfa28847c` inherits main
-  `37b97a7bfc52e201513f2d1120506f287d2d9bbf`. F06 chronology, atomic
+  `05724a5c433a547d9177ebd8bc8e9184962f128e` inherits main
+  `cdfd1a804599eda21fdc5bced9c0d1de025d07da`. F06 chronology, atomic
   admission, checkpoint/loop-streak/TUI position handling, F07 compaction
   admission guards, and callable SDK examples are now shared contracts, not
   exclusive compat policies. F04 request preflight and F10 legacy snapshot
-  reads remain compat-owned. This is a local source/test snapshot; final
-  integration, current-head regression checks and accepted-SHA CI are pending.
+  reads remain compat-owned. Local affected regressions and the two measured
+  integration-test budgets are recorded in [the compat implementation report](compat-audit-followups-2026-09-15.md).
+  Final accepted-branch integration and accepted-SHA CI remain pending.
 
 - 2026-09-09 full sync: image normalization is inherited through the existing model transform. Keep bounded replay/error media, active-tool preflight, frozen context and chronology; adapt image fixtures to actual containers. Provider/API/schema inputs and compat SDK operations remain unchanged.
 
