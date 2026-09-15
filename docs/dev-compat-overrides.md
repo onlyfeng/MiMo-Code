@@ -385,7 +385,7 @@ The seven owner dispositions and evidence are recorded in
 
 ## First-batch review record
 
-- Status: active
+- Status: historical first-batch snapshot
 - Canonical owner: fork `dev/compat`
 - Last reviewed: 2026-09-15
 - Reviewed upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
@@ -396,9 +396,31 @@ The seven owner dispositions and evidence are recorded in
 - Main source inheritance merge: `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`
 - Prior shared audit commit: `5f06049e568276cd1cea9012f6b114e6ddb2fac2`
 - Inherited bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
-- Publication state: PR #129 now locally inherits accepted main `806a11e430ae7f90d6a9c50143cb11e6f4123adc` (PR #130); its remote CI, final merge and accepted-SHA verification remain pending. The preceding documentation tip `b3b32061cfcf997d3fb1cac0a73302e551678a96` (PR #127) has successful exact-SHA test, typecheck and lint.
-- Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
-- First-batch shared documentation inheritance: accepted main `f10fddb67d830b82890206759c53cef4d8710460`. The current shared FD/FC and implementation report are inherited unchanged from main `555598ab4c257aa0b99d337366cd56e6886aa6e9`; the later local source/test snapshot is recorded under DC-CONTEXT-001 below.
+- Historical publication state: this first batch was recorded before PR #129 acceptance. The preceding documentation tip `b3b32061cfcf997d3fb1cac0a73302e551678a96` (PR #127) had successful exact-SHA test, typecheck and lint; later PR state is recorded below.
+- Original audit baseline: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with the original fixed Git trees, 529 file pairs and pre-implementation findings.
+- First-batch shared documentation inheritance: accepted main `f10fddb67d830b82890206759c53cef4d8710460`; these first-batch fields do not describe the later reviewed source or PR head.
+- History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
+
+## Current review record
+
+- Status: active
+- Canonical owner: fork `dev/compat`; seven DC policies remain active.
+- Last reviewed: 2026-09-15
+- Reviewed upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
+- Accepted `main` tip: `89866569ee21e106f3c31c39072d8ec3e976d20a` (PR #131)
+- Inherited main behavior (runtime/tests): `3a12d1800d9bfd002f543764e4ec72047e6e6bb3`.
+- Compat behavior (runtime/tests): `02cd25b5385dbaffcc629693ca1df2da15af68f2`.
+- Prior validated behavior: main `cdfd1a804599eda21fdc5bced9c0d1de025d07da`, inherited by compat source merge `05724a5c433a547d9177ebd8bc8e9184962f128e`; these remain historical validation baselines.
+- Accepted-main ancestry merge: `c407439ff4d213977acf3986d79a4e31627cf9db`; its complete tree equals `02cd25b5`.
+- Inherited bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
+- Accepted PR #129 head: `c407439ff4d213977acf3986d79a4e31627cf9db`.
+- Accepted compat tip: `ab81af7293ac5ea1ee219bb6aab491d4fd665307`; its complete tree equals `c407439f` and behavior snapshot `02cd25b5`.
+- Historical gate: all eight checks passed at `bb6d4049`, but Codex reported the P2 cache bound after revert clears, so acceptance was paused. Main PR #131 accepted the correction, followed by the compat candidate-cache adaptation.
+- Accepted-head CI: all eight checks succeeded at `c407439f`: [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940004167), [typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940004188), [lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940004185).
+- Codex review: the [summary](https://github.com/onlyfeng/MiMo-Code/pull/129#issuecomment-5674809678) completed at 2026-09-15 07:15:08Z, with no new reviews or threads. The technically disproved P1 thread remains unresolved and non-outdated in the UI; the corrected P2 thread is outdated. These UI states are not described as resolved.
+- Accepted-SHA CI: [test 成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940948422), [typecheck 成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940948433) and [lint 成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940948413) all succeeded at `ab81af72`; PR-head success does not substitute for these runs.
+- Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed current trees, per-file ownership and retained boundaries.
+- Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); original coverage and earlier findings remain historical.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -1091,17 +1113,25 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
 
-- 2026-09-15 implementation snapshot: compat
+- 2026-09-15 prior validated implementation snapshot: compat
   `05724a5c433a547d9177ebd8bc8e9184962f128e` inherits main
-  `cdfd1a804599eda21fdc5bced9c0d1de025d07da`. F06 chronology, atomic
-  admission, checkpoint/loop-streak/TUI position handling, F07 compaction
+  `cdfd1a804599eda21fdc5bced9c0d1de025d07da`. F06 chronology, transactional
+  user admission, checkpoint/loop-streak/TUI position handling, F07 compaction
   admission guards, and callable SDK examples are now shared contracts, not
   exclusive compat policies. F04 request preflight and F10 legacy snapshot
   reads remain compat-owned. Local affected regressions and the two measured
   integration-test budgets are recorded in [the compat implementation report](compat-audit-followups-2026-09-15.md).
-  PR #129 locally inherits accepted main `806a11e430ae7f90d6a9c50143cb11e6f4123adc`
-  (PR #130), whose source/test content is unchanged from `cdfd1a80`.
-  PR #129 remote CI, final merge and accepted-SHA verification remain pending.
+  This historical snapshot preceded the Codex P2 concerning cache bounds after
+  revert clears. Main PR #131 accepted `89866569ee21e106f3c31c39072d8ec3e976d20a`
+  with behavior `3a12d1800d9bfd002f543764e4ec72047e6e6bb3`; compat behavior is
+  `02cd25b5385dbaffcc629693ca1df2da15af68f2`, and pushed PR head
+  `c407439ff4d213977acf3986d79a4e31627cf9db` inherits accepted main without
+  changing that tree. Session updates and refreshes now release undo history
+  immediately; compat records no-parts marker candidates before deleting evicted
+  parts, keeps the existing 100-candidate cap and retains known coverage for PartRemoved.
+  The layered red/green evidence is recorded in the implementation report.
+  PR #129 is accepted at `ab81af7293ac5ea1ee219bb6aab491d4fd665307` with the same
+  complete tree; only its post-merge test/typecheck/lint results remain pending.
 
 - 2026-09-09 full sync: image normalization is inherited through the existing model transform. Keep bounded replay/error media, active-tool preflight, frozen context and chronology; adapt image fixtures to actual containers. Provider/API/schema inputs and compat SDK operations remain unchanged.
 
@@ -1141,15 +1171,18 @@ files remain byte-identical to the accepted main correction.
   replay; and inherited generated client examples. These have different retirement
   conditions and must not be treated as one indivisible product policy.
   Shared `createMessage` allocates monotonic actor commit timestamps;
-  prompt/compaction `commitUserMessage` atomically admits the user and parts,
-  checks ownership and accepts only equivalent current content. The prompt
+  only user and derived-user messages submitted through `commitUserMessage`
+  or `commitUserMessageIfLatest` admit their message and parts in one transaction,
+  with ownership and current-content equivalence checks. The prompt
   producer can reuse generated anonymous part IDs in relative order, while
   explicit identities remain strict; runtime additions can make old input
   non-equivalent. Debug, inbox, prompt and compaction producers,
   fork/revert/checkpoint and TUI consumers use chronological position with UTF-8
   BINARY ID tie-breaking, not caller-ID magnitude. Inbox still creates the
-  message, writes parts and deletes the queue row in three separate steps; its
-  drain is not covered by the prompt/compaction transaction.
+  message, writes parts and deletes the queue row in three separate steps.
+  `shellImpl` also writes its message and parts separately; streaming assistant
+  output is not one atomic message/parts transaction. These paths are not
+  covered by the `commitUserMessage*` transaction.
   `currentUserID` feeds the current-turn projection through `llm-request-prefix`.
   JSON-schema requests suppress the active recall reminder and can recover the
   structured result from a completed StructuredOutput part. These local prompt

@@ -1,6 +1,6 @@
 # 2026-09-15 compat 差异审计实施
 
-本页记录 [共享实施清单](audit-followups-2026-09-15.md) 中 compat 自有的 F04/F10 与后续 main 继承。原始完整差异审计仍保留固定快照；实现完成不回写旧清单。
+本页记录 [共享实施清单](audit-followups-2026-09-15.md) 中 compat 自有的 F04/F10 与后续 main 继承。当前完整清单与残差决定见[实施收尾报告](fork-difference-closure-2026-09-15.md)。[原始差异审计](fork-difference-audit-2026-09-15.md)仍保留固定快照；实现完成不回写旧清单。
 
 ## 固定源码与继承范围
 
@@ -8,9 +8,11 @@
 
 首批 main PR #128 已接受为 `f10fddb67d830b82890206759c53cef4d8710460`，PR #129 分支在 `f48b6e918d683688348d0c8bfc59cd0199fc7fc8` 继承该提交；`c0c0ebcd`、`eaf99b8b` 记录当时的继承和验证。文档接受点 `b3b32061` 的精确 SHA CI 均已成功；该历史结果不覆盖后续源码。
 
-当前本地源码/测试快照为 `05724a5c433a547d9177ebd8bc8e9184962f128e`，真实继承 main `cdfd1a804599eda21fdc5bced9c0d1de025d07da`。早期 `d8f6578b`、`31192b26`、`0d568184` 分别合入 F06、F07 及其两项动态 gate；后续合入共享预算描述、checkpoint 最新持久尾部读取、有限匿名 part 重试、workflow 清理缺陷收敛和 frozen-catalog 测试准备。所有继承均保留 main 祖先。本地受影响验证已完成，最终接受分支合并与接受 SHA CI 尚待完成；下列证据各自注明实际快照，不以旧绿灯替代后续验证。
+此前已验证的源码/测试快照为 `05724a5c433a547d9177ebd8bc8e9184962f128e`，真实继承 main `cdfd1a804599eda21fdc5bced9c0d1de025d07da`。早期 `d8f6578b`、`31192b26`、`0d568184` 分别合入 F06、F07 及其两项动态 gate；后续合入共享预算描述、checkpoint 最新持久尾部读取、有限匿名 part 重试、workflow 清理缺陷收敛和 frozen-catalog 测试准备。所有继承均保留 main 祖先。该快照的本地受影响验证已完成；后续 Codex P2 修正和传播的证据另列于下，最终接受 SHA CI 均已成功。各组证据注明实际快照，不以旧绿灯替代后续验证。
 
-PR #129 分支现已本地真实继承 PR #130 接受的 main `806a11e430ae7f90d6a9c50143cb11e6f4123adc`。其源码/测试与 main `cdfd1a80` 相同，共享 FD/FC/实施报告与 `555598ab` 及接受 main 相同；compat 源码/测试仍与上述 `05724a5c` 快照一致。PR #129 的远端 CI、最终合并及接受 SHA 验证仍待完成。
+历史 PR #129 head `bb6d40491757eeee3bcd52ede94b89d8b02fab02` 真实继承 PR #130 接受的 main `806a11e430ae7f90d6a9c50143cb11e6f4123adc`。当时 main 的源码/测试与 `cdfd1a80` 相同；该 PR head 的共享 FD/FC/实施报告与 `555598ab` 及接受 main 相同，compat 源码/测试与上述 `05724a5c` 快照一致。八项 CI 检查虽已通过，Codex 仍发现 `session.updated` 清除 revert 后超过 100 条的消息缓存未收缩；PR #129 曾转为 draft 暂缓接受。CDF/05724 的结果保留为该修正之前的历史验证基线。
+
+main PR #131 已接受为 `89866569ee21e106f3c31c39072d8ec3e976d20a`，运行时/测试内容固定于 `3a12d1800d9bfd002f543764e4ec72047e6e6bb3`。compat 在 `fe9011fb` 真实继承该修正，再以 `02cd25b5385dbaffcc629693ca1df2da15af68f2` 完成候选缓存适配。已推送 PR #129 head `c407439ff4d213977acf3986d79a4e31627cf9db` 真实合并接受 main `89866569`，全树与 `02cd25b5` 一致。PR #129 已接受为 `ab81af7293ac5ea1ee219bb6aab491d4fd665307`，全树也与 `02cd25b5` 一致；head CI/Codex 证据见发布核验，接受 SHA 的 test/typecheck/lint 均已成功。
 
 ## 已实现的语义
 
@@ -18,7 +20,7 @@ F04 取消工具 schema 估算的 80 KiB 截断，使用完整 JSON 语义计算
 
 F10 停止 `active_tools` 双写，新快照只写 tools JSON 的完整 active 标记。旧 nullable 列与 migration 保留，旧行/混合行/显式空 mask 仍能读，完整 JSON 标记优先于旧列。删除无生产调用的 `restoreTools` 二参过滤形式；实际执行保留完整已授权工具池，模型可见集合另行选择，MCP hash 与成员绑定不变。compaction 的请求参数及尾部估算继续通过 `restoreActiveTools(tools, active_tools)` 兼容旧行。
 
-F06 已从 main 继承同 actor 单调提交时间及 UTF-8 BINARY ID 排序。debug/inbox/prompt/compaction 生产者和 fork/revert/checkpoint、loop-streak、TUI 消费者共同遵循提交顺序。prompt/compaction 的 `commitUserMessage` 在同一事务内写入 user 和 parts，检查身份所有权及当前内容等价；Inbox 当前仍分三段创建消息、写入 parts、删除队列行，未声明整个 drain crash-atomic。无效 checkpoint 水位在临时视图中清除 marker digest，防止后续 collapse 再误裁；持久对象保持原值。TUI 对已加载的撤销边界保留既有桶容量，revert 活跃时禁止消息事件淘汰。完整 coverage route/schema/SDK/cache 继续属于 compat 的 F08 协议，不作为 main 的新增 API。
+F06 已从 main 继承同 actor 单调提交时间及 UTF-8 BINARY ID 排序。debug/inbox/prompt/compaction 生产者和 fork/revert/checkpoint、loop-streak、TUI 消费者共同遵循提交顺序。仅经 `commitUserMessage` 或 `commitUserMessageIfLatest` 提交的用户及派生用户消息，其消息和 parts 在同一事务内写入并检查身份所有权及当前内容等价。`shellImpl` 的消息和 parts 仍分步写入；Inbox 仍分三段创建消息、写入 parts、删除队列行；assistant 的流式消息/parts 也不作为整体原子事务。没有将这些路径或整个 prompt 生命周期纳入上述原子保证。无效 checkpoint 水位在临时视图中清除 marker digest，防止后续 collapse 再误裁；持久对象保持原值。TUI 在 revert 活跃时保留已加载的撤销边界；清除 revert 的 session 事件或 HTTP 刷新立即恢复每 actor 最新 100 条缓存，消息更新也裁剪全部超额条目并清理对应 parts。compat 在批量淘汰前保留无 parts 消息的必要候选元数据，已知 coverage 不随消息缓存一起删除。完整 coverage route/schema/SDK/cache 继续属于 compat 的 F08 协议，不作为 main 的新增 API。
 
 共享匿名重试修正只允许 prompt producer 标记的自动生成 part IDs 按匿名 parts 的相对顺序复用当前持久 ID，并返回持久 parts。匿名内容换序、内容/metadata 改变、显式身份冲突与跨 owner 仍拒绝；显式 ID 已确定身份时，输入数组换序可在规范排序后等价。执行期间新增 parts 或修改 metadata 后，旧输入也可能不再匹配，因此不是整个消息生命周期的重放保证。
 
@@ -26,7 +28,7 @@ F06 的严格 `usageRecovered` 只认真实持久化水位。compat 的 prefligh
 
 F07 已共享 `afterSnapshot`：按持久消息顺序中的快照 ID 端点识别压缩期间到达的消息，不再以输入数组长度切片，避免过滤掉旧行的投影把已有请求误算成新请求。经既有大工具结果缩减后，summarizer 未见的首个新 `source=user/spawn` 请求及其后全部消息是必留后缀；旧版无 source 行仅按真实、非 synthetic 的文本/文件判为外部请求。可选旧轮次只使用扣除必留后缀后的剩余预算。必留后缀允许超过可选预算；缺 frozen prefix 导致可选预算为零时也不能丢弃新请求。超大请求继续交 compat preflight 和既有 overflow 路由处理，这不是整个尾部必然小于配置预算的承诺。
 
-F07 在同 session/actor 的外部 admission 登记后等待其 settle，在 synthetic continuation 插入前后各检查一次，并删除本轮已过期的 continuation 及 parts。失败或中断的 admission 释放等待；另一 actor 的 pending 请求不阻塞本 actor。新请求不会继承旧 run 的批准收据。最新两项 gate 测试分别固定“hook 已插入而 MCP admission 尚未提交”和“资源仍未释放但 admission fiber 已中断”的真实入口，检查准确删除和后续压缩可继续；这两项已在 `8a0f5062` 的完整 prompt 矩阵通过；后续有限匿名重试修正后的最终完整矩阵另行记录。
+F07 在同 session/actor 的外部 admission 登记后等待其 settle，在 synthetic continuation 插入前后各检查一次，并删除本轮已过期的 continuation 及 parts。失败或中断的 admission 释放等待；另一 actor 的 pending 请求不阻塞本 actor。新请求不会继承旧 run 的批准收据。最新两项 gate 测试分别固定“hook 已插入而 MCP admission 尚未提交”和“资源仍未释放但 admission fiber 已中断”的真实入口，检查准确删除和后续压缩可继续；这两项已在 `8a0f5062` 的完整 prompt 矩阵通过；后续有限匿名重试修正后的矩阵见下方分组证据。
 
 F05/F09/F11 同步继承共享生成器、退役入口清理与生成格式化策略。SDK 保留 compat 的 141 个 operations、coverage 和每 Agent MaxMode schema；code samples 使用共享 callable-v2 生成规则。旧 Actor wake 入口退役，resume 仍使用的执行/通知路径保留。caps、preflight、per-agent MaxMode、模型侧 full Actor、currentTurn/frozen turnContext、TUI 模型元数据和网络/平台政策继续保留。
 
@@ -60,15 +62,44 @@ F06 传播期间的分组证据，包含 `d8f6578b` 收据修正后的受影响�
 - `f73267d2` 的无 observer SDK+frozen 两文件组合为 2 pass、0 fail、1147 断言、14.04 秒，SDK 4.66 秒、frozen 6.02 秒。当时 SDK 没有对应修正，退出 137 的根因未定；这一次组合通过不能证明它由 frozen 的依赖安装导致。后续复现与隔离证据如下。
 - `fd217997` 的原 42 文件矩阵为 481 pass、1 fail、1695 断言、177.93 秒，唯一失败仍是 SDK 原 30 秒子进程退出 137；它发生在 frozen 执行之前。同 42 文件路径、只过滤 SDK 目标的低扰动观察保持 child 完全不改，仅在退出后检查已收输出：553610 字节、JSON 完整、141 operations。采样时父 CPU 接近零、子进程持续占用 CPU，原生栈多在 Bun 事件循环。直接证据将问题范围缩至完整写出后的完成/退出边界，尚未直接确认具体回调或原生机制；Bun pipe 完成机制属于推断。
 - 仅将 SDK 测试 stdout 改为临时文件，保持真实 `GenerateCommand`、原 30 秒 child/45 秒测试限时和全部 callable/HTTP 断言：同 42 文件路径过滤目标为 1 pass、1132 断言、7.14 秒；正式文件捕获实现的无 observer SDK+frozen 组合为 2 pass、1147 断言、10.21 秒，opencode `bun typecheck` 通过。临时文件用 async disposal 清理；两条实际标准生成流程本来就重定向到文件，生产生成器未改。原 42 文件组合的修正后复跑见下。
-- `c2607746` 最终生产源码上的完整 prompt 原默认 5 秒矩阵为 165 pass、2 项既有 skip、1 timeout、929 断言、300.63 秒。失败为串行四个 Actor 的批准继承组合；原 5 秒单例也超时，不归因为共享进程随机性。该单例有界观察完成四个 child，17 断言全部通过，测试本体 7.33 秒；只给此例设置 15 秒预算后的无 observer 默认 CLI 定向为 1 pass、17 断言、测试本体 8.38 秒。主线 `8d5ac893` 的两行测试修正已真实继承，未改变生产 deadline 或整份 prompt 的默认预算。其余 165 项仍引用先前整文件证据，不宣称新 head 又完整重跑过整份 prompt。
+- `c2607746` 当时生产源码上的完整 prompt 原默认 5 秒矩阵为 165 pass、2 项既有 skip、1 timeout、929 断言、300.63 秒。失败为串行四个 Actor 的批准继承组合；原 5 秒单例也超时，不归因为共享进程随机性。该单例有界观察完成四个 child，17 断言全部通过，测试本体 7.33 秒；只给此例设置 15 秒预算后的无 observer 默认 CLI 定向为 1 pass、17 断言、测试本体 8.38 秒。主线 `8d5ac893` 的两行测试修正已真实继承，未改变生产 deadline 或整份 prompt 的默认预算。其余 165 项仍引用先前整文件证据，不宣称新 head 又完整重跑过整份 prompt。
 
-最终本地验证（生产/测试内容固定于 `05724a5c`，运行 head `3103f1d8` 只再继承共享文档）：
+P2 修正前的历史本地验证（生产/测试内容固定于 `05724a5c`，运行 head `3103f1d8` 只再继承共享文档）：
 
 - 原 42 文件组合在 SDK 捕获修正后重跑：482 pass、0 fail、2826 断言、171.23 秒；SDK 用例在原先失败的位置自然完成。范围是原 38 个 compaction/classify/overflow/prefix/tool-mask/chronology/checkpoint/TUI/SDK 文件，加 `auto-overflow-writer-first`、`title-first-turn`、真实 `/rebuild` 的 `rebuild-on-the-spot` 和 `prompt-rebuild-reset` 四文件，包含高 usage assistant 的 digest 端点、手动重建与 compat preflight。
 - SDK、shared package 分别执行 `bun typecheck`，均成功。opencode 已在完全相同的源码/测试内容上通过 `bun typecheck`（7.59 秒）；随后只提交/合并相同 SDK 测试补丁和文档，没有新的 package 内容差异。
 - 完整 prompt 的 165 pass/2 skip/1 timeout，以及预算修正后单例 17 断言通过，按上一节分组保留；没有提高整份文件的默认超时，也没有把历史整文件失败改写为新 head 完整重跑全绿。
 
-F04/F10 独占的 overflow、prefix-snapshot、session.sql、llm-request-prefix 和 text-truncate 文件与 `199286de` 无差异；prompt、message-v2 等共享文件按上述运行契约与具体 hunk 保留，不能称整文件未改。本地当前源码验证如上；最终 PR 审查、接受分支祖先链和接受 SHA CI 由发布阶段另行记录，本地通过不等于远端接受完成。
+F04/F10 独占的 overflow、prefix-snapshot、session.sql、llm-request-prefix 和 text-truncate 文件与 `199286de` 无差异；prompt、message-v2 等共享文件按上述运行契约与具体 hunk 保留，不能称整文件未改。上述本地验证绑定其注明的历史源码快照；P2 修正及传播后的验证见下。PR 审查和接受分支祖先链见发布核验；接受 SHA CI 均已成功，本地矩阵与 PR-head 检查不替代该结果。
+
+## P2 撤销缓存修正与兼容适配
+
+三项新增真实 Provider 用例先后区分了共享缓存容量问题与 compat 候选保留缺口：
+
+- `f1a9f601` 在原行为上运行 coverage 全文件：6 pass、3 fail。两项 late-marker 用例仍保留 103 条，已知 coverage 用例仍保留 101 条，失败点是清除 revert 后未恢复 100 条上限。
+- `fe9011fb` 继承 main `3a12d180`，并将既有 `message.updated` 的单个 removed 消费适配为遍历数组后：7 pass、2 fail。容量断言已通过；事件及 HTTP refresh 两入口的 late-marker 用例仍得到空的 provisional coverage，定位到新增批量裁剪尚未登记候选。已知 coverage 的 PartRemoved 用例此时已通过。
+- `02cd25b5` 在删除 parts 前为无 parts 消息保留候选后：9 pass、0 fail、53 断言。两项用例同轮淘汰两个 marker 及一条有 text part 的旧消息，逐个投递晚到的 checkpoint part；两次权威 HTTP 响应保持挂起直到本地逐项断言完成，证明全部候选得到保留。既有候选 Map 上限仍为 100，只复制 ID、sessionID 和 created 时间，不保存 store draft。已知 coverage 不因消息淘汰被删除，后续 PartRemoved 仍可按 partID 清除并刷新。
+- `02cd25b5` 最终九文件受影响矩阵：61 pass、0 fail、390 断言、11.66 秒；opencode `bun typecheck` 通过，14.15 秒。独立两文件 Provider/coverage 复核为 11 pass、0 fail、241 断言、4.26 秒。上述矩阵有重叠，不相加计数；真实接受 main 合并 `c407439f` 与该树相同。
+
+额外临时探针对比权威响应已为 `[]` 且本地状态已空时的单项淘汰与批量淘汰：PartRemoved 前后均为 2 次请求、coverage `[]`、pending=false，未见该适配新增的可见问题。因此没有为已空状态引入永久 partID 跟踪，也没有扩大 coverage 协议。历史 42 文件矩阵不移称为 `02cd25b5` 或 `c407439f` 上的完整重跑。
+
+## 发布核验
+
+PR #129 已接受为 `ab81af7293ac5ea1ee219bb6aab491d4fd665307`，其双亲为此前接受 compat `b3b32061` 与最终 PR head `c407439f`。接受树与 `c407439f`、源码/测试快照 `02cd25b5` 完全相同；main `89866569` 为真实祖先。最终 head 的八项 CI 检查全部成功，接受 SHA 的三项后续 CI 独立记录于下。
+
+Codex [summary](https://github.com/onlyfeng/MiMo-Code/pull/129#issuecomment-5674809678) 在 2026-09-15 07:15:08Z 完成，没有新增 reviews 或 threads。既有 P1 祖先误报的技术反驳见[共享实施报告](audit-followups-2026-09-15.md)，其 UI 仍为 unresolved/non-outdated；修正后的 P2 已 outdated。没有将这些状态写成所有线程已解决。
+
+| 范围 | SHA / 证据 |
+| --- | --- |
+| main / compat 行为 | `3a12d1800d9bfd002f543764e4ec72047e6e6bb3` / `02cd25b5385dbaffcc629693ca1df2da15af68f2` |
+| 已接受 main / compat 继承合并 | `89866569ee21e106f3c31c39072d8ec3e976d20a` / `c407439ff4d213977acf3986d79a4e31627cf9db` |
+| PR #129 最终 head | `c407439ff4d213977acf3986d79a4e31627cf9db` |
+| 最终 head CI | 八项成功：[test](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940004167)、[typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940004188)、[lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940004185) |
+| Codex | [summary](https://github.com/onlyfeng/MiMo-Code/pull/129#issuecomment-5674809678) 已完成；无新增 reviews/threads，既有线程状态见上 |
+| compat 接受 SHA | `ab81af7293ac5ea1ee219bb6aab491d4fd665307` |
+| 接受 SHA test | [test 成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940948422) |
+| 接受 SHA typecheck | [typecheck 成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940948433) |
+| 接受 SHA lint | [lint 成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34940948413) |
 
 ## 七项归属
 
