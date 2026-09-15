@@ -5128,7 +5128,8 @@ mcpIt.live(
           ),
         )
         expect(snapshot?.revision).toBe(2)
-        expect(snapshot?.active_tools).toContain("mcp_success")
+        expect(snapshot?.active_tools).toBeNull()
+        expect(snapshot?.tools?.find((item) => item.name === "mcp_success")?.active).toBe(true)
         expect(snapshot?.loaded_mcp_tools).toEqual(["mcp_success"])
 
         const followup = JSON.stringify(requests[2])
@@ -5177,8 +5178,9 @@ mcpIt.live(
         expect(snapshot?.tools?.map((item) => item.name)).toEqual(
           expect.arrayContaining(["mcp_tool_search", "mcp_result", "mcp_success"]),
         )
-        expect(snapshot?.active_tools).toContain("mcp_tool_search")
-        expect(snapshot?.active_tools).not.toContain("mcp_result")
+        expect(snapshot?.active_tools).toBeNull()
+        expect(snapshot?.tools?.find((item) => item.name === "mcp_tool_search")?.active).toBe(true)
+        expect(snapshot?.tools?.find((item) => item.name === "mcp_result")?.active).toBe(false)
         expect(snapshot?.loaded_mcp_tools).toEqual([])
 
         const capture = prefixCaptureRef.current

@@ -770,7 +770,6 @@ export const layer = Layer.effect(
             skillCatalog: materialized.catalog,
             toolsHash: SessionPrefixSnapshot.toolsHash(prefix.tools, prefix.activeTools, prefix.loadedMcpTools),
             tools: yield* Effect.promise(() => SessionPrefixSnapshot.snapshotTools(prefix.tools, prefix.activeTools)),
-            activeTools: prefix.activeTools,
             loadedMcpTools: prefix.loadedMcpTools,
             watermarkMessageID: captureUser.info.id,
           }))
@@ -5633,7 +5632,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   skillCatalog: materialized.catalog,
                   toolsHash: currentToolsHash,
                   tools: currentTools,
-                  activeTools,
                   loadedMcpTools: resolvedTools.loadedMcpTools,
                   watermarkMessageID: lastUser.id,
                 })
@@ -5661,7 +5659,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                         skillCatalog: winner.catalog,
                         toolsHash: currentToolsHash,
                         tools: currentTools,
-                        activeTools,
                         loadedMcpTools: resolvedTools.loadedMcpTools,
                         watermarkMessageID: lastUser.id,
                       })
@@ -5707,7 +5704,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 skillCatalog: materialized.catalog,
                 toolsHash: currentToolsHash,
                 tools: currentTools,
-                activeTools,
                 loadedMcpTools: resolvedTools.loadedMcpTools,
                 watermarkMessageID: lastUser.id,
               })

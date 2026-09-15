@@ -93,8 +93,8 @@ export async function snapshotTools(tools: Record<string, AITool>, activeTools: 
 }
 
 export function restoreActiveTools(items: SessionPrefixToolSnapshot[], legacyActiveTools?: readonly string[] | null) {
-  // A shared-main writer updates the JSON but cannot update compat's extra
-  // column. Complete new-format flags therefore outrank a stale legacy mask.
+  // New writers store activity in the tools JSON. Keep the separate column
+  // only for old snapshots; complete flags outrank a stale legacy mask.
   if (items.every((item) => typeof item.active === "boolean")) {
     return items.filter((item) => item.active).map((item) => item.name)
   }
@@ -102,22 +102,15 @@ export function restoreActiveTools(items: SessionPrefixToolSnapshot[], legacyAct
   return items.map((item) => item.name)
 }
 
-export function restoreTools(items: SessionPrefixToolSnapshot[], activeTools?: string[]) {
-  const active = activeTools ? new Set(activeTools) : undefined
+export function restoreTools(items: SessionPrefixToolSnapshot[]) {
   return Object.fromEntries(
-    items.flatMap((item) =>
-      active && !active.has(item.name)
-        ? []
-        : [
-            [
-              item.name,
-              {
-                ...tool({ description: item.description, inputSchema: jsonSchema(item.input_schema) }),
-                ...(item.native_input_schema ? { nativeInputSchema: item.native_input_schema } : {}),
-              },
-            ],
-          ],
-    ),
+    items.map((item) => [
+      item.name,
+      {
+        ...tool({ description: item.description, inputSchema: jsonSchema(item.input_schema) }),
+        ...(item.native_input_schema ? { nativeInputSchema: item.native_input_schema } : {}),
+      },
+    ]),
   )
 }
 
@@ -141,7 +134,6 @@ export const pin = Effect.fn("SessionPrefixSnapshot.pin")(function* (input: {
   system: string[]
   toolsHash: string
   tools: SessionPrefixToolSnapshot[]
-  activeTools: string[]
   loadedMcpTools: string[]
   skillCatalog?: SkillCatalogSnapshot
   watermarkMessageID: MessageID
@@ -158,7 +150,6 @@ export const pin = Effect.fn("SessionPrefixSnapshot.pin")(function* (input: {
           system_hash: systemHash(input.system),
           tools_hash: input.toolsHash,
           tools: input.tools,
-          active_tools: input.activeTools,
           loaded_mcp_tools: input.loadedMcpTools,
           skill_catalog: input.skillCatalog,
           watermark_message_id: input.watermarkMessageID,
@@ -181,7 +172,6 @@ export const rotate = Effect.fn("SessionPrefixSnapshot.rotate")(function* (input
   system: string[]
   toolsHash: string
   tools: SessionPrefixToolSnapshot[]
-  activeTools: string[]
   loadedMcpTools: string[]
   skillCatalog?: SkillCatalogSnapshot
   watermarkMessageID: MessageID
@@ -197,7 +187,6 @@ export const rotate = Effect.fn("SessionPrefixSnapshot.rotate")(function* (input
           system_hash: systemHash(input.system),
           tools_hash: input.toolsHash,
           tools: input.tools,
-          active_tools: input.activeTools,
           loaded_mcp_tools: input.loadedMcpTools,
           // Older callers only rotate the prefix; retain its catalog metadata.
           ...(input.skillCatalog ? { skill_catalog: input.skillCatalog } : {}),
