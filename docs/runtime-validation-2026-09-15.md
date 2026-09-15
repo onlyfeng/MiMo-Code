@@ -11,7 +11,8 @@ main 继续承载共享正确性修正；compat 的产品保证和环境适配�
 - Inbox 实现：`74d4bfb6008071fca87c245c7791530660d64876`，经 [PR #134](https://github.com/onlyfeng/MiMo-Code/pull/134) 接受为 main `d11a9652981e7b5953584205474249775ee54236`。
 - 本批测试/CI：`b23c278e51ab0cc34c47c2d20406d69e57d24f2f`；继承已接受 Inbox 后的集成源码/测试：`a9e4458e62632d65ccdef38152e757730ac102db`。
 - PR #136 复审后的测试源码：`5165307c8a97c448de252a33b9eb2a1feb393545`，为新增插件 child 设置明确的 15 秒测试预算，25 秒进程 watchdog 和 30 秒 wrapper 预算保持原值。
-- 本批新增两个测试 wrapper、两个子进程夹具和共享 Windows job；没有插件、MCP 或平台生产实现改动。
+- 共享 CI 安装修正：`9bf2b8bcc696abf8797487b090c342a5a64f7a7c`，从 `package.json` 选择 Bun 并使用 `bun ci`；runtime/test 行为引用仍为上面的 `5165307c`。
+- 本批新增两个测试 wrapper、两个子进程夹具和共享 Windows job，并收敛共享安装步骤；没有插件、MCP 或平台生产实现改动。
 
 | ID | 能力及归属 | main 结果 | dev/compat 处理与证据归属 |
 | --- | --- | --- | --- |
@@ -69,7 +70,10 @@ compat 私网承诺保留；共享 MCP 生产源码没有分叉。
 `.github/workflows/test.yml` 的 `windows-runtime` job 使用 `windows-latest`，
 自动覆盖 dev/compat push 及以 dev/compat 为 base 的 PR；main push/PR 不执行
 compat 入口。布尔 `workflow_dispatch.windows_runtime` 默认 false，可对指定 ref
-启用。原 Linux job、既有触发和 concurrency 保持原逻辑。
+启用。原 Linux 测试任务、分片、时限、既有触发和 concurrency 保持原逻辑。
+共享 setup-bun composite 原先使用最新 Bun 和 `bun install`；CI 复核后改为读取
+packageManager 并执行 `bun ci`，与独立 Windows job 和仓库依赖安装规范一致。
+本机 frozen install exit 0、锁文件无变化；实际 Linux 安装结果由最终 CI 验证。
 
 Bun 版本取自 `package.json`，核对实际版本后执行 `bun ci`。job 有 15 分钟预算，
 分别记录事件 SHA、实际 checkout SHA、PR head SHA 与 OS/Bun/PowerShell 信息。

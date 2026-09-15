@@ -730,7 +730,9 @@ not change their implementation. The preceding review is retained in the
 
 - 2026-09-15 runtime acceptance infrastructure: the shared test workflow adds
   a Windows job for compat PR/push and explicit manual dispatch. Bun follows the
-  package declaration and dependencies use `bun ci`; a missing Windows entry
+  package declaration and dependencies use `bun ci`, including the shared
+  `.github/actions/setup-bun` composite after the CI reproducibility review.
+  A missing Windows entry
   fails. The job records event, checkout and PR-head SHAs separately and uploads
   bounded evidence. DC-PLATFORM-001 owns the actual compat archive/no-rg entry;
   a skipped main-side Windows job is not a platform acceptance result. Existing
