@@ -8711,6 +8711,7 @@ it.live("run approval disconnect retracts an already pending command permission 
   ),
 )
 
+// Four serialized Actors exercise real tools and provider turns.
 itActor.live(
   "run approval explicitly follows new peers and subagents but never infers ownership from a parent session",
   () =>
@@ -8763,6 +8764,7 @@ itActor.live(
       }),
       { git: true, config: (url) => ({ ...providerCfg(url), permission: { bash: "ask" } }) },
     ),
+  15_000,
 )
 
 it.live("run approval does not authorize an unrelated user queued into its admitted runner", () =>
