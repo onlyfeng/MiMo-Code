@@ -509,13 +509,14 @@ the complete resolved model identity` case. FD-005 keeps only identity
   value consumed unchanged by every prompt, discovery, registry, capture, and
   dispatch surface, with alias-conflict and GPT-4 regressions.
 
-- 2026-09-15 audit gaps and cleanup candidates: `cli/cmd/debug/agent.ts`
-  passes model ID, API ID and family to the registry but omits `harnessModel`,
-  unlike actual requests and the experimental tool-list route. An opaque trusted
-  alias can therefore produce a different diagnostic tool list. This is an open
-  carrier defect, not an exception granting a new harness policy. The unused
-  fourth `CustomModelLoader` model argument also remains after the MiMo transport
-  retirement; removing it is a cleanup candidate, not an unadopted feature.
+- 2026-09-15 debug carrier correction: `cli/cmd/debug/agent.ts` now passes
+  the resolved `harness_model` to registry discovery, matching actual requests
+  and the experimental tool-list route. Eight real CLI subprocess cases cover
+  trusted opaque aliases, untrusted API aliases, GPT-4/OSS/MiMo vetoes and explicit
+  selectors. This closes the diagnostic carrier defect identified by the audit;
+  it does not change harness policy or validate `debug --tool` execution.
+  The unused fourth `CustomModelLoader` argument remains a separate cleanup
+  candidate tracked by F09 in [the implementation report](audit-followups-2026-09-15.md).
 
 ## FD-006 — `exec` is a composition tool, not an authority gateway
 

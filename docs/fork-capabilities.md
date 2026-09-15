@@ -693,14 +693,18 @@ not change their implementation. The preceding review is retained in the
   bound the cancellation join to the existing reclaim grace while detached
   cleanup continues; shared cancellation retains interrupt/join semantics.
   The dated actor quarantine entries below describe their historical snapshots.
-  One separate fork-only workflow case is still quarantined:
-  `test/workflow/runtime-worktree.test.ts` aliases `deadline` to `it.live.skip`
-  for `a deadline-fired run reclaims the in-flight isolated agent's worktree`.
-  Upstream `5198ff54` runs it with `it.live`. Its recorded defect is test-server /
-  child-Instance disposer settlement after the assertions, not a demonstrated
-  product reclamation failure. It must pass and exit in a bounded isolated run
-  before the skip can be removed. Closing the two actor cases does not close
-  this FC-008 validation debt; green CI does not execute a skipped case.
+  The separate workflow deadline quarantine is also closed. The restored
+  `it.live` case proves the hanging LLM request was consumed, a child worktree
+  and running Instance existed, the exact workflow deadline fired, and the
+  worktree and Instance were disposed. Its former two-second deadline could
+  precede child startup; the test now explicitly gates on startup before testing
+  reclamation. Four workflow/disposal suites pass together (44 tests) and the
+  process exits naturally. The historically reported disposer hang was not
+  reproduced; no production cleanup policy changed. F03 records the opt-in
+  environment and evidence in [the implementation report](audit-followups-2026-09-15.md).
+  A separate Runner reentry fixture now uses explicit started/reentered/release
+  signals instead of five/fifty-millisecond timer ordering, preserving the
+  assertion that both waiters share the first execution and emit one warning.
 
 - Status: active process/runtime contract
 - Canonical owner: fork `main` workflow runtime and repository CI

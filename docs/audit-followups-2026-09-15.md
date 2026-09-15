@@ -14,14 +14,14 @@
 
 | ID  | 选定行为与归属                                | main 结果        | dev/compat 结果      | 决定性载体/验证                                                           |
 | --- | --------------------------------------------- | ---------------- | -------------------- | ------------------------------------------------------------------------- |
-| F01 | upstream 网关错误别名                         | 本地采纳，待发布 | 待继承               | provider/error.ts；别名、大小写、421/441与非网关隔离                      |
-| F02 | 可信模型身份传到 debug；FD-005                | 待集成           | 待继承               | debug agent真实入口、harness resolver及负向/显式模式                      |
-| F03 | workflow deadline真实执行与释放；FC-008       | 正在验证         | 待继承               | runtime-worktree、LLM进入、child Instance释放、进程自然退出               |
+| F01 | upstream 网关错误别名                         | 已集成，待发布   | 待继承               | provider/error.ts；别名、大小写、421/441与非网关隔离                      |
+| F02 | 可信模型身份传到 debug；FD-005                | 已集成，待发布   | 待继承               | debug agent真实入口、harness resolver及负向/显式模式                      |
+| F03 | workflow deadline真实执行与释放；FC-008       | 已恢复，待发布   | 待继承               | runtime-worktree、LLM进入、child Instance释放、进程自然退出               |
 | F04 | 请求估算及序列化失败策略；DC-CONTEXT-001      | 无对应预检扩展   | 正在修复             | 完整tool schema、实际prompt预检、有效工具集合及保守失败                   |
 | F05 | 通用SDK示例生成正确性；FC-008                 | 待提升           | 待继承并删除重复差异 | 生成器、OpenAPI code samples、实际v2调用；不混入compat schema             |
 | F06 | 消息时序与原子用户提交；FC-001/DC-CONTEXT-001 | 待提升           | 待以共享实现收敛     | createMessage、UTF8排序、producer、fork/revert/checkpoint及TUI消费        |
 | F07 | 并发压缩保留新请求；FC-015/DC-CONTEXT-001     | 待提升           | 待以共享实现收敛     | compaction、pending external admission、continuation前后检查              |
-| F08 | checkpoint coverage协议归属；DC-CONTEXT-001   | 待评估共享必要性 | 保留完整现有协议     | route/schema/SDK/TUI缓存；不允许只移动单边载体                            |
+| F08 | checkpoint coverage协议归属；DC-CONTEXT-001   | 评估完成，不上移 | 保留完整现有协议     | route/schema/SDK/TUI缓存；不允许只移动单边载体                            |
 | F09 | 退役入口及无调用残留；FC-001/008、FD-004/005  | 待清理           | 待继承               | 旧wake入口、三helper、loader参数、worker与Actor注释；保留resume仍使用路径 |
 | F10 | 旧工具mask存储及无用重载；DC-CONTEXT-001      | 不引入旧扩展     | 待收敛               | tools.active、旧行读取、空mask、migration和独立MCP hash                   |
 | F11 | 机械差异与生成格式化策略；FC-008/015          | 待收敛           | 待继承               | root generate与已收敛overflow/default prompt；不改运行策略                |
@@ -30,10 +30,24 @@
 
 ## 已取得的验证
 
-F01 新增六组 gateway alias 回归在旧源码上失败，四组近似但非网关的 provider 保持原错误处理。采纳 upstream 后，provider error完整测试集为25 pass、0 fail、45断言。默认命令移除 MIMOCODE_EXPERIMENTAL、MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH、MIMOCODE_CODEX_MODE，保留包级 Orchestrator preload。package bun typecheck通过。定向lint为0 error、6 warning，警告位于继承的upstream源码；不把退出0描述成零警告。
+### 第一批 main 修正
 
-F01源/测试快照为 `874f198b5f25fdd1bc21f73bc58553ba82a2938d`。这些本地证据不等于最终分支CI或其他条目的通过。
+源码/测试快照：`0b12e39ebfae5e0a01e623de1b4f58e96c86cb09`。F01 采纳的生产文件与 upstream `b4cc11cd` 完全一致。六组 alias 回归在旧实现上失败，新实现 provider error 集为 25 pass、45 断言，涵盖四组非网关近似名称。定向 lint 为 0 error、6 warning（继承的 upstream 源码），不宣称零警告。
+
+F02 将可信 `harness_model` 传入 debug 工具发现。八个真实 CLI 子进程检查 agent/default 模型、可信与不可信 alias、模型家族 veto 及显式开关。F03 恢复 deadline 实例回收测试，新增真实启动、准确 deadline 原因及 Instance 释放断言；历史 disposer hang 未在现有实现复现，未修改生产清理策略。四个 workflow/disposal 文件同进程 44 pass、0 skip、262 断言、64.08 秒自然退出。该矩阵显式启用 workflow 开关，属于 opt-in 验证。
+
+PR #126 初始 CI 暴露 Runner 重入测试的 5/50ms 竞争：父测试被调度晚时首执行可能已结束。现在通过 started/reentered/finish 信号确保正在执行时重入，再放行首任务；生产 Runner 未改。
+
+最终 main 默认矩阵为 provider error、debug agent、harness alias、tuple key、Runner 五文件，88 pass、0 fail、335 断言、84.40 秒；package `bun typecheck` 通过。独立复核其中三文件为 37 pass、101 断言。默认验证显式清除 `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`、`MIMOCODE_CODEX_MODE`、`MIMOCODE_COMPACTION_MAX_CONTEXT`、`MIMOCODE_COMPACTION_TRIGGER_RATIO`、`MIMOCODE_DISABLE_CHECKPOINT`、`MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`，保留包 preload 的 Orchestrator、内存数据库和隔离配置。早期仅清前三项的运行继承了 workflow 开关，不能作为默认路径证据。
+
+另有本地 shard 4 同分组的 126 文件矩阵：1417 pass、20 skip、4123 断言、459.63 秒。该轮 `CI=true` 但继承 workflow 开关，是 opt-in 共享进程补充证据，不等同默认 CI。最终远端 SHA 的 CI 仍须独立确认。
+
+### 协议归属决定
+
+F08 的 checkpoint-coverage route、schema、SDK 与 TUI 缓存作为完整协议留在 compat。没有 core engine 对该查询 API 的依赖；共享正确性所需的消息时序、checkpoint 边界及 main 现有 TUI 水位判断由 F06/F07 修正，不要求新增 main API。私网和 Actor 等原有产品策略继续保留。
 
 ## 发布与审查
 
-文档 PR [#126](https://github.com/onlyfeng/MiMo-Code/pull/126) 已创建。后续合并、compat传播、自动审查处置及最终SHA的CI结果仍待完成，不能引用旧接受SHA的绿灯替代。
+文档 PR [#126](https://github.com/onlyfeng/MiMo-Code/pull/126) 已合并至 main `818457d08e9d39f561cdd2bcb86ee4a73bcf5fbf`。Codex 提出的 FD-004 历史锚点问题通过显式保留旧锚点修复；最终 PR head 的八项检查和自动复审通过，合并 SHA 的 test/lint/typecheck 均成功。文档传播 PR [#127](https://github.com/onlyfeng/MiMo-Code/pull/127) 正在审核。
+
+本页区分本地已实现与远端接受。后续 runtime PR、compat 传播及最终 SHA 的 CI 结果在接受后更新，不引用旧 SHA 绿灯替代。
