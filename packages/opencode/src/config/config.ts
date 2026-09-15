@@ -270,7 +270,7 @@ const InfoSchema = Schema.Struct({
       }),
       preserve_recent_tokens: Schema.optional(NonNegativeInt).annotate({
         description:
-          "Deprecated compatibility setting. Compression-time API rounds use at most 40000 tokens, capped by the ratio-based compaction trigger after frozen prefix and projection overhead.",
+          "Deprecated compatibility setting. Optional older API rounds use at most 40000 tokens, capped by the ratio-based trigger after frozen prefix and projection overhead. New external requests arriving during compaction and their following messages are retained even beyond that optional budget.",
       }),
       reserved: Schema.optional(NonNegativeInt).annotate({
         description:

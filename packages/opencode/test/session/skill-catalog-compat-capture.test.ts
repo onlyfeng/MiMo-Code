@@ -170,7 +170,6 @@ it.live(
                 ["mcp_pin_winner"],
               ),
               tools,
-              activeTools: ["actor"],
               loadedMcpTools: ["mcp_pin_winner"],
               watermarkMessageID: user.info.id,
             })

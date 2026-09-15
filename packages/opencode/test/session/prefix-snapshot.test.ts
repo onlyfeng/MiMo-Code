@@ -112,8 +112,11 @@ describe("session prefix snapshot", () => {
             profileKey: key,
             system: ["first"],
             toolsHash: "tools-1",
-            tools: [],
-            activeTools: ["local_first", "mcp_first"],
+            tools: [
+              { name: "local_first", input_schema: { type: "object" }, active: true },
+              { name: "mcp_first", input_schema: { type: "object" }, active: true },
+              { name: "mcp_hidden", input_schema: { type: "object" }, active: false },
+            ],
             loadedMcpTools: ["mcp_first"],
             watermarkMessageID: firstWatermark,
           }),
@@ -122,11 +125,21 @@ describe("session prefix snapshot", () => {
           revision: 1,
           system: ["first"],
           tools_hash: "tools-1",
-          active_tools: ["local_first", "mcp_first"],
+          active_tools: null,
           loaded_mcp_tools: ["mcp_first"],
           skill_catalog: null,
           watermark_message_id: firstWatermark,
         })
+
+        expect(SessionPrefixSnapshot.restoreActiveTools(first.tools!, first.active_tools)).toEqual([
+          "local_first",
+          "mcp_first",
+        ])
+        expect(Object.keys(SessionPrefixSnapshot.restoreTools(first.tools!))).toEqual([
+          "local_first",
+          "mcp_first",
+          "mcp_hidden",
+        ])
 
         const pinned = await AppRuntime.runPromise(
           SessionPrefixSnapshot.pin({
@@ -135,7 +148,6 @@ describe("session prefix snapshot", () => {
             system: ["ignored"],
             toolsHash: "ignored",
             tools: [],
-            activeTools: [],
             loadedMcpTools: [],
             watermarkMessageID: MessageID.ascending(),
           }),
@@ -148,8 +160,10 @@ describe("session prefix snapshot", () => {
             profileKey: key,
             system: ["second"],
             toolsHash: "tools-2",
-            tools: [],
-            activeTools: ["local_second", "mcp_second"],
+            tools: [
+              { name: "local_second", input_schema: { type: "object" }, active: false },
+              { name: "mcp_second", input_schema: { type: "object" }, active: false },
+            ],
             loadedMcpTools: ["mcp_second"],
             watermarkMessageID: firstWatermark,
           }),
@@ -158,10 +172,13 @@ describe("session prefix snapshot", () => {
           revision: 2,
           system: ["second"],
           tools_hash: "tools-2",
-          active_tools: ["local_second", "mcp_second"],
+          active_tools: null,
           loaded_mcp_tools: ["mcp_second"],
           skill_catalog: null,
         })
+
+        expect(SessionPrefixSnapshot.restoreActiveTools(rotated.tools!, rotated.active_tools)).toEqual([])
+        expect(Object.keys(SessionPrefixSnapshot.restoreTools(rotated.tools!))).toEqual(["local_second", "mcp_second"])
 
         const finalWatermark = MessageID.ascending()
         await AppRuntime.runPromise(
@@ -224,7 +241,6 @@ describe("session prefix snapshot", () => {
           system: ["stable prefix", catalog.text],
           toolsHash: "native-tools",
           tools,
-          activeTools: ["actor"],
           loadedMcpTools: ["mcp_hidden"],
           watermarkMessageID: MessageID.ascending(),
         }
@@ -367,23 +383,5 @@ describe("session prefix snapshot", () => {
     expect(SessionPrefixSnapshot.toolsHash(first, ["beta", "alpha"])).toBe(
       SessionPrefixSnapshot.toolsHash(second, ["alpha", "beta"]),
     )
-  })
-
-  test("restores only the separately recorded wire-active subset", async () => {
-    const tools = {
-      local: tool({ description: "local", inputSchema: jsonSchema({ type: "object", properties: {} }) }),
-      mcp_loaded: tool({ description: "loaded", inputSchema: jsonSchema({ type: "object", properties: {} }) }),
-      mcp_searchable: tool({
-        description: "searchable",
-        inputSchema: jsonSchema({ type: "object", properties: {} }),
-      }),
-    }
-    const snapshot = await SessionPrefixSnapshot.snapshotTools(tools, Object.keys(tools))
-
-    expect(Object.keys(SessionPrefixSnapshot.restoreTools(snapshot))).toEqual(["local", "mcp_loaded", "mcp_searchable"])
-    expect(Object.keys(SessionPrefixSnapshot.restoreTools(snapshot, ["local", "mcp_loaded"]))).toEqual([
-      "local",
-      "mcp_loaded",
-    ])
   })
 })

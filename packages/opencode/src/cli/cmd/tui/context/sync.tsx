@@ -174,15 +174,15 @@ export function messageInsertIndex(messages: readonly OrderedMessage[], message:
   return index < 0 ? messages.length : index
 }
 
-export function upsertChronologicalMessage<M extends OrderedMessage>(
-  messages: readonly M[],
-  message: M,
-  limit = 100,
-) {
+export function upsertChronologicalMessage<M extends OrderedMessage>(messages: readonly M[], message: M, limit = 100) {
   const next = messages.filter((current) => current.id !== message.id)
   next.splice(messageInsertIndex(next, message), 0, message)
-  const removed = next.length > limit ? next.shift() : undefined
-  return { messages: next, removed }
+  return trimChronologicalMessages(next, limit)
+}
+
+function trimChronologicalMessages<M>(messages: readonly M[], limit = 100) {
+  const start = Math.max(0, messages.length - limit)
+  return { messages: messages.slice(start), removed: messages.slice(0, start) }
 }
 
 export function removeMessageByID<M extends { id: string }>(messages: readonly M[], id: string) {
@@ -192,21 +192,6 @@ export function removeMessageByID<M extends { id: string }>(messages: readonly M
     messages: [...messages.slice(0, index), ...messages.slice(index + 1)],
     removed: messages[index],
   }
-}
-
-export function messagesBefore<M extends { id: string }>(messages: readonly M[], id: string) {
-  const index = messageIndex(messages, id)
-  return index < 0 ? [] : messages.slice(0, index)
-}
-
-export function messagesAfter<M extends { id: string }>(messages: readonly M[], id: string) {
-  const index = messageIndex(messages, id)
-  return index < 0 ? [] : messages.slice(index + 1)
-}
-
-export function messagesFrom<M extends { id: string }>(messages: readonly M[], id: string) {
-  const index = messageIndex(messages, id)
-  return index < 0 ? [] : messages.slice(index)
 }
 
 export function revertView<M extends OrderedMessage>(
@@ -501,11 +486,34 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       if (deletedSessions.has(incoming.id)) return
       const next = mergedSession(incoming)
       const found = Binary.search(store.session, incoming.id, item => item.id)
-      if (found.found) setStore("session", found.index, reconcile(next))
-      else setStore("session", produce(draft => { draft.splice(found.index, 0, next) }))
+      batch(() => {
+        if (found.found) setStore("session", found.index, reconcile(next))
+        else setStore("session", produce(draft => { draft.splice(found.index, 0, next) }))
+        trimSessionMessages(next)
+      })
     }
     function applySessions(incoming: Session[]) {
-      setStore("session", reconcile(incoming.filter(item => !deletedSessions.has(item.id)).map(mergedSession)))
+      const next = incoming.filter(item => !deletedSessions.has(item.id)).map(mergedSession)
+      batch(() => {
+        setStore("session", reconcile(next))
+        next.forEach(trimSessionMessages)
+      })
+    }
+    function trimSessionMessages(session: Session) {
+      if (session.revert || !store.message[session.id]) return
+      // Undo can hydrate many pages. Release them with the authoritative session
+      // update, including its HTTP refresh path, even if no new message arrives.
+      setStore(produce(draft => {
+        for (const [aid, messages] of Object.entries(draft.message[session.id])) {
+          if (messages.length <= 100) continue
+          const result = trimChronologicalMessages(messages)
+          draft.message[session.id][aid] = result.messages
+          for (const message of result.removed) {
+            if (!draft.part[message.id]?.length) rememberCheckpointCoverageCandidate(message)
+            delete draft.part[message.id]
+          }
+        }
+      }))
     }
     let syncedWorkspace = project.workspace.current()
     let syncedDirectory = sdk.directory
@@ -799,18 +807,26 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           const sid = event.properties.info.sessionID
           const aid = event.properties.info.agentID ?? "main"
           if (!store.message[sid]) setStore("message", sid, {})
-          const result = upsertChronologicalMessage(store.message[sid][aid] ?? [], event.properties.info)
-          const removed = result.removed
-          if (removed?.id === event.properties.info.id || (removed && !store.part[removed.id]?.length)) {
-            rememberCheckpointCoverageCandidate(removed)
+          const session = store.session.find((item) => item.id === sid)
+          // Undo may have loaded older pages to resolve its boundary. Keep that
+          // history available while undo/redo still depends on the boundary.
+          const result = upsertChronologicalMessage(
+            store.message[sid][aid] ?? [],
+            event.properties.info,
+            session?.revert ? Infinity : 100,
+          )
+          for (const removed of result.removed) {
+            if (removed.id === event.properties.info.id || !store.part[removed.id]?.length) {
+              rememberCheckpointCoverageCandidate(removed)
+            }
           }
           batch(() => {
             setStore("message", sid, aid, reconcile(result.messages))
-            if (!removed) return
+            if (!result.removed.length) return
             setStore(
               "part",
               produce((draft) => {
-                delete draft[removed.id]
+                for (const removed of result.removed) delete draft[removed.id]
               }),
             )
           })
@@ -1261,10 +1277,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             messages,
             session.data!.revert?.messageID,
             (before) =>
-              sdk.client.session.messages(
-                { sessionID, limit: 100, before, agent_id: "*" },
-                { throwOnError: true },
-              ),
+              sdk.client.session.messages({ sessionID, limit: 100, before, agent_id: "*" }, { throwOnError: true }),
           )
           if (!loadedMessages.found) {
             toast?.show({

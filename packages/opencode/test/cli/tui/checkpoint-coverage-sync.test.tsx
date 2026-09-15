@@ -8,6 +8,7 @@ import type {
   Event,
   GlobalEvent,
   Message,
+  Part,
   Session,
   UserMessage,
 } from "@mimo-ai/sdk/v2"
@@ -104,11 +105,16 @@ function coverage(
   }
 }
 
-function checkpoint(input: { coveredUpTo: string; digestUpTo?: string; partID?: string }): CheckpointPart {
+function checkpoint(input: {
+  coveredUpTo: string
+  digestUpTo?: string
+  partID?: string
+  messageID?: string
+}): CheckpointPart {
   return {
     id: input.partID ?? "prt_checkpoint",
     sessionID: SESSION_ID,
-    messageID: "msg_z_marker",
+    messageID: input.messageID ?? "msg_z_marker",
     type: "checkpoint",
     checkpointDir: "",
     checkpointNumber: 0,
@@ -137,9 +143,14 @@ function holdCoverage(data: CheckpointCoverage[]): CoverageGate {
   }
 }
 
-function createFetch(messages: Message[], coverageReplies: (CheckpointCoverage[] | CoverageGate)[]) {
+function createFetch(
+  messages: Message[],
+  coverageReplies: (CheckpointCoverage[] | CoverageGate)[],
+  initialSession = session(),
+) {
   const replies = [...coverageReplies]
   let coverageRequests = 0
+  let currentSession = initialSession
 
   function body(path: string, directory?: string): unknown {
     if (path === "/path")
@@ -147,8 +158,8 @@ function createFetch(messages: Message[], coverageReplies: (CheckpointCoverage[]
     if (path === "/project/current") return { id: "project" }
     if (path === "/config/providers") return { providers: [], default: {} }
     if (path === "/provider") return { all: [], default: {}, connected: [], authenticated: [] }
-    if (path === "/session") return [session()]
-    if (path === `/session/${SESSION_ID}`) return session()
+    if (path === "/session") return [currentSession]
+    if (path === `/session/${SESSION_ID}`) return currentSession
     if (path === `/session/${SESSION_ID}/message`) return messages.map((info) => ({ info, parts: [] }))
     if (path.startsWith(`/session/${SESSION_ID}/`)) return []
     if (path === "/experimental/console") return {}
@@ -189,6 +200,9 @@ function createFetch(messages: Message[], coverageReplies: (CheckpointCoverage[]
   return {
     fetch: fetcher,
     coverageRequests: () => coverageRequests,
+    setSession(info: Session) {
+      currentSession = info
+    },
   }
 }
 
@@ -215,10 +229,11 @@ async function mount(
   input: {
     messages?: Message[]
     coverageReplies?: (CheckpointCoverage[] | CoverageGate)[]
+    session?: Session
   } = {},
 ) {
   const events = createEvents()
-  const http = createFetch(input.messages ?? history(), input.coverageReplies ?? [[]])
+  const http = createFetch(input.messages ?? history(), input.coverageReplies ?? [[]], input.session)
   let context!: {
     project: ReturnType<typeof useProject>
     sdk: ReturnType<typeof useSDK>
@@ -271,7 +286,7 @@ function updated(info: Message): Event {
   return { type: "message.updated", properties: { sessionID: SESSION_ID, info } }
 }
 
-function partUpdated(part: CheckpointPart): Event {
+function partUpdated(part: Part): Event {
   return {
     type: "message.part.updated",
     properties: { sessionID: SESSION_ID, part, time: Date.now() },
@@ -344,6 +359,109 @@ describe("tui checkpoint coverage sync", () => {
       expect(usage(sync)?.context).toBe("190.1K/960K (20%)")
     } finally {
       app.renderer.destroy()
+    }
+  })
+
+  for (const entry of ["session.updated", "session.refresh"] as const) {
+    test(`${entry} preserves late checkpoint parts for every marker evicted when undo ends`, async () => {
+      const markers = [user("msg_marker_first", 10), user("msg_marker_second", 20)]
+      const expected = markers.map((marker, index) =>
+        coverage({ markerID: marker.id, markerCreated: marker.time.created, partID: `prt_checkpoint_${index}` }),
+      )
+      const refreshes = expected.map(() => holdCoverage(expected))
+      const context = await mount({
+        session: { ...session(), revert: { messageID: history()[0].id } },
+        coverageReplies: [[], ...refreshes],
+      })
+
+      try {
+        await context.sync.session.sync(SESSION_ID)
+        for (const marker of markers) context.emit(updated(marker))
+        context.emit(updated(user("msg_old_with_part", 30)))
+        context.emit(
+          partUpdated({
+            id: "prt_old_text",
+            messageID: "msg_old_with_part",
+            sessionID: SESSION_ID,
+            type: "text",
+            text: "old text",
+          }),
+        )
+        await wait(() => context.sync.data.message[SESSION_ID].main.length === 103)
+        await wait(() => context.sync.data.part.msg_old_with_part?.length === 1)
+
+        context.http.setSession(session())
+        if (entry === "session.updated") {
+          context.emit({ type: "session.updated", properties: { sessionID: SESSION_ID, info: session() } })
+          await wait(() => !context.sync.session.get(SESSION_ID)?.revert)
+        }
+        if (entry === "session.refresh") await context.sync.session.refresh()
+
+        expect(context.sync.data.message[SESSION_ID].main.map((message) => message.id)).toEqual(
+          history().map((message) => message.id),
+        )
+        for (const marker of markers) expect(context.sync.data.part[marker.id]).toBeUndefined()
+        expect(context.sync.data.part.msg_old_with_part).toBeUndefined()
+
+        for (const [index, marker] of markers.entries()) {
+          context.emit(
+            partUpdated(
+              checkpoint({
+                messageID: marker.id,
+                partID: expected[index].partID,
+                coveredUpTo: "msg_z_measured",
+              }),
+            ),
+          )
+          await wait(() => refreshes[index].parked)
+          expect(context.sync.data.checkpoint_coverage[SESSION_ID]).toEqual(expected.slice(0, index + 1))
+          expect(usage(context.sync)?.pending).toBe(true)
+        }
+        expect(context.http.coverageRequests()).toBe(3)
+        expect(context.sync.data.message[SESSION_ID].main).toHaveLength(100)
+        for (const refresh of refreshes) refresh.release()
+      } finally {
+        for (const refresh of refreshes) refresh.release()
+        context.app.renderer.destroy()
+      }
+    })
+  }
+
+  test("undo-end eviction preserves cached coverage until PartRemoved refreshes it", async () => {
+    const markerPart = checkpoint({ coveredUpTo: "msg_z_measured" })
+    const expected = [coverage()]
+    const removed = holdCoverage([])
+    const context = await mount({
+      session: { ...session(), revert: { messageID: history()[0].id } },
+      coverageReplies: [[], expected, removed],
+    })
+
+    try {
+      await context.sync.session.sync(SESSION_ID)
+      context.emit(updated(user("msg_z_marker", 50)))
+      context.emit(partUpdated(markerPart))
+      await wait(() => context.http.coverageRequests() === 2)
+      await wait(() => context.sync.data.checkpoint_coverage[SESSION_ID]?.length === expected.length)
+      expect(context.sync.data.message[SESSION_ID].main).toHaveLength(101)
+      expect(context.sync.data.part.msg_z_marker).toEqual([markerPart])
+
+      context.http.setSession(session())
+      context.emit({ type: "session.updated", properties: { sessionID: SESSION_ID, info: session() } })
+      await wait(() => !context.sync.session.get(SESSION_ID)?.revert)
+      expect(context.sync.data.message[SESSION_ID].main).toHaveLength(100)
+      expect(context.sync.data.part.msg_z_marker).toBeUndefined()
+      expect(context.sync.data.checkpoint_coverage[SESSION_ID]).toEqual(expected)
+      expect(usage(context.sync)?.pending).toBe(true)
+
+      context.emit(partRemoved(markerPart))
+      await wait(() => removed.parked)
+      expect(context.http.coverageRequests()).toBe(3)
+      expect(context.sync.data.checkpoint_coverage[SESSION_ID]).toEqual([])
+      expect(usage(context.sync)?.pending).toBe(false)
+      removed.release()
+    } finally {
+      removed.release()
+      context.app.renderer.destroy()
     }
   })
 

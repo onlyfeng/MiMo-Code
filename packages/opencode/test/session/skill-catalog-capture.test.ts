@@ -226,7 +226,6 @@ it.live(
               system: ["LEGACY_PIN_WINNER_SYSTEM"],
               toolsHash: SessionPrefixSnapshot.toolsHash(SessionPrefixSnapshot.restoreTools(tools), ["actor"], ["mcp_pin_winner"]),
               tools,
-              activeTools: ["actor"],
               loadedMcpTools: ["mcp_pin_winner"],
               watermarkMessageID: user.info.id,
             })
@@ -362,7 +361,6 @@ for (const layout of ["legacy", "managed format"] as const) it.live(
               skillCatalog: bound?.catalog,
               toolsHash: SessionPrefixSnapshot.toolsHash(SessionPrefixSnapshot.restoreTools(tools), ["actor"]),
               tools,
-              activeTools: ["actor"],
               loadedMcpTools: [],
               watermarkMessageID: user.info.id,
             })

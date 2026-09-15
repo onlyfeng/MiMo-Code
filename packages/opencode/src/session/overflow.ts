@@ -5,8 +5,6 @@ import { ProviderTransform } from "@/provider"
 import { Log, Token, Wildcard } from "@/util"
 import type { MessageV2 } from "./message-v2"
 import type { ModelMessage } from "ai"
-import { capUtf8TextByBytes } from "../util/text-truncate"
-import { safeStringifySimple } from "../util/safe-stringify"
 
 const COMPACTION_BUFFER = 33_000
 
@@ -14,11 +12,6 @@ const COMPACTION_BUFFER = 33_000
 // don't strangle the usable input window. 20K covers >99.99% of compaction
 // summary outputs based on production telemetry of summary token counts.
 const OUTPUT_CAP = 20_000
-// Cap tool schema bytes for overflow estimation. Tool schemas are static and
-// compaction cannot shrink them, so oversized schemas must be detected at
-// preflight time. 80KB covers the worst-case toolset (~30 tools with verbose
-// descriptions) while keeping the estimate tractable.
-const REQUEST_PREFLIGHT_TOOL_SCHEMA_MAX_BYTES = 80 * 1024
 
 type RequestEstimateInput = {
   prebuiltSystem?: string[]
@@ -30,6 +23,7 @@ type RequestEstimateInput = {
 
 export type RequestOverflowClassification =
   | { type: "ok" }
+  | { type: "unserializable" }
   | { type: "overflow"; requestTokens: number; recoveryFloorTokens: number }
   | { type: "overflow-static"; requestTokens: number; recoveryFloorTokens: number }
 
@@ -127,11 +121,13 @@ export function isOverflow(input: { cfg: Config.Info; tokens: MessageV2.Assistan
 }
 
 export function estimateRequestTokens(input: RequestEstimateInput) {
-  const tools = safeStringifySimple(input.tools ?? {})
-  const serialized = safeStringifySimple({
+  // Estimate complete descriptors using the same JSON semantics as dispatch.
+  // Truncation and circular-reference placeholders can hide an oversized or
+  // invalid request; shared objects must be counted at every wire occurrence.
+  const serialized = JSON.stringify({
     system: input.prebuiltSystem ?? input.system ?? [],
     messages: input.messages,
-    tools: capUtf8TextByBytes(tools, REQUEST_PREFLIGHT_TOOL_SCHEMA_MAX_BYTES, "tool schemas"),
+    tools: input.tools ?? {},
     toolChoice: input.toolChoice,
   })
   const charEstimate = Token.estimate(serialized)
@@ -154,12 +150,18 @@ export function classifyRequestOverflow(
     recoveryFloorMessages: ModelMessage[]
   },
 ): RequestOverflowClassification {
-  const requestTokens = estimateRequestTokens(input)
-  if (!isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens })) return { type: "ok" }
-  const recoveryFloorTokens = estimateRequestTokens({ ...input, messages: input.recoveryFloorMessages })
-  return isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens: recoveryFloorTokens })
-    ? { type: "overflow-static", requestTokens, recoveryFloorTokens }
-    : { type: "overflow", requestTokens, recoveryFloorTokens }
+  if (input.cfg.compaction?.auto === false || input.model.limit.context === 0) return { type: "ok" }
+  try {
+    const requestTokens = estimateRequestTokens(input)
+    if (!isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens })) return { type: "ok" }
+    const recoveryFloorTokens = estimateRequestTokens({ ...input, messages: input.recoveryFloorMessages })
+    return isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens: recoveryFloorTokens })
+      ? { type: "overflow-static", requestTokens, recoveryFloorTokens }
+      : { type: "overflow", requestTokens, recoveryFloorTokens }
+  } catch {
+    // An invalid request cannot be sized or repaired by context compaction.
+    return { type: "unserializable" }
+  }
 }
 
 export function pressureLevel(input: {

@@ -607,7 +607,7 @@ export const layer = Layer.effect(
     }
     const pendingExternalAdmissions = new Map<string, Set<ExternalAdmission>>()
     const externalAdmissionKey = (sessionID: SessionID, agentID: string | undefined) =>
-      `${sessionID}\u0000${agentID ?? "main"}`
+      JSON.stringify([sessionID, agentID ?? "main"])
     const waitForPendingExternalAdmission = Effect.fn("SessionPrompt.waitForPendingExternalAdmission")(function* (
       sessionID: SessionID,
       agentID: string | undefined,
@@ -770,7 +770,6 @@ export const layer = Layer.effect(
             skillCatalog: materialized.catalog,
             toolsHash: SessionPrefixSnapshot.toolsHash(prefix.tools, prefix.activeTools, prefix.loadedMcpTools),
             tools: yield* Effect.promise(() => SessionPrefixSnapshot.snapshotTools(prefix.tools, prefix.activeTools)),
-            activeTools: prefix.activeTools,
             loadedMcpTools: prefix.loadedMcpTools,
             watermarkMessageID: captureUser.info.id,
           }))
@@ -829,7 +828,6 @@ export const layer = Layer.effect(
     // fall back to compaction when it returns false.
     const rebuildFromCheckpoint = Effect.fn("SessionPrompt.rebuildFromCheckpoint")(function* (input: {
       sessionID: SessionID
-      msgs: MessageV2.WithParts[]
       agentID?: string
       agent: string
       model: { providerID: string; id: string }
@@ -843,16 +841,21 @@ export const layer = Layer.effect(
         .pipe(Effect.catch(() => Effect.succeed(undefined)))
       if (!boundary) return false
 
-      const boundaryMsg = input.msgs.find((m) => m.info.id === boundary)
+      // The processor may have committed its completed assistant after the
+      // loop snapshot, or the writer may have been awaited since that snapshot.
+      // Freeze the actual insert-time tail so recovery covers those committed
+      // rows instead of immediately rebuilding again for their stale usage.
+      const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
+      const boundaryMsg = messages.find((m) => m.info.id === boundary)
       const inserted = yield* checkpoint
         .insertRebuildBoundary({
           sessionID: input.sessionID,
           boundary,
-          lastMessageInfo: computeLastMessageInfo(input.msgs.map((m) => m.info)),
+          lastMessageInfo: computeLastMessageInfo(messages.map((m) => m.info)),
           // Freeze the digest range at insert time: only this tail is eligible
           // for activity-log collapse. Auto rebuild mid-tool-loop keeps later
           // tool rounds live; manual rebuild digests the whole idle tail.
-          digestUpTo: input.msgs.at(-1)?.info.id,
+          digestUpTo: messages.at(-1)?.info.id,
           agentID: input.agentID,
           agent: input.agent,
           model: { providerID: input.model.providerID, modelID: input.model.id },
@@ -927,7 +930,6 @@ export const layer = Layer.effect(
     // and therefore drops all pre-boundary history with no summary at all.
     const rebuildEnsuringCheckpoint = Effect.fn("SessionPrompt.rebuildEnsuringCheckpoint")(function* (input: {
       sessionID: SessionID
-      msgs: MessageV2.WithParts[]
       agentID?: string
       agent: string
       model: { providerID: string; id: string }
@@ -2902,10 +2904,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       yield* Effect.addFinalizer(() => instruction.clear(info.id))
 
       type Draft<T> = T extends MessageV2.Part ? Omit<T, "id"> & { id?: string } : never
-      const assign = (part: Draft<MessageV2.Part>): MessageV2.Part => ({
-        ...part,
-        id: part.id ? PartID.make(part.id) : PartID.ascending(),
-      })
+      const generatedPartIDs = new Set<PartID>()
+      const assign = (part: Draft<MessageV2.Part>): MessageV2.Part => {
+        const id = part.id ? PartID.make(part.id) : PartID.ascending()
+        if (!part.id) generatedPartIDs.add(id)
+        return { ...part, id }
+      }
 
       const resolvePart: (part: PromptInput["parts"][number]) => Effect.Effect<Draft<MessageV2.Part>[]> = Effect.fn(
         "SessionPrompt.resolveUserPart",
@@ -3359,9 +3363,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
       })
 
-      const committed = yield* sessions.commitUserMessage(message, parts)
+      const committed = yield* sessions.commitUserMessage(message, parts, { generatedPartIDs })
 
-      return { info: committed, parts }
+      return { info: committed, parts: MessageV2.parts(committed.id) }
     }, Effect.scoped)
 
     const sweepOrphanAssistants = Effect.fn("SessionPrompt.sweepOrphanAssistants")(function* (
@@ -4527,13 +4531,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
             }
           }
-          const usageRecovered =
-            !!lastFinished &&
-            msgs.some(
-              (msg) =>
-                msg.info.id > lastFinished.id &&
-                msg.parts.some((part) => part.type === "checkpoint" || part.type === "compaction"),
-            )
+          const usageRecovered = !!lastFinished && MessageV2.usageRecovered(msgs, lastFinished)
 
           // Per-user-message active recall reminder. Once the session has
           // any memory artifacts (memory dir populated OR tasks recorded),
@@ -4602,11 +4600,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               lastUser,
               assistant: lastAssistant,
               parts: lastAssistantMsg?.parts ?? [],
-              // A checkpoint boundary is timestamped beside its old watermark,
-              // so the cancelled overflow placeholder can still sort after the
-              // active user. usageRecovered is the durable proof that recovery
-              // happened and this empty placeholder is safe to pass through.
-              recoverOverflowPlaceholder: usageRecovered || isBoundedComputation,
+              // Preflight's empty cancelled placeholder may be newer than the
+              // recovered watermark. A successful recovery in this loop also
+              // lets it reach the next preflight and its bounded progress check.
+              recoverOverflowPlaceholder: skipOverflowCheck || usageRecovered || isBoundedComputation,
             })
             if (classification.type === "filtered") {
               yield* writeContentFilterError({ assistant: lastAssistant })
@@ -4860,7 +4857,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // logic/boundary conditions can't drift.
             const attempt: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
               sessionID,
-              msgs,
               agentID: lastUser.agentID,
               agent: lastUser.agent,
               model: { providerID: model.providerID, id: model.id },
@@ -5162,7 +5158,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             const runStep = (processArgs: LLM.StreamInput, recoveryFloorMessages: ModelMessage[]) =>
               Effect.gen(function* () {
-                if (!isBoundedComputation) {
+                if (!isBoundedComputation && cfg.compaction?.auto !== false && processArgs.model.limit.context !== 0) {
                   // Estimate only the tool schemas the request will actually carry.
                   // resolveTools applies user/permission filters; activeTools then
                   // narrows the full executor map to the request-scoped wire subset.
@@ -5174,18 +5170,29 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     processArgs.user,
                     processArgs.mergeTurnContextIntoLastUser,
                   )
-                  const overflow = classifyRequestOverflow({
-                    ...processArgs,
-                    cfg,
-                    messages,
-                    recoveryFloorMessages: LLM.appendTurnContext(
-                      recoveryFloorMessages,
-                      processArgs.user,
-                      processArgs.mergeTurnContextIntoLastUser,
-                    ),
-                    tools: yield* Effect.promise(() => LLM.materializeWireToolDescriptors(wireTools)),
-                    model: processArgs.model,
-                  })
+                  const descriptors = yield* Effect.tryPromise(() => LLM.materializeWireToolDescriptors(wireTools)).pipe(
+                    Effect.catch(() => Effect.succeed(undefined)),
+                  )
+                  const overflow = descriptors
+                    ? classifyRequestOverflow({
+                        ...processArgs,
+                        cfg,
+                        messages,
+                        recoveryFloorMessages: LLM.appendTurnContext(
+                          recoveryFloorMessages,
+                          processArgs.user,
+                          processArgs.mergeTurnContextIntoLastUser,
+                        ),
+                        tools: descriptors,
+                        model: processArgs.model,
+                      })
+                    : { type: "unserializable" as const }
+                  if (overflow.type === "unserializable") {
+                    yield* finalizeUnrecoverableOverflow(
+                      "Request could not be serialized for context preflight. Check tool schemas and plugin-provided request metadata before retrying.",
+                    )
+                    return "overflow-static" as const
+                  }
                   if (overflow.type === "ok") {
                     preflightOverflowRecovery = undefined
                   } else {
@@ -5622,7 +5629,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   skillCatalog: materialized.catalog,
                   toolsHash: currentToolsHash,
                   tools: currentTools,
-                  activeTools,
                   loadedMcpTools: resolvedTools.loadedMcpTools,
                   watermarkMessageID: lastUser.id,
                 })
@@ -5650,7 +5656,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                         skillCatalog: winner.catalog,
                         toolsHash: currentToolsHash,
                         tools: currentTools,
-                        activeTools,
                         loadedMcpTools: resolvedTools.loadedMcpTools,
                         watermarkMessageID: lastUser.id,
                       })
@@ -5696,7 +5701,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 skillCatalog: materialized.catalog,
                 toolsHash: currentToolsHash,
                 tools: currentTools,
-                activeTools,
                 loadedMcpTools: resolvedTools.loadedMcpTools,
                 watermarkMessageID: lastUser.id,
               })
@@ -5893,7 +5897,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // compaction fallback stays ONE condition, not three lookalikes.
               const attempt2: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
                 sessionID,
-                msgs,
                 agentID: lastUser.agentID,
                 agent: lastUser.agent,
                 model: { providerID: model.providerID, id: model.id },
@@ -6057,8 +6060,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         started = true
       }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale, undefined, undefined, undefined, undefined, input.deferInbox)))
       // Continuations are serialized per (session, actor) by ActorExecution and
-      // settle through runTurn, matching upstream. The fork's former
-      // Actor.runPersistentTurn wake-generation routing on this path is retired.
+      // settle through runTurn, matching upstream.
       const execution =
         input.notifyParentOnComplete === true && agentID !== "main"
           ? Effect.acquireUseRelease(
@@ -6326,7 +6328,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // session produces the first checkpoint on the spot rather than deferring.
         const attempt: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
           sessionID: input.sessionID,
-          msgs,
           agentID: lastUser?.info.agentID ?? "main",
           agent: agentName,
           model: { providerID: model.providerID, id: model.modelID },

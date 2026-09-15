@@ -4,13 +4,14 @@ import { pathToFileURL } from "node:url"
 import { Effect, Layer } from "effect"
 import { AppLayer } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
+import { Global } from "../../src/global"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { Session } from "../../src/session"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionPrefixSnapshotTable } from "../../src/session/session.sql"
 import { Database, eq } from "../../src/storage"
 import { ToolRegistry } from "../../src/tool"
-import { provideTmpdirServer, tmpdirScoped } from "../fixture/fixture"
+import { prepareConfigDependencies, provideTmpdirServer, tmpdirScoped } from "../fixture/fixture"
 import { TestLLMServer } from "../lib/llm-server"
 import { testEffect } from "../lib/effect"
 import { withEnv } from "../lib/env"
@@ -65,6 +66,7 @@ const rows = (sessionID: Session.Info["id"]) =>
       db.select().from(SessionPrefixSnapshotTable).where(eq(SessionPrefixSnapshotTable.session_id, sessionID)).all(),
     ),
   )
+// Five real provider turns include plugin loading and Git snapshot work.
 it.live("catalog refresh and tool rotation preserve every non-catalog frozen byte", () =>
   Effect.gen(function* () {
     const key = "catalog-frozen-plugin-generation"
@@ -85,6 +87,9 @@ it.live("catalog refresh and tool rotation preserve every non-catalog frozen byt
       ({ dir, llm }) =>
         Effect.gen(function* () {
           yield* writeSkill(dir, OLD)
+          yield* Effect.promise(() =>
+            Promise.all([Global.Path.config, path.join(dir, ".mimocode")].map(prepareConfigDependencies)),
+          )
           yield* Effect.promise(() => Bun.write(path.join(dir, "AGENTS.md"), "FROZEN_AGENTS_OLD"))
           const sessions = yield* Session.Service
           const prompt = yield* SessionPrompt.Service
@@ -187,4 +192,5 @@ it.live("catalog refresh and tool rotation preserve every non-catalog frozen byt
       { git: true, config: (url) => ({ ...config(url), plugin: [pathToFileURL(plugin).href] }) },
     )
   }),
+  15_000,
 )

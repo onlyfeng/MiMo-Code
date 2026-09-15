@@ -5,9 +5,6 @@ import {
   loadMessagesThroughRevertBoundary,
   messageIndex,
   messageInsertIndex,
-  messagesAfter,
-  messagesBefore,
-  messagesFrom,
   removeMessageByID,
   revertRedoAction,
   revertView,
@@ -111,22 +108,37 @@ describe("selectMessages", () => {
 })
 
 describe("message chronology helpers", () => {
+  test.each(["update", "insert"] as const)("%s restores the default cache cap after oversized history", (kind) => {
+    const history = Array.from({ length: 150 }, (_, index) => msg(`msg_${index}`, undefined, index))
+    const message = kind === "update" ? { ...history[149], agent: "updated" } : msg("msg_new", undefined, 150)
+    const result = upsertChronologicalMessage(history, message)
+
+    expect(result.messages).toHaveLength(100)
+    expect(result.messages[0].id).toBe(kind === "update" ? "msg_50" : "msg_51")
+    expect(result.messages.at(-1)).toEqual(message)
+    expect(result.removed).toEqual(history.slice(0, kind === "update" ? 50 : 51))
+    expect(history).toHaveLength(150)
+  })
+
+  test("updates preserve history loaded through an undo boundary", () => {
+    const history = Array.from({ length: 101 }, (_, index) => msg(`msg_${index}`, undefined, index))
+    const updated = upsertChronologicalMessage(history, { ...history[100], agent: "updated" }, Infinity)
+    expect(updated.messages).toHaveLength(101)
+    expect(updated.messages[0]).toEqual(history[0])
+    expect(updated.removed).toEqual([])
+
+    const arrived = upsertChronologicalMessage(updated.messages, msg("msg_late", undefined, 102), Infinity)
+    expect(arrived.messages).toHaveLength(102)
+    expect(revertView({ main: arrived.messages }, arrived.messages, history[0].id).found).toBe(true)
+    expect(arrived.removed).toEqual([])
+  })
+
   test("inserts an older caller ID after an earlier timestamp and still finds it by equality", () => {
     const messages = [msg("m9", undefined, 1)]
     const late = msg("m1", undefined, 2)
     expect(messageInsertIndex(messages, late)).toBe(1)
     messages.splice(messageInsertIndex(messages, late), 0, late)
     expect(messageIndex(messages, "m1")).toBe(1)
-  })
-
-  test("slices undo and redo ranges by boundary position instead of ID magnitude", () => {
-    const earlier = msg("m9", undefined, 1)
-    const boundary = msg("m1", undefined, 2)
-    const later = msg("m8", undefined, 3)
-    const messages = [earlier, boundary, later]
-    expect(messagesBefore(messages, boundary.id)).toEqual([earlier])
-    expect(messagesFrom(messages, boundary.id)).toEqual([boundary, later])
-    expect(messagesAfter(messages, boundary.id)).toEqual([later])
   })
 
   test("keeps the newest low-ID update, evicts the chronological oldest, and removes only the requested ID", () => {
@@ -138,7 +150,7 @@ describe("message chronology helpers", () => {
 
     expect(upserted.messages).toHaveLength(100)
     expect(upserted.messages.at(-1)).toEqual(newest)
-    expect(upserted.removed?.id).toBe("msg_9000")
+    expect(upserted.removed.map((message) => message.id)).toEqual(["msg_9000"])
 
     const removed = removeMessageByID(upserted.messages, "msg_9050")
     expect(removed.removed?.id).toBe("msg_9050")

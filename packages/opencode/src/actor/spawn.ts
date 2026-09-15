@@ -1,4 +1,3 @@
-import { isTurnCancelled } from "../session/turn-cancellation"
 import * as RunApproval from "@/session/run-approval"
 import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause, Exit, Schedule } from "effect"
 import type { SessionID, MessageID } from "@/session/schema"
@@ -36,7 +35,6 @@ import { NotFoundError } from "@/storage"
 import { Instance, type InstanceContext } from "@/project/instance"
 import { InstanceState } from "@/effect"
 import { InstanceRef } from "@/effect/instance-ref"
-import { WakeSourceDisposal } from "@/inbox/wake-source"
 
 const log = Log.create({ service: "actor.spawn" })
 
@@ -351,14 +349,6 @@ export interface Interface {
     notified: boolean,
   ) => Effect.Effect<void>
 
-  readonly runPersistentTurn?: (input: {
-    sessionID: SessionID
-    actorID: string
-    work: Effect.Effect<MessageV2.WithParts>
-    onInterrupt: Effect.Effect<MessageV2.WithParts>
-    notifyParentOnComplete: boolean
-    inboxID?: string
-  }) => Effect.Effect<MessageV2.WithParts>
   /**
    * Run ONE stall-watchdog scan pass synchronously (the same body the background
    * fiber repeats every WATCHDOG_SCAN_INTERVAL_MS). Exposed for deterministic
@@ -1315,7 +1305,7 @@ export const layer = Layer.effect(
       return current
     })
 
-    // Unified parent notification used by woken persistent turns and by the
+    // Parent notification used by resumed persistent turns and by the
     // explicit cancel owner. Spawn-turn delivery remains in forkWork because it
     // also resolves AgentOutcome and runs completion-gate reconciliation.
     const notifyTerminal = (
@@ -1470,187 +1460,6 @@ export const layer = Layer.effect(
         if (Exit.isFailure(terminalResult)) return yield* Effect.failCause(terminalResult.cause)
         return terminalResult.value
       })
-
-    // Terminal settlement for a continuation turn of a NON-persistent actor.
-    // Mirrors the persistent path's finishPersistentTurn: persist the delivery,
-    // publish its id on the registry row, and notify the parent once.
-    const continueTurn = (
-      sessionID: SessionID,
-      actorID: string,
-      actor: Actor,
-      onInterrupt: Effect.Effect<MessageV2.WithParts>,
-      work: Effect.Effect<MessageV2.WithParts>,
-    ) =>
-      Effect.gen(function* () {
-        let lastFinal: MessageV2.WithParts | undefined
-        const continued = Effect.gen(function* () {
-          const final = yield* state.ensureRunning(sessionID, actorID, onInterrupt, work)
-          lastFinal = final
-          if (final.info.role === "assistant" && final.info.error)
-            return yield* Effect.die(new Error(sessionErrorText(final.info.error) ?? "actor session failed"))
-          return final
-        })
-        const delivery = (exit: Exit.Exit<MessageV2.WithParts>) =>
-          Effect.gen(function* () {
-            if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) return undefined
-            const final = Exit.isSuccess(exit) ? exit.value : lastFinal
-            if (!final || final.info.role !== "assistant") return undefined
-            const text = assistantFinalText(final.info, final.parts)
-            const structured = final.info.structured
-            if (text === undefined && structured === undefined) return undefined
-            const parsed = parseReturnHeader(text)
-            yield* session.updateMessage({
-              ...final.info,
-              actorResult: {
-                ...(text !== undefined ? { finalText: text } : {}),
-                ...(structured !== undefined ? { structured } : {}),
-                ...(parsed.status ? { reportedStatus: parsed.status } : {}),
-                ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
-              },
-            })
-            return final.info.id
-          })
-        return yield* runTurn(sessionID, actorID, continued, { settle: delivery }).pipe(
-          Effect.provideService(ActorRegistry.Service, actorReg),
-          Effect.onExit((exit) =>
-            Effect.gen(function* () {
-              const final = Exit.isSuccess(exit) ? exit.value : lastFinal
-              const text = final?.info.role === "assistant" ? assistantFinalText(final.info, final.parts) : undefined
-              const parsed = parseReturnHeader(text)
-              const failureCause = Exit.isFailure(exit) ? exit.cause : undefined
-              const status = !failureCause
-                ? ("completed" as const)
-                : Cause.hasInterruptsOnly(failureCause)
-                  ? ("cancelled" as const)
-                  : ("failed" as const)
-              yield* notifyTerminal(
-                sessionID,
-                actorID,
-                actor,
-                status,
-                status === "completed"
-                  ? {
-                      result: text ?? "(no output)",
-                      ...(parsed.status ? { reportedStatus: parsed.status } : {}),
-                      ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
-                    }
-                  : status === "failed"
-                    ? { error: Cause.pretty(failureCause!), ...(text !== undefined ? { result: text } : {}) }
-                    : {},
-              )
-            }),
-          ),
-        )
-      })
-
-    const runPersistentTurnImpl = Effect.fn("Actor.runPersistentTurn.impl")(function* (
-      input: {
-        sessionID: SessionID
-        actorID: string
-        work: Effect.Effect<MessageV2.WithParts>
-        onInterrupt: Effect.Effect<MessageV2.WithParts>
-        notifyParentOnComplete: boolean
-        inboxID?: string
-      },
-      wakeSource: RunDisposalState | undefined,
-    ) {
-      const actor = yield* actorReg.get(input.sessionID, input.actorID)
-      const key = actorKey(input.sessionID, input.actorID)
-      if (!actor || actor.lifecycle !== "persistent" || (actor.mode !== "peer" && actor.mode !== "subagent")) {
-        while (true) {
-          const active = yield* lifecycleState.currentGeneration(key)
-          if (active?.kind === "fork") yield* Deferred.await(active.done)
-          if (input.inboxID && !(yield* inbox.has(input.inboxID))) return yield* input.onInterrupt
-          // A continuation of a non-persistent actor still settles: it writes the
-          // turn's delivery, publishes its id and notifies the parent exactly
-          // once. Only the persistent path below owns a wake generation, so this
-          // branch drives the terminal write through runTurn directly.
-          const settleTurn = !actor || !input.notifyParentOnComplete
-          const result = settleTurn
-            ? yield* state.ensureRunning(input.sessionID, input.actorID, input.onInterrupt, input.work)
-            : yield* continueTurn(input.sessionID, input.actorID, actor, input.onInterrupt, input.work)
-          if (!input.inboxID || !(yield* inbox.has(input.inboxID))) return result
-        }
-      }
-      if (wakeSource?.instance && !isRunDisposing(wakeSource)) {
-        const parentSessionID = actor.mode === "peer" ? (yield* session.get(input.sessionID)).parentID : input.sessionID
-        if (parentSessionID) {
-          const parent = yield* session.get(parentSessionID)
-          if (parent.directory === wakeSource.instance.directory) {
-            const target = {
-              instance: wakeSource.instance,
-              disposal: wakeSource,
-            }
-            if (rememberNotificationTarget(target)) yield* lifecycleState.setNotificationTarget(key, target)
-          }
-        }
-      }
-      if (actor.status === "idle" && actor.lastOutcome === "cancelled") {
-        yield* inbox.drain(input.sessionID, input.actorID).pipe(Effect.ignore)
-        yield* lifecycleState.releasePersistent(key)
-        return yield* Effect.interrupt
-      }
-      yield* lifecycleState.retainPersistent(key)
-
-      return yield* Effect.uninterruptible(
-        Effect.gen(function* () {
-          while (true) {
-            const head = input.inboxID ? yield* inbox.head(input.sessionID, input.actorID) : undefined
-            const ownership = yield* lifecycleState.acquireWake(key)
-
-            if (ownership._tag === "blocked") return yield* Effect.interrupt
-            if (ownership._tag === "episode") {
-              yield* Deferred.await(ownership.episode.done)
-              if (input.inboxID && (yield* inbox.has(input.inboxID))) continue
-              return yield* Effect.interrupt
-            }
-            if (ownership._tag === "fork") {
-              yield* Deferred.await(ownership.active.done)
-              continue
-            }
-            if (ownership._tag === "follower") {
-              const result = yield* Deferred.await(ownership.active.result)
-              const stalled = Exit.isFailure(result) && (!head || (yield* inbox.has(head)))
-              if (input.inboxID && !isTurnCancelled(result) && !stalled && (yield* inbox.has(input.inboxID))) continue
-              if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
-              return result.value
-            }
-
-            const owner = ownership.owner
-            const guardedWork = Effect.gen(function* () {
-              if (!(yield* lifecycleState.isCurrentOpen(key, owner))) return yield* Effect.interrupt
-              yield* actorReg
-                .updateStatus(input.sessionID, input.actorID, { status: "running" })
-                .pipe(Effect.ignoreCause)
-              return yield* input.work
-            })
-            const result = yield* state
-              .ensureRunning(input.sessionID, input.actorID, input.onInterrupt, guardedWork)
-              .pipe(Effect.interruptible, Effect.exit)
-            const finished = yield* finishPersistentTurn(input, actor, owner, result).pipe(Effect.exit)
-            // Retry an unconsumed tail after progress, including a failed finish;
-            // cancellation and failures before any drain must not restart work.
-            const stalled = Exit.isFailure(finished) && (!head || (yield* inbox.has(head)))
-            if (
-              input.inboxID &&
-              !isTurnCancelled(result) &&
-              !isTurnCancelled(finished) &&
-              !stalled &&
-              (yield* inbox.has(input.inboxID))
-            ) continue
-            if (Exit.isFailure(finished)) return yield* Effect.failCause(finished.cause)
-            return finished.value
-          }
-        }),
-      )
-    })
-
-    const runPersistentTurn = Effect.fn("Actor.runPersistentTurn")(function* (
-      input: Parameters<typeof runPersistentTurnImpl>[0],
-    ) {
-      const wakeSource = yield* WakeSourceDisposal
-      return yield* runPersistentTurnImpl(input, wakeSource).pipe(state.withRunDisposal, RunApproval.provide(undefined))
-    })
 
     const recoveryUnavailable = () =>
       new NotFoundError({ message: "Actor has no resumable turn with retained current-instance context" })
@@ -2222,7 +2031,7 @@ export const layer = Layer.effect(
         if (notified) notifiedSettlements.add(key)
         else notifiedSettlements.delete(key)
       })
-    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, runPersistentTurn, scanStalledOnce })
+    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it

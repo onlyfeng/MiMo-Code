@@ -121,7 +121,7 @@ The trigger is `floor(effective window × ratio)`, with a default ratio of 90%, 
 | `compaction.auto` | Auto-compact when context full (default true) |
 | `compaction.prune` | Prune old tool outputs (default true) |
 | `compaction.tail_turns` | Deprecated compatibility setting; projected compaction keeps whole API rounds arriving during compression |
-| `compaction.preserve_recent_tokens` | Deprecated compatibility setting; compression-time API rounds use at most 40000 tokens, also capped by the ratio-based trigger after frozen prefix and projection overhead |
+| `compaction.preserve_recent_tokens` | Deprecated compatibility setting; optional older API rounds use at most 40000 tokens, also capped by the ratio-based trigger after frozen prefix and projection overhead. New external requests arriving during compaction and their following messages remain even beyond that optional budget; oversized requests still undergo normal overflow handling |
 | `compaction.reserved` | Compatibility buffer for validating `compaction.max_context`, together with any output reservation; not subtracted from the ratio-based trigger |
 | `compaction.max_context` | Compact earlier than the model window. One value for all models, or a map keyed `"<providerID>/<modelID>"` (wildcards allowed, longest pattern wins). Values: token count, `"300K"`, `"1M"`, or `"50%"` of the window. Always clamped to the provider cap — can only lower the trigger, never raise it. `0` = no budget. Set it from the TUI with `/context-limit` |
 | `checkpoint.thresholds` | Context-fill triggers, e.g. `["40%","60%","80%"]` |
