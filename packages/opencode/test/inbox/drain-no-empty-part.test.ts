@@ -294,7 +294,7 @@ describe("Inbox.drain leaves rows durable when cancelled before commit", () => {
     })
   })
 
-  test("cancel after the first check rolls back the synthetic message and keeps inbox rows", async () => {
+  test("cancel at the final admission check keeps the transcript and inbox rows unchanged", async () => {
     await using tmp = await tmpdir({ git: true })
     await withInbox(tmp.path, async (rt) => {
       const session = await rt.runPromise(Session.Service.use((s) => s.create()))
@@ -312,8 +312,8 @@ describe("Inbox.drain leaves rows durable when cancelled before commit", () => {
         ),
       )
 
-      // First isCancelled() is the pre-commit check (must pass); the second
-      // lands mid-commit (before a part write or the inbox DELETE).
+      // The first check passes before entering the transaction; cancellation
+      // at its final admission check must stop before any message/part write.
       let calls = 0
       const count = await rt.runPromise(
         Inbox.Service.use((inbox) =>
