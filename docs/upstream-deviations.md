@@ -17,7 +17,7 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-15
 - Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
 - Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `3a12d1800d9bfd002f543764e4ec72047e6e6bb3`
+- Main behavior (runtime/tests): `f20e91358da8ba4feef8d669ae1b105486e2566f`
 - Bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
@@ -621,6 +621,14 @@ the complete resolved model identity` case. FD-005 keeps only identity
   negative execution; registry, prefix, checkpoint, skill, TUI permission and
   `test/session/exec-effect-carriers.test.ts` cover the other carriers.
   Experiment-only tests retain their independent evidence attribution.
+- 2026-09-15 standalone experiment cleanup: `disposeExperimentRuntime` closes
+  its owned log sink after the global runtime and database. Reusable
+  `runExperiment` calls retain their existing lifecycle. The isolated
+  `test/experiments/tool-schema-runner.test.ts` child verifies queued records,
+  completed log naming, no post-cleanup append and natural exit within the
+  original budget. This fixes a proven log cleanup omission; the earlier
+  intermittent CI exit-143 observation was not reproduced or attributed to a
+  confirmed root cause. Evidence is recorded in [RV04](runtime-validation-2026-09-15.md#rv04独立实验日志资源清理).
 - 2026-09-08 POLICY-01: the selected single capability (N=1) aligns nested
   Actor/question/plan composition with source
   `0abfeba186191c1a361cf3f27b802e9d29bf0fdc` and released v0.1.14
