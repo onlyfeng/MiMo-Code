@@ -396,7 +396,7 @@ The seven owner dispositions and evidence are recorded in
 - Main source inheritance merge: `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`
 - Prior shared audit commit: `5f06049e568276cd1cea9012f6b114e6ddb2fac2`
 - Inherited bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
-- Publication state: the initial implementation is under PR #129; later local integration and accepted-SHA CI remain pending as recorded in the implementation snapshot below. The preceding documentation tip `b3b32061cfcf997d3fb1cac0a73302e551678a96` (PR #127) has successful exact-SHA test, typecheck and lint.
+- Publication state: PR #129 now locally inherits accepted main `806a11e430ae7f90d6a9c50143cb11e6f4123adc` (PR #130); its remote CI, final merge and accepted-SHA verification remain pending. The preceding documentation tip `b3b32061cfcf997d3fb1cac0a73302e551678a96` (PR #127) has successful exact-SHA test, typecheck and lint.
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
 - First-batch shared documentation inheritance: accepted main `f10fddb67d830b82890206759c53cef4d8710460`. The current shared FD/FC and implementation report are inherited unchanged from main `555598ab4c257aa0b99d337366cd56e6886aa6e9`; the later local source/test snapshot is recorded under DC-CONTEXT-001 below.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
@@ -1099,7 +1099,9 @@ files remain byte-identical to the accepted main correction.
   exclusive compat policies. F04 request preflight and F10 legacy snapshot
   reads remain compat-owned. Local affected regressions and the two measured
   integration-test budgets are recorded in [the compat implementation report](compat-audit-followups-2026-09-15.md).
-  Final accepted-branch integration and accepted-SHA CI remain pending.
+  PR #129 locally inherits accepted main `806a11e430ae7f90d6a9c50143cb11e6f4123adc`
+  (PR #130), whose source/test content is unchanged from `cdfd1a80`.
+  PR #129 remote CI, final merge and accepted-SHA verification remain pending.
 
 - 2026-09-09 full sync: image normalization is inherited through the existing model transform. Keep bounded replay/error media, active-tool preflight, frozen context and chronology; adapt image fixtures to actual containers. Provider/API/schema inputs and compat SDK operations remain unchanged.
 

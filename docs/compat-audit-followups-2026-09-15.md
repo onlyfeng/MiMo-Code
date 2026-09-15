@@ -10,6 +10,8 @@
 
 当前本地源码/测试快照为 `05724a5c433a547d9177ebd8bc8e9184962f128e`，真实继承 main `cdfd1a804599eda21fdc5bced9c0d1de025d07da`。早期 `d8f6578b`、`31192b26`、`0d568184` 分别合入 F06、F07 及其两项动态 gate；后续合入共享预算描述、checkpoint 最新持久尾部读取、有限匿名 part 重试、workflow 清理缺陷收敛和 frozen-catalog 测试准备。所有继承均保留 main 祖先。本地受影响验证已完成，最终接受分支合并与接受 SHA CI 尚待完成；下列证据各自注明实际快照，不以旧绿灯替代后续验证。
 
+PR #129 分支现已本地真实继承 PR #130 接受的 main `806a11e430ae7f90d6a9c50143cb11e6f4123adc`。其源码/测试与 main `cdfd1a80` 相同，共享 FD/FC/实施报告与 `555598ab` 及接受 main 相同；compat 源码/测试仍与上述 `05724a5c` 快照一致。PR #129 的远端 CI、最终合并及接受 SHA 验证仍待完成。
+
 ## 已实现的语义
 
 F04 取消工具 schema 估算的 80 KiB 截断，使用完整 JSON 语义计算重复引用的每次出现。预检只计算请求实际启用的工具描述，遇到 descriptor/请求序列化错误时返回终态错误，不发模型请求或进入压缩恢复。`auto=false`、未知 context 容量和 bounded hidden agent 的原有旁路保留。UTF-8 omission marker 与分隔符计入内容预算，极小 Actor state 预算不再被 marker 自身突破。内容 wrapper 和后续 provider 转换仍不属于严格总线长保证；更早的回放 helper 也没有统一改成不抛异常。
