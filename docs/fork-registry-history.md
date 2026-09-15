@@ -3237,3 +3237,34 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - FC-001 now commits the Inbox synthetic user, every rendered part and selected queue deletion in one immediate transaction. Under its write lock, admission rechecks cancellation, retired persistent peers and live receiver rows after seed resolution. Existing Session validation/projectors and compat rendering/context ownership remain.
 - Real SQLite failures, SIGKILL/reopen and concurrent/late-admission probes reproduce the prior gaps and verify the correction. Final affected matrix: 126 pass/582 assertions; selected prompt consumers: 11 pass/58 assertions; final atomic/crash test lint adjustment: 7 pass/87 assertions. Package typecheck and focused lint exit 0. Actual postcommit interruption remains observable; its new test was already green before the explicit interrupt guard.
 - This supersedes the earlier separate-write Inbox statement for the new implementation. Exactly-once model execution, crash-durable event delivery, shell writes and streamed assistant/tool output remain outside this contract. The [Inbox evidence record](inbox-crash-consistency-2026-09-15.md) owns the detailed scope and tests; frozen earlier audit inventories retain their original trees and counts.
+
+## 2026-09-15 real plugin/MCP acceptance and Windows validation facility
+
+- Test/CI implementation `b23c278e51ab0cc34c47c2d20406d69e57d24f2f` is integrated with accepted Inbox main `d11a9652981e7b5953584205474249775ee54236` at source/test snapshot `a9e4458e62632d65ccdef38152e757730ac102db`. Selected upstream remains `b4cc11cd652195af9a80297ed543218f3172e6c4`; bundled guidance remains `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`.
+- RV01 closes FC-006's previous full-chain evidence gap with real Config, built-in Plugin, Actor and Write calls across opposing alternate-cwd worktrees. The model is a scripted SSE service. RV02 exercises actual MCP SDK HTTP/OAuth discovery, DCR, PKCE, callback, two read-only calls, refresh and pending-auth cancellation using self-owned issuers on loopback and a local RFC1918 interface. These tests found fixture observation/API errors, not new plugin or MCP production defects.
+- At integrated `a9e4458e`, the two new wrappers pass 4 tests / 8 wrapper assertions in 30.59 seconds; the same real private-interface chain separately passes 1 test / 2 wrapper assertions in 11.24 seconds. Package typecheck exits 0. At the earlier M370 base, existing plugin support suites passed 115 / 200 assertions and the MCP matrix passed 48 / 163 assertions; those remain their original snapshot evidence, not a new integrated full-suite claim. Focused new-file lint has no warnings or errors.
+- RV03 adds a bounded shared Windows CI job, with frozen dependency installation and distinct event/checkout/PR-head identity evidence. Its actual archive/no-rg runtime entry remains DC-PLATFORM-001-owned on compat. Static workflow readiness is not Windows execution; compat records its actual platform run and acceptance. No private-network product guarantee, full-context model actor or platform fallback is promoted to main.
+- The [runtime evidence record](runtime-validation-2026-09-15.md) owns all three inventory results, commands and the remaining enterprise IdP/proxy/TLS/restricted-image boundaries. Publication/review/exact accepted-tip CI are separate from these fixed source/test results.
+
+### 2026-09-15 runtime acceptance review correction
+
+- Current main source/test snapshot: `5165307c8a97c448de252a33b9eb2a1feb393545`. PR #136 correctly identified the nested Bun runner's independent default five-second timeout. A subsequent compat-candidate run reproduced three plugin-child timeout failures while MCP passed. The new plugin integration child now has a fifteen-second test budget inside the existing 25-second process watchdog and 30-second wrapper; no production or pre-existing test deadline changes.
+- Corrected main plugin wrappers pass 3 / 0 fail / 6 assertions in 46.93 seconds; package typecheck exits 0. Earlier a9e and M370 evidence retains its original source boundary. The user's private-network/OAuth acceptance scope is explicitly the self-owned local laboratory, with enterprise environments excluded from this task.
+- The first PR #136 stdio job failed while downloading the fixed ghostty-web tarball (HTTP 504); its tests did not start. The same source/configuration's successful candidate run has 6 stdio passes / 20 assertions. No stdio behavior, skip or timeout workaround is introduced.
+
+### 2026-09-15 shared CI dependency reproducibility
+
+- CI implementation `9bf2b8bcc696abf8797487b090c342a5a64f7a7c` makes the shared setup-bun composite select Bun from package.json and install with `bun ci`, matching the repository convention and the new standalone Windows job. Source/test behavior remains `5165307c8a97c448de252a33b9eb2a1feb393545`; no package manifest or lockfile changes.
+- Review of earlier Linux logs found `bun install` and Saved lockfile, so identical checked-in sources could not establish identical post-install dependency state. This correction makes final CI reject lock drift instead of silently accepting it. Local frozen install exits 0 without changes; YAML formatting and diff checks pass. Linux installation and full tests remain final-head CI gates; no test selection, quarantine or timeout change is bundled with the installation correction.
+
+## 2026-09-15 shared plugin fixture scope review
+
+- PR #137 的多实例夹具反馈由共享源码 `15ca0f83a466f0581ce4e1add6883e0e204318ed` 处理，基于已接受运行验收 main `c643adf9dffa57191153cc4452003ba03e3cab32`。遵循包测试指引使用 `testEffect`/`it.live`、真实 AppLayer、tmpdirScoped/provideInstance，并显式释放两个捕获的实例；没有全局实例清理或生产修改。
+- 原 A-B-A-B、真实跨目录 403、三个 Actor/Write 场景及 35 处断言保留，子测试和外层预算仍为 15/25/30 秒。3 wrappers pass / 0 fail / 6 assertions，30.69 秒；包 typecheck exit 0，focused lint 无警告错误。详见[共享运行验收](runtime-validation-2026-09-15.md#多实例夹具复审收敛)。
+- FC-006 的测试来源前进至该源码；共享 CI 安装仍由 `9bf2b8bc` 提供，bundled guidance 与选定 upstream `b4cc11cd` 不变。七项 DC 政策保持 compat 归属，后续接受 SHA 的 CI、审核及传播另行验收。
+
+## 2026-09-15 standalone experiment log cleanup
+
+- PR #138 的退出测试调查定位 standalone CLI 自建日志流未显式关闭；共享源码 `f20e91358da8ba4feef8d669ae1b105486e2566f` 在 runtime/DB 清理后等待 Log.shutdown。FD-006 的实验载体沿用独立证据归属，不改变 exec 权限、模型语义或七项 DC 政策。
+- 现有隔离子进程新增真实日志完成和关闭后不追加断言；旧实现自然 exit 0 仍确定失败，修正后完整实验文件 11 pass / 0 fail / 69 assertions，23.03 秒。并行消费两个输出管道，保留自然退出和 15/30 秒预算。包 typecheck exit 0；lint 0 errors，七条现存警告不归入本次新增。
+- 之前单次 CI exit143 未在本机重现，日志对照只显示资源遗漏和退出耗时相关，不能证明该失败根因。详细边界见[RV04](runtime-validation-2026-09-15.md#rv04独立实验日志资源清理)。FD/FC runtime/test 引用前进至 `f20e9135`，插件 scope 夹具仍为 `15ca0f83`，共享安装、bundled guidance 和选定 upstream 不变。
