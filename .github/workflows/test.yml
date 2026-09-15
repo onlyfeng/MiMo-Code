@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main, dev, dev/compat]
   workflow_dispatch:
+    inputs:
+      windows_runtime:
+        description: Run the Windows runtime acceptance entry on this ref
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -214,4 +220,88 @@ jobs:
         with:
           name: junit-session-actor-recovery
           path: packages/opencode/.artifacts/unit/junit.xml
+          if-no-files-found: error
+
+  windows-runtime:
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev/compat') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev/compat') ||
+      (github.event_name == 'workflow_dispatch' && inputs.windows_runtime)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Record and validate Windows runtime
+        env:
+          PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $artifacts = Join-Path $env:GITHUB_WORKSPACE "packages/opencode/.artifacts/windows-runtime"
+          New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
+          $bunVersion = bun --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $checkoutSha = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packageManager = (Get-Content -Raw package.json | ConvertFrom-Json).packageManager
+          $environment = [ordered]@{
+            os = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+            runner_os = $env:RUNNER_OS
+            bun = $bunVersion.Trim()
+            package_manager = $packageManager
+            powershell = $PSVersionTable.PSVersion.ToString()
+            github_sha = $env:GITHUB_SHA
+            checkout_sha = $checkoutSha.Trim()
+            pull_request_head_sha = $env:PULL_REQUEST_HEAD_SHA
+          }
+          $environment | ConvertTo-Json | Tee-Object -FilePath (Join-Path $artifacts "workflow-environment.json")
+          if (-not $IsWindows) { throw "Windows runtime acceptance requires Windows" }
+          if ($packageManager -notmatch '^bun@(.+)$') {
+            throw "Windows runtime acceptance requires a Bun packageManager declaration"
+          }
+          if ($environment.bun -ne $Matches[1]) {
+            throw "Installed Bun does not match the packageManager declaration"
+          }
+          if (-not (Test-Path -Path "packages/opencode/script/verify-windows-runtime.ts" -PathType Leaf)) {
+            throw "Missing compat Windows runtime acceptance entry"
+          }
+
+      - name: Install locked dependencies
+        run: |
+          bun ci 2>&1 | Tee-Object -FilePath "packages/opencode/.artifacts/windows-runtime/workflow-install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify Windows runtime
+        working-directory: packages/opencode
+        run: |
+          foreach ($selector in @(
+            "MIMOCODE_EXPERIMENTAL",
+            "MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH",
+            "MIMOCODE_CODEX_MODE",
+            "MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL",
+            "MIMOCODE_EXPERIMENTAL_WORKSPACES",
+            "MIMOCODE_COMPACTION_MAX_CONTEXT",
+            "MIMOCODE_COMPACTION_TRIGGER_RATIO",
+            "MIMOCODE_DISABLE_CHECKPOINT"
+          )) {
+            Remove-Item "Env:$selector" -ErrorAction SilentlyContinue
+          }
+          bun script/verify-windows-runtime.ts 2>&1 | Tee-Object -FilePath ".artifacts/windows-runtime/workflow-runtime.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: packages/opencode/.artifacts/windows-runtime/
           if-no-files-found: error
