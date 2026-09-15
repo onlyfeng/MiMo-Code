@@ -17,8 +17,10 @@ input audio are inherited byte-for-byte; all seven DC owners retain their contra
 DC-MODEL-001, DC-CONTEXT-001 and DC-ACTOR-001 have request-semantics adjacency, but
 no audio override. TUI voice, MCP sampling, private WebFetch policy, platform fallbacks
 and TUI metadata are unchanged. Historical adoption paragraphs below describe their
-original snapshots; the [audio convergence record](audio-upstream-alignment-2026-09-09.md)
-is authoritative for the current audio boundary.
+original snapshots. The [audio convergence record](audio-upstream-alignment-2026-09-09.md)
+is historical: FD-004's 2026-09-14 capability-route retirement supersedes its
+upload/auth/token details. [Current audio guidance](audio-api.md) and FD-004
+are authoritative for the present audio boundary.
 
 ## 2026-09-10 title authority synchronization
 
@@ -300,15 +302,15 @@ main. It excludes upstream commits after `5198ff54`. No DC owner retires; the
 complete model-facing actor context interface is now explicitly compat-owned.
 Shared FD/FC records are inherited byte-for-byte.
 
-| Owner | Disposition | Evidence and boundary |
-| --- | --- | --- |
-| DC-NET-001 | Retain private-network WebFetch | No owned implementation change; finite Read media MIME changes do not replace per-request private WebFetch approval |
-| DC-NET-002 | Retain RFC1918 HTTP(S) MCP guarantee | Production remains inherited from main; existing mocked lifecycle evidence is not a new real-private-network or OAuth validation |
-| DC-PLATFORM-001 | Retain restricted-network and Windows fallbacks | Ripgrep/archive production overlay unchanged; no upstream equivalent in this range |
-| DC-MODEL-001 | Retain per-agent MaxMode | Agent selector tests pass; regenerated SDK/OpenAPI preserve maxMode |
-| DC-CONTEXT-001 | Retain UTF-8 content caps, preflight and checkpoint coverage | History's local result budget does not replace these capabilities; bounds, frozen catalog, server coverage and TUI synchronization tests pass |
-| DC-ACTOR-001 | Retain and adapt none/state/full and persistent creation | Preserve complete capture/execute chain and bounded state; repair input recovery without dropping explicit values; validate runtime-created and model-created persistent recovery |
-| DC-TUI-001 | Retain provider/model/variant display | Metadata and coverage synchronization tests pass; no equivalent upstream UI replaces this overlay |
+| Owner           | Disposition                                                  | Evidence and boundary                                                                                                                                                             |
+| --------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DC-NET-001      | Retain private-network WebFetch                              | No owned implementation change; finite Read media MIME changes do not replace per-request private WebFetch approval                                                               |
+| DC-NET-002      | Retain RFC1918 HTTP(S) MCP guarantee                         | Production remains inherited from main; existing mocked lifecycle evidence is not a new real-private-network or OAuth validation                                                  |
+| DC-PLATFORM-001 | Retain restricted-network and Windows fallbacks              | Ripgrep/archive production overlay unchanged; no upstream equivalent in this range                                                                                                |
+| DC-MODEL-001    | Retain per-agent MaxMode                                     | Agent selector tests pass; regenerated SDK/OpenAPI preserve maxMode                                                                                                               |
+| DC-CONTEXT-001  | Retain UTF-8 content caps, preflight and checkpoint coverage | History's local result budget does not replace these capabilities; bounds, frozen catalog, server coverage and TUI synchronization tests pass                                     |
+| DC-ACTOR-001    | Retain and adapt none/state/full and persistent creation     | Preserve complete capture/execute chain and bounded state; repair input recovery without dropping explicit values; validate runtime-created and model-created persistent recovery |
+| DC-TUI-001      | Retain provider/model/variant display                        | Metadata and coverage synchronization tests pass; no equivalent upstream UI replaces this overlay                                                                                 |
 
 The actor overlay includes JSON schema, shell parser, no-script argument
 recovery, execution, tool descriptions and public creation tests. Missing
@@ -359,6 +361,13 @@ source/test/harness manifest and entire packages tree remain unchanged during
 validation. Final seven capability results and source boundaries are in
 [the history](dev-compat-registry-history.md#2026-09-15-final-lifecycle-inheritance-and-capability-results).
 
+The selected propagation is accepted at `90abf6e447d7a5e5b405aba301bf1a951f469bf6`
+(PR #125), with exact-SHA test/typecheck/lint and main ancestry verified.
+The [shared accepted result](upstream-sync-2026-09-15-5198ff54.md#accepted-result-and-publication-evidence)
+is the publication summary; dated staging gates below remain historical.
+The workflow deadline/disposer case remains skipped under shared FC-008.
+Closing both actor quarantine cases did not close that independent debt.
+
 ## Review record
 
 - Status: active
@@ -371,8 +380,9 @@ validation. Final seven capability results and source boundaries are in
 - Prior compat tip: `b277f8efa0dd379997c40a50798c9086d88c6480`
 - Main source inheritance merge: `3cf81dabd6efc66d7cbd037292eee742a2a33728`
 - Shared audit commit: `5f06049e568276cd1cea9012f6b114e6ddb2fac2`
-- Inherited bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
-- Publication state: accepted main inherited and all seven capability results locally validated; final PR and remote-tip CI are verified after publication.
+- Inherited bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
+- Publication state: accepted at `90abf6e447d7a5e5b405aba301bf1a951f469bf6` through PR #125; exact merged-SHA test, typecheck and lint passed. See the shared synchronization record for run links and ancestry evidence.
+- Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -731,15 +741,15 @@ files remain byte-identical to the accepted main correction.
 
 ## Sync index
 
-| ID | Watch surfaces | Relationship to inherited `main` | Required decision |
-| --- | --- | --- | --- |
-| DC-NET-001 | WebFetch and SSRF call seam | Private-destination policy override | Preserve explicit intranet access or adopt a reviewed replacement |
-| DC-NET-002 | Remote MCP URL and lifecycle tests | Compat guarantee; no production fork | Keep RFC1918 client creation unless policy changes explicitly |
-| DC-PLATFORM-001 | `ripgrep` and `archive` fallbacks | Restricted-network/Windows adaptation under fixed-cwd path semantics | Keep compat-only; preserve inherited relative-path resolution |
-| DC-MODEL-001 | Agent config, MaxMode, retry status, title path, SDK/OpenAPI | Per-agent extension over shared bounded retry; title generation stays shared | Preserve opt-in, final-step bound, title isolation, and subagent status isolation |
-| DC-CONTEXT-001 | Model-visible text, request preflight, title/skills/memory, compaction, checkpoint coverage, chronology, and TUI context/revert projection | Bounded-content hardening around shared request construction | Preserve caps, snapshots, stable paths, effective-window preflight, positional coverage, chronology, and recovery routing |
-| DC-ACTOR-001 | Actor context, default-fork checkpoint, replace-agent, static-prefix overflow | Full-context extension beyond shared capture and actor identity scope | Preserve frozen membership/system/cwd and fail unrecoverable prefixes |
-| DC-TUI-001 | Prompt/footer model metadata and title locale | Request-metadata display override alongside shared locale propagation | Preserve provider/model/variant truth, locale submission, and known-limit disclosure |
+| ID              | Watch surfaces                                                                                                                             | Relationship to inherited `main`                                             | Required decision                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| DC-NET-001      | WebFetch and SSRF call seam                                                                                                                | Private-destination policy override                                          | Preserve explicit intranet access or adopt a reviewed replacement                                                         |
+| DC-NET-002      | Remote MCP URL and lifecycle tests                                                                                                         | Compat guarantee; no production fork                                         | Keep RFC1918 client creation unless policy changes explicitly                                                             |
+| DC-PLATFORM-001 | `ripgrep` and `archive` fallbacks                                                                                                          | Restricted-network/Windows adaptation under fixed-cwd path semantics         | Keep compat-only; preserve inherited relative-path resolution                                                             |
+| DC-MODEL-001    | Agent config, MaxMode, retry status, title path, SDK/OpenAPI                                                                               | Per-agent extension over shared bounded retry; title generation stays shared | Preserve opt-in, final-step bound, title isolation, and subagent status isolation                                         |
+| DC-CONTEXT-001  | Model-visible text, request preflight, title/skills/memory, compaction, checkpoint coverage, chronology, and TUI context/revert projection | Bounded-content hardening around shared request construction                 | Preserve caps, snapshots, stable paths, effective-window preflight, positional coverage, chronology, and recovery routing |
+| DC-ACTOR-001    | Actor context, default-fork checkpoint, replace-agent, static-prefix overflow                                                              | Full-context extension beyond shared capture and actor identity scope        | Preserve frozen membership/system/cwd and fail unrecoverable prefixes                                                     |
+| DC-TUI-001      | Prompt/footer model metadata and title locale                                                                                              | Request-metadata display override alongside shared locale propagation        | Preserve provider/model/variant truth, locale submission, and known-limit disclosure                                      |
 
 ## DC-NET-001 — approved private-network WebFetch
 
@@ -761,17 +771,19 @@ files remain byte-identical to the accepted main correction.
   `assertSafeUrl` import and its two call sites from WebFetch. The inherited
   classifier implementation and tests, including full IPv6 link-local
   `fe80::/10` coverage, remain byte-identical to `main`; compat WebFetch does
-  not call that classifier. The separate model API image downloader is identical
-  to main and still rejects private destinations at every hop; this override
-  grants no exception to `src/llm-server/images.ts`. MEDIA-DNS-01 inherits
-  sequential fallback within each fully validated public DNS answer set for
-  the shared refused/unreachable connection-error whitelist only. TLS, HTTP
-  and body failures remain terminal; WebFetch policy is unchanged.
+  not call that classifier. The former separate model API image downloader and
+  its MEDIA-DNS-01 policy were retired by FD-004 on 2026-09-14; the old
+  `src/llm-server/images.ts` no longer exists. Current `/v1` remote image URLs
+  follow upstream's SDK path without that downloader's per-hop checks. This
+  shared capability API behavior is independent of compat's WebFetch policy.
 - Delta: after the effective `webfetch` permission approves a target,
   operator-configured private HTTP(S) destinations such as
   `http://192.168.1.1/wiki` may be requested. HTTP(S)-only validation,
-  per-target permission asks, manual redirects with the 10-hop limit, timeout,
-  the 5 MB response bound, and the injected HTTP client remain in force.
+  per-target permission asks, manual redirects with the 10-hop limit and the
+  injected HTTP client remain in force. As in main, the timeout covers response
+  acquisition/redirects; the 5 MiB check rejects a declared oversized body or a
+  fully buffered oversized response. It is not a streaming memory or complete
+  body-read deadline guarantee.
 - Source surfaces: `packages/opencode/src/tool/webfetch.ts`. The inherited
   `packages/opencode/src/util/ssrf.ts` is a synchronization surface but is not
   forked by this entry.
@@ -1094,6 +1106,30 @@ files remain byte-identical to the accepted main correction.
   passing on main.
 - Status: active
 - Canonical owner: `dev/compat` model-request safety boundary
+- 2026-09-15 code-inventory subcontracts (existing behavior, no new owner):
+  content caps/serialization; request estimation and current-turn recovery floor;
+  message chronology/idempotent admission; checkpoint coverage and logical tail;
+  legacy active-tool snapshot migration; structured-output replay; and generated
+  client examples. These have different retirement conditions and must not be
+  treated as one indivisible product policy.
+  `createMessage` allocates monotonic commit timestamps and checks message/part
+  ownership; atomic user admission is separate from inbox draining, whose
+  message/part creation and inbox deletion are not one crash-atomic transaction.
+  `currentUserID` feeds the current-turn projection through `llm-request-prefix`.
+  JSON-schema requests suppress the active recall reminder and can recover the
+  structured result from a completed StructuredOutput part. These local prompt
+  corrections were previously under-specified; they are candidates for shared
+  correctness review rather than a new compat product feature.
+  Request preflight is heuristic and applies only when its runtime gates allow
+  it: `compaction.auto=false`, unknown context capacity and hidden native bounded
+  agents can bypass it. Provider conversion or later `_noop` insertion can change
+  the wire shape. No exact provider-token or universal request-fit guarantee is
+  claimed.
+  The generic truncation helper can exceed an unusually tiny requested budget
+  when the omission marker itself is longer; wrappers are additional bytes.
+  Normal fixed 50 KiB content caps are not a proof of a strict total wire bound
+  for arbitrary helper arguments.
+
 - Base: inherited main behavior
   `37bbc8229ca70a92b5eaaa7bafd725d070f3f271` retains FD-002 instruction
   delivery, shared retry/title construction, frozen system-tail skill catalogs, stable
@@ -1106,7 +1142,10 @@ files remain byte-identical to the accepted main correction.
   the full-context/static-prefix actor extension.
 - Delta: instruction, inbox, replayed tool input/output, synthetic error media,
   judge fields, and actor state use explicit UTF-8/character caps and
-  non-throwing serialization. HTTP title text, image, and part validation
+  serialization helpers. This is not a universal non-throwing guarantee:
+  `safeStringifySimple` can throw on BigInt; `safeStringify` can throw from
+  getters or `toJSON` even with BigInt conversion. Only the judge's
+  `safeStringifyNoThrow` path catches those serialization errors. HTTP title text, image, and part validation
   retains its existing limits; system-tail catalogs remain bounded at 50 KiB.
   Historical capped v2 directories migrate only after strict generated-part
   recognition, preserving loaded skill bodies and ordinary text. Stable `{current_session_id}` memory instructions
@@ -1114,7 +1153,11 @@ files remain byte-identical to the accepted main correction.
   Request preflight accounts for system/messages, treats current-turn context
   as unshrinkable, includes only active tool schemas, and uses the inherited
   effective window, including `MIMOCODE_COMPACTION_MAX_CONTEXT` and the
-  upstream ratio trigger. Preflight compares the estimate directly with that
+  upstream ratio trigger. Tool-schema serialization is capped at 80 KiB only
+  for estimation; dispatch does not impose that same cap. Oversized active
+  schemas can therefore be undercounted. This is an estimator limitation, not
+  evidence that every dispatched request fits the provider window.
+  Preflight compares the estimate directly with that
   trigger, without its former additional 5K/10% advance. Estimation can still
   observe a larger current request than the previous provider usage record;
   shared thresholds do not imply identical trigger timing. It routes recoverable overflow to existing
@@ -1132,8 +1175,9 @@ files remain byte-identical to the accepted main correction.
   same-timestamp live message. The active marker moves to the logical seam,
   superseded context boundaries are removed, and missing or reversed coverage
   fails closed to the full observed history. The published OpenAPI exposes
-  `/session/{sessionID}/checkpoint-coverage`, `CheckpointCoverage`, and
-  `CompactionPart.projection`. Every published code sample imports
+  `/session/{sessionID}/checkpoint-coverage` and `CheckpointCoverage` as
+  compat additions. `CompactionPart.projection` is already shared with main and
+  must stay equivalent; it is not an additional compat API field. Every published code sample imports
   `@mimo-ai/sdk/v2`, camelizes underscore operation-ID segments, and targets an
   actual callable v2 client method.
 - POLICY-04 additional surfaces: `packages/opencode/src/session/skill-catalog.ts`,
@@ -1168,6 +1212,17 @@ files remain byte-identical to the accepted main correction.
   `packages/sdk/js/src/v2/gen/sdk.gen.ts`,
   `packages/sdk/js/src/v2/gen/types.gen.ts`, and
   `packages/sdk/openapi.json`.
+- Additional actual carriers: `packages/opencode/src/cli/cmd/debug/agent.ts`,
+  `packages/opencode/src/inbox/inbox.ts`,
+  `packages/opencode/src/session/llm-request-prefix.ts`,
+  `packages/opencode/src/session/session.sql.ts`, and
+  `packages/opencode/migration/20260901000001_session_prefix_active_tools/migration.sql`.
+  New snapshots already encode per-tool `active` in shared JSON. The separate
+  legacy column remains for old rows, including an explicit empty mask; it is
+  migration compatibility, not a second independent permission policy. Preserve
+  old-row reads when evaluating removal of new-row dual writes. The additional
+  two-argument `restoreTools` filter has only test callers in the current tree;
+  production uses the full stored pool and separately selects advertised tools.
 - Test surfaces: inbox rendering, request classification, instruction, MaxMode,
   message replay, overflow, prompt-effect, actor, checkpoint coverage,
   checkpoint tail, context usage, select-messages, revert, safe-stringify, and
@@ -1281,9 +1336,11 @@ files remain byte-identical to the accepted main correction.
   remain intact. Request-local structured schemas participate in snapshot
   rotation when a session changes output format.
 - 2026-09-08 selected Actor/MCP completion: The shared actor recovery entry preserves currentTurnMessages, frozen turnContext, active-tool preflight, reserve-safe overflow, pending-external guards and owned continuation receipts. Fresh generation retains CheckpointCoverage, projection, and callable-v2 samples. The complete context/actor/checkpoint matrix passes 303 tests with two pre-existing timing skips.
-- Exit condition: retire only when shared `main` enforces equivalent caps and
-  non-throwing serialization at every model-visible boundary and performs the
-  same request-aware, active-tool preflight without weakening FD-002 delivery.
+- Exit condition: retire the supported cap/preflight overlay only when shared
+  `main` provides equivalent behavior without weakening FD-002 delivery.
+  Universal non-throwing serialization and conservative accounting of oversized
+  active schemas are improvement targets; the current limitations above must
+  not be presented as already implemented guarantees.
 
 ## DC-ACTOR-001 — full-context actor and static-prefix overflow extensions
 
