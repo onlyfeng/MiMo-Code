@@ -3262,3 +3262,9 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - PR #137 的多实例夹具反馈由共享源码 `15ca0f83a466f0581ce4e1add6883e0e204318ed` 处理，基于已接受运行验收 main `c643adf9dffa57191153cc4452003ba03e3cab32`。遵循包测试指引使用 `testEffect`/`it.live`、真实 AppLayer、tmpdirScoped/provideInstance，并显式释放两个捕获的实例；没有全局实例清理或生产修改。
 - 原 A-B-A-B、真实跨目录 403、三个 Actor/Write 场景及 35 处断言保留，子测试和外层预算仍为 15/25/30 秒。3 wrappers pass / 0 fail / 6 assertions，30.69 秒；包 typecheck exit 0，focused lint 无警告错误。详见[共享运行验收](runtime-validation-2026-09-15.md#多实例夹具复审收敛)。
 - FC-006 的测试来源前进至该源码；共享 CI 安装仍由 `9bf2b8bc` 提供，bundled guidance 与选定 upstream `b4cc11cd` 不变。七项 DC 政策保持 compat 归属，后续接受 SHA 的 CI、审核及传播另行验收。
+
+## 2026-09-15 standalone experiment log cleanup
+
+- PR #138 的退出测试调查定位 standalone CLI 自建日志流未显式关闭；共享源码 `f20e91358da8ba4feef8d669ae1b105486e2566f` 在 runtime/DB 清理后等待 Log.shutdown。FD-006 的实验载体沿用独立证据归属，不改变 exec 权限、模型语义或七项 DC 政策。
+- 现有隔离子进程新增真实日志完成和关闭后不追加断言；旧实现自然 exit 0 仍确定失败，修正后完整实验文件 11 pass / 0 fail / 69 assertions，23.03 秒。并行消费两个输出管道，保留自然退出和 15/30 秒预算。包 typecheck exit 0；lint 0 errors，七条现存警告不归入本次新增。
+- 之前单次 CI exit143 未在本机重现，日志对照只显示资源遗漏和退出耗时相关，不能证明该失败根因。详细边界见[RV04](runtime-validation-2026-09-15.md#rv04独立实验日志资源清理)。FD/FC runtime/test 引用前进至 `f20e9135`，插件 scope 夹具仍为 `15ca0f83`，共享安装、bundled guidance 和选定 upstream 不变。
