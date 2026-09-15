@@ -40,6 +40,14 @@ F02 将可信 `harness_model` 传入 debug 工具发现。八个真实 CLI 子�
 
 PR #126 初始 CI 暴露 Runner 重入测试的 5/50ms 竞争：父测试被调度晚时首执行可能已结束。现在通过 started/reentered/finish 信号确保正在执行时重入，再放行首任务；生产 Runner 未改。
 
+第二轮同 head 的[Linux 观察](https://github.com/onlyfeng/MiMo-Code/actions/runs/34932109523/job/104262298746) 捕获 child Instance 在约 10 秒释放，但 `runtime.wait` 未返回，直到 120 秒测试时限。第三轮[深层观察](https://github.com/onlyfeng/MiMo-Code/actions/runs/34933167224/job/104265451092) 完整退出，同时证实 reclaim 与 isolated disposer 会并行删除 worktree。该轮没有捕获 Git 缺陷异常，不能把具体竞争错误写成直接观察事实。
+
+源码确认 `Worktree.remove` 的 Git/文件错误以 Effect defect 抛出，原 `Effect.ignore` 只吞 typed error，缺陷会跳过后续终态持久化和 Deferred 完成。真实删除目录后注入同类 `RemoveFailedError`，旧实现稳定复现 deadline 等待超时及 cancel 直接抛错。修复 `a748c5f0`（main 整合 `97b69a20`）只在该清理项捕获并记录 defect，保留原始终态、纯中断和所有生产时限。两例由 0 pass/2 fail 转为 2 pass、26 断言，检查 outcome、DB、WorkflowFinished、真实目录和完整 Instance 释放；fixture 仅在全部断言之后释放挂起响应，不代替生产取消。
+
+作者完整 worktree 文件为 8 pass、49 断言、39.03 秒；runtime 取消/失败/代际/deadline 五例为 5 pass、17 断言、9.37 秒，package typecheck 通过。两组清除八项 selector 后仅显式启用 workflow，属于 opt-in。诊断分支保持独立，不合入生产。另一个纯挂起 HTTP fixture 的失败清理会遮盖原断言，但它发生在资源清理阶段，不能用于解释第二轮已定位的 `runtime.wait` 卡住。
+
+root 在 `97b69a20` 清除八项 selector 后独立运行完整 worktree 文件，默认路径 8 pass、0 fail、49 断言、39.63 秒自然退出。该结果与作者的 opt-in 矩阵分开记录。
+
 最终 main 默认矩阵为 provider error、debug agent、harness alias、tuple key、Runner 五文件，88 pass、0 fail、335 断言、84.40 秒；package `bun typecheck` 通过。独立复核其中三文件为 37 pass、101 断言。默认验证显式清除 `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`、`MIMOCODE_CODEX_MODE`、`MIMOCODE_COMPACTION_MAX_CONTEXT`、`MIMOCODE_COMPACTION_TRIGGER_RATIO`、`MIMOCODE_DISABLE_CHECKPOINT`、`MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`，保留包 preload 的 Orchestrator、内存数据库和隔离配置。早期仅清前三项的运行继承了 workflow 开关，不能作为默认路径证据。
 
 另有本地 shard 4 同分组的 126 文件矩阵：1417 pass、20 skip、4123 断言、459.63 秒。该轮 `CI=true` 但继承 workflow 开关，是 opt-in 共享进程补充证据，不等同默认 CI。最终远端 SHA 的 CI 仍须独立确认。
@@ -61,7 +69,7 @@ F06 原提交 `b2dad34ea1cde4509d9f6ce4143c8b6a0094f858`，整合为 `8cfc6eca`�
 PR #130 初始 head `3836da63` 的 CI 又发现两项组合回归，均已在原失败条件下复现并修正：
 
 - `1efa8ff9`：provider 返回 overflow 时，checkpoint 重建此前读取流式执行前的消息快照，遗漏刚提交的高用量 assistant；下轮因水位没有覆盖该行再次重建。现在在准备重建时读取同 session/actor 的最新已提交消息，并在异步渲染前冻结该范围。原 50,000-token 用例从两个 marker 失败恢复为一个，新增断言同时检查真实 assistant、水位和 usage recovery。没有放宽恢复判定，也没有把 writer stub 改成不真实的边界。
-- `d726a454`：同一 prompt message ID 的重试会为未指定 ID 的 parts 再生成身份，触发 F06 的严格冲突检查。producer 现在标记自身生成的 part IDs，在事务中按顺序匹配当前持久 parts，再完整比较内容；返回持久身份。显式 ID、不同内容/顺序/metadata、跨消息与跨 actor 仍拒绝。若执行期间追加了 parts 或修改 metadata，旧输入也可能不再匹配；这是相同当前内容的有限幂等，不是整个消息生命周期的重放保证。并发相同请求验证仅提交一份 user/parts，并仅触发一次标题生成。
+- `d726a454`：同一 prompt message ID 的重试会为未指定 ID 的 parts 再生成身份，触发 F06 的严格冲突检查。producer 现在标记自身生成的 part IDs，在事务中按匿名 parts 的相对顺序匹配当前持久 parts，再完整比较内容；返回持久身份。匿名 parts 换序、显式 ID 冲突、不同内容/metadata、跨消息与跨 actor 仍拒绝；显式 ID 已确定顺序时，输入数组换序可以在规范排序后等价。若执行期间追加了 parts 或修改 metadata，旧输入也可能不再匹配；这是相同当前内容的有限幂等，不是整个消息生命周期的重放保证。并发相同请求验证仅提交一份 user/parts，并仅触发一次标题生成。
 
 作者最终准入子矩阵为 10 pass、102 断言。root 在 `d726a454` 独立运行完整 title-first-turn、auto-overflow-writer-first、usage recovery、tail digest、checkpoint unify、rebuild reset 和 on-the-spot 七文件：49 pass、0 fail、298 断言、38.49 秒自然退出。使用原测试时限，清除上述七项环境 selector 及 `MIMOCODE_EXPERIMENTAL_WORKSPACES`，保留包 preload；没有把先前矩阵当作新修复后的全量重跑。
 
