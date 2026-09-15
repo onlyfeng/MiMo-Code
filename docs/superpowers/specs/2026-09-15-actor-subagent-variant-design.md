@@ -50,8 +50,10 @@
   其他动作继续由 strict schema 拒绝该字段。
 - Shell：`--variant <name>` 与 `--variant=<name>`，只用于 run/spawn。缺值时报
   `--variant requires a value`；arity 提示包含 `[--variant <name>]`。
-- 无脚本恢复：`recoverActorArgs` 在平铺字段中保留字符串 `variant`；`operation`
-  信封形式原样保留。
+- 无脚本恢复：`recoverActorArgs` 保留显式给出的 `variant`，无论它在平铺字段中，
+  还是在 `operation` 信封（对象或 JSON 字符串）旁的根级；格式错误的值也保留，交给
+  strict schema 拒绝。根级与信封内取值不同时，两份都留在外层，由 strict schema
+  拒绝，不会静默选用其中一个。
 
 ### 解析与校验
 

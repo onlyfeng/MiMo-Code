@@ -375,9 +375,9 @@ export function recoverActorArgs(rawArgs: unknown): ActorShellArgs | undefined {
   }
   if (obj.operation && typeof obj.operation === "object" && !Array.isArray(obj.operation)) {
     const operation = obj.operation as Record<string, unknown>
-    // Conflicting copies cannot choose a different context or lifetime silently.
-    // Keep the extra root fields so the native strict schema rejects this shape.
-    if (["context", "lifecycle"].some((key) =>
+    // Conflicting copies cannot choose a different context, lifetime or variant
+    // silently. Keep the extra root fields so the native strict schema rejects this shape.
+    if (["context", "lifecycle", "variant"].some((key) =>
       Object.hasOwn(obj, key) && Object.hasOwn(operation, key) && obj[key] !== operation[key],
     )) return { ...obj, operation } as ActorShellArgs
     return {
@@ -385,6 +385,7 @@ export function recoverActorArgs(rawArgs: unknown): ActorShellArgs | undefined {
         ...operation,
         ...(Object.hasOwn(obj, "context") ? { context: obj.context } : {}),
         ...(Object.hasOwn(obj, "lifecycle") ? { lifecycle: obj.lifecycle } : {}),
+        ...(Object.hasOwn(obj, "variant") ? { variant: obj.variant } : {}),
       },
     } as ActorShellArgs
   }

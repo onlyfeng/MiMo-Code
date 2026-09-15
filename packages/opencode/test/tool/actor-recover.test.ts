@@ -25,13 +25,26 @@ describe("recoverActorArgs", () => {
     ).toEqual({ operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p", model: "lite", task_id: "T4" } })
   })
 
-  test("an explicit variant survives recovery, even malformed, for strict validation", () => {
-    expect(
-      recoverActorArgs({ action: "spawn", subagent_type: "general", description: "d", prompt: "p", model: "lite", variant: "high" }),
-    ).toEqual({ operation: { action: "spawn", subagent_type: "general", description: "d", prompt: "p", model: "lite", variant: "high" } })
-    expect(recoverActorArgs({ subagent_type: "general", description: "d", prompt: "p", variant: 3 }) as unknown).toEqual({
-      operation: { action: "run", subagent_type: "general", description: "d", prompt: "p", variant: 3 },
+  // A dropped variant would silently run the child at a different cost or
+  // reasoning level, so every recovery shape keeps it for strict validation.
+  test("an explicit variant survives flat and envelope recovery, even malformed, for strict validation", () => {
+    const base = { action: "spawn" as const, subagent_type: "general", description: "d", prompt: "p" }
+    for (const variant of ["high", null, 3]) {
+      for (const raw of [base, { operation: base }, { operation: JSON.stringify(base) }]) {
+        expect(recoverActorArgs({ ...raw, variant }) as unknown).toEqual({ operation: { ...base, variant } })
+      }
+    }
+    expect(recoverActorArgs({ ...base, model: "lite", variant: "high" })).toEqual({
+      operation: { ...base, model: "lite", variant: "high" },
     })
+  })
+
+  test("a conflicting root variant beside an envelope stays visible for strict rejection", () => {
+    const operation = { action: "spawn", subagent_type: "general", description: "d", prompt: "p", variant: "low" }
+    for (const raw of [{ operation, variant: "high" }, { operation: JSON.stringify(operation), variant: "high" }]) {
+      expect(recoverActorArgs(raw) as unknown).toEqual({ operation, variant: "high" })
+    }
+    expect(recoverActorArgs({ operation, variant: "low" }) as unknown).toEqual({ operation })
   })
 
   // spawn/run have no resume argument. Recovery must NOT quietly drop a top-level
