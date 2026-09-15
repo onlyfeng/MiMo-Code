@@ -353,6 +353,17 @@ not change their implementation. The preceding review is retained in the
   deleted testing entry's notification policy. See F09 in
   [the implementation report](audit-followups-2026-09-15.md).
 
+- 2026-09-15 shared chronology/admission: caller IDs are identity keys, not
+  admission order. `createMessage` allocates an actor-local monotonic committed
+  timestamp; metadata updates preserve creation time and completion cannot
+  precede it. User message/parts are committed together with session/actor/part
+  ownership validation and same-content idempotency; latest-user conditional
+  admission shares that transaction. Inbox draining is not claimed to be one
+  crash-atomic transaction with message creation. Fork/revert and cursor
+  consumers use chronological positions, with UTF-8 ID ties matching SQLite
+  BINARY. Producer and transaction regressions are recorded under F06 in
+  [the implementation report](audit-followups-2026-09-15.md).
+
 ## FC-002 — canonical checkpoint writer and mode-specific frozen context
 
 - Status: active
@@ -1254,6 +1265,21 @@ logged`, and the peer `success`/`failure` variants of
   advertised subset. Its file manifest includes retained validated terminal
   nested exec effects within the snapshot budget; these read-only views never
   create tool-execution authority.
+- 2026-09-15 shared chronological projections: rebuild tails, recovery usage,
+  checkpoint context and persisted loop-streak spans resolve actual message
+  positions rather than lexical ID ranges. Missing/reversed checkpoint bounds
+  retain live messages through both context filtering and later tail collapse;
+  the transient invalid range is not written back to storage. TUI buckets use
+  the same `(created, UTF-8 ID)` order and undo hydration follows pagination
+  through its exact boundary, preserving that boundary during live updates.
+  Main's existing footer compares a locally resolved watermark and remains
+  pending when it cannot resolve one. The extra checkpoint-coverage HTTP/SDK
+  and TUI cache protocol stays owned by DC-CONTEXT-001 on compat.
+  Additional carriers: `session/session.ts`, `message-v2.ts`, `checkpoint.ts`,
+  `tail-digest.ts`, `revert.ts`, `prompt/loop-streak.ts`, shared UTF-8 ordering,
+  and TUI sync/session/model utilities. Real SQL pagination, atomic admission,
+  composed projection and TUI state-helper tests bind these paths; no
+  interactive terminal playtest is claimed.
 - POLICY-04 carrier review: compaction is the third frozen-prefix consumer.
   Its history projection uses the layout paired with the selected frozen
   system, preserving legacy catalog messages or suppressing known generated

@@ -19,7 +19,7 @@
 | F03 | workflow deadline真实执行与释放；FC-008       | 已恢复，待发布   | 待继承               | runtime-worktree、LLM进入、child Instance释放、进程自然退出               |
 | F04 | 请求估算及序列化失败策略；DC-CONTEXT-001      | 无对应预检扩展   | 本地修复，待发布     | 完整tool schema、实际prompt预检、有效工具集合及保守失败                   |
 | F05 | 通用SDK示例生成正确性；FC-008                 | 已集成，待发布   | 待继承并删除重复差异 | 生成器、OpenAPI code samples、实际v2调用；不混入compat schema             |
-| F06 | 消息时序与原子用户提交；FC-001/DC-CONTEXT-001 | 待提升           | 待以共享实现收敛     | createMessage、UTF8排序、producer、fork/revert/checkpoint及TUI消费        |
+| F06 | 消息时序与原子用户提交；FC-001/DC-CONTEXT-001 | 已集成，待发布   | 待以共享实现收敛     | createMessage、UTF8排序、producer、fork/revert/checkpoint及TUI消费        |
 | F07 | 并发压缩保留新请求；FC-015/DC-CONTEXT-001     | 待提升           | 待以共享实现收敛     | compaction、pending external admission、continuation前后检查              |
 | F08 | checkpoint coverage协议归属；DC-CONTEXT-001   | 评估完成，不上移 | 保留完整现有协议     | route/schema/SDK/TUI缓存；不允许只移动单边载体                            |
 | F09 | 退役入口及无调用残留；FC-001/008、FD-004/005  | 已清理，待发布   | 待继承               | 旧wake入口、三helper、loader参数、worker与Actor注释；保留resume仍使用路径 |
@@ -49,6 +49,12 @@ F05/F09/F11 整合源码快照 `99297fa6`。SDK 示例改用 `@mimo-ai/sdk/v2` �
 F09 删除仅供旧测试调用的 Actor wake 入口及其专属上下文注入，保留 resume 仍用的执行/通知路径。旧十例逐项映射至真实 Inbox 路径或明确退役旧 DTO 注入/owner-follower 结果共享语义。当前真实 continuation 向父 Inbox 通知且不发 toast，没有伪称保留已删除入口的 toast。作者默认 Actor 矩阵 143 pass、工具/worker/provider 消费者 131 pass、Inbox 24 pass、串行 main/队列 6 pass（其中两例与 Actor 组重复）；独立十目标例为 10 pass、64 断言。package typecheck 通过。main late-row 用例在并发负载下曾超时，未改源码，独立复跑和最终串行矩阵通过；保留该时序敏感性记录。
 
 F11 取消根生成脚本隐式全仓格式化，保留 SDK 及 OpenAPI 自身格式化。隔离探针执行真实脚本并替换生成子命令，前后成功码均 0、任一步失败码均 1，SDK→OpenAPI 顺序、cwd 和重定向不变。`0.5/0.7` 与 upstream `0.50/0.70` 等价，保留 formatter 规范；default prompt 也保留无尾空格写法。这些机械差异没有额外行为待同步。
+
+### 共享消息时序
+
+F06 原提交 `b2dad34ea1cde4509d9f6ce4143c8b6a0094f858`，整合为 `8cfc6eca`。消息提交、fork/revert/checkpoint、usage recovery、loop-streak 和 TUI 统一按提交时间与 UTF-8 ID tie-break 处理；用户消息与 parts 原子提交并拒绝身份冲突。新增行为不包含 compat 的内容上限、预检、MaxMode 或模型侧 full Actor。
+
+独立审核发现并修复两项组合问题：缺失 checkpoint watermark 不得被后续 collapse 当作有效范围；撤销分页加载的边界不得被 live message update 挤出缓存。最终相关十文件 155 pass，真实 prompt 子矩阵 19 pass；独立六文件 103 pass、287 断言，以及原子准入六例 6 pass、34 断言。整合后 root 默认五文件再验证 85 pass、239 断言。两个 package typecheck 通过。更早全量相关矩阵为 356 pass、2 个既有 skip；最后补丁后按影响范围复验，未把旧全量结果移称为最终完整矩阵。TUI 证据是状态 helper 测试和事件接线核验，未运行交互终端。
 
 ### 协议归属决定
 
