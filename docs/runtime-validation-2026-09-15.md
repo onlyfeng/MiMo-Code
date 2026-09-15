@@ -11,7 +11,8 @@ main 继续承载共享正确性修正；compat 的产品保证和环境适配�
 - Inbox 实现：`74d4bfb6008071fca87c245c7791530660d64876`，经 [PR #134](https://github.com/onlyfeng/MiMo-Code/pull/134) 接受为 main `d11a9652981e7b5953584205474249775ee54236`。
 - 本批测试/CI：`b23c278e51ab0cc34c47c2d20406d69e57d24f2f`；继承已接受 Inbox 后的集成源码/测试：`a9e4458e62632d65ccdef38152e757730ac102db`。
 - PR #136 复审后的测试源码：`5165307c8a97c448de252a33b9eb2a1feb393545`，为新增插件 child 设置明确的 15 秒测试预算，25 秒进程 watchdog 和 30 秒 wrapper 预算保持原值。
-- 共享 CI 安装修正：`9bf2b8bcc696abf8797487b090c342a5a64f7a7c`，从 `package.json` 选择 Bun 并使用 `bun ci`；runtime/test 行为引用仍为上面的 `5165307c`。
+- PR #137 复审后的共享插件夹具源码：`15ca0f83a466f0581ce4e1add6883e0e204318ed`，使用 Effect-aware 多实例夹具，按作用域释放两个测试实例与临时资源。
+- 共享 CI 安装修正：`9bf2b8bcc696abf8797487b090c342a5a64f7a7c`，从 `package.json` 选择 Bun 并使用 `bun ci`；该安装提交不改变 runtime/test；当前夹具引用为上面的 `15ca0f83`。
 - 本批新增两个测试 wrapper、两个子进程夹具和共享 Windows job，并收敛共享安装步骤；没有插件、MCP 或平台生产实现改动。
 
 | ID | 能力及归属 | main 结果 | dev/compat 处理与证据归属 |
@@ -130,3 +131,9 @@ PR #136 的 P2 指出新启动的 Bun test 不继承 wrapper 的预算。实际 
 限定为 15 秒，保留外层终止与清理余量，不放宽已有测试或应用时限。
 同 PR 的首轮 stdio job 因固定依赖下载返回 HTTP 504 而未执行测试，属于独立安装失败；
 同源成功运行的 stdio JUnit 为 6 pass / 0 fail / 20 assertions，未修改 stdio 代码。
+
+## 多实例夹具复审收敛
+
+PR #137 的 [scoped fixture 反馈](https://github.com/onlyfeng/MiMo-Code/pull/137#discussion_r4015271088) 指出共享子测试应遵循 `test/AGENTS.md` 的多目录 Effect 夹具约定。`15ca0f83` 使用 `testEffect`/`it.live`、真实 `AppLayer` 与 `tmpdirScoped`/`provideInstance`，替换手写 `AppRuntime.runPromise` 嵌套和进程全局 `Instance.disposeAll`。低层 `provideInstance` 只绑定上下文，不负责释放，因此分别捕获两个 owned instance 并登记释放；订阅先结束，实例在恢复 cwd、关闭 scripted server、删除相邻 worktree 和 checkout 前释放。
+
+三个应用场景和 35 处既有断言保留，15/25/30 秒预算不变，无生产服务替换或新增生产改动。最终同一 wrapper 复验为 3 pass、0 fail、6 次外层断言，30.69 秒；包 `bun typecheck` exit 0，focused lint 为 0 warnings / 0 errors。原隔离进程中未证明存在生产泄漏；本次修正处理仓库测试约定与资源作用域，不把结构调整写成已发现的应用缺陷。此前固定 SHA 的运行结果仍有效，不移称为该夹具重构后的重跑。共享修正先在 main 接受，再传播到 compat。
