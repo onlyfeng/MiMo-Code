@@ -17,7 +17,7 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-15
 - Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
 - Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `874f198b5f25fdd1bc21f73bc58553ba82a2938d`
+- Main behavior (runtime/tests): `0b12e39ebfae5e0a01e623de1b4f58e96c86cb09`
 - Bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
