@@ -22,7 +22,9 @@ for (const scenario of ["disabled", "enabled", "read-only"] as const) {
       delete env[selector]
 
     const child = Bun.spawn({
-      cmd: [process.execPath, "test", "./test/fixture/subagent-progress-chain-child.ts"],
+      // The nested runner has its own budget; leave time for imports and cleanup
+      // before the process watchdog and outer test deadlines.
+      cmd: [process.execPath, "test", "./test/fixture/subagent-progress-chain-child.ts", "--timeout", "15000"],
       cwd: path.resolve(import.meta.dir, "../.."),
       env,
       stdin: "ignore",
