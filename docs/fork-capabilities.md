@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-09-15
 - Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
 - Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `3a12d1800d9bfd002f543764e4ec72047e6e6bb3`
+- Main behavior (runtime/tests): `74d4bfb6008071fca87c245c7791530660d64876`
 - Bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
@@ -366,9 +366,18 @@ not change their implementation. The preceding review is retained in the
   persisted content/metadata remain strict. Reordering explicitly identified
   input parts can be equivalent after canonical sorting. Runtime-added
   parts can make a later replay conflict. This is not a lifetime replay receipt.
-  Inbox draining still writes the message, its parts and the queue deletion in
-  separate steps. Shell message/parts writes and streamed assistant/tool output
-  also remain outside the `commitUserMessage*` transaction.
+  Inbox draining commits its synthetic user message, all rendered parts and the
+  selected queue deletion in one immediate transaction. After asynchronous seed
+  resolution, admission rechecks cancellation, persistent-peer retirement and
+  the still-present receiver rows under that write lock. Concurrent drains or GC
+  cannot replay a previously selected row. Failed writes leave the whole batch
+  queued; postcommit observers see the complete transcript and consumed queue.
+  A publication callback failure preserves the committed drain count, while
+  Effect interruption still propagates. This guarantees queue-to-transcript
+  atomicity, not exactly-once model execution or durable event delivery. See
+  [the crash/reopen evidence](inbox-crash-consistency-2026-09-15.md).
+  Shell message/parts writes and streamed assistant/tool output remain outside
+  the `commitUserMessage*` transaction.
   Fork/revert and cursor
   consumers use chronological positions, with UTF-8 ID ties matching SQLite
   BINARY. Producer and transaction regressions are recorded under F06 in
