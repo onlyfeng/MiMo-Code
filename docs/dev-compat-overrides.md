@@ -1077,8 +1077,8 @@ files remain byte-identical to the accepted main correction.
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
 
 - 2026-09-15 implementation snapshot: compat
-  `0d568184e304666f7129388f2e0d3b9e353f2178` inherits main
-  `313ca1ddfd5d36a2220aaadeee1f750d88e2bcc6`. F06 chronology, atomic
+  `c38078f7eb99d7ba68478808abbd616cfa28847c` inherits main
+  `37b97a7bfc52e201513f2d1120506f287d2d9bbf`. F06 chronology, atomic
   admission, checkpoint/loop-streak/TUI position handling, F07 compaction
   admission guards, and callable SDK examples are now shared contracts, not
   exclusive compat policies. F04 request preflight and F10 legacy snapshot
@@ -1123,11 +1123,15 @@ files remain byte-identical to the accepted main correction.
   replay; and inherited generated client examples. These have different retirement
   conditions and must not be treated as one indivisible product policy.
   Shared `createMessage` allocates monotonic actor commit timestamps;
-  `commitUserMessage` atomically admits the user and parts, checks ownership and
-  accepts only equivalent retries. Debug, inbox, prompt and compaction producers,
+  prompt/compaction `commitUserMessage` atomically admits the user and parts,
+  checks ownership and accepts only equivalent current content. The prompt
+  producer can reuse generated anonymous part IDs in relative order, while
+  explicit identities remain strict; runtime additions can make old input
+  non-equivalent. Debug, inbox, prompt and compaction producers,
   fork/revert/checkpoint and TUI consumers use chronological position with UTF-8
-  BINARY ID tie-breaking, not caller-ID magnitude. Inbox deletion is still outside
-  the message/part admission transaction, so the entire drain is not crash-atomic.
+  BINARY ID tie-breaking, not caller-ID magnitude. Inbox still creates the
+  message, writes parts and deletes the queue row in three separate steps; its
+  drain is not covered by the prompt/compaction transaction.
   `currentUserID` feeds the current-turn projection through `llm-request-prefix`.
   JSON-schema requests suppress the active recall reminder and can recover the
   structured result from a completed StructuredOutput part. These local prompt
@@ -1180,6 +1184,9 @@ files remain byte-identical to the accepted main correction.
   observe a larger current request than the previous provider usage record;
   shared thresholds do not imply identical trigger timing. It routes recoverable
   overflow to existing recovery and distinguishes an unrecoverable static prefix.
+  The shared rebuild helper reloads the latest persisted same-actor messages
+  immediately before inserting its boundary, including a high-usage assistant
+  completed after the request began.
   F06's strict `usageRecovered` validates real persisted checkpoint endpoints;
   an empty preflight placeholder created after the digest is not covered merely
   because recovery succeeded. Compat additionally passes the loop-local
