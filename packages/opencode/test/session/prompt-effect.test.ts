@@ -722,6 +722,46 @@ const mcpIt = testEffect(
     })),
   ),
 )
+const largeSchemaMcpIt = testEffect(
+  makeHttp(
+    mcpLayer(() => ({
+      mcp_large: dynamicTool({
+        description: "Example large schema",
+        inputSchema: jsonSchema({
+          type: "object",
+          properties: { value: { type: "string", description: "x".repeat(1024 * 1024) } },
+        }),
+        execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      }),
+    })),
+  ),
+)
+const unserializablePreflightIt = testEffect(
+  makeHttp(mcp, {
+    plugin: Layer.effect(
+      Plugin.Service,
+      Effect.gen(function* () {
+        const plugin = yield* Plugin.Service
+        return Plugin.Service.of({
+          ...plugin,
+          trigger: (name, input, output) => {
+            if (name === "experimental.chat.messages.transform") {
+              const messages = (output as { messages: MessageV2.WithParts[] }).messages
+              for (const message of messages) {
+                if (message.info.role !== "assistant") continue
+                for (const part of message.parts) {
+                  if (part.type === "text") part.metadata = { test: { value: 1n } }
+                }
+              }
+            }
+            return plugin.trigger(name, input, output)
+          },
+        })
+      }),
+    ).pipe(Layer.provide(taskMetadataPlugin)),
+  }),
+)
+
 const lifecycleContexts: MCP.TurnContext[] = []
 const lifecycleNotifications: Array<Record<string, any>> = []
 let lifecycleNotificationHangs = false
@@ -4418,6 +4458,95 @@ it.live("request preflight overflow terminates on unrecoverable static prefix", 
       expect(yield* llm.hits).toHaveLength(0)
     }),
     { git: true, config: staticPreflightOverflowCfg },
+  ),
+)
+
+for (const mode of ["active", "inactive", "auto-disabled"] as const) {
+  largeSchemaMcpIt.live(`request preflight handles a large ${mode} MCP schema`, () => {
+    const run = provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Large MCP schema" })
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          harness: "default",
+          noReply: true,
+          parts: [{ type: "text", text: "hello" }],
+        })
+        yield* llm.text("request accepted")
+        const result = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.timeout("20 seconds"))
+        expect(result.info.role).toBe("assistant")
+        if (result.info.role !== "assistant") return
+        if (mode === "active") {
+          expect(result.info.finish).toBe("error")
+          expect(result.info.error?.name).toBe("ModelError")
+          expect(yield* llm.hits).toHaveLength(0)
+          const messages = yield* sessions.messages({ sessionID: chat.id })
+          expect(messages.flatMap((message) => message.parts).some((part) => part.type === "compaction")).toBe(false)
+          return
+        }
+        expect(result.info.error).toBeUndefined()
+        expect(result.parts.some((part) => part.type === "text" && part.text === "request accepted")).toBe(true)
+        const requests = yield* llm.inputs
+        expect(requests).toHaveLength(1)
+        const schema = JSON.stringify(requests[0].tools)
+        if (mode === "inactive") {
+          expect(schema).not.toContain("x".repeat(1024))
+          const compaction = yield* SessionCompaction.Service
+          for (const text of ["second turn", "third turn"]) {
+            yield* llm.text("request accepted")
+            yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text }] })
+          }
+          yield* compaction.create({ sessionID: chat.id, agent: "compaction", model: ref, auto: false })
+          const messages = yield* sessions.messages({ sessionID: chat.id })
+          const boundary = messages.at(-1)
+          if (!boundary) return yield* Effect.die("Missing compaction boundary")
+          yield* llm.text("summary")
+          expect(
+            yield* compaction.process({ parentID: boundary.info.id, messages, sessionID: chat.id, auto: false }),
+          ).toBe("continue")
+          const summary = (yield* llm.inputs).at(-1)
+          expect(summary?.tool_choice).toBe("none")
+          expect(JSON.stringify(summary?.tools)).not.toContain("x".repeat(1024))
+          return
+        }
+        expect(schema).toContain("x".repeat(1024 * 1024))
+      }),
+      {
+        git: true,
+        config: (url) => ({
+          ...providerCfg(url),
+          ...(mode === "auto-disabled" ? { compaction: { auto: false } } : {}),
+        }),
+      },
+    )
+    return mode === "inactive" ? run.pipe(withMcpToolSearch) : run
+  }, 30_000)
+}
+
+unserializablePreflightIt.live("request preflight rejects unserializable plugin metadata before dispatch", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Unserializable request" })
+      yield* seed(chat.id, { finish: "stop" })
+      yield* user(chat.id, "continue")
+      yield* llm.text("provider must not be called")
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role !== "assistant") return
+      expect(result.info.finish).toBe("error")
+      expect(result.info.error?.name).toBe("ModelError")
+      if (result.info.error?.name === "ModelError") expect(result.info.error.data.message).toContain("serialized")
+      expect(yield* llm.hits).toHaveLength(0)
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      expect(messages.flatMap((message) => message.parts).some((part) => part.type === "compaction")).toBe(false)
+    }),
+    { git: true, config: providerCfg },
   ),
 )
 

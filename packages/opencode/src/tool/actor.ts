@@ -87,6 +87,7 @@ function estimateStateTokens(text: string) {
 function capStateContext(text: string, maxTokens: number) {
   if (estimateStateTokens(text) <= maxTokens) return text
   const marker = `\n\n[... checkpoint truncated to ${maxTokens} tokens for actor context=state ...]\n\n`
+  if (Buffer.byteLength(marker, "utf8") >= maxTokens * 3) return takeUtf8PrefixByBytes(marker.trim(), maxTokens * 3)
   const budget = Math.max(0, maxTokens * 3 - Buffer.byteLength(marker, "utf8"))
   const head = Math.floor(budget * 0.65)
   const tail = budget - head

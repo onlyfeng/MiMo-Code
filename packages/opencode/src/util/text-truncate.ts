@@ -51,8 +51,8 @@ export function takeUtf8SuffixByBytes(text: string, maxBytes: number) {
 
 // UTF-8 safe, O(n) byte cap. `keep` selects which slice survives — use
 // `head+tail` for tool errors / tracebacks whose signal sits at the tail.
-// The marker always contains `<label> truncated <suffix>` so callers (and
-// the model) can identify what was dropped and why.
+// When the budget fits it, the marker contains `<label> truncated <suffix>`
+// so callers (and the model) can identify what was dropped and why.
 export function capUtf8TextByBytes(
   text: string,
   maxBytes: number,
@@ -68,6 +68,9 @@ export function capUtf8TextByBytes(
   if (buf.length <= maxBytes) return text
 
   const marker = (omitted: number) => `... ${omitted} bytes of ${label} truncated ${suffix} ...`
+  // Include separators in the minimum budget; even the marker must fit.
+  if (Buffer.byteLength(marker(buf.length), "utf8") + (keep === "head+tail" ? 4 : 2) >= maxBytes)
+    return takeUtf8PrefixByBytes(marker(buf.length), maxBytes)
 
   if (keep === "tail") {
     const reserve = Buffer.byteLength(`${marker(buf.length)}\n\n`, "utf8")

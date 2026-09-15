@@ -796,6 +796,53 @@ continue from state`)
     ),
   )
 
+  for (const maxTokens of [1, 20, 24, 25, 30]) {
+    it.live(`context state includes the omission marker within a ${maxTokens} token budget`, () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            let capturedTask = ""
+            yield* installMockSpawn((input) => {
+              capturedTask = input.task
+            })
+            const { chat, assistant } = yield* seed()
+            const tool = yield* ActorTool
+            const def = yield* tool.init()
+            yield* def.execute(
+              {
+                operation: {
+                  action: "run",
+                  description: "inspect state",
+                  prompt: "continue",
+                  subagent_type: "general",
+                  context: "state",
+                },
+              },
+              {
+                sessionID: chat.id,
+                messageID: assistant.id,
+                agent: "build",
+                abort: new AbortController().signal,
+                extra: {},
+                messages: [],
+                metadata: () => Effect.void,
+                ask: () => Effect.void,
+              },
+            )
+            const prefix = "<session-state>\nHere is a summary of the parent session's progress:\n\n"
+            const suffix = "\n</session-state>\ncontinue"
+            expect(capturedTask.startsWith(prefix)).toBe(true)
+            expect(capturedTask.endsWith(suffix)).toBe(true)
+            const state = capturedTask.slice(prefix.length, -suffix.length)
+            expect(Buffer.byteLength(state, "utf8")).toBeLessThanOrEqual(maxTokens * 3)
+            expect(state.length).toBeGreaterThan(0)
+            expect(state).not.toContain("\uFFFD")
+          }).pipe(Effect.provideService(SessionCheckpoint.Service, checkpointStub("界🙂".repeat(200)))),
+        { config: { checkpoint: { push_caps: { checkpoint: maxTokens } } } },
+      ),
+    )
+  }
+
   it.live("context state caps multibyte checkpoint injection before spawning", () =>
     provideTmpdirInstance(
       () =>

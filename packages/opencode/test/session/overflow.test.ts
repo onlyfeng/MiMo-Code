@@ -636,7 +636,7 @@ describe("request preflight overflow", () => {
 // static, so compaction could never shrink them back out of recovery.
 describe("request preflight overflow tool filtering", () => {
   // Big enough that, on its own, the schema pushes a small-context model over
-  // the preflight threshold; small enough to stay under the 80KB schema cap.
+  // the preflight threshold even before larger schemas are considered.
   const bigTool = () => ({
     description: "d".repeat(30_000),
     inputSchema: { type: "object", properties: { path: { type: "string" } } },
@@ -727,6 +727,87 @@ describe("request preflight overflow tool filtering", () => {
     expect(
       isRequestOverflow({ cfg, model, requestTokens: estimateRequestTokens({ messages, tools: descriptors }) }),
     ).toBe(true)
+  })
+})
+
+describe("request preflight complete serialization", () => {
+  const model = createModel({ context: 100_000, input: 100_000, output: 1_000 })
+  const cfg = mockCfg({ reserved: 0 })
+
+  test.each([40, 80, 256, 1024])("counts the complete %i KiB active schema", async (kib) => {
+    const descriptors = await LLM.materializeWireToolDescriptors({
+      mcp_example: tool({
+        description: "Example MCP tool",
+        inputSchema: jsonSchema({
+          type: "object",
+          properties: { value: { type: "string", description: "x".repeat(kib * 1024) } },
+        }),
+      }),
+    })
+    const tokens = estimateRequestTokens({ messages: [], tools: descriptors })
+    // The payload alone requires this many tokens under the byte heuristic.
+    expect(tokens).toBeGreaterThanOrEqual(Math.round((kib * 1024) / 3))
+    expect(tokens).toBeLessThan(Math.round((kib * 1024) / 3) + 200)
+  })
+
+  test.each([undefined, "none"] as const)("an oversized active schema is static with toolChoice=%s", (toolChoice) => {
+    const result = classifyRequestOverflow({
+      cfg,
+      model,
+      messages: [textMessage("hello")],
+      recoveryFloorMessages: [],
+      tools: [{ name: "mcp_example", inputSchema: { description: "x".repeat(1024 * 1024) } }],
+      toolChoice,
+    })
+    expect(result.type).toBe("overflow-static")
+  })
+
+  test("counts shared schema objects at every wire occurrence", () => {
+    const property = { type: "string", description: "x".repeat(160_000) }
+    const result = classifyRequestOverflow({
+      cfg,
+      model,
+      messages: [],
+      recoveryFloorMessages: [],
+      tools: [{ inputSchema: { properties: { first: property, second: property } } }],
+    })
+    expect(result.type).toBe("overflow-static")
+  })
+
+  const circular: Record<string, unknown> = {}
+  circular.self = circular
+  test.each([
+    { name: "BigInt", tools: { value: 1n } },
+    { name: "circular object", tools: circular },
+    {
+      name: "throwing getter",
+      tools: {
+        get value() {
+          throw new Error("unreadable value")
+        },
+      },
+    },
+    {
+      name: "throwing toJSON",
+      tools: {
+        toJSON() {
+          throw new Error("unreadable JSON")
+        },
+      },
+    },
+  ])("rejects $name instead of estimating a short placeholder", ({ tools }) => {
+    expect(classifyRequestOverflow({ cfg, model, tools, messages: [], recoveryFloorMessages: [] })).toEqual({
+      type: "unserializable",
+    })
+  })
+
+  test.each([
+    { cfg: mockCfg({ auto: false }), model },
+    { cfg, model: createModel({ context: 0 }) },
+  ])("keeps disabled preflight disabled for unserializable input", ({ cfg, model }) => {
+    expect(classifyRequestOverflow({ cfg, model, tools: circular, messages: [], recoveryFloorMessages: [] })).toEqual({
+      type: "ok",
+    })
   })
 })
 

@@ -78,7 +78,7 @@ describe("capUtf8TextByBytes", () => {
     const result = capUtf8TextByBytes(long, 100, "test", "suffix", "head")
     expect(result).toContain("truncated suffix")
     expect(result).not.toContain("a".repeat(100))
-    expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(120) // cap + marker overhead
+    expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(100)
   })
 
   test("tail mode keeps suffix and truncates head", () => {
@@ -86,7 +86,7 @@ describe("capUtf8TextByBytes", () => {
     const result = capUtf8TextByBytes(long, 100, "test", "suffix", "tail")
     expect(result).toContain("truncated suffix")
     expect(result).toContain("a".repeat(50)) // tail portion preserved
-    expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(120)
+    expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(100)
   })
 
   test("head+tail mode keeps both ends", () => {
@@ -102,7 +102,16 @@ describe("capUtf8TextByBytes", () => {
     const cjk = "界".repeat(200) // 3 bytes each = 600 bytes
     const result = capUtf8TextByBytes(cjk, 100, "test")
     expect(result).not.toContain("\uFFFD")
-    expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(120)
+    expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(100)
+  })
+
+  test.each(["head", "tail", "head+tail"] as const)("%s keeps the marker within tiny byte budgets", (keep) => {
+    for (const budget of [0, 1, 3, 20, 55, 56, 57, 58, 59, 60, 61, 100]) {
+      const result = capUtf8TextByBytes("界🙂".repeat(200), budget, "界🙂", "before injection", keep)
+      expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(budget)
+      expect(result).not.toContain("\uFFFD")
+      if (budget > 0) expect(result.length).toBeGreaterThan(0)
+    }
   })
 
   test("empty string returns empty", () => {

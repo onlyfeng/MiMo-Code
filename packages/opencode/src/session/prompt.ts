@@ -5162,7 +5162,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             const runStep = (processArgs: LLM.StreamInput, recoveryFloorMessages: ModelMessage[]) =>
               Effect.gen(function* () {
-                if (!isBoundedComputation) {
+                if (!isBoundedComputation && cfg.compaction?.auto !== false && processArgs.model.limit.context !== 0) {
                   // Estimate only the tool schemas the request will actually carry.
                   // resolveTools applies user/permission filters; activeTools then
                   // narrows the full executor map to the request-scoped wire subset.
@@ -5174,18 +5174,29 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     processArgs.user,
                     processArgs.mergeTurnContextIntoLastUser,
                   )
-                  const overflow = classifyRequestOverflow({
-                    ...processArgs,
-                    cfg,
-                    messages,
-                    recoveryFloorMessages: LLM.appendTurnContext(
-                      recoveryFloorMessages,
-                      processArgs.user,
-                      processArgs.mergeTurnContextIntoLastUser,
-                    ),
-                    tools: yield* Effect.promise(() => LLM.materializeWireToolDescriptors(wireTools)),
-                    model: processArgs.model,
-                  })
+                  const descriptors = yield* Effect.tryPromise(() => LLM.materializeWireToolDescriptors(wireTools)).pipe(
+                    Effect.catch(() => Effect.succeed(undefined)),
+                  )
+                  const overflow = descriptors
+                    ? classifyRequestOverflow({
+                        ...processArgs,
+                        cfg,
+                        messages,
+                        recoveryFloorMessages: LLM.appendTurnContext(
+                          recoveryFloorMessages,
+                          processArgs.user,
+                          processArgs.mergeTurnContextIntoLastUser,
+                        ),
+                        tools: descriptors,
+                        model: processArgs.model,
+                      })
+                    : { type: "unserializable" as const }
+                  if (overflow.type === "unserializable") {
+                    yield* finalizeUnrecoverableOverflow(
+                      "Request could not be serialized for context preflight. Check tool schemas and plugin-provided request metadata before retrying.",
+                    )
+                    return "overflow-static" as const
+                  }
                   if (overflow.type === "ok") {
                     preflightOverflowRecovery = undefined
                   } else {
