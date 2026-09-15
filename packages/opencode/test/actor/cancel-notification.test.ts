@@ -1186,7 +1186,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
 
 
   it.live(
-    "a previous failed generation does not let cancel overwrite the next generation's claimed failure",
+    "a failed inbox delivery survives concurrent retirement after an earlier failure",
     () =>
       provideTmpdirServer(
         Effect.fnUntraced(function* ({ llm }) {
@@ -1222,19 +1222,9 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
             Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).run()),
           )
 
-          const previous = (yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })).findLast(
-            (message) => message.info.role === "assistant",
-          )
-          if (!previous || previous.info.role !== "assistant") {
-            return yield* Effect.die("spawn did not persist an assistant message")
-          }
-          const failed = {
-            ...previous,
-            info: {
-              ...previous.info,
-              error: new MessageV2.ModelError({ message: "current generation failed" }).toObject(),
-            },
-          }
+          const inbox = yield* Inbox.Service
+          const executions = yield* ActorExecution.Service
+          yield* llm.error(401, { error: { message: "current generation failed", type: "authentication_error" } })
 
           const failureWriteEntered = yield* Deferred.make<void>()
           const releaseFailureWrite = yield* Deferred.make<void>()
@@ -1245,22 +1235,30 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
             release: releaseFailureWrite,
           }
           yield* Effect.addFinalizer(() => Deferred.succeed(releaseFailureWrite, undefined).pipe(Effect.ignore))
-          const currentTurn = yield* actor.runPersistentTurn!({
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            notifyParentOnComplete: true,
-            onInterrupt: Effect.succeed(failed),
-            work: Effect.succeed(failed),
-          }).pipe(Effect.forkChild)
+          yield* inbox.send({
+            receiverSessionID: result.sessionID,
+            receiverActorID: result.actorID,
+            senderSessionID: parent.id,
+            senderActorID: "main",
+            content: "fail this continuation",
+          })
           yield* Deferred.await(failureWriteEntered).pipe(Effect.timeout("5 seconds"))
+          const currentTurn = yield* executions.current(result.sessionID, result.actorID)
+          if (!currentTurn) return yield* Effect.die("Continuation execution missing")
 
           const cancelling = yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.forkChild)
           yield* Effect.yieldNow
           yield* Deferred.succeed(releaseFailureWrite, undefined)
-          yield* Fiber.join(currentTurn)
+          yield* Deferred.await(currentTurn.done)
           yield* Fiber.join(cancelling)
 
-          expect((yield* actorReg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("failure")
+          // Cancellation joins the failed execution, then explicitly retires
+          // the standing actor. That later state must not replace its delivery.
+          expect((yield* actorReg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("cancelled")
+          const final = (yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })).findLast(
+            (message) => message.info.role === "assistant",
+          )
+          expect(final?.info.role === "assistant" ? final.info.error?.name : undefined).toBe("APIError")
           const notifications = yield* parentInboxRows(parent.id)
           expect(notifications).toHaveLength(1)
           const content = notifications[0].content as { text?: string }
@@ -1276,423 +1274,65 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
   )
 
   it.live(
-    "a wake follower retries its own durable inbox row after the active generation settles",
+    "cancelActor defect still releases a real inbox execution and its queued wake",
     () =>
       provideTmpdirServer(
         Effect.fnUntraced(function* ({ llm }) {
           const actor = yield* Actor.Service
-          const session = yield* Session.Service
-          const parent = yield* session.create({
-            title: "wake-follower-row-retry",
-            permission: [{ permission: "*", pattern: "*", action: "allow" }],
-          })
-          yield* llm.text("spawn turn complete")
-          const result = yield* actor.spawn({
+          const registry = yield* ActorRegistry.Service
+          const sessions = yield* Session.Service
+          const inbox = yield* Inbox.Service
+          const executions = yield* ActorExecution.Service
+          const parent = yield* sessions.create({ title: "cancel continuation defect" })
+          yield* llm.text("spawn complete")
+          const child = yield* actor.spawn({
             mode: "peer",
             sessionID: parent.id,
             agentType: "build",
-            task: "standing peer",
-            description: "wake follower peer",
+            task: "stand by",
             context: "none",
-            tools: ["read"],
+            tools: [],
             background: true,
             model: ref,
           })
-          expect((yield* Deferred.await(result.outcome)).status).toBe("success")
-          const previous = (yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })).findLast(
-            (message) => message.info.role === "assistant",
-          )
-          if (!previous) return yield* Effect.die("spawn did not persist an assistant message")
-
-          const ownerEntered = yield* Deferred.make<void>()
-          const releaseOwner = yield* Deferred.make<void>()
-          const owner = yield* actor.runPersistentTurn!({
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            notifyParentOnComplete: false,
-            onInterrupt: Effect.succeed(previous),
-            work: Deferred.succeed(ownerEntered, undefined).pipe(
-              Effect.andThen(Deferred.await(releaseOwner)),
-              Effect.as(previous),
-            ),
-          }).pipe(Effect.forkChild)
-          yield* Deferred.await(ownerEntered).pipe(Effect.timeout("5 seconds"))
-
-          const inboxID = "lost-wake-row"
-          yield* Effect.sync(() =>
-            Database.use((db) =>
-              db
-                .insert(InboxTable)
-                .values({
-                  id: inboxID,
-                  receiver_session_id: result.sessionID,
-                  receiver_actor_id: result.actorID,
-                  sender_session_id: parent.id,
-                  sender_actor_id: "main",
-                  type: "text",
-                  content: { text: "must run after current generation" },
-                  created_at: Date.now(),
-                })
-                .run(),
-            ),
-          )
-          const followerEntered = yield* Deferred.make<void>()
-          const follower = yield* actor.runPersistentTurn!({
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            notifyParentOnComplete: false,
-            onInterrupt: Effect.succeed(previous),
-            inboxID,
-            work: Deferred.succeed(followerEntered, undefined).pipe(
-              Effect.andThen(
-                Effect.sync(() => Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.id, inboxID)).run())),
-              ),
-              Effect.as(previous),
-            ),
-          }).pipe(Effect.forkChild)
-          yield* Effect.yieldNow
-          expect(yield* Deferred.isDone(followerEntered)).toBe(false)
-
-          yield* Deferred.succeed(releaseOwner, undefined)
-          yield* Deferred.await(followerEntered).pipe(Effect.timeout("5 seconds"))
-          yield* Fiber.join(owner)
-          yield* Fiber.join(follower)
-          expect(
-            yield* Effect.sync(() =>
-              Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, inboxID)).get()),
-            ),
-          ).toBeUndefined()
-        }),
-        { git: true, config: providerCfg },
-      ),
-    15_000,
-  )
-
-  it.live(
-    "an ephemeral wake retries its exact inbox row after joining an older Runner",
-    () =>
-      provideTmpdirServer(
-        Effect.fnUntraced(function* ({ llm }) {
-          const actor = yield* Actor.Service
-          const session = yield* Session.Service
-          const parent = yield* session.create({
-            title: "ephemeral-wake-row-retry",
-            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          yield* Deferred.await(child.outcome)
+          const before = yield* llm.calls
+          yield* llm.hang
+          yield* inbox.send({
+            receiverSessionID: child.sessionID,
+            receiverActorID: child.actorID,
+            senderSessionID: parent.id,
+            senderActorID: "main",
+            content: "start continuation",
           })
-          yield* llm.text("spawn turn complete")
-          const result = yield* actor.spawn({
-            mode: "subagent",
-            sessionID: parent.id,
-            agentType: "build",
-            task: "ephemeral actor",
-            description: "ephemeral wake retry",
-            context: "none",
-            tools: ["read"],
-            background: true,
-            lifecycle: "ephemeral",
-            model: ref,
+          for (let i = 0; i < 500 && (yield* llm.calls) === before; i++) yield* Effect.sleep("10 millis")
+          expect(yield* llm.calls).toBe(before + 1)
+          const owner = yield* executions.current(child.sessionID, child.actorID)
+          if (!owner) return yield* Effect.die("Continuation execution missing")
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          cancelActorFailureGate = { sessionID: child.sessionID, actorID: child.actorID, entered, release, armed: true }
+          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
+          const cancelling = yield* actor.cancel(child.sessionID, child.actorID, "forced").pipe(Effect.forkChild)
+          yield* Deferred.await(entered).pipe(Effect.timeout("5 seconds"))
+          const queued = yield* inbox.send({
+            receiverSessionID: child.sessionID,
+            receiverActorID: child.actorID,
+            senderSessionID: parent.id,
+            senderActorID: "main",
+            content: "must not execute",
           })
-          expect((yield* Deferred.await(result.outcome)).status).toBe("success")
-          const previous = (yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })).findLast(
-            (message) => message.info.role === "assistant",
-          )
-          if (!previous) return yield* Effect.die("spawn did not persist an assistant message")
-
-          const ownerEntered = yield* Deferred.make<void>()
-          const releaseOwner = yield* Deferred.make<void>()
-          yield* Effect.addFinalizer(() => Deferred.succeed(releaseOwner, undefined).pipe(Effect.ignore))
-          const owner = yield* actor.runPersistentTurn!({
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            notifyParentOnComplete: false,
-            onInterrupt: Effect.succeed(previous),
-            work: Deferred.succeed(ownerEntered, undefined).pipe(
-              Effect.andThen(Deferred.await(releaseOwner)),
-              Effect.as(previous),
-            ),
-          }).pipe(Effect.forkChild)
-          yield* Deferred.await(ownerEntered).pipe(Effect.timeout("5 seconds"))
-
-          const inboxID = "ephemeral-lost-wake-row"
-          yield* Effect.sync(() =>
-            Database.use((db) =>
-              db
-                .insert(InboxTable)
-                .values({
-                  id: inboxID,
-                  receiver_session_id: result.sessionID,
-                  receiver_actor_id: result.actorID,
-                  sender_session_id: parent.id,
-                  sender_actor_id: "main",
-                  type: "text",
-                  content: { text: "must run after the older Runner" },
-                  created_at: Date.now(),
-                })
-                .run(),
-            ),
-          )
-          const retryEntered = yield* Deferred.make<void>()
-          const retry = yield* actor.runPersistentTurn!({
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            notifyParentOnComplete: false,
-            onInterrupt: Effect.succeed(previous),
-            inboxID,
-            work: Deferred.succeed(retryEntered, undefined).pipe(
-              Effect.andThen(
-                Effect.sync(() => Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.id, inboxID)).run())),
-              ),
-              Effect.as(previous),
-            ),
-          }).pipe(Effect.forkChild)
-          yield* Effect.yieldNow
-          expect(yield* Deferred.isDone(retryEntered)).toBe(false)
-
-          yield* Deferred.succeed(releaseOwner, undefined)
-          yield* Deferred.await(retryEntered).pipe(
-            Effect.timeoutOrElse({
-              duration: "5 seconds",
-              orElse: () => Effect.fail(new Error("ephemeral wake did not retry its durable inbox row")),
-            }),
-          )
-          yield* Fiber.join(owner)
-          yield* Fiber.join(retry)
-          expect(
-            yield* Effect.sync(() =>
-              Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, inboxID)).get()),
-            ),
-          ).toBeUndefined()
-        }),
-        { git: true, config: providerCfg },
-      ),
-    15_000,
-  )
-
-  it.live(
-    "wake owner and follower share terminal-processing failure and release the next generation",
-    () =>
-      provideTmpdirServer(
-        Effect.fnUntraced(function* ({ llm }) {
-          const actor = yield* Actor.Service
-          const actorReg = yield* ActorRegistry.Service
-          const session = yield* Session.Service
-          const parent = yield* session.create({
-            title: "wake-finalizer-defect",
-            permission: [{ permission: "*", pattern: "*", action: "allow" }],
-          })
-          yield* llm.text("spawn turn complete")
-          const result = yield* actor.spawn({
-            mode: "peer",
-            sessionID: parent.id,
-            agentType: "build",
-            task: "standing peer",
-            description: "wake finalizer defect peer",
-            context: "none",
-            tools: ["read"],
-            background: true,
-            model: ref,
-          })
-          expect((yield* Deferred.await(result.outcome)).status).toBe("success")
-          const previous = (yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })).findLast(
-            (message) => message.info.role === "assistant",
-          )
-          if (!previous) return yield* Effect.die("spawn did not persist an assistant message")
-          const malformed = Object.defineProperty({ ...previous }, "parts", {
-            get: () => {
-              throw new Error("deterministic terminal notification defect")
-            },
-          })
-
-          const ownerEntered = yield* Deferred.make<void>()
-          const releaseOwner = yield* Deferred.make<void>()
-          yield* Effect.addFinalizer(() => Deferred.succeed(releaseOwner, undefined).pipe(Effect.ignore))
-          const owner = yield* actor.runPersistentTurn!({
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            notifyParentOnComplete: true,
-            onInterrupt: Effect.succeed(previous),
-            work: Deferred.succeed(ownerEntered, undefined).pipe(
-              Effect.andThen(Deferred.await(releaseOwner)),
-              Effect.as(malformed),
-            ),
-          }).pipe(Effect.exit, Effect.forkChild)
-          yield* Deferred.await(ownerEntered).pipe(Effect.timeout("5 seconds"))
-
-          let followerWorkRan = false
-          const followerStarted = yield* Deferred.make<void>()
-          const follower = yield* Deferred.succeed(followerStarted, undefined).pipe(
-            Effect.andThen(
-              actor.runPersistentTurn!({
-                sessionID: result.sessionID,
-                actorID: result.actorID,
-                notifyParentOnComplete: true,
-                onInterrupt: Effect.succeed(previous),
-                work: Effect.sync(() => {
-                  followerWorkRan = true
-                  return previous
-                }),
-              }),
-            ),
-            Effect.exit,
-            Effect.forkChild,
-          )
-          yield* Deferred.await(followerStarted)
-          yield* Effect.yieldNow
-          expect(followerWorkRan).toBe(false)
-
-          yield* Deferred.succeed(releaseOwner, undefined)
-          const ownerExit = yield* Fiber.join(owner).pipe(Effect.timeout("5 seconds"))
-          const followerExit = yield* Fiber.join(follower).pipe(Effect.timeout("5 seconds"))
-          expect(ownerExit._tag).toBe("Failure")
-          expect(followerExit._tag).toBe("Failure")
-          expect(followerWorkRan).toBe(false)
-
-          const next = yield* actor.runPersistentTurn!({
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            notifyParentOnComplete: false,
-            onInterrupt: Effect.succeed(previous),
-            work: Effect.succeed(previous),
-          }).pipe(Effect.timeout("5 seconds"))
-          expect(next.info.id).toBe(previous.info.id)
-
-          yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.timeout("5 seconds"))
-          expect((yield* actorReg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("cancelled")
-        }),
-        { git: true, config: providerCfg },
-      ),
-    15_000,
-  )
-
-  it.live(
-    "cancelActor defect still commits cancellation and releases the episode waiter",
-    () =>
-      provideTmpdirServer(
-        Effect.fnUntraced(function* ({ llm }) {
-          const actor = yield* Actor.Service
-          const actorReg = yield* ActorRegistry.Service
-          const session = yield* Session.Service
-          const parent = yield* session.create({
-            title: "cancel-runner-defect",
-            permission: [{ permission: "*", pattern: "*", action: "allow" }],
-          })
-          yield* llm.text("spawn turn complete")
-          const result = yield* actor.spawn({
-            mode: "peer",
-            sessionID: parent.id,
-            agentType: "build",
-            task: "standing peer",
-            description: "cancel runner defect peer",
-            context: "none",
-            tools: ["read"],
-            background: true,
-            model: ref,
-          })
-          expect((yield* Deferred.await(result.outcome)).status).toBe("success")
-          const previous = (yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })).findLast(
-            (message) => message.info.role === "assistant",
-          )
-          if (!previous) return yield* Effect.die("spawn did not persist an assistant message")
-          yield* Effect.sync(() =>
-            Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).run()),
-          )
-
-          const ownerEntered = yield* Deferred.make<void>()
-          const releaseOwner = yield* Deferred.make<void>()
-          yield* Effect.addFinalizer(() => Deferred.succeed(releaseOwner, undefined).pipe(Effect.ignore))
-          const owner = yield* actor.runPersistentTurn!({
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            notifyParentOnComplete: false,
-            onInterrupt: Effect.succeed(previous),
-            work: Deferred.succeed(ownerEntered, undefined).pipe(
-              Effect.andThen(Deferred.await(releaseOwner)),
-              Effect.as(previous),
-            ),
-          }).pipe(Effect.forkChild)
-          yield* Deferred.await(ownerEntered).pipe(Effect.timeout("5 seconds"))
-
-          const cancelEntered = yield* Deferred.make<void>()
-          const releaseCancel = yield* Deferred.make<void>()
-          cancelActorFailureGate = {
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            entered: cancelEntered,
-            release: releaseCancel,
-            armed: true,
-          }
-          yield* Effect.addFinalizer(() => Deferred.succeed(releaseCancel, undefined).pipe(Effect.ignore))
-          const cancelling = yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.forkChild)
-          yield* Deferred.await(cancelEntered).pipe(Effect.timeout("5 seconds"))
-
-          const inboxID = "cancel-defect-episode-row"
-          yield* Effect.sync(() =>
-            Database.use((db) =>
-              db
-                .insert(InboxTable)
-                .values({
-                  id: inboxID,
-                  receiver_session_id: result.sessionID,
-                  receiver_actor_id: result.actorID,
-                  sender_session_id: parent.id,
-                  sender_actor_id: "main",
-                  type: "text",
-                  content: { text: "must be drained by cancel" },
-                  created_at: Date.now(),
-                })
-                .run(),
-            ),
-          )
-          let waiterWorkRan = false
-          const waiterStarted = yield* Deferred.make<void>()
-          const waiterFinished = yield* Deferred.make<void>()
-          const waiter = yield* Deferred.succeed(waiterStarted, undefined).pipe(
-            Effect.andThen(
-              actor.runPersistentTurn!({
-                sessionID: result.sessionID,
-                actorID: result.actorID,
-                notifyParentOnComplete: false,
-                onInterrupt: Effect.succeed(previous),
-                inboxID,
-                work: Effect.sync(() => {
-                  waiterWorkRan = true
-                  return previous
-                }),
-              }),
-            ),
-            Effect.ensuring(Deferred.succeed(waiterFinished, undefined).pipe(Effect.ignore)),
-            Effect.forkChild,
-          )
-          yield* Deferred.await(waiterStarted)
-          yield* Effect.yieldNow
-          expect(yield* Deferred.isDone(waiterFinished)).toBe(false)
-
-          yield* Deferred.succeed(releaseCancel, undefined)
+          yield* Deferred.succeed(release, undefined)
           yield* Fiber.join(cancelling).pipe(Effect.timeout("5 seconds"))
-          const waiterExit = yield* Fiber.await(waiter).pipe(Effect.timeout("5 seconds"))
-          expect(waiterExit._tag).toBe("Failure")
-          expect(waiterWorkRan).toBe(false)
-          expect(
-            yield* Effect.sync(() =>
-              Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, inboxID)).get()),
-            ),
-          ).toBeUndefined()
-          expect((yield* actorReg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("cancelled")
-
-          yield* Deferred.succeed(releaseOwner, undefined)
-          yield* Fiber.join(owner).pipe(Effect.timeout("5 seconds"))
-          let reentered = false
-          yield* actor.runPersistentTurn!({
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            notifyParentOnComplete: true,
-            onInterrupt: Effect.succeed(previous),
-            work: Effect.sync(() => {
-              reentered = true
-              return previous
-            }),
-          }).pipe(Effect.exit, Effect.timeout("5 seconds"))
-          expect(reentered).toBe(false)
+          yield* Deferred.await(owner.done)
+          expect(yield* inbox.has(queued.inboxID)).toBe(false)
+          expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
+          expect(yield* executions.current(child.sessionID, child.actorID)).toBeUndefined()
+          expect(yield* llm.calls).toBe(before + 1)
+          const rejected = yield* inbox
+            .send({ receiverSessionID: child.sessionID, receiverActorID: child.actorID, content: "must remain retired" })
+            .pipe(Effect.exit)
+          expect(Exit.isFailure(rejected)).toBe(true)
         }),
         { git: true, config: providerCfg },
       ),
@@ -1865,62 +1505,48 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
 
 
   it.live(
-    "forced cancel in the wake-generation to Runner gap never starts the work",
+    "forced cancel before an inbox continuation starts its Runner never calls the model",
     () =>
       provideTmpdirServer(
         Effect.fnUntraced(function* ({ llm }) {
           const actor = yield* Actor.Service
-          const session = yield* Session.Service
-          const actorReg = yield* ActorRegistry.Service
-          const parent = yield* session.create({
-            title: "wake-runner-start-cancel",
-            permission: [{ permission: "*", pattern: "*", action: "allow" }],
-          })
-          yield* llm.text("spawn turn complete")
-          const result = yield* actor.spawn({
+          const sessions = yield* Session.Service
+          const registry = yield* ActorRegistry.Service
+          const inbox = yield* Inbox.Service
+          const parent = yield* sessions.create({ title: "continuation admission cancellation" })
+          yield* llm.text("spawn complete")
+          const child = yield* actor.spawn({
             mode: "peer",
             sessionID: parent.id,
             agentType: "build",
-            task: "standing peer",
-            description: "wake runner gap peer",
+            task: "stand by",
             context: "none",
-            tools: ["read"],
+            tools: [],
             background: false,
             model: ref,
           })
-          expect((yield* Deferred.await(result.outcome)).status).toBe("success")
-          const previous = (yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })).findLast(
-            (message) => message.info.role === "assistant",
-          )
-          if (!previous) return yield* Effect.die("spawn did not persist an assistant message")
-
-          const runningEntered = yield* Deferred.make<void>()
-          const releaseRunning = yield* Deferred.make<void>()
-          runningWriteGate = {
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            entered: runningEntered,
-            release: releaseRunning,
-          }
-          yield* Effect.addFinalizer(() => Deferred.succeed(releaseRunning, undefined).pipe(Effect.ignore))
-          const workEntered = yield* Deferred.make<void>()
-          const wake = yield* actor.runPersistentTurn!({
-            sessionID: result.sessionID,
-            actorID: result.actorID,
-            notifyParentOnComplete: false,
-            onInterrupt: Effect.succeed(previous),
-            work: Deferred.succeed(workEntered, undefined).pipe(Effect.as(previous)),
-          }).pipe(Effect.forkChild)
-          yield* Deferred.await(runningEntered).pipe(Effect.timeout("5 seconds"))
-
-          yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.timeout("5 seconds"))
-          yield* Deferred.succeed(releaseRunning, undefined)
-          yield* Fiber.await(wake)
-
-          expect(yield* Deferred.isDone(workEntered)).toBe(false)
-          const row = yield* actorReg.get(result.sessionID, result.actorID)
-          expect(row?.status).toBe("idle")
-          expect(row?.lastOutcome).toBe("cancelled")
+          yield* Deferred.await(child.outcome)
+          const before = yield* llm.calls
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          runningWriteGate = { sessionID: child.sessionID, actorID: child.actorID, entered, release }
+          yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
+          yield* llm.text("must not execute")
+          yield* inbox.send({
+            receiverSessionID: child.sessionID,
+            receiverActorID: child.actorID,
+            senderSessionID: parent.id,
+            senderActorID: "main",
+            content: "cancel before model request",
+          })
+          yield* Deferred.await(entered).pipe(Effect.timeout("5 seconds"))
+          const cancelling = yield* actor
+            .cancel(child.sessionID, child.actorID, "forced")
+            .pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(cancelling).pipe(Effect.timeout("5 seconds"))
+          expect(yield* llm.calls).toBe(before)
+          expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
         }),
         { git: true, config: providerCfg },
       ),
@@ -2008,37 +1634,18 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           )
         expect(yield* childInboxRows()).toHaveLength(0)
 
-        // Simulate a durable row left by an older process. Turn-start sees the
-        // tombstone, discards it, and never evaluates the supplied work.
-        yield* Effect.sync(() =>
-          Database.use((db) =>
-            db
-              .insert(InboxTable)
-              .values({
-                id: "legacy-cancelled-row",
-                receiver_session_id: succeeded.sessionID,
-                receiver_actor_id: succeeded.actorID,
-                sender_session_id: parent.id,
-                sender_actor_id: "main",
-                type: "text",
-                content: { text: "must be discarded" },
-                created_at: Date.now(),
-              })
-              .run(),
-          ),
-        )
-        let ran = false
-        yield* actor.runPersistentTurn!({
-          sessionID: succeeded.sessionID,
-          actorID: succeeded.actorID,
-          notifyParentOnComplete: true,
-          onInterrupt: Effect.interrupt,
-          work: Effect.sync(() => {
-            ran = true
-            throw new Error("retired work must not run")
-          }),
+        const inbox = yield* Inbox.Service
+        const before = yield* llm.calls
+        const rejected = yield* inbox.send({
+          receiverSessionID: succeeded.sessionID,
+          receiverActorID: succeeded.actorID,
+          senderSessionID: parent.id,
+          senderActorID: "main",
+          content: "retired work must not run",
         }).pipe(Effect.exit)
-        expect(ran).toBe(false)
+        expect(Exit.isFailure(rejected)).toBe(true)
+        yield* inbox.wakePending(succeeded.sessionID, succeeded.actorID)
+        expect(yield* llm.calls).toBe(before)
         expect(yield* childInboxRows()).toHaveLength(0)
       }),
       { git: true, config: providerCfg },

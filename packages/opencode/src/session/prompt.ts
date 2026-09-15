@@ -5752,8 +5752,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         started = true
       }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale, undefined, undefined, undefined, undefined, input.deferInbox)))
       // Continuations are serialized per (session, actor) by ActorExecution and
-      // settle through runTurn, matching upstream. The fork's former
-      // Actor.runPersistentTurn wake-generation routing on this path is retired.
+      // settle through runTurn, matching upstream.
       const execution =
         input.notifyParentOnComplete === true && agentID !== "main"
           ? Effect.acquireUseRelease(
