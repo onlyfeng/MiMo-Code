@@ -828,7 +828,6 @@ export const layer = Layer.effect(
     // fall back to compaction when it returns false.
     const rebuildFromCheckpoint = Effect.fn("SessionPrompt.rebuildFromCheckpoint")(function* (input: {
       sessionID: SessionID
-      msgs: MessageV2.WithParts[]
       agentID?: string
       agent: string
       model: { providerID: string; id: string }
@@ -842,16 +841,21 @@ export const layer = Layer.effect(
         .pipe(Effect.catch(() => Effect.succeed(undefined)))
       if (!boundary) return false
 
-      const boundaryMsg = input.msgs.find((m) => m.info.id === boundary)
+      // The processor may have committed its completed assistant after the
+      // loop snapshot, or the writer may have been awaited since that snapshot.
+      // Freeze the actual insert-time tail so recovery covers those committed
+      // rows instead of immediately rebuilding again for their stale usage.
+      const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
+      const boundaryMsg = messages.find((m) => m.info.id === boundary)
       const inserted = yield* checkpoint
         .insertRebuildBoundary({
           sessionID: input.sessionID,
           boundary,
-          lastMessageInfo: computeLastMessageInfo(input.msgs.map((m) => m.info)),
+          lastMessageInfo: computeLastMessageInfo(messages.map((m) => m.info)),
           // Freeze the digest range at insert time: only this tail is eligible
           // for activity-log collapse. Auto rebuild mid-tool-loop keeps later
           // tool rounds live; manual rebuild digests the whole idle tail.
-          digestUpTo: input.msgs.at(-1)?.info.id,
+          digestUpTo: messages.at(-1)?.info.id,
           agentID: input.agentID,
           agent: input.agent,
           model: { providerID: input.model.providerID, modelID: input.model.id },
@@ -926,7 +930,6 @@ export const layer = Layer.effect(
     // and therefore drops all pre-boundary history with no summary at all.
     const rebuildEnsuringCheckpoint = Effect.fn("SessionPrompt.rebuildEnsuringCheckpoint")(function* (input: {
       sessionID: SessionID
-      msgs: MessageV2.WithParts[]
       agentID?: string
       agent: string
       model: { providerID: string; id: string }
@@ -4852,7 +4855,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // logic/boundary conditions can't drift.
             const attempt: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
               sessionID,
-              msgs,
               agentID: lastUser.agentID,
               agent: lastUser.agent,
               model: { providerID: model.providerID, id: model.id },
@@ -5893,7 +5895,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // compaction fallback stays ONE condition, not three lookalikes.
               const attempt2: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
                 sessionID,
-                msgs,
                 agentID: lastUser.agentID,
                 agent: lastUser.agent,
                 model: { providerID: model.providerID, id: model.id },
@@ -6325,7 +6326,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // session produces the first checkpoint on the spot rather than deferring.
         const attempt: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
           sessionID: input.sessionID,
-          msgs,
           agentID: lastUser?.info.agentID ?? "main",
           agent: agentName,
           model: { providerID: model.providerID, id: model.modelID },
