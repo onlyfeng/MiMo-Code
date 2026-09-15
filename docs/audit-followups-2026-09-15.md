@@ -64,6 +64,8 @@ F11 取消根生成脚本隐式全仓格式化，保留 SDK 及 OpenAPI 自身�
 
 冻结 catalog 的五轮真实请求测试还移除了无关 npm 安装等待：通过既有 `prepareConfigDependencies` 准备隔离的配置目录，保留真实插件、Git 与五次模型请求。原默认 5 秒先在依赖等待处零断言失败；准备依赖后推进到 13 个断言仍超时。有界阶段观察确认测试体约 6.54 秒、15 个断言自然完成，因此仅本用例使用 15 秒测试壳，生产时限不变。`df02208e` 只调整该测试。root 在当时完整运行时/测试快照 `37b97a7b` 无观察器运行 SDK samples 与 frozen catalog 两文件，2 pass、1139 断言、14.44 秒自然退出；SDK 保留原 child 30 秒、test 45 秒限制，catalog 使用明确的 15 秒测试壳。
 
+SDK 的 pipe 捕获在 compat 42 文件矩阵及同路径仅 SDK 目标中仍复现原 30 秒退出 137。仅在退出后读取父进程已有输出的探针确认 553,610 字节为完整 JSON、含全部 141 operations，生成/格式化已经完成；不能再归因为 frozen 的依赖安装。保持真实 child 和原时限，只把 stdout 指向临时文件的对照通过，与根 `script/generate.ts` 和 SDK build 原有重定向方式一致。`cdfd1a80` 因此仅让测试按真实构建路径捕获完整文件，并自动清理；生成器生产代码、30 秒 child/45 秒测试时限及所有 callable/HTTP 断言不变。具体 Bun 回调/退出内部机制未被直接捕获，没有声称修复全部生产 pipe 场景。root 在 `cdfd1a80` 独立运行 SDK 生成/发布调用测试，1 pass、1124 断言、5.82 秒自然退出。
+
 ### 共享消息时序
 
 F06 原提交 `b2dad34ea1cde4509d9f6ce4143c8b6a0094f858`，整合为 `8cfc6eca`。消息提交、fork/revert/checkpoint、usage recovery、loop-streak 和 TUI 统一按提交时间与 UTF-8 ID tie-break 处理；用户消息与 parts 原子提交并拒绝身份冲突。新增行为不包含 compat 的内容上限、预检、MaxMode 或模型侧 full Actor。
@@ -87,7 +89,7 @@ F07 生产实现由 `7fd795db` 整合为 `79df88f0`，额外 gate 测试由 `f57
 
 `c6e30d0b` 同步配置 schema、内置指南及生成 SDK/OpenAPI，明确必留新请求不受可选预算截断；标准生成正常完成，变动限定为描述。随后 SDK/OpenAPI 两文件验证 5 pass、1154 断言，opencode、sdk、shared 三包 typecheck 通过。运行与生成描述分开记录，没有把此前源码测试移称为描述改动后的整套重跑。
 
-四个串行 Actor 的 approval 集成用例在 compat `c2607746` 的完整 prompt 矩阵和原 5 秒定向运行均超时。单例阶段观察确认四个 child 全部成功、测试体 7.33 秒、17 断言，随后无观察器通过。`8d5ac893` 只为该用例明确 15 秒壳，保留 subagent/peer × 继承/不继承的四组真实工具/模型执行及全部断言，不调整整份 prompt 的默认预算。root 在 main 独立定向验证 1 pass、17 断言、11.87 秒自然退出。最终 runtime/test 引用更新到 `8d5ac893cafafa529abf0644c6d68de615374d93`。
+四个串行 Actor 的 approval 集成用例在 compat `c2607746` 的完整 prompt 矩阵和原 5 秒定向运行均超时。单例阶段观察确认四个 child 全部成功、测试体 7.33 秒、17 断言，随后无观察器通过。`8d5ac893` 只为该用例明确 15 秒壳，保留 subagent/peer × 继承/不继承的四组真实工具/模型执行及全部断言，不调整整份 prompt 的默认预算。root 在 main 独立定向验证 1 pass、17 断言、11.87 秒自然退出。该阶段 runtime/test 引用为 `8d5ac893cafafa529abf0644c6d68de615374d93`。
 
 ### 协议归属决定
 
