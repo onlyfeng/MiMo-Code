@@ -1039,8 +1039,7 @@ export const ToolScriptTool = Tool.define(
               (ToolCompat.canonical(id) === "actor" && (id !== "actor" || !def))
             )
               return Promise.reject(new Error(`unknown tool: ${id}`))
-            const mcpID = def ? undefined : ToolCompat.resolveName(id, [...mcpById.keys()])
-            const mcpDef = mcpID ? mcpById.get(mcpID) : undefined
+            const mcpDef = def ? undefined : mcpById.get(id)
             if (!def && !mcpDef) return Promise.reject(new Error(`unknown tool: ${id}`))
             if (plan.pending || (def?.id === "plan_exit" && admittedCalls.size > 0))
               return Promise.reject(new Error("plan_exit requires exclusive execution; await all other tool calls first"))
