@@ -1,8 +1,9 @@
-import { Context, Effect, Fiber, Layer, Scope, Schema, Option } from "effect"
+import { Cause, Context, Effect, Fiber, Layer, Scope, Schema, Option } from "effect"
 import { ulid } from "ulid"
 import { Database, eq, and, lte, inArray, desc } from "@/storage"
 import { Bus } from "@/bus"
 import { ActorRegistry } from "@/actor/registry"
+import { ActorRegistryTable } from "@/actor/actor.sql"
 import type { Actor } from "@/actor/schema"
 import { Session } from "@/session"
 import { MessageID, PartID } from "@/session/schema"
@@ -22,7 +23,7 @@ const log = Log.create({ service: "inbox" })
 
 const GC_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export const MAX_DRAIN_PER_TURN = 100
-const isRetiredPersistent = (actor: Actor | undefined) =>
+const isRetiredPersistent = (actor: Pick<Actor, "lifecycle" | "status" | "lastOutcome"> | undefined) =>
   actor?.lifecycle === "persistent" && actor.status === "idle" && actor.lastOutcome === "cancelled"
 
 /** Delete inbox rows whose created_at is at or before cutoffMs. Unit-testable without layer reset. */
@@ -396,22 +397,6 @@ export const layer: Layer.Layer<
         return []
       })
 
-      // Every row rendered blank: consume them (they carry no information and
-      // must not be re-drained forever) without writing a message at all. A
-      // zero-part user message would be skipped downstream anyway, so writing
-      // one is pure litter.
-      if (rendered.length === 0) {
-        yield* Effect.sync(() =>
-          Database.use((db) =>
-            db
-              .delete(InboxTable)
-              .where(inArray(InboxTable.id, rows.map((r) => r.id)))
-              .run(),
-          ),
-        )
-        return 0
-      }
-
       // Abort before any mutation when the execution was cancelled mid-drain.
       // Leaving rows durable means the next non-cancelled wake still consumes
       // them; writing a synthetic user message and then interrupting the turn
@@ -425,74 +410,91 @@ export const layer: Layer.Layer<
         return 0
       }
 
-      // Non-transactional crash window: createMessage + updatePart commit
-      // before the inbox DELETE. A crash between them re-renders the same
-      // rows on next drain — LLM sees duplicated notifications. Tolerable;
-      // a transactional fix would require threading tx through
-      // sessions.updateMessage/updatePart, which crosses three abstraction
-      // layers.
-      //
-      // Cancel that lands after the first isCancelled check but before the
-      // inbox DELETE is handled by re-checking around the writes and rolling
-      // the synthetic message back (removeMessage) so Inbox rows stay the
-      // durable source of truth.
-      const msgID = MessageID.ascending()
-      const now = Date.now()
-      yield* sessions.createMessage({
-        id: msgID,
-        role: "user" as const,
-        sessionID,
-        agentID: actorID,
-        time: { created: now },
-        agent: seed.agent,
-        model: seed.model,
-        source: "spawn",
-      })
-      for (const entry of rendered) {
-        if (isCancelled?.()) {
-          yield* sessions.removeMessage({ sessionID, messageID: msgID }).pipe(Effect.ignore)
-          log.info("inbox.drain: cancelled mid-commit — rolled back synthetic message, rows durable", {
-            sessionID,
-            actorID,
-            messageID: msgID,
-            pending: rendered.length,
-          })
-          return 0
-        }
-        yield* sessions.updatePart({
-          id: PartID.ascending(),
-          messageID: msgID,
-          sessionID,
-          type: "text" as const,
-          synthetic: true,
-          text: entry.text,
-        })
-      }
-      // Last cancel check and the inbox DELETE share one Effect.sync so a
-      // cancel cannot land between them. If cancelled we skip the DELETE and
-      // roll the synthetic message back below; rows stay durable.
-      const cancelledAtDelete = yield* Effect.sync(() => {
-        if (isCancelled?.()) return true
-        Database.use((db) =>
-          db
-            .delete(InboxTable)
-            .where(inArray(InboxTable.id, rows.map((r) => r.id)))
-            .run(),
-        )
-        return false
-      })
-      if (cancelledAtDelete) {
-        yield* sessions.removeMessage({ sessionID, messageID: msgID }).pipe(Effect.ignore)
-        log.info("inbox.drain: cancelled before inbox delete — rolled back synthetic message, rows durable", {
-          sessionID,
-          actorID,
-          messageID: msgID,
-          pending: rendered.length,
-        })
-        return 0
-      }
-
-      return rendered.length
+      // Seed resolution can yield: another drain, GC or retirement may have
+      // changed this batch. Recheck it under the same write lock as the complete
+      // message/parts commit and queue deletion. No Effect fiber or async work
+      // may escape this synchronous transaction.
+      let committed: number | undefined
+      return yield* Effect.sync(() =>
+        Database.transaction(
+          (tx) => {
+            const actor = tx
+              .select({
+                lifecycle: ActorRegistryTable.lifecycle,
+                status: ActorRegistryTable.status,
+                lastOutcome: ActorRegistryTable.last_outcome,
+              })
+              .from(ActorRegistryTable)
+              .where(and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID)))
+              .get()
+            if (actor && isRetiredPersistent({ ...actor, lastOutcome: actor.lastOutcome ?? undefined })) {
+              tx.delete(InboxTable)
+                .where(and(eq(InboxTable.receiver_session_id, sessionID), eq(InboxTable.receiver_actor_id, actorID)))
+                .run()
+              return 0
+            }
+            if (isCancelled?.()) return 0
+            const pending = tx
+              .select({ id: InboxTable.id })
+              .from(InboxTable)
+              .where(
+                and(
+                  eq(InboxTable.receiver_session_id, sessionID),
+                  eq(InboxTable.receiver_actor_id, actorID),
+                  inArray(
+                    InboxTable.id,
+                    rows.map((row) => row.id),
+                  ),
+                ),
+              )
+              .all()
+            if (pending.length === 0) return 0
+            const ids = new Set(pending.map((row) => row.id))
+            const entries = rendered.filter((entry) => ids.has(entry.row.id))
+            // This no-throw witness must precede all publication callbacks. An
+            // observer can throw after SQLite committed; that cannot turn a real
+            // consumed batch into a failure/zero count and strand the resumed turn.
+            Database.effect(() => {
+              committed = entries.length
+            })
+            if (entries.length > 0) {
+              const messageID = MessageID.ascending()
+              sessions.commitUserMessageSync(
+                {
+                  id: messageID,
+                  role: "user",
+                  sessionID,
+                  agentID: actorID,
+                  time: { created: Date.now() },
+                  agent: seed.agent,
+                  model: seed.model,
+                  source: "spawn",
+                },
+                entries.map((entry) => ({
+                  id: PartID.ascending(),
+                  messageID,
+                  sessionID,
+                  type: "text",
+                  synthetic: true,
+                  text: entry.text,
+                })),
+              )
+            }
+            // Blank rows are consumed too, without creating an empty user message.
+            tx.delete(InboxTable)
+              .where(inArray(InboxTable.id, [...ids]))
+              .run()
+            return entries.length
+          },
+          { behavior: "immediate" },
+        ),
+      ).pipe(
+        Effect.catchCause((cause) => {
+          if (committed == null || Cause.hasInterrupts(cause)) return Effect.failCause(cause)
+          log.error("inbox.drain: notification failed after commit", { sessionID, actorID, cause: Cause.pretty(cause) })
+          return Effect.succeed(committed)
+        }),
+      )
     })
 
     const impl = Service.of({ send, drain, has, head, wakePending, bindPrompt })
