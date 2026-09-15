@@ -10,7 +10,7 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Status: active; all seven DC owners remain compat-owned.
+- Status: active; the seven DC owners reviewed in this synchronization remain compat-owned. DC-ACTOR-002 was added afterwards, so eight owners are now active.
 - Last reviewed: 2026-09-15, full upstream synchronization through `26aa00fc7e243a90586f5895ddcad2b7ce76b935`.
 - Prior upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`.
 - Starting compat: `1caf307ff8c26137cfd095fe9fa5374293e2e208`.
@@ -815,6 +815,7 @@ files remain byte-identical to the accepted main correction.
 | DC-MODEL-001    | Agent config, MaxMode, retry status, title path, SDK/OpenAPI                                                                               | Per-agent extension over shared bounded retry; title generation stays shared | Preserve opt-in, final-step bound, title isolation, and subagent status isolation                                         |
 | DC-CONTEXT-001  | Model-visible text, request preflight, title/skills/memory, compaction, checkpoint coverage, chronology, and TUI context/revert projection | Bounded-content hardening around shared request construction                 | Preserve caps, snapshots, stable paths, effective-window preflight, positional coverage, chronology, and recovery routing |
 | DC-ACTOR-001    | Actor context, default-fork checkpoint, replace-agent, static-prefix overflow                                                              | Full-context extension beyond shared capture and actor identity scope        | Preserve frozen membership/system/cwd and fail unrecoverable prefixes                                                     |
+| DC-ACTOR-002    | Actor run/spawn `variant`, shell `--variant`, argument recovery, `actor models` listing, spawn-to-prompt propagation                       | Model-facing extension over inherited actor model selection                  | Preserve pre-admission validation, explicit precedence, non-inheritance, and actor-lifetime persistence                   |
 | DC-TUI-001      | Prompt/footer model metadata and title locale                                                                                              | Request-metadata display override alongside shared locale propagation        | Preserve provider/model/variant truth, locale submission, and known-limit disclosure                                      |
 
 ## DC-NET-001 — approved private-network WebFetch
@@ -1612,6 +1613,63 @@ files remain byte-identical to the accepted main correction.
   frozen-membership full-context actors, bounded state transport, and
   unrecoverable-static-prefix handling while FD-009 and FC-001 remain satisfied
   or are retired independently.
+
+## DC-ACTOR-002 — explicit subagent model variant
+
+- Status: active
+- Canonical owner: `dev/compat` model-facing actor creation
+- Base: inherited main behavior
+  `0b8c5d634077f19c2d8c03179f2c869a01a18cec` lets actor `run`/`spawn` choose
+  only `model`. A child request's variant then comes solely from the prompt-side
+  agent fallback: the agent's configured `variant`, applied only when the request
+  uses the agent's configured model and that model defines it. The caller's own
+  variant is never inherited.
+- Overrides: compat adds an optional `variant` selector to `run`/`spawn` across
+  the strict JSON schema, shell `--variant`, no-script argument recovery, tool
+  descriptions and `actor models`, starting from compat
+  `3ff9794a0b5a2568e819b4876f2448f9d666dc15`.
+- Delta: the tool resolves the child model exactly as before, then requires the
+  variant to be an own key of that model's merged, non-disabled `variants`.
+  Otherwise it fails with a recoverable error before admission (no registry row,
+  fork capture or child turn), naming the valid variants or stating that the
+  model defines none. A valid value travels through `SpawnInput.variant` into
+  every prompt turn the spawn drives (initial, pre-stop, completion-gate and
+  post-stop re-entry), outranks the agent fallback, and is persisted on each
+  child user message. Woken `send` turns reuse it through the drain seed's
+  persisted user model; `resume` accepts no variant and retries the original
+  user. Without a variant, the spawn input, prompt input, tool metadata and
+  model/variant selection are unchanged and no extra provider lookup runs. Tool
+  metadata adds `variant` only when set. `actor models` appends
+  `[variants: …]` to models that define variants. DC-TUI-001 renders the
+  persisted value in the subagent footer without a TUI change.
+- Boundaries: no parent-variant inheritance, no variant inside `model`, no
+  workflow `agent()` or session-tool peer selector, and no resume override. The
+  agent fallback is unchanged, including its pre-existing group-reference gap:
+  actor model selection resolves a group provider-aware, while the prompt-side
+  comparison resolves the agent's group without provider context, so a member on
+  the caller's provider can miss the agent's configured variant.
+- Source surfaces: `packages/opencode/src/tool/actor.ts`,
+  `packages/opencode/src/tool/actor.txt`,
+  `packages/opencode/src/tool/actor.shell.txt`, and
+  `packages/opencode/src/actor/spawn.ts`.
+- Test surfaces: `packages/opencode/test/tool/actor.test.ts`,
+  `packages/opencode/test/tool/actor.shell.test.ts`,
+  `packages/opencode/test/tool/actor-recover.test.ts`,
+  `packages/opencode/test/tool/actor-models.test.ts`,
+  `packages/opencode/test/tool/actor-variant-guidance.test.ts`,
+  `packages/opencode/test/actor/spawn.test.ts`, and
+  `packages/opencode/test/inbox/drain-seed-variant.test.ts`.
+- Evidence: shell, recovery and strict-schema tests cover the entry points.
+  Actor tool tests prove forwarding against an overridden model, rejection of
+  unknown and disabled variants and of models without variants before any
+  spawn, and an unchanged spawn input when omitted. A real prompt-loop test
+  proves the persisted child variant and the request's reasoning effort, and the
+  drain-seed test proves a woken turn keeps the variant. Forwarding, validation,
+  schema and drain-seed assertions were each mutation-checked.
+- Exit condition: retire when shared `main` exposes an equivalent validated
+  per-actor variant selector for model-created actors with the same precedence,
+  pre-admission validation and actor lifetime. If this capability is propagated
+  to `main`, move its contract to the shared registry instead of duplicating it.
 
 ## DC-TUI-001 — request provider/model/variant display
 

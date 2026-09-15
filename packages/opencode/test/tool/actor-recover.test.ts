@@ -25,6 +25,15 @@ describe("recoverActorArgs", () => {
     ).toEqual({ operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p", model: "lite", task_id: "T4" } })
   })
 
+  test("an explicit variant survives recovery, even malformed, for strict validation", () => {
+    expect(
+      recoverActorArgs({ action: "spawn", subagent_type: "general", description: "d", prompt: "p", model: "lite", variant: "high" }),
+    ).toEqual({ operation: { action: "spawn", subagent_type: "general", description: "d", prompt: "p", model: "lite", variant: "high" } })
+    expect(recoverActorArgs({ subagent_type: "general", description: "d", prompt: "p", variant: 3 }) as unknown).toEqual({
+      operation: { action: "run", subagent_type: "general", description: "d", prompt: "p", variant: 3 },
+    })
+  })
+
   // spawn/run have no resume argument. Recovery must NOT quietly drop a top-level
   // actor_id: that would lift the call into a valid spawn and hand back a fresh,
   // empty subagent — the silent failure removing the argument exists to end.

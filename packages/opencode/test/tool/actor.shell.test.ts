@@ -174,6 +174,34 @@ describe("actor.shell.parse: --model flag", () => {
   })
 })
 
+describe("actor.shell.parse: --variant flag", () => {
+  test("run with --model and --variant (space form)", async () => {
+    const out = await parse('actor run explore "d" "p" --model lite --variant high')
+    expect(out).toEqual([
+      { operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p", model: "lite", variant: "high" } },
+    ])
+  })
+
+  test("spawn with --variant=<name> (equals form) and no --model", async () => {
+    const out = await parse('actor spawn general "d" "p" --variant=max')
+    expect(out).toEqual([
+      { operation: { action: "spawn", subagent_type: "general", description: "d", prompt: "p", variant: "max" } },
+    ])
+  })
+
+  test("--variant with no value fails with kind: flag", async () => {
+    const err = await Effect.runPromise(Effect.flip(parseActorScript('actor spawn general "d" "p" --variant')))
+    expect(err).toMatchObject({ kind: "flag", detail: expect.stringContaining("--variant requires a value") })
+  })
+
+  test("arity errors advertise --variant on run and spawn", async () => {
+    for (const verb of ["run", "spawn"]) {
+      const err = await Effect.runPromise(Effect.flip(parseActorScript(`actor ${verb} general "only a description"`)))
+      expect(err).toMatchObject({ kind: "arity", detail: expect.stringContaining("[--model <ref>] [--variant <name>]") })
+    }
+  })
+})
+
 describe("actor.shell.parse: lifecycle", () => {
   test.each([
     ["status", "status"],
