@@ -2904,10 +2904,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       yield* Effect.addFinalizer(() => instruction.clear(info.id))
 
       type Draft<T> = T extends MessageV2.Part ? Omit<T, "id"> & { id?: string } : never
-      const assign = (part: Draft<MessageV2.Part>): MessageV2.Part => ({
-        ...part,
-        id: part.id ? PartID.make(part.id) : PartID.ascending(),
-      })
+      const generatedPartIDs = new Set<PartID>()
+      const assign = (part: Draft<MessageV2.Part>): MessageV2.Part => {
+        const id = part.id ? PartID.make(part.id) : PartID.ascending()
+        if (!part.id) generatedPartIDs.add(id)
+        return { ...part, id }
+      }
 
       const resolvePart: (part: PromptInput["parts"][number]) => Effect.Effect<Draft<MessageV2.Part>[]> = Effect.fn(
         "SessionPrompt.resolveUserPart",
@@ -3361,9 +3363,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
       })
 
-      const committed = yield* sessions.commitUserMessage(message, parts)
+      const committed = yield* sessions.commitUserMessage(message, parts, { generatedPartIDs })
 
-      return { info: committed, parts }
+      return { info: committed, parts: MessageV2.parts(committed.id) }
     }, Effect.scoped)
 
     const sweepOrphanAssistants = Effect.fn("SessionPrompt.sweepOrphanAssistants")(function* (

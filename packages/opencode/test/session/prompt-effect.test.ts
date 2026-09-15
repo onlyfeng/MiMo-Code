@@ -286,6 +286,13 @@ let compactionAutoContinueGate:
       release: Deferred.Deferred<void>
     }
   | undefined
+let userMessageCommitGate:
+  | {
+      arrivals: number
+      entered: Deferred.Deferred<void>
+      release: Deferred.Deferred<void>
+    }
+  | undefined
 const taskMetadataPlugin = Layer.succeed(
   Plugin.Service,
   Plugin.Service.of({
@@ -312,6 +319,12 @@ const taskMetadataPlugin = Layer.succeed(
           compactionGate.armed = false
           yield* Deferred.succeed(compactionGate.entered, undefined)
           yield* Deferred.await(compactionGate.release)
+        }
+        const commitGate = userMessageCommitGate
+        if (name === "chat.message" && commitGate) {
+          commitGate.arrivals++
+          if (commitGate.arrivals === 2) yield* Deferred.succeed(commitGate.entered, undefined)
+          yield* Deferred.await(commitGate.release)
         }
         return output
       }),
@@ -494,6 +507,7 @@ afterEach(() => {
   sessionPreGate = undefined
   userQueryPostGate = undefined
   compactionAutoContinueGate = undefined
+  userMessageCommitGate = undefined
   sessionTaskIDs.pre.length = 0
   sessionTaskIDs.post.length = 0
 })
@@ -9110,4 +9124,183 @@ concurrentAdmissionMcpIt.live(
       { git: true, config: providerCfg },
     ),
   30_000,
+)
+
+it.live("prompt retries without part IDs preserve the receipt and reject changed content or order", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Anonymous prompt retry" })
+      const input = {
+        sessionID: chat.id,
+        messageID: MessageID.ascending(),
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [
+          { type: "text" as const, text: "first" },
+          { type: "text" as const, text: "second" },
+        ],
+      }
+      const first = yield* prompt.prompt(input)
+      const retry = yield* prompt.prompt(input)
+      expect(retry).toEqual(first)
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
+      expect(MessageV2.parts(first.info.id)).toEqual(first.parts)
+      if (first.info.role !== "user") throw new Error("Expected committed user receipt")
+      const strict = yield* sessions
+        .commitUserMessage(
+          first.info,
+          first.parts.map((part) => ({ ...part, id: PartID.ascending() })),
+        )
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(strict) && Cause.pretty(strict.cause)).toContain("different content")
+      for (const parts of [
+        [{ type: "text" as const, text: "changed" }, input.parts[1]],
+        [...input.parts].reverse(),
+        [{ ...input.parts[0], metadata: { changed: true } }, input.parts[1]],
+      ]) {
+        const result = yield* prompt.prompt({ ...input, parts }).pipe(Effect.exit)
+        expect(Exit.isFailure(result) && Cause.pretty(result.cause)).toContain("different content")
+        expect(MessageV2.parts(first.info.id)).toEqual(first.parts)
+      }
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("prompt retries preserve mixed explicit part identities and reject cross-message ownership", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Mixed prompt identities" })
+      const input = {
+        sessionID: chat.id,
+        messageID: MessageID.ascending(),
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [
+          { type: "text" as const, id: PartID.make("prt_zz-explicit"), text: "explicit high" },
+          { type: "text" as const, text: "anonymous first" },
+          { type: "text" as const, id: PartID.make("prt_00-explicit"), text: "explicit low" },
+          { type: "text" as const, text: "anonymous second" },
+        ],
+      }
+      const first = yield* prompt.prompt(input)
+      const retry = yield* prompt.prompt(input)
+      expect(retry).toEqual(first)
+      expect(retry.parts.filter((part) => part.id === "prt_zz-explicit" || part.id === "prt_00-explicit")).toHaveLength(
+        2,
+      )
+      const changedID = yield* prompt
+        .prompt({
+          ...input,
+          parts: [{ ...input.parts[0], id: PartID.ascending() }, ...input.parts.slice(1)],
+        })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(changedID) && Cause.pretty(changedID.cause)).toContain("different content")
+      const stolen = yield* prompt.prompt({ ...input, messageID: MessageID.ascending() }).pipe(Effect.exit)
+      expect(Exit.isFailure(stolen) && Cause.pretty(stolen.cause)).toContain(
+        "Part ID already belongs to another message",
+      )
+      const otherActor = yield* prompt.prompt({ ...input, agentID: "other-actor" }).pipe(Effect.exit)
+      expect(Exit.isFailure(otherActor) && Cause.pretty(otherActor.cause)).toContain("another actor")
+      expect(yield* sessions.messages({ sessionID: chat.id, agentID: "*" })).toHaveLength(1)
+      expect(MessageV2.parts(first.info.id)).toEqual(first.parts)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+taskMetadataIt.live("concurrent prompt retries without part IDs share one atomic receipt", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create()
+      yield* llm.tool("StructuredOutput", { title: "One committed title" })
+      const gate = {
+        arrivals: 0,
+        entered: yield* Deferred.make<void>(),
+        release: yield* Deferred.make<void>(),
+      }
+      userMessageCommitGate = gate
+      yield* Effect.addFinalizer(() => Deferred.succeed(gate.release, undefined))
+      const input = {
+        sessionID: chat.id,
+        messageID: MessageID.ascending(),
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [
+          { type: "text" as const, text: "same first" },
+          { type: "text" as const, text: "same second" },
+        ],
+      }
+      const attempts = yield* Effect.all([prompt.prompt(input), prompt.prompt(input)], { concurrency: 2 }).pipe(
+        Effect.forkChild,
+      )
+      yield* Deferred.await(gate.entered).pipe(Effect.timeout("5 seconds"))
+      expect(gate.arrivals).toBe(2)
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(0)
+      yield* Deferred.succeed(gate.release, undefined)
+      const receipts = yield* Fiber.join(attempts).pipe(Effect.timeout("5 seconds"))
+      expect(receipts[1]).toEqual(receipts[0])
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
+      expect(MessageV2.parts(input.messageID)).toEqual(receipts[0].parts)
+      expect(receipts[0].parts).toHaveLength(2)
+      const titled = yield* Effect.gen(function* () {
+        while (true) {
+          const current = yield* sessions.get(chat.id)
+          if (current.titleSource === "generated") return current
+          yield* Effect.sleep(10)
+        }
+      }).pipe(Effect.timeout("5 seconds"))
+      expect(titled.title).toBe("One committed title")
+      expect(titled.titleRevision).toBe(2)
+      expect(yield* llm.calls).toBe(1)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("prompt retries keep rejecting stored runtime additions", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Runtime-mutated prompt" })
+      const input = {
+        sessionID: chat.id,
+        messageID: MessageID.ascending(),
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "text" as const, text: "original user request" }],
+      }
+      const first = yield* prompt.prompt(input)
+      // Loop-streak recovery appends an ignored synthetic part to the original
+      // user. Anonymous ID reuse must not silently erase that persisted state.
+      const added = yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: input.messageID,
+        sessionID: chat.id,
+        type: "text",
+        text: "",
+        ignored: true,
+        synthetic: true,
+        metadata: {
+          origin: { kind: "loop_streak_crop", fromId: "msg_from", toId: "msg_to", key: "tool", truncated: false },
+        },
+      })
+      const retry = yield* prompt.prompt(input).pipe(Effect.exit)
+      expect(Exit.isFailure(retry) && Cause.pretty(retry.cause)).toContain("different content")
+      expect(MessageV2.parts(input.messageID)).toEqual([...first.parts, added])
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
+    }),
+    { git: true, config: providerCfg },
+  ),
 )
