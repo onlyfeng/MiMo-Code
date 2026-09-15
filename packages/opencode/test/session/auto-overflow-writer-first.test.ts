@@ -423,6 +423,20 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
                 const checkpoints = after.filter((m) => m.parts.some((p) => p.type === "checkpoint"))
                 expect(checkpoints).toHaveLength(rebuilds)
                 expect(new Set(checkpoints.map((m) => m.info.id)).size).toBe(rebuilds)
+                if (rebuilds) {
+                  const highUsage = after.find(
+                    (message) => message.info.role === "assistant" && message.info.tokens.input === usage,
+                  )
+                  expect(highUsage?.info.role).toBe("assistant")
+                  if (highUsage?.info.role !== "assistant") throw new Error("Missing completed high-usage turn")
+                  // Provider-signalled overflow rebuilds after the processor
+                  // commits this row. Its digest must include that completed
+                  // turn, not the older pre-stream snapshot's last user.
+                  expect(MessageV2.usageRecovered(after, highUsage.info)).toBe(true)
+                  expect(checkpoints[0].parts.find((part) => part.type === "checkpoint")?.digestUpTo).toBe(
+                    highUsage.info.id,
+                  )
+                }
                 expect(writerCalls).toBe(rebuilds)
                 expect(llm.calls).toBe(3)
                 expect(
