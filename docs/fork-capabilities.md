@@ -18,8 +18,8 @@ authority.
 - Last reviewed: 2026-09-15
 - Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
 - Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `0b12e39ebfae5e0a01e623de1b4f58e96c86cb09`
-- Bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
+- Main behavior (runtime/tests): `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
+- Bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -707,14 +707,17 @@ not change their implementation. The preceding review is retained in the
   bound the cancellation join to the existing reclaim grace while detached
   cleanup continues; shared cancellation retains interrupt/join semantics.
   The dated actor quarantine entries below describe their historical snapshots.
-  The separate workflow deadline quarantine is also closed. The restored
+  The separate workflow deadline case is restored, but its CI follow-up remains open. The restored
   `it.live` case proves the hanging LLM request was consumed, a child worktree
   and running Instance existed, the exact workflow deadline fired, and the
   worktree and Instance were disposed. Its former two-second deadline could
   precede child startup; the test now explicitly gates on startup before testing
   reclamation. Four workflow/disposal suites pass together (44 tests) and the
-  process exits naturally. The historically reported disposer hang was not
-  reproduced; no production cleanup policy changed. F03 records the opt-in
+  process exits naturally in that local matrix. PR #129 at `eaf99b8b` subsequently
+  reproduced a 120-second timeout in this case on Linux; other tests continued
+  until the shard's eight-minute budget ended. That does not establish a final
+  process-exit hang or its cause. Publication is held pending a phase-level
+  diagnosis; no production cleanup policy has changed. F03 records the opt-in
   environment and evidence in [the implementation report](audit-followups-2026-09-15.md).
   A separate Runner reentry fixture now uses explicit started/reentered/release
   signals instead of five/fifty-millisecond timer ordering, preserving the
@@ -932,8 +935,9 @@ logged`, and the peer `success`/`failure` variants of
   FD-004's decision rather than by an upstream settlement, and FD-004 records
   each resulting behaviour.
 - Retirement condition: runtime bounds may retire only with equivalent upstream
-  settlement. The single test skip retires after the disposer is fixed and
-  bounded exact-SHA CI proves process exit.
+  settlement. Restoring a quarantined test requires effective assertions and
+  bounded exact-SHA CI settlement; the workflow case's restored execution alone
+  does not close the Linux timeout follow-up above.
 
 - 2026-09-15 retired-fixture inventory: `test/fixture/llm-server-cli-child.ts`,
   `test/fixture/model-api-default-child.ts` and `test/llm-server/tokens-child.ts`
@@ -1256,9 +1260,13 @@ logged`, and the peer `success`/`failure` variants of
   additional fixed-reserve ceiling. The TUI budget picker validates and previews
   each candidate through the same resolver and reports the applied trigger.
   Compression-time projection retains its summary,
-  file manifest, and complete API rounds, but its tail budget is the smaller of
+  file manifest, and complete API rounds. Its optional tail budget is the smaller of
   40K tokens and the remaining usable window after the frozen system/tools and
-  fixed projection content. Compaction reuses the frozen request prefix and
+  fixed projection content. A new external user/spawn request that arrived after
+  the summary snapshot, and all messages after it, must remain visible even when
+  that optional budget is zero. Their cost consumes the available optional budget
+  before older complete rounds are selected; ordinary overflow handling still
+  applies to an oversized required request. Compaction reuses the frozen request prefix and
   keeps `toolChoice: "none"`; schema bytes remain cache-stable without granting
   summary-time tool execution. Complete authorized definitions remain available
   for frozen rebinding, while compaction sends and budgets only the frozen
@@ -1280,6 +1288,17 @@ logged`, and the peer `success`/`failure` variants of
   and TUI sync/session/model utilities. Real SQL pagination, atomic admission,
   composed projection and TUI state-helper tests bind these paths; no
   interactive terminal playtest is claimed.
+- 2026-09-15 concurrent admission review: pending external requests are scoped
+  by session and actor until their message and parts commit or admission ends.
+  Compaction waits for that actor's pending admissions before and after inserting
+  an automatic continuation; a newer committed request removes the exact stale
+  continuation and its parts. Failed/interrupted admission releases the wait,
+  and another actor's pending request does not block this actor. Snapshot tails
+  use message identity and the actual chronological endpoint rather than an
+  array length shared across different views. Real MCP gates cover pre-insert,
+  post-insert, failure, cross-actor and interruption paths, including a second
+  compaction while a cancelled resource remains unresolved. No additional tool
+  authority or compat preflight policy is introduced.
 - POLICY-04 carrier review: compaction is the third frozen-prefix consumer.
   Its history projection uses the layout paired with the selected frozen
   system, preserving legacy catalog messages or suppressing known generated
