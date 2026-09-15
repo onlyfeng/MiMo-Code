@@ -1,6 +1,7 @@
 import type { AssistantMessage, Config, Message, Model, Provider } from "@mimo-ai/sdk/v2"
 import { contextWindow as overflowWindow } from "@/session/overflow"
 import { Locale, Token } from "@/util"
+import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 
 type Selection = {
   providerID: string
@@ -97,7 +98,7 @@ export type ContextWindow = ReturnType<typeof overflowWindow>
  * a cumulative sum over all assistant turns and is unaffected by the boundary —
  * the whole point of /rebuild is to drop context, not cost.
  *
- * Staleness is decided from each rebuild's `coveredUpTo` (the watermark message
+ * Staleness is decided from each rebuild's effective watermark (the message
  * id it collapsed up to), NOT from the boundary marker's own id or its array
  * position. This matters: the boundary marker message is created with a fresh
  * ascending id but a deliberately backdated `time.created` (checkpoint.ts, so it
@@ -105,9 +106,9 @@ export type ContextWindow = ReturnType<typeof overflowWindow>
  * design. Comparing the marker's own id — or trusting `findLast` to return the
  * newest boundary in array order — would silently reintroduce the stale-figure
  * bug the moment the caller ordered messages by time, or ran a second rebuild.
- * `coveredUpTo` is an ordinary watermark message id (a real prior turn), so
- * `coveredUpTo >= last.id` is an honest "was this measured turn collapsed?" test
- * that holds under any caller ordering and any number of rebuilds.
+ * Resolve that exact watermark and compare its `(time.created, id)` order with
+ * the measured turn. Caller-supplied IDs are not timestamps. A known marker
+ * whose watermark is outside the local transcript keeps the readout pending.
  *
  * `context` is the final display string in every case: the pure function is the
  * sole owner of the pending placeholder (it is where the "figure is stale"
@@ -118,16 +119,19 @@ export function computeContextUsage(input: {
   messages: Message[]
   window: ContextWindow | undefined
   /**
-   * For a message carrying a `checkpoint` (rebuild) part, the `coveredUpTo`
-   * watermark id that rebuild collapsed up to; `undefined` for any other
+   * For a message carrying a `checkpoint` (rebuild) part, the effective
+   * `digestUpTo ?? coveredUpTo` watermark; `undefined` for any other
    * message. Ordering-independent: the readout never inspects message order.
    */
   checkpointCoverage: (messageID: string) => string | undefined
 }): { context: string; cost: number; pending: boolean } | undefined {
   const { messages, window: win, checkpointCoverage } = input
-  const last = messages.findLast(
-    (m): m is AssistantMessage => m.role === "assistant" && m.tokens.output > 0,
-  )
+  const compare = (left: Message, right: Message) =>
+    left.time.created - right.time.created || compareUtf8Bytes(left.id, right.id)
+  const last = messages
+    .filter((m): m is AssistantMessage => m.role === "assistant" && m.tokens.output > 0)
+    .sort(compare)
+    .at(-1)
   if (!last) return undefined
 
   const tokens =
@@ -141,12 +145,14 @@ export function computeContextUsage(input: {
   // reaches 100% and a configured budget looks ignored.
   const frame = win ? `${Token.format(win.usable)}${win.source === "config" ? "↓" : ""}` : undefined
 
-  // The measured turn is stale if ANY rebuild collapsed a region reaching it or
-  // past it — i.e. some checkpoint's coveredUpTo id is >= the last measured turn's
-  // id. `some` (not `findLast`) so the result never depends on message order.
+  const byID = new Map(messages.map((message) => [message.id, message]))
+  // Any resolved checkpoint reaching the measured turn makes its usage stale.
+  // Missing watermarks provide no evidence that the old measurement is current.
   const pending = messages.some((m) => {
     const coveredUpTo = checkpointCoverage(m.id)
-    return coveredUpTo !== undefined && coveredUpTo >= last.id
+    if (!coveredUpTo) return false
+    const watermark = byID.get(coveredUpTo)
+    return !watermark || compare(watermark, last) >= 0
   })
   if (pending) {
     // Blank only the unmeasured numerator; keep the frame when we have one so the

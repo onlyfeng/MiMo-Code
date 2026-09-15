@@ -601,14 +601,16 @@ export function Prompt(props: PromptProps) {
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     const win = Model.contextWindow(sync.data.config, model)
     // A /rebuild boundary is a message carrying a `checkpoint` part (stored in
-    // sync.data.part, keyed by message id). Its `coveredUpTo` is the watermark it
+    // sync.data.part, keyed by message id). Its effective watermark is the range it
     // collapsed up to; computeContextUsage uses that (not message order) to decide
     // the measured turn is stale and report pending until the next assistant turn.
     const result = Model.computeContextUsage({
       messages: msg,
       window: win,
-      checkpointCoverage: (id) =>
-        (sync.data.part[id] ?? []).find((p) => p.type === "checkpoint")?.coveredUpTo,
+      checkpointCoverage: (id) => {
+        const checkpoint = (sync.data.part[id] ?? []).find((part) => part.type === "checkpoint")
+        return checkpoint?.digestUpTo ?? checkpoint?.coveredUpTo
+      },
     })
     if (!result) return
     return {

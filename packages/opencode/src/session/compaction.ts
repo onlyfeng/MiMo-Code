@@ -495,7 +495,7 @@ export const layer: Layer.Layer<
         },
       )
       const ctx = yield* InstanceState.context
-      const msg: MessageV2.Assistant = {
+      const msg: MessageV2.Assistant = yield* session.createMessage({
         id: MessageID.ascending(),
         role: "assistant",
         parentID: input.parentID,
@@ -521,8 +521,7 @@ export const layer: Layer.Layer<
         time: {
           created: Date.now(),
         },
-      }
-      yield* session.updateMessage(msg)
+      })
       const processor = yield* processors.create({
         assistantMessage: msg,
         sessionID: input.sessionID,
@@ -946,8 +945,7 @@ export const layer: Layer.Layer<
 
     const create = Effect.fn("SessionCompaction.create")(function* (input: Parameters<Interface["create"]>[0]) {
       const next = boundary(input)
-      yield* session.updateMessage(next.message)
-      yield* session.updatePart(next.part)
+      yield* session.commitUserMessage(next.message, [next.part])
       yield* publish(input)
     })
 

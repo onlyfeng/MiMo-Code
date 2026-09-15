@@ -49,6 +49,54 @@ function coverage(map: Record<string, string>) {
 }
 
 describe("computeContextUsage", () => {
+  test("a late old-ID watermark makes the measured turn stale", () => {
+    expect(
+      computeContextUsage({
+        messages: [
+          assistant("msg_z_measured", 300_000, { created: 100 }),
+          user("msg_a_watermark", { created: 200 }),
+          boundary("msg_marker", { created: 101 }),
+        ],
+        window: WINDOW,
+        checkpointCoverage: coverage({ msg_marker: "msg_a_watermark" }),
+      })?.pending,
+    ).toBe(true)
+  })
+
+  test("a new low-ID assistant supersedes covered usage regardless of array order", () => {
+    expect(
+      computeContextUsage({
+        messages: [
+          assistant("msg_a_new", 190_000, { created: 200 }),
+          boundary("msg_marker", { created: 101 }),
+          assistant("msg_z_old", 300_000, { created: 100 }),
+        ],
+        window: WINDOW,
+        checkpointCoverage: coverage({ msg_marker: "msg_z_old" }),
+      }),
+    ).toMatchObject({ context: "190.1K/960K (20%)", pending: false })
+  })
+
+  test("a known checkpoint with an unavailable watermark keeps usage pending", () => {
+    expect(
+      computeContextUsage({
+        messages: [assistant("msg_z_measured", 300_000, { created: 100 }), boundary("msg_marker")],
+        window: WINDOW,
+        checkpointCoverage: coverage({ msg_marker: "msg_missing" }),
+      })?.pending,
+    ).toBe(true)
+  })
+
+  test("equal-time measured turns use SQLite UTF-8 ID order", () => {
+    expect(
+      computeContextUsage({
+        messages: [assistant("msg_\u{10000}", 190_000), assistant("msg_\uE000", 300_000)],
+        window: WINDOW,
+        checkpointCoverage: () => undefined,
+      })?.context,
+    ).toBe("190.1K/960K (20%)")
+  })
+
   test("measured: reports the last assistant turn's context fill and cumulative cost", () => {
     // 578900 + 100 output = 579000 tokens over a 960K usable window → 579.0K/960K (60%).
     const messages = [user("msg_01"), assistant("msg_02", 578_900, { cost: 13.1 })]

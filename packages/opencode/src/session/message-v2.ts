@@ -3,6 +3,7 @@ import { BusEvent } from "@/bus/bus-event"
 import { SessionID, MessageID, PartID } from "./schema"
 import z from "zod"
 import { NamedError } from "@mimo-ai/shared/util/error"
+import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 import {
   APICallError,
   convertToModelMessages,
@@ -584,6 +585,11 @@ export const Info = z.discriminatedUnion("role", [User, Assistant]).meta({
 })
 export type Info = z.infer<typeof Info>
 
+export function compareOrder(left: Pick<Info, "id" | "time">, right: Pick<Info, "id" | "time">) {
+  if (left.time.created !== right.time.created) return left.time.created - right.time.created
+  return compareUtf8Bytes(left.id, right.id)
+}
+
 export const Event = {
   Updated: SyncEvent.define({
     type: "message.updated",
@@ -640,6 +646,38 @@ export const WithParts = z.object({
   parts: z.array(Part),
 })
 export type WithParts = z.infer<typeof WithParts>
+
+export function usageRecovered(messages: readonly WithParts[], assistant: Assistant) {
+  return messages.some((message) => {
+    if (message.info.sessionID !== assistant.sessionID) return false
+    if ((message.info.agentID ?? "main") !== (assistant.agentID ?? "main")) return false
+    return message.parts.some((part) => {
+      if (part.type === "compaction") return compareOrder(message.info, assistant) > 0
+      if (part.type !== "checkpoint") return false
+
+      // Rebuild markers are backdated just after coveredUpTo. Their digest can
+      // cover later turns, including rows outside the current context window.
+      const endpoints = Database.use((db) =>
+        db
+          .select({ id: MessageTable.id, created: MessageTable.time_created })
+          .from(MessageTable)
+          .where(
+            and(
+              eq(MessageTable.session_id, assistant.sessionID),
+              eq(MessageTable.agent_id, assistant.agentID ?? "main"),
+              inArray(MessageTable.id, [part.coveredUpTo, part.digestUpTo ?? part.coveredUpTo]),
+            ),
+          )
+          .all(),
+      ).map((row) => ({ id: row.id, time: { created: row.created } }))
+      const covered = endpoints.find((row) => row.id === part.coveredUpTo)
+      const digest = endpoints.find((row) => row.id === (part.digestUpTo ?? part.coveredUpTo))
+      if (!covered || !digest) return false
+      if (compareOrder(covered, message.info) >= 0 || compareOrder(digest, covered) < 0) return false
+      return compareOrder(digest, assistant) >= 0
+    })
+  })
+}
 
 // Apply the newest v1 compaction boundary as a context projection while keeping
 // its persisted assistant summary in the internal message stream. API
@@ -1228,14 +1266,73 @@ export function get(input: { sessionID: SessionID; messageID: MessageID }): With
   }
 }
 
+function contextBoundary(msg: WithParts) {
+  if (msg.info.role !== "user") return
+  return msg.parts.find(
+    (part): part is CheckpointPart | CompactionPart => part.type === "checkpoint" || part.type === "compaction",
+  )
+}
+
 export function filterCompacted(msgs: Iterable<WithParts>) {
   const result = [] as WithParts[]
+  let rebuild: { marker: WithParts; coveredUpTo: MessageID } | undefined
+  let covered = false
+  // stream() is newest-first. Checkpoint watermarks only advance; repeated
+  // rebuilds at one watermark receive ascending IDs, so the first boundary is
+  // also the latest logical generation even though its timestamp is backdated.
   for (const msg of msgs) {
+    if (rebuild) {
+      if (msg.info.id === rebuild.coveredUpTo) {
+        covered = true
+        break
+      }
+      result.push(msg)
+      continue
+    }
+
     result.push(msg)
-    if (msg.info.role === "user" && msg.parts.some((p) => p.type === "checkpoint" || p.type === "compaction")) break
+    const boundary = contextBoundary(msg)
+    if (!boundary) continue
+    // A rebuild marker is written later but deliberately backdated to the
+    // checkpoint watermark. `(created, id)` therefore cannot always place it
+    // before every already-present live-tail message (there may be no key
+    // between adjacent or equal timestamps). Reconstruct its logical window
+    // from coveredUpTo instead of trusting the marker's physical row order.
+    // coveredUpTo has defined this seam since the first persisted checkpoint
+    // format, including markers created before the source discriminator.
+    if (boundary.type !== "checkpoint") break
+    rebuild = { marker: msg, coveredUpTo: boundary.coveredUpTo }
   }
+
   result.reverse()
-  return compactionProjection(result)
+  // Missing/reversed coverage fails closed: return the untrimmed history we
+  // observed instead of guessing which user instructions the checkpoint owns.
+  if (!rebuild) return compactionProjection(result)
+  if (!covered) {
+    // The later activity-collapse pass must not revive an unverified range.
+    // Clear only its transient digest bound; persisted messages stay intact.
+    return compactionProjection(
+      result.map((msg) =>
+        msg === rebuild.marker
+          ? {
+              ...msg,
+              parts: msg.parts.map((part) =>
+                part.type === "checkpoint" ? { ...part, digestUpTo: undefined } : part,
+              ),
+            }
+          : msg,
+      ),
+    )
+  }
+
+  // The active marker supersedes older synthetic boundaries in its covered
+  // tail. Move it to the logical seam and preserve canonical order everywhere
+  // else; collapseCheckpointTail then digests only its exact assistant range
+  // while user turns and post-insert messages remain live.
+  return compactionProjection([
+    rebuild.marker,
+    ...result.filter((msg) => msg.info.id !== rebuild.marker.info.id && !contextBoundary(msg)),
+  ])
 }
 
 export const filterCompactedEffect = Effect.fnUntraced(function* (

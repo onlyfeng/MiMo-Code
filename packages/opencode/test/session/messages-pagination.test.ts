@@ -120,6 +120,33 @@ async function addCheckpointPart(sessionID: SessionID, messageID: MessageID, cov
 }
 
 describe("MessageV2.page", () => {
+  test("in-memory chronology matches SQLite pagination for equal-time Unicode IDs", async () => {
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const session = await svc.create({})
+        const messages = await Promise.all(
+          ["msg_\u{10000}", "msg_z", "msg_\uE000", "msg_\u00E9"].map((id) =>
+            svc.updateMessage({
+              id: MessageID.make(id),
+              sessionID: session.id,
+              role: "user",
+              time: { created: 1_000 },
+              agent: "test",
+              model: { providerID: ProviderID.make("test"), modelID: ModelID.make("model") },
+            }),
+          ),
+        )
+        const latest = MessageV2.page({ sessionID: session.id, limit: 2 })
+        const older = MessageV2.page({ sessionID: session.id, limit: 2, before: latest.cursor! })
+        const persisted = [...older.items, ...latest.items].map((message) => message.info.id)
+        expect(persisted.map(String)).toEqual(["msg_z", "msg_\u00E9", "msg_\uE000", "msg_\u{10000}"])
+        expect(messages.toSorted(MessageV2.compareOrder).map((message) => message.id)).toEqual(persisted)
+        await svc.remove(session.id)
+      },
+    })
+  })
+
   test("returns sync result", async () => {
     await Instance.provide({
       directory: root,
@@ -693,7 +720,7 @@ describe("MessageV2.filterCompacted", () => {
         })
 
         const u2 = await addUser(session.id, "new question")
-        await addCheckpointPart(session.id, u2, u1)
+        await addCheckpointPart(session.id, u2, a1)
         const a2 = await addAssistant(session.id, u2)
         await svc.updatePart({
           id: PartID.ascending(),
@@ -733,7 +760,7 @@ describe("MessageV2.filterCompacted", () => {
         })
 
         const u2 = await addUser(session.id, "second")
-        await addCheckpointPart(session.id, u2, u1)
+        await addCheckpointPart(session.id, u2, a1)
         const a2 = await addAssistant(session.id, u2, { finish: "end_turn" })
         await svc.updatePart({
           id: PartID.ascending(),
@@ -744,7 +771,7 @@ describe("MessageV2.filterCompacted", () => {
         })
 
         const u3 = await addUser(session.id, "third")
-        await addCheckpointPart(session.id, u3, u2)
+        await addCheckpointPart(session.id, u3, a2)
         const a3 = await addAssistant(session.id, u3)
         await svc.updatePart({
           id: PartID.ascending(),
@@ -756,6 +783,38 @@ describe("MessageV2.filterCompacted", () => {
 
         const result = MessageV2.filterCompacted(MessageV2.stream(session.id))
         expect(result.map((item) => item.info.id)).toEqual([u3, a3])
+
+        await svc.remove(session.id)
+      },
+    })
+  })
+
+  test("reconstructs a checkpoint tail across stream page boundaries", async () => {
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const session = await svc.create({})
+        const covered = (await fill(session.id, 1, () => 1_000))[0]!
+        const tail = await fill(session.id, 55, (i) => 1_001 + i)
+        const marker = MessageID.ascending()
+        await svc.updateMessage({
+          id: marker,
+          sessionID: session.id,
+          role: "user",
+          time: { created: 2_000 },
+          agent: "test",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as MessageV2.Info)
+        await addCheckpointPart(session.id, marker, covered)
+        const future = await fill(session.id, 1, () => 2_001)
+
+        expect(MessageV2.filterCompacted(MessageV2.stream(session.id)).map((item) => item.info.id)).toEqual([
+          marker,
+          ...tail,
+          ...future,
+        ])
 
         await svc.remove(session.id)
       },

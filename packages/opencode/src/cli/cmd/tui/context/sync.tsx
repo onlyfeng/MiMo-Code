@@ -26,6 +26,7 @@ import { useProject } from "@tui/context/project"
 import { useEvent } from "@tui/context/event"
 import { useSDK } from "@tui/context/sdk"
 import { Binary } from "@mimo-ai/shared/util/binary"
+import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 import { createSimpleContext } from "./helper"
 import type { Snapshot } from "@/snapshot"
 import { useExit } from "./exit"
@@ -135,6 +136,108 @@ export type ActorEntry = {
   last_turn_time: number | null
 }
 
+type OrderedMessage = Pick<Message, "id" | "time">
+
+type MessagePage<M> = {
+  data: M[] | undefined
+  response: {
+    headers: {
+      get(name: string): string | null
+    }
+  }
+}
+
+type BoundaryMessage = { id: string } | { info: { id: string } }
+
+type RevertView<M> = {
+  found: boolean
+  before: M[]
+  from: M[]
+  after: M[]
+  globalAfter: M[]
+}
+
+export function compareMessageOrder(left: OrderedMessage, right: OrderedMessage) {
+  if (left.time.created !== right.time.created) return left.time.created - right.time.created
+  return compareUtf8Bytes(left.id, right.id)
+}
+
+export function messageIndex(messages: readonly Pick<Message, "id">[], id: string) {
+  return messages.findIndex((message) => message.id === id)
+}
+
+export function messageInsertIndex(messages: readonly OrderedMessage[], message: OrderedMessage) {
+  const index = messages.findIndex((current) => compareMessageOrder(message, current) < 0)
+  return index < 0 ? messages.length : index
+}
+
+export function upsertChronologicalMessage<M extends OrderedMessage>(messages: readonly M[], message: M, limit = 100) {
+  const next = messages.filter((current) => current.id !== message.id)
+  next.splice(messageInsertIndex(next, message), 0, message)
+  const removed = next.length > limit && next.length > messages.length ? next.shift() : undefined
+  return { messages: next, removed }
+}
+
+export function removeMessageByID<M extends { id: string }>(messages: readonly M[], id: string) {
+  const index = messageIndex(messages, id)
+  if (index < 0) return { messages: [...messages], removed: undefined }
+  return {
+    messages: [...messages.slice(0, index), ...messages.slice(index + 1)],
+    removed: messages[index],
+  }
+}
+
+export function revertView<M extends OrderedMessage>(
+  buckets: Record<string, M[]> | undefined,
+  current: readonly M[],
+  boundaryID?: string,
+): RevertView<M> {
+  if (!boundaryID) return { found: true, before: [...current], from: [], after: [], globalAfter: [] }
+  const ordered = Object.values(buckets ?? {})
+    .flat()
+    .toSorted(compareMessageOrder)
+  const boundary = messageIndex(ordered, boundaryID)
+  if (boundary < 0) return { found: false, before: [], from: [...current], after: [], globalAfter: [] }
+  const ids = new Set(current.map((message) => message.id))
+  const project = (messages: M[]) => messages.filter((message) => ids.has(message.id))
+  return {
+    found: true,
+    before: project(ordered.slice(0, boundary)),
+    from: project(ordered.slice(boundary)),
+    after: project(ordered.slice(boundary + 1)),
+    globalAfter: ordered.slice(boundary + 1),
+  }
+}
+
+export function revertRedoAction<M extends OrderedMessage & { role: string }>(view: RevertView<M>) {
+  if (!view.found) return { type: "blocked" } as const
+  const message = view.globalAfter.find((item) => item.role === "user")
+  if (!message) return { type: "unrevert" } as const
+  return { type: "revert", messageID: message.id } as const
+}
+
+export async function loadMessagesThroughRevertBoundary<M extends BoundaryMessage>(
+  initial: MessagePage<M>,
+  boundaryID: string | undefined,
+  loadOlder: (cursor: string) => Promise<MessagePage<M>>,
+) {
+  const pages = [initial.data ?? []]
+  const id = (message: M) => ("info" in message ? message.info.id : message.id)
+  if (!boundaryID) return { messages: pages[0], found: true }
+  let found = pages[0].some((message) => id(message) === boundaryID)
+  let cursor = initial.response.headers.get("x-next-cursor") ?? undefined
+  const seen = new Set<string>()
+  while (!found && cursor && !seen.has(cursor)) {
+    seen.add(cursor)
+    const page = await loadOlder(cursor)
+    const messages = page.data ?? []
+    pages.unshift(messages)
+    found = messages.some((message) => id(message) === boundaryID)
+    cursor = page.response.headers.get("x-next-cursor") ?? undefined
+  }
+  return { messages: pages.flat(), found }
+}
+
 function actorStatusFromEvent(
   s: "pending" | "running" | "idle",
   outcome: "success" | "failure" | "cancelled" | undefined,
@@ -195,7 +298,7 @@ export function nextSessionStatus(status: SessionStatus) {
 // read-only local-DB snapshot and they drift — this arm's population grew
 // 1294 → 1313 across this branch's own revisions — so trust the split's shape,
 // not the absolute numbers.
-export function selectMessages<M extends { id: string }>(
+export function selectMessages<M extends { id: string; time: { created: number } }>(
   buckets: Record<string, M[]> | undefined,
   agentID: string,
   sessionID: string,
@@ -204,7 +307,7 @@ export function selectMessages<M extends { id: string }>(
   if (buckets?.[sessionID]?.length) return buckets[sessionID]
   const newest = Object.entries(buckets ?? {})
     .filter(([key, msgs]) => key !== "main" && msgs.length > 0)
-    .sort(([, a], [, b]) => (b.at(-1)?.id ?? "").localeCompare(a.at(-1)?.id ?? ""))
+    .sort(([, a], [, b]) => compareMessageOrder(b.at(-1)!, a.at(-1)!))
     .at(0)
   return newest?.[1] ?? []
 }
@@ -591,48 +694,26 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           // session view renders whichever bucket matches route.agentID.
           const sid = event.properties.info.sessionID
           const aid = event.properties.info.agentID ?? "main"
-          if (!store.message[sid]) {
-            setStore("message", sid, { [aid]: [event.properties.info] })
-            break
-          }
-          if (!store.message[sid][aid]) {
-            setStore("message", sid, aid, [event.properties.info])
-            break
-          }
-          const messages = store.message[sid][aid]
-          const result = Binary.search(messages, event.properties.info.id, (m) => m.id)
-          if (result.found) {
-            setStore("message", sid, aid, result.index, reconcile(event.properties.info))
-            break
-          }
-          setStore(
-            "message",
-            sid,
-            aid,
-            produce((draft) => {
-              draft.splice(result.index, 0, event.properties.info)
-            }),
+          if (!store.message[sid]) setStore("message", sid, {})
+          const session = store.session.find((item) => item.id === sid)
+          // Undo may have loaded older pages to resolve its boundary. Keep that
+          // history available while undo/redo still depends on the boundary.
+          const result = upsertChronologicalMessage(
+            store.message[sid][aid] ?? [],
+            event.properties.info,
+            session?.revert ? Infinity : 100,
           )
-          const updated = store.message[sid][aid]
-          if (updated.length > 100) {
-            const oldest = updated[0]
-            batch(() => {
-              setStore(
-                "message",
-                sid,
-                aid,
-                produce((draft) => {
-                  draft.shift()
-                }),
-              )
-              setStore(
-                "part",
-                produce((draft) => {
-                  delete draft[oldest.id]
-                }),
-              )
-            })
-          }
+          const removed = result.removed
+          batch(() => {
+            setStore("message", sid, aid, reconcile(result.messages))
+            if (!removed) return
+            setStore(
+              "part",
+              produce((draft) => {
+                delete draft[removed.id]
+              }),
+            )
+          })
           break
         }
         case "message.removed": {
@@ -640,15 +721,14 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           const buckets = store.message[sid]
           if (!buckets) break
           for (const aid of Object.keys(buckets)) {
-            const messages = buckets[aid]
-            const result = Binary.search(messages, event.properties.messageID, (m) => m.id)
-            if (result.found) {
+            const result = removeMessageByID(buckets[aid], event.properties.messageID)
+            const removed = result.removed
+            if (removed) {
+              setStore("message", sid, aid, reconcile(result.messages))
               setStore(
-                "message",
-                sid,
-                aid,
+                "part",
                 produce((draft) => {
-                  draft.splice(result.index, 1)
+                  delete draft[removed.id]
                 }),
               )
               break
@@ -697,6 +777,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
         case "message.part.removed": {
           const parts = store.part[event.properties.messageID]
+          if (!parts) break
           const result = Binary.search(parts, event.properties.partID, (p) => p.id)
           if (result.found)
             setStore(
@@ -1031,6 +1112,18 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             // subagent sessions" is not a third kind.
             sdk.client.session.children({ sessionID, visible: true }).catch(() => undefined),
           ])
+          const loadedMessages = await loadMessagesThroughRevertBoundary(
+            messages,
+            session.data!.revert?.messageID,
+            (before) =>
+              sdk.client.session.messages({ sessionID, limit: 100, before, agent_id: "*" }, { throwOnError: true }),
+          )
+          if (!loadedMessages.found) {
+            toast?.show({
+              message: "Undo boundary could not be loaded. History is hidden to prevent an unsafe redo.",
+              variant: "error",
+            })
+          }
           if (deletedSessions.has(sessionID)) return
           applySession(session.data!)
           for (const child of children?.data ?? []) applySession(child)
@@ -1039,10 +1132,11 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
               draft.todo[sessionID] = todo.data ?? []
               draft.session_recovery[sessionID] = recovery.data ?? []
               draft.task[sessionID] = task.data ?? []
-              const flat = (messages.data ?? []).map((x) => x.info)
-              // Server returns messages id-ordered and message.updated keeps that order; the footer's post-/rebuild pending-detection deliberately does NOT depend on it (it keys off checkpoint coveredUpTo, model.ts), so reordering here won't resurface the stale-context bug.
+              const flat = loadedMessages.messages.map((x) => x.info).toSorted(compareMessageOrder)
+              // Server and message.updated both keep each actor bucket ordered by
+              // (time.created, id); caller-supplied IDs are idempotency keys, not chronology.
               draft.message[sessionID] = bucketMessages(flat)
-              for (const message of messages.data ?? []) {
+              for (const message of loadedMessages.messages) {
                 draft.part[message.info.id] = message.parts
               }
               draft.session_diff[sessionID] = diff.data ?? []

@@ -2319,7 +2319,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const promptOps = yield* ops()
       const { actor: actorTool } = yield* registry.named()
       const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
-      const assistantMessage: MessageV2.Assistant = yield* sessions.updateMessage({
+      const assistantMessage: MessageV2.Assistant = yield* sessions.createMessage({
         id: MessageID.ascending(),
         role: "assistant",
         parentID: lastUser.id,
@@ -2543,7 +2543,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         model: { providerID: model.providerID, modelID: model.modelID },
         source: "user",
       }
-      yield* sessions.updateMessage(userMsg)
+      yield* sessions.createMessage(userMsg)
       const userPart: MessageV2.Part = {
         type: "text",
         id: PartID.ascending(),
@@ -2554,7 +2554,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
       yield* sessions.updatePart(userPart)
 
-      const msg: MessageV2.Assistant = {
+      const msg: MessageV2.Assistant = yield* sessions.createMessage({
         id: MessageID.ascending(),
         sessionID: input.sessionID,
         parentID: userMsg.id,
@@ -2568,8 +2568,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         modelID: model.modelID,
         providerID: model.providerID,
-      }
-      yield* sessions.updateMessage(msg)
+      })
       const part: MessageV2.ToolPart = {
         type: "tool",
         id: PartID.ascending(),
@@ -2722,7 +2721,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         if (terminalUser) {
           const ctx = yield* InstanceState.context
           const now = Date.now()
-          yield* sessions.updateMessage({
+          yield* sessions.createMessage({
             id: MessageID.ascending(),
             sessionID,
             parentID: terminalUser.id,
@@ -3267,10 +3266,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
       })
 
-      yield* sessions.updateMessage(message)
-      for (const part of parts) yield* sessions.updatePart(part)
+      const committed = yield* sessions.commitUserMessage(message, parts)
 
-      return { info: message, parts }
+      return { info: committed, parts }
     }, Effect.scoped)
 
     const sweepOrphanAssistants = Effect.fn("SessionPrompt.sweepOrphanAssistants")(function* (
@@ -4398,13 +4396,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
             }
           }
-          const usageRecovered =
-            !!lastFinished &&
-            msgs.some(
-              (msg) =>
-                msg.info.id > lastFinished.id &&
-                msg.parts.some((part) => part.type === "checkpoint" || part.type === "compaction"),
-            )
+          const usageRecovered = !!lastFinished && MessageV2.usageRecovered(msgs, lastFinished)
 
           // Per-user-message active recall reminder. Once the session has
           // any memory artifacts (memory dir populated OR tasks recorded),
@@ -4875,7 +4867,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           msgs = yield* insertReminders({ messages: msgs, agent, model, session })
 
-          const msg: MessageV2.Assistant = {
+          const msg: MessageV2.Assistant = yield* sessions.createMessage({
             id: MessageID.ascending(),
             parentID: lastUser.id,
             role: "assistant",
@@ -4890,8 +4882,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             providerID: model.providerID,
             time: { created: Date.now() },
             sessionID,
-          }
-          yield* sessions.updateMessage(msg)
+          })
           const handle = yield* processor.create({
             assistantMessage: msg,
             sessionID,
@@ -4958,7 +4949,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             if (step > 1 && lastFinished) {
               for (const m of msgs) {
-                if (m.info.role !== "user" || m.info.id <= lastFinished.id) continue
+                if (m.info.role !== "user" || MessageV2.compareOrder(m.info, lastFinished) <= 0) continue
                 for (const p of m.parts) {
                   if (p.type !== "text" || p.ignored || p.synthetic) continue
                   if (!p.text.trim()) continue
@@ -4982,9 +4973,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // Main also has contextMode="full", but has no forkCtx and stays on the
             // normal path because only spawned subagent/peer records qualify.
             if (forkCtx) {
-              const ownNew = msgs.filter(
-                (m) => m.info.id > forkCtx.watermarkMsgID && m.info.agentID === lastUser.agentID,
-              )
+              // The watermark identifies the parent snapshot, not child-session
+              // chronology. Caller-supplied child IDs can predate that watermark.
+              const ownNew = msgs.filter((m) => m.info.agentID === lastUser.agentID)
               const ownNewModelMsgs = yield* MessageV2.toModelMessagesEffect(ownNew, model)
               const prebuiltSystem = forkCtx.system
               lastSystemPrompt = prebuiltSystem

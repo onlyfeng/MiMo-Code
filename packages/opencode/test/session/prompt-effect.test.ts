@@ -6210,3 +6210,331 @@ for (const mode of ["matching", "changed", "legacy", "legacy-json"] as const) {
     15000,
   )
 }
+
+it.live("fork uses chronological position when the boundary has an older caller ID", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "Old-ID fork parent" })
+      const boundaryID = MessageID.ascending()
+      const before = yield* seed(parent.id, { finish: "stop" })
+      expect(boundaryID < before.user.id).toBe(true)
+      yield* sessions.commitUserMessage(
+        {
+          id: boundaryID,
+          sessionID: parent.id,
+          role: "user",
+          agent: "build",
+          model: ref,
+          source: "user",
+          time: { created: 0 },
+        },
+        [
+          {
+            id: PartID.ascending(),
+            messageID: boundaryID,
+            sessionID: parent.id,
+            type: "text",
+            text: "fork boundary",
+          },
+        ],
+      )
+      expect(yield* sessions.lastMainMessageID(parent.id)).toBe(boundaryID)
+
+      const fork = yield* sessions.fork({ sessionID: parent.id, messageID: boundaryID })
+      const forked = yield* sessions.messages({ sessionID: fork.id, agentID: "*" })
+      expect(forked).toHaveLength(2)
+      expect(forked.map((message) => message.info.role)).toEqual(["user", "assistant"])
+      expect(JSON.stringify(forked)).toContain("hello")
+      expect(JSON.stringify(forked)).toContain("hi there")
+      expect(JSON.stringify(forked)).not.toContain("fork boundary")
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live(
+  "direct admission commits after the latest actor timestamp even with an older message ID",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Monotonic direct admission" })
+        const directMessageID = MessageID.ascending()
+        const hook = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          role: "user",
+          agent: "build",
+          model: ref,
+          source: "hook",
+          time: { created: Date.now() + 60_000 },
+        })
+        const peerHook = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          agentID: "peer",
+          role: "user",
+          agent: "build",
+          model: ref,
+          source: "hook",
+          time: { created: hook.time.created + 60_000 },
+        })
+
+        const direct = yield* prompt.prompt({
+          sessionID: chat.id,
+          messageID: directMessageID,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "newer direct request" }],
+        })
+
+        expect(direct.info.role).toBe("user")
+        if (direct.info.role !== "user") return
+        expect(direct.info.time.created).toBe(hook.time.created + 1)
+        expect(direct.info.time.created).toBeLessThan(peerHook.time.created)
+        expect((yield* sessions.messages({ sessionID: chat.id })).at(-1)?.info.id).toBe(directMessageID)
+        expect(
+          (yield* sessions.commitUserMessage({ ...direct.info, time: { created: 0 } }, direct.parts)).time.created,
+        ).toBe(direct.info.time.created)
+        const conflict = yield* sessions
+          .commitUserMessage(
+            { ...direct.info, time: { created: 0 } },
+            direct.parts.map((part) => (part.type === "text" ? { ...part, text: "conflicting retry" } : part)),
+          )
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(conflict)).toBe(true)
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).find((message) => message.info.id === directMessageID)
+            ?.parts.some((part) => part.type === "text" && part.text === "newer direct request"),
+        ).toBe(true)
+
+        yield* llm.text("future-timestamp request handled")
+        const result = yield* prompt.loop({ sessionID: chat.id })
+        expect(result.info.role).toBe("assistant")
+        if (result.info.role === "assistant") {
+          expect(result.info.parentID).toBe(directMessageID)
+          expect(result.info.time.created).toBe(direct.info.time.created + 1)
+          expect(result.info.time.completed).toBeGreaterThanOrEqual(result.info.time.created)
+        }
+        expect((yield* sessions.messages({ sessionID: chat.id })).at(-1)?.info.id).toBe(result.info.id)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
+)
+
+it.live(
+  "run loop handles a committed direct request whose client ID predates a finished assistant",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Late committed direct request" })
+        const directMessageID = MessageID.ascending()
+        const previous = yield* seed(chat.id, { finish: "stop" })
+        expect(directMessageID < previous.assistant.id).toBe(true)
+
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          messageID: directMessageID,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "must reach the model despite my older ID" }],
+        })
+        yield* llm.text("late direct handled")
+        const result = yield* prompt.loop({ sessionID: chat.id })
+
+        expect(result.parts.some((part) => part.type === "text" && part.text === "late direct handled")).toBe(true)
+        expect(yield* llm.hits).toHaveLength(1)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
+)
+
+it.live("user message and parts roll back together when atomic admission fails", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Atomic user admission" })
+      const messageID = MessageID.ascending()
+
+      const exit = yield* sessions
+        .commitUserMessage(
+          {
+            id: messageID,
+            sessionID: chat.id,
+            role: "user",
+            agent: "build",
+            model: ref,
+            source: "user",
+            time: { created: Date.now() },
+          },
+          [
+            {
+              id: PartID.ascending(),
+              messageID,
+              sessionID: chat.id,
+              type: "text",
+              text: "must roll back",
+              metadata: { invalid_json_value: 1n },
+            },
+          ],
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect((yield* sessions.messages({ sessionID: chat.id })).some((message) => message.info.id === messageID)).toBe(
+        false,
+      )
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("createMessage rejects duplicate IDs and updateMessage preserves the committed timestamp", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Monotonic message API" })
+      const created = yield* sessions.createMessage({
+        id: MessageID.ascending(),
+        sessionID: chat.id,
+        role: "user" as const,
+        agent: "build",
+        model: ref,
+        source: "hook" as const,
+        time: { created: 0 },
+      })
+      const duplicate = yield* sessions.createMessage({ ...created, system: "must not overwrite" }).pipe(Effect.exit)
+      expect(Exit.isFailure(duplicate)).toBe(true)
+
+      const updated = yield* sessions.updateMessage({ ...created, system: "preserved update", time: { created: 0 } })
+      expect(updated.time.created).toBe(created.time.created)
+      const stored = (yield* sessions.messages({ sessionID: chat.id })).find(
+        (message) => message.info.id === created.id,
+      )
+      expect(stored?.info.time.created).toBe(created.time.created)
+      expect(stored?.info.role === "user" && stored.info.system).toBe("preserved update")
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("atomic user admission rejects reused and duplicate part IDs without changing their owner", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Atomic part ownership" })
+      const originalMessageID = MessageID.ascending()
+      const partID = PartID.ascending()
+      yield* sessions.commitUserMessage(
+        {
+          id: originalMessageID,
+          sessionID: chat.id,
+          role: "user",
+          agent: "build",
+          model: ref,
+          source: "user",
+          time: { created: Date.now() },
+        },
+        [{ id: partID, messageID: originalMessageID, sessionID: chat.id, type: "text", text: "original part" }],
+      )
+
+      const collisionMessageID = MessageID.ascending()
+      const collision = yield* sessions
+        .commitUserMessage(
+          {
+            id: collisionMessageID,
+            sessionID: chat.id,
+            role: "user",
+            agent: "build",
+            model: ref,
+            source: "user",
+            time: { created: Date.now() },
+          },
+          [{ id: partID, messageID: collisionMessageID, sessionID: chat.id, type: "text", text: "collision" }],
+        )
+        .pipe(Effect.exit)
+      const duplicateMessageID = MessageID.ascending()
+      const duplicatePartID = PartID.ascending()
+      const duplicate = yield* sessions
+        .commitUserMessage(
+          {
+            id: duplicateMessageID,
+            sessionID: chat.id,
+            role: "user",
+            agent: "build",
+            model: ref,
+            source: "user",
+            time: { created: Date.now() },
+          },
+          [
+            {
+              id: duplicatePartID,
+              messageID: duplicateMessageID,
+              sessionID: chat.id,
+              type: "text",
+              text: "first duplicate",
+            },
+            {
+              id: duplicatePartID,
+              messageID: duplicateMessageID,
+              sessionID: chat.id,
+              type: "text",
+              text: "second duplicate",
+            },
+          ],
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(collision)).toBe(true)
+      expect(Exit.isFailure(duplicate)).toBe(true)
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      expect(messages.some((message) => message.info.id === collisionMessageID)).toBe(false)
+      expect(messages.some((message) => message.info.id === duplicateMessageID)).toBe(false)
+      expect(
+        messages.find((message) => message.info.id === originalMessageID)
+          ?.parts.some((part) => part.id === partID && part.type === "text" && part.text === "original part"),
+      ).toBe(true)
+
+      const retryMessageID = MessageID.ascending()
+      const retryMessage: MessageV2.User = {
+        id: retryMessageID,
+        sessionID: chat.id,
+        role: "user",
+        agent: "build",
+        model: ref,
+        source: "user",
+        time: { created: Date.now() },
+      }
+      const retryParts: MessageV2.Part[] = [
+        {
+          id: PartID.make("prt_\u{10000}"),
+          messageID: retryMessageID,
+          sessionID: chat.id,
+          type: "text",
+          text: "supplementary-plane part",
+        },
+        {
+          id: PartID.make("prt_\uE000"),
+          messageID: retryMessageID,
+          sessionID: chat.id,
+          type: "text",
+          text: "private-use part",
+        },
+      ]
+      const committed = yield* sessions.commitUserMessage(retryMessage, retryParts)
+      expect(
+        (yield* sessions.commitUserMessage({ ...retryMessage, time: { created: 0 } }, [...retryParts].reverse())).time
+          .created,
+      ).toBe(committed.time.created)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
