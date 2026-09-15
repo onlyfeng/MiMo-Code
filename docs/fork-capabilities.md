@@ -18,10 +18,11 @@ authority.
 - Last reviewed: 2026-09-15
 - Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
 - Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `cdfd1a804599eda21fdc5bced9c0d1de025d07da`
+- Main behavior (runtime/tests): `3a12d1800d9bfd002f543764e4ec72047e6e6bb3`
 - Bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
-- Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
+- Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
+- Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -356,7 +357,8 @@ not change their implementation. The preceding review is retained in the
 - 2026-09-15 shared chronology/admission: caller IDs are identity keys, not
   admission order. `createMessage` allocates an actor-local monotonic committed
   timestamp; metadata updates preserve creation time and completion cannot
-  precede it. Prompt and compaction user message/parts are committed together
+  precede it. User and derived-user message/parts submitted through
+  `commitUserMessage` or `commitUserMessageIfLatest` are committed together
   with session/actor/part ownership validation; latest-user conditional
   admission shares that transaction. Same-owner prompt retries may reuse
   producer-generated part IDs only when the complete current persisted content
@@ -365,7 +367,8 @@ not change their implementation. The preceding review is retained in the
   input parts can be equivalent after canonical sorting. Runtime-added
   parts can make a later replay conflict. This is not a lifetime replay receipt.
   Inbox draining still writes the message, its parts and the queue deletion in
-  separate steps; the prompt/compaction transaction does not cover Inbox drain.
+  separate steps. Shell message/parts writes and streamed assistant/tool output
+  also remain outside the `commitUserMessage*` transaction.
   Fork/revert and cursor
   consumers use chronological positions, with UTF-8 ID ties matching SQLite
   BINARY. Producer and transaction regressions are recorded under F06 in
@@ -1301,6 +1304,11 @@ logged`, and the peer `success`/`failure` variants of
   the transient invalid range is not written back to storage. TUI buckets use
   the same `(created, UTF-8 ID)` order and undo hydration follows pagination
   through its exact boundary, preserving that boundary during live updates.
+  After authoritative single-session or list updates clear revert, each actor
+  bucket returns to its normal 100-message limit and all evicted cached parts
+  are removed. Normal message upserts likewise remove the entire excess prefix.
+  Active revert still retains hydrated history; the real SyncProvider event and
+  bootstrap regressions in `test/cli/tui/revert-cache.test.tsx` cover this change.
   Main's existing footer compares a locally resolved watermark and remains
   pending when it cannot resolve one. The extra checkpoint-coverage HTTP/SDK
   and TUI cache protocol stays owned by DC-CONTEXT-001 on compat.
