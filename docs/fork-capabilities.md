@@ -19,8 +19,9 @@ authority.
 - Upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
 - Prior reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
 - Main behavior (runtime/tests): `4eacc84dccf83c22f533c35bea282d4c5a38cacd`
-- Bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
+- Bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
+- Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -43,23 +44,24 @@ not change their implementation. The preceding review is retained in the
 
 ## Sync index
 
-| ID | Watch surfaces | Upstream relationship | Required decision |
-| --- | --- | --- | --- |
-| FC-001 | actor, inbox, runner, session state, recovery/resume | Typed upstream admission plus stronger fork lifecycle | Preserve synchronous admission and async queue persistence |
-| FC-002 | checkpoint writer and frozen request prefix | Extension plus adaptation | Preserve writer-mode semantics |
-| FC-004 | MCP configuration, connection state, and local exit diagnostics | Explicit imported-server auto-connect plus fork hardening | Preserve validation, redaction, and isolation |
-| FC-005 | skill discovery and invocation | Stronger shared gates | Preserve permission parity |
-| FC-006 | plugin progress-checker configuration | Fork integration hardening | Preserve instance-local decision |
-| FC-007 | project roots, fixed instance cwd, Auto-Worktree notice, inert SDK event, optional context, Bash deletion | Shared fixed cwd and SDK compatibility plus fork safety boundary | Preserve exact path, mutation, and cwd boundaries |
-| FC-008 | workflow cleanup, detached Effect context, package test isolation, synchronization, and CI/reporting | Runtime/process hardening | Preserve bounds, scoped services, clean defaults, and fail-closed evidence |
-| FC-009 | synthetic messages, text parts, and retry boundary | Adapted upstream stream/retry handling | Preserve provenance and prevent side-effect replay |
-| FC-010 | WebFetch and SSRF destination classification | Adapted contract plus fork hardening | Preserve complete `fe80::/10` classification, per-hop authorization, and resource bounds |
-| FC-011 | model prompts, path guidance, and bundled skills | Fork-facing guidance | Preserve factual shared guidance |
-| FC-012 | publication, contribution, security | Fork-specific process | Preserve fork routing |
-| FC-013 | MaxMode final step and bounded retry | Shared retry plus fork hardening | Preserve tool-free terminal step and status isolation |
-| FC-014 | `.cursor/environment.json` Cloud Agent dev environment | Fork-only infra absent from upstream | Preserve Bun bootstrap and read-only `upstream` remote; never send to upstream |
-| FC-015 | compaction context budget, projection, frozen prefix, and trigger ratio | Upstream trigger plus bounded fork projection | Preserve ratio parity, no-tool summaries, and config precedence |
-| FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets | Upstream voice protocol plus fork lifecycle/editor hardening | Preserve owner identity, drain-before-idle, and grapheme boundaries |
+| ID     | Watch surfaces                                                                                            | Upstream relationship                                            | Required decision                                                                        |
+| ------ | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| FC-001 | actor, inbox, runner, session state, recovery/resume                                                      | Typed upstream admission plus stronger fork lifecycle            | Preserve synchronous admission and async queue persistence                               |
+| FC-002 | checkpoint writer and frozen request prefix                                                               | Extension plus adaptation                                        | Preserve writer-mode semantics                                                           |
+| FC-004 | MCP configuration, connection state, and local exit diagnostics                                           | Explicit imported-server auto-connect plus fork hardening        | Preserve validation, redaction, and isolation                                            |
+| FC-005 | skill discovery and invocation                                                                            | Stronger shared gates                                            | Preserve permission parity                                                               |
+| FC-006 | plugin progress-checker configuration                                                                     | Fork integration hardening                                       | Preserve instance-local decision                                                         |
+| FC-007 | project roots, fixed instance cwd, Auto-Worktree notice, inert SDK event, optional context, Bash deletion | Shared fixed cwd and SDK compatibility plus fork safety boundary | Preserve exact path, mutation, and cwd boundaries                                        |
+| FC-008 | workflow cleanup, detached Effect context, package test isolation, synchronization, and CI/reporting      | Runtime/process hardening                                        | Preserve bounds, scoped services, clean defaults, and fail-closed evidence               |
+| FC-009 | synthetic messages, text parts, and retry boundary                                                        | Adapted upstream stream/retry handling                           | Preserve provenance and prevent side-effect replay                                       |
+| FC-010 | WebFetch and SSRF destination classification                                                              | Adapted contract plus fork hardening                             | Preserve complete `fe80::/10` classification, per-hop authorization, and resource bounds |
+| FC-011 | model prompts, path guidance, and bundled skills                                                          | Fork-facing guidance                                             | Preserve factual shared guidance                                                         |
+| FC-012 | publication, contribution, security                                                                       | Fork-specific process                                            | Preserve fork routing                                                                    |
+| FC-013 | Retry configuration, request/candidate/judge scopes and MaxMode final step                                | Shared retry plus fork policy corrections                        | Preserve budget precedence, bounded defaults, tool-free final step and status isolation  |
+| FC-014 | `.cursor/environment.json` Cloud Agent dev environment                                                    | Fork-only infra absent from upstream                             | Preserve Bun bootstrap and read-only `upstream` remote; never send to upstream           |
+| FC-015 | compaction context budget, projection, frozen prefix, and trigger ratio                                   | Upstream trigger plus bounded fork projection                    | Preserve ratio parity, no-tool summaries, and config precedence                          |
+| FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets                                               | Upstream voice protocol plus fork lifecycle/editor hardening     | Preserve owner identity, drain-before-idle, and grapheme boundaries                      |
+| FC-017 | History SQLite projection and attachment preview formatting                                               | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds and original attachment locators                  |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -338,6 +340,14 @@ not change their implementation. The preceding review is retained in the
   HTTP/SDK/tool publication and actual provider/transaction regressions are
   recorded in the shared history; no cross-restart recovery is introduced.
 
+- 2026-09-15 code-inventory note: production inbox turns use ActorExecution
+  and SessionPrompt. `Actor.runPersistentTurn` and its private `continueTurn`
+  path remain exported/retained for test callers only; no production caller was
+  found at the reviewed main SHA. This is retired-path cleanup debt. Preserve
+  `finishPersistentTurn` and `acquireWake`, which still participate in resume,
+  and move useful assertions to real inbox admission before deleting the old
+  testing entry.
+
 ## FC-002 — canonical checkpoint writer and mode-specific frozen context
 
 - Status: active
@@ -545,7 +555,11 @@ not change their implementation. The preceding review is retained in the
   `packages/plugin/src/index.ts`.
 - Tests/evidence:
   `packages/opencode/test/plugin/subagent-progress-checker.test.ts` exercises
-  enabled, disabled, absent, and instance-local configuration paths.
+  enabled, disabled and absent values passed directly to the hook. Source
+  inspection of `plugin/index.ts` establishes the instance-local Config.Service
+  injection; those hook tests do not construct Plugin.Service or prove the full
+  alternate-cwd injection chain. A service-level regression remains a validation
+  improvement, not an already passing test claimed by this entry.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
 - 2026-09-10 hook-validation review: upstream `1493f7813e3041e9da2ea52738940591d03ed8a8`,
@@ -632,18 +646,23 @@ not change their implementation. The preceding review is retained in the
   retaining `pathsOverlap`, `tmpOnlyDelete`, explicit delete approval, and
   immutable instance-cwd handling. Full output remains archived independently
   of the inline preview; `metadata.truncated` prevents wrapper re-truncation.
-- 2026-09-07 explicit model API review: capability discovery and token-scoped
+- 2026-09-07 explicit model API review (historical; superseded by FD-004's
+  2026-09-14 retirement): capability discovery and token-scoped
   model API admission use a fixed startup directory. Requests cannot select a
   different directory or workspace; the new Node token export is opt-in host
   functionality. FD-004 remains the canonical listener/auth owner. Coverage:
   `test/server/model-api.test.ts`, shared `server/api-request.ts`, and CLI tests.
-- POLICY-03 carrier review: TUI-generated Basic authentication is distinct
+- POLICY-03 carrier review (historical model-token containment; superseded
+  by FD-004's 2026-09-14 retirement): TUI-generated Basic authentication is distinct
   from operator configuration. Both instance-route directory guards and the
   non-loopback bind guard preserve their operator-origin policy; automatic
   credentials cannot authorize a broader directory. Model tokens retain their
   exact startup directory and reject workspace switching regardless of Basic
   credentials. Existing orchestrator and explicit noAuth exceptions retain
   their original scope. The fixed-cwd and deletion contracts above are unchanged.
+  Current `/v1` token checks run inside the route after instance bootstrap;
+  operator-password servers follow upstream's directory policy. The historical
+  no-workspace/pre-bootstrap clauses do not describe today's capability API.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
 - Retirement condition: upstream retains fixed instance cwd and supplies
@@ -671,7 +690,15 @@ not change their implementation. The preceding review is retained in the
   self/ancestor cancellation. Workflow agent timeouts
   bound the cancellation join to the existing reclaim grace while detached
   cleanup continues; shared cancellation retains interrupt/join semantics.
-  The dated quarantine entries below describe their historical snapshots.
+  The dated actor quarantine entries below describe their historical snapshots.
+  One separate fork-only workflow case is still quarantined:
+  `test/workflow/runtime-worktree.test.ts` aliases `deadline` to `it.live.skip`
+  for `a deadline-fired run reclaims the in-flight isolated agent's worktree`.
+  Upstream `5198ff54` runs it with `it.live`. Its recorded defect is test-server /
+  child-Instance disposer settlement after the assertions, not a demonstrated
+  product reclamation failure. It must pass and exit in a bounded isolated run
+  before the skip can be removed. Closing the two actor cases does not close
+  this FC-008 validation debt; green CI does not execute a skipped case.
 
 - Status: active process/runtime contract
 - Canonical owner: fork `main` workflow runtime and repository CI
@@ -721,7 +748,7 @@ not change their implementation. The preceding review is retained in the
   `test/question/lifecycle.test.ts` and real
   `test/cli/tui/question-lifecycle.test.tsx` cover these consumers.
 - 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
-  ownership to the real parent` polled the `InboxTable` row its assertion is
+ownership to the real parent` polled the `InboxTable` row its assertion is
   about. That row exists to wake the persistent peer it addresses, so the peer's
   continuation drains it within milliseconds and the poll observes a state the
   system is designed to erase. A drained row never returns, so the earlier
@@ -734,41 +761,41 @@ not change their implementation. The preceding review is retained in the
   to `main`. Prefer the bus envelope over inbox rows whenever a test asserts
   notification routing.
 - 2026-09-14 TP-R14-12 unquarantined: `[TP-R14-12] undeliverable terminal
-  notification is logged` runs again, and the rationale it was quarantined under
+notification is logged` runs again, and the rationale it was quarantined under
   — upstream behaviour the fork's actor pipeline does not yet reproduce — was
   wrong. The case asserts upstream's log wording, `actor terminal notification
-  failed`; the fork's own inbox send in `spawn.ts` logged
+failed`; the fork's own inbox send in `spawn.ts` logged
   `actor inbox notification failed`, a line upstream does not have. Aligning
   that one message is the whole fix, mutation-checked: with the fork wording the
   case fails its assertion, with upstream's it passes. #107 had passed it from
   its first commit (CI run 34693434562, shard 4/4), which the 2026-09-13
   follow-up below did not record. At that snapshot two cases stayed quarantined, both reducing to
   the postStop publish-ordering product decision recorded there: `[TP-R14-07]
-  postStop LLM failure preserves the successful result with a warning` and
+postStop LLM failure preserves the successful result with a warning` and
   `inbox waits for the entire spawn execution before starting a continuation`.
 - 2026-09-13 quarantine follow-up: the peer `success`/`failure` continuation
   envelope-count cases are fixed and unskipped; see the FC-001 terminal-publisher
   entry. At that snapshot three cases stayed quarantined, all `skip`ped in place with their
   inline rationale:
   `[TP-R14-07] postStop LLM failure preserves the successful result with a
-  warning` (`test/plugin/actor-hooks.test.ts`) and `inbox waits for the entire
-  spawn execution before starting a continuation`
+warning` (`test/plugin/actor-hooks.test.ts`) and `inbox waits for the entire
+spawn execution before starting a continuation`
   (`test/actor/execution-integration.test.ts`) both reduce to one blocker — the
-  fork publishes an actor's outcome and leaves it idle *before* postStop, where
+  fork publishes an actor's outcome and leaves it idle _before_ postStop, where
   upstream publishes after — and the second additionally needs a spawn-side
   execution claim held across the whole spawn. What holds these open is a
   product decision, not a test conflict: publishing after postStop means a
   spawn's caller, and a blocking `actor run`, resolves only once postStop
   finishes. Exactly one fork case reads on the early publish, `delivered no-op
-  cancel preserves forkContext while postStop is still running`, and only in how
+cancel preserves forkContext while postStop is still running`, and only in how
   it sequences its awaits.
   `[TP-R14-12] undeliverable terminal notification is logged`
   (`test/actor/cancel-notification.test.ts`) is independent of that ordering and
   is untouched by this PR.
 - 2026-09-12 quarantine: four upstream-new actor cases are skipped in place with
   an inline rationale — `inbox waits for the entire spawn execution before
-  starting a continuation`, `[TP-R14-12] undeliverable terminal notification is
-  logged`, and the peer `success`/`failure` variants of
+starting a continuation`, `[TP-R14-12] undeliverable terminal notification is
+logged`, and the peer `success`/`failure` variants of
   `[TP-R14-08] [TP-R14-09] ... continuation settles ... once`. They assert
   upstream behavior the fork's actor pipeline does not yet reproduce after the
   FC-001 wake-routing retirement. Each is `skip`ped rather than deleted so the
@@ -794,7 +821,7 @@ not change their implementation. The preceding review is retained in the
   `.mimocode/skills/upstream-sync/.gitignore`,
   `.github/workflows/test.yml`, `.github/scripts/verify-junit.py`,
   `.github/workflows/lint.yml`,
-  `.github/workflows/typecheck.yml`, and `AGENTS.md`.
+  `.github/workflows/typecheck.yml`, `script/generate.ts`, and `AGENTS.md`.
 - Tests/evidence: hard-timeout, runner, workflow runtime/worktree suites, four
   complete local hash shards, positive/negative JUnit verifier fixtures, and
   exact-SHA CI for the reviewed behavior tree when published; local tests do not
@@ -821,13 +848,22 @@ not change their implementation. The preceding review is retained in the
   unchanged from main into compat, adding no runtime capability and no new
   retirement decision. Review-thread adjudication for the cleanup-scope finding
   is recorded on PR #105.
+- 2026-09-15 tooling inventory: root `script/generate.ts` currently runs the
+  repository formatter after SDK/OpenAPI generation, unlike upstream's disabled
+  final formatter call. This is a tooling-policy difference, not generated API
+  behavior; assess removing the implicit whole-repository formatting step during
+  a later focused cleanup. Generated SDK/OpenAPI differences mix actual fork
+  schema additions with refreshes of upstream source fields whose checked-in
+  upstream artifacts lag. Compare producers before attributing every artifact
+  hunk to a fork feature.
 - 2026-09-05 fixture review: removed `resetDatabase` and its four call sites,
   preserving local disposal and the fork project-init authorization fixture.
   Rejected incoming auth-override, fork-prefix, and failed-subtask skips: the
   fork already has relevant fixture isolation and all three pass on both
   pre-sync branch SHAs. Existing unrelated CI timeouts are tracked separately;
   this decision does not claim that the fixture removal fixes those failures.
-- 2026-09-07 model API lifecycle review: token verification precedes body and
+- 2026-09-07 model API lifecycle review (historical; retired by FD-004 on
+  2026-09-14): token verification precedes body and
   bootstrap; both optional API modes use bounded uploads and cancellation-aware
   instance waiting. SSE retains admission and its instance lease until EOF or
   producer cancellation acknowledgement, including cancellation at response
@@ -835,11 +871,12 @@ not change their implementation. The preceding review is retained in the
   shared bootstrap producers remain owned by their original callers. CLI stop
   closes admission before instance disposal. Direct and native HTTP regressions
   cover these seams without changing the ordinary actor/workflow lifecycle.
-- Selected model API evidence: CLI test children have a 20-second execution
+- Selected model API evidence (historical tests of the retired implementation): CLI test children have a 20-second execution
   bound, unconditional kill and a bounded two-second drain on cleanup; multi-child
   cases declare their total 60-second budget. Image/SDK cancellation and Node
   checks cover adjacent API resources, not a rerun of all workflow lifecycle tests.
-- POLICY-03 lifecycle review: the TUI worker stops model API admission and
+- POLICY-03 lifecycle review (the model API admission clauses are historical
+  and retired by FD-004; listener shutdown still exists): the TUI worker stops model API admission and
   joins pending listener startup before checkpoint draining and instance
   disposal. Its GlobalBus bridge remains available for terminal events; only
   final cleanup releases automatic authentication. Repeated shutdown shares
@@ -872,6 +909,13 @@ not change their implementation. The preceding review is retained in the
 - Retirement condition: runtime bounds may retire only with equivalent upstream
   settlement. The single test skip retires after the disposer is fixed and
   bounded exact-SHA CI proves process exit.
+
+- 2026-09-15 retired-fixture inventory: `test/fixture/llm-server-cli-child.ts`,
+  `test/fixture/model-api-default-child.ts` and `test/llm-server/tokens-child.ts`
+  have no current callers in the tracked tree. They retain former model/audio
+  API or token-helper assumptions and do not count as executed validation of
+  today's capability API. Delete or deliberately reconnect them in a focused
+  cleanup; the current actor/quarantine result is unaffected.
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
 
@@ -922,6 +966,11 @@ not change their implementation. The preceding review is retained in the
   retry publication for ephemeral or non-main requests, and regenerated
   artifacts preserve the same source discriminator.
 
+- 2026-09-15 error-summary carrier: `session/trajectory.ts` extracts a
+  NamedError's `data.message` for the model-visible session error instead of
+  serializing its complete data/metadata. The `sessionErrorText` regression
+  covers this helper; it does not prove end-to-end provider exception redaction.
+
 ## FC-010 — WebFetch and SSRF destination classification, authorization, and resource bounds
 
 - Status: active
@@ -932,8 +981,11 @@ not change their implementation. The preceding review is retained in the
   including the complete IPv6 link-local `fe80::/10` range. Each target that passes
   classification triggers the effective `webfetch` permission before its
   request; a rejected target stops before its permission ask and request.
-  Redirects are capped at 10 hops, the request timeout applies, and responses
-  larger than 5 MB are rejected.
+  Redirects are capped at 10 hops. The timeout wraps response acquisition and
+  the redirect chain, not the subsequent `response.arrayBuffer` body read.
+  A Content-Length above 5 MiB is rejected early; otherwise the complete buffer
+  is read before the 5 MiB check. This rejects oversized results but does not
+  bound streamed-body allocation or total body-read time.
 - Upstream relationship: adapts the shared upstream WebFetch contract while
   retaining fork per-hop authorization and resource bounds, and hardens the
   fork's destination classification to block the complete IPv6 `fe80::/10` range.
@@ -946,7 +998,8 @@ not change their implementation. The preceding review is retained in the
   request. `packages/opencode/test/util/ssrf.test.ts` covers numeric `fe80`,
   `fe90`, `fea0`, and `febf` link-local representatives plus a DNS-resolved
   family-6 `febf::1` target. Source review at main behavior confirms HTTP(S)
-  scheme enforcement, the 10-hop cap, timeout, and 5 MB bound; that test file
+  scheme enforcement, the 10-hop cap, acquisition timeout and post-read 5 MiB
+  rejection; that test file
   has no focused scheme or resource-bound regression for those source contracts.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
@@ -985,10 +1038,11 @@ not change their implementation. The preceding review is retained in the
   credential, scoped token issuance and lifetime controls, and image/audio
   inputs on upstream's terms. Its attach guidance is the one place the fork's
   text diverges from upstream's, because this fork's TUI worker serves a
-  directory chosen at startup and upstream's wording would hand these users a
-  401. The retired fork model API's whitelist, `--all-models`/`--directory`
-  flags and TUI-owned listener are no longer described because they no longer
-  exist; the content snapshot is recorded separately from runtime/tests.
+  directory chosen at startup and upstream's wording would hand these users a 401. The retired fork model API's whitelist, `--all-models`/`--directory`
+  flags and parallel admission implementation are retired. The TUI-owned
+  listener still exists in `cli/cmd/tui/worker-listener.ts`, with generated Basic
+  credentials and `advertiseDirectory`; upstream's capability route is served
+  through it. The content snapshot is recorded separately from runtime/tests.
 - Upstream relationship: fork-facing guidance plus selectively adopted upstream
   documentation improvements.
 - Watch surfaces: `packages/opencode/src/session/prompt/default.txt`,
@@ -1081,7 +1135,7 @@ not change their implementation. The preceding review is retained in the
 - Retirement condition: fork ownership or publication topology changes through
   an explicit governance decision and every repository-facing route is updated.
 
-## FC-013 — MaxMode final-step and bounded retry enforcement
+## FC-013 — retry budget resolution and MaxMode final-step enforcement
 
 - Status: active
 - Canonical owner: fork `main` session run loop
@@ -1092,8 +1146,17 @@ not change their implementation. The preceding review is retained in the
   and judge calls use bounded configurable retry with fresh attempt-local
   accumulators. Eligible subagents may execute MaxMode, but only the main agent
   may publish session-global retry status or `RetryAttempt` events.
+- Configuration delta: `session/retry.ts` resolves top-level jitter as each
+  budget's default. Priority from lowest to highest is global top-level jitter, global budget jitter,
+  provider top-level jitter, then provider budget jitter. Switching network
+  retry from persistent to bounded without `maxRetries` supplies 5 rather than
+  leaving it unbounded. Request, max-candidate and max-judge scopes select their
+  corresponding retry budgets; these rules are shared policy, not harness
+  identity. `docs/architecture/retry-coordinator.md` and retry tests describe
+  the same precedence. This previously under-specified delta is recorded by the
+  2026-09-15 code audit; no implementation changes are made by that audit.
 - Upstream relationship: adopts shared bounded retry while retaining fork
-  final-step enforcement and subagent status isolation.
+  budget resolution, final-step enforcement and subagent status isolation.
 - Watch surfaces: `packages/opencode/src/session/max-mode.ts`,
   `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/session/retry.ts`,
@@ -1280,3 +1343,15 @@ not change their implementation. The preceding review is retained in the
   Prompt/session owner, prevents stop/drain state races, converts editor offsets
   on grapheme boundaries, and supplies equivalent real-editor and lifecycle
   regressions.
+
+## FC-017 — faithful and bounded history previews
+
+- Status: active; explicit owner added by the 2026-09-15 code audit for already accepted fixes.
+- Canonical owner: fork `main` history projection; inherited unchanged by `dev/compat`.
+- Observable contract: SQLite projection keeps JSON escapes until final parsing so NUL-containing strings survive old SQLite. Individual preview fields are selected by a 4,000-byte decoded-value check; the complete projected attachment metadata list is checked against 4,000 bytes of serialized JSON. Both decisions occur in SQLite before crossing the driver boundary. Escaping and multiple fields add JSON bytes: this is not a 4,000-byte bound on a field's serialized representation, the whole driver row, SQLite's internal materialization cost or complete `history get` results. Inline data URLs are omitted from previews, while original attachment positions/locators and raw stored data remain unchanged.
+- An oversized attachment list produces a structural omission notice, never a fabricated `tool:0` attachment. A real attachment whose MIME equals the notice text remains an attachment because its URL key distinguishes the shape, including a null URL after data removal.
+- Upstream relationship: adopts uniform indexing, transactional import and resumable one-time migration; retains NUL-fidelity and SQL-preview/locator corrections. Startup after completed migration does not promise repair of later missed asynchronous index writes.
+- Watch surfaces: `packages/opencode/src/history/projection.ts`, `packages/opencode/src/history/media.ts`, `packages/opencode/src/history/service.ts` and `packages/opencode/src/history/import.ts`. Read actual producers/callers when upstream reorganizes these paths; the two current fork-different production files are `projection.ts` and `media.ts`.
+- Tests/evidence: `packages/opencode/test/history/` NUL/projection/media/attachment-around tests and the C05 record in [selected synchronization](upstream-sync-2026-09-15-5198ff54.md). The accepted final history run has 68 passes, five upstream benchmark skips, and 625 assertions; this audit does not rerun or relabel that evidence.
+- Review basis: upstream `5198ff540efb5ca9fff2baa64555324d43a721b9`, main runtime/test behavior `4eacc84dccf83c22f533c35bea282d4c5a38cacd` (history fixes already present at `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d`).
+- Retirement condition: upstream supplies equivalent NUL fidelity, SQL-side field/list budgets and structural locator-safe omission behavior, proven against raw retrieval and real preview formatting.

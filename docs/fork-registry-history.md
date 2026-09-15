@@ -3207,3 +3207,17 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - Final source: 132 default-path execution/Runner/Actor/plugin/tool cases pass (586 assertions), plus 9 postStop/cross-session/hook cases (50 assertions). Typecheck and focused lint pass. Independent finalizer reentry and context-preservation probes pass 2 cases/16 assertions. Earlier matrices above retain their original snapshot boundary.
 - The final workflow-specific timeout/cancel/worktree matrix is also repeated on `4eacc84d`: 7 pass, 23 assertions, with WORKFLOW_TOOL explicitly enabled and the other six selectors removed.
 - Main PR #124 acceptance, compat inheritance and exact merged-tip CI follow this source validation; the lifecycle record remains the detailed evidence owner.
+
+## 2026-09-15 accepted synchronization documentation closure
+
+- Accepted runtime publication: main `648f7cdf100b30ff046db7518d8f832473b61481`, compat `90abf6e447d7a5e5b405aba301bf1a951f469bf6`; main behavior `4eacc84dccf83c22f533c35bea282d4c5a38cacd`, compat behavior `1a072e7aa3b142fc9804974bd8142729817c92db`.
+- Exact merged-SHA test/typecheck/lint and ancestry were rechecked and are linked in the [accepted result](upstream-sync-2026-09-15-5198ff54.md#accepted-result-and-publication-evidence). This supersedes pending publication language in earlier dated entries without relabeling intermediate tests as final-source tests.
+- FD-004 enumerates three corrections plus retained listener/shared boundaries. FD-012's retry is configurable: default 1, zero disables. FC-008 explicitly retains the workflow deadline/disposer quarantine after closing the two actor quarantines.
+- This is a documentation correction, not an additional runtime fix or upstream merge. The overall accepted upstream baseline stays `5198ff540efb5ca9fff2baa64555324d43a721b9`; observed newer `b4cc11cd` is not adopted.
+
+## 2026-09-15 complete code-difference audit
+
+- The [audit report](fork-difference-audit-2026-09-15.md) reconciles 422 upstream-to-main and 107 main-to-compat file comparisons (470 distinct paths), using accepted runtime publication snapshots rather than changing the upstream baseline.
+- FD/FC/DC wording was corrected against code; FC-017 now explicitly owns existing history projection fidelity and budget fixes. Open debug identity, workflow quarantine, estimator and serialization gaps are recommendations, not implemented fixes.
+- Bundled guidance content is `3fa41ad98ac15668b2b3be899767c6498772ad4b`: implicit listener startup may fall back to RPC; directory selection depends on operator authentication and containment, with the fixed Orchestrator exception. Runtime/test behavior references are unchanged.
+- This documentation work has its own commits. Accepted runtime CI remains evidence only for the earlier main/compat SHAs; see the report for the new documentation checks and scope.

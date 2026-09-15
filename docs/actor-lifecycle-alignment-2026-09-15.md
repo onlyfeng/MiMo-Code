@@ -5,6 +5,17 @@ Background spawn still returns after admission. Blocking run, outcome and wait
 observe the preserved main result after housekeeping, including warnings when
 postStop fails. Persistence and parent notification carry the same warning.
 
+## Accepted publication
+
+Main accepted C07 through PR #124 at `648f7cdf100b30ff046db7518d8f832473b61481`;
+compat inherited it through PR #125 at `90abf6e447d7a5e5b405aba301bf1a951f469bf6`.
+Both accepted SHAs passed test, typecheck and lint. The
+[final synchronization record](upstream-sync-2026-09-15-5198ff54.md#accepted-result-and-publication-evidence)
+contains exact run links and ancestry evidence, and supersedes publication gates
+in the historical validation narrative below. The two actor quarantines are
+closed; the independent workflow deadline fixture-disposer quarantine is still
+open under FC-008. This is not a claim that all skipped tests have been enabled.
+
 ## Sources and ownership
 
 - Initial implementation: `30b9df3d51bc912e8f3efb3122f66cb81fa5daaf`.
@@ -17,7 +28,7 @@ postStop fails. Persistence and parent notification carry the same warning.
 - FC-001 owns lifecycle/execution correctness; FC-008 owns quarantine closure
   and validation discipline. FD-009 system frozen-context consumers remain.
 - Compat retains its model-facing context/lifecycle overlay and frozen
-  turnContext. It inherits this shared execution behavior after main accepts it.
+  turnContext. It has inherited this shared execution behavior from accepted main.
 
 The initial lifecycle patch changes `src/actor/spawn.ts`,
 `src/effect/runner.ts` and five existing test files. The review follow-ups below
@@ -74,17 +85,17 @@ inherited shell `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL=1`; they are not a
 preload-only default-path run. Follow-up actor matrices clear that selector;
 workflow-specific regressions report it explicitly as their target selector.
 
-| Snapshot and command | Actual result |
-| --- | --- |
+| Snapshot and command                                                                                                                                                                                    | Actual result                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
 | Before final cancellation-mask patch: `bun test test/actor/ test/inbox/ test/plugin/actor-hooks.test.ts test/tool/actor-owned-lifecycle.test.ts test/tool/actor-exec-lifecycle.test.ts --timeout 30000` | 353 pass, 0 fail, 1,428 assertions, 37 files |
-| Before final mask patch: real HTTP actor recovery suite | 13 pass, 0 fail, 175 assertions |
-| Final mask source: cancel-notification, Runner, Runner warnings, execution-integration, actor-hooks, actor-owned-lifecycle and actor-exec-lifecycle files | 122 pass, 0 fail, 517 assertions |
-| Final mask source: postStop and two cross-session regressions | 6 pass, 0 fail, 35 assertions |
-| Final mask source: scheduler, owner and follower cases | 3 pass, 0 fail, 40 assertions |
-| Final mask source: `bun typecheck` | Exit 0 |
-| Integrated main: runtime-created persistent actor to public resume | 1 pass, 0 fail, 21 assertions |
-| Integrated main before metadata-only inheritance: root `bun lint` | Exit 0; 4,506 warnings, 0 errors |
-| Independent final scheduler/follower probes | 2 pass, 0 fail |
+| Before final mask patch: real HTTP actor recovery suite                                                                                                                                                 | 13 pass, 0 fail, 175 assertions              |
+| Final mask source: cancel-notification, Runner, Runner warnings, execution-integration, actor-hooks, actor-owned-lifecycle and actor-exec-lifecycle files                                               | 122 pass, 0 fail, 517 assertions             |
+| Final mask source: postStop and two cross-session regressions                                                                                                                                           | 6 pass, 0 fail, 35 assertions                |
+| Final mask source: scheduler, owner and follower cases                                                                                                                                                  | 3 pass, 0 fail, 40 assertions                |
+| Final mask source: `bun typecheck`                                                                                                                                                                      | Exit 0                                       |
+| Integrated main: runtime-created persistent actor to public resume                                                                                                                                      | 1 pass, 0 fail, 21 assertions                |
+| Integrated main before metadata-only inheritance: root `bun lint`                                                                                                                                       | Exit 0; 4,506 warnings, 0 errors             |
+| Independent final scheduler/follower probes                                                                                                                                                             | 2 pass, 0 fail                               |
 
 The old quarantined implementation fails both original assertions. Independent
 red evidence also covers premature postStop cancellation publication, paused
@@ -169,13 +180,13 @@ compaction/checkpoint selectors, retaining the package ORCHESTRATOR preload.
 The integrated workflow-specific matrix explicitly enables WORKFLOW_TOOL and
 passes 7 tests, 0 failures and 23 assertions on the same source.
 
-| Stable admission/receipt source check | Actual result |
-| --- | --- |
+| Stable admission/receipt source check                                                                                                                            | Actual result                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
 | `bun test` execution, cancel-notification, Runner, Runner warnings, execution-integration, actor-hooks, actor-owned-lifecycle and actor-exec-lifecycle (8 files) | 130 pass, 0 fail, 569 assertions |
-| PostStop joins/reentry and two cross-session cases | 6 pass, 0 fail, 35 assertions |
-| Workflow timeout/cancel/worktree integration after admission fixes | 7 pass, 0 fail, 23 assertions |
-| Package `bun typecheck` | Exit 0 |
-| Focused admission lint | Exit 0; 26 warnings, 0 errors |
+| PostStop joins/reentry and two cross-session cases                                                                                                               | 6 pass, 0 fail, 35 assertions    |
+| Workflow timeout/cancel/worktree integration after admission fixes                                                                                               | 7 pass, 0 fail, 23 assertions    |
+| Package `bun typecheck`                                                                                                                                          | Exit 0                           |
+| Focused admission lint                                                                                                                                           | Exit 0; 26 warnings, 0 errors    |
 
 Independent review covers the blocked-acquire and reserve-before-generation
 reproductions, ten execution-barrier assertions and both already-cancelled
@@ -209,13 +220,13 @@ Runner, tool schema, Promise bridge or cross-context marker change is needed.
 Final default-path validation on that exact source clears all seven ambient
 selectors listed above and retains the package ORCHESTRATOR preload:
 
-| Final execution-hook source check | Actual result |
-| --- | --- |
+| Final execution-hook source check                                                                                                                    | Actual result                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
 | Execution, real none/full tool self-cancel, cancel-notification, Runner, Runner warnings, execution-integration, hooks and lifecycle tools (9 files) | 132 pass, 0 fail, 586 assertions |
-| Existing postStop/cross-session cases plus direct hook, finalizer and ancestor cancellation | 9 pass, 0 fail, 50 assertions |
-| Workflow timeout/cancel/worktree integration, explicit WORKFLOW_TOOL=1 | 7 pass, 0 fail, 23 assertions |
-| Package `bun typecheck` | Exit 0 |
-| Focused four-file lint | Exit 0; 48 warnings, 0 errors |
+| Existing postStop/cross-session cases plus direct hook, finalizer and ancestor cancellation                                                          | 9 pass, 0 fail, 50 assertions    |
+| Workflow timeout/cancel/worktree integration, explicit WORKFLOW_TOOL=1                                                                               | 7 pass, 0 fail, 23 assertions    |
+| Package `bun typecheck`                                                                                                                              | Exit 0                           |
+| Focused four-file lint                                                                                                                               | Exit 0; 48 warnings, 0 errors    |
 
 The two default actor groups total 141 passes and 636 assertions; the separate
 workflow group explicitly enables WORKFLOW_TOOL with the other six selectors
