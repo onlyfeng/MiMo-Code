@@ -1,8 +1,8 @@
-import { Flag, clearGeneratedServerPassword, generateServerPassword } from "@/flag/flag"
+import { clearGeneratedServerPassword, generateServerPassword } from "@/flag/flag"
 import { Server } from "@/server/server"
 import { serverAuthHeaders } from "@/server/auth"
 
-export type WorkerListenerInput = Partial<Omit<Parameters<typeof Server.listen>[0], "llm" | "audio" | "childEnv">> & {
+export type WorkerListenerInput = Partial<Omit<Parameters<typeof Server.listen>[0], "childEnv">> & {
   http?: boolean
 }
 

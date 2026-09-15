@@ -262,7 +262,7 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
   "venice-ai-sdk-provider": () => import("venice-ai-sdk-provider").then((m) => m.createVenice),
 }
 
-type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>, model?: Model) => Promise<any>
+type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>) => Promise<any>
 type CustomVarsLoader = (options: Record<string, any>) => Record<string, string>
 type CustomDiscoverModels = () => Promise<Record<string, Model>>
 type CustomLoader = (provider: Info) => Effect.Effect<{
@@ -1806,15 +1806,10 @@ const layer: Layer.Layer<
 
         try {
           const language = s.modelLoaders[model.providerID]
-            ? await s.modelLoaders[model.providerID](
-                sdk,
-                model.api.id,
-                {
-                  ...provider.options,
-                  ...model.options,
-                },
-                model,
-              )
+            ? await s.modelLoaders[model.providerID](sdk, model.api.id, {
+                ...provider.options,
+                ...model.options,
+              })
             : sdk.languageModel(model.api.id)
           s.models.set(key, language)
           return language

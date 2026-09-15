@@ -960,12 +960,9 @@ export const ActorTool = Tool.define(
                 }
               }
 
-              // op.action ==="run": blocking path — await the authoritative
-              // `outcome` Deferred. It is resolved in spawn's onSuccess AFTER the
-              // preStop loop AND the completion gate (but before the fire-and-forget
-              // postStop loop), so the parent sees the reconciled status/summary —
-              // unlike ActorWaiter, which resolves on the row's first `idle` and would
-              // miss the gate's downgrade.
+              // Blocking run awaits the authoritative outcome after preStop,
+              // the completion gate, and postStop have settled. It preserves the
+              // main delivery while surfacing any postStop failures as warnings.
               const outcome = yield* Deferred.await(spawnResult.outcome).pipe(
                 Effect.timeout(op.timeout_ms ?? 600_000),
                 Effect.catchTag("TimeoutError", () => Effect.succeed({ status: "timeout" as const })),
