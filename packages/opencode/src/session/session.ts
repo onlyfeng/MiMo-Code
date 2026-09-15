@@ -525,7 +525,11 @@ export interface Interface {
   readonly remove: (sessionID: SessionID) => Effect.Effect<void>
   readonly updateMessage: <T extends MessageV2.Info>(msg: T) => Effect.Effect<T>
   readonly createMessage: <T extends MessageV2.Info>(msg: T) => Effect.Effect<T>
-  readonly commitUserMessage: (msg: MessageV2.User, parts: MessageV2.Part[]) => Effect.Effect<MessageV2.User>
+  readonly commitUserMessage: (
+    msg: MessageV2.User,
+    parts: MessageV2.Part[],
+    options?: { generatedPartIDs: ReadonlySet<PartID> },
+  ) => Effect.Effect<MessageV2.User>
   /** Patch only live message metadata; never overwrite task/source fields from an old read. */
   readonly patchMessageMetadata: (input: {
     sessionID: SessionID
@@ -819,7 +823,12 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       return { message, parts: parsedParts }
     }
 
-    const commitUserMessageInTransaction = (tx: Database.TxOrDb, message: MessageV2.User, parts: MessageV2.Part[]) => {
+    const commitUserMessageInTransaction = (
+      tx: Database.TxOrDb,
+      message: MessageV2.User,
+      parts: MessageV2.Part[],
+      generatedPartIDs?: ReadonlySet<PartID>,
+    ) => {
       const owner = tx
         .select({ id: SessionTable.id })
         .from(SessionTable)
@@ -880,8 +889,22 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           JSON.parse(JSON.stringify({ ...message, time: existingMessage.data.time })),
         )
         const canonicalExistingMessage = MessageV2.User.parse(JSON.parse(JSON.stringify(existingMessage.data)))
+        // The prompt producer regenerates IDs for anonymous input parts on a
+        // retry. Reuse only those IDs, in their original relative order, while
+        // keeping caller/plugin-supplied identities and all content strict.
+        const explicitIDs = new Set(
+          parts.filter((part) => !generatedPartIDs?.has(part.id)).map((part) => part.id),
+        )
+        const reusable = existingParts.filter((part) => !explicitIDs.has(part.id))
+        const replacements = new Map(
+          parts
+            .filter((part) => generatedPartIDs?.has(part.id))
+            .map((part, index) => [part.id, reusable[index]?.id ?? part.id]),
+        )
         const expectedParts = parts
-          .map((part) => MessageV2.Part.parse(JSON.parse(JSON.stringify(part))))
+          .map((part) =>
+            MessageV2.Part.parse(JSON.parse(JSON.stringify({ ...part, id: replacements.get(part.id) ?? part.id }))),
+          )
           .sort((a, b) => compareUtf8Bytes(a.id, b.id))
         if (
           !isDeepStrictEqual(canonicalExistingMessage, expectedMessage) ||
@@ -927,12 +950,13 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       return committed
     }
 
-    const commitUserMessage = (msg: MessageV2.User, parts: MessageV2.Part[]): Effect.Effect<MessageV2.User> =>
+    const commitUserMessage: Interface["commitUserMessage"] = (msg, parts, options) =>
       Effect.sync(() => {
         const parsed = parseUserMessage(msg, parts)
-        return Database.transaction((tx) => commitUserMessageInTransaction(tx, parsed.message, parsed.parts), {
-          behavior: "immediate",
-        })
+        return Database.transaction(
+          (tx) => commitUserMessageInTransaction(tx, parsed.message, parsed.parts, options?.generatedPartIDs),
+          { behavior: "immediate" },
+        )
       }).pipe(Effect.withSpan("Session.commitUserMessage"))
     const patchMessageMetadata: Interface["patchMessageMetadata"] = Effect.fn("Session.patchMessageMetadata")((input) =>
       Effect.sync(() => {

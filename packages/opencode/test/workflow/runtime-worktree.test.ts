@@ -1,16 +1,19 @@
 import { $ } from "bun"
 import { describe, expect, afterEach } from "bun:test"
-import { Deferred, Effect } from "effect"
+import { Deferred, Effect, Layer, Semaphore } from "effect"
 import * as fsp from "fs/promises"
 import * as path from "path"
 import { Session } from "../../src/session"
 import { Instance } from "../../src/project/instance"
 import { Global } from "../../src/global"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
+import { Bus } from "../../src/bus"
 import { Worktree } from "../../src/worktree"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { WorkflowRuntime } from "../../src/workflow/runtime"
+import { WorkflowFinished } from "../../src/workflow/events"
+import { WorkflowPersistence } from "../../src/workflow/persistence"
 import { makeLayer, ref, providerCfg } from "./lib"
 
 // Worktree isolation lives in its own file: it boots a real Instance per isolated
@@ -21,6 +24,100 @@ afterEach(async () => {
 })
 
 const it = testEffect(makeLayer())
+
+describe("WorkflowRuntime cleanup defects", () => {
+  for (const terminal of ["deadline", "cancel"] as const) {
+    const removed = new Set<string>()
+    const worktree = Layer.effect(
+      Worktree.Service,
+      Effect.gen(function* () {
+        const real = yield* Worktree.Service
+        const lock = yield* Semaphore.make(1)
+        return Worktree.Service.of({
+          ...real,
+          remove: (input) =>
+            lock.withPermits(1)(
+              Effect.gen(function* () {
+                yield* real.remove(input)
+                expect(yield* Effect.promise(() => fsp.stat(input.directory).then(() => true, () => false))).toBe(false)
+                removed.add(input.directory)
+                // Model a competing disposer deleting the branch after the real
+                // directory cleanup. The cleanup itself is never mocked away.
+                return yield* Effect.die(new Worktree.RemoveFailedError({ message: "Concurrent branch removal" }))
+              }),
+            ),
+        })
+      }),
+    ).pipe(Layer.provide(Worktree.defaultLayer))
+
+    testEffect(makeLayer(undefined, worktree)).live(
+      `${terminal} settles and publishes its original outcome after a worktree cleanup defect`,
+      () =>
+        provideTmpdirServer(
+          Effect.fnUntraced(function* ({ dir, llm }) {
+            removed.clear()
+            const runtime = yield* WorkflowRuntime.Service
+            const session = yield* Session.Service
+            const bus = yield* Bus.Service
+            const parent = yield* session.create({
+              title: "workflow cleanup defect",
+              permission: [{ permission: "*", pattern: "*", action: "allow" }],
+            })
+            const released = yield* Deferred.make<void>()
+            yield* llm.hangUntil(released)
+            // Release only after all assertions, including a failed assertion,
+            // so fixture teardown cannot obscure a missing workflow settlement.
+            yield* Effect.addFinalizer(() => Deferred.succeed(released, undefined))
+            yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+            const root = path.join(Global.Path.data, "worktree", Instance.project.id)
+            const disposed = new Set<string>()
+            const onDisposed = (event: GlobalEvent) => {
+              if (event.payload.type === "server.instance.disposed" && event.directory) disposed.add(event.directory)
+            }
+            GlobalBus.on("event", onDisposed)
+            yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", onDisposed)))
+            const finished = yield* Deferred.make<{ status: string; error?: string }>()
+            const unsubscribe = yield* bus.subscribeCallback(WorkflowFinished, (event) => {
+              if (event.properties.sessionID === parent.id)
+                Deferred.doneUnsafe(finished, Effect.succeed(event.properties))
+            })
+            yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
+            const { runID } = yield* runtime.start({
+              script: [
+                `export const meta = { name: "cleanup", description: "d" }`,
+                `return await agent("x", { isolation: "worktree" })`,
+              ].join("\n"),
+              sessionID: parent.id,
+              parentActorID: "main",
+              model: ref,
+              scriptDeadlineMs: terminal === "deadline" ? 10_000 : 60_000,
+            })
+            yield* llm.wait(1).pipe(Effect.timeout(8000))
+            expect(yield* llm.pending).toBe(0)
+            const worktrees = yield* Effect.promise(() => fsp.readdir(root))
+            expect(worktrees).toHaveLength(1)
+            const directory = path.join(root, worktrees[0])
+            expect(yield* Effect.promise(() => Instance.peek(directory))).toBeDefined()
+            expect((yield* runtime.status({ runID })).status).toBe("running")
+            if (terminal === "cancel") yield* runtime.cancel({ runID }).pipe(Effect.timeout(5000))
+            const outcome = yield* runtime.wait({ runID }).pipe(Effect.timeout(15_000))
+            const expected: WorkflowRuntime.RunOutcome = terminal === "deadline"
+              ? { status: "failed", error: "workflow script deadline exceeded" }
+              : { status: "cancelled" }
+            expect(outcome).toEqual(expected)
+            expect(yield* WorkflowPersistence.load(runID)).toMatchObject(expected)
+            expect(yield* Deferred.await(finished).pipe(Effect.timeout(2000))).toMatchObject(expected)
+            expect(removed.has(directory)).toBe(true)
+            expect(yield* Effect.promise(() => fsp.readdir(root))).toHaveLength(0)
+            expect(disposed.has(directory)).toBe(true)
+            expect(yield* Effect.promise(() => Instance.peek(directory))).toBeUndefined()
+          }),
+          { git: true, config: providerCfg },
+        ),
+      30_000,
+    )
+  }
+})
 
 const fileExists = (p: string) =>
   fsp

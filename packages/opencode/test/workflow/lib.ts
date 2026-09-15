@@ -106,7 +106,7 @@ const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
 const run = SessionRunState.layer.pipe(Layer.provide(status))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 
-export function makeLayer(plugin = Plugin.defaultLayer) {
+export function makeLayer(plugin = Plugin.defaultLayer, worktree = Worktree.defaultLayer) {
   const deps = Layer.mergeAll(
     Session.defaultLayer,
     Snapshot.defaultLayer,
@@ -188,7 +188,7 @@ export function makeLayer(plugin = Plugin.defaultLayer) {
       // provideMerge (not provide) so Worktree.Service stays in the output
       // context — the worktree-isolation test resolves it to clean up the kept
       // worktree before the tmpdir fixture finalizer runs.
-      Layer.provideMerge(Worktree.defaultLayer),
+      Layer.provideMerge(worktree),
     ),
   ).pipe(Layer.provide(summary))
 }

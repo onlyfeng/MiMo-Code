@@ -138,8 +138,8 @@ function pendingTool(messageID: string, id: string, tool: string, input: Record<
 
 /**
  * Boundary as insertRebuildBoundary writes it: checkpoint part + rebuild
- * context (incl. Recent activity). IDs must be lexically ordered like real
- * MessageIDs: covered < digestUpTo < boundary id.
+ * context (incl. Recent activity). Endpoint identity, not ID ordering, defines
+ * the covered interval.
  */
 function boundaryUser(
   id: string,
@@ -147,9 +147,7 @@ function boundaryUser(
   activityLines?: string[],
   coveredUpTo = "msg_01",
 ): MessageV2.WithParts {
-  const activity = activityLines?.length
-    ? `\n# Recent activity\n\n${activityLines.join("\n")}\n`
-    : ""
+  const activity = activityLines?.length ? `\n# Recent activity\n\n${activityLines.join("\n")}\n` : ""
   return {
     info: userInfo(id),
     parts: [
@@ -241,7 +239,7 @@ describe("renderTailDigest", () => {
     ])
     expect(text).toContain('read(path="new.ts")')
     expect(text).not.toContain("prior summary")
-    expect(text).not.toContain("read(path=\"old.ts\")")
+    expect(text).not.toContain('read(path="old.ts")')
   })
 })
 
@@ -380,6 +378,48 @@ describe("collapseCheckpointTail", () => {
 })
 
 describe("toModelMessages with collapseCheckpointTail", () => {
+  for (const digest of ["msg_absent", "msg_before"]) {
+    test(`an unresolved digest endpoint preserves the projected live tail: ${digest}`, async () => {
+      const marker = boundaryUser("msg_marker", digest, ["- assistant: activity"], "msg_covered")
+      marker.info.time.created = 11
+      const input: MessageV2.WithParts[] = [
+        { info: userInfo("msg_before", 0), parts: [] },
+        { info: userInfo("msg_covered", 10), parts: [] },
+        marker,
+        { info: assistantInfo("msg_tail", "msg_covered", 20), parts: [textPart("msg_tail", "prt_tail", "LIVE_TAIL")] },
+      ]
+      const original = structuredClone(input)
+      const messages = await MessageV2.toModelMessages(MessageV2.filterCompacted(input.toReversed()), model, {
+        collapseCheckpointTail: true,
+      })
+      expect(JSON.stringify(messages)).toContain("LIVE_TAIL")
+      expect(input).toEqual(original)
+    })
+  }
+
+  for (const covered of ["msg_absent", "msg_tail1"]) {
+    test(`an unresolved checkpoint seam cannot collapse live history: ${covered}`, async () => {
+      const marker = boundaryUser("msg_marker", "msg_tail2", ["- assistant: activity"], covered)
+      marker.info.time.created = 10
+      const input: MessageV2.WithParts[] = [
+        { info: userInfo("msg_user", 0), parts: [textPart("msg_user", "prt_user", "request")] },
+        marker,
+        { info: assistantInfo("msg_tail1", "msg_user", 20), parts: [textPart("msg_tail1", "prt_tail1", "LIVE_FIRST")] },
+        {
+          info: assistantInfo("msg_tail2", "msg_user", 30),
+          parts: [textPart("msg_tail2", "prt_tail2", "LIVE_SECOND")],
+        },
+      ]
+      const original = structuredClone(input)
+      const messages = await MessageV2.toModelMessages(MessageV2.filterCompacted(input.toReversed()), model, {
+        collapseCheckpointTail: true,
+      })
+      expect(JSON.stringify(messages)).toContain("LIVE_FIRST")
+      expect(JSON.stringify(messages)).toContain("LIVE_SECOND")
+      expect(input).toEqual(original)
+    })
+  }
+
   test("one user turn holds checkpoint + activity; no hollow tool pairs from the tail", async () => {
     const messages = await MessageV2.toModelMessages(
       [

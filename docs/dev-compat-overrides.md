@@ -366,7 +366,10 @@ The selected propagation is accepted at `90abf6e447d7a5e5b405aba301bf1a951f469bf
 The [shared accepted result](upstream-sync-2026-09-15-5198ff54.md#accepted-result-and-publication-evidence)
 is the publication summary; dated staging gates below remain historical.
 At that historical runtime snapshot the workflow deadline/disposer case was
-still skipped. The audit follow-up below supersedes this remaining debt.
+still skipped. The first audit batch below restored execution; PR #129 later
+reproduced the Linux timeout. The shared implementation report records that
+failure and the subsequent cleanup fix; local first-batch passes did not close
+the remaining FC-008 validation debt.
 
 ## 2026-09-15 audit implementation, first batch
 
@@ -380,7 +383,7 @@ tiny content budgets and single-format snapshot writes with legacy reads.
 The seven owner dispositions and evidence are recorded in
 [the compat implementation report](compat-audit-followups-2026-09-15.md).
 
-## Review record
+## First-batch review record
 
 - Status: active
 - Canonical owner: fork `dev/compat`
@@ -393,9 +396,9 @@ The seven owner dispositions and evidence are recorded in
 - Main source inheritance merge: `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`
 - Prior shared audit commit: `5f06049e568276cd1cea9012f6b114e6ddb2fac2`
 - Inherited bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
-- Publication state: the initial implementation is local and pending its compat PR. The preceding documentation tip `b3b32061cfcf997d3fb1cac0a73302e551678a96` (PR #127) has successful exact-SHA test, typecheck and lint.
+- Publication state: the initial implementation is under PR #129; later local integration and accepted-SHA CI remain pending as recorded in the implementation snapshot below. The preceding documentation tip `b3b32061cfcf997d3fb1cac0a73302e551678a96` (PR #127) has successful exact-SHA test, typecheck and lint.
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
-- Shared documentation inheritance: accepted main `f10fddb67d830b82890206759c53cef4d8710460`; FD/FC and shared reports are inherited unchanged.
+- First-batch shared documentation inheritance: accepted main `f10fddb67d830b82890206759c53cef4d8710460`. The current shared FD/FC and implementation report are inherited unchanged from main `d1e12e85`; the later local source/test snapshot is recorded under DC-CONTEXT-001 below.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -1088,6 +1091,15 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
 
+- 2026-09-15 implementation snapshot: compat
+  `c38078f7eb99d7ba68478808abbd616cfa28847c` inherits main
+  `37b97a7bfc52e201513f2d1120506f287d2d9bbf`. F06 chronology, atomic
+  admission, checkpoint/loop-streak/TUI position handling, F07 compaction
+  admission guards, and callable SDK examples are now shared contracts, not
+  exclusive compat policies. F04 request preflight and F10 legacy snapshot
+  reads remain compat-owned. This is a local source/test snapshot; final
+  integration, current-head regression checks and accepted-SHA CI are pending.
+
 - 2026-09-09 full sync: image normalization is inherited through the existing model transform. Keep bounded replay/error media, active-tool preflight, frozen context and chronology; adapt image fixtures to actual containers. Provider/API/schema inputs and compat SDK operations remain unchanged.
 
 - POLICY-02 wake follow-up: Inherit durable-row rearming through the existing receiver lifecycle; keep content caps, frozen context, cancellation and disposal boundaries.
@@ -1121,13 +1133,20 @@ files remain byte-identical to the accepted main correction.
 - Canonical owner: `dev/compat` model-request safety boundary
 - 2026-09-15 code-inventory subcontracts (existing behavior, no new owner):
   content caps/serialization; request estimation and current-turn recovery floor;
-  message chronology/idempotent admission; checkpoint coverage and logical tail;
-  legacy active-tool snapshot migration; structured-output replay; and generated
-  client examples. These have different retirement conditions and must not be
-  treated as one indivisible product policy.
-  `createMessage` allocates monotonic commit timestamps and checks message/part
-  ownership; atomic user admission is separate from inbox draining, whose
-  message/part creation and inbox deletion are not one crash-atomic transaction.
+  inherited message chronology/idempotent admission; compat checkpoint coverage
+  over a shared logical tail; legacy active-tool snapshot reads; structured-output
+  replay; and inherited generated client examples. These have different retirement
+  conditions and must not be treated as one indivisible product policy.
+  Shared `createMessage` allocates monotonic actor commit timestamps;
+  prompt/compaction `commitUserMessage` atomically admits the user and parts,
+  checks ownership and accepts only equivalent current content. The prompt
+  producer can reuse generated anonymous part IDs in relative order, while
+  explicit identities remain strict; runtime additions can make old input
+  non-equivalent. Debug, inbox, prompt and compaction producers,
+  fork/revert/checkpoint and TUI consumers use chronological position with UTF-8
+  BINARY ID tie-breaking, not caller-ID magnitude. Inbox still creates the
+  message, writes parts and deletes the queue row in three separate steps; its
+  drain is not covered by the prompt/compaction transaction.
   `currentUserID` feeds the current-turn projection through `llm-request-prefix`.
   JSON-schema requests suppress the active recall reminder and can recover the
   structured result from a completed StructuredOutput part. These local prompt
@@ -1178,8 +1197,37 @@ files remain byte-identical to the accepted main correction.
   Preflight compares the estimate directly with that
   trigger, without its former additional 5K/10% advance. Estimation can still
   observe a larger current request than the previous provider usage record;
-  shared thresholds do not imply identical trigger timing. It routes recoverable overflow to existing
-  recovery and distinguishes an unrecoverable static prefix. Preflight does not
+  shared thresholds do not imply identical trigger timing. It routes recoverable
+  overflow to existing recovery and distinguishes an unrecoverable static prefix.
+  The shared rebuild helper reloads the latest persisted same-actor messages
+  immediately before inserting its boundary, including a high-usage assistant
+  completed after the request began.
+  F06's strict `usageRecovered` validates real persisted checkpoint endpoints;
+  an empty preflight placeholder created after the digest is not covered merely
+  because recovery succeeded. Compat additionally passes the loop-local
+  `skipOverflowCheck` receipt to `recoverOverflowPlaceholder`. This receipt is
+  set only after successful compaction creation or checkpoint rebuild, and is
+  cleared before constructing the next actual request. Classification still
+  requires an existing cancelled assistant, `MessageAbortedError`, the exact
+  overflow-recovery message and no parts. A real cancellation or an interrupted
+  response with content is not resumed by this receipt. The next preflight still
+  enforces its no-progress test and two-recovery episode limit; the receipt does
+  not exempt the request from those checks or relax checkpoint watermarks.
+  Shared F07 projection locates the snapshot endpoint by message identity in
+  persisted order (`afterSnapshot`), including when the input omitted old rows.
+  After the existing large-tool-result shrinking, the first newly arrived
+  external user/spawn request and its entire suffix remain mandatory; eligible
+  legacy user rows are classified by real, non-synthetic text/file content.
+  Only older optional rounds spend the remaining tail budget. The mandatory
+  suffix can exceed that budget, including when a missing frozen prefix leaves
+  zero optional budget. Compat preflight then handles an oversized request;
+  projecting the new request away is not a recovery strategy. Same-session/actor
+  pending admissions settle before continuation checks on both sides of insert;
+  a stale owned continuation and its parts are removed. Failed or interrupted
+  admissions release the guard, and another actor's pending request does not
+  block this actor. These guards do not grant the new request the old run's
+  approval receipt.
+  Preflight does not
   restore a mutable cwd store, setter, clear path, `Event.Changed` publisher,
   or `change_directory` tool; cross-directory calls continue to use absolute
   paths or explicit `workdir`. Checkpoint tail collapse, TUI context accounting,
@@ -1192,7 +1240,12 @@ files remain byte-identical to the accepted main correction.
   canonical `(time.created, id)` order places a synthetic marker after a
   same-timestamp live message. The active marker moves to the logical seam,
   superseded context boundaries are removed, and missing or reversed coverage
-  fails closed to the full observed history. The published OpenAPI exposes
+  fails closed to the full observed history. An invalid marker's digest is
+  cleared only in the temporary view so later tail collapse cannot undo that
+  protection; persisted messages/parts remain unchanged. TUI updates retain an
+  already-hydrated undo boundary, and active revert disables event-driven message
+  eviction. These F06 fixes coexist with the independent coverage cache.
+  The published OpenAPI exposes
   `/session/{sessionID}/checkpoint-coverage` and `CheckpointCoverage` as
   compat additions. `CompactionPart.projection` is already shared with main and
   must stay equivalent; it is not an additional compat API field. Every published code sample imports
@@ -1356,9 +1409,9 @@ files remain byte-identical to the accepted main correction.
 - 2026-09-08 selected Actor/MCP completion: The shared actor recovery entry preserves currentTurnMessages, frozen turnContext, active-tool preflight, reserve-safe overflow, pending-external guards and owned continuation receipts. Fresh generation retains CheckpointCoverage, projection, and callable-v2 samples. The complete context/actor/checkpoint matrix passes 303 tests with two pre-existing timing skips.
 - Exit condition: retire the supported cap/preflight overlay only when shared
   `main` provides equivalent behavior without weakening FD-002 delivery.
-  Universal non-throwing serialization and conservative accounting of oversized
-  active schemas are improvement targets; the current limitations above must
-  not be presented as already implemented guarantees.
+  F04 now counts complete active schemas and terminates unserializable preflight
+  requests. Universal non-throwing replay serialization, exact provider-token
+  accounting and a strict total wire bound remain outside that guarantee.
 
 ## DC-ACTOR-001 — full-context actor and static-prefix overflow extensions
 

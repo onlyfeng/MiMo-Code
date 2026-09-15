@@ -174,14 +174,10 @@ export function messageInsertIndex(messages: readonly OrderedMessage[], message:
   return index < 0 ? messages.length : index
 }
 
-export function upsertChronologicalMessage<M extends OrderedMessage>(
-  messages: readonly M[],
-  message: M,
-  limit = 100,
-) {
+export function upsertChronologicalMessage<M extends OrderedMessage>(messages: readonly M[], message: M, limit = 100) {
   const next = messages.filter((current) => current.id !== message.id)
   next.splice(messageInsertIndex(next, message), 0, message)
-  const removed = next.length > limit ? next.shift() : undefined
+  const removed = next.length > limit && next.length > messages.length ? next.shift() : undefined
   return { messages: next, removed }
 }
 
@@ -192,21 +188,6 @@ export function removeMessageByID<M extends { id: string }>(messages: readonly M
     messages: [...messages.slice(0, index), ...messages.slice(index + 1)],
     removed: messages[index],
   }
-}
-
-export function messagesBefore<M extends { id: string }>(messages: readonly M[], id: string) {
-  const index = messageIndex(messages, id)
-  return index < 0 ? [] : messages.slice(0, index)
-}
-
-export function messagesAfter<M extends { id: string }>(messages: readonly M[], id: string) {
-  const index = messageIndex(messages, id)
-  return index < 0 ? [] : messages.slice(index + 1)
-}
-
-export function messagesFrom<M extends { id: string }>(messages: readonly M[], id: string) {
-  const index = messageIndex(messages, id)
-  return index < 0 ? [] : messages.slice(index)
 }
 
 export function revertView<M extends OrderedMessage>(
@@ -799,7 +780,14 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           const sid = event.properties.info.sessionID
           const aid = event.properties.info.agentID ?? "main"
           if (!store.message[sid]) setStore("message", sid, {})
-          const result = upsertChronologicalMessage(store.message[sid][aid] ?? [], event.properties.info)
+          const session = store.session.find((item) => item.id === sid)
+          // Undo may have loaded older pages to resolve its boundary. Keep that
+          // history available while undo/redo still depends on the boundary.
+          const result = upsertChronologicalMessage(
+            store.message[sid][aid] ?? [],
+            event.properties.info,
+            session?.revert ? Infinity : 100,
+          )
           const removed = result.removed
           if (removed?.id === event.properties.info.id || (removed && !store.part[removed.id]?.length)) {
             rememberCheckpointCoverageCandidate(removed)
@@ -1261,10 +1249,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             messages,
             session.data!.revert?.messageID,
             (before) =>
-              sdk.client.session.messages(
-                { sessionID, limit: 100, before, agent_id: "*" },
-                { throwOnError: true },
-              ),
+              sdk.client.session.messages({ sessionID, limit: 100, before, agent_id: "*" }, { throwOnError: true }),
           )
           if (!loadedMessages.found) {
             toast?.show({

@@ -326,6 +326,23 @@ describe("classifyAssistantStep", () => {
     ).toEqual({ type: "failed", reason: "MessageAbortedError" })
   })
 
+  test("recovery intent does not resume a cancelled overflow message with existing content", () => {
+    for (const part of [textPart("m-2", "partial answer"), reasoningPart("m-2", "partial reasoning")]) {
+      expect(
+        classifyAssistantStep({
+          phase: "existing-assistant",
+          lastUser: userInfo("m-1"),
+          assistant: assistantInfo("m-2", {
+            finish: "cancelled",
+            error: new MessageV2.AbortedError({ message: REQUEST_OVERFLOW_RECOVERY_MESSAGE }).toObject(),
+          }),
+          parts: [part],
+          recoverOverflowPlaceholder: true,
+        }),
+      ).toEqual({ type: "failed", reason: "MessageAbortedError" })
+    }
+  })
+
   test("existing-assistant phase + near-match overflow placeholder stays failed", () => {
     expect(
       classifyAssistantStep({

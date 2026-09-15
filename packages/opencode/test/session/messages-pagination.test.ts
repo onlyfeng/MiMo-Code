@@ -120,6 +120,33 @@ async function addCheckpointPart(sessionID: SessionID, messageID: MessageID, cov
 }
 
 describe("MessageV2.page", () => {
+  test("in-memory chronology matches SQLite pagination for equal-time Unicode IDs", async () => {
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const session = await svc.create({})
+        const messages = await Promise.all(
+          ["msg_\u{10000}", "msg_z", "msg_\uE000", "msg_\u00E9"].map((id) =>
+            svc.updateMessage({
+              id: MessageID.make(id),
+              sessionID: session.id,
+              role: "user",
+              time: { created: 1_000 },
+              agent: "test",
+              model: { providerID: ProviderID.make("test"), modelID: ModelID.make("model") },
+            }),
+          ),
+        )
+        const latest = MessageV2.page({ sessionID: session.id, limit: 2 })
+        const older = MessageV2.page({ sessionID: session.id, limit: 2, before: latest.cursor! })
+        const persisted = [...older.items, ...latest.items].map((message) => message.info.id)
+        expect(persisted.map(String)).toEqual(["msg_z", "msg_\u00E9", "msg_\uE000", "msg_\u{10000}"])
+        expect(messages.toSorted(MessageV2.compareOrder).map((message) => message.id)).toEqual(persisted)
+        await svc.remove(session.id)
+      },
+    })
+  })
+
   test("returns sync result", async () => {
     await Instance.provide({
       directory: root,
