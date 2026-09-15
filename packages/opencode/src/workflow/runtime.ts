@@ -479,6 +479,12 @@ export const layer = Layer.effect(
                 Effect.sync(() => log.warn("worktree remove timed out during reclaim", { directory })),
               ),
               Effect.ignore,
+              // Worktree removal reports filesystem/git failures as defects.
+              // Preserve cancellation, but never let a cleanup defect strand the
+              // run's terminal Deferred after its original deadline or failure.
+              Effect.catchDefect((error) =>
+                Effect.sync(() => log.warn("worktree remove failed during reclaim", { directory, error })),
+              ),
             ),
           { concurrency: "unbounded", discard: true },
         )
