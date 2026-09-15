@@ -6,6 +6,7 @@ import * as path from "path"
 import { Session } from "../../src/session"
 import { Instance } from "../../src/project/instance"
 import { Global } from "../../src/global"
+import { Flag } from "../../src/flag/flag"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { Worktree } from "../../src/worktree"
 import { provideTmpdirServer } from "../fixture/fixture"
@@ -16,11 +17,45 @@ import { makeLayer, ref, providerCfg } from "./lib"
 // Worktree isolation lives in its own file: it boots a real Instance per isolated
 // agent, which is heavyweight. A dedicated file gives a fresh process, exactly
 // like test/project/worktree.test.ts.
+let deadlineTrace: ((phase: string, outcome?: "Success" | "Failure") => void) | undefined
+let deadlineTraceStop: (() => void) | undefined
 afterEach(async () => {
+  deadlineTrace?.("afterEach.disposeAll.begin")
   await Instance.disposeAll()
+  deadlineTrace?.("afterEach.disposeAll.end")
+  deadlineTraceStop?.()
+  deadlineTrace = undefined
+  deadlineTraceStop = undefined
 })
 
-const it = testEffect(makeLayer())
+const it = testEffect(makeLayer(), (name) => {
+  if (!name.includes("a deadline-fired run")) return
+  const started = Date.now()
+  let previous = "observer.created"
+  const write = (phase: string, outcome?: "Success" | "Failure") => {
+    process.stderr.write(`[workflow-deadline] ${JSON.stringify({ phase, previous, outcome, elapsedMs: Date.now() - started })}\n`)
+    previous = phase
+  }
+  // Observation only: keep the real hang and all existing cleanup scopes.
+  // An unref'd watchdog exposes a stuck finalizer without ending the process.
+  const timer = setInterval(() => {
+    process.stderr.write(`[workflow-deadline] ${JSON.stringify({ phase: "watchdog", waitingAt: previous, elapsedMs: Date.now() - started })}\n`)
+  }, 15_000)
+  timer.unref()
+  deadlineTrace = write
+  deadlineTraceStop = () => clearInterval(timer)
+  process.stderr.write(`[workflow-deadline] ${JSON.stringify({
+    phase: "selectors",
+    workflow: Flag.MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL,
+    orchestrator: Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR,
+    mcpSearch: Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
+    codexMode: Flag.MIMOCODE_CODEX_MODE,
+    workspaces: Flag.MIMOCODE_EXPERIMENTAL_WORKSPACES,
+    checkpointDisabled: Flag.MIMOCODE_DISABLE_CHECKPOINT,
+    compactionMaxConfigured: Flag.MIMOCODE_COMPACTION_MAX_CONTEXT !== undefined,
+  })}\n`)
+  return write
+})
 
 const fileExists = (p: string) =>
   fsp
@@ -197,6 +232,7 @@ describe("WorkflowRuntime worktree isolation", () => {
   it.live("a deadline-fired run reclaims the in-flight isolated agent's worktree", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ dir, llm }) {
+        deadlineTrace?.("body.enter")
         const runtime = yield* WorkflowRuntime.Service
         const session = yield* Session.Service
         const parent = yield* session.create({
@@ -204,11 +240,17 @@ describe("WorkflowRuntime worktree isolation", () => {
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
         yield* llm.hang // the isolated agent hangs → run will hit the deadline
+        deadlineTrace?.("llm.hang.queued")
         yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+        deadlineTrace?.("fixture.config.committed")
         const root = path.join(Global.Path.data, "worktree", Instance.project.id)
         const disposed = new Set<string>()
         const onDisposed = (event: GlobalEvent) => {
-          if (event.payload.type === "server.instance.disposed" && event.directory) disposed.add(event.directory)
+          if (event.payload.type === "server.instance.disposed" && event.directory) {
+            disposed.add(event.directory)
+            if (event.directory === dir) deadlineTrace?.("instance.parent.disposed")
+            if (event.directory.startsWith(root + path.sep)) deadlineTrace?.("instance.child.disposed")
+          }
         }
         GlobalBus.on("event", onDisposed)
         yield* Effect.addFinalizer(() =>
@@ -229,7 +271,9 @@ describe("WorkflowRuntime worktree isolation", () => {
           // A shorter budget can expire before the queued hang is consumed.
           scriptDeadlineMs: 10_000,
         })
+        deadlineTrace?.("runtime.started")
         yield* llm.wait(1).pipe(Effect.timeout(8000))
+        deadlineTrace?.("llm.request.received")
         expect(yield* llm.pending).toBe(0)
         const worktrees = yield* Effect.promise(() => fsp.readdir(root))
         expect(worktrees).toHaveLength(1)
@@ -237,21 +281,30 @@ describe("WorkflowRuntime worktree isolation", () => {
         expect(yield* Effect.promise(() => Instance.peek(directory))).toBeDefined()
         expect((yield* runtime.status({ runID })).status).toBe("running")
         expect(disposed.has(directory)).toBe(false)
+        deadlineTrace?.("runtime.wait.begin")
         const outcome = yield* runtime.wait({ runID })
+        deadlineTrace?.("runtime.wait.end")
+        deadlineTrace?.("assert.outcome")
         expect(outcome).toEqual({ status: "failed", error: "workflow script deadline exceeded" })
+        deadlineTrace?.("worktree.reclaim.wait.begin")
         yield* Effect.gen(function* () {
           while ((yield* Effect.promise(() => fsp.readdir(root))).length) {
             yield* Effect.sleep(50)
           }
         }).pipe(Effect.timeout(10_000))
+        deadlineTrace?.("worktree.reclaim.wait.end")
         const left = yield* Effect.promise(() => fsp.readdir(root))
+        deadlineTrace?.("assert.worktree.empty")
         expect(left.length).toBe(0)
         // This event is emitted only after all Instance disposers settle. An
         // empty directory alone also passes after disposeDirectory's soft timeout.
+        deadlineTrace?.("assert.child.disposed")
         expect(disposed.has(directory)).toBe(true)
+        deadlineTrace?.("assert.child.absent")
         expect(yield* Effect.promise(() => Instance.peek(directory))).toBeUndefined()
+        deadlineTrace?.("body.assertions.passed")
       }),
-      { git: true, config: providerCfg },
+      { git: true, config: providerCfg, observeCleanup: (phase) => deadlineTrace?.(phase) },
     ),
     120_000,
   )

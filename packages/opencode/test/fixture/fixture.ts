@@ -166,6 +166,7 @@ type ScopedTmpDirOptions = {
   config?: Partial<Config.Info>
   root?: "cwd" | "tmp" | "home"
   outsideGit?: boolean
+  observeCleanup?: (phase: string) => void
 }
 
 /** Effectful scoped tmpdir. Cleaned up when the scope closes. Make sure these stay in sync */
@@ -191,8 +192,11 @@ export function tmpdirScoped(options?: ScopedTmpDirOptions) {
 
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
+        options?.observeCleanup?.("tmpdir.cleanup.begin")
         if (options?.git) await stop(dir).catch(() => undefined)
+        options?.observeCleanup?.("tmpdir.git-stopped")
         await cleanupTmpdir(dir)
+        options?.observeCleanup?.("tmpdir.cleanup.end")
       }),
     )
 
@@ -241,16 +245,16 @@ export function provideTmpdirInstance<A, E, R>(
     const path = yield* tmpdirScoped(options)
     let provided = false
 
-    yield* Effect.addFinalizer(() =>
-      provided
-        ? Effect.promise(() =>
-            Instance.provide({
-              directory: path,
-              fn: () => Instance.dispose(),
-            }),
-          ).pipe(Effect.ignore)
-        : Effect.void,
-    )
+    yield* Effect.addFinalizer(() => {
+      if (!provided) return Effect.void
+      const dispose = () => Instance.provide({ directory: path, fn: () => Instance.dispose() })
+      if (!options?.observeCleanup) return Effect.promise(dispose).pipe(Effect.ignore)
+      return Effect.promise(async () => {
+        options.observeCleanup?.("instance.dispose.begin")
+        await dispose()
+        options.observeCleanup?.("instance.dispose.end")
+      }).pipe(Effect.ignore)
+    })
 
     provided = true
     return yield* self(path).pipe(provideInstance(path))
@@ -259,7 +263,7 @@ export function provideTmpdirInstance<A, E, R>(
 
 export function provideTmpdirServer<A, E, R>(
   self: (input: { dir: string; llm: TestLLMServer["Service"] }) => Effect.Effect<A, E, R>,
-  options?: { git?: boolean; config?: (url: string) => Partial<Config.Info>; root?: "cwd" | "tmp" | "home"; outsideGit?: boolean },
+  options?: { git?: boolean; config?: (url: string) => Partial<Config.Info>; root?: "cwd" | "tmp" | "home"; outsideGit?: boolean; observeCleanup?: (phase: string) => void },
 ): Effect.Effect<
   A,
   E | PlatformError.PlatformError,
@@ -272,6 +276,7 @@ export function provideTmpdirServer<A, E, R>(
       config: options?.config?.(llm.url),
       root: options?.root,
       outsideGit: options?.outsideGit,
+      observeCleanup: options?.observeCleanup,
     })
   })
 }
