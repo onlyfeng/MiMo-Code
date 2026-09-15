@@ -64,6 +64,8 @@ F08 的 checkpoint-coverage route、schema、SDK 与 TUI 缓存作为完整协�
 
 文档 PR [#126](https://github.com/onlyfeng/MiMo-Code/pull/126) 已合并至 main `818457d08e9d39f561cdd2bcb86ee4a73bcf5fbf`。Codex 提出的 FD-004 历史锚点问题通过显式保留旧锚点修复；最终 PR head 的八项检查和自动复审通过，合并 SHA 的 test/lint/typecheck 均成功。文档传播 PR [#127](https://github.com/onlyfeng/MiMo-Code/pull/127) 的八项检查和自动审核通过，已合并为 `b3b32061cfcf997d3fb1cac0a73302e551678a96`；合并后的 test/lint/typecheck 均通过。第一批 main PR [#128](https://github.com/onlyfeng/MiMo-Code/pull/128) 已接受为 `f10fddb67d830b82890206759c53cef4d8710460`；最终 head `6eb559b86b10b5e6bcf7eea50b873eb714c9b137` 的八项检查通过。Codex 在旧 head 指出的两处 runtime 快照引用已于 `6eb559b8` 修正到完整 `0b12e39e`，当前内容已复核；该 discussion 的 UI 状态仍未手动解决。没有把旧 head 审查描述成新 head 的自动复审。第一批 compat PR 为 [#129](https://github.com/onlyfeng/MiMo-Code/pull/129)，本地完整快照 `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`。
 
+PR #129 的 Codex ancestry 反馈经实际 Git 图核查不成立。当前 head `eaf99b8bf34aa791df0d7c921d610a581c4c4e9d` 含 `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`，其父提交为 `199286decd7881737493c35ac6ffea30fc6e00c9` 与已接受 main `f10fddb67d830b82890206759c53cef4d8710460`。本地两项 ancestry 检查通过，GitHub commits API 确认相同父列表，compare 返回 behind_by=0 且 merge_base 为该 main。反馈引用的 `78337bd` 不是实际 PR head；没有为此重写历史。[原讨论](https://github.com/onlyfeng/MiMo-Code/pull/129#discussion_r4011989981) 的 UI 状态单独保留。
+
 已接受提交的 CI 证据：
 
 | PR / 分支          | 接受 SHA   | test                                                                   | typecheck                                                              | lint                                                                   |
