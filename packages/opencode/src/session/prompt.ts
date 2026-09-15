@@ -4526,13 +4526,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
             }
           }
-          const usageRecovered =
-            !!lastFinished &&
-            msgs.some(
-              (msg) =>
-                msg.info.id > lastFinished.id &&
-                msg.parts.some((part) => part.type === "checkpoint" || part.type === "compaction"),
-            )
+          const usageRecovered = !!lastFinished && MessageV2.usageRecovered(msgs, lastFinished)
 
           // Per-user-message active recall reminder. Once the session has
           // any memory artifacts (memory dir populated OR tasks recorded),
@@ -4601,11 +4595,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               lastUser,
               assistant: lastAssistant,
               parts: lastAssistantMsg?.parts ?? [],
-              // A checkpoint boundary is timestamped beside its old watermark,
-              // so the cancelled overflow placeholder can still sort after the
-              // active user. usageRecovered is the durable proof that recovery
-              // happened and this empty placeholder is safe to pass through.
-              recoverOverflowPlaceholder: usageRecovered || isBoundedComputation,
+              // Preflight's empty cancelled placeholder may be newer than the
+              // recovered watermark. A successful recovery in this loop also
+              // lets it reach the next preflight and its bounded progress check.
+              recoverOverflowPlaceholder: skipOverflowCheck || usageRecovered || isBoundedComputation,
             })
             if (classification.type === "filtered") {
               yield* writeContentFilterError({ assistant: lastAssistant })
@@ -6064,8 +6057,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         started = true
       }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale, undefined, undefined, undefined, undefined, input.deferInbox)))
       // Continuations are serialized per (session, actor) by ActorExecution and
-      // settle through runTurn, matching upstream. The fork's former
-      // Actor.runPersistentTurn wake-generation routing on this path is retired.
+      // settle through runTurn, matching upstream.
       const execution =
         input.notifyParentOnComplete === true && agentID !== "main"
           ? Effect.acquireUseRelease(

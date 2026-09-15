@@ -122,9 +122,7 @@ function checkpointPart(msg: WithParts): CheckpointPart | undefined {
  * never receives it.
  */
 export function collapseCheckpointTail(msgs: readonly WithParts[]): WithParts[] {
-  const boundary = msgs.findLastIndex(
-    (m) => m.info.role === "user" && m.parts.some((p) => p.type === "checkpoint"),
-  )
+  const boundary = msgs.findLastIndex((m) => m.info.role === "user" && m.parts.some((p) => p.type === "checkpoint"))
   if (boundary < 0) return msgs as WithParts[]
 
   const part = checkpointPart(msgs[boundary])

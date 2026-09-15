@@ -130,10 +130,7 @@ describe("detectStreak", () => {
   })
 
   test("span walks back through identical keys and keeps predecessor as anchor", () => {
-    const span = detectStreak(
-      [entry("m0", "prev"), entry("m1", "k"), entry("m2", "k"), entry("m3", "k")],
-      3,
-    )
+    const span = detectStreak([entry("m0", "prev"), entry("m1", "k"), entry("m2", "k"), entry("m3", "k")], 3)
     expect(span).toEqual({
       fromId: "m1",
       toId: "m3",
@@ -161,6 +158,53 @@ describe("detectStreak", () => {
 })
 
 describe("cropMessagesForStreak", () => {
+  test("crops a truncated streak by message order when ids are not monotonic", () => {
+    const shared = [reasoning("same")]
+    const key = streakKey(shared)
+    const messages = [
+      msg("u0", "user", [text("start")]),
+      msg("a9", "assistant", shared),
+      msg("a8", "assistant", shared),
+      msg("u1", "user", [text("reminder")]),
+      msg("narration", "assistant", [text("still working")]),
+      msg("a1", "assistant", shared),
+      msg("a2", "assistant", shared),
+      msg("a0", "assistant", shared),
+    ]
+    const span = detectStreak([entry("a9", key), entry("a8", key), entry("a1", key), entry("a2", key)], 3, 3)
+    expect(span?.truncated).toBe(true)
+    const crop = cropMessagesForStreak(messages, span!)
+    expect(crop.omitted).toEqual(["a8", "a1", "a2"])
+    expect(crop.remainingSimilar).toBe(1)
+    expect(crop.omittedMessages).toBe(3)
+    expect(crop.omittedParts).toBe(3)
+    expect(crop.kept.map((message) => message.info.id)).toEqual(["u0", "a9", "u1", "narration", "a0"])
+    expect(crop.kept[3]).toBe(messages[4])
+  })
+
+  test.each([
+    ["missing start", "a0", "a8"],
+    ["missing end", "a1", "z9"],
+    ["reversed endpoints", "a8", "a9"],
+  ])("keeps all messages for %s", (_, fromId, toId) => {
+    const shared = [reasoning("same")]
+    const messages = [msg("a9", "assistant", shared), msg("a1", "assistant", shared), msg("a8", "assistant", shared)]
+    const span = {
+      fromId,
+      toId,
+      anchorId: undefined,
+      key: streakKey(shared),
+      length: 3,
+      truncated: false,
+    }
+    const crop = cropMessagesForStreak(messages, span)
+    expect(crop.kept).toEqual(messages)
+    expect(crop.omitted).toEqual([])
+    expect(crop.remainingSimilar).toBe(0)
+    expect(crop.omittedParts).toBe(0)
+    expect(applyPersistedCrops(messages, [span])).toEqual({ kept: messages, omitted: [] })
+  })
+
   test("omits only the span assistants and keeps anchor", () => {
     const shared = [reasoning("same"), tool("edit", { file_path: "a.ts" })]
     const messages = [
@@ -200,11 +244,7 @@ describe("cropMessagesForStreak", () => {
         text("改 AssistantRow"),
         tool("edit", { file_path: "AssistantRow.tsx", new_string: "B" }),
       ]),
-      msg("a3", "assistant", [
-        reasoning(thinking),
-        text("跑测试"),
-        tool("bash", { command: "bun test" }),
-      ]),
+      msg("a3", "assistant", [reasoning(thinking), text("跑测试"), tool("bash", { command: "bun test" })]),
     ]
     const span = detectStreak(
       [
@@ -222,7 +262,7 @@ describe("cropMessagesForStreak", () => {
     expect(crop.kept.map((m) => m.info.id)).toEqual(["u0", "a0"])
   })
 
-  test("does not omit non-assistant messages inside id range", () => {
+  test("does not omit non-assistant messages inside the message span", () => {
     const shared = [reasoning("same")]
     const messages = [
       msg("u0", "user", [text("start")]),
@@ -376,6 +416,23 @@ describe("persisted crop span", () => {
     expect(applied.kept.map((m) => m.info.id)).toEqual(["u0", "u1", "u2"])
   })
 
+  test("overlapping persisted spans use positions in the original message sequence", () => {
+    const messages = [
+      userWithSpan("u0", "a9", "a4"),
+      msg("a5", "assistant", [reasoning("same")]),
+      msg("a9", "assistant", [reasoning("same")]),
+      msg("a4", "assistant", [reasoning("same")]),
+      userWithSpan("u1", "a4", "a1"),
+      msg("a1", "assistant", [reasoning("same")]),
+      msg("a6", "assistant", [reasoning("same")]),
+    ]
+    const crops = extractAllCrops(messages)
+    const applied = applyPersistedCrops(messages, crops)
+    expect(applied.omitted).toEqual(["a9", "a4", "a1"])
+    expect(applied.kept.map((message) => message.info.id)).toEqual(["u0", "a5", "u1", "a6"])
+    expect(applyPersistedCrops(messages, crops.toReversed())).toEqual(applied)
+  })
+
   test("applyPersistedCrops removes the same span every time", () => {
     const base = [
       msg("u0", "user", [text("go")]),
@@ -387,18 +444,10 @@ describe("persisted crop span", () => {
     const withNewStep = [...base, msg("a3", "assistant", [reasoning("fresh plan")])]
     const crop = { fromId: "a1", toId: "a2", key: SAME_KEY, truncated: false }
     expect(applyPersistedCrops(base, [crop]).kept.map((m) => m.info.id)).toEqual(["u0", "a0", "u1"])
-    expect(applyPersistedCrops(withNewStep, [crop]).kept.map((m) => m.info.id)).toEqual([
-      "u0",
-      "a0",
-      "u1",
-      "a3",
-    ])
+    expect(applyPersistedCrops(withNewStep, [crop]).kept.map((m) => m.info.id)).toEqual(["u0", "a0", "u1", "a3"])
   })
 
-  // Id must land inside [fromId, toId] lexicographically. "x_between" sorts
-  // after "a3" and is already dropped by the id-range check, so it never
-  // reaches the streakKey clause this test is meant to lock down.
-  test("text-only assistant inside the id range is not cropped", () => {
+  test("text-only assistant inside the message span is not cropped", () => {
     const shared = [reasoning("same plan")]
     const messages = [
       msg("u0", "user", [text("go")]),
@@ -420,7 +469,7 @@ describe("persisted crop span", () => {
     expect(crop.kept.map((m) => m.info.id)).toEqual(["u0", "a1narr"])
   })
 
-  test("applyPersistedCrops keeps empty-key assistant inside the span id range", () => {
+  test("applyPersistedCrops keeps empty-key assistant inside the message span", () => {
     const shared = [reasoning("same plan")]
     const key = streakKey(shared)
     const messages = [
@@ -431,9 +480,7 @@ describe("persisted crop span", () => {
       msg("a3", "assistant", shared),
       userWithSpan("u1", "a1", "a3", key),
     ]
-    const applied = applyPersistedCrops(messages, [
-      { fromId: "a1", toId: "a3", key, truncated: false },
-    ])
+    const applied = applyPersistedCrops(messages, [{ fromId: "a1", toId: "a3", key, truncated: false }])
     expect(applied.omitted).toEqual(["a1", "a2", "a3"])
     expect(applied.kept.map((m) => m.info.id)).toEqual(["u0", "a1narr", "u1"])
   })

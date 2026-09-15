@@ -85,6 +85,7 @@ async function getAvailableTools(agent: Agent.Info) {
         modelID: model.id,
         modelAPIID: model.api.id,
         modelFamily: model.family,
+        harnessModel: model.harness_model,
         agent,
       })
     }),
