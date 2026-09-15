@@ -18,7 +18,7 @@ F10 停止 `active_tools` 双写，新快照以 tools JSON 的完整 active 标�
 - F10 独立默认六文件（prefix、capture、compat capture、reopen、frozen refresh、compat projection）：25 pass、0 fail、182 断言；真实 warm legacy、pinned full-context MCP、structuredContent 三例：3 pass、0 fail、52 断言。
 - package typecheck 通过。早期只清前三项的较大矩阵继承 workflow 开关，属于 opt-in 补充证据，不改称默认。
 
-两项已完成独立代码复核。继承 main 后的默认六文件回归（provider error、debug CLI、harness、Runner tuple、overflow、prefix snapshot）150 pass、0 fail、459 断言、78.97 秒；package typecheck 通过。workflow 继承回归与接受 SHA CI 待确认，本地通过不等于远端完成。
+两项已完成独立代码复核。继承 main 后的默认六文件回归（provider error、debug CLI、harness、Runner tuple、overflow、prefix snapshot）150 pass、0 fail、459 断言、78.97 秒；package typecheck 通过。workflow opt-in 四文件继承回归 44 pass、0 skip、262 断言、65.00 秒自然退出。接受 SHA CI 待确认，本地通过不等于远端完成。
 
 ## 七项归属
 
