@@ -1126,10 +1126,11 @@ files remain byte-identical to the accepted main correction.
   agents can bypass it. Provider conversion or later `_noop` insertion can change
   the wire shape. No exact provider-token or universal request-fit guarantee is
   claimed.
-  The generic truncation helper can exceed an unusually tiny requested budget
-  when the omission marker itself is longer; wrappers are additional bytes.
-  Normal fixed 50 KiB content caps are not a proof of a strict total wire bound
-  for arbitrary helper arguments.
+  UTF-8 truncation now includes its omission marker and separator within a
+  positive requested byte budget, falling back to a bounded prefix when the
+  marker itself cannot fit. Actor state also respects tiny positive token
+  budgets. Wrappers remain additional bytes; content caps are not a strict
+  total wire bound.
 
 - Base: inherited main behavior
   `37bbc8229ca70a92b5eaaa7bafd725d070f3f271` retains FD-002 instruction
@@ -1145,8 +1146,10 @@ files remain byte-identical to the accepted main correction.
   judge fields, and actor state use explicit UTF-8/character caps and
   serialization helpers. This is not a universal non-throwing guarantee:
   `safeStringifySimple` can throw on BigInt; `safeStringify` can throw from
-  getters or `toJSON` even with BigInt conversion. Only the judge's
-  `safeStringifyNoThrow` path catches those serialization errors. HTTP title text, image, and part validation
+  getters or `toJSON` even with BigInt conversion. The judge uses
+  `safeStringifyNoThrow`. Request preflight separately catches descriptor or
+  request-estimate serialization failure and terminates that request before
+  dispatch/recovery; earlier replay helpers are not globally made non-throwing. HTTP title text, image, and part validation
   retains its existing limits; system-tail catalogs remain bounded at 50 KiB.
   Historical capped v2 directories migrate only after strict generated-part
   recognition, preserving loaded skill bodies and ordinary text. Stable `{current_session_id}` memory instructions
@@ -1154,10 +1157,12 @@ files remain byte-identical to the accepted main correction.
   Request preflight accounts for system/messages, treats current-turn context
   as unshrinkable, includes only active tool schemas, and uses the inherited
   effective window, including `MIMOCODE_COMPACTION_MAX_CONTEXT` and the
-  upstream ratio trigger. Tool-schema serialization is capped at 80 KiB only
-  for estimation; dispatch does not impose that same cap. Oversized active
-  schemas can therefore be undercounted. This is an estimator limitation, not
-  evidence that every dispatched request fits the provider window.
+  upstream ratio trigger. The estimator serializes complete active tool
+  schemas with JSON.stringify; the former 80 KiB estimation-only cutoff is
+  removed. Repeated object references are counted as serialized occurrences.
+  An unserializable request yields a terminal preflight error, with no dispatch
+  or compaction retry. The estimate remains heuristic rather than an exact
+  provider token count or a guarantee that every request fits.
   Preflight compares the estimate directly with that
   trigger, without its former additional 5K/10% advance. Estimation can still
   observe a larger current request than the previous provider usage record;
@@ -1218,12 +1223,12 @@ files remain byte-identical to the accepted main correction.
   `packages/opencode/src/session/llm-request-prefix.ts`,
   `packages/opencode/src/session/session.sql.ts`, and
   `packages/opencode/migration/20260901000001_session_prefix_active_tools/migration.sql`.
-  New snapshots already encode per-tool `active` in shared JSON. The separate
-  legacy column remains for old rows, including an explicit empty mask; it is
-  migration compatibility, not a second independent permission policy. Preserve
-  old-row reads when evaluating removal of new-row dual writes. The additional
-  two-argument `restoreTools` filter has only test callers in the current tree;
-  production uses the full stored pool and separately selects advertised tools.
+  New pin/rotate writes encode per-tool `active` only in shared JSON. The
+  separate nullable legacy column and migration remain for old/mixed rows,
+  including an explicit empty mask. Complete JSON flags take precedence over
+  stale column values. The unused two-argument `restoreTools` filter is removed;
+  production retains the full stored executable pool and separately selects
+  advertised tools. Independent MCP membership/hash binding is unchanged.
 - Test surfaces: inbox rendering, request classification, instruction, MaxMode,
   message replay, overflow, prompt-effect, actor, checkpoint coverage,
   checkpoint tail, context usage, select-messages, revert, safe-stringify, and
