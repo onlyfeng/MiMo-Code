@@ -10,6 +10,7 @@ main 继续承载共享正确性修正；compat 的产品保证和环境适配�
 - 起始 main：`370d12295f4c4628e10012ae46f3bcb454a5b587`；compat：`49dce5816792e95050cd64561080d3257b714b7f`。
 - Inbox 实现：`74d4bfb6008071fca87c245c7791530660d64876`，经 [PR #134](https://github.com/onlyfeng/MiMo-Code/pull/134) 接受为 main `d11a9652981e7b5953584205474249775ee54236`。
 - 本批测试/CI：`b23c278e51ab0cc34c47c2d20406d69e57d24f2f`；继承已接受 Inbox 后的集成源码/测试：`a9e4458e62632d65ccdef38152e757730ac102db`。
+- PR #136 复审后的测试源码：`5165307c8a97c448de252a33b9eb2a1feb393545`，为新增插件 child 设置明确的 15 秒测试预算，25 秒进程 watchdog 和 30 秒 wrapper 预算保持原值。
 - 本批新增两个测试 wrapper、两个子进程夹具和共享 Windows job；没有插件、MCP 或平台生产实现改动。
 
 | ID | 能力及归属 | main 结果 | dev/compat 处理与证据归属 |
@@ -58,8 +59,8 @@ verifier 哈希、client、redirect URI 和 resource。错误 state 被拒绝且
 绑定地址确实属于当前本机。没有扫描网段或连接未知服务，没有读取用户认证配置，
 没有启动用户浏览器。凭据、code、token、工具返回值均为合成值，报告不记录实际接口地址。
 
-本次证明具体实验环境的协议链与私网 HTTP 连通。没有指定企业 IdP、代理、DNS/TLS
-部署或用户私有 MCP，因此不声称这些互操作路径通过。取消证据限定为 `removeAuth`
+用户明确选择本机隔离服务作为本轮私网/OAuth 验收范围。本次证明该实验环境的协议链
+与私网 HTTP 连通；企业 IdP、代理、DNS/TLS 部署及企业 MCP 不在本轮范围。取消证据限定为 `removeAuth`
 的 pending callback 终态，不泛称任意 token exchange fiber 中断。DC-NET-002 的
 compat 私网承诺保留；共享 MCP 生产源码没有分叉。
 
@@ -112,8 +113,16 @@ runtime_clean bun typecheck
 | M370 + 原始 MCP 夹具 | Loopback 1 pass；自有私网接口 1 pass；新入口加五个旧文件 48 pass / 163 assertions |
 | b23 测试/CI 提交 | 三个纯 lint 警告收敛后，新 wrapper 组合 4 pass / 8 assertions，26.74 秒；focused lint 0 warnings / 0 errors |
 | a9e 集成已接受 Inbox | 新 wrapper 组合 4 pass / 0 fail / 8 assertions，30.59 秒；同一私网入口复验 exit 0；包 typecheck exit 0 |
+| 516 复审后的插件测试 | 三个 plugin wrapper 3 pass / 0 fail / 6 assertions，46.93 秒；包 typecheck exit 0。只调整新增 child 的测试预算，未改变生产 deadline |
 
 wrapper 计数只汇总子进程退出和完成回执；具体应用及协议断言在 child 内执行，
 不将这些计数与历史矩阵相加伪装成一次全新运行。早期夹具 API/观察错误没有被记为
 生产缺陷。上表是源码运行证据；fork PR 审核、合并后准确 SHA 的 CI、远端 tip 与
 main → compat 祖先关系属于独立发布验收，记录在相应 PR 与 compat 当前登记中。
+
+PR #136 的 P2 指出新启动的 Bun test 不继承 wrapper 的预算。实际 compat 候选
+`289f63163e71a0c058ece11ff16755efeb1c6879` 的复验中，三个 plugin child 均触发
+默认 5 秒上限，MCP child 通过；这证实了测试运行器的预算缺口。修正将 child
+限定为 15 秒，保留外层终止与清理余量，不放宽已有测试或应用时限。
+同 PR 的首轮 stdio job 因固定依赖下载返回 HTTP 504 而未执行测试，属于独立安装失败；
+同源成功运行的 stdio JUnit 为 6 pass / 0 fail / 20 assertions，未修改 stdio 代码。
