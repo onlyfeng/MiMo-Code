@@ -83,7 +83,7 @@ _Cross-task facts that survive across sessions. Promoted from session checkpoint
 
 /**
  * Section budgets for checkpoint.md (token estimates per section).
- * Total ~11K, well under the 40K tail max.
+ * Total ~11K, well under the 40K optional tail budget.
  */
 export const CHECKPOINT_SECTION_BUDGETS: Record<string, number> = {
   "§1 Active intent": 500,
