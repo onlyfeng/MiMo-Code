@@ -6,6 +6,7 @@ import * as path from "path"
 import { Session } from "../../src/session"
 import { Instance } from "../../src/project/instance"
 import { Global } from "../../src/global"
+import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { Worktree } from "../../src/worktree"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -20,7 +21,6 @@ afterEach(async () => {
 })
 
 const it = testEffect(makeLayer())
-const deadline = it.live.skip
 
 const fileExists = (p: string) =>
   fsp
@@ -194,13 +194,7 @@ describe("WorkflowRuntime worktree isolation", () => {
     120_000,
   )
 
-  // The workflow and reclamation assertions finish on both Darwin and Linux,
-  // but this composition can stall afterward while finalizing the test server /
-  // child Instance scope. Runtime and sandbox deadline behavior remains covered
-  // in their dedicated suites, while the adjacent cancel and per-agent timeout
-  // cases cover in-flight worktree reclamation. Quarantine only this composition
-  // until the fixture disposer is fixed independently of this upstream sync.
-  deadline("a deadline-fired run reclaims the in-flight isolated agent's worktree", () =>
+  it.live("a deadline-fired run reclaims the in-flight isolated agent's worktree", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ dir, llm }) {
         const runtime = yield* WorkflowRuntime.Service
@@ -212,6 +206,16 @@ describe("WorkflowRuntime worktree isolation", () => {
         yield* llm.hang // the isolated agent hangs → run will hit the deadline
         yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
         const root = path.join(Global.Path.data, "worktree", Instance.project.id)
+        const disposed = new Set<string>()
+        const onDisposed = (event: GlobalEvent) => {
+          if (event.payload.type === "server.instance.disposed" && event.directory) disposed.add(event.directory)
+        }
+        GlobalBus.on("event", onDisposed)
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            GlobalBus.off("event", onDisposed)
+          }),
+        )
         const script = [
           `export const meta = { name: "t", description: "d" }`,
           `return await agent("x", { isolation: "worktree" })`,
@@ -221,17 +225,31 @@ describe("WorkflowRuntime worktree isolation", () => {
           sessionID: parent.id,
           parentActorID: "main",
           model: ref,
-          scriptDeadlineMs: 2000,
+          // The deadline must cover a live request after worktree bootstrap.
+          // A shorter budget can expire before the queued hang is consumed.
+          scriptDeadlineMs: 10_000,
         })
+        yield* llm.wait(1).pipe(Effect.timeout(8000))
+        expect(yield* llm.pending).toBe(0)
+        const worktrees = yield* Effect.promise(() => fsp.readdir(root))
+        expect(worktrees).toHaveLength(1)
+        const directory = path.join(root, worktrees[0])
+        expect(yield* Effect.promise(() => Instance.peek(directory))).toBeDefined()
+        expect((yield* runtime.status({ runID })).status).toBe("running")
+        expect(disposed.has(directory)).toBe(false)
         const outcome = yield* runtime.wait({ runID })
-        expect(["failed", "cancelled"]).toContain(outcome.status)
+        expect(outcome).toEqual({ status: "failed", error: "workflow script deadline exceeded" })
         yield* Effect.gen(function* () {
-          while ((yield* Effect.promise(() => fsp.readdir(root).catch(() => [] as string[]))).length) {
+          while ((yield* Effect.promise(() => fsp.readdir(root))).length) {
             yield* Effect.sleep(50)
           }
         }).pipe(Effect.timeout(10_000))
-        const left = yield* Effect.promise(() => fsp.readdir(root).catch(() => [] as string[]))
+        const left = yield* Effect.promise(() => fsp.readdir(root))
         expect(left.length).toBe(0)
+        // This event is emitted only after all Instance disposers settle. An
+        // empty directory alone also passes after disposeDirectory's soft timeout.
+        expect(disposed.has(directory)).toBe(true)
+        expect(yield* Effect.promise(() => Instance.peek(directory))).toBeUndefined()
       }),
       { git: true, config: providerCfg },
     ),
