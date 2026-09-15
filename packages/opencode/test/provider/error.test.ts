@@ -60,6 +60,42 @@ describe("provider error message", () => {
     expect(parsed.message).toBe("Request blocked by content moderation")
   })
 
+  test.each(["mimo-desktop", "MiMo-DeSkToP", "XIAOMI", "MiMo", "xiaomi-test", "XIAOMI-TEST"])(
+    "maps moderation and risk-control errors for gateway alias %s",
+    (provider) => {
+      for (const [code, message] of [
+        ["421", "Request blocked by content moderation"],
+        ["441", "Request blocked by risk control"],
+      ]) {
+        const parsed = parseAPICallError({
+          providerID: ProviderID.make(provider),
+          error: apiError({
+            message: "Bad Request",
+            statusCode: 400,
+            responseBody: JSON.stringify({ error: { code, message: "Gateway blocked", param: "test detail" } }),
+          }),
+        })
+        expect(parsed.type).toBe("api_error")
+        expect(parsed.message).toBe(`${message}: test detail`)
+      }
+    },
+  )
+
+  test.each(["example", "mimo-example", "prefix-xiaomi", "xiaomitest"])(
+    "preserves non-gateway error handling for %s",
+    (provider) => {
+      const parsed = parseAPICallError({
+        providerID: ProviderID.make(provider),
+        error: apiError({
+          message: "Original provider error",
+          statusCode: 400,
+          responseBody: JSON.stringify({ error: { code: "421", message: "Gateway blocked", param: "test detail" } }),
+        }),
+      })
+      expect(parsed.message).toBe("Original provider error")
+    },
+  )
+
   test("appends param detail when message is generic (Param Incorrect)", () => {
     const parsed = parseAPICallError({
       providerID: xiaomi,
