@@ -62,7 +62,7 @@ F09 删除仅供旧测试调用的 Actor wake 入口及其专属上下文注入�
 
 F11 取消根生成脚本隐式全仓格式化，保留 SDK 及 OpenAPI 自身格式化。隔离探针执行真实脚本并替换生成子命令，前后成功码均 0、任一步失败码均 1，SDK→OpenAPI 顺序、cwd 和重定向不变。`0.5/0.7` 与 upstream `0.50/0.70` 等价，保留 formatter 规范；default prompt 也保留无尾空格写法。这些机械差异没有额外行为待同步。
 
-冻结 catalog 的五轮真实请求测试还移除了无关 npm 安装等待：通过既有 `prepareConfigDependencies` 准备隔离的配置目录，保留真实插件、Git 与五次模型请求。原默认 5 秒先在依赖等待处零断言失败；准备依赖后推进到 13 个断言仍超时。有界阶段观察确认测试体约 6.54 秒、15 个断言自然完成，因此仅本用例使用 15 秒测试壳，生产时限不变。`df02208e` 只调整该测试。root 在最终运行时/测试快照 `37b97a7b` 无观察器运行 SDK samples 与 frozen catalog 两文件，2 pass、1139 断言、14.44 秒自然退出；SDK 保留原 child 30 秒、test 45 秒限制，catalog 使用明确的 15 秒测试壳。
+冻结 catalog 的五轮真实请求测试还移除了无关 npm 安装等待：通过既有 `prepareConfigDependencies` 准备隔离的配置目录，保留真实插件、Git 与五次模型请求。原默认 5 秒先在依赖等待处零断言失败；准备依赖后推进到 13 个断言仍超时。有界阶段观察确认测试体约 6.54 秒、15 个断言自然完成，因此仅本用例使用 15 秒测试壳，生产时限不变。`df02208e` 只调整该测试。root 在当时完整运行时/测试快照 `37b97a7b` 无观察器运行 SDK samples 与 frozen catalog 两文件，2 pass、1139 断言、14.44 秒自然退出；SDK 保留原 child 30 秒、test 45 秒限制，catalog 使用明确的 15 秒测试壳。
 
 ### 共享消息时序
 
@@ -86,6 +86,8 @@ F07 生产实现由 `7fd795db` 整合为 `79df88f0`，额外 gate 测试由 `f57
 真实 MCP gate 覆盖同 actor 成功/失败、其他 actor、写入后清理和中断后连续两次压缩。补充测试在删除 post-insert 清理和 admission 完成通知的受控反例中分别捕获残留消息与 join 超时；反例源码已恢复。作者最终默认 admission 矩阵 11 pass、96 断言、18.02 秒，package typecheck 通过。root 在 `313ca1dd` 的默认五文件整合矩阵为 183 pass、2 个既有 skip、892 断言、197.63 秒自然退出，包含完整 prompt-effect、projection、message filter、revert 和 loop-streak。两个 skip 为 upstream 已有的 Bash 取消与排队 shell 取消用例，未新增 skip。
 
 `c6e30d0b` 同步配置 schema、内置指南及生成 SDK/OpenAPI，明确必留新请求不受可选预算截断；标准生成正常完成，变动限定为描述。随后 SDK/OpenAPI 两文件验证 5 pass、1154 断言，opencode、sdk、shared 三包 typecheck 通过。运行与生成描述分开记录，没有把此前源码测试移称为描述改动后的整套重跑。
+
+四个串行 Actor 的 approval 集成用例在 compat `c2607746` 的完整 prompt 矩阵和原 5 秒定向运行均超时。单例阶段观察确认四个 child 全部成功、测试体 7.33 秒、17 断言，随后无观察器通过。`8d5ac893` 只为该用例明确 15 秒壳，保留 subagent/peer × 继承/不继承的四组真实工具/模型执行及全部断言，不调整整份 prompt 的默认预算。root 在 main 独立定向验证 1 pass、17 断言、11.87 秒自然退出。最终 runtime/test 引用更新到 `8d5ac893cafafa529abf0644c6d68de615374d93`。
 
 ### 协议归属决定
 
