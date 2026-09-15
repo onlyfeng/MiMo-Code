@@ -18,8 +18,9 @@ renumbered to close gaps.
 - Upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
 - Prior reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
 - Main behavior (runtime/tests): `4eacc84dccf83c22f533c35bea282d4c5a38cacd`
-- Bundled guidance content: `118337857661a3fde59cd0406a598a4aa9d79688`
+- Bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
+- Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
@@ -42,17 +43,17 @@ not change their implementation. The preceding review is retained in the
 
 ## Sync index
 
-| ID     | Watch surfaces                                                        | Upstream relationship                                                                                             | Required decision                                                                     |
-| ------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| FD-001 | yolo, permission, Bash delete                                         | Adopts startup delete approval; rejects run-driven shared switch mutation                                         | Preserve deny precedence and live invocation isolation                               |
-| FD-002 | instruction disable parity, model requests, retry, and actor identity | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries               | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement |
+| ID     | Watch surfaces                                                                        | Upstream relationship                                                                                                                           | Required decision                                                                                                                                                         |
+| ------ | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FD-001 | yolo, permission, Bash delete                                                         | Adopts startup delete approval; rejects run-driven shared switch mutation                                                                       | Preserve deny precedence and live invocation isolation                                                                                                                    |
+| FD-002 | instruction disable parity, model requests, retry, and actor identity                 | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries                                             | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement                                                                                     |
 | FD-004 | `/v1` capability route, `llm-server` CLI, listener advertisement, TUI worker listener | Adopts upstream's capability route whole; retired the fork model API with its admission, deadline and authentication-before-bootstrap hardening | Keep the operator-password bind guard, `advertiseDirectory` and the three corrections; do not restore retired hardening — recorded behaviours stay as upstream ships them |
-| FD-005 | model identity, prompt, discovery, tools, retry                       | Adapts inconsistent upstream classification                                                                       | Preserve one resolved identity                                                        |
-| FD-006 | compact Codex declarations and nested execution                       | Adopts compact registration and full authorized nested Actor/interactive composition                                     | Preserve request authority, frozen schemas, media and size/unit boundaries            |
-| FD-009 | actor/checkpoint context capture, retry, resume                       | Rejects live-context fallback                                                                                     | Fail before child execution and reuse frozen membership                               |
-| FD-010 | compaction summary acceptance                                          | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                        | Preserve rollback for every other failure shape and for a content-filtered step; empty steps are FD-012 |
-| FD-011 | compaction request tool_choice                                         | Rejects upstream's `"auto"`: it permits the one event the summary processor throws on                             | Keep tool calls disabled while summary messages cannot handle them                    |
-| FD-012 | compaction retry on an empty step                                      | Extends upstream: retries once instead of rolling back on a step that produced nothing            | Keep the bound at one and the scope to genuinely empty steps                           |
+| FD-005 | model identity, prompt, discovery, tools, retry                                       | Adapts inconsistent upstream classification                                                                                                     | Preserve one resolved identity                                                                                                                                            |
+| FD-006 | compact Codex declarations and nested execution                                       | Adopts compact registration and full authorized nested Actor/interactive composition                                                            | Preserve request authority, frozen schemas, media and size/unit boundaries                                                                                                |
+| FD-009 | actor/checkpoint context capture, retry, resume                                       | Rejects live-context fallback                                                                                                                   | Fail before child execution and reuse frozen membership                                                                                                                   |
+| FD-010 | compaction summary acceptance                                                         | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                                                       | Preserve rollback for every other failure shape and for a content-filtered step; empty steps are FD-012                                                                   |
+| FD-011 | compaction request tool_choice                                                        | Rejects upstream's `"auto"`: it permits the one event the summary processor throws on                                                           | Keep tool calls disabled while summary messages cannot handle them                                                                                                        |
+| FD-012 | compaction retry on an empty step                                                     | Extends upstream: retries a genuinely empty step, once by default                                                                               | Preserve the configurable non-negative limit (default 1, 0 disables) and empty-step scope                                                                                 |
 
 ## FD-001 — run approval must not toggle shared delete state
 
@@ -131,6 +132,12 @@ not change their implementation. The preceding review is retained in the
   event/payload parity, immutable retry-set, and unknown-identity fail-closed
   boundaries; upstream's actor-scoped `replace-agent` correction is adapted
   rather than copied because checkpoint ownership intentionally fails open.
+- Provider/payload parity correction: GitLab workflow transport and
+  `session.llm.request` telemetry consume the final `providerSystem`, including
+  the per-turn `user.system` append/replace-agent tail, rather than the frozen
+  `system` portion alone. The final provider payload and telemetry must agree;
+  `test/session/llm-gitlab-workflow-system.test.ts` covers this separate FD-002
+  carrier. This existing code delta was made explicit by the 2026-09-15 audit.
 - POLICY-04 carrier review: the authorized skill catalog now occupies the
   frozen system tail after environment/format and before instruction files.
   FC-005 owns its schema-3 snapshot and legacy-pair migration; this placement
@@ -174,6 +181,8 @@ not change their implementation. The preceding review is retained in the
   HTTP/SDK/tool publication and actual provider/transaction regressions are
   recorded in the shared history; no cross-restart recovery is introduced.
 
+<a id="fd-004--ordinary-instances-expose-no-implicit-openai-compatible-listener"></a>
+
 ## FD-004 — upstream's capability route, adopted whole
 
 - Status: active (reduced to near-nothing 2026-09-14)
@@ -186,8 +195,8 @@ not change their implementation. The preceding review is retained in the
   `protocol.ts` that already accepts `image_url` and `input_audio`. Checked
   rather than assumed: those modules were a second implementation of what
   upstream ships.
-- Observable contract: identical to upstream apart from the two corrections
-  below. Byte-for-byte upstream: `src/llm-server/{protocol,tokens}.ts`,
+- Observable contract: aligned to upstream with the three corrections and the
+  retained listener/shared boundaries listed below. Byte-for-byte upstream: `src/llm-server/{protocol,tokens}.ts`,
   `routes/instance/{capability,middleware,index}.ts`,
   `routes/instance/httpapi/server.ts`, `cli/cmd/{serve,acp,web}.ts`,
   `config/llm-server.ts`, `util/self.ts`, `node.ts`.
@@ -335,8 +344,9 @@ not change their implementation. The preceding review is retained in the
     non-expiring tokens accumulate without a ceiling; the address registry trusts
     pid liveness rather than probing the endpoint; a non-terminal finish reason
     is reported as `stop`.
-  Two were taken rather than recorded, because each is one line and each was
-  silently wrong, and both now have a mutation-checked test:
+    The initial pass took two one-line corrections, each with a mutation-checked
+    test, rather than merely recording them. The subsequent CLI `revoke` guard
+    listed above is the third retained correction and is not a one-line change:
   - `model.options` is merged at upstream's own precedence point, so a model
     configured in `mimocode.json` no longer behaves differently over `/v1` than
     in a session.
@@ -350,6 +360,7 @@ not change their implementation. The preceding review is retained in the
   needs a provider that echoes credential material into an error body, and
   redacting costs every legitimate caller the reason their request failed.
   Everything else above stays as recorded.
+
 - Watch surfaces: `packages/opencode/src/server/routes/instance/capability.ts`,
   `packages/opencode/src/server/middleware.ts`,
   `packages/opencode/src/server/routes/instance/middleware.ts`,
@@ -362,9 +373,13 @@ not change their implementation. The preceding review is retained in the
   asks cases that depend on the InstanceMiddleware containment check to opt in
   with `root: "cwd"`, where upstream's preload roots every fixture under cwd.
   `implicit-listener.test.ts` carries that opt-in with a comment saying why.
-- Tests/evidence: upstream's `test/llm-server/`, `test/cli/cmd/serve-advertise.test.ts`,
-  `test/util/self.test.ts` and `test/flag/dynamic-system-prompt-flag.test.ts` are
-  inherited verbatim. The fork keeps `test/cli/tui/worker-listener.test.ts` and
+- Tests/evidence: upstream's capability tests are inherited with explicit fork
+  additions/adaptations: `test/llm-server/streaming.test.ts` checks model.options
+  precedence, `test/cli/cmd/serve-advertise.test.ts` checks IPv6 advertisement,
+  and `test/llm-server/implicit-listener.test.ts` opts into the cwd-root fixture.
+  The directory and these files are not byte-identical to upstream.
+  `test/util/self.test.ts` and `test/flag/dynamic-system-prompt-flag.test.ts`
+  remain inherited verbatim. The fork keeps `test/cli/tui/worker-listener.test.ts` and
   `test/fixture/tui-worker-default-child.ts` for the advertise-directory delta.
 - Upstream relationship: the fork tracks upstream on this surface.
 
@@ -412,7 +427,7 @@ not change their implementation. The preceding review is retained in the
   a multi-value resolver and routed PTC identities to `sdk.responses`. Adopted
   upstream's shape and retired that routing with `isMimoModel`,
   `usesMimoResponsesApi`, their tests, and the `xiaomi transport selection uses
-  the complete resolved model identity` case. FD-005 keeps only identity
+the complete resolved model identity` case. FD-005 keeps only identity
   resolution for prompt, discovery, toolset and retry policy; it no longer owns
   API transport. Verified: `test/provider/` + `test/tool/gpt.test.ts` 581 pass.
 - Upstream relationship: adapts the classification introduced at
@@ -491,6 +506,14 @@ not change their implementation. The preceding review is retained in the
 - Retirement condition: the provider layer exposes one immutable model-mode
   value consumed unchanged by every prompt, discovery, registry, capture, and
   dispatch surface, with alias-conflict and GPT-4 regressions.
+
+- 2026-09-15 audit gaps and cleanup candidates: `cli/cmd/debug/agent.ts`
+  passes model ID, API ID and family to the registry but omits `harnessModel`,
+  unlike actual requests and the experimental tool-list route. An opaque trusted
+  alias can therefore produce a different diagnostic tool list. This is an open
+  carrier defect, not an exception granting a new harness policy. The unused
+  fourth `CustomModelLoader` model argument also remains after the MiMo transport
+  retirement; removing it is a cleanup candidate, not an unadopted feature.
 
 ## FD-006 — `exec` is a composition tool, not an authority gateway
 
@@ -777,7 +800,7 @@ not change their implementation. The preceding review is retained in the
   Every other failure shape keeps upstream's rollback exactly: provider
   overflow, repeated text, and a blocked or errored step. A step that produced
   nothing at all is NOT decided here — it is retried first under
-  [FD-012](#fd-012--a-compaction-step-that-produced-nothing-is-retried-once) and
+  [FD-012](#fd-012--a-compaction-step-that-produced-nothing-is-retried-once-by-default) and
   reaches this rollback only once that retry is exhausted. The fallback never
   fabricates a summary — it only promotes content the model actually produced.
 - Finish-reason boundary (a rejection list, so each entry is a recorded
@@ -806,6 +829,7 @@ not change their implementation. The preceding review is retained in the
   throws in the processor and arrives as `"stop"`. `stop`, `length` and `other`
   are adopted: truncated or abnormally-finished is not suppressed, and a partial
   summary beats losing the session.
+
 - Why nothing upstream catches this: `classify.ts` short-circuits on
   `assistant.summary` before it inspects the finish reason, so every safety
   branch the conversation path relies on is skipped for a compaction message by
@@ -833,7 +857,7 @@ not change their implementation. The preceding review is retained in the
   (same rejection — the guard is not confined to the no-text branch), and
   output-limited (`length` stays adopted, so the filter guard cannot quietly
   widen to cover truncation). The
-  The empty-step cases belong to [FD-012](#fd-012--a-compaction-step-that-produced-nothing-is-retried-once).
+  The empty-step cases belong to [FD-012](#fd-012--a-compaction-step-that-produced-nothing-is-retried-once-by-default).
 - Retirement condition: upstream gives compaction its own retry or an equivalent
   recovery for a summary step that carries reasoning but no text.
 
@@ -869,7 +893,7 @@ not change their implementation. The preceding review is retained in the
   or fork), at which point `"auto"` can be adopted and the guard assertion
   relaxed to inherit the conversation's `tool_choice`.
 
-## FD-012 — a compaction step that produced nothing is retried once
+## FD-012 — a compaction step that produced nothing is retried once by default
 
 - Status: active
 - Canonical owner: fork `main` compaction retry bound
@@ -883,7 +907,7 @@ not change their implementation. The preceding review is retained in the
   Every other shape is either already recoverable — think-only, handled by
   [FD-010](#fd-010--a-think-only-compaction-step-is-recovered-not-discarded) —
   or deterministic: a content filter refilters, an over-cap request is still
-  over, a blocked or errored step stays blocked. The bound is deliberately
+  over, a blocked or errored step stays blocked. The default bound is deliberately
   tighter than the conversation path's two, because a compaction retry re-sends
   the ENTIRE transcript: one attempt separates a one-off from a systematic
   cause, and a second only buys the same answer at another full-transcript cost.

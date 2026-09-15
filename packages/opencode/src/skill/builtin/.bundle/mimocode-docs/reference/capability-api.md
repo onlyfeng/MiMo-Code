@@ -14,18 +14,21 @@ The surface serves chat models.
 
 ## Where the endpoint is
 
-Every session binds a loopback listener on a random port at startup, so the endpoints
-exist without anyone asking for one. Two consequences:
+The TUI attempts to bind a loopback listener on a random port at startup. If an implicit
+listener cannot start, this fork warns and can continue through its internal RPC path;
+there is then no usable HTTP endpoint from that attempt. Explicit listener startup failure
+stops startup. When the listener starts, two consequences apply:
 
 - **The port changes every session** and belongs to that process — it is gone when the
   session exits. Never cache a base URL across runs.
 - **A listener nobody asked for is credential-closed.** It generates a password kept in
   memory (never printed, never put in the environment), so `/session`, `/file`, `/pty` and
   every other instance route require HTTP Basic auth that only that process knows. `/v1`
-  is carved out: a minted token gets through. Containment also stays in force, so an
-  implicit listener serves exactly one project.
+  is carved out: the capability route validates its scoped token separately. Without an
+  operator-supplied password, directory containment applies relative to the server's cwd,
+  including permitted descendant directories and the fixed Orchestrator exception.
 
-Pass a network flag when a *fixed* port is wanted instead:
+Pass a network flag when a _fixed_ port is wanted instead:
 
 ```bash
 mimo --port 4096                 # TUI plus a listener on a port you chose
@@ -38,8 +41,13 @@ operator has not set one, and that value is handed only to the TUI that opened i
 instance — has to reach the same server, since attach can only take a credential from its
 own option or the environment.
 
-Launch from the project directory either way: the instance directory is the process's cwd,
-and a request naming a directory outside it is refused with 403.
+Use the directory actually served by the process when issuing a token. This fork's TUI
+worker advertises that startup directory explicitly; it need not equal the parent cwd.
+Without an operator-supplied password, requests must satisfy the containment checks above.
+An operator-supplied `MIMOCODE_SERVER_PASSWORD` permits upstream's broader directory
+selection; it is not an unconditional outside-cwd 403 policy. Capability tokens remain
+bound to the request's resolved directory and are verified inside the route after instance
+bootstrap.
 
 Each serving process advertises itself at
 `<state>/llm-server/<sha1 of the resolved directory>/server-<pid>.json` — one file per
@@ -81,9 +89,9 @@ are accepted too. These routes **always** authenticate with a minted token, inde
 
 Model ids are always `providerID/modelID` — pass them through verbatim, never split.
 
-| Endpoint | Shape |
-| --- | --- |
-| `GET /v1/models` | Lists the models this token can reach |
+| Endpoint                    | Shape                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------- |
+| `GET /v1/models`            | Lists the models this token can reach                                                       |
 | `POST /v1/chat/completions` | OpenAI chat, incl. `input_audio` content parts; `stream:true` yields SSE ending in `[DONE]` |
 
 Fields that cannot be honoured are **refused with 400 rather than ignored**, so a caller never
@@ -94,10 +102,10 @@ so a stock OpenAI client works by changing `base_url` alone. Provider-native kno
 
 ## Error codes a consumer must distinguish
 
-| Status | `error.code` | Meaning |
-| --- | --- | --- |
-| 401 | `expired_api_key` | Reissue and retry against the same base URL |
-| 401 | `invalid_api_key` | Missing, invalid, or revoked — stop retrying |
-| 400 | — | The request asked for something unsupported |
-| 404 | `model_not_found` | No such model in this instance |
-| 502 | — | The upstream provider failed, not MiMoCode |
+| Status | `error.code`      | Meaning                                      |
+| ------ | ----------------- | -------------------------------------------- |
+| 401    | `expired_api_key` | Reissue and retry against the same base URL  |
+| 401    | `invalid_api_key` | Missing, invalid, or revoked — stop retrying |
+| 400    | —                 | The request asked for something unsupported  |
+| 404    | `model_not_found` | No such model in this instance               |
+| 502    | —                 | The upstream provider failed, not MiMoCode   |

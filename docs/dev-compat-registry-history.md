@@ -3890,3 +3890,16 @@ The first three runtime groups total 390 passes and 1,849 assertions. The C03 gr
 Main acceptance precedes this compat publication. The resulting PR head and actual merged compat SHA require their own CI; final remote-tip ancestry and exact-SHA CI are verified after publication and reported with the operation result.
 
 Main PR #124 passed all eight checks at `5f06049e`: [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/34889363962), [typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/34889363859), [lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/34889363855). Its latest automated review completed without new findings. The older tool self-cancellation thread is technically disproved by real frozen-source calls; UI resolution is separate. Direct Effect hook cancellation was independently reproduced and corrected.
+
+## 2026-09-15 accepted publication and documentation closure
+
+Compat PR #125 merged at `90abf6e447d7a5e5b405aba301bf1a951f469bf6`, inheriting accepted main `648f7cdf100b30ff046db7518d8f832473b61481`. Exact merged-SHA [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/34891295940), [typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/34891295906) and [lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/34891295928) succeeded. Remote tips and `5198ff54 -> main -> compat` ancestry were rechecked on 2026-09-15. This closes the publication gates of the preceding final-source entry.
+
+All seven capability results in that entry remain valid; runtime/test behavior stays `1a072e7aa3b142fc9804974bd8142729817c92db`. Shared documentation corrects FD-004 correction counting, FD-012 configurable retry wording and FC-008's still-quarantined workflow deadline/disposer case. The two actor cases are enabled. No runtime, SDK, lockfile or reviewed upstream baseline changes are part of this documentation closure. Later documentation commits need their own publication/CI evidence and do not inherit the accepted runtime merge's CI.
+
+## 2026-09-15 complete compatibility difference audit
+
+- Reconciled every one of the 107 main-to-compat file comparisons at main `648f7cdf100b30ff046db7518d8f832473b61481` and compat `90abf6e447d7a5e5b405aba301bf1a951f469bf6`. The [shared report](fork-difference-audit-2026-09-15.md) contains the seven owner results, ranked consolidation proposals and evidence limits.
+- DC-CONTEXT-001 now distinguishes chronology/atomic message creation, structured-output replay, request estimation, legacy tool-mask storage and checkpoint coverage. Documentation no longer promises universal non-throwing serialization or treats shared CompactionPart.projection as a new compat API.
+- DC-NET-001's retired upload contract and DC-NET-002's mock-only test boundary are explicit. Bundled guidance inherits main content `3fa41ad98ac15668b2b3be899767c6498772ad4b`; runtime/test behavior stays `1a072e7aa3b142fc9804974bd8142729817c92db`.
+- This is documentation reconciliation; no suggested runtime migration, deletion, or newer upstream commit is adopted.
