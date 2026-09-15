@@ -1131,7 +1131,8 @@ files remain byte-identical to the accepted main correction.
   parts, keeps the existing 100-candidate cap and retains known coverage for PartRemoved.
   The layered red/green evidence is recorded in the implementation report.
   PR #129 is accepted at `ab81af7293ac5ea1ee219bb6aab491d4fd665307` with the same
-  complete tree; only its post-merge test/typecheck/lint results remain pending.
+  complete tree; its post-merge test/typecheck/lint runs all succeeded, as
+  recorded in the current review record above.
 
 - 2026-09-09 full sync: image normalization is inherited through the existing model transform. Keep bounded replay/error media, active-tool preflight, frozen context and chronology; adapt image fixtures to actual containers. Provider/API/schema inputs and compat SDK operations remain unchanged.
 
