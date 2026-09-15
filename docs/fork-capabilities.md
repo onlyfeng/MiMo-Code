@@ -342,13 +342,16 @@ not change their implementation. The preceding review is retained in the
   HTTP/SDK/tool publication and actual provider/transaction regressions are
   recorded in the shared history; no cross-restart recovery is introduced.
 
-- 2026-09-15 code-inventory note: production inbox turns use ActorExecution
-  and SessionPrompt. `Actor.runPersistentTurn` and its private `continueTurn`
-  path remain exported/retained for test callers only; no production caller was
-  found at the reviewed main SHA. This is retired-path cleanup debt. Preserve
-  `finishPersistentTurn` and `acquireWake`, which still participate in resume,
-  and move useful assertions to real inbox admission before deleting the old
-  testing entry.
+- 2026-09-15 retired-path cleanup: production inbox turns use ActorExecution
+  and SessionPrompt. The unused `Actor.runPersistentTurn`, private
+  `continueTurn` and sole-consumer `WakeSourceDisposal` are removed. Existing
+  `finishPersistentTurn` and `acquireWake` remain because resume uses them.
+  Ten old tests were individually mapped to actual Inbox/cancellation/lock
+  paths or explicitly retired obsolete DTO/owner-follower semantics; the
+  independent ten-case regression passed. Real continuation notifications
+  arrive through the parent Inbox without a toast. This does not reinstate the
+  deleted testing entry's notification policy. See F09 in
+  [the implementation report](audit-followups-2026-09-15.md).
 
 ## FC-002 — canonical checkpoint writer and mode-specific frozen context
 
@@ -854,14 +857,19 @@ logged`, and the peer `success`/`failure` variants of
   unchanged from main into compat, adding no runtime capability and no new
   retirement decision. Review-thread adjudication for the cleanup-scope finding
   is recorded on PR #105.
-- 2026-09-15 tooling inventory: root `script/generate.ts` currently runs the
-  repository formatter after SDK/OpenAPI generation, unlike upstream's disabled
-  final formatter call. This is a tooling-policy difference, not generated API
-  behavior; assess removing the implicit whole-repository formatting step during
-  a later focused cleanup. Generated SDK/OpenAPI differences mix actual fork
-  schema additions with refreshes of upstream source fields whose checked-in
-  upstream artifacts lag. Compare producers before attributing every artifact
-  hunk to a fork feature.
+- 2026-09-15 tooling convergence: root `script/generate.ts` keeps SDK then
+  OpenAPI generation and stops implicitly formatting the whole repository,
+  matching upstream's generation policy. Generator-local formatting and failure
+  propagation remain. JavaScript OpenAPI examples import `@mimo-ai/sdk/v2`
+  and call the generated camelCase methods, including `session.promptAsync`;
+  actual generated/published samples are checked against the client and the
+  async prompt example sends the expected HTTP path/body. Main publishes 140
+  operations; compat's extra coverage operation remains its own protocol.
+  Generated artifacts still mix actual fork schema additions with refreshes of
+  upstream source fields whose checked-in artifacts lag. Compare producers
+  before attributing every artifact hunk to a fork feature.
+  Three no-caller model API child fixtures are removed; the live TUI worker
+  default/listener tests remain. See F05/F09/F11 in the implementation report.
 - 2026-09-05 fixture review: removed `resetDatabase` and its four call sites,
   preserving local disposal and the fork project-init authorization fixture.
   Rejected incoming auth-override, fork-prefix, and failed-subtask skips: the

@@ -515,8 +515,9 @@ the complete resolved model identity` case. FD-005 keeps only identity
   trusted opaque aliases, untrusted API aliases, GPT-4/OSS/MiMo vetoes and explicit
   selectors. This closes the diagnostic carrier defect identified by the audit;
   it does not change harness policy or validate `debug --tool` execution.
-  The unused fourth `CustomModelLoader` argument remains a separate cleanup
-  candidate tracked by F09 in [the implementation report](audit-followups-2026-09-15.md).
+  The unused fourth `CustomModelLoader` argument is removed under F09 in
+  [the implementation report](audit-followups-2026-09-15.md); the closed loader
+  table has no reader of that argument and preserves its three used arguments.
 
 ## FD-006 — `exec` is a composition tool, not an authority gateway
 
