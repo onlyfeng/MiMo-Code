@@ -17,14 +17,14 @@
 | F01 | upstream 网关错误别名                         | 已集成，待发布   | 待继承               | provider/error.ts；别名、大小写、421/441与非网关隔离                      |
 | F02 | 可信模型身份传到 debug；FD-005                | 已集成，待发布   | 待继承               | debug agent真实入口、harness resolver及负向/显式模式                      |
 | F03 | workflow deadline真实执行与释放；FC-008       | 已恢复，待发布   | 待继承               | runtime-worktree、LLM进入、child Instance释放、进程自然退出               |
-| F04 | 请求估算及序列化失败策略；DC-CONTEXT-001      | 无对应预检扩展   | 正在修复             | 完整tool schema、实际prompt预检、有效工具集合及保守失败                   |
-| F05 | 通用SDK示例生成正确性；FC-008                 | 待提升           | 待继承并删除重复差异 | 生成器、OpenAPI code samples、实际v2调用；不混入compat schema             |
+| F04 | 请求估算及序列化失败策略；DC-CONTEXT-001      | 无对应预检扩展   | 本地修复，待发布     | 完整tool schema、实际prompt预检、有效工具集合及保守失败                   |
+| F05 | 通用SDK示例生成正确性；FC-008                 | 已集成，待发布   | 待继承并删除重复差异 | 生成器、OpenAPI code samples、实际v2调用；不混入compat schema             |
 | F06 | 消息时序与原子用户提交；FC-001/DC-CONTEXT-001 | 待提升           | 待以共享实现收敛     | createMessage、UTF8排序、producer、fork/revert/checkpoint及TUI消费        |
 | F07 | 并发压缩保留新请求；FC-015/DC-CONTEXT-001     | 待提升           | 待以共享实现收敛     | compaction、pending external admission、continuation前后检查              |
 | F08 | checkpoint coverage协议归属；DC-CONTEXT-001   | 评估完成，不上移 | 保留完整现有协议     | route/schema/SDK/TUI缓存；不允许只移动单边载体                            |
-| F09 | 退役入口及无调用残留；FC-001/008、FD-004/005  | 待清理           | 待继承               | 旧wake入口、三helper、loader参数、worker与Actor注释；保留resume仍使用路径 |
-| F10 | 旧工具mask存储及无用重载；DC-CONTEXT-001      | 不引入旧扩展     | 待收敛               | tools.active、旧行读取、空mask、migration和独立MCP hash                   |
-| F11 | 机械差异与生成格式化策略；FC-008/015          | 待收敛           | 待继承               | root generate与已收敛overflow/default prompt；不改运行策略                |
+| F09 | 退役入口及无调用残留；FC-001/008、FD-004/005  | 已清理，待发布   | 待继承               | 旧wake入口、三helper、loader参数、worker与Actor注释；保留resume仍使用路径 |
+| F10 | 旧工具mask存储及无用重载；DC-CONTEXT-001      | 不引入旧扩展     | 本地收敛，待发布     | tools.active、旧行读取、空mask、migration和独立MCP hash                   |
+| F11 | 机械差异与生成格式化策略；FC-008/015          | 已收敛，待发布   | 待继承               | root generate与已收敛overflow/default prompt；不改运行策略                |
 
 私网 WebFetch、每 Agent MaxMode、模型侧 full Actor 和 TUI 元数据仍按七项 DC 的现有政策保留；NET-002 的生产 MCP 实现已经共享。通用正确性上移不能顺带改变这些产品选择。
 
@@ -41,6 +41,14 @@ PR #126 初始 CI 暴露 Runner 重入测试的 5/50ms 竞争：父测试被调�
 最终 main 默认矩阵为 provider error、debug agent、harness alias、tuple key、Runner 五文件，88 pass、0 fail、335 断言、84.40 秒；package `bun typecheck` 通过。独立复核其中三文件为 37 pass、101 断言。默认验证显式清除 `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`、`MIMOCODE_CODEX_MODE`、`MIMOCODE_COMPACTION_MAX_CONTEXT`、`MIMOCODE_COMPACTION_TRIGGER_RATIO`、`MIMOCODE_DISABLE_CHECKPOINT`、`MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`，保留包 preload 的 Orchestrator、内存数据库和隔离配置。早期仅清前三项的运行继承了 workflow 开关，不能作为默认路径证据。
 
 另有本地 shard 4 同分组的 126 文件矩阵：1417 pass、20 skip、4123 断言、459.63 秒。该轮 `CI=true` 但继承 workflow 开关，是 opt-in 共享进程补充证据，不等同默认 CI。最终远端 SHA 的 CI 仍须独立确认。
+
+### SDK 与退役路径收敛
+
+F05/F09/F11 整合源码快照 `99297fa6`。SDK 示例改用 `@mimo-ai/sdk/v2` 和生成客户端的 camelCase 方法。默认两文件验证为 5 pass、1154 断言：同时检查实际生成与发布的全部 140 个 operation samples 可调用，并执行 `prompt_async` 示例核对 HTTP 方法、路径和请求体。根 `bun script/generate.ts` 在整合后完整运行两次，SDK/OpenAPI 均没有额外差异；没有引入 compat 的 coverage 或每 Agent MaxMode 字段。
+
+F09 删除仅供旧测试调用的 Actor wake 入口及其专属上下文注入，保留 resume 仍用的执行/通知路径。旧十例逐项映射至真实 Inbox 路径或明确退役旧 DTO 注入/owner-follower 结果共享语义。当前真实 continuation 向父 Inbox 通知且不发 toast，没有伪称保留已删除入口的 toast。作者默认 Actor 矩阵 143 pass、工具/worker/provider 消费者 131 pass、Inbox 24 pass、串行 main/队列 6 pass（其中两例与 Actor 组重复）；独立十目标例为 10 pass、64 断言。package typecheck 通过。main late-row 用例在并发负载下曾超时，未改源码，独立复跑和最终串行矩阵通过；保留该时序敏感性记录。
+
+F11 取消根生成脚本隐式全仓格式化，保留 SDK 及 OpenAPI 自身格式化。隔离探针执行真实脚本并替换生成子命令，前后成功码均 0、任一步失败码均 1，SDK→OpenAPI 顺序、cwd 和重定向不变。`0.5/0.7` 与 upstream `0.50/0.70` 等价，保留 formatter 规范；default prompt 也保留无尾空格写法。这些机械差异没有额外行为待同步。
 
 ### 协议归属决定
 
