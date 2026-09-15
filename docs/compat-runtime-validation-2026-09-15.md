@@ -20,7 +20,7 @@
 
 上表区分源码运行、main 接受和 compat 集成。对应 PR 的审核、实际合并 SHA 的 CI、远端 tip 与 main → compat 祖先关系，由发布回执记录；候选运行不能替代这些检查。共享运行验收 main 已接受为 `c643adf9`；compat 集成 `24fc2224` 同时继承它与 Inbox compat `78f65017`。历史运行 SHA 保持原值。
 
-PR #135 的 reviewed head 曾通过八项 CI，且已接受合并；接受 tip `78f65017` 的 push CI 分片 1 另有失败，正在诊断。因此本报告不声称该接受点 CI 全绿。后续 PR #137 及最终接受 compat 的 CI 独立验收。
+PR #135 的中间接受点有分片预算失败，详见[审核与中间发布记录](#审核与中间发布记录)。后续 compat PR 及最终接受 SHA 的 CI 独立验收。
 
 ## 能力清单（N = 3）
 
