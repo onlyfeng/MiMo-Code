@@ -508,7 +508,10 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           if (messages.length <= 100) continue
           const result = trimChronologicalMessages(messages)
           draft.message[session.id][aid] = result.messages
-          for (const message of result.removed) delete draft.part[message.id]
+          for (const message of result.removed) {
+            if (!draft.part[message.id]?.length) rememberCheckpointCoverageCandidate(message)
+            delete draft.part[message.id]
+          }
         }
       }))
     }
