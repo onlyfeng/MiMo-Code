@@ -15,9 +15,9 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-09-15
-- Upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Prior reviewed upstream: `6fbb1732232c9d0ecefee209798a8586d78cb70d`
-- Main behavior (runtime/tests): `4eacc84dccf83c22f533c35bea282d4c5a38cacd`
+- Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
+- Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
+- Main behavior (runtime/tests): `874f198b5f25fdd1bc21f73bc58553ba82a2938d`
 - Bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
@@ -28,7 +28,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest synchronization: 2026-09-15, the specified upstream range
+Latest reviewed synchronization: gateway error aliases at `b4cc11cd`, with local validation and pending publication in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
+
+Previous synchronization: 2026-09-15, the specified upstream range
 `6fbb1732..5198ff54` (21 commits, 17 non-merge). The
 [capability inventory](upstream-sync-2026-09-15-5198ff54.md) records six incoming
 capabilities and the separately approved actor lifecycle follow-up. FC-003 is
