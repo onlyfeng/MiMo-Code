@@ -220,6 +220,33 @@ export const buildTail = Effect.fn("SessionCompaction.buildTail")(function* (inp
   return kept.flat()
 })
 
+export const buildProjectionTail = Effect.fn("SessionCompaction.buildProjectionTail")(function* (input: {
+  messages: MessageV2.WithParts[]
+  model: Provider.Model
+  budget?: number
+}) {
+  const requiredIdx = input.messages.findIndex(MessageV2.isExternalUserMessage)
+  if (requiredIdx < 0) return yield* buildTail(input)
+
+  // A request that arrived after compaction started was never visible to the
+  // summarizer. Keep that user and everything after it even when the optional
+  // tail budget is exhausted. Normal overflow handling still applies to an
+  // oversized request; projecting it away would silently lose user work.
+  // Older complete rounds may use only the remaining optional budget.
+  const required = shrinkLargeToolResults(input.messages.slice(requiredIdx))
+  const requiredCost = Token.estimate(
+    JSON.stringify(yield* Effect.promise(() => MessageV2.toModelMessages(required, input.model))),
+  )
+  return [
+    ...(yield* buildTail({
+      messages: input.messages.slice(0, requiredIdx),
+      model: input.model,
+      budget: Math.max(0, (input.budget ?? COMPACTION_TAIL_BUDGET) - requiredCost),
+    })),
+    ...required,
+  ]
+})
+
 function compactedToolCalls(messages: MessageV2.WithParts[]) {
   return messages.flatMap((message) =>
     message.parts.flatMap((part) => {
@@ -269,6 +296,7 @@ export interface Interface {
     agentID?: string
     /** Internal receipt for a user actually committed by this compaction. */
     onUserCommitted?: (message: MessageV2.User) => void
+    waitForPendingExternalRequest?: () => Effect.Effect<void>
   }) => Effect.Effect<"continue" | "stop" | "text-repeat">
   readonly create: (input: {
     sessionID: SessionID
@@ -383,8 +411,13 @@ export const layer: Layer.Layer<
       overflow?: boolean
       agentID?: string
       onUserCommitted?: (message: MessageV2.User) => void
+      waitForPendingExternalRequest?: () => Effect.Effect<void>
     }) {
-      const snapshotLen = input.messages.length
+      const snapshotIDs = new Set(input.messages.map((message) => message.info.id))
+      // Use persisted order to locate the snapshot endpoint, even if a caller
+      // supplied a projection that omitted some older rows.
+      const afterSnapshot = (messages: MessageV2.WithParts[]) =>
+        messages.slice(messages.findLastIndex((message) => snapshotIDs.has(message.info.id)) + 1)
       const parentIdx = input.messages.findLastIndex((m) => m.info.id === input.parentID)
       const parent = parentIdx >= 0 ? input.messages[parentIdx] : undefined
       if (!parent || parent.info.role !== "user") {
@@ -428,7 +461,9 @@ export const layer: Layer.Layer<
         const hasContent =
           replay &&
           messages.some(
-            (m) => m.info.role === "user" && !m.parts.some((p) => p.type === "compaction" || p.type === "checkpoint"),
+            (m) =>
+              (m.info.role === "user" && !m.parts.some((p) => p.type === "compaction" || p.type === "checkpoint")) ||
+              (m.info.role === "assistant" && m.info.summary === true),
           )
         if (!hasContent) {
           replay = undefined
@@ -753,19 +788,19 @@ export const layer: Layer.Layer<
           sessionID: input.sessionID,
           agentID: input.agentID ?? "main",
         })
-        const arrived = current.slice(snapshotLen).filter((message) => message.info.id !== msg.id)
+        const arrived = afterSnapshot(current).filter((message) => message.info.id !== msg.id)
         const summary = MessageV2.parts(msg.id)
           .filter((part): part is MessageV2.TextPart => part.type === "text")
           .map((part) => part.text)
           .join("\n")
         const trigger: CompactionTrigger = input.overflow ? "provider-overflow" : input.auto ? "automatic" : "manual"
         const manifest = buildFileManifest(history, { worktree: ctx.worktree })
-        const tail = yield* buildTail({
+        const tail = yield* buildProjectionTail({
           messages: arrived,
           model: parentModel,
-          // A missing frozen prefix cannot be sized safely. Keep the summary
-          // but omit compression-time rounds until the normal request path
-          // pins a complete prefix snapshot.
+          // A missing frozen prefix leaves no optional tail budget. External
+          // requests remain mandatory so sizing cannot silently discard work
+          // that the summary never saw.
           budget: frozen
             ? projectionTailBudget({
                 cfg: yield* config.get(),
@@ -794,7 +829,17 @@ export const layer: Layer.Layer<
         })
       }
 
-      if (result === "continue" && input.auto) {
+      const externalRequestArrived = Effect.fn("SessionCompaction.externalRequestArrived")(function* () {
+        if (!compactionPart) return false
+        if (input.waitForPendingExternalRequest) yield* input.waitForPendingExternalRequest()
+        const current = yield* session.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
+        return afterSnapshot(current).some(
+          (message) => message.info.id !== msg.id && MessageV2.isExternalUserMessage(message),
+        )
+      })
+
+      if (result === "continue" && input.auto && !(yield* externalRequestArrived())) {
+        let continuationMessageID: MessageID | undefined
         if (replay) {
           const original = replay.info
           const replayMsg: MessageV2.User = {
@@ -833,7 +878,10 @@ export const layer: Layer.Layer<
             message: replayMsg,
             parts,
           })
-          if (created) input.onUserCommitted?.(replayMsg)
+          if (created) {
+            continuationMessageID = replayMsg.id
+            input.onUserCommitted?.(replayMsg)
+          }
         }
 
         if (!replay) {
@@ -894,8 +942,17 @@ export const layer: Layer.Layer<
                 } satisfies MessageV2.TextPart,
               ],
             })
-            if (created) input.onUserCommitted?.(continueMsg)
+            if (created) {
+              continuationMessageID = continueMsg.id
+              input.onUserCommitted?.(continueMsg)
+            }
           }
+        }
+
+        // Close the check/insert race after any in-flight admission settles.
+        // A request arriving later commits after this hook and naturally wins.
+        if (continuationMessageID && (yield* externalRequestArrived())) {
+          yield* session.removeMessage({ sessionID: input.sessionID, messageID: continuationMessageID })
         }
       }
 

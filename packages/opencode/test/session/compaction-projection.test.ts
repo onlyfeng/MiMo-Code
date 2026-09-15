@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import {
   isTerminalCompactionFinish,
   buildFileManifest,
+  buildProjectionTail,
   buildSummaryMessage,
   buildTail,
   projectionTailBudget,
@@ -134,6 +135,40 @@ describe("compaction projection", () => {
 
     expect(tail.map((message) => message.info.id)).toEqual([newUser.info.id, newAssistant.info.id])
     expect(JSON.stringify([newUser, newAssistant]).length).toBeGreaterThan(4_000)
+  })
+
+  for (const source of ["user", "spawn"] as const) {
+    test(`projection tail preserves source=${source} requests when the optional budget is exhausted`, async () => {
+      const external = user(`msg_${source}_during_compaction`, "must survive")
+      if (external.info.role === "user") external.info.source = source
+      const followup = assistant(`msg_${source}_followup`, external.info.id, [])
+      const optional = user("msg_optional_user", "optional history")
+      if (optional.info.role === "user") optional.info.source = "hook"
+      const tail = await Effect.runPromise(
+        buildProjectionTail({
+          messages: [optional, assistant("msg_optional_assistant", "msg_optional_user", []), external, followup],
+          model: ProviderTest.model(),
+          budget: 0,
+        }),
+      )
+
+      expect(tail.map((message) => message.info.id)).toEqual([external.info.id, followup.info.id])
+      expect(tail[0].parts).toEqual(external.parts)
+    })
+  }
+
+  test("projection tail does not make source=hook mandatory when the optional budget is exhausted", async () => {
+    const hook = user("msg_hook_during_compaction", "hook continuation")
+    if (hook.info.role === "user") hook.info.source = "hook"
+    const tail = await Effect.runPromise(
+      buildProjectionTail({
+        messages: [hook],
+        model: ProviderTest.model(),
+        budget: 0,
+      }),
+    )
+
+    expect(tail).toEqual([])
   })
 
   test("tail budget fits the frozen projection inside the configured ratio window", async () => {

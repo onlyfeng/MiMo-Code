@@ -566,6 +566,26 @@ export const layer = Layer.effect(
     // surface it once per primary session rather than on every run-loop turn.
     const instructionsNotified = new Set<SessionID>()
 
+    type ExternalAdmission = {
+      settled: Promise<void>
+      complete: () => void
+    }
+    const pendingExternalAdmissions = new Map<string, Set<ExternalAdmission>>()
+    const externalAdmissionKey = (sessionID: SessionID, agentID: string | undefined) =>
+      JSON.stringify([sessionID, agentID ?? "main"])
+    const waitForPendingExternalAdmission = Effect.fn("SessionPrompt.waitForPendingExternalAdmission")(function* (
+      sessionID: SessionID,
+      agentID: string | undefined,
+    ) {
+      const admissions = [...(pendingExternalAdmissions.get(externalAdmissionKey(sessionID, agentID)) ?? [])]
+      yield* Effect.all(
+        admissions.map((admission) => Effect.promise(() => admission.settled)),
+        {
+          concurrency: "unbounded",
+        },
+      )
+    })
+
     const selectSkillCatalog = Effect.fnUntraced(function* (input: {
       frozen: SessionPrefixSnapshot.Info | undefined
       user: MessageV2.User
@@ -2756,6 +2776,37 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     })
 
     const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
+      const messageID = input.messageID ?? MessageID.ascending()
+      const admissionKey =
+        input.source === undefined || input.source === "user" || input.source === "spawn"
+          ? externalAdmissionKey(input.sessionID, input.agentID)
+          : undefined
+      const admission: ExternalAdmission | undefined = admissionKey
+        ? (() => {
+            let complete!: ExternalAdmission["complete"]
+            const settled = new Promise<void>((resolve) => {
+              complete = resolve
+            })
+            return { settled, complete }
+          })()
+        : undefined
+      if (admissionKey && admission) {
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            const current = pendingExternalAdmissions.get(admissionKey) ?? new Set()
+            current.add(admission)
+            pendingExternalAdmissions.set(admissionKey, current)
+          }),
+          () =>
+            Effect.sync(() => {
+              admission.complete()
+              const current = pendingExternalAdmissions.get(admissionKey)
+              if (!current) return
+              current.delete(admission)
+              if (current.size === 0) pendingExternalAdmissions.delete(admissionKey)
+            }),
+        )
+      }
       const agentName = input.agent || (yield* agents.defaultAgent())
       const ag = yield* agents.get(agentName)
       if (!ag) {
@@ -2785,7 +2836,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const variant = input.variant ?? (ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined)
 
       const info: MessageV2.User = {
-        id: input.messageID ?? MessageID.ascending(),
+        id: messageID,
         role: "user",
         sessionID: input.sessionID,
         agentID: input.agentID,
@@ -4591,6 +4642,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               auto: compactionPart?.auto ?? false,
               overflow: compactionPart?.overflow,
               agentID: lastUser.agentID,
+              waitForPendingExternalRequest: () =>
+                waitForPendingExternalAdmission(sessionID, lastUser.agentID ?? "main"),
             })
             // cron-sentinel cache is invalidated via a SessionCompaction.Event
             // .Compacted bus subscription inside cron-bridge — see

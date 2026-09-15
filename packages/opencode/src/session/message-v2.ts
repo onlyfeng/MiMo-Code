@@ -679,6 +679,20 @@ export function usageRecovered(messages: readonly WithParts[], assistant: Assist
   })
 }
 
+export function isExternalUserMessage(message: WithParts) {
+  if (message.info.role !== "user") return false
+  if (message.info.source === "user" || message.info.source === "spawn") return true
+  if (message.info.source !== undefined) return false
+  // Legacy rows predate the source discriminator. Only real user text/files
+  // count; recovery boundaries and synthetic continuation users do not start a
+  // new external request episode.
+  return message.parts.some((part) => {
+    if ("synthetic" in part && part.synthetic) return false
+    if (part.type === "text") return !part.ignored && part.text.trim().length > 0
+    return part.type === "file"
+  })
+}
+
 // Apply the newest v1 compaction boundary as a context projection while keeping
 // its persisted assistant summary in the internal message stream. API
 // conversion below re-roles that summary as user context; runLoop still sees
