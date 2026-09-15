@@ -77,4 +77,4 @@ PY
 
 接受的 main `648f7cdf100b30ff046db7518d8f832473b61481` 与 compat `90abf6e447d7a5e5b405aba301bf1a951f469bf6` 的六个 test/typecheck/lint 结果已实时复核，链接由[同步记录](../../upstream-sync-2026-09-15-5198ff54.md#accepted-result-and-publication-evidence)维护。该证据属于旧接受 SHA，不属于本轮新文档提交。
 
-本轮交付在隔离的文档分支中保存；没有以本轮审计名义推送、合并 PR 或更改历史 review thread 状态。建议实施及后续文档发布各自需要相应范围的检查，不能把清单完整写成已经与最新 upstream 完全一致。
+审计阶段结束时，交付保存在隔离的文档分支中，尚未推送或合并 PR，也未更改历史 review thread 状态。随后用户批准依次实施建议及文档发布；这些后续操作需要各自范围的检查和提交证据，不能把本清单完整写成已经与最新 upstream 完全一致。
