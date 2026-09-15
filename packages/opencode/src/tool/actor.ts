@@ -204,7 +204,8 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
           description: rest[1],
           prompt: rest[2],
           ...(flags.model ? { model: flags.model } : {}),
-          ...(flags.variant ? { variant: flags.variant } : {}),
+          // An explicit empty value must reach the strict schema, not silently fall back.
+          ...(Object.hasOwn(flags, "variant") ? { variant: flags.variant } : {}),
           ...(flags.task ? { task_id: flags.task } : {}),
           ...(flags.timeout ? { timeout_ms: Number(flags.timeout) } : {}),
           ...(flags.command ? { command: flags.command } : {}),
@@ -231,7 +232,8 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
           description: rest[1],
           prompt: rest[2],
           ...(flags.model ? { model: flags.model } : {}),
-          ...(flags.variant ? { variant: flags.variant } : {}),
+          // An explicit empty value must reach the strict schema, not silently fall back.
+          ...(Object.hasOwn(flags, "variant") ? { variant: flags.variant } : {}),
           ...(flags.task ? { task_id: flags.task } : {}),
           ...(flags.command ? { command: flags.command } : {}),
           ...(flags.context ? { context: flags.context } : {}),

@@ -189,6 +189,19 @@ describe("actor.shell.parse: --variant flag", () => {
     ])
   })
 
+  // `--variant ""` tokenizes to an empty string. Dropping it would launch at the
+  // default variant; keeping it lets the strict schema's min(1) reject the call.
+  test("an explicitly empty --variant is kept for strict rejection, not dropped", async () => {
+    expect(await parse('actor spawn general "d" "p" --variant ""')).toEqual([
+      { operation: { action: "spawn", subagent_type: "general", description: "d", prompt: "p", variant: "" } },
+    ])
+    expect(await parse('actor run explore "d" "p" --variant ""')).toEqual([
+      { operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p", variant: "" } },
+    ])
+    const err = await Effect.runPromise(Effect.flip(parseActorScript('actor spawn general "d" "p" --variant=""')))
+    expect(err).toMatchObject({ kind: "flag", detail: expect.stringContaining("--variant requires a value") })
+  })
+
   test("--variant with no value fails with kind: flag", async () => {
     const err = await Effect.runPromise(Effect.flip(parseActorScript('actor spawn general "d" "p" --variant')))
     expect(err).toMatchObject({ kind: "flag", detail: expect.stringContaining("--variant requires a value") })
