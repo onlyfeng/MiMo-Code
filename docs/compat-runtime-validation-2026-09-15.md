@@ -1,6 +1,6 @@
 # 2026-09-15 dev/compat 实际运行验收
 
-本轮在接受 Inbox 崩溃一致性修正后，补齐插件实际调用链、本机隔离 MCP/OAuth 和 Windows 平台证据。main 承载共享正确性修正与通用验证设施；dev/compat 保留自己的产品保证和平台适配，七项 DC 均继续 active。本轮没有追加 upstream 提交，也没有将 dev/compat 整体合并到 main。
+本轮在接受 Inbox 崩溃一致性修正后，补齐插件实际调用链、本机隔离 MCP/OAuth 和 Windows 平台证据，并修复验证中发现的独立实验日志清理遗漏。main 承载共享正确性修正与通用验证设施；dev/compat 保留自己的产品保证和平台适配，七项 DC 均继续 active。本轮没有追加 upstream 提交，也没有将 dev/compat 整体合并到 main。
 
 本报告补充[共享运行验收](runtime-validation-2026-09-15.md)，由 compat 维护分支执行和平台证据。共享 FD/FC、共享 history 和公共验收报告按 main 继承；此前[完整差异审计](fork-difference-closure-2026-09-15.md)的固定树与计数不回写。
 
@@ -15,6 +15,9 @@
 | 共享安装设施修正 | `9bf2b8bcc696abf8797487b090c342a5a64f7a7c`，按 packageManager 选择 Bun 并执行 `bun ci`，不推进入口的 runtime/test 行为引用 |
 | 共享运行验收的已接受 main | `c643adf9dffa57191153cc4452003ba03e3cab32`，由 [PR #136](https://github.com/onlyfeng/MiMo-Code/pull/136) 接受；评审候选为 `d40e8afc48f29a8faa3f4a7e1eae17afaed47a3a` |
 | compat 集成源码 | `24fc2224bd7041957eac0335310d1286170626ef`，继承已接受 Inbox 和共享运行验收；它是集成引用，不表示下方所有测试在此 SHA 重跑 |
+| 共享作用域夹具修正 | `15ca0f83a466f0581ce4e1add6883e0e204318ed`，main [PR #138](https://github.com/onlyfeng/MiMo-Code/pull/138)，接受提交 `2bbd3c0b20f2fb9c005c593585bd320c0e0a91d8` |
+| 作用域修正后的 compat 源码 | `3f65c815168af2ac75de3433018c9d8ccac4b7ac`，三个插件场景实际复验；接受 main 后的最终集成为 `302a1727fd2e3462738719656bc521641f525812` |
+| 独立实验日志清理 | 共享源码 `f20e91358da8ba4feef8d669ae1b105486e2566f`；compat 实验复验源码 `c7b2fdc59d5852c97131f4a4db4b809d1cc06d88` |
 | Windows 与初次 compat 运行 | `289f63163e71a0c058ece11ff16755efeb1c6879`，实际 Windows 候选以及插件超时红例 |
 | 插件预算修正后的 compat 运行 | `3bd11622851a985f1d84d5f67081efb85e2354bf`，只重跑三个插件 wrapper 的绿例 |
 
@@ -22,13 +25,14 @@
 
 PR #135 的中间接受点有分片预算失败，详见[审核与中间发布记录](#审核与中间发布记录)。后续 compat PR 及最终接受 SHA 的 CI 独立验收。
 
-## 能力清单（N = 3）
+## 能力清单（N = 4）
 
 | ID | 能力和归属 | compat 处理 | 已有实际证据 |
 | --- | --- | --- | --- |
-| RV01 | FC-006：Config → 内置 Plugin → Actor → Write | 继承 main 的同一验证入口与 15 秒子测试预算 | `3bd11622`：3 pass、0 fail、6 次 wrapper 断言 |
+| RV01 | FC-006：Config → 内置 Plugin → Actor → Write | 继承 main 的同一验证入口与 15 秒子测试预算 | `3f65c815`：3 pass、0 fail、6 次 wrapper 断言；早期预算修正记录仍为 `3bd11622` |
 | RV02 | FC-004：实际 MCP/OAuth；DC-NET-002：compat 私网准入保证 | MCP 生产源码保持共享；保留 compat 准入 sentinel | `289f6316`：loopback 与自有 RFC1918 接口分别通过；准入 sentinel 独立通过 |
-| RV03 | FC-008：共享 CI 调度；DC-PLATFORM-001：compat 平台适配 | 保留 no-rg 与 Windows 解压实现，新增真实平台验收入口 | `289f6316`：Windows 11 个解压场景与 8 个 no-rg 用例通过 |
+| RV03 | FC-008：共享 CI 调度；DC-PLATFORM-001：compat 平台适配 | 保留 no-rg 与 Windows 解压实现，新增真实平台验收入口 | `289f6316` 与 PR 候选 `b7e3f850` 分别实际通过 Windows 11 个解压场景与 8 个 no-rg 用例 |
+| RV04 | FD-006：独立实验载体拥有的全局日志流 | 继承 standalone 清理修正及真实日志回归断言 | `c7b2fdc5`：完整实验文件 11 pass、0 fail、69 assertions |
 
 ## RV01：插件实际调用链与预算修正
 
@@ -39,6 +43,8 @@ PR #135 的中间接受点有分片预算失败，详见[审核与中间发布�
 PR #136 的 P2 指出新启动的 Bun test 有独立默认预算。`289f6316` 上两个 wrapper 的组合复验得到 1 pass、3 fail：MCP 通过，三个 plugin child 均触发 5000ms 上限；其中只读场景已打印完成哨兵，仍在子测试结束前越界。这是嵌套测试预算缺口，不能以早期成功日志覆盖。
 
 继承 `5165307c` 后，`3bd11622` 仅重跑三个 plugin wrapper：**3 pass、0 fail、6 次外层断言，28.35 秒，exit 0**。子测试显式采用 15000ms，进程 watchdog 仍为 25000ms，wrapper 仍为 30000ms；子场景实现未变。运行前后 SHA 一致、工作树干净。六次断言校验真实子进程成功退出及场景完成哨兵，未虚构或累计未输出的内部断言数。
+
+PR #137 随后的作用域夹具反馈由共享 `15ca0f83` 修正，使用 `testEffect`/`it.live`、真实 AppLayer 和 `tmpdirScoped`/`provideInstance`。两个实例被捕获并单独释放，订阅、实例、cwd、scripted server 和目录依次随 Effect scope 清理，不再调用全局 `disposeAll`。所有 35 处现有断言及 15/25/30 秒预算保留。compat 候选 `3f65c815` 的三个 wrapper 复验为 **3 pass、0 fail、6 次外层断言，24.57 秒**；运行前后源码一致。这里是仓库夹具约定与生命周期收敛，未证明原隔离进程存在生产泄漏；没有新增服务 mock 或生产修改。
 
 ## RV02：本机隔离 MCP/OAuth 与私网接口
 
@@ -71,6 +77,16 @@ no-rg 入口精确选中 8 项，全部执行，**8 pass、0 fail、15 次断言
 以上三个 Git blob 在 `3bd11622` 不变，但这不表示 Windows 在 `3bd11622` 重跑过。上传 ZIP 的 digest 由 GitHub job 日志提供；下载后独立计算了各解压文件的 hash，未保留并重算 ZIP 容器本身。
 
 该 runner 上 `Microsoft.PowerShell.Archive` 模块可用，实际生产路径调用 .NET ZipFile；未验证移除该模块后的环境。有效条目可能在后续危险条目被拒绝前已写入，不能声称整个 ZIP 解压具备事务回滚。企业限制镜像、junction/symlink 竞态和任意 Windows 配置不在本轮证明范围。
+
+PR #137 的候选 `b7e3f8504af58ea007ac71b4d9886865d7f14146` 再次通过真实 Windows 验证：[run 34965350598](https://github.com/onlyfeng/MiMo-Code/actions/runs/34965350598)、[job 104368372097](https://github.com/onlyfeng/MiMo-Code/actions/runs/34965350598/job/104368372097)、[artifact 10395038696](https://github.com/onlyfeng/MiMo-Code/actions/runs/34965350598/artifacts/10395038696)。11 个解压场景和 8 个 no-rg 用例全部通过，15 次 no-rg 断言，选中项 0 skip。事件是 `pull_request`，`GITHUB_SHA` 和 checkout 为合并提交 `7f5994af`，PR head 字段为 `b7e3f850`；合并父提交对应 base `78f65017` 和该 head，合并树与 head 相同，三个生产源的 CRLF hash 逐一核对。该候选九项 CI 全绿，但因上面的 scoped fixture 审核反馈保留 draft；Windows 成功不能代替修正后的审核和接受。原 `289f6316` 记录不被改写，两个 Windows 运行也不相加为一轮测试。
+
+## RV04：独立实验日志资源清理
+
+共享修正 `f20e9135` 在 standalone CLI 的 AppRuntime、数据库清理之后等待 `Log.shutdown()`；复用的 `runExperiment` 不关闭全局运行时。新增断言仍在已有隔离子进程内，验证排队日志落盘、active 文件转为 completed、原 active 路径消失、清理后写入不再追加。父进程并行读取 stdout/stderr，保留自然 exit 0、15 秒 watchdog 和 30 秒外层预算。
+
+旧实现的子进程自然 exit 0，但三项日志关闭断言确定失败；修正后的 main 完整实验文件 11 pass / 69 assertions。compat `c7b2fdc59d5852c97131f4a4db4b809d1cc06d88` 的同一完整文件复验为 **11 pass、0 fail、69 assertions，13.00 秒**，standalone 用例为 4.040 秒，运行前后源码一致。此处是确定的文件日志所有权修正，范围不扩为异常路径上的所有全局资源关闭保证。
+
+此前 main PR #138 候选 `31365b8a` 的一次 CI 退出 143 未在本机复现；唯一一次同 SHA 失败分片重跑成功，standalone 用例 3.630 秒，1422 pass / 21 skip / 0 fail。重跑工件按 ID `10396023297` 核对，未误用同名首轮工件 `10395761714`。该旧结果不验证日志新修正，也不证明原 CI 失败根因；更强的新回归与旧间歇现象分别记录。实验载体仍独立于生产 Codex exec 权限和 token 收益，详见共享[RV04](runtime-validation-2026-09-15.md#rv04独立实验日志资源清理)。
 
 ## 七项 DC 的处理
 

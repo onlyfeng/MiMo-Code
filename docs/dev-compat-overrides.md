@@ -15,13 +15,13 @@ registry/history commit does not advance either behavior reference below.
 - Selected upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`；本轮不追加 upstream 同步。
 - Accepted Inbox main: `d11a9652981e7b5953584205474249775ee54236`（PR #134）。
 - Starting accepted compat: `78f65017acacae66dfccc1ec28338e131492a929`（PR #135），已继承 Inbox 原子 drain。
-- Accepted runtime main: `c643adf9dffa57191153cc4452003ba03e3cab32`（PR #136）。共享 runtime/test 修正为 `5165307c8a97c448de252a33b9eb2a1feb393545`；共享安装设施为 `9bf2b8bcc696abf8797487b090c342a5a64f7a7c`，不将 CI 安装改动记为生产行为推进。
-- Compat integration source: `24fc2224bd7041957eac0335310d1286170626ef`。本次新增/继承的运行证据分别绑定 `289f6316` 和 `3bd11622`；集成引用不改写其执行 SHA。
+- Accepted runtime main: `2bbd3c0b20f2fb9c005c593585bd320c0e0a91d8`（PR #138），继承 PR #136 的 `c643adf9dffa57191153cc4452003ba03e3cab32`。共享 runtime/test 当前快照为 `f20e91358da8ba4feef8d669ae1b105486e2566f`，其中插件作用域夹具仍为 `15ca0f83a466f0581ce4e1add6883e0e204318ed`；共享安装设施为 `9bf2b8bcc696abf8797487b090c342a5a64f7a7c`，不将 CI 安装改动记为生产行为推进。
+- Compat integration source: `302a1727fd2e3462738719656bc521641f525812`。私网及初次 Windows、插件预算、作用域夹具、后续 Windows 四组证据分别绑定 `289f6316`、`3bd11622`、`3f65c815` 和 `b7e3f850`；实验日志清理复验另绑定 `c7b2fdc5`；集成引用不改写各自执行 SHA。
 - Inherited bundled guidance: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`，本轮未修改。
 - Scope and evidence: [Inbox 修正](inbox-crash-consistency-2026-09-15.md)、[共享运行验收](runtime-validation-2026-09-15.md)、[compat 运行验收](compat-runtime-validation-2026-09-15.md)。
 - Publication authority: 对应 PR 另行记录 reviewed head、实际接受 tip 的 CI 与最终 ancestry；候选 Windows 成功不等同于新集成 SHA 已接受。PR #135 的 reviewed head 八项 CI 通过且已合并，但接受 tip 的 push 分片 1 在全部断言通过后超过八分钟预算，仍按 CI 失败记录；诊断见 compat 运行报告。后续 compat PR 及最终接受 SHA 的 CI 另行验收。
 
-FC-001 的队列到完整用户消息事务保持共享。FC-006/FC-004 的插件与 MCP 协议验证入口随 main 继承，FC-008 维护共享 Windows 调度及 frozen install。DC-NET-002 保留私网准入保证，DC-PLATFORM-001 保留平台适配并拥有 compat 验收脚本。DC-CONTEXT-001/DC-ACTOR-001 的 cap、coverage、full/persistent 和 frozen context 保持原归属；其余 DC-NET-001、DC-MODEL-001、DC-TUI-001 无新增生产行为。七项全部 active，没有整体上移或政策退休。此前历史记录保留原始来源和验收范围。
+FC-001 的队列到完整用户消息事务保持共享。FC-006/FC-004 的插件与 MCP 协议验证入口随 main 继承，FC-008 维护共享 Windows 调度及 frozen install。FD-006 的独立实验载体继承自有日志清理修正，不改变生产 exec 权限与模型语义。DC-NET-002 保留私网准入保证，DC-PLATFORM-001 保留平台适配并拥有 compat 验收脚本。DC-CONTEXT-001/DC-ACTOR-001 的 cap、coverage、full/persistent 和 frozen context 保持原归属；其余 DC-NET-001、DC-MODEL-001、DC-TUI-001 无新增生产行为。七项全部 active，没有整体上移或政策退休。此前历史记录保留原始来源和验收范围。
 
 ## 2026-09-09 specified audio convergence
 
@@ -986,7 +986,7 @@ files remain byte-identical to the accepted main correction.
 - Review basis: inherited main
   `37bbc8229ca70a92b5eaaa7bafd725d070f3f271`; compat behavior
   `ec963d93abcc41a41aff9a65a6fd8f4b5aabfdef`.
-- Evidence: `289f63163e71a0c058ece11ff16755efeb1c6879` 的 [Windows run 34958196675](https://github.com/onlyfeng/MiMo-Code/actions/runs/34958196675/job/104345235279) 在 Windows Server 2025/Bun 1.3.14 上执行实际生产 `powershell`/`.NET ZipFile`：11 个解压场景全部通过，8 个选定 no-rg 用例通过且共有 15 次断言、0 选中项 skip；JUnit 另有 15 个筛选排除项，不计为通过。工件的 Windows CRLF 源文件 hash 与该提交 Git blob 的 CRLF 转换逐一对应。三个平台生产源在后续插件测试修正 `3bd11622` 上不变，实际 Windows 执行仍只绑定 `289f6316`。完整环境、事件/checkout 身份及覆盖边界见 [RV03](compat-runtime-validation-2026-09-15.md#rv03真实-windows-解压与-no-rg)。POSIX symlink/权限项、移除 Archive 模块的环境与企业限制镜像均未被计入；不声称整个 ZIP 解压具备事务回滚。Status 与 keep-compat-only exit condition 均不变。
+- Evidence: `289f63163e71a0c058ece11ff16755efeb1c6879` 的 [Windows run 34958196675](https://github.com/onlyfeng/MiMo-Code/actions/runs/34958196675/job/104345235279) 在 Windows Server 2025/Bun 1.3.14 上执行实际生产 `powershell`/`.NET ZipFile`：11 个解压场景全部通过，8 个选定 no-rg 用例通过且共有 15 次断言、0 选中项 skip；JUnit 另有 15 个筛选排除项，不计为通过。工件的 Windows CRLF 源文件 hash 与该提交 Git blob 的 CRLF 转换逐一对应。三个平台生产源在后续插件测试修正 `3bd11622` 上不变，此后 PR 候选 `b7e3f850` 的实际 Windows run `34965350598` 也通过同一 11/8 矩阵；其 PR merge checkout 与 head 树、源码 hash 已单独核对，不能把该 Windows 成功当作 scoped-fixture 修正后的验收。完整环境、事件/checkout 身份及覆盖边界见 [RV03](compat-runtime-validation-2026-09-15.md#rv03真实-windows-解压与-no-rg)。POSIX symlink/权限项、移除 Archive 模块的环境与企业限制镜像均未被计入；不声称整个 ZIP 解压具备事务回滚。Status 与 keep-compat-only exit condition 均不变。
 - 2026-09-01 review: incoming changes had no ripgrep/archive fallback overlap;
   the restricted-network and Windows adaptations remain unchanged.
 - 2026-09-01 OAuth-branding propagation: no platform-fallback path or symbol

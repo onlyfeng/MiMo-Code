@@ -3927,3 +3927,11 @@ All seven capability results in that entry remain valid; runtime/test behavior s
 - 在已接受 Inbox compat `78f65017acacae66dfccc1ec28338e131492a929` 上继承运行验收 main `c643adf9dffa57191153cc4452003ba03e3cab32`，集成源码为 `24fc2224bd7041957eac0335310d1286170626ef`。选定 upstream 仍为 `b4cc11cd652195af9a80297ed543218f3172e6c4`。共享 FD/FC/history 和公共运行报告随 main 继承，七项 DC 继续 active；没有整体上移或政策退休。
 - RV01/RV02 继承共享真实应用/协议入口；RV03 增加 compat Windows 执行脚本与夹具。`289f6316` 的实际 Windows 运行验证 11 个解压场景和 8 个 no-rg 用例；其插件复验的三个 5 秒子测试超时通过共享 `5165307c` 修正，在 compat `3bd11622` 复验为 3 pass / 0 fail / 6 wrapper assertions。该修正仅为新 child 设置 15 秒预算，25/30 秒外层边界不变。共享 `9bf2b8bc` 安装修正使用声明 Bun 与 `bun ci`，不推进入口 runtime/test 行为引用。
 - RV02 的用户范围为本机隔离服务；loopback、自有 RFC1918 实际链及独立准入 sentinel 的执行来源、结果和企业环境边界见 [compat 运行验收](compat-runtime-validation-2026-09-15.md)。候选工件保持原 SHA，后续集成与接受 tip 的 CI/审核由对应 PR 发布回执独立证明；不把阶段性测试相加为一轮完整运行。
+
+## 2026-09-15 shared scoped plugin fixture follow-up
+
+- main PR #138 接受 `2bbd3c0b20f2fb9c005c593585bd320c0e0a91d8` 后，compat 集成为 `302a1727fd2e3462738719656bc521641f525812`，继承 shared fixture `15ca0f83a466f0581ce4e1add6883e0e204318ed`。共享 FD/FC/history 和运行报告保持 main 原文；upstream `b4cc11cd`、bundled guidance 与七项 DC 政策不变。
+- PR #137 的 scoped fixture 反馈修正为 Effect-aware 多实例测试和 owned instance 作用域释放，保留全部实际调用链、35 处原断言及 15/25/30 秒预算。候选 compat `3f65c815168af2ac75de3433018c9d8ccac4b7ac` 本机三个 wrapper 3 pass / 0 fail / 6 assertions，24.57 秒；不把原隔离进程说成已证明的生产泄漏。
+- 先前 `b7e3f850` 候选的九项 CI 全绿，实际 Windows run `34965350598` 再次证明 11 个解压场景和 8 个 no-rg 用例；因新 review feedback 仍保留 draft。新集成 head 和最终接受 SHA 需要自己的 CI/审核；实际 scope、原始 Windows 来源与平台边界见[compat 运行验收](compat-runtime-validation-2026-09-15.md)。
+
+- 同一 main PR #138 还修复独立实验自有日志流遗漏关闭的问题，源码 `f20e91358da8ba4feef8d669ae1b105486e2566f`。旧实现自然退出仍在真实文件关闭断言确定失败；compat `c7b2fdc59d5852c97131f4a4db4b809d1cc06d88` 完整实验文件复验 11 pass / 0 fail / 69 assertions，13.00 秒。保留 15/30 秒预算，父端并行消费两个管道。旧 `31365b8a` 的单次 exit143 与其成功重跑作为历史间歇现象记录，不声称该次 CI 根因已证，详见 compat RV04。
