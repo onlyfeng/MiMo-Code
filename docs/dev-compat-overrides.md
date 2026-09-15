@@ -8,6 +8,26 @@ Review this registry whenever work targets `dev/compat` or propagates `main`
 into it, including when a listed surface merges without conflicts. A pure
 registry/history commit does not advance either behavior reference below.
 
+## Current review record
+
+- Status: active; all seven DC policies remain owned by `dev/compat`.
+- Last reviewed: 2026-09-15, specified Inbox crash-consistency inheritance.
+- Selected upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`; no additional upstream synchronization.
+- Accepted main: `d11a9652981e7b5953584205474249775ee54236` (PR #134).
+- Inherited main source/test behavior: `74d4bfb6008071fca87c245c7791530660d64876`.
+- Compat source/test behavior and accepted-main ancestry merge: `31e904ff1aa730d0a618901929b05aaba6fc34a9`.
+- Starting accepted compat: `49dce5816792e95050cd64561080d3257b714b7f`.
+- Inherited bundled guidance: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`.
+- Scope and decisive crash evidence: [Inbox correction](inbox-crash-consistency-2026-09-15.md); compat execution evidence is appended to [registry history](dev-compat-registry-history.md).
+- Publication authority: the inheritance PR records its reviewed head, exact accepted-tip CI and final ancestry separately from this source/test snapshot.
+
+FC-001 now owns atomic queue-to-transcript delivery on both branches.
+DC-CONTEXT-001 retains notification UTF-8 caps, preflight and checkpoint coverage;
+DC-ACTOR-001 retains model-created full/persistent actors and frozen turn context.
+The other five DC owners have no changed implementation surface in this narrow
+correction. No owner retires and no compat policy moves to main. Earlier dated
+records below retain their original source and acceptance boundaries.
+
 ## 2026-09-09 specified audio convergence
 
 AUDIO-ALIGN-01 replaces only the audio-retention decision of the earlier full sync.
@@ -401,7 +421,7 @@ The seven owner dispositions and evidence are recorded in
 - First-batch shared documentation inheritance: accepted main `f10fddb67d830b82890206759c53cef4d8710460`; these first-batch fields do not describe the later reviewed source or PR head.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
-## Current review record
+## F01–F11 accepted review record (historical)
 
 - Status: active
 - Canonical owner: fork `dev/compat`; seven DC policies remain active.
@@ -1172,18 +1192,22 @@ files remain byte-identical to the accepted main correction.
   replay; and inherited generated client examples. These have different retirement
   conditions and must not be treated as one indivisible product policy.
   Shared `createMessage` allocates monotonic actor commit timestamps;
-  only user and derived-user messages submitted through `commitUserMessage`
-  or `commitUserMessageIfLatest` admit their message and parts in one transaction,
+  user and derived-user messages submitted through `commitUserMessage*`
+  admit their message and parts in one transaction,
   with ownership and current-content equivalence checks. The prompt
   producer can reuse generated anonymous part IDs in relative order, while
   explicit identities remain strict; runtime additions can make old input
   non-equivalent. Debug, inbox, prompt and compaction producers,
   fork/revert/checkpoint and TUI consumers use chronological position with UTF-8
-  BINARY ID tie-breaking, not caller-ID magnitude. Inbox still creates the
-  message, writes parts and deletes the queue row in three separate steps.
-  `shellImpl` also writes its message and parts separately; streaming assistant
-  output is not one atomic message/parts transaction. These paths are not
-  covered by the `commitUserMessage*` transaction.
+  BINARY ID tie-breaking, not caller-ID magnitude. Inbox now joins the shared
+  synchronous admission primitive: its complete synthetic user/parts and live
+  selected queue deletion share one immediate transaction, after cancellation,
+  retirement and receiver-row rechecks. Compat rendering/caps still run before
+  that admission; frozen context and mandatory spawn projection are retained.
+  `shellImpl` writes its message and parts separately; streaming assistant output
+  is not one atomic message/parts transaction. Those two paths remain outside
+  the `commitUserMessage*` transaction. The Inbox guarantee does not extend to
+  exactly-once model execution or crash-durable event publication.
   `currentUserID` feeds the current-turn projection through `llm-request-prefix`.
   JSON-schema requests suppress the active recall reminder and can recover the
   structured result from a completed StructuredOutput part. These local prompt
@@ -1451,6 +1475,10 @@ files remain byte-identical to the accepted main correction.
   accounting and a strict total wire bound remain outside that guarantee.
 
 ## DC-ACTOR-001 — full-context actor and static-prefix overflow extensions
+
+- 2026-09-15 Inbox crash consistency: inherit FC-001's atomic drain without
+  changing full-context capture, system/model actor ownership, persistent-peer
+  retirement or recovery. No model-facing context field is added to main.
 
 - 2026-09-15 ownership adaptation: inherited main now creates only none-context
   ephemeral model actors. Compat explicitly owns the complete none/state/full
