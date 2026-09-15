@@ -360,7 +360,9 @@ not change their implementation. The preceding review is retained in the
   with session/actor/part ownership validation; latest-user conditional
   admission shares that transaction. Same-owner prompt retries may reuse
   producer-generated part IDs only when the complete current persisted content
-  matches. Explicit IDs, content, order and metadata remain strict; runtime-added
+  matches. Anonymous parts match by relative order; explicit IDs and complete
+  persisted content/metadata remain strict. Reordering explicitly identified
+  input parts can be equivalent after canonical sorting. Runtime-added
   parts can make a later replay conflict. This is not a lifetime replay receipt.
   Inbox draining still writes the message, its parts and the queue deletion in
   separate steps; the prompt/compaction transaction does not cover Inbox drain.
@@ -712,7 +714,7 @@ not change their implementation. The preceding review is retained in the
   bound the cancellation join to the existing reclaim grace while detached
   cleanup continues; shared cancellation retains interrupt/join semantics.
   The dated actor quarantine entries below describe their historical snapshots.
-  The separate workflow deadline case is restored, but its CI follow-up remains open. The restored
+  The separate workflow deadline case is restored. The restored
   `it.live` case proves the hanging LLM request was consumed, a child worktree
   and running Instance existed, the exact workflow deadline fired, and the
   worktree and Instance were disposed. Its former two-second deadline could
@@ -720,10 +722,18 @@ not change their implementation. The preceding review is retained in the
   reclamation. Four workflow/disposal suites pass together (44 tests) and the
   process exits naturally in that local matrix. PR #129 at `eaf99b8b` subsequently
   reproduced a 120-second timeout in this case on Linux; other tests continued
-  until the shard's eight-minute budget ended. That does not establish a final
-  process-exit hang or its cause. Publication is held pending a phase-level
-  diagnosis; no production cleanup policy has changed. F03 records the opt-in
-  environment and evidence in [the implementation report](audit-followups-2026-09-15.md).
+  until the shard's eight-minute budget ended. A second observation located the
+  wait inside workflow settlement after child disposal. Worktree removal can
+  fail as an Effect defect, which the old typed-error ignore did not catch;
+  that failure stranded terminal persistence and the completion signal.
+  Reclaim now logs removal defects and continues publishing the original
+  outcome. Pure interruption still propagates and existing cleanup deadlines
+  remain unchanged. Real removal followed by fault injection proves both
+  deadline and cancellation settle, persist and notify after child disposal.
+  Concurrent reclaim/isolated removal is observed; the exact Git failure in the
+  intermittent Linux run remains an inference, not a captured exception.
+  F03 records default/opt-in and final CI evidence separately in
+  [the implementation report](audit-followups-2026-09-15.md).
   A separate Runner reentry fixture now uses explicit started/reentered/release
   signals instead of five/fifty-millisecond timer ordering, preserving the
   assertion that both waiters share the first execution and emit one warning.
