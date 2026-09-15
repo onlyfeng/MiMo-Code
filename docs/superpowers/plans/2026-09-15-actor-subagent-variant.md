@@ -15,7 +15,7 @@
 
 ## Global Constraints
 
-- 工作区 `.worktrees/feat-actor-subagent-variant`，分支 `feat/actor-subagent-variant`，基点 `3ff9794a0b5a2568e819b4876f2448f9d666dc15`；PR 只发往 `onlyfeng/MiMo-Code` 的 `dev/compat`。
+- 工作区 `.worktrees/feat-example`，分支 `feat/example`，基点 `3ff9794a0b5a2568e819b4876f2448f9d666dc15`；PR 只发往 `onlyfeng/MiMo-Code` 的 `dev/compat`。
 - 依赖只用 `bun ci` 安装。
 - 测试在 `packages/opencode` 下运行，不在仓库根；类型检查在 `packages/opencode` 用 `bun typecheck`；lint 在仓库根用 `bun lint`（oxlint，要求 0 errors）。
 - 默认路径验证的命令前缀记为 `$T`：`env -u MIMOCODE_EXPERIMENTAL -u MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL -u MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH -u MIMOCODE_CODEX_MODE bun test --timeout 30000`。package preload 自带 `MIMOCODE_EXPERIMENTAL_ORCHESTRATOR=true`，作为基线报告。
@@ -809,13 +809,13 @@ Expected: 只包含 spec、plan、Task 1/2 列出的文件，行数与改动规�
 
 ```bash
 set -euo pipefail
-git push -q -u origin feat/actor-subagent-variant
-[ "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/feat/actor-subagent-variant | cut -f1)" ] || { echo "ABORT: remote != local"; exit 1; }
+git push -q -u origin feat/example
+[ "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/feat/example | cut -f1)" ] || { echo "ABORT: remote != local"; exit 1; }
 ```
 
 - [ ] **Step 2: 创建 PR 并核对目标仓库**
 
-`gh pr create --repo onlyfeng/MiMo-Code --base dev/compat --head feat/actor-subagent-variant --title "feat(compat): let actor subagents select a validated model variant" --body-file <body>`。
+`gh pr create --repo onlyfeng/MiMo-Code --base dev/compat --head feat/example --title "feat(compat): let actor subagents select a validated model variant" --body-file <body>`。
 正文包括：动机、设计要点（校验、优先级、生命周期、发现）、兼容性、非目标、验证证据（含变异检查与环境基线）、DC-ACTOR-002，结尾附 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`。
 
 Run: `gh api repos/onlyfeng/MiMo-Code/pulls/<N> -q '.base.repo.full_name + " " + .base.ref'`
