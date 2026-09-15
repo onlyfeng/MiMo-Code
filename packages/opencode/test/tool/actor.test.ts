@@ -1368,6 +1368,165 @@ describe("Actor tool recovered context", () => {
   )
 })
 
+const variantModels = {
+  provider: {
+    test: {
+      name: "Test",
+      id: "test",
+      env: [],
+      npm: "@ai-sdk/openai-compatible",
+      options: { apiKey: "test-key", baseURL: "http://localhost:1/v1" },
+      models: {
+        "test-model": {
+          id: "test-model",
+          name: "Test Model",
+          attachment: false,
+          reasoning: false,
+          temperature: false,
+          tool_call: true,
+          release_date: "2025-01-01",
+          limit: { context: 100000, output: 10000 },
+          cost: { input: 0, output: 0 },
+          options: {},
+        },
+        reasoner: {
+          id: "reasoner",
+          name: "Reasoner",
+          attachment: false,
+          reasoning: false,
+          temperature: false,
+          tool_call: true,
+          release_date: "2025-01-01",
+          limit: { context: 100000, output: 10000 },
+          cost: { input: 0, output: 0 },
+          options: {},
+          variants: {
+            low: { reasoningEffort: "low" },
+            high: { reasoningEffort: "high" },
+            max: { disabled: true },
+          },
+        },
+      },
+    },
+  },
+}
+
+describe("Actor tool variant selection", () => {
+  const execute = (selection: { model?: string; variant?: string }) =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* ActorTool).init()
+      return yield* def.execute(
+        {
+          operation: {
+            action: "run",
+            description: "review",
+            prompt: "review the change",
+            subagent_type: "general",
+            ...selection,
+          },
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: {},
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+    })
+
+  it.live("schema accepts a non-empty variant on run and spawn only", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const def = yield* (yield* ActorTool).init()
+        const wrap = (operation: Record<string, unknown>) => def.parameters.safeParse({ operation })
+        const launch = { description: "x", prompt: "y", subagent_type: "general" }
+
+        expect(wrap({ action: "run", ...launch, variant: "high" }).success).toBe(true)
+        expect(wrap({ action: "spawn", ...launch, model: "lite", variant: "high" }).success).toBe(true)
+        expect(wrap({ action: "spawn", ...launch, variant: "" }).success).toBe(false)
+        expect(wrap({ action: "spawn", ...launch, variant: 3 }).success).toBe(false)
+        expect(wrap({ action: "resume", actor_id: "general-1", variant: "high" }).success).toBe(false)
+        expect(wrap({ action: "models", variant: "high" }).success).toBe(false)
+      }),
+    ),
+  )
+
+  it.live("forwards a variant the resolved model defines", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          const result = yield* execute({ model: "test/reasoner", variant: "high" })
+
+          expect(spawned.map((input) => [input.model, input.variant])).toEqual([
+            [{ providerID: ProviderID.make("test"), modelID: ModelID.make("reasoner") }, "high"],
+          ])
+          expect(result.metadata.variant).toBe("high")
+        }),
+      { config: variantModels },
+    ),
+  )
+
+  for (const variant of ["ultra", "max"]) {
+    it.live(`rejects variant ${variant} before spawning and lists the valid ones`, () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const spawned: SpawnInput[] = []
+            yield* installMockSpawn((input) => spawned.push(input))
+            const exit = yield* Effect.exit(execute({ model: "test/reasoner", variant }))
+
+            expect(Exit.isFailure(exit)).toBe(true)
+            expect(String(Exit.isFailure(exit) ? exit.cause : "")).toContain(
+              `Model "test/reasoner" has no variant "${variant}". Valid variants: low, high.`,
+            )
+            expect(spawned).toEqual([])
+          }),
+        { config: variantModels },
+      ),
+    )
+  }
+
+  it.live("rejects a variant when the parent's model defines none", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          const exit = yield* Effect.exit(execute({ variant: "high" }))
+
+          expect(Exit.isFailure(exit)).toBe(true)
+          expect(String(Exit.isFailure(exit) ? exit.cause : "")).toContain(
+            `Model "test/test-model" defines no variants, so variant "high" cannot apply.`,
+          )
+          expect(spawned).toEqual([])
+        }),
+      { config: variantModels },
+    ),
+  )
+
+  it.live("omitting variant leaves the spawn input and metadata without one", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          const result = yield* execute({ model: "test/reasoner" })
+
+          expect(spawned.map((input) => Object.hasOwn(input, "variant"))).toEqual([false])
+          expect(Object.hasOwn(result.metadata, "variant")).toBe(false)
+        }),
+      { config: variantModels },
+    ),
+  )
+})
+
 describe("Actor tool task_id degradation", () => {
   it.live("malformed task_id degrades to ad-hoc with a notice", () =>
     provideTmpdirInstance(() =>

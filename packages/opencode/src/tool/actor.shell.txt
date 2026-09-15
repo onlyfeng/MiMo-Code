@@ -23,13 +23,13 @@ appends them at request time per-agent).
 #   - $vars are preserved as literal text (no expansion)
 
 # DEFAULT — return actor_id immediately, run in the background, stay responsive:
-    actor spawn <subagent_type> "<description>" "<prompt>" [--model <ref>] [--command <cmd>] [--context none|state|full] [--lifecycle persistent] [--output-schema '<json>']
+    actor spawn <subagent_type> "<description>" "<prompt>" [--model <ref>] [--variant <name>] [--command <cmd>] [--context none|state|full] [--lifecycle persistent] [--output-schema '<json>']
     # bind it to one of your `task` tool tasks (TID from the `task` tool, e.g. T4):
     actor spawn <subagent_type> "<description>" "<prompt>" --task <TID>
 
 # EXCEPTION — block the whole conversation until done, return the final message inline.
 # Only for a tiny, fast lookup whose answer gates your very next decision this turn:
-    actor run <subagent_type> "<description>" "<prompt>" [--model <ref>] [--timeout <ms>] [--command <cmd>] [--context none|state|full] [--output-schema '<json>']
+    actor run <subagent_type> "<description>" "<prompt>" [--model <ref>] [--variant <name>] [--timeout <ms>] [--command <cmd>] [--context none|state|full] [--output-schema '<json>']
     # bind it to one of your `task` tool tasks (TID from the `task` tool, e.g. T4):
     actor run <subagent_type> "<description>" "<prompt>" --task <TID>
 
@@ -41,7 +41,7 @@ appends them at request time per-agent).
     actor cancel <actor_id>     # graceful stop
     actor resume <actor_id> [--task <TID>] # retry a persistent full-context actor's original interrupted user
     # resume requires retained original instance/model identity; busy, cancelled,
-    # completed, or released actors are rejected. No model/prompt overrides.
+    # completed, or released actors are rejected. No model/variant/prompt overrides.
     # --task validates the original task, or binds an unbound user to an eligible
     # task in the original task session. Existing bindings cannot be replaced.
     # Omit --task to retain the persisted task. Unrelated sessions are unavailable.
@@ -63,7 +63,7 @@ appends them at request time per-agent).
     # --session: target session id (defaults to current); --type: 'text' (default) or 'actor_notification'
     # (--task is NOT valid here — use it on spawn/run for initial binding or resume for recovery binding)
 
-# list available models (optionally vision-only) to pick a --model value:
+# list available models with their variants (optionally vision-only) to pick --model/--variant values:
     actor models [--vision] [--limit <n>]
 
 Examples:
@@ -77,6 +77,10 @@ Examples:
 
 # pick a model/tier for this subagent (group name like ultra/standard/lite, or a literal provider/model):
     actor spawn explore "Quick scan" "find catch blocks" --model lite
+
+# pick a variant the resolved model lists in `actor models` (e.g. a reasoning level). It is not inherited
+# from you, an unknown name fails before the subagent starts, and it stays fixed for the actor's lifetime:
+    actor spawn general "Deep review" "review the auth flow end to end" --model ultra --variant high
 
 # tie this subagent to a task — pass a TID the `task` tool returned this session
 # (e.g. T1). On completion the postStop hook validates tasks/<TID>/progress.md.
@@ -109,7 +113,8 @@ Examples:
     actor run explore "Is the field public API" "Is `retryLimit` re-exported from src/index.ts? yes/no + file:line."
 
 # spawn/run flags: --timeout ms before giving up (run only); --command the command that
-#   triggered this; --context none|state|full
+#   triggered this; --variant one of the resolved model's variants from `actor models`;
+#   --context none|state|full
 #   (default none); --output-schema a JSON Schema STRING (single-quote it) — forces the
 #   subagent to return a matching object instead of free text.
 
@@ -121,4 +126,4 @@ When to use what:
              fast lookup. Never for ordinary analysis or implementation. Unsure? use spawn.
     wait   — pick up a previously-spawned actor's result when you must synchronize
     status — non-blocking peek at a spawned actor's progress
-    models — discover which models you can pass to --model (use --vision to find image-capable models for dispatching an image subagent)
+    models — discover which models, and each model's variants, you can pass to --model/--variant (use --vision to find image-capable models for dispatching an image subagent)

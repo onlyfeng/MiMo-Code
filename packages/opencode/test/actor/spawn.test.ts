@@ -610,7 +610,61 @@ describe("Actor.spawn peer mode", () => {
   )
 })
 
+function variantProviderCfg(url: string) {
+  const config = providerCfg(url)
+  return {
+    ...config,
+    provider: {
+      ...config.provider,
+      test: {
+        ...config.provider.test,
+        models: {
+          "test-model": {
+            ...config.provider.test.models["test-model"],
+            variants: { high: { reasoningEffort: "high" } },
+          },
+        },
+      },
+    },
+  }
+}
+
 describe("Actor.spawn subagent mode", () => {
+  it.live("carries an explicit variant into every child user and request", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({ title: "Variant subagent" })
+
+        yield* llm.text("done")
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "general",
+          task: "verify the requested variant",
+          context: "none",
+          tools: "INHERIT",
+          background: false,
+          model: ref,
+          variant: "high",
+        })
+        yield* Deferred.await(result.outcome)
+
+        const users = (yield* session.messages({ sessionID: parent.id, agentID: result.actorID })).flatMap((msg) =>
+          msg.info.role === "user" ? [msg.info] : [],
+        )
+        expect(users.length).toBeGreaterThan(0)
+        expect(users.map((user) => user.model.variant)).toEqual(users.map(() => "high"))
+
+        const request = (yield* llm.hits).find((hit) => JSON.stringify(hit.body).includes("verify the requested variant"))
+        expect(request?.body.reasoning_effort ?? request?.body.reasoningEffort).toBe("high")
+      }),
+      { git: true, config: variantProviderCfg },
+    ),
+    30000,
+  )
+
   it.live("exposes GPT orchestration and read tools to read-only GPT subagents", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {

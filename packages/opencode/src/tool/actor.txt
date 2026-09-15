@@ -29,7 +29,7 @@ THE EXCEPTION — `run` blocks the conversation; only for a tiny lookup that gat
           Use it for essentially all delegation: investigation, analysis, review,
           implementation, long searches — anything that takes real time.
           required: subagent_type, description, prompt
-          optional: command, context, lifecycle="persistent" (requires context="full")
+          optional: model, variant, command, context, lifecycle="persistent" (requires context="full")
 - run:    **RARE EXCEPTION.** Same launch, but BLOCKS the whole conversation until
           the subagent finishes; result returned inline. Allowed ONLY when you
           cannot make your very next decision without the result in THIS turn, and
@@ -37,7 +37,7 @@ THE EXCEPTION — `run` blocks the conversation; only for a tiny lookup that gat
           ordinary analysis, review, or implementation work — those go to `spawn`.
           If you are unsure, use `spawn`.
           required: subagent_type, description, prompt
-          optional: timeout_ms, command, context
+          optional: timeout_ms, model, variant, command, context
 - status: poll actor state without blocking. required: actor_id.
           Returns: { status: "pending"|"running"|"idle"|"unknown", actor_id, turnCount, ... }
 - wait:   block until actor completes (success/failure/cancelled) or timeout (default 10 min).
@@ -97,6 +97,17 @@ You are the subagent's only briefing — it hasn't seen this conversation.
 - `context="full"`: subagent sees your full conversation history (for state writers, evaluators).
 - `context="none"` (default): clean context, only the prompt.
 
+## Choosing a model and variant
+
+Both launch actions accept two optional selectors:
+
+- `model`: a tier/group name (e.g. `lite`) or a literal `provider/model`. Omit it to use the agent's configured model, else yours.
+- `variant`: a named variant of that resolved model, usually a reasoning-effort level. It must be one the model lists: call `{"operation":{"action":"models"}}` to see each model's variants. An unknown name fails before the subagent starts, and the error lists the valid ones.
+- Omitting `variant` keeps the default: the agent's configured variant when the subagent uses the agent's configured model, otherwise none. Your own current variant is not inherited, so pass it explicitly when the subagent needs the same reasoning level.
+- The variant stays fixed for the actor's lifetime: `send` follow-ups keep it, and `resume` cannot change it.
+
+{"operation":{"action":"spawn","subagent_type":"general","description":"Deep review","prompt":"<full task>","model":"ultra","variant":"high"}}
+
 ## Actor ID vs Task ID
 
 `actor_id` identifies a live subagent. It is returned by `spawn`/`run` and accepted by
@@ -105,7 +116,7 @@ You are the subagent's only briefing — it hasn't seen this conversation.
 ## Recovering an interrupted actor
 
 Use `{"operation":{"action":"resume","actor_id":"<existing>"}}` to retry the
-existing interrupted user turn. It accepts no new prompt or model. Optionally add
+existing interrupted user turn. It accepts no new prompt, model, or variant. Optionally add
 `"task_id":"T2.1"` to validate its original task, or bind an unbound interrupted
 user to an eligible task in the actor's original task session. A different existing
 binding is rejected. New bindings reject malformed, unknown, terminal, or another

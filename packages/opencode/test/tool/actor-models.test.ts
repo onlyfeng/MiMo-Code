@@ -45,6 +45,7 @@ const textModel = ProviderTest.model({
   id: ModelID.make("text-1"),
   providerID: ProviderID.make("acme"),
   name: "Text One",
+  variants: { low: { reasoningEffort: "low" }, high: { reasoningEffort: "high" } },
   capabilities: {
     toolcall: true,
     attachment: false,
@@ -201,6 +202,23 @@ describe("actor tool — models action", () => {
         expect(result.metadata.count).toBe(1)
         expect(result.metadata.total).toBe(3)
         expect(result.output).toContain("more")
+      }),
+    ),
+  )
+
+  it.live(
+    "models lists each model's variants and says how to pass one",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "chat" })
+        const def = yield* (yield* ActorTool).init()
+
+        const result = yield* def.execute({ operation: { action: "models" } }, ctxFor(chat.id))
+
+        expect(result.output).toContain(`${textRef} [variants: low, high]`)
+        expect(result.output).not.toContain(`${visionRef} (vision) [variants`)
+        expect(result.output).toContain("--variant")
       }),
     ),
   )

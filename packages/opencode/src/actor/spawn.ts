@@ -265,6 +265,12 @@ export interface SpawnInput {
   context: ContextMode
   tools: ToolWhitelist
   model?: { providerID: ProviderID; modelID: ModelID }
+  /**
+   * Named variant of `model`, already validated by the caller against that
+   * model's variants. Every prompt turn this spawn drives carries it, so it
+   * outranks the agent's configured variant; omitted → that fallback applies.
+   */
+  variant?: string
   background: boolean
   // ActorTool owns foreground waiting and cancellation after admission. Other
   // callers retain the existing foreground join unless they explicitly opt out.
@@ -459,6 +465,7 @@ export const layer = Layer.effect(
       task: string
       task_id?: string
       model?: { providerID: ProviderID; modelID: ModelID }
+      variant?: string
       source: "spawn" | "hook"
       provenance?: MessageV2.Provenance
       format?: MessageV2.OutputFormat
@@ -470,6 +477,7 @@ export const layer = Layer.effect(
         source: input.source,
         provenance: input.provenance,
         model: input.model,
+        variant: input.variant,
         task_id: input.task_id,
         parts: [{ type: "text", text: input.task }],
         ...(input.format ? { format: input.format } : {}),
@@ -511,6 +519,7 @@ export const layer = Layer.effect(
       description?: string
       background: boolean
       model?: { providerID: ProviderID; modelID: ModelID }
+      variant?: string
       lifecycle: "ephemeral" | "persistent"
       generation: ForkGenerationOwner
       execution: Execution
@@ -1193,6 +1202,7 @@ export const layer = Layer.effect(
             description: input.description,
             background: input.background,
             model: input.model,
+            variant: input.variant,
             lifecycle,
             generation,
             execution,
@@ -1250,6 +1260,7 @@ export const layer = Layer.effect(
             description: input.description,
             background: input.background,
             model: input.model,
+            variant: input.variant,
             lifecycle,
             generation,
             execution,

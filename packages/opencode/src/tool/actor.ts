@@ -74,6 +74,9 @@ const sendSchema = z.strictObject({
 const MODEL_PARAM_DESCRIPTION =
   "(optional) Model for this subagent: a model group name (e.g. ultra/standard/lite) or a literal provider/model (e.g. mimo-v2.5-pro). Overrides the agent's configured model; defaults to the agent's model, else the parent's. If no model_groups are configured, the tier names resolve to the default model. To discover valid provider/model values (e.g. a vision-capable model for image tasks), run `actor models` (or `actor models --vision`)."
 
+const VARIANT_PARAM_DESCRIPTION =
+  "(optional) Named variant of this subagent's model, usually a reasoning-effort level (e.g. low/high/max). It must be one the resolved model lists — run `actor models` to see each model's variants; an unknown name fails before the subagent starts and lists the valid ones. Omit it for the default: the agent's configured variant when the subagent uses the agent's configured model, otherwise none. Your own current variant is not inherited, and the variant stays fixed for the actor's lifetime."
+
 const KNOWN_ACTOR_VERBS = ["run", "spawn", "status", "wait", "cancel", "resume", "send", "models"]
 // Default token budget for checkpoint context injected into subagent prompts.
 // ~11K tokens ≈ 44KB UTF-8, enough for a concise progress summary without
@@ -120,8 +123,8 @@ function suggestActorVerb(input: string): string | undefined {
 // uses z.string() for subagent_type since the dynamic enum is only needed at
 // Zod validation time (inside execute), not at parse time.
 type ActorShellArgs =
-  | { operation: { action: "run"; subagent_type: string; description: string; prompt: string; model?: string; task_id?: string; timeout_ms?: number; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
-  | { operation: { action: "spawn"; subagent_type: string; description: string; prompt: string; lifecycle?: "persistent"; model?: string; task_id?: string; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
+  | { operation: { action: "run"; subagent_type: string; description: string; prompt: string; model?: string; variant?: string; task_id?: string; timeout_ms?: number; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
+  | { operation: { action: "spawn"; subagent_type: string; description: string; prompt: string; lifecycle?: "persistent"; model?: string; variant?: string; task_id?: string; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
   | { operation: { action: "status"; actor_id: string } }
   | { operation: { action: "wait"; actor_id: string; timeout_ms?: number } }
   | { operation: { action: "cancel"; actor_id: string } }
@@ -190,10 +193,10 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
       if (rejected) return yield* rejected
       const { flags, rest } = yield* extractNamedFlags(
         args,
-        ["model", "task", "timeout", "command", "context", "output-schema"],
+        ["model", "variant", "task", "timeout", "command", "context", "output-schema"],
         line,
       )
-      if (rest.length !== 3) return yield* actorArityError("run", '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--task <TID>] [--timeout <ms>] [--command <cmd>] [--context none|state|full] [--output-schema <json>]', rest, line)
+      if (rest.length !== 3) return yield* actorArityError("run", '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--variant <name>] [--task <TID>] [--timeout <ms>] [--command <cmd>] [--context none|state|full] [--output-schema <json>]', rest, line)
       return {
         operation: {
           action: "run" as const,
@@ -201,6 +204,8 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
           description: rest[1],
           prompt: rest[2],
           ...(flags.model ? { model: flags.model } : {}),
+          // An explicit empty value must reach the strict schema, not silently fall back.
+          ...(Object.hasOwn(flags, "variant") ? { variant: flags.variant } : {}),
           ...(flags.task ? { task_id: flags.task } : {}),
           ...(flags.timeout ? { timeout_ms: Number(flags.timeout) } : {}),
           ...(flags.command ? { command: flags.command } : {}),
@@ -216,10 +221,10 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
       if (rejected) return yield* rejected
       const { flags, rest } = yield* extractNamedFlags(
         args,
-        ["model", "task", "command", "context", "lifecycle", "output-schema"],
+        ["model", "variant", "task", "command", "context", "lifecycle", "output-schema"],
         line,
       )
-      if (rest.length !== 3) return yield* actorArityError("spawn", '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--task <TID>] [--command <cmd>] [--context none|state|full] [--lifecycle persistent] [--output-schema <json>]', rest, line)
+      if (rest.length !== 3) return yield* actorArityError("spawn", '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--variant <name>] [--task <TID>] [--command <cmd>] [--context none|state|full] [--lifecycle persistent] [--output-schema <json>]', rest, line)
       return {
         operation: {
           action: "spawn" as const,
@@ -227,6 +232,8 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
           description: rest[1],
           prompt: rest[2],
           ...(flags.model ? { model: flags.model } : {}),
+          // An explicit empty value must reach the strict schema, not silently fall back.
+          ...(Object.hasOwn(flags, "variant") ? { variant: flags.variant } : {}),
           ...(flags.task ? { task_id: flags.task } : {}),
           ...(flags.command ? { command: flags.command } : {}),
           ...(flags.context ? { context: flags.context } : {}),
@@ -370,9 +377,9 @@ export function recoverActorArgs(rawArgs: unknown): ActorShellArgs | undefined {
   }
   if (obj.operation && typeof obj.operation === "object" && !Array.isArray(obj.operation)) {
     const operation = obj.operation as Record<string, unknown>
-    // Conflicting copies cannot choose a different context or lifetime silently.
-    // Keep the extra root fields so the native strict schema rejects this shape.
-    if (["context", "lifecycle"].some((key) =>
+    // Conflicting copies cannot choose a different context, lifetime or variant
+    // silently. Keep the extra root fields so the native strict schema rejects this shape.
+    if (["context", "lifecycle", "variant"].some((key) =>
       Object.hasOwn(obj, key) && Object.hasOwn(operation, key) && obj[key] !== operation[key],
     )) return { ...obj, operation } as ActorShellArgs
     return {
@@ -380,6 +387,7 @@ export function recoverActorArgs(rawArgs: unknown): ActorShellArgs | undefined {
         ...operation,
         ...(Object.hasOwn(obj, "context") ? { context: obj.context } : {}),
         ...(Object.hasOwn(obj, "lifecycle") ? { lifecycle: obj.lifecycle } : {}),
+        ...(Object.hasOwn(obj, "variant") ? { variant: obj.variant } : {}),
       },
     } as ActorShellArgs
   }
@@ -394,6 +402,9 @@ export function recoverActorArgs(rawArgs: unknown): ActorShellArgs | undefined {
     if (Object.hasOwn(obj, "context")) op.context = obj.context
     if (Object.hasOwn(obj, "lifecycle")) op.lifecycle = obj.lifecycle
     if (typeof obj.model === "string") op.model = obj.model
+    // Like context and lifecycle, keep an explicit variant even when malformed:
+    // the strict schema rejects it instead of silently using the default.
+    if (Object.hasOwn(obj, "variant")) op.variant = obj.variant
     if (typeof obj.task_id === "string") op.task_id = obj.task_id
     // Carried on purpose even though no action accepts it, so the strict schema
     // rejects the call and the model is told the argument does not exist. This is
@@ -489,6 +500,11 @@ export const ActorTool = Tool.define(
           .min(1)
           .optional()
           .describe(MODEL_PARAM_DESCRIPTION),
+        variant: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(VARIANT_PARAM_DESCRIPTION),
         timeout_ms: timeoutField,
         command: z.string().min(1).optional().describe("(optional) The command that triggered this task."),
         context: contextField,
@@ -521,6 +537,11 @@ export const ActorTool = Tool.define(
           .min(1)
           .optional()
           .describe(MODEL_PARAM_DESCRIPTION),
+        variant: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(VARIANT_PARAM_DESCRIPTION),
         command: z.string().min(1).optional().describe("(optional) The command that triggered this task."),
         context: contextField,
         lifecycle: z
@@ -846,12 +867,15 @@ export const ActorTool = Tool.define(
             : [...filtered].sort((a, b) => `${a.providerID}/${a.id}`.localeCompare(`${b.providerID}/${b.id}`))
           const limit = op.limit ?? 50
           const shown = ordered.slice(0, limit)
-          const lines = shown.map((m) => `${m.providerID}/${m.id}${m.capabilities.input.image ? " (vision)" : ""}`)
+          const lines = shown.map((m) => {
+            const variants = Object.keys(m.variants ?? {})
+            return `${m.providerID}/${m.id}${m.capabilities.input.image ? " (vision)" : ""}${variants.length > 0 ? ` [variants: ${variants.join(", ")}]` : ""}`
+          })
           const header = op.vision ? `Vision-capable models` : `Available models`
           const more = ordered.length > shown.length ? `\n… and ${ordered.length - shown.length} more (raise --limit)` : ""
           const output = shown.length === 0
             ? (op.vision ? "No vision-capable models are configured. Configure a vision model or use an OCR tool." : "No models are configured.")
-            : `${header} (${shown.length} of ${ordered.length}):\n${lines.join("\n")}${more}\nPass any of these to actor --model.`
+            : `${header} (${shown.length} of ${ordered.length}):\n${lines.join("\n")}${more}\nPass any of these to actor --model, and optionally one of that model's listed variants to --variant.`
           return { title: header, output, metadata: { count: shown.length, total: ordered.length, vision: !!op.vision } as Record<string, any> }
         }
 
@@ -936,14 +960,28 @@ export const ActorTool = Tool.define(
         if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
 
         const modelRef = op.model ?? next.modelRef
-        const model = modelRef
-          ? yield* provider
-              .resolveModelRef(modelRef, msg.info.providerID)
-              .pipe(Effect.map((m) => ({ modelID: m.id, providerID: m.providerID })))
+        const resolved = modelRef ? yield* provider.resolveModelRef(modelRef, msg.info.providerID) : undefined
+        const model = resolved
+          ? { modelID: resolved.id, providerID: resolved.providerID }
           : (next.model ?? {
               modelID: msg.info.modelID,
               providerID: msg.info.providerID,
             })
+        // Validate before admission so a wrong variant never starts a child at a
+        // different cost or quality than the caller asked for. Own keys only: the
+        // provider has already merged configured variants and removed disabled ones.
+        if (op.variant) {
+          const variants = Object.keys((resolved ?? (yield* provider.getModel(model.providerID, model.modelID))).variants ?? {})
+          if (!variants.includes(op.variant))
+            return yield* Effect.fail(
+              new RecoverableError(
+                variants.length > 0
+                  ? `Model "${model.providerID}/${model.modelID}" has no variant "${op.variant}". Valid variants: ${variants.join(", ")}. Pass one of these, or omit variant to use the default.`
+                  : `Model "${model.providerID}/${model.modelID}" defines no variants, so variant "${op.variant}" cannot apply. Omit variant, or choose a model that lists variants in \`actor models\`.`,
+              ),
+            )
+        }
+        const selection = op.variant ? { model, variant: op.variant } : { model }
 
         const forkContext: ForkContext | undefined = yield* (op.context === "full"
           ? Effect.gen(function* () {
@@ -1027,7 +1065,7 @@ export const ActorTool = Tool.define(
                 task: prompt,
                 context: op.context ?? "none",
                 tools: next.toolAllowlist ? [...next.toolAllowlist] : "INHERIT",
-                model,
+                ...selection,
                 background,
                 awaitCompletion: false,
                 onAdmitted: (result) => {
@@ -1039,7 +1077,7 @@ export const ActorTool = Tool.define(
                 onReady: ({ actorID, sessionID }) =>
                   ctx.metadata({
                     title: op.description,
-                    metadata: { sessionId: sessionID, actorId: actorID, model },
+                    metadata: { sessionId: sessionID, actorId: actorID, ...selection },
                   }),
                 ...(op.output_schema
                   ? { format: { type: "json_schema" as const, schema: op.output_schema, retryCount: 2 } }
@@ -1052,7 +1090,7 @@ export const ActorTool = Tool.define(
                 ownership.handedOff = true
                 return {
                   title: op.description,
-                  metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, model },
+                  metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, ...selection },
                   output:
                     (taskNotice ? taskNotice + "\n" : "") +
                     `Background sub-session started. actor_id: ${spawnResult.actorID}\nThe result will be delivered as a notification when complete.`,
@@ -1099,7 +1137,7 @@ export const ActorTool = Tool.define(
               ownership.handedOff = true
               return {
                 title: op.description,
-                metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, model } as Record<
+                metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, ...selection } as Record<
                   string,
                   any
                 >,
