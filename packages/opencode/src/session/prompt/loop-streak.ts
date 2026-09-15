@@ -113,27 +113,25 @@ export type StreakCrop = {
 export function estimateBlocks(messages: readonly StreakMessage[]): number {
   return messages.reduce((sum, message) => {
     const tools = message.parts.filter((part) => part.type === "tool").length
-    const others = message.parts.filter(
-      (part) => part.type === "reasoning" || part.type === "text",
-    ).length
+    const others = message.parts.filter((part) => part.type === "reasoning" || part.type === "text").length
     return sum + tools * 2 + others
   }, 0)
 }
 
-export function cropMessagesForStreak(
-  messages: readonly StreakMessage[],
-  span: StreakSpan,
-): StreakCrop {
+export function cropMessagesForStreak(messages: readonly StreakMessage[], span: StreakSpan): StreakCrop {
+  const from = messages.findIndex((message) => message.info.id === span.fromId)
+  const to = messages.findIndex((message) => message.info.id === span.toId)
   // Only omit assistants that are actually in the streak (matching key) inside
-  // the id range. A text-only assistant with an empty key that happens to sit
+  // the message span. A text-only assistant with an empty key that happens to sit
   // between two streak steps is not part of the loop and must stay.
   const omittedIds = new Set(
     messages
       .filter(
-        (message) =>
+        (message, index) =>
+          from >= 0 &&
+          index >= from &&
+          index <= to &&
           message.info.role === "assistant" &&
-          message.info.id >= span.fromId &&
-          message.info.id <= span.toId &&
           streakKey(message.parts) === span.key,
       )
       .map((message) => message.info.id),
@@ -142,11 +140,8 @@ export function cropMessagesForStreak(
   const omittedMessages = messages.filter((message) => omittedIds.has(message.info.id))
   const omitted = omittedMessages.map((m) => m.info.id)
   const remainingSimilar = messages.filter(
-    (message) =>
-      message.info.role === "assistant" &&
-      message.info.id < span.fromId &&
-      omittedIds.size > 0 &&
-      streakKey(message.parts) === span.key,
+    (message, index) =>
+      message.info.role === "assistant" && index < from && omittedIds.size > 0 && streakKey(message.parts) === span.key,
   ).length
   const omittedParts = omittedMessages.reduce((sum, message) => sum + message.parts.length, 0)
   return {
@@ -220,16 +215,20 @@ export function applyPersistedCrops(
   crops: readonly PersistedStreakCrop[],
 ): { kept: StreakMessage[]; omitted: string[] } {
   if (crops.length === 0) return { kept: [...messages], omitted: [] }
+  // Resolve every span before omitting messages so overlapping spans keep
+  // their endpoints. Missing or reversed endpoints cannot establish a range.
+  const spans = crops
+    .map((crop) => ({
+      from: messages.findIndex((message) => message.info.id === crop.fromId),
+      to: messages.findIndex((message) => message.info.id === crop.toId),
+      key: crop.key,
+    }))
+    .filter((span) => span.from >= 0 && span.to >= span.from)
   const omitted = messages
     .filter(
-      (message) =>
+      (message, index) =>
         message.info.role === "assistant" &&
-        crops.some(
-          (crop) =>
-            message.info.id >= crop.fromId &&
-            message.info.id <= crop.toId &&
-            streakKey(message.parts) === crop.key,
-        ),
+        spans.some((span) => index >= span.from && index <= span.to && streakKey(message.parts) === span.key),
     )
     .map((message) => message.info.id)
   if (omitted.length === 0) return { kept: [...messages], omitted }

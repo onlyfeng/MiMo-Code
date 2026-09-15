@@ -566,6 +566,26 @@ export const layer = Layer.effect(
     // surface it once per primary session rather than on every run-loop turn.
     const instructionsNotified = new Set<SessionID>()
 
+    type ExternalAdmission = {
+      settled: Promise<void>
+      complete: () => void
+    }
+    const pendingExternalAdmissions = new Map<string, Set<ExternalAdmission>>()
+    const externalAdmissionKey = (sessionID: SessionID, agentID: string | undefined) =>
+      JSON.stringify([sessionID, agentID ?? "main"])
+    const waitForPendingExternalAdmission = Effect.fn("SessionPrompt.waitForPendingExternalAdmission")(function* (
+      sessionID: SessionID,
+      agentID: string | undefined,
+    ) {
+      const admissions = [...(pendingExternalAdmissions.get(externalAdmissionKey(sessionID, agentID)) ?? [])]
+      yield* Effect.all(
+        admissions.map((admission) => Effect.promise(() => admission.settled)),
+        {
+          concurrency: "unbounded",
+        },
+      )
+    })
+
     const selectSkillCatalog = Effect.fnUntraced(function* (input: {
       frozen: SessionPrefixSnapshot.Info | undefined
       user: MessageV2.User
@@ -767,7 +787,6 @@ export const layer = Layer.effect(
     // fall back to compaction when it returns false.
     const rebuildFromCheckpoint = Effect.fn("SessionPrompt.rebuildFromCheckpoint")(function* (input: {
       sessionID: SessionID
-      msgs: MessageV2.WithParts[]
       agentID?: string
       agent: string
       model: { providerID: string; id: string }
@@ -781,16 +800,21 @@ export const layer = Layer.effect(
         .pipe(Effect.catch(() => Effect.succeed(undefined)))
       if (!boundary) return false
 
-      const boundaryMsg = input.msgs.find((m) => m.info.id === boundary)
+      // The processor may have committed its completed assistant after the
+      // loop snapshot, or the writer may have been awaited since that snapshot.
+      // Freeze the actual insert-time tail so recovery covers those committed
+      // rows instead of immediately rebuilding again for their stale usage.
+      const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
+      const boundaryMsg = messages.find((m) => m.info.id === boundary)
       const inserted = yield* checkpoint
         .insertRebuildBoundary({
           sessionID: input.sessionID,
           boundary,
-          lastMessageInfo: computeLastMessageInfo(input.msgs.map((m) => m.info)),
+          lastMessageInfo: computeLastMessageInfo(messages.map((m) => m.info)),
           // Freeze the digest range at insert time: only this tail is eligible
           // for activity-log collapse. Auto rebuild mid-tool-loop keeps later
           // tool rounds live; manual rebuild digests the whole idle tail.
-          digestUpTo: input.msgs.at(-1)?.info.id,
+          digestUpTo: messages.at(-1)?.info.id,
           agentID: input.agentID,
           agent: input.agent,
           model: { providerID: input.model.providerID, modelID: input.model.id },
@@ -865,7 +889,6 @@ export const layer = Layer.effect(
     // and therefore drops all pre-boundary history with no summary at all.
     const rebuildEnsuringCheckpoint = Effect.fn("SessionPrompt.rebuildEnsuringCheckpoint")(function* (input: {
       sessionID: SessionID
-      msgs: MessageV2.WithParts[]
       agentID?: string
       agent: string
       model: { providerID: string; id: string }
@@ -2319,7 +2342,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const promptOps = yield* ops()
       const { actor: actorTool } = yield* registry.named()
       const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
-      const assistantMessage: MessageV2.Assistant = yield* sessions.updateMessage({
+      const assistantMessage: MessageV2.Assistant = yield* sessions.createMessage({
         id: MessageID.ascending(),
         role: "assistant",
         parentID: lastUser.id,
@@ -2543,7 +2566,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         model: { providerID: model.providerID, modelID: model.modelID },
         source: "user",
       }
-      yield* sessions.updateMessage(userMsg)
+      yield* sessions.createMessage(userMsg)
       const userPart: MessageV2.Part = {
         type: "text",
         id: PartID.ascending(),
@@ -2554,7 +2577,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
       yield* sessions.updatePart(userPart)
 
-      const msg: MessageV2.Assistant = {
+      const msg: MessageV2.Assistant = yield* sessions.createMessage({
         id: MessageID.ascending(),
         sessionID: input.sessionID,
         parentID: userMsg.id,
@@ -2568,8 +2591,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         modelID: model.modelID,
         providerID: model.providerID,
-      }
-      yield* sessions.updateMessage(msg)
+      })
       const part: MessageV2.ToolPart = {
         type: "tool",
         id: PartID.ascending(),
@@ -2722,7 +2744,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         if (terminalUser) {
           const ctx = yield* InstanceState.context
           const now = Date.now()
-          yield* sessions.updateMessage({
+          yield* sessions.createMessage({
             id: MessageID.ascending(),
             sessionID,
             parentID: terminalUser.id,
@@ -2757,6 +2779,37 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     })
 
     const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
+      const messageID = input.messageID ?? MessageID.ascending()
+      const admissionKey =
+        input.source === undefined || input.source === "user" || input.source === "spawn"
+          ? externalAdmissionKey(input.sessionID, input.agentID)
+          : undefined
+      const admission: ExternalAdmission | undefined = admissionKey
+        ? (() => {
+            let complete!: ExternalAdmission["complete"]
+            const settled = new Promise<void>((resolve) => {
+              complete = resolve
+            })
+            return { settled, complete }
+          })()
+        : undefined
+      if (admissionKey && admission) {
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            const current = pendingExternalAdmissions.get(admissionKey) ?? new Set()
+            current.add(admission)
+            pendingExternalAdmissions.set(admissionKey, current)
+          }),
+          () =>
+            Effect.sync(() => {
+              admission.complete()
+              const current = pendingExternalAdmissions.get(admissionKey)
+              if (!current) return
+              current.delete(admission)
+              if (current.size === 0) pendingExternalAdmissions.delete(admissionKey)
+            }),
+        )
+      }
       const agentName = input.agent || (yield* agents.defaultAgent())
       const ag = yield* agents.get(agentName)
       if (!ag) {
@@ -2786,7 +2839,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const variant = input.variant ?? (ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined)
 
       const info: MessageV2.User = {
-        id: input.messageID ?? MessageID.ascending(),
+        id: messageID,
         role: "user",
         sessionID: input.sessionID,
         agentID: input.agentID,
@@ -2810,10 +2863,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       yield* Effect.addFinalizer(() => instruction.clear(info.id))
 
       type Draft<T> = T extends MessageV2.Part ? Omit<T, "id"> & { id?: string } : never
-      const assign = (part: Draft<MessageV2.Part>): MessageV2.Part => ({
-        ...part,
-        id: part.id ? PartID.make(part.id) : PartID.ascending(),
-      })
+      const generatedPartIDs = new Set<PartID>()
+      const assign = (part: Draft<MessageV2.Part>): MessageV2.Part => {
+        const id = part.id ? PartID.make(part.id) : PartID.ascending()
+        if (!part.id) generatedPartIDs.add(id)
+        return { ...part, id }
+      }
 
       const resolvePart: (part: PromptInput["parts"][number]) => Effect.Effect<Draft<MessageV2.Part>[]> = Effect.fn(
         "SessionPrompt.resolveUserPart",
@@ -3267,10 +3322,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
       })
 
-      yield* sessions.updateMessage(message)
-      for (const part of parts) yield* sessions.updatePart(part)
+      const committed = yield* sessions.commitUserMessage(message, parts, { generatedPartIDs })
 
-      return { info: message, parts }
+      return { info: committed, parts: MessageV2.parts(committed.id) }
     }, Effect.scoped)
 
     const sweepOrphanAssistants = Effect.fn("SessionPrompt.sweepOrphanAssistants")(function* (
@@ -4398,13 +4452,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
             }
           }
-          const usageRecovered =
-            !!lastFinished &&
-            msgs.some(
-              (msg) =>
-                msg.info.id > lastFinished.id &&
-                msg.parts.some((part) => part.type === "checkpoint" || part.type === "compaction"),
-            )
+          const usageRecovered = !!lastFinished && MessageV2.usageRecovered(msgs, lastFinished)
 
           // Per-user-message active recall reminder. Once the session has
           // any memory artifacts (memory dir populated OR tasks recorded),
@@ -4599,6 +4647,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               auto: compactionPart?.auto ?? false,
               overflow: compactionPart?.overflow,
               agentID: lastUser.agentID,
+              waitForPendingExternalRequest: () =>
+                waitForPendingExternalAdmission(sessionID, lastUser.agentID ?? "main"),
             })
             // cron-sentinel cache is invalidated via a SessionCompaction.Event
             // .Compacted bus subscription inside cron-bridge — see
@@ -4720,7 +4770,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // logic/boundary conditions can't drift.
             const attempt: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
               sessionID,
-              msgs,
               agentID: lastUser.agentID,
               agent: lastUser.agent,
               model: { providerID: model.providerID, id: model.id },
@@ -4875,7 +4924,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           msgs = yield* insertReminders({ messages: msgs, agent, model, session })
 
-          const msg: MessageV2.Assistant = {
+          const msg: MessageV2.Assistant = yield* sessions.createMessage({
             id: MessageID.ascending(),
             parentID: lastUser.id,
             role: "assistant",
@@ -4890,8 +4939,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             providerID: model.providerID,
             time: { created: Date.now() },
             sessionID,
-          }
-          yield* sessions.updateMessage(msg)
+          })
           const handle = yield* processor.create({
             assistantMessage: msg,
             sessionID,
@@ -4958,7 +5006,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             if (step > 1 && lastFinished) {
               for (const m of msgs) {
-                if (m.info.role !== "user" || m.info.id <= lastFinished.id) continue
+                if (m.info.role !== "user" || MessageV2.compareOrder(m.info, lastFinished) <= 0) continue
                 for (const p of m.parts) {
                   if (p.type !== "text" || p.ignored || p.synthetic) continue
                   if (!p.text.trim()) continue
@@ -4982,9 +5030,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // Main also has contextMode="full", but has no forkCtx and stays on the
             // normal path because only spawned subagent/peer records qualify.
             if (forkCtx) {
-              const ownNew = msgs.filter(
-                (m) => m.info.id > forkCtx.watermarkMsgID && m.info.agentID === lastUser.agentID,
-              )
+              // The watermark identifies the parent snapshot, not child-session
+              // chronology. Caller-supplied child IDs can predate that watermark.
+              const ownNew = msgs.filter((m) => m.info.agentID === lastUser.agentID)
               const ownNewModelMsgs = yield* MessageV2.toModelMessagesEffect(ownNew, model)
               const prebuiltSystem = forkCtx.system
               lastSystemPrompt = prebuiltSystem
@@ -5588,7 +5636,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // compaction fallback stays ONE condition, not three lookalikes.
               const attempt2: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
                 sessionID,
-                msgs,
                 agentID: lastUser.agentID,
                 agent: lastUser.agent,
                 model: { providerID: model.providerID, id: model.id },
@@ -5752,8 +5799,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         started = true
       }).pipe(Effect.andThen(runLoop(input.sessionID, agentID, input.titleLocale, undefined, undefined, undefined, undefined, input.deferInbox)))
       // Continuations are serialized per (session, actor) by ActorExecution and
-      // settle through runTurn, matching upstream. The fork's former
-      // Actor.runPersistentTurn wake-generation routing on this path is retired.
+      // settle through runTurn, matching upstream.
       const execution =
         input.notifyParentOnComplete === true && agentID !== "main"
           ? Effect.acquireUseRelease(
@@ -6021,7 +6067,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // session produces the first checkpoint on the spot rather than deferring.
         const attempt: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
           sessionID: input.sessionID,
-          msgs,
           agentID: lastUser?.info.agentID ?? "main",
           agent: agentName,
           model: { providerID: model.providerID, id: model.modelID },

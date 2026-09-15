@@ -234,7 +234,7 @@ test("failed completion-gate reentry preserves the result without reporting task
 }, 30000)
 
 // Desktop tool-step-schema [TP-R14-08] [TP-R14-11].
-test("inbox waits for the entire spawn execution before starting a continuation", async () => {
+test.each(["subagent", "peer"] as const)("%s inbox waits for the entire spawn execution before starting a continuation", async (mode) => {
   const server = startScriptedLLMServer([
     { lines: textStopResponse("SPAWN-RESULT") },
     { lines: textStopResponse("POST-RESULT") },
@@ -283,7 +283,7 @@ test("inbox waits for the entire spawn execution before starting a continuation"
               permission: [{ permission: "*", pattern: "*", action: "allow" }],
             })
             const child = yield* actors.spawn({
-              mode: "subagent",
+              mode,
               sessionID: parent.id,
               agentType: "custom",
               task: "spawn probe",

@@ -17,8 +17,8 @@ renumbered to close gaps.
 - Last reviewed: 2026-09-15
 - Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
 - Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `0b12e39ebfae5e0a01e623de1b4f58e96c86cb09`
-- Bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
+- Main behavior (runtime/tests): `cdfd1a804599eda21fdc5bced9c0d1de025d07da`
+- Bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -28,7 +28,7 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: gateway error aliases at `b4cc11cd`, with local validation and pending publication in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
+Latest reviewed synchronization: gateway error aliases at `b4cc11cd`, accepted on main through PR #128; propagation and exact-SHA validation are recorded in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
 
 Previous synchronization: 2026-09-15, the specified upstream range
 `6fbb1732..5198ff54` (21 commits, 17 non-merge). The
@@ -515,8 +515,9 @@ the complete resolved model identity` case. FD-005 keeps only identity
   trusted opaque aliases, untrusted API aliases, GPT-4/OSS/MiMo vetoes and explicit
   selectors. This closes the diagnostic carrier defect identified by the audit;
   it does not change harness policy or validate `debug --tool` execution.
-  The unused fourth `CustomModelLoader` argument remains a separate cleanup
-  candidate tracked by F09 in [the implementation report](audit-followups-2026-09-15.md).
+  The unused fourth `CustomModelLoader` argument is removed under F09 in
+  [the implementation report](audit-followups-2026-09-15.md); the closed loader
+  table has no reader of that argument and preserves its three used arguments.
 
 ## FD-006 — `exec` is a composition tool, not an authority gateway
 

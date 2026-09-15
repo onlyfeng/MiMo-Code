@@ -17,7 +17,6 @@ import { Instance } from "@/project/instance"
 import { InstanceRef } from "@/effect/instance-ref"
 import { EffectBridge } from "@/effect"
 import { isRunDisposing, RunDisposal } from "@/session/run-disposal"
-import { WakeSourceDisposal } from "./wake-source"
 
 const log = Log.create({ service: "inbox" })
 
@@ -197,11 +196,9 @@ export const layer: Layer.Layer<
           wakeSource.instance?.directory === receiver.directory ? wakeSource : { disposing: false as const }
         const bridge = yield* EffectBridge.make().pipe(
           Effect.provideService(InstanceRef, receiverInstance),
-          // The receiver owns its run lifetime. The sender generation is only
-          // provenance across directories; same-directory delivery keeps the
-          // shared marker so disposal cannot re-arm the receiver generation.
+          // The receiver owns its run lifetime. Same-directory delivery keeps
+          // the shared marker so disposal cannot re-arm the receiver generation.
           Effect.provideService(RunDisposal, receiverDisposal),
-          Effect.provideService(WakeSourceDisposal, wakeSource),
         )
         yield* Effect.acquireUseRelease(
           Effect.sync(() => bridge.fork(promptRef.loop({
@@ -428,7 +425,7 @@ export const layer: Layer.Layer<
         return 0
       }
 
-      // Non-transactional crash window: updateMessage + updatePart commit
+      // Non-transactional crash window: createMessage + updatePart commit
       // before the inbox DELETE. A crash between them re-renders the same
       // rows on next drain — LLM sees duplicated notifications. Tolerable;
       // a transactional fix would require threading tx through
@@ -441,7 +438,7 @@ export const layer: Layer.Layer<
       // durable source of truth.
       const msgID = MessageID.ascending()
       const now = Date.now()
-      yield* sessions.updateMessage({
+      yield* sessions.createMessage({
         id: msgID,
         role: "user" as const,
         sessionID,

@@ -53,7 +53,7 @@ import { TuiEvent } from "../../src/cli/cmd/tui/event"
 import { Database } from "../../src/storage"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { Instance } from "../../src/project/instance"
-import { EffectBridge, InstanceState } from "../../src/effect"
+import { EffectBridge } from "../../src/effect"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Ripgrep } from "../../src/file/ripgrep"
@@ -566,7 +566,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
   )
 
   it.live(
-    "a woken peer toast is routed to the parent directory rather than the sender ambient instance",
+    "a woken peer sends its result to the parent from a sibling sender directory",
     () =>
       provideTmpdirServer(
         Effect.fnUntraced(function* ({ dir, llm }) {
@@ -590,44 +590,48 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
             model: ref,
           })
           expect((yield* Deferred.await(result.outcome)).status).toBe("success")
-          const previous = (yield* session.messages({ sessionID: result.sessionID, agentID: result.actorID })).findLast(
-            (message) => message.info.role === "assistant",
-          )
-          if (!previous) return yield* Effect.die("spawn did not persist an assistant message")
           yield* Effect.sync(() =>
             Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).run()),
           )
 
-          const toast = yield* Deferred.make<GlobalEvent>()
+          const delivered = yield* Deferred.make<GlobalEvent>()
+          const toasts: GlobalEvent[] = []
           const onGlobal = (event: GlobalEvent) => {
-            if (event.payload?.type !== TuiEvent.ToastShow.type) return
-            if (event.payload.properties?.message !== 'Child "woken routed peer" completed') return
-            Effect.runFork(Deferred.succeed(toast, event))
+            if (event.payload?.type === TuiEvent.ToastShow.type && event.payload.properties?.message === 'Child "woken routed peer" completed')
+              toasts.push(event)
+            if (event.payload?.type !== InboxArrived.type) return
+            if (event.payload.properties?.senderSessionID !== result.sessionID) return
+            if (event.payload.properties?.senderActorID !== result.actorID) return
+            Effect.runFork(Deferred.succeed(delivered, event))
           }
           GlobalBus.on("event", onGlobal)
           yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", onGlobal)))
 
           const senderDir = join(dir, "sibling-sender")
           yield* Effect.promise(() => mkdir(senderDir, { recursive: true }))
-          const parentInstance = yield* InstanceState.context
           const senderInstance = yield* Effect.promise(() =>
             Instance.provide({ directory: senderDir, fn: () => Instance.current }),
           )
           const senderBridge = yield* EffectBridge.make().pipe(Effect.provideService(InstanceRef, senderInstance))
+          const inbox = yield* Inbox.Service
+          yield* llm.text("woken turn complete")
           yield* Effect.promise(() =>
-            senderBridge.promise(
-              actor.runPersistentTurn!({
-                sessionID: result.sessionID,
-                actorID: result.actorID,
-                notifyParentOnComplete: true,
-                onInterrupt: Effect.succeed(previous),
-                work: Effect.succeed(previous),
-              }).pipe(Effect.provideService(InstanceRef, parentInstance)),
-            ),
+            senderBridge.promise(inbox.send({
+              receiverSessionID: result.sessionID,
+              receiverActorID: result.actorID,
+              senderSessionID: parent.id,
+              senderActorID: "main",
+              content: "continue from a sibling directory",
+            })),
           )
 
-          const event = yield* Deferred.await(toast).pipe(Effect.timeout("5 seconds"))
-          expect(event.directory).toBe(dir)
+          const event = yield* Deferred.await(delivered).pipe(Effect.timeout("5 seconds"))
+          expect(event.payload?.properties?.receiverSessionID).toBe(parent.id)
+          const rows = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).all())
+          expect(rows).toHaveLength(1)
+          expect((rows[0].content as { text: string }).text).toContain("woken turn complete")
+          // The shared continuation notifier intentionally omits spawn toasts.
+          expect(toasts).toEqual([])
         }),
         { git: true, config: providerCfg },
       ),

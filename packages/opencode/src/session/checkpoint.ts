@@ -1571,7 +1571,9 @@ export const layer: Layer.Layer<
           // Main slice only — the runLoop collapse is main-scoped; subagent
           // activity must not appear as if the main agent performed it.
           const all = yield* session.messages({ sessionID })
-          const tail = all.filter((m) => m.info.id > boundaryID && m.info.id <= digestUpTo)
+          const from = all.findIndex((m) => m.info.id === boundaryID)
+          const to = all.findIndex((m) => m.info.id === digestUpTo)
+          const tail = from < 0 || to <= from ? [] : all.slice(from + 1, to + 1)
           const activity = renderTailDigest(tail)
           if (activity) {
             hasActivity = true

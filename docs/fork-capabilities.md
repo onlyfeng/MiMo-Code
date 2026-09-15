@@ -18,8 +18,8 @@ authority.
 - Last reviewed: 2026-09-15
 - Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
 - Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `0b12e39ebfae5e0a01e623de1b4f58e96c86cb09`
-- Bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
+- Main behavior (runtime/tests): `cdfd1a804599eda21fdc5bced9c0d1de025d07da`
+- Bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,7 +29,7 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: gateway error aliases at `b4cc11cd`, with local validation and pending publication in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
+Latest reviewed synchronization: gateway error aliases at `b4cc11cd`, accepted on main through PR #128; propagation and exact-SHA validation are recorded in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
 
 Previous synchronization: 2026-09-15, the specified upstream range
 `6fbb1732..5198ff54` (21 commits, 17 non-merge). The
@@ -342,13 +342,34 @@ not change their implementation. The preceding review is retained in the
   HTTP/SDK/tool publication and actual provider/transaction regressions are
   recorded in the shared history; no cross-restart recovery is introduced.
 
-- 2026-09-15 code-inventory note: production inbox turns use ActorExecution
-  and SessionPrompt. `Actor.runPersistentTurn` and its private `continueTurn`
-  path remain exported/retained for test callers only; no production caller was
-  found at the reviewed main SHA. This is retired-path cleanup debt. Preserve
-  `finishPersistentTurn` and `acquireWake`, which still participate in resume,
-  and move useful assertions to real inbox admission before deleting the old
-  testing entry.
+- 2026-09-15 retired-path cleanup: production inbox turns use ActorExecution
+  and SessionPrompt. The unused `Actor.runPersistentTurn`, private
+  `continueTurn` and sole-consumer `WakeSourceDisposal` are removed. Existing
+  `finishPersistentTurn` and `acquireWake` remain because resume uses them.
+  Ten old tests were individually mapped to actual Inbox/cancellation/lock
+  paths or explicitly retired obsolete DTO/owner-follower semantics; the
+  independent ten-case regression passed. Real continuation notifications
+  arrive through the parent Inbox without a toast. This does not reinstate the
+  deleted testing entry's notification policy. See F09 in
+  [the implementation report](audit-followups-2026-09-15.md).
+
+- 2026-09-15 shared chronology/admission: caller IDs are identity keys, not
+  admission order. `createMessage` allocates an actor-local monotonic committed
+  timestamp; metadata updates preserve creation time and completion cannot
+  precede it. Prompt and compaction user message/parts are committed together
+  with session/actor/part ownership validation; latest-user conditional
+  admission shares that transaction. Same-owner prompt retries may reuse
+  producer-generated part IDs only when the complete current persisted content
+  matches. Anonymous parts match by relative order; explicit IDs and complete
+  persisted content/metadata remain strict. Reordering explicitly identified
+  input parts can be equivalent after canonical sorting. Runtime-added
+  parts can make a later replay conflict. This is not a lifetime replay receipt.
+  Inbox draining still writes the message, its parts and the queue deletion in
+  separate steps; the prompt/compaction transaction does not cover Inbox drain.
+  Fork/revert and cursor
+  consumers use chronological positions, with UTF-8 ID ties matching SQLite
+  BINARY. Producer and transaction regressions are recorded under F06 in
+  [the implementation report](audit-followups-2026-09-15.md).
 
 ## FC-002 — canonical checkpoint writer and mode-specific frozen context
 
@@ -693,18 +714,35 @@ not change their implementation. The preceding review is retained in the
   bound the cancellation join to the existing reclaim grace while detached
   cleanup continues; shared cancellation retains interrupt/join semantics.
   The dated actor quarantine entries below describe their historical snapshots.
-  The separate workflow deadline quarantine is also closed. The restored
+  The separate workflow deadline case is restored. The restored
   `it.live` case proves the hanging LLM request was consumed, a child worktree
   and running Instance existed, the exact workflow deadline fired, and the
   worktree and Instance were disposed. Its former two-second deadline could
   precede child startup; the test now explicitly gates on startup before testing
   reclamation. Four workflow/disposal suites pass together (44 tests) and the
-  process exits naturally. The historically reported disposer hang was not
-  reproduced; no production cleanup policy changed. F03 records the opt-in
-  environment and evidence in [the implementation report](audit-followups-2026-09-15.md).
+  process exits naturally in that local matrix. PR #129 at `eaf99b8b` subsequently
+  reproduced a 120-second timeout in this case on Linux; other tests continued
+  until the shard's eight-minute budget ended. A second observation located the
+  wait inside workflow settlement after child disposal. Worktree removal can
+  fail as an Effect defect, which the old typed-error ignore did not catch;
+  that failure stranded terminal persistence and the completion signal.
+  Reclaim now logs removal defects and continues publishing the original
+  outcome. Pure interruption still propagates and existing cleanup deadlines
+  remain unchanged. Real removal followed by fault injection proves both
+  deadline and cancellation settle, persist and notify after child disposal.
+  Concurrent reclaim/isolated removal is observed; the exact Git failure in the
+  intermittent Linux run remains an inference, not a captured exception.
+  F03 records default/opt-in and final CI evidence separately in
+  [the implementation report](audit-followups-2026-09-15.md).
   A separate Runner reentry fixture now uses explicit started/reentered/release
   signals instead of five/fifty-millisecond timer ordering, preserving the
   assertion that both waiters share the first execution and emit one warning.
+
+- SDK generation validation captures stdout in a temporary file, matching the
+  standard root/SDK build redirect. The pipe fixture could remain alive after
+  delivering a complete document on Bun; file capture preserves the actual
+  generator, full-document/callable/HTTP assertions and original child deadline.
+  This does not claim to fix every production pipe or Bun callback/exit path.
 
 - Status: active process/runtime contract
 - Canonical owner: fork `main` workflow runtime and repository CI
@@ -854,14 +892,19 @@ logged`, and the peer `success`/`failure` variants of
   unchanged from main into compat, adding no runtime capability and no new
   retirement decision. Review-thread adjudication for the cleanup-scope finding
   is recorded on PR #105.
-- 2026-09-15 tooling inventory: root `script/generate.ts` currently runs the
-  repository formatter after SDK/OpenAPI generation, unlike upstream's disabled
-  final formatter call. This is a tooling-policy difference, not generated API
-  behavior; assess removing the implicit whole-repository formatting step during
-  a later focused cleanup. Generated SDK/OpenAPI differences mix actual fork
-  schema additions with refreshes of upstream source fields whose checked-in
-  upstream artifacts lag. Compare producers before attributing every artifact
-  hunk to a fork feature.
+- 2026-09-15 tooling convergence: root `script/generate.ts` keeps SDK then
+  OpenAPI generation and stops implicitly formatting the whole repository,
+  matching upstream's generation policy. Generator-local formatting and failure
+  propagation remain. JavaScript OpenAPI examples import `@mimo-ai/sdk/v2`
+  and call the generated camelCase methods, including `session.promptAsync`;
+  actual generated/published samples are checked against the client and the
+  async prompt example sends the expected HTTP path/body. Main publishes 140
+  operations; compat's extra coverage operation remains its own protocol.
+  Generated artifacts still mix actual fork schema additions with refreshes of
+  upstream source fields whose checked-in artifacts lag. Compare producers
+  before attributing every artifact hunk to a fork feature.
+  Three no-caller model API child fixtures are removed; the live TUI worker
+  default/listener tests remain. See F05/F09/F11 in the implementation report.
 - 2026-09-05 fixture review: removed `resetDatabase` and its four call sites,
   preserving local disposal and the fork project-init authorization fixture.
   Rejected incoming auth-override, fork-prefix, and failed-subtask skips: the
@@ -913,8 +956,9 @@ logged`, and the peer `success`/`failure` variants of
   FD-004's decision rather than by an upstream settlement, and FD-004 records
   each resulting behaviour.
 - Retirement condition: runtime bounds may retire only with equivalent upstream
-  settlement. The single test skip retires after the disposer is fixed and
-  bounded exact-SHA CI proves process exit.
+  settlement. Restoring a quarantined test requires effective assertions and
+  bounded exact-SHA CI settlement; the workflow case's restored execution alone
+  does not close the Linux timeout follow-up above.
 
 - 2026-09-15 retired-fixture inventory: `test/fixture/llm-server-cli-child.ts`,
   `test/fixture/model-api-default-child.ts` and `test/llm-server/tokens-child.ts`
@@ -1237,15 +1281,45 @@ logged`, and the peer `success`/`failure` variants of
   additional fixed-reserve ceiling. The TUI budget picker validates and previews
   each candidate through the same resolver and reports the applied trigger.
   Compression-time projection retains its summary,
-  file manifest, and complete API rounds, but its tail budget is the smaller of
+  file manifest, and complete API rounds. Its optional tail budget is the smaller of
   40K tokens and the remaining usable window after the frozen system/tools and
-  fixed projection content. Compaction reuses the frozen request prefix and
+  fixed projection content. A new external user/spawn request that arrived after
+  the summary snapshot, and all messages after it, must remain visible even when
+  that optional budget is zero. Their cost consumes the available optional budget
+  before older complete rounds are selected; ordinary overflow handling still
+  applies to an oversized required request. Compaction reuses the frozen request prefix and
   keeps `toolChoice: "none"`; schema bytes remain cache-stable without granting
   summary-time tool execution. Complete authorized definitions remain available
   for frozen rebinding, while compaction sends and budgets only the frozen
   advertised subset. Its file manifest includes retained validated terminal
   nested exec effects within the snapshot budget; these read-only views never
   create tool-execution authority.
+- 2026-09-15 shared chronological projections: rebuild tails, recovery usage,
+  checkpoint context and persisted loop-streak spans resolve actual message
+  positions rather than lexical ID ranges. Missing/reversed checkpoint bounds
+  retain live messages through both context filtering and later tail collapse;
+  the transient invalid range is not written back to storage. TUI buckets use
+  the same `(created, UTF-8 ID)` order and undo hydration follows pagination
+  through its exact boundary, preserving that boundary during live updates.
+  Main's existing footer compares a locally resolved watermark and remains
+  pending when it cannot resolve one. The extra checkpoint-coverage HTTP/SDK
+  and TUI cache protocol stays owned by DC-CONTEXT-001 on compat.
+  Additional carriers: `session/session.ts`, `message-v2.ts`, `checkpoint.ts`,
+  `tail-digest.ts`, `revert.ts`, `prompt/loop-streak.ts`, shared UTF-8 ordering,
+  and TUI sync/session/model utilities. Real SQL pagination, atomic admission,
+  composed projection and TUI state-helper tests bind these paths; no
+  interactive terminal playtest is claimed.
+- 2026-09-15 concurrent admission review: pending external requests are scoped
+  by session and actor until their message and parts commit or admission ends.
+  Compaction waits for that actor's pending admissions before and after inserting
+  an automatic continuation; a newer committed request removes the exact stale
+  continuation and its parts. Failed/interrupted admission releases the wait,
+  and another actor's pending request does not block this actor. Snapshot tails
+  use message identity and the actual chronological endpoint rather than an
+  array length shared across different views. Real MCP gates cover pre-insert,
+  post-insert, failure, cross-actor and interruption paths, including a second
+  compaction while a cancelled resource remains unresolved. No additional tool
+  authority or compat preflight policy is introduced.
 - POLICY-04 carrier review: compaction is the third frozen-prefix consumer.
   Its history projection uses the layout paired with the selected frozen
   system, preserving legacy catalog messages or suppressing known generated

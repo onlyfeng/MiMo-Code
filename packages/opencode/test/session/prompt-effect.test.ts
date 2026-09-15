@@ -225,6 +225,7 @@ function wireTool(tools: Array<Record<string, unknown>>, name: string) {
 function mcpLayer(
   tools: (context?: MCP.TurnContext) => Record<string, AITool> = () => ({}),
   clients: () => Record<string, any> = () => ({}),
+  input?: { readResource?: MCP.Interface["readResource"] },
 ) {
   return Layer.succeed(
     MCP.Service,
@@ -238,7 +239,7 @@ function mcpLayer(
       connect: () => Effect.void,
       disconnect: () => Effect.void,
       getPrompt: () => Effect.succeed(undefined),
-      readResource: () => Effect.succeed(undefined),
+      readResource: input?.readResource ?? (() => Effect.succeed(undefined)),
       startAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
       authenticate: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
       finishAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
@@ -270,6 +271,20 @@ let userQueryPostGate:
       release: Deferred.Deferred<void>
     }
   | undefined
+let compactionAutoContinueGate:
+  | {
+      armed: boolean
+      entered: Deferred.Deferred<void>
+      release: Deferred.Deferred<void>
+    }
+  | undefined
+let userMessageCommitGate:
+  | {
+      arrivals: number
+      entered: Deferred.Deferred<void>
+      release: Deferred.Deferred<void>
+    }
+  | undefined
 const taskMetadataPlugin = Layer.succeed(
   Plugin.Service,
   Plugin.Service.of({
@@ -290,6 +305,18 @@ const taskMetadataPlugin = Layer.succeed(
           queryGate.armed = false
           yield* Deferred.succeed(queryGate.entered, undefined)
           yield* Deferred.await(queryGate.release)
+        }
+        const compactionGate = compactionAutoContinueGate
+        if (name === "experimental.compaction.autocontinue" && compactionGate?.armed) {
+          compactionGate.armed = false
+          yield* Deferred.succeed(compactionGate.entered, undefined)
+          yield* Deferred.await(compactionGate.release)
+        }
+        const commitGate = userMessageCommitGate
+        if (name === "chat.message" && commitGate) {
+          commitGate.arrivals++
+          if (commitGate.arrivals === 2) yield* Deferred.succeed(commitGate.entered, undefined)
+          yield* Deferred.await(commitGate.release)
         }
         return output
       }),
@@ -471,6 +498,8 @@ afterEach(() => {
   droppedStartGate = undefined
   sessionPreGate = undefined
   userQueryPostGate = undefined
+  compactionAutoContinueGate = undefined
+  userMessageCommitGate = undefined
   sessionTaskIDs.pre.length = 0
   sessionTaskIDs.post.length = 0
 })
@@ -574,6 +603,71 @@ function makeHttp(mcpService = mcp, input?: { actor?: boolean; plugin?: Layer.La
 
 const it = testEffect(makeHttp())
 const itActor = testEffect(makeHttp(mcp, { actor: true }))
+const admissionResourceStarted = defer<void>()
+const admissionResourceRelease = defer<void>()
+const admissionMcpIt = testEffect(
+  makeHttp(
+    mcpLayer(
+      () => ({}),
+      () => ({}),
+      {
+        readResource: () =>
+          Effect.promise(async () => {
+            admissionResourceStarted.resolve()
+            await admissionResourceRelease.promise
+            return { contents: [{ text: "admitted resource", uri: "mcp://admission", mimeType: "text/plain" }] }
+          }),
+      },
+    ),
+  ),
+)
+const failedAdmissionResourceStarted = defer<void>()
+const failedAdmissionResourceRelease = defer<void>()
+const failedAdmissionMcpIt = testEffect(
+  makeHttp(
+    mcpLayer(
+      () => ({}),
+      () => ({}),
+      {
+        readResource: () =>
+          Effect.promise(async () => {
+            failedAdmissionResourceStarted.resolve()
+            await failedAdmissionResourceRelease.promise
+            return undefined
+          }),
+      },
+    ),
+  ),
+)
+function controlledAdmission(result: "success" | "failure") {
+  return { result, started: defer<void>(), release: defer<void>() }
+}
+const concurrentAdmissionControls = {
+  "mcp://same-actor-success": controlledAdmission("success"),
+  "mcp://same-actor-failure": controlledAdmission("failure"),
+  "mcp://peer-admission": controlledAdmission("success"),
+  "mcp://post-insert": controlledAdmission("success"),
+  "mcp://cancelled-admission": controlledAdmission("success"),
+}
+const concurrentAdmissionMcp = mcpLayer(
+  () => ({}),
+  () => ({}),
+  {
+    readResource: (_, uri) => {
+      const control = concurrentAdmissionControls[uri as keyof typeof concurrentAdmissionControls]
+      if (!control) return Effect.die(`Unexpected controlled admission URI: ${uri}`)
+      return Effect.promise(async () => {
+        control.started.resolve()
+        await control.release.promise
+        if (control.result === "failure") return undefined
+        return { contents: [{ text: `admitted ${uri}`, uri, mimeType: "text/plain" }] }
+      })
+    },
+  },
+)
+const concurrentAdmissionMcpIt = testEffect(makeHttp(concurrentAdmissionMcp))
+const postInsertAdmissionMcpIt = testEffect(makeHttp(concurrentAdmissionMcp, { plugin: taskMetadataPlugin }))
+
 const taskMetadataIt = testEffect(makeHttp(mcp, { plugin: taskMetadataPlugin }))
 const mcpLegacyMetadata = { interrupted: true, output: "must not become a successful result" }
 const mcpErrorImage = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -5995,6 +6089,7 @@ it.live("run approval disconnect retracts an already pending command permission 
   ),
 )
 
+// Four serialized Actors exercise real tools and provider turns.
 itActor.live(
   "run approval explicitly follows new peers and subagents but never infers ownership from a parent session",
   () =>
@@ -6047,6 +6142,7 @@ itActor.live(
       }),
       { git: true, config: (url) => ({ ...providerCfg(url), permission: { bash: "ask" } }) },
     ),
+  15_000,
 )
 
 it.live("run approval does not authorize an unrelated user queued into its admitted runner", () =>
@@ -6210,3 +6306,1156 @@ for (const mode of ["matching", "changed", "legacy", "legacy-json"] as const) {
     15000,
   )
 }
+
+it.live("fork uses chronological position when the boundary has an older caller ID", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "Old-ID fork parent" })
+      const boundaryID = MessageID.ascending()
+      const before = yield* seed(parent.id, { finish: "stop" })
+      expect(boundaryID < before.user.id).toBe(true)
+      yield* sessions.commitUserMessage(
+        {
+          id: boundaryID,
+          sessionID: parent.id,
+          role: "user",
+          agent: "build",
+          model: ref,
+          source: "user",
+          time: { created: 0 },
+        },
+        [
+          {
+            id: PartID.ascending(),
+            messageID: boundaryID,
+            sessionID: parent.id,
+            type: "text",
+            text: "fork boundary",
+          },
+        ],
+      )
+      expect(yield* sessions.lastMainMessageID(parent.id)).toBe(boundaryID)
+
+      const fork = yield* sessions.fork({ sessionID: parent.id, messageID: boundaryID })
+      const forked = yield* sessions.messages({ sessionID: fork.id, agentID: "*" })
+      expect(forked).toHaveLength(2)
+      expect(forked.map((message) => message.info.role)).toEqual(["user", "assistant"])
+      expect(JSON.stringify(forked)).toContain("hello")
+      expect(JSON.stringify(forked)).toContain("hi there")
+      expect(JSON.stringify(forked)).not.toContain("fork boundary")
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live(
+  "direct admission commits after the latest actor timestamp even with an older message ID",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Monotonic direct admission" })
+        const directMessageID = MessageID.ascending()
+        const hook = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          role: "user",
+          agent: "build",
+          model: ref,
+          source: "hook",
+          time: { created: Date.now() + 60_000 },
+        })
+        const peerHook = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          agentID: "peer",
+          role: "user",
+          agent: "build",
+          model: ref,
+          source: "hook",
+          time: { created: hook.time.created + 60_000 },
+        })
+
+        const direct = yield* prompt.prompt({
+          sessionID: chat.id,
+          messageID: directMessageID,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "newer direct request" }],
+        })
+
+        expect(direct.info.role).toBe("user")
+        if (direct.info.role !== "user") return
+        expect(direct.info.time.created).toBe(hook.time.created + 1)
+        expect(direct.info.time.created).toBeLessThan(peerHook.time.created)
+        expect((yield* sessions.messages({ sessionID: chat.id })).at(-1)?.info.id).toBe(directMessageID)
+        expect(
+          (yield* sessions.commitUserMessage({ ...direct.info, time: { created: 0 } }, direct.parts)).time.created,
+        ).toBe(direct.info.time.created)
+        const conflict = yield* sessions
+          .commitUserMessage(
+            { ...direct.info, time: { created: 0 } },
+            direct.parts.map((part) => (part.type === "text" ? { ...part, text: "conflicting retry" } : part)),
+          )
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(conflict)).toBe(true)
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).find((message) => message.info.id === directMessageID)
+            ?.parts.some((part) => part.type === "text" && part.text === "newer direct request"),
+        ).toBe(true)
+
+        yield* llm.text("future-timestamp request handled")
+        const result = yield* prompt.loop({ sessionID: chat.id })
+        expect(result.info.role).toBe("assistant")
+        if (result.info.role === "assistant") {
+          expect(result.info.parentID).toBe(directMessageID)
+          expect(result.info.time.created).toBe(direct.info.time.created + 1)
+          expect(result.info.time.completed).toBeGreaterThanOrEqual(result.info.time.created)
+        }
+        expect((yield* sessions.messages({ sessionID: chat.id })).at(-1)?.info.id).toBe(result.info.id)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
+)
+
+it.live(
+  "run loop handles a committed direct request whose client ID predates a finished assistant",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Late committed direct request" })
+        const directMessageID = MessageID.ascending()
+        const previous = yield* seed(chat.id, { finish: "stop" })
+        expect(directMessageID < previous.assistant.id).toBe(true)
+
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          messageID: directMessageID,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "must reach the model despite my older ID" }],
+        })
+        yield* llm.text("late direct handled")
+        const result = yield* prompt.loop({ sessionID: chat.id })
+
+        expect(result.parts.some((part) => part.type === "text" && part.text === "late direct handled")).toBe(true)
+        expect(yield* llm.hits).toHaveLength(1)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
+)
+
+it.live("user message and parts roll back together when atomic admission fails", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Atomic user admission" })
+      const messageID = MessageID.ascending()
+
+      const exit = yield* sessions
+        .commitUserMessage(
+          {
+            id: messageID,
+            sessionID: chat.id,
+            role: "user",
+            agent: "build",
+            model: ref,
+            source: "user",
+            time: { created: Date.now() },
+          },
+          [
+            {
+              id: PartID.ascending(),
+              messageID,
+              sessionID: chat.id,
+              type: "text",
+              text: "must roll back",
+              metadata: { invalid_json_value: 1n },
+            },
+          ],
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect((yield* sessions.messages({ sessionID: chat.id })).some((message) => message.info.id === messageID)).toBe(
+        false,
+      )
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("createMessage rejects duplicate IDs and updateMessage preserves the committed timestamp", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Monotonic message API" })
+      const created = yield* sessions.createMessage({
+        id: MessageID.ascending(),
+        sessionID: chat.id,
+        role: "user" as const,
+        agent: "build",
+        model: ref,
+        source: "hook" as const,
+        time: { created: 0 },
+      })
+      const duplicate = yield* sessions.createMessage({ ...created, system: "must not overwrite" }).pipe(Effect.exit)
+      expect(Exit.isFailure(duplicate)).toBe(true)
+
+      const updated = yield* sessions.updateMessage({ ...created, system: "preserved update", time: { created: 0 } })
+      expect(updated.time.created).toBe(created.time.created)
+      const stored = (yield* sessions.messages({ sessionID: chat.id })).find(
+        (message) => message.info.id === created.id,
+      )
+      expect(stored?.info.time.created).toBe(created.time.created)
+      expect(stored?.info.role === "user" && stored.info.system).toBe("preserved update")
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("atomic user admission rejects reused and duplicate part IDs without changing their owner", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Atomic part ownership" })
+      const originalMessageID = MessageID.ascending()
+      const partID = PartID.ascending()
+      yield* sessions.commitUserMessage(
+        {
+          id: originalMessageID,
+          sessionID: chat.id,
+          role: "user",
+          agent: "build",
+          model: ref,
+          source: "user",
+          time: { created: Date.now() },
+        },
+        [{ id: partID, messageID: originalMessageID, sessionID: chat.id, type: "text", text: "original part" }],
+      )
+
+      const collisionMessageID = MessageID.ascending()
+      const collision = yield* sessions
+        .commitUserMessage(
+          {
+            id: collisionMessageID,
+            sessionID: chat.id,
+            role: "user",
+            agent: "build",
+            model: ref,
+            source: "user",
+            time: { created: Date.now() },
+          },
+          [{ id: partID, messageID: collisionMessageID, sessionID: chat.id, type: "text", text: "collision" }],
+        )
+        .pipe(Effect.exit)
+      const duplicateMessageID = MessageID.ascending()
+      const duplicatePartID = PartID.ascending()
+      const duplicate = yield* sessions
+        .commitUserMessage(
+          {
+            id: duplicateMessageID,
+            sessionID: chat.id,
+            role: "user",
+            agent: "build",
+            model: ref,
+            source: "user",
+            time: { created: Date.now() },
+          },
+          [
+            {
+              id: duplicatePartID,
+              messageID: duplicateMessageID,
+              sessionID: chat.id,
+              type: "text",
+              text: "first duplicate",
+            },
+            {
+              id: duplicatePartID,
+              messageID: duplicateMessageID,
+              sessionID: chat.id,
+              type: "text",
+              text: "second duplicate",
+            },
+          ],
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(collision)).toBe(true)
+      expect(Exit.isFailure(duplicate)).toBe(true)
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      expect(messages.some((message) => message.info.id === collisionMessageID)).toBe(false)
+      expect(messages.some((message) => message.info.id === duplicateMessageID)).toBe(false)
+      expect(
+        messages.find((message) => message.info.id === originalMessageID)
+          ?.parts.some((part) => part.id === partID && part.type === "text" && part.text === "original part"),
+      ).toBe(true)
+
+      const retryMessageID = MessageID.ascending()
+      const retryMessage: MessageV2.User = {
+        id: retryMessageID,
+        sessionID: chat.id,
+        role: "user",
+        agent: "build",
+        model: ref,
+        source: "user",
+        time: { created: Date.now() },
+      }
+      const retryParts: MessageV2.Part[] = [
+        {
+          id: PartID.make("prt_\u{10000}"),
+          messageID: retryMessageID,
+          sessionID: chat.id,
+          type: "text",
+          text: "supplementary-plane part",
+        },
+        {
+          id: PartID.make("prt_\uE000"),
+          messageID: retryMessageID,
+          sessionID: chat.id,
+          type: "text",
+          text: "private-use part",
+        },
+      ]
+      const committed = yield* sessions.commitUserMessage(retryMessage, retryParts)
+      expect(
+        (yield* sessions.commitUserMessage({ ...retryMessage, time: { created: 0 } }, [...retryParts].reverse())).time
+          .created,
+      ).toBe(committed.time.created)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+postInsertAdmissionMcpIt.live(
+  "auto-compaction deletes an inserted continuation after a later MCP admission commits",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const compaction = yield* SessionCompaction.Service
+        const chat = yield* sessions.create({ title: "Post-insert compaction admission" })
+        yield* seed(chat.id, { finish: "stop" })
+        yield* compaction.create({ sessionID: chat.id, agent: "build", model: ref, auto: true })
+
+        const gate = {
+          armed: true,
+          entered: yield* Deferred.make<void>(),
+          release: yield* Deferred.make<void>(),
+        }
+        compactionAutoContinueGate = gate
+        const resource = concurrentAdmissionControls["mcp://post-insert"]
+        yield* Effect.addFinalizer(() =>
+          Deferred.succeed(gate.release, undefined).pipe(Effect.andThen(Effect.sync(() => resource.release.resolve()))),
+        )
+        yield* llm.text("post-insert summary")
+        const compacting = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+        yield* Deferred.await(gate.entered).pipe(Effect.timeout("10 seconds"))
+
+        const directMessageID = MessageID.ascending()
+        const direct = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: directMessageID,
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [
+              {
+                type: "file",
+                url: "mcp://post-insert",
+                filename: "post-insert.txt",
+                mime: "text/plain",
+                source: {
+                  type: "resource",
+                  clientName: "test-client",
+                  uri: "mcp://post-insert",
+                  text: { value: "post-insert.txt", start: 0, end: 15 },
+                },
+              },
+            ],
+          })
+          .pipe(Effect.forkChild)
+        yield* Effect.promise(() => resource.started.promise).pipe(Effect.timeout("10 seconds"))
+        yield* llm.text("post-insert request handled")
+        yield* Deferred.succeed(gate.release, undefined)
+
+        const continuation = yield* Effect.gen(function* () {
+          while (true) {
+            const hooks = (yield* sessions.messages({ sessionID: chat.id })).filter(
+              (message) =>
+                message.info.role === "user" &&
+                message.info.source === "hook" &&
+                !message.parts.some((part) => part.type === "compaction"),
+            )
+            if (hooks.length > 0) {
+              expect(hooks).toHaveLength(1)
+              return hooks[0]
+            }
+            yield* Effect.sleep(10)
+          }
+        }).pipe(Effect.timeout("10 seconds"))
+        expect(continuation.parts.some((part) => part.type === "text" && part.metadata?.compaction_continue)).toBe(true)
+        expect(MessageV2.parts(continuation.info.id)).toHaveLength(1)
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).some((message) => message.info.id === directMessageID),
+        ).toBe(false)
+        expect(compacting.pollUnsafe()).toBeUndefined()
+        expect(yield* llm.calls).toBe(1)
+
+        resource.release.resolve()
+        yield* Fiber.join(direct).pipe(Effect.timeout("10 seconds"))
+        const result = yield* Fiber.join(compacting).pipe(Effect.timeout("10 seconds"))
+        const messages = yield* sessions.messages({ sessionID: chat.id })
+        expect(messages.some((message) => message.info.id === continuation.info.id)).toBe(false)
+        expect(MessageV2.parts(continuation.info.id)).toHaveLength(0)
+        expect(messages.filter((message) => message.info.role === "user").at(-1)?.info.id).toBe(directMessageID)
+        expect(result.parts.some((part) => part.type === "text" && part.text === "post-insert request handled")).toBe(
+          true,
+        )
+        expect(yield* llm.calls).toBe(2)
+        const input = JSON.stringify((yield* llm.inputs).at(-1)?.messages)
+        expect(input).toContain("admitted mcp://post-insert")
+        expect(input).not.toContain("Continue if you have next steps, or stop and ask for clarification")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
+)
+
+concurrentAdmissionMcpIt.live(
+  "interrupting a pending MCP admission releases compaction and the next compaction",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const compaction = yield* SessionCompaction.Service
+        const chat = yield* sessions.create({ title: "Cancelled compaction admission" })
+        yield* seed(chat.id, { finish: "stop" })
+        yield* compaction.create({ sessionID: chat.id, agent: "build", model: ref, auto: true })
+
+        const releaseSummary = defer<void>()
+        const resource = concurrentAdmissionControls["mcp://cancelled-admission"]
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            releaseSummary.resolve()
+            resource.release.resolve()
+          }),
+        )
+        yield* llm.hold("cancelled admission summary", releaseSummary.promise)
+        const compacting = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+        yield* llm.wait(1).pipe(Effect.timeout("10 seconds"))
+
+        const directMessageID = MessageID.ascending()
+        const direct = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: directMessageID,
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [
+              {
+                type: "file",
+                url: "mcp://cancelled-admission",
+                filename: "cancelled-admission.txt",
+                mime: "text/plain",
+                source: {
+                  type: "resource",
+                  clientName: "test-client",
+                  uri: "mcp://cancelled-admission",
+                  text: { value: "cancelled-admission.txt", start: 0, end: 23 },
+                },
+              },
+            ],
+          })
+          .pipe(Effect.forkChild)
+        yield* Effect.promise(() => resource.started.promise).pipe(Effect.timeout("10 seconds"))
+        yield* llm.text("continued after cancelled admission")
+        releaseSummary.resolve()
+        yield* Effect.gen(function* () {
+          while (true) {
+            const boundary = (yield* sessions.messages({ sessionID: chat.id })).find((message) =>
+              message.parts.some((part) => part.type === "compaction" && part.projection),
+            )
+            if (boundary) return
+            yield* Effect.sleep(10)
+          }
+        }).pipe(Effect.timeout("10 seconds"))
+        expect(compacting.pollUnsafe()).toBeUndefined()
+        expect(yield* llm.calls).toBe(1)
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).filter(
+            (message) =>
+              message.info.role === "user" &&
+              message.info.source === "hook" &&
+              !message.parts.some((part) => part.type === "compaction"),
+          ),
+        ).toHaveLength(0)
+
+        yield* Fiber.interrupt(direct).pipe(Effect.timeout("10 seconds"))
+        const interrupted = yield* Fiber.await(direct)
+        expect(Exit.isFailure(interrupted) && Cause.hasInterruptsOnly(interrupted.cause)).toBe(true)
+        const result = yield* Fiber.join(compacting).pipe(Effect.timeout("10 seconds"))
+        expect(
+          result.parts.some((part) => part.type === "text" && part.text === "continued after cancelled admission"),
+        ).toBe(true)
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).some((message) => message.info.id === directMessageID),
+        ).toBe(false)
+        expect(MessageV2.parts(directMessageID)).toHaveLength(0)
+
+        // Keep the cancelled resource unresolved through another compaction;
+        // only the fixture finalizer releases it after both runs complete.
+        yield* compaction.create({ sessionID: chat.id, agent: "build", model: ref, auto: true })
+        yield* llm.text("second cancelled admission summary")
+        yield* llm.text("second compaction continued")
+        const next = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.timeout("10 seconds"))
+        expect(next.parts.some((part) => part.type === "text" && part.text === "second compaction continued")).toBe(
+          true,
+        )
+        expect(yield* llm.calls).toBe(4)
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).some((message) => message.info.id === directMessageID),
+        ).toBe(false)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
+)
+
+admissionMcpIt.live(
+  "auto-compaction waits for a successful direct MCP resource admission and handles it without a stale continuation",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const compaction = yield* SessionCompaction.Service
+        const chat = yield* sessions.create({ title: "Compaction admission race" })
+        yield* seed(chat.id, { finish: "stop" })
+        yield* compaction.create({ sessionID: chat.id, agent: "build", model: ref, auto: true })
+
+        const releaseSummary = defer<void>()
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            releaseSummary.resolve()
+            admissionResourceRelease.resolve()
+          }),
+        )
+        yield* llm.hold("admission race summary", releaseSummary.promise)
+        const compacting = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+        yield* llm.wait(1).pipe(Effect.timeout("10 seconds"))
+
+        const directMessageID = MessageID.ascending()
+        const direct = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: directMessageID,
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [
+              {
+                type: "file",
+                url: "mcp://admission",
+                filename: "admission.txt",
+                mime: "text/plain",
+                source: {
+                  type: "resource",
+                  clientName: "test-client",
+                  uri: "mcp://admission",
+                  text: { value: "admission.txt", start: 0, end: 13 },
+                },
+              },
+            ],
+          })
+          .pipe(Effect.forkChild)
+        yield* Effect.promise(() => admissionResourceStarted.promise).pipe(Effect.timeout("10 seconds"))
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).some((message) => message.info.id === directMessageID),
+        ).toBe(false)
+
+        yield* llm.text("admitted request handled")
+        releaseSummary.resolve()
+        admissionResourceRelease.resolve()
+        yield* Fiber.join(direct).pipe(Effect.timeout("10 seconds"))
+        const result = yield* Fiber.join(compacting).pipe(Effect.timeout("10 seconds"))
+        const messages = yield* sessions.messages({ sessionID: chat.id })
+        const users = messages.filter(
+          (message): message is MessageV2.WithParts & { info: MessageV2.User } => message.info.role === "user",
+        )
+        expect(result.parts.some((part) => part.type === "text" && part.text === "admitted request handled")).toBe(true)
+        expect(users.at(-1)?.info.id).toBe(directMessageID)
+        expect(users.at(-1)?.info.source).toBe("user")
+        expect(
+          users.filter(
+            (message) => message.info.source === "hook" && !message.parts.some((part) => part.type === "compaction"),
+          ),
+        ).toHaveLength(0)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
+)
+
+failedAdmissionMcpIt.live(
+  "overflow compaction replays the active request when a direct MCP resource admission fails",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const compaction = yield* SessionCompaction.Service
+        const chat = yield* sessions.create({ title: "Failed compaction admission race" })
+        yield* seed(chat.id, { finish: "stop" })
+        const active = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          time: { created: Date.now() + 60_000 },
+        })
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: active.id,
+          sessionID: chat.id,
+          type: "text",
+          text: "ACTIVE_REQUEST_MUST_BE_REPLAYED",
+        })
+        yield* compaction.create({ sessionID: chat.id, agent: "build", model: ref, auto: true, overflow: true })
+        const boundary = (yield* sessions.messages({ sessionID: chat.id })).find((message) =>
+          message.parts.some((part) => part.type === "compaction"),
+        )
+        expect(boundary?.info.time.created).toBe(active.time.created + 1)
+
+        const releaseSummary = defer<void>()
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            releaseSummary.resolve()
+            failedAdmissionResourceRelease.resolve()
+          }),
+        )
+        yield* llm.hold("failed admission race summary", releaseSummary.promise)
+        const compacting = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+        yield* llm.wait(1).pipe(Effect.timeout("10 seconds"))
+
+        const directMessageID = MessageID.ascending()
+        const direct = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: directMessageID,
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [
+              {
+                type: "file",
+                url: "mcp://failed-admission",
+                filename: "failed-admission.txt",
+                mime: "text/plain",
+                source: {
+                  type: "resource",
+                  clientName: "test-client",
+                  uri: "mcp://failed-admission",
+                  text: { value: "failed-admission.txt", start: 0, end: 20 },
+                },
+              },
+            ],
+          })
+          .pipe(Effect.exit, Effect.forkChild)
+        yield* Effect.promise(() => failedAdmissionResourceStarted.promise).pipe(Effect.timeout("10 seconds"))
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).some((message) => message.info.id === directMessageID),
+        ).toBe(false)
+
+        yield* llm.text("continued after failed admission")
+        releaseSummary.resolve()
+        yield* Effect.gen(function* () {
+          while (true) {
+            const boundary = (yield* sessions.messages({ sessionID: chat.id })).find((message) =>
+              message.parts.some((part) => part.type === "compaction"),
+            )
+            if (boundary?.parts.some((part) => part.type === "compaction" && part.projection)) return
+            yield* Effect.sleep(10)
+          }
+        }).pipe(Effect.timeout("10 seconds"))
+        yield* Effect.sleep(10)
+        expect(compacting.pollUnsafe()).toBeUndefined()
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).filter(
+            (message) =>
+              message.info.role === "user" &&
+              message.info.source === "hook" &&
+              !message.parts.some((part) => part.type === "compaction"),
+          ),
+        ).toHaveLength(0)
+
+        failedAdmissionResourceRelease.resolve()
+        expect(Exit.isFailure(yield* Fiber.join(direct).pipe(Effect.timeout("10 seconds")))).toBe(true)
+        const result = yield* Fiber.join(compacting).pipe(Effect.timeout("10 seconds"))
+        const messages = yield* sessions.messages({ sessionID: chat.id })
+        expect(
+          result.parts.some((part) => part.type === "text" && part.text === "continued after failed admission"),
+        ).toBe(true)
+        expect(messages.some((message) => message.info.id === directMessageID)).toBe(false)
+        const replay = messages.filter(
+          (message) =>
+            message.info.role === "user" &&
+            message.info.source === "hook" &&
+            !message.parts.some((part) => part.type === "compaction"),
+        )
+        expect(replay).toHaveLength(1)
+        expect(
+          replay[0].parts.some((part) => part.type === "text" && part.text === "ACTIVE_REQUEST_MUST_BE_REPLAYED"),
+        ).toBe(true)
+        const compactionSummary = messages.find(
+          (message) => message.info.role === "assistant" && message.info.summary === true,
+        )
+        expect(compactionSummary).toBeDefined()
+        if (boundary && compactionSummary) {
+          expect(MessageV2.compareOrder(boundary.info, compactionSummary.info)).toBeLessThan(0)
+          expect(MessageV2.compareOrder(compactionSummary.info, replay[0].info)).toBeLessThan(0)
+          expect(compactionSummary.info.role).toBe("assistant")
+          if (compactionSummary.info.role === "assistant")
+            expect(compactionSummary.info.parentID).toBe(boundary.info.id)
+        }
+        expect(result.info.role).toBe("assistant")
+        if (result.info.role === "assistant") {
+          expect(result.info.parentID).toBe(replay[0].info.id)
+          expect(MessageV2.compareOrder(replay[0].info, result.info)).toBeLessThan(0)
+        }
+        expect(JSON.stringify((yield* llm.inputs).at(-1)?.messages)).toContain("ACTIVE_REQUEST_MUST_BE_REPLAYED")
+      }),
+      {
+        git: true,
+        config: (url) => ({
+          ...providerCfg(url),
+          agent: { build: { tool_allowlist: [] } },
+        }),
+      },
+    ),
+  30_000,
+)
+
+concurrentAdmissionMcpIt.live(
+  "auto-compaction waits for every same-actor admission when one succeeds and one fails",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const compaction = yield* SessionCompaction.Service
+        const chat = yield* sessions.create({ title: "Concurrent compaction admissions" })
+        yield* seed(chat.id, { finish: "stop" })
+        yield* compaction.create({ sessionID: chat.id, agent: "build", model: ref, auto: true })
+
+        const releaseSummary = defer<void>()
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            releaseSummary.resolve()
+            concurrentAdmissionControls["mcp://same-actor-success"].release.resolve()
+            concurrentAdmissionControls["mcp://same-actor-failure"].release.resolve()
+          }),
+        )
+        yield* llm.hold("concurrent admission summary", releaseSummary.promise)
+        const compacting = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+        yield* llm.wait(1).pipe(Effect.timeout("10 seconds"))
+
+        const failedMessageID = MessageID.ascending()
+        const failed = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: failedMessageID,
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [
+              {
+                type: "file",
+                url: "mcp://same-actor-failure",
+                filename: "same-actor-failure.txt",
+                mime: "text/plain",
+                source: {
+                  type: "resource",
+                  clientName: "test-client",
+                  uri: "mcp://same-actor-failure",
+                  text: { value: "same-actor-failure.txt", start: 0, end: 22 },
+                },
+              },
+            ],
+          })
+          .pipe(Effect.exit, Effect.forkChild)
+        const successfulMessageID = MessageID.ascending()
+        const successful = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: successfulMessageID,
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [
+              {
+                type: "file",
+                url: "mcp://same-actor-success",
+                filename: "same-actor-success.txt",
+                mime: "text/plain",
+                source: {
+                  type: "resource",
+                  clientName: "test-client",
+                  uri: "mcp://same-actor-success",
+                  text: { value: "same-actor-success.txt", start: 0, end: 22 },
+                },
+              },
+            ],
+          })
+          .pipe(Effect.exit, Effect.forkChild)
+        yield* Effect.all(
+          [
+            Effect.promise(() => concurrentAdmissionControls["mcp://same-actor-failure"].started.promise),
+            Effect.promise(() => concurrentAdmissionControls["mcp://same-actor-success"].started.promise),
+          ],
+          { concurrency: 2 },
+        ).pipe(Effect.timeout("10 seconds"))
+
+        yield* llm.text("handled successful admission")
+        releaseSummary.resolve()
+        yield* Effect.gen(function* () {
+          while (true) {
+            const boundary = (yield* sessions.messages({ sessionID: chat.id })).find((message) =>
+              message.parts.some((part) => part.type === "compaction"),
+            )
+            if (boundary?.parts.some((part) => part.type === "compaction" && part.projection)) return
+            yield* Effect.sleep(10)
+          }
+        }).pipe(Effect.timeout("10 seconds"))
+
+        concurrentAdmissionControls["mcp://same-actor-failure"].release.resolve()
+        expect(Exit.isFailure(yield* Fiber.join(failed).pipe(Effect.timeout("10 seconds")))).toBe(true)
+        yield* Effect.yieldNow
+        expect(compacting.pollUnsafe()).toBeUndefined()
+        const whileSuccessHeld = yield* sessions.messages({ sessionID: chat.id })
+        expect(whileSuccessHeld.some((message) => message.info.id === successfulMessageID)).toBe(false)
+        expect(
+          whileSuccessHeld.filter(
+            (message) =>
+              message.info.role === "user" &&
+              message.info.source === "hook" &&
+              !message.parts.some((part) => part.type === "compaction"),
+          ),
+        ).toHaveLength(0)
+
+        concurrentAdmissionControls["mcp://same-actor-success"].release.resolve()
+        expect(Exit.isSuccess(yield* Fiber.join(successful).pipe(Effect.timeout("10 seconds")))).toBe(true)
+        const result = yield* Fiber.join(compacting).pipe(Effect.timeout("10 seconds"))
+        const messages = yield* sessions.messages({ sessionID: chat.id })
+        expect(result.parts.some((part) => part.type === "text" && part.text === "handled successful admission")).toBe(
+          true,
+        )
+        expect(messages.some((message) => message.info.id === successfulMessageID)).toBe(true)
+        expect(messages.some((message) => message.info.id === failedMessageID)).toBe(false)
+        expect(
+          messages.filter(
+            (message) =>
+              message.info.role === "user" &&
+              message.info.source === "hook" &&
+              !message.parts.some((part) => part.type === "compaction"),
+          ),
+        ).toHaveLength(0)
+      }),
+      {
+        git: true,
+        config: (url) => ({
+          ...providerCfg(url),
+          agent: { build: { tool_allowlist: [] } },
+        }),
+      },
+    ),
+  30_000,
+)
+
+concurrentAdmissionMcpIt.live(
+  "a pending admission for another actor does not block main compaction",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const compaction = yield* SessionCompaction.Service
+        const chat = yield* sessions.create({ title: "Actor-isolated compaction admission" })
+        yield* seed(chat.id, { finish: "stop" })
+        yield* compaction.create({ sessionID: chat.id, agent: "build", model: ref, auto: true })
+
+        const releaseSummary = defer<void>()
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            releaseSummary.resolve()
+            concurrentAdmissionControls["mcp://peer-admission"].release.resolve()
+          }),
+        )
+        yield* llm.hold("actor-isolated admission summary", releaseSummary.promise)
+        const compacting = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+        yield* llm.wait(1).pipe(Effect.timeout("10 seconds"))
+
+        const peerMessageID = MessageID.ascending()
+        const peer = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: peerMessageID,
+            agentID: "peer-admission",
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [
+              {
+                type: "file",
+                url: "mcp://peer-admission",
+                filename: "peer-admission.txt",
+                mime: "text/plain",
+                source: {
+                  type: "resource",
+                  clientName: "test-client",
+                  uri: "mcp://peer-admission",
+                  text: { value: "peer-admission.txt", start: 0, end: 18 },
+                },
+              },
+            ],
+          })
+          .pipe(Effect.exit, Effect.forkChild)
+        yield* Effect.promise(() => concurrentAdmissionControls["mcp://peer-admission"].started.promise).pipe(
+          Effect.timeout("10 seconds"),
+        )
+
+        yield* llm.text("main continued while peer pending")
+        releaseSummary.resolve()
+        const result = yield* Fiber.join(compacting).pipe(Effect.timeout("10 seconds"))
+        expect(
+          result.parts.some((part) => part.type === "text" && part.text === "main continued while peer pending"),
+        ).toBe(true)
+        expect(peer.pollUnsafe()).toBeUndefined()
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id, agentID: "peer-admission" })).some(
+            (message) => message.info.id === peerMessageID,
+          ),
+        ).toBe(false)
+        const mainBeforePeerCommit = yield* sessions.messages({ sessionID: chat.id })
+        expect(
+          mainBeforePeerCommit.filter(
+            (message) =>
+              message.info.role === "user" &&
+              message.info.source === "hook" &&
+              !message.parts.some((part) => part.type === "compaction"),
+          ),
+        ).toHaveLength(1)
+
+        concurrentAdmissionControls["mcp://peer-admission"].release.resolve()
+        expect(Exit.isSuccess(yield* Fiber.join(peer).pipe(Effect.timeout("10 seconds")))).toBe(true)
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id, agentID: "peer-admission" })).some(
+            (message) => message.info.id === peerMessageID,
+          ),
+        ).toBe(true)
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).some((message) => message.info.id === peerMessageID),
+        ).toBe(false)
+      }),
+      {
+        git: true,
+        config: (url) => ({
+          ...providerCfg(url),
+          agent: { build: { tool_allowlist: [] } },
+        }),
+      },
+    ),
+  30_000,
+)
+
+it.live("prompt retries without part IDs preserve the receipt and reject changed content or order", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Anonymous prompt retry" })
+      const input = {
+        sessionID: chat.id,
+        messageID: MessageID.ascending(),
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [
+          { type: "text" as const, text: "first" },
+          { type: "text" as const, text: "second" },
+        ],
+      }
+      const first = yield* prompt.prompt(input)
+      const retry = yield* prompt.prompt(input)
+      expect(retry).toEqual(first)
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
+      expect(MessageV2.parts(first.info.id)).toEqual(first.parts)
+      if (first.info.role !== "user") throw new Error("Expected committed user receipt")
+      const strict = yield* sessions
+        .commitUserMessage(
+          first.info,
+          first.parts.map((part) => ({ ...part, id: PartID.ascending() })),
+        )
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(strict) && Cause.pretty(strict.cause)).toContain("different content")
+      for (const parts of [
+        [{ type: "text" as const, text: "changed" }, input.parts[1]],
+        [...input.parts].reverse(),
+        [{ ...input.parts[0], metadata: { changed: true } }, input.parts[1]],
+      ]) {
+        const result = yield* prompt.prompt({ ...input, parts }).pipe(Effect.exit)
+        expect(Exit.isFailure(result) && Cause.pretty(result.cause)).toContain("different content")
+        expect(MessageV2.parts(first.info.id)).toEqual(first.parts)
+      }
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("prompt retries preserve mixed explicit part identities and reject cross-message ownership", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Mixed prompt identities" })
+      const input = {
+        sessionID: chat.id,
+        messageID: MessageID.ascending(),
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [
+          { type: "text" as const, id: PartID.make("prt_zz-explicit"), text: "explicit high" },
+          { type: "text" as const, text: "anonymous first" },
+          { type: "text" as const, id: PartID.make("prt_00-explicit"), text: "explicit low" },
+          { type: "text" as const, text: "anonymous second" },
+        ],
+      }
+      const first = yield* prompt.prompt(input)
+      const retry = yield* prompt.prompt(input)
+      expect(retry).toEqual(first)
+      expect(retry.parts.filter((part) => part.id === "prt_zz-explicit" || part.id === "prt_00-explicit")).toHaveLength(
+        2,
+      )
+      const changedID = yield* prompt
+        .prompt({
+          ...input,
+          parts: [{ ...input.parts[0], id: PartID.ascending() }, ...input.parts.slice(1)],
+        })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(changedID) && Cause.pretty(changedID.cause)).toContain("different content")
+      const stolen = yield* prompt.prompt({ ...input, messageID: MessageID.ascending() }).pipe(Effect.exit)
+      expect(Exit.isFailure(stolen) && Cause.pretty(stolen.cause)).toContain(
+        "Part ID already belongs to another message",
+      )
+      const otherActor = yield* prompt.prompt({ ...input, agentID: "other-actor" }).pipe(Effect.exit)
+      expect(Exit.isFailure(otherActor) && Cause.pretty(otherActor.cause)).toContain("another actor")
+      expect(yield* sessions.messages({ sessionID: chat.id, agentID: "*" })).toHaveLength(1)
+      expect(MessageV2.parts(first.info.id)).toEqual(first.parts)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+taskMetadataIt.live("concurrent prompt retries without part IDs share one atomic receipt", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create()
+      yield* llm.tool("StructuredOutput", { title: "One committed title" })
+      const gate = {
+        arrivals: 0,
+        entered: yield* Deferred.make<void>(),
+        release: yield* Deferred.make<void>(),
+      }
+      userMessageCommitGate = gate
+      yield* Effect.addFinalizer(() => Deferred.succeed(gate.release, undefined))
+      const input = {
+        sessionID: chat.id,
+        messageID: MessageID.ascending(),
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [
+          { type: "text" as const, text: "same first" },
+          { type: "text" as const, text: "same second" },
+        ],
+      }
+      const attempts = yield* Effect.all([prompt.prompt(input), prompt.prompt(input)], { concurrency: 2 }).pipe(
+        Effect.forkChild,
+      )
+      yield* Deferred.await(gate.entered).pipe(Effect.timeout("5 seconds"))
+      expect(gate.arrivals).toBe(2)
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(0)
+      yield* Deferred.succeed(gate.release, undefined)
+      const receipts = yield* Fiber.join(attempts).pipe(Effect.timeout("5 seconds"))
+      expect(receipts[1]).toEqual(receipts[0])
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
+      expect(MessageV2.parts(input.messageID)).toEqual(receipts[0].parts)
+      expect(receipts[0].parts).toHaveLength(2)
+      const titled = yield* Effect.gen(function* () {
+        while (true) {
+          const current = yield* sessions.get(chat.id)
+          if (current.titleSource === "generated") return current
+          yield* Effect.sleep(10)
+        }
+      }).pipe(Effect.timeout("5 seconds"))
+      expect(titled.title).toBe("One committed title")
+      expect(titled.titleRevision).toBe(2)
+      expect(yield* llm.calls).toBe(1)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("prompt retries keep rejecting stored runtime additions", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Runtime-mutated prompt" })
+      const input = {
+        sessionID: chat.id,
+        messageID: MessageID.ascending(),
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "text" as const, text: "original user request" }],
+      }
+      const first = yield* prompt.prompt(input)
+      // Loop-streak recovery appends an ignored synthetic part to the original
+      // user. Anonymous ID reuse must not silently erase that persisted state.
+      const added = yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: input.messageID,
+        sessionID: chat.id,
+        type: "text",
+        text: "",
+        ignored: true,
+        synthetic: true,
+        metadata: {
+          origin: { kind: "loop_streak_crop", fromId: "msg_from", toId: "msg_to", key: "tool", truncated: false },
+        },
+      })
+      const retry = yield* prompt.prompt(input).pipe(Effect.exit)
+      expect(Exit.isFailure(retry) && Cause.pretty(retry.cause)).toContain("different content")
+      expect(MessageV2.parts(input.messageID)).toEqual([...first.parts, added])
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
