@@ -383,6 +383,7 @@ Closing both actor quarantine cases did not close that independent debt.
 - Inherited bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
 - Publication state: accepted at `90abf6e447d7a5e5b405aba301bf1a951f469bf6` through PR #125; exact merged-SHA test, typecheck and lint passed. See the shared synchronization record for run links and ancestry evidence.
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
+- Shared documentation inheritance: main `818457d08e9d39f561cdd2bcb86ee4a73bcf5fbf` through PR #126; the source/test references above remain unchanged.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
