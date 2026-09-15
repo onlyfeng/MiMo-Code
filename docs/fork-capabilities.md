@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-09-15
 - Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
 - Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `3a12d1800d9bfd002f543764e4ec72047e6e6bb3`
+- Main behavior (runtime/tests): `a9e4458e62632d65ccdef38152e757730ac102db`
 - Bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
 - Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
@@ -366,9 +366,18 @@ not change their implementation. The preceding review is retained in the
   persisted content/metadata remain strict. Reordering explicitly identified
   input parts can be equivalent after canonical sorting. Runtime-added
   parts can make a later replay conflict. This is not a lifetime replay receipt.
-  Inbox draining still writes the message, its parts and the queue deletion in
-  separate steps. Shell message/parts writes and streamed assistant/tool output
-  also remain outside the `commitUserMessage*` transaction.
+  Inbox draining commits its synthetic user message, all rendered parts and the
+  selected queue deletion in one immediate transaction. After asynchronous seed
+  resolution, admission rechecks cancellation, persistent-peer retirement and
+  the still-present receiver rows under that write lock. Concurrent drains or GC
+  cannot replay a previously selected row. Failed writes leave the whole batch
+  queued; postcommit observers see the complete transcript and consumed queue.
+  A publication callback failure preserves the committed drain count, while
+  Effect interruption still propagates. This guarantees queue-to-transcript
+  atomicity, not exactly-once model execution or durable event delivery. See
+  [the crash/reopen evidence](inbox-crash-consistency-2026-09-15.md).
+  Shell message/parts writes and streamed assistant/tool output remain outside
+  the `commitUserMessage*` transaction.
   Fork/revert and cursor
   consumers use chronological positions, with UTF-8 ID ties matching SQLite
   BINARY. Producer and transaction regressions are recorded under F06 in
@@ -484,6 +493,14 @@ not change their implementation. The preceding review is retained in the
   prefix/tool-search regressions prove URL rejection, pending imports, OAuth
   callback/connection behavior, redacted exit diagnosis, and request isolation
   at the reviewed main behavior.
+- 2026-09-15 real protocol evidence: `test/mcp/real-transport-oauth.test.ts`
+  launches an isolated non-test child using the actual MCP SDK HTTP transport
+  and a self-owned OAuth issuer. Resource/issuer discovery, DCR, S256 PKCE,
+  callback, read-only tool execution, token refresh and pending-auth cancellation
+  pass on loopback and a self-owned local RFC1918 interface. This is concrete lab
+  evidence, not enterprise IdP/proxy/TLS interoperability or a new fork-wide
+  private-network policy. DC-NET-002 remains compat-owned. See the
+  [runtime evidence](runtime-validation-2026-09-15.md).
 - 2026-09-08 selected integration: `auto_connect` explicitly enables a selected
   imported server while retaining pending defaults and disabled precedence.
   The real-transport regression runs in an isolated child process to avoid
@@ -581,11 +598,16 @@ not change their implementation. The preceding review is retained in the
   `packages/plugin/src/index.ts`.
 - Tests/evidence:
   `packages/opencode/test/plugin/subagent-progress-checker.test.ts` exercises
-  enabled, disabled and absent values passed directly to the hook. Source
-  inspection of `plugin/index.ts` establishes the instance-local Config.Service
-  injection; those hook tests do not construct Plugin.Service or prove the full
-  alternate-cwd injection chain. A service-level regression remains a validation
-  improvement, not an already passing test claimed by this entry.
+  enabled, disabled and absent values passed directly to the hook.
+  `packages/opencode/test/plugin/subagent-progress-chain.test.ts` additionally
+  runs three isolated real Config/built-in Plugin/Actor/Write chains. Opposing
+  checkout/worktree memory settings remain isolated during interleaved calls,
+  even though the actual out-of-cwd HTTP config request is rejected. Disabled
+  writes fail without a journal or reentry; enabled writes complete a five-section
+  journal after one postStop nudge; a read-only actor receives no impossible
+  write request. The model response is scripted; application services and the
+  Write tool are real. [Runtime evidence](runtime-validation-2026-09-15.md)
+  distinguishes this chain from the earlier direct-hook tests.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
 - 2026-09-10 hook-validation review: upstream `1493f7813e3041e9da2ea52738940591d03ed8a8`,
@@ -705,6 +727,14 @@ not change their implementation. The preceding review is retained in the
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
+
+- 2026-09-15 runtime acceptance infrastructure: the shared test workflow adds
+  a Windows job for compat PR/push and explicit manual dispatch. Bun follows the
+  package declaration and dependencies use `bun ci`; a missing Windows entry
+  fails. The job records event, checkout and PR-head SHAs separately and uploads
+  bounded evidence. DC-PLATFORM-001 owns the actual compat archive/no-rg entry;
+  a skipped main-side Windows job is not a platform acceptance result. Existing
+  Linux jobs and their failure/reporting boundaries are preserved.
 
 - 2026-09-15 quarantine closure: both remaining registered actor cases run
   normally: postStop failure preserves a successful result with warnings, and
