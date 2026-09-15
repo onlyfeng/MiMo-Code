@@ -605,7 +605,7 @@ const admissionMcpIt = testEffect(
           Effect.promise(async () => {
             admissionResourceStarted.resolve()
             await admissionResourceRelease.promise
-            return { contents: [{ text: "admitted resource", uri: "mcp://admission", mimeType: "text/plain" }] } as any
+            return { contents: [{ text: "admitted resource", uri: "mcp://admission", mimeType: "text/plain" }] }
           }),
       },
     ),
@@ -650,13 +650,14 @@ const concurrentAdmissionMcpIt = testEffect(
             control.started.resolve()
             await control.release.promise
             if (control.result === "failure") return undefined
-            return { contents: [{ text: `admitted ${uri}`, uri, mimeType: "text/plain" }] } as any
+            return { contents: [{ text: `admitted ${uri}`, uri, mimeType: "text/plain" }] }
           })
         },
       },
     ),
   ),
 )
+
 const taskMetadataIt = testEffect(makeHttp(mcp, { plugin: taskMetadataPlugin }))
 const mcpLegacyMetadata = { interrupted: true, output: "must not become a successful result" }
 const mcpErrorImage = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="

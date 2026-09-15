@@ -14,12 +14,12 @@
 
 | ID  | 选定行为与归属                                | main 结果        | dev/compat 结果      | 决定性载体/验证                                                           |
 | --- | --------------------------------------------- | ---------------- | -------------------- | ------------------------------------------------------------------------- |
-| F01 | upstream 网关错误别名                         | 已集成，待发布   | 待继承               | provider/error.ts；别名、大小写、421/441与非网关隔离                      |
-| F02 | 可信模型身份传到 debug；FD-005                | 已集成，待发布   | 待继承               | debug agent真实入口、harness resolver及负向/显式模式                      |
-| F03 | workflow deadline真实执行与释放；FC-008       | 已恢复，待发布   | 待继承               | runtime-worktree、LLM进入、child Instance释放、进程自然退出               |
+| F01 | upstream 网关错误别名                         | 已接受 #128      | 已集成，PR #129审核  | provider/error.ts；别名、大小写、421/441与非网关隔离                      |
+| F02 | 可信模型身份传到 debug；FD-005                | 已接受 #128      | 已集成，PR #129审核  | debug agent真实入口、harness resolver及负向/显式模式                      |
+| F03 | workflow deadline真实执行与释放；FC-008       | 已接受 #128      | 已集成，PR #129审核  | runtime-worktree、LLM进入、child Instance释放、进程自然退出               |
 | F04 | 请求估算及序列化失败策略；DC-CONTEXT-001      | 无对应预检扩展   | 本地修复，待发布     | 完整tool schema、实际prompt预检、有效工具集合及保守失败                   |
 | F05 | 通用SDK示例生成正确性；FC-008                 | 已集成，待发布   | 待继承并删除重复差异 | 生成器、OpenAPI code samples、实际v2调用；不混入compat schema             |
-| F06 | 消息时序与原子用户提交；FC-001/DC-CONTEXT-001 | 待提升           | 待以共享实现收敛     | createMessage、UTF8排序、producer、fork/revert/checkpoint及TUI消费        |
+| F06 | 消息时序与原子用户提交；FC-001/DC-CONTEXT-001 | 已集成，待发布   | 待以共享实现收敛     | createMessage、UTF8排序、producer、fork/revert/checkpoint及TUI消费        |
 | F07 | 并发压缩保留新请求；FC-015/DC-CONTEXT-001     | 待提升           | 待以共享实现收敛     | compaction、pending external admission、continuation前后检查              |
 | F08 | checkpoint coverage协议归属；DC-CONTEXT-001   | 评估完成，不上移 | 保留完整现有协议     | route/schema/SDK/TUI缓存；不允许只移动单边载体                            |
 | F09 | 退役入口及无调用残留；FC-001/008、FD-004/005  | 已清理，待发布   | 待继承               | 旧wake入口、三helper、loader参数、worker与Actor注释；保留resume仍使用路径 |
@@ -50,12 +50,28 @@ F09 删除仅供旧测试调用的 Actor wake 入口及其专属上下文注入�
 
 F11 取消根生成脚本隐式全仓格式化，保留 SDK 及 OpenAPI 自身格式化。隔离探针执行真实脚本并替换生成子命令，前后成功码均 0、任一步失败码均 1，SDK→OpenAPI 顺序、cwd 和重定向不变。`0.5/0.7` 与 upstream `0.50/0.70` 等价，保留 formatter 规范；default prompt 也保留无尾空格写法。这些机械差异没有额外行为待同步。
 
+### 共享消息时序
+
+F06 原提交 `b2dad34ea1cde4509d9f6ce4143c8b6a0094f858`，整合为 `8cfc6eca`。消息提交、fork/revert/checkpoint、usage recovery、loop-streak 和 TUI 统一按提交时间与 UTF-8 ID tie-break 处理；用户消息与 parts 原子提交并拒绝身份冲突。新增行为不包含 compat 的内容上限、预检、MaxMode 或模型侧 full Actor。
+
+独立审核发现并修复两项组合问题：缺失 checkpoint watermark 不得被后续 collapse 当作有效范围；撤销分页加载的边界不得被 live message update 挤出缓存。最终相关十文件 155 pass，真实 prompt 子矩阵 19 pass；独立六文件 103 pass、287 断言，以及原子准入六例 6 pass、34 断言。整合后 root 默认五文件再验证 85 pass、239 断言。两个 package typecheck 通过。更早全量相关矩阵为 356 pass、2 个既有 skip；最后补丁后按影响范围复验，未把旧全量结果移称为最终完整矩阵。TUI 证据是状态 helper 测试和事件接线核验，未运行交互终端。
+
 ### 协议归属决定
 
 F08 的 checkpoint-coverage route、schema、SDK 与 TUI 缓存作为完整协议留在 compat。没有 core engine 对该查询 API 的依赖；共享正确性所需的消息时序、checkpoint 边界及 main 现有 TUI 水位判断由 F06/F07 修正，不要求新增 main API。私网和 Actor 等原有产品策略继续保留。
 
 ## 发布与审查
 
-文档 PR [#126](https://github.com/onlyfeng/MiMo-Code/pull/126) 已合并至 main `818457d08e9d39f561cdd2bcb86ee4a73bcf5fbf`。Codex 提出的 FD-004 历史锚点问题通过显式保留旧锚点修复；最终 PR head 的八项检查和自动复审通过，合并 SHA 的 test/lint/typecheck 均成功。文档传播 PR [#127](https://github.com/onlyfeng/MiMo-Code/pull/127) 的八项检查和自动审核通过，已合并为 `b3b32061cfcf997d3fb1cac0a73302e551678a96`；合并后 CI 待确认。第一批 main 修正为 PR [#128](https://github.com/onlyfeng/MiMo-Code/pull/128)。
+文档 PR [#126](https://github.com/onlyfeng/MiMo-Code/pull/126) 已合并至 main `818457d08e9d39f561cdd2bcb86ee4a73bcf5fbf`。Codex 提出的 FD-004 历史锚点问题通过显式保留旧锚点修复；最终 PR head 的八项检查和自动复审通过，合并 SHA 的 test/lint/typecheck 均成功。文档传播 PR [#127](https://github.com/onlyfeng/MiMo-Code/pull/127) 的八项检查和自动审核通过，已合并为 `b3b32061cfcf997d3fb1cac0a73302e551678a96`；合并后的 test/lint/typecheck 均通过。第一批 main PR [#128](https://github.com/onlyfeng/MiMo-Code/pull/128) 已接受为 `f10fddb67d830b82890206759c53cef4d8710460`；最终 head `6eb559b86b10b5e6bcf7eea50b873eb714c9b137` 的八项检查通过。Codex 在旧 head 指出的两处 runtime 快照引用已于 `6eb559b8` 修正到完整 `0b12e39e`，当前内容已复核；该 discussion 的 UI 状态仍未手动解决。没有把旧 head 审查描述成新 head 的自动复审。第一批 compat PR 为 [#129](https://github.com/onlyfeng/MiMo-Code/pull/129)，本地完整快照 `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`。
 
-本页区分本地已实现与远端接受。后续 runtime PR、compat 传播及最终 SHA 的 CI 结果在接受后更新，不引用旧 SHA 绿灯替代。
+PR #129 的 Codex ancestry 反馈经实际 Git 图核查不成立。当前 head `eaf99b8bf34aa791df0d7c921d610a581c4c4e9d` 含 `f48b6e918d683688348d0c8bfc59cd0199fc7fc8`，其父提交为 `199286decd7881737493c35ac6ffea30fc6e00c9` 与已接受 main `f10fddb67d830b82890206759c53cef4d8710460`。本地两项 ancestry 检查通过，GitHub commits API 确认相同父列表，compare 返回 behind_by=0 且 merge_base 为该 main。反馈引用的 `78337bd` 不是实际 PR head；没有为此重写历史。[原讨论](https://github.com/onlyfeng/MiMo-Code/pull/129#discussion_r4011989981) 的 UI 状态单独保留。
+
+已接受提交的 CI 证据：
+
+| PR / 分支          | 接受 SHA   | test                                                                   | typecheck                                                              | lint                                                                   |
+| ------------------ | ---------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| #126 / main 文档   | `818457d0` | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34927357463) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34927357520) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34927357464) |
+| #127 / compat 文档 | `b3b32061` | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34928314593) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34928314523) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34928314603) |
+| #128 / main 第一批 | `f10fddb6` | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34929143930) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34929143952) | [成功](https://github.com/onlyfeng/MiMo-Code/actions/runs/34929144107) |
+
+本页区分本地已实现与远端接受。后续共享能力 PR、compat 传播及最终 SHA 的 CI 结果在接受后更新，不引用旧 SHA 绿灯替代。

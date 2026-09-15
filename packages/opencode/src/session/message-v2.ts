@@ -683,20 +683,6 @@ export const WithParts = z.object({
 })
 export type WithParts = z.infer<typeof WithParts>
 
-export function isExternalUserMessage(message: WithParts) {
-  if (message.info.role !== "user") return false
-  if (message.info.source === "user" || message.info.source === "spawn") return true
-  if (message.info.source !== undefined) return false
-  // Legacy rows predate the source discriminator. Only real user text/files
-  // count; recovery boundaries and synthetic continuation users do not start a
-  // new external request episode.
-  return message.parts.some((part) => {
-    if ("synthetic" in part && part.synthetic) return false
-    if (part.type === "text") return !part.ignored && part.text.trim().length > 0
-    return part.type === "file"
-  })
-}
-
 export function usageRecovered(messages: readonly WithParts[], assistant: Assistant) {
   return messages.some((message) => {
     if (message.info.sessionID !== assistant.sessionID) return false
@@ -726,6 +712,20 @@ export function usageRecovered(messages: readonly WithParts[], assistant: Assist
       if (compareOrder(covered, message.info) >= 0 || compareOrder(digest, covered) < 0) return false
       return compareOrder(digest, assistant) >= 0
     })
+  })
+}
+
+export function isExternalUserMessage(message: WithParts) {
+  if (message.info.role !== "user") return false
+  if (message.info.source === "user" || message.info.source === "spawn") return true
+  if (message.info.source !== undefined) return false
+  // Legacy rows predate the source discriminator. Only real user text/files
+  // count; recovery boundaries and synthetic continuation users do not start a
+  // new external request episode.
+  return message.parts.some((part) => {
+    if ("synthetic" in part && part.synthetic) return false
+    if (part.type === "text") return !part.ignored && part.text.trim().length > 0
+    return part.type === "file"
   })
 }
 

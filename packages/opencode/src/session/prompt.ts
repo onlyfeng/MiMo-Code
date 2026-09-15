@@ -607,7 +607,7 @@ export const layer = Layer.effect(
     }
     const pendingExternalAdmissions = new Map<string, Set<ExternalAdmission>>()
     const externalAdmissionKey = (sessionID: SessionID, agentID: string | undefined) =>
-      `${sessionID}\u0000${agentID ?? "main"}`
+      JSON.stringify([sessionID, agentID ?? "main"])
     const waitForPendingExternalAdmission = Effect.fn("SessionPrompt.waitForPendingExternalAdmission")(function* (
       sessionID: SessionID,
       agentID: string | undefined,

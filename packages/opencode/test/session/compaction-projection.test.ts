@@ -202,17 +202,18 @@ describe("compaction projection", () => {
     test(`projection tail preserves source=${source} requests when the optional budget is exhausted`, async () => {
       const external = user(`msg_${source}_during_compaction`, "must survive")
       if (external.info.role === "user") external.info.source = source
+      const followup = assistant(`msg_${source}_followup`, external.info.id, [])
       const optional = user("msg_optional_user", "optional history")
       if (optional.info.role === "user") optional.info.source = "hook"
       const tail = await Effect.runPromise(
         buildProjectionTail({
-          messages: [optional, assistant("msg_optional_assistant", "msg_optional_user", []), external],
+          messages: [optional, assistant("msg_optional_assistant", "msg_optional_user", []), external, followup],
           model: ProviderTest.model(),
           budget: 0,
         }),
       )
 
-      expect(tail.map((message) => message.info.id)).toEqual([external.info.id])
+      expect(tail.map((message) => message.info.id)).toEqual([external.info.id, followup.info.id])
       expect(tail[0].parts).toEqual(external.parts)
     })
   }
