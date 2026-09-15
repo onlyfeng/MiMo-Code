@@ -3268,3 +3268,12 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - PR #138 的退出测试调查定位 standalone CLI 自建日志流未显式关闭；共享源码 `f20e91358da8ba4feef8d669ae1b105486e2566f` 在 runtime/DB 清理后等待 Log.shutdown。FD-006 的实验载体沿用独立证据归属，不改变 exec 权限、模型语义或七项 DC 政策。
 - 现有隔离子进程新增真实日志完成和关闭后不追加断言；旧实现自然 exit 0 仍确定失败，修正后完整实验文件 11 pass / 0 fail / 69 assertions，23.03 秒。并行消费两个输出管道，保留自然退出和 15/30 秒预算。包 typecheck exit 0；lint 0 errors，七条现存警告不归入本次新增。
 - 之前单次 CI exit143 未在本机重现，日志对照只显示资源遗漏和退出耗时相关，不能证明该失败根因。详细边界见[RV04](runtime-validation-2026-09-15.md#rv04独立实验日志资源清理)。FD/FC runtime/test 引用前进至 `f20e9135`，插件 scope 夹具仍为 `15ca0f83`，共享安装、bundled guidance 和选定 upstream 不变。
+
+## 2026-09-15 exact tool-name synchronization
+
+- Upstream range: `b4cc11cd652195af9a80297ed543218f3172e6c4..26aa00fc7e243a90586f5895ddcad2b7ce76b935` (one commit, nine incoming paths).
+- Prior main: `2bbd3c0b20f2fb9c005c593585bd320c0e0a91d8`.
+- Main runtime/test and prompt content snapshot: `0b8c5d634077f19c2d8c03179f2c869a01a18cec`.
+- C01 adopts exact catalog lookup across ordinary repair, GitLab execution and nested MCP dispatch. Parameter normalization and raw exec wrapping remain. Fork checkpoint instructions retain the generated runtime contract; FD-006 keeps its request-owned pool, explicit adapters and control authority. No owner retires.
+- Local main validation: 118 tool tests and 28 request/checkpoint/prefix tests pass; package typecheck and repository lint pass (4509 warnings, zero errors).
+- Complete reconciliation, environment and compat evidence: [sync record](upstream-sync-2026-09-15-26aa00fc.md). This documentation update does not itself advance runtime behavior. Final tip CI is verified after publication.

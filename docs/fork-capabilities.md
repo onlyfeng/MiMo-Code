@@ -16,11 +16,11 @@ authority.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-09-15
-- Upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
-- Prior reviewed upstream: `5198ff540efb5ca9fff2baa64555324d43a721b9`
-- Main behavior (runtime/tests): `f20e91358da8ba4feef8d669ae1b105486e2566f`
-- Bundled guidance content: `c6e30d0bd2a651ae40fbf26a1b8913a16696a13e`
-- Prior fork `main` tip: `e4075dfc141df0b4141fdd817b309bb52b3bca91`
+- Upstream: `26aa00fc7e243a90586f5895ddcad2b7ce76b935`
+- Prior reviewed upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
+- Main behavior (runtime/tests): `0b8c5d634077f19c2d8c03179f2c869a01a18cec`
+- Bundled guidance content: `0b8c5d634077f19c2d8c03179f2c869a01a18cec`
+- Prior fork `main` tip: `2bbd3c0b20f2fb9c005c593585bd320c0e0a91d8`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: gateway error aliases at `b4cc11cd`, accepted on main through PR #128; propagation and exact-SHA validation are recorded in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
+Latest reviewed synchronization: exact catalog tool names at `26aa00fc`; the [single-capability review](upstream-sync-2026-09-15-26aa00fc.md) records lookup, GitLab and nested MCP dispatch, retained parameter normalization, authoritative checkpoint guidance, and validation. Explicit advertised adapters and existing request/permission boundaries remain intact.
+
+Previous synchronization: gateway error aliases at `b4cc11cd`, accepted on main through PR #128; propagation and exact-SHA validation are recorded in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
 
 Previous synchronization: 2026-09-15, the specified upstream range
 `6fbb1732..5198ff54` (21 commits, 17 non-merge). The
