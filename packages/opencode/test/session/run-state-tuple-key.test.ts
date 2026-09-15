@@ -117,12 +117,16 @@ describe("SessionRunState tuple key — independent Runners per (sid, agentID)",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
       const warnings: Array<{ label: string; existingRunId: number }> = []
+      const started = yield* Deferred.make<void>()
+      const reentered = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<string>()
 
       const runner = Runner.make<string>(s, {
         label: "session-1:main",
         onReentryWarn: (info) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             warnings.push(info)
+            yield* Deferred.succeed(reentered, undefined)
           }),
       })
 
@@ -130,17 +134,18 @@ describe("SessionRunState tuple key — independent Runners per (sid, agentID)",
       const fiber1 = yield* runner
         .ensureRunning(
           Effect.gen(function* () {
-            yield* Effect.sleep("50 millis")
-            return "first"
+            yield* Deferred.succeed(started, undefined)
+            return yield* Deferred.await(finish)
           }),
         )
         .pipe(Effect.forkChild)
 
-      // Give first run time to start
-      yield* Effect.sleep("5 millis")
+      yield* Deferred.await(started)
 
       // Second call triggers reentry warn
       const fiber2 = yield* runner.ensureRunning(Effect.succeed("second")).pipe(Effect.forkChild)
+      yield* Deferred.await(reentered)
+      yield* Deferred.succeed(finish, "first")
 
       const [exit1, exit2] = yield* Effect.all([Fiber.await(fiber1), Fiber.await(fiber2)])
       // Both get the first run's result (reentry attaches to existing deferred)
