@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
+import os from "node:os"
+import { mkdtemp, rm } from "node:fs/promises"
 
 type Document = {
   paths: Record<string, Record<string, { operationId?: string; "x-codeSamples"?: { lang: string; source: string }[] }>>
@@ -10,23 +12,25 @@ test("generated and published code samples use callable v2 SDK methods", async (
   delete env.MIMOCODE_EXPERIMENTAL
   delete env.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH
   delete env.MIMOCODE_CODEX_MODE
+  // Match the root generation script's redirected stdout and retain its full document.
+  const directory = await mkdtemp(path.join(os.tmpdir(), "mimocode-sdk-generate-"))
+  await using output = {
+    file: Bun.file(path.join(directory, "openapi.json")),
+    [Symbol.asyncDispose]: () => rm(directory, { recursive: true, force: true }),
+  }
   const child = Bun.spawn({
     cmd: [process.execPath, "--conditions=browser", path.resolve("test/fixture/generate-child.ts")],
     env,
     stdin: "ignore",
-    stdout: "pipe",
+    stdout: output.file,
     stderr: "pipe",
   })
   const timer = setTimeout(() => child.kill("SIGKILL"), 30_000)
   const generated = await (async () => {
     try {
-      const [code, stdout, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-      ])
+      const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()])
       expect(code, stderr).toBe(0)
-      return JSON.parse(stdout) as Document
+      return JSON.parse(await output.file.text()) as Document
     } finally {
       clearTimeout(timer)
       child.kill("SIGKILL")

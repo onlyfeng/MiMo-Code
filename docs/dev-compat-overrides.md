@@ -398,7 +398,7 @@ The seven owner dispositions and evidence are recorded in
 - Inherited bundled guidance content: `3fa41ad98ac15668b2b3be899767c6498772ad4b`
 - Publication state: the initial implementation is under PR #129; later local integration and accepted-SHA CI remain pending as recorded in the implementation snapshot below. The preceding documentation tip `b3b32061cfcf997d3fb1cac0a73302e551678a96` (PR #127) has successful exact-SHA test, typecheck and lint.
 - Complete code-difference audit: [2026-09-15 report](fork-difference-audit-2026-09-15.md), with fixed Git trees, per-file ownership and open implementation gaps.
-- First-batch shared documentation inheritance: accepted main `f10fddb67d830b82890206759c53cef4d8710460`. The current shared FD/FC and implementation report are inherited unchanged from main `d1e12e85`; the later local source/test snapshot is recorded under DC-CONTEXT-001 below.
+- First-batch shared documentation inheritance: accepted main `f10fddb67d830b82890206759c53cef4d8710460`. The current shared FD/FC and implementation report are inherited unchanged from main `555598ab4c257aa0b99d337366cd56e6886aa6e9`; the later local source/test snapshot is recorded under DC-CONTEXT-001 below.
 - History: [dev-compat-registry-history.md](dev-compat-registry-history.md)
 
 `Base` names the inherited source/test behavior being reviewed. `Overrides`
@@ -1092,13 +1092,14 @@ files remain byte-identical to the accepted main correction.
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
 
 - 2026-09-15 implementation snapshot: compat
-  `c38078f7eb99d7ba68478808abbd616cfa28847c` inherits main
-  `37b97a7bfc52e201513f2d1120506f287d2d9bbf`. F06 chronology, atomic
+  `05724a5c433a547d9177ebd8bc8e9184962f128e` inherits main
+  `cdfd1a804599eda21fdc5bced9c0d1de025d07da`. F06 chronology, atomic
   admission, checkpoint/loop-streak/TUI position handling, F07 compaction
   admission guards, and callable SDK examples are now shared contracts, not
   exclusive compat policies. F04 request preflight and F10 legacy snapshot
-  reads remain compat-owned. This is a local source/test snapshot; final
-  integration, current-head regression checks and accepted-SHA CI are pending.
+  reads remain compat-owned. Local affected regressions and the two measured
+  integration-test budgets are recorded in [the compat implementation report](compat-audit-followups-2026-09-15.md).
+  Final accepted-branch integration and accepted-SHA CI remain pending.
 
 - 2026-09-09 full sync: image normalization is inherited through the existing model transform. Keep bounded replay/error media, active-tool preflight, frozen context and chronology; adapt image fixtures to actual containers. Provider/API/schema inputs and compat SDK operations remain unchanged.
 

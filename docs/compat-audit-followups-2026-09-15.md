@@ -8,7 +8,7 @@
 
 首批 main PR #128 已接受为 `f10fddb67d830b82890206759c53cef4d8710460`，PR #129 分支在 `f48b6e918d683688348d0c8bfc59cd0199fc7fc8` 继承该提交；`c0c0ebcd`、`eaf99b8b` 记录当时的继承和验证。文档接受点 `b3b32061` 的精确 SHA CI 均已成功；该历史结果不覆盖后续源码。
 
-当前本地源码/测试快照为 `c38078f7eb99d7ba68478808abbd616cfa28847c`，真实继承 main `37b97a7bfc52e201513f2d1120506f287d2d9bbf`。早期 `d8f6578b`、`31192b26`、`0d568184` 分别合入 F06、F07 及其两项动态 gate；后续合入共享预算描述、checkpoint 最新持久尾部读取、有限匿名 part 重试、workflow 清理缺陷收敛和 frozen-catalog 测试准备。所有继承均保留 main 祖先。最终接受分支合并、当前完整受影响矩阵和接受 SHA CI 尚待完成；下列证据各自注明实际快照，不以旧绿灯替代后续验证。
+当前本地源码/测试快照为 `05724a5c433a547d9177ebd8bc8e9184962f128e`，真实继承 main `cdfd1a804599eda21fdc5bced9c0d1de025d07da`。早期 `d8f6578b`、`31192b26`、`0d568184` 分别合入 F06、F07 及其两项动态 gate；后续合入共享预算描述、checkpoint 最新持久尾部读取、有限匿名 part 重试、workflow 清理缺陷收敛和 frozen-catalog 测试准备。所有继承均保留 main 祖先。本地受影响验证已完成，最终接受分支合并与接受 SHA CI 尚待完成；下列证据各自注明实际快照，不以旧绿灯替代后续验证。
 
 ## 已实现的语义
 
@@ -30,7 +30,7 @@ F05/F09/F11 同步继承共享生成器、退役入口清理与生成格式化�
 
 ## 合并检查与验证边界
 
-本轮最终验证显式清除 `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`、`MIMOCODE_CODEX_MODE`、`MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`、`MIMOCODE_COMPACTION_MAX_CONTEXT`、`MIMOCODE_COMPACTION_TRIGGER_RATIO`、`MIMOCODE_DISABLE_CHECKPOINT`、`MIMOCODE_EXPERIMENTAL_WORKSPACES` 八项 selector，保留包 preload 的 Orchestrator、内存数据库、隔离 HOME/XDG/models fixture 和禁默认插件设置。早期组按各自日志记录环境，不将此八项显式清除命令倒写为早期命令。MCP 测试内部需要搜索模式时只显式开启该目标 selector。各矩阵存在重叠，不汇总成独立测试总数。
+本轮最终验证显式清除 `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`、`MIMOCODE_CODEX_MODE`、`MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL`、`MIMOCODE_COMPACTION_MAX_CONTEXT`、`MIMOCODE_COMPACTION_TRIGGER_RATIO`、`MIMOCODE_DISABLE_CHECKPOINT`、`MIMOCODE_EXPERIMENTAL_WORKSPACES` 八项 selector，保留包 preload 的 Orchestrator、内存数据库、隔离 HOME/XDG/models fixture 和禁默认插件设置。早期组按各自日志记录环境，不将此八项显式清除命令倒写为早期命令。MCP 测试内部需要搜索模式时只显式开启该目标 selector。最终整文件命令不传全局 `--timeout`，保留已有单例预算；两项经阶段测量调整的集成用例分别使用显式 15 秒壳。各矩阵存在重叠，不汇总成独立测试总数。
 
 第一批 F04/F10 固定快照的证据：
 
@@ -55,9 +55,18 @@ F06 传播期间的分组证据，包含 `d8f6578b` 收据修正后的受影响�
 - `9c30a312` 按标准 SDK build 和 OpenAPI generate 成功完成；生成结果与语义合并产物逐字一致。相对前一产物只有 `Config.compaction.preserve_recent_tokens` 的一个 description 值变化，明确 40000 是可选旧轮次预算；141 operations/samples、coverage 与 Agent/AgentConfig MaxMode schema 保留。
 - `8a0f5062` 完整 `prompt-effect.test.ts` 在原默认 5 秒门通过：162 pass、2 项既有 skip、900 断言、227.97 秒。其后的 38 文件矩阵为 461 pass、2 fail；失败分别为 SDK 子进程原 30 秒限时后退出 137，以及 frozen-catalog 原 5 秒门超时。缩小为这两文件同进程时仍两项失败，不能只据单文件通过归因负载。
 - frozen-catalog 单文件原 5 秒门为 0 断言超时。临时阶段观察证明真实插件等待 global/project 两个配置目录的 Npm.reify；使用既有 `prepareConfigDependencies` 后无 reify、依赖等待降至不足 1 毫秒，但五个真实请求累计仍在 13 断言时撞上 5 秒门。独立有界观察自然完成全部 15 断言，测试本体 6.54 秒。最小共享测试修正因此准备本地依赖并仅给这一例设置 15 秒壳，保留全部请求、插件和 Git 操作，不改生产 deadline；不声称原 5 秒通过。
-- `f73267d2` 的无 observer SDK+frozen 两文件组合为 2 pass、0 fail、1147 断言、14.04 秒，SDK 4.66 秒、frozen 6.02 秒。SDK 没有对应生产修正；早期退出 137 的根因仍未确定，当前组合不复现不能证明它由 frozen 的依赖安装导致。
+- `f73267d2` 的无 observer SDK+frozen 两文件组合为 2 pass、0 fail、1147 断言、14.04 秒，SDK 4.66 秒、frozen 6.02 秒。当时 SDK 没有对应修正，退出 137 的根因未定；这一次组合通过不能证明它由 frozen 的依赖安装导致。后续复现与隔离证据如下。
+- `fd217997` 的原 42 文件矩阵为 481 pass、1 fail、1695 断言、177.93 秒，唯一失败仍是 SDK 原 30 秒子进程退出 137；它发生在 frozen 执行之前。同 42 文件路径、只过滤 SDK 目标的低扰动观察保持 child 完全不改，仅在退出后检查已收输出：553610 字节、JSON 完整、141 operations。采样时父 CPU 接近零、子进程持续占用 CPU，原生栈多在 Bun 事件循环。直接证据将问题范围缩至完整写出后的完成/退出边界，尚未直接确认具体回调或原生机制；Bun pipe 完成机制属于推断。
+- 仅将 SDK 测试 stdout 改为临时文件，保持真实 `GenerateCommand`、原 30 秒 child/45 秒测试限时和全部 callable/HTTP 断言：同 42 文件路径过滤目标为 1 pass、1132 断言、7.14 秒；正式文件捕获实现的无 observer SDK+frozen 组合为 2 pass、1147 断言、10.21 秒，opencode `bun typecheck` 通过。临时文件用 async disposal 清理；两条实际标准生成流程本来就重定向到文件，生产生成器未改。原 42 文件组合的修正后复跑见下。
+- `c2607746` 最终生产源码上的完整 prompt 原默认 5 秒矩阵为 165 pass、2 项既有 skip、1 timeout、929 断言、300.63 秒。失败为串行四个 Actor 的批准继承组合；原 5 秒单例也超时，不归因为共享进程随机性。该单例有界观察完成四个 child，17 断言全部通过，测试本体 7.33 秒；只给此例设置 15 秒预算后的无 observer 默认 CLI 定向为 1 pass、17 断言、测试本体 8.38 秒。主线 `8d5ac893` 的两行测试修正已真实继承，未改变生产 deadline 或整份 prompt 的默认预算。其余 165 项仍引用先前整文件证据，不宣称新 head 又完整重跑过整份 prompt。
 
-F04/F10 独占的 overflow、prefix-snapshot、session.sql、llm-request-prefix 和 text-truncate 文件与 `199286de` 无差异；prompt、message-v2 等共享文件按上述运行契约与具体 hunk 保留，不能称整文件未改。后续当前源码回归、最终 PR 审查和接受 SHA CI 另行记录；本地静态继承或早期运行通过不等于远端完成。
+最终本地验证（生产/测试内容固定于 `05724a5c`，运行 head `3103f1d8` 只再继承共享文档）：
+
+- 原 42 文件组合在 SDK 捕获修正后重跑：482 pass、0 fail、2826 断言、171.23 秒；SDK 用例在原先失败的位置自然完成。范围是原 38 个 compaction/classify/overflow/prefix/tool-mask/chronology/checkpoint/TUI/SDK 文件，加 `auto-overflow-writer-first`、`title-first-turn`、真实 `/rebuild` 的 `rebuild-on-the-spot` 和 `prompt-rebuild-reset` 四文件，包含高 usage assistant 的 digest 端点、手动重建与 compat preflight。
+- SDK、shared package 分别执行 `bun typecheck`，均成功。opencode 已在完全相同的源码/测试内容上通过 `bun typecheck`（7.59 秒）；随后只提交/合并相同 SDK 测试补丁和文档，没有新的 package 内容差异。
+- 完整 prompt 的 165 pass/2 skip/1 timeout，以及预算修正后单例 17 断言通过，按上一节分组保留；没有提高整份文件的默认超时，也没有把历史整文件失败改写为新 head 完整重跑全绿。
+
+F04/F10 独占的 overflow、prefix-snapshot、session.sql、llm-request-prefix 和 text-truncate 文件与 `199286de` 无差异；prompt、message-v2 等共享文件按上述运行契约与具体 hunk 保留，不能称整文件未改。本地当前源码验证如上；最终 PR 审查、接受分支祖先链和接受 SHA CI 由发布阶段另行记录，本地通过不等于远端接受完成。
 
 ## 七项归属
 
