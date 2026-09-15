@@ -181,6 +181,8 @@ not change their implementation. The preceding review is retained in the
   HTTP/SDK/tool publication and actual provider/transaction regressions are
   recorded in the shared history; no cross-restart recovery is introduced.
 
+<a id="fd-004--ordinary-instances-expose-no-implicit-openai-compatible-listener"></a>
+
 ## FD-004 — upstream's capability route, adopted whole
 
 - Status: active (reduced to near-nothing 2026-09-14)
