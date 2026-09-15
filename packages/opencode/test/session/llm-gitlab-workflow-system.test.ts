@@ -45,7 +45,7 @@ function user(sessionID: SessionID, systemMode: "append" | "replace-agent"): Mes
 }
 
 describe("session.llm GitLab workflow system prompt", () => {
-  test("preserves per-turn system context in workflow and telemetry for append and replace-agent", async () => {
+  test("preserves per-turn system context and dispatches only exact tool names", async () => {
     await using tmp = await tmpdir({ git: true })
 
     await Instance.provide({
@@ -83,6 +83,7 @@ describe("session.llm GitLab workflow system prompt", () => {
           }),
         })
 
+        const calls: string[] = []
         const requests: Array<{ systemPrompt: string[] }> = []
         const plugin = Layer.succeed(
           Plugin.Service,
@@ -134,7 +135,15 @@ describe("session.llm GitLab workflow system prompt", () => {
                     agent,
                     system: ["CALL_SYSTEM"],
                     messages: [{ role: "user", content: "Hello" }],
-                    tools: {},
+                    tools: {
+                      read: {
+                        inputSchema: z.object({ file_path: z.string() }),
+                        execute: async (input) => {
+                          calls.push(input.file_path)
+                          return { output: input.file_path }
+                        },
+                      },
+                    },
                   })
                   .pipe(Stream.runDrain),
               ),
@@ -156,6 +165,18 @@ describe("session.llm GitLab workflow system prompt", () => {
           expect(replace.prompt).toContain("CALL_SYSTEM")
           expect(replace.prompt).toContain("TURN_SYSTEM")
           expect(replace.telemetry).toBe(replace.prompt)
+
+          const execute = workflow.toolExecutor!
+          expect(await execute("read", JSON.stringify({ filePath: "/tmp/example" }), "test-exact")).toMatchObject({
+            result: "/tmp/example",
+          })
+          for (const name of ["Read", "r-e-a-d", "mcp__test__read"]) {
+            expect(await execute(name, JSON.stringify({ filePath: "/tmp/example" }), "test-invalid")).toMatchObject({
+              result: "",
+              error: `Unknown tool: ${name}`,
+            })
+          }
+          expect(calls).toEqual(["/tmp/example"])
         } finally {
           await runtime.dispose()
         }
