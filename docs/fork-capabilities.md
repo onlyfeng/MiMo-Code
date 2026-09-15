@@ -29,7 +29,7 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: gateway error aliases at `b4cc11cd`, with local validation and pending publication in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
+Latest reviewed synchronization: gateway error aliases at `b4cc11cd`, accepted on main through PR #128; propagation and exact-SHA validation are recorded in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
 
 Previous synchronization: 2026-09-15, the specified upstream range
 `6fbb1732..5198ff54` (21 commits, 17 non-merge). The
@@ -356,10 +356,15 @@ not change their implementation. The preceding review is retained in the
 - 2026-09-15 shared chronology/admission: caller IDs are identity keys, not
   admission order. `createMessage` allocates an actor-local monotonic committed
   timestamp; metadata updates preserve creation time and completion cannot
-  precede it. User message/parts are committed together with session/actor/part
-  ownership validation and same-content idempotency; latest-user conditional
-  admission shares that transaction. Inbox draining is not claimed to be one
-  crash-atomic transaction with message creation. Fork/revert and cursor
+  precede it. Prompt and compaction user message/parts are committed together
+  with session/actor/part ownership validation; latest-user conditional
+  admission shares that transaction. Same-owner prompt retries may reuse
+  producer-generated part IDs only when the complete current persisted content
+  matches. Explicit IDs, content, order and metadata remain strict; runtime-added
+  parts can make a later replay conflict. This is not a lifetime replay receipt.
+  Inbox draining still writes the message, its parts and the queue deletion in
+  separate steps; the prompt/compaction transaction does not cover Inbox drain.
+  Fork/revert and cursor
   consumers use chronological positions, with UTF-8 ID ties matching SQLite
   BINARY. Producer and transaction regressions are recorded under F06 in
   [the implementation report](audit-followups-2026-09-15.md).

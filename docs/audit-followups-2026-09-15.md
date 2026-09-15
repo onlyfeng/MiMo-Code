@@ -58,6 +58,15 @@ F06 原提交 `b2dad34ea1cde4509d9f6ce4143c8b6a0094f858`，整合为 `8cfc6eca`�
 
 独立审核发现并修复两项组合问题：缺失 checkpoint watermark 不得被后续 collapse 当作有效范围；撤销分页加载的边界不得被 live message update 挤出缓存。最终相关十文件 155 pass，真实 prompt 子矩阵 19 pass；独立六文件 103 pass、287 断言，以及原子准入六例 6 pass、34 断言。整合后 root 默认五文件再验证 85 pass、239 断言。两个 package typecheck 通过。更早全量相关矩阵为 356 pass、2 个既有 skip；最后补丁后按影响范围复验，未把旧全量结果移称为最终完整矩阵。TUI 证据是状态 helper 测试和事件接线核验，未运行交互终端。
 
+PR #130 初始 head `3836da63` 的 CI 又发现两项组合回归，均已在原失败条件下复现并修正：
+
+- `1efa8ff9`：provider 返回 overflow 时，checkpoint 重建此前读取流式执行前的消息快照，遗漏刚提交的高用量 assistant；下轮因水位没有覆盖该行再次重建。现在在准备重建时读取同 session/actor 的最新已提交消息，并在异步渲染前冻结该范围。原 50,000-token 用例从两个 marker 失败恢复为一个，新增断言同时检查真实 assistant、水位和 usage recovery。没有放宽恢复判定，也没有把 writer stub 改成不真实的边界。
+- `d726a454`：同一 prompt message ID 的重试会为未指定 ID 的 parts 再生成身份，触发 F06 的严格冲突检查。producer 现在标记自身生成的 part IDs，在事务中按顺序匹配当前持久 parts，再完整比较内容；返回持久身份。显式 ID、不同内容/顺序/metadata、跨消息与跨 actor 仍拒绝。若执行期间追加了 parts 或修改 metadata，旧输入也可能不再匹配；这是相同当前内容的有限幂等，不是整个消息生命周期的重放保证。并发相同请求验证仅提交一份 user/parts，并仅触发一次标题生成。
+
+作者最终准入子矩阵为 10 pass、102 断言。root 在 `d726a454` 独立运行完整 title-first-turn、auto-overflow-writer-first、usage recovery、tail digest、checkpoint unify、rebuild reset 和 on-the-spot 七文件：49 pass、0 fail、298 断言、38.49 秒自然退出。使用原测试时限，清除上述七项环境 selector 及 `MIMOCODE_EXPERIMENTAL_WORKSPACES`，保留包 preload；没有把先前矩阵当作新修复后的全量重跑。
+
+原子提交范围也已明确：prompt/compaction 的消息及 parts 使用同一事务；Inbox 当前消息、parts 与队列删除仍分步执行，未声称 Inbox drain 已具备跨这些步骤的 crash-atomic 保证。
+
 ### 并发压缩与请求准入
 
 F07 生产实现由 `7fd795db` 整合为 `79df88f0`，额外 gate 测试由 `f5750b6a` 整合为 `313ca1dd`。新外部 user/spawn 请求与其后缀必须保留，即使可选旧轮次预算为零；其成本先占用可选预算。synthetic/hook 消息不因此获得外部请求身份。压缩按同 session/actor 等待尚未结束的外部准入，并在自动 continuation 写入前后核对，精确清除被新请求替代的消息及 parts。失败和中断释放等待，其他 actor 不受阻塞。
