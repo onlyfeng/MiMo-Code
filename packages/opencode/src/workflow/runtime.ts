@@ -327,6 +327,7 @@ export const layer = Layer.effect(
     const fork = <A, E, R>(effect: Effect.Effect<A, E, R>) => hostBridge.fork(effect)
     const scope = yield* Scope.Scope
     const runs = new Map<string, RunEntry>()
+    const settlementTraces = new WeakMap<RunEntry, (phase: string, exit?: Exit.Exit<unknown, unknown>) => void>()
 
     // Resolve a guest-supplied model ref (a "provider/model" literal OR a
     // tier/group name like "lite") to a concrete {providerID, modelID} via the
@@ -453,8 +454,10 @@ export const layer = Layer.effect(
     const RECLAIM_ACTOR_TIMEOUT_MS = 5_000
     const reclaim = (entry: RunEntry) =>
       Effect.gen(function* () {
+        settlementTraces.get(entry)?.("reclaim.begin")
         const actor = spawnRef.current
         if (actor) {
+          settlementTraces.get(entry)?.("reclaim.actors.begin")
           yield* Effect.forEach(
             [...entry.childActorIDs],
             (childID) =>
@@ -462,6 +465,7 @@ export const layer = Layer.effect(
                 actor.cancel(entry.sessionID, childID, "graceful"),
                 RECLAIM_ACTOR_TIMEOUT_MS,
               ).pipe(
+                Effect.onExit((exit) => Effect.sync(() => settlementTraces.get(entry)?.("reclaim.actor.exit", exit))),
                 Effect.catchTag("TimeoutError", () =>
                   Effect.sync(() => log.warn("actor cancel timed out during reclaim", { childID })),
                 ),
@@ -469,11 +473,14 @@ export const layer = Layer.effect(
               ),
             { concurrency: "unbounded", discard: true },
           )
+          settlementTraces.get(entry)?.("reclaim.actors.end")
         }
+        settlementTraces.get(entry)?.("reclaim.worktrees.begin")
         yield* Effect.forEach(
           [...entry.worktrees],
           (directory) =>
             worktree.remove({ directory }).pipe(
+              Effect.onExit((exit) => Effect.sync(() => settlementTraces.get(entry)?.("reclaim.worktree.exit", exit))),
               Effect.timeout(RECLAIM_WORKTREE_TIMEOUT_MS),
               Effect.catchTag("TimeoutError", () =>
                 Effect.sync(() => log.warn("worktree remove timed out during reclaim", { directory })),
@@ -482,6 +489,7 @@ export const layer = Layer.effect(
             ),
           { concurrency: "unbounded", discard: true },
         )
+        settlementTraces.get(entry)?.("reclaim.worktrees.end")
         entry.worktrees.clear()
         // Recurse into child workflow RUNS (populated by workflow()). Cancelling the
         // orchestrator tears down the whole tree — a child still "running" here is
@@ -501,6 +509,7 @@ export const layer = Layer.effect(
             }).pipe(Effect.ignore),
           { concurrency: "unbounded", discard: true },
         )
+        settlementTraces.get(entry)?.("reclaim.end")
       })
 
     // Bounded interrupt: Fiber.interrupt can stall on a hung LLM fetch or an
@@ -571,6 +580,24 @@ export const layer = Layer.effect(
         currentPhaseId: undefined,
       }
       runs.set(runID, entry)
+      if (input.scriptDeadlineMs === 10_000) {
+        const started = Date.now()
+        settlementTraces.set(entry, (phase, exit) => {
+          process.stderr.write(`[workflow-settlement] ${JSON.stringify({
+            phase,
+            elapsedMs: Date.now() - started,
+            outcome: exit?._tag,
+            reasons: exit && Exit.isFailure(exit) ? exit.cause.reasons.map((reason) => {
+              const error = reason._tag === "Die" ? reason.defect : reason._tag === "Fail" ? reason.error : undefined
+              return {
+                tag: reason._tag,
+                name: error instanceof Error ? error.name : undefined,
+                frames: error instanceof Error ? error.stack?.match(/(?:src|test)\/[\w/.-]+:\d+:\d+/g)?.slice(0, 4) : undefined,
+              }
+            }) : undefined,
+          })}\n`)
+        })
+      }
       // Stamp a sha256 of the FULL script body (the exact bytes writeScript persists
       // and resume's readScript reads back), so resume can detect a between-cycle
       // edit by comparing this to the current file's sha — apples-to-apples, MR104
@@ -992,6 +1019,7 @@ export const layer = Layer.effect(
                   const outcome = yield* awaitWithTimeout(s.actorID, o, Deferred.await(s.outcome), () => {
                     reason = "timeout"
                   })
+                  settlementTraces.get(entry)?.("isolated.outcome")
                   entry.childActorIDs.delete(s.actorID)
                   if (outcome === null) return null
                   if (outcome.status !== "success") {
@@ -1025,7 +1053,11 @@ export const layer = Layer.effect(
         // disposition below owns it) rather than the returned deliverable: in the
         // isolated path a successful agent's work is its worktree, so a status
         // success is a success even when it returned no text.
-        if (spawned) await Instance.disposeDirectory(info.directory)
+        if (spawned) {
+          settlementTraces.get(entry)?.("isolated.dispose.begin")
+          await Instance.disposeDirectory(info.directory)
+          settlementTraces.get(entry)?.("isolated.dispose.end")
+        }
         entry.running--
         if (succeeded) entry.succeeded++
         else {
@@ -1047,7 +1079,9 @@ export const layer = Layer.effect(
           base !== "" && (await bridge.promise(worktree.isPristine(info.directory, base)).catch(() => false))
         const keep = succeeded && !pristine
         if (!keep) {
+          settlementTraces.get(entry)?.("isolated.remove.begin")
           await bridge.promise(worktree.remove({ directory: info.directory })).catch(() => undefined)
+          settlementTraces.get(entry)?.("isolated.remove.end")
           entry.worktrees.delete(info.directory)
           return succeeded ? { value, reason: null } : { value: null, reason }
         }
@@ -1452,12 +1486,16 @@ export const layer = Layer.effect(
         // deadline-fire / script throw leaves a clean slate for a convergent
         // re-run. Success path does NOT reclaim — kept worktrees are the deliverable.
         yield* reclaim(entry)
+        settlementTraces.get(entry)?.("terminal.reclaimed")
         const error = result.failure instanceof Error ? result.failure.message : String(result.failure)
         entry.status = "failed"
         log.warn("workflow run failed", { runID, error })
         yield* flushNow(entry)
+        settlementTraces.get(entry)?.("terminal.flushed")
         yield* WorkflowPersistence.recordTerminal({ runID, status: "failed", error }).pipe(Effect.ignore)
+        settlementTraces.get(entry)?.("terminal.recorded")
         yield* Deferred.succeed(deferred, { status: "failed", error })
+        settlementTraces.get(entry)?.("terminal.deferred.settled")
         if (!isRunDisposing(yield* RunDisposal))
           yield* bus.publish(WorkflowFinished, { sessionID: input.sessionID, runID, status: "failed", error })
         if (input.notifyOnTerminal !== false && !isRunDisposing(yield* RunDisposal))
@@ -1473,7 +1511,10 @@ export const layer = Layer.effect(
             .pipe(Effect.ignore)
       })
 
-      entry.fiber = yield* work.pipe(Effect.forkIn(scope))
+      entry.fiber = yield* work.pipe(
+        Effect.onExit((exit) => Effect.sync(() => settlementTraces.get(entry)?.("work.exit", exit))),
+        Effect.forkIn(scope),
+      )
       return { runID }
     })
 
