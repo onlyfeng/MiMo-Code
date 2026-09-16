@@ -67,6 +67,7 @@ not change their implementation. The preceding review is retained in the
 | FC-015 | compaction context budget, projection, frozen prefix, and trigger ratio                                   | Upstream trigger plus bounded fork projection                    | Preserve ratio parity, no-tool summaries, and config precedence                          |
 | FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets                                               | Upstream voice protocol plus fork lifecycle/editor hardening     | Preserve owner identity, drain-before-idle, and grapheme boundaries                      |
 | FC-017 | History SQLite projection and attachment preview formatting                                               | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds and original attachment locators                  |
+| FC-018 | actor shell flag values (`extractNamedFlags` and the verb mappings)                                       | Fork hardening of shared parsing                                 | Reject an explicitly empty value in both flag forms                                      |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -816,6 +817,11 @@ not change their implementation. The preceding review is retained in the
   The explicit Linux zero-case inputs are still loaded by Bun and excluded only
   from the expected suite set, so a future registered case fails as unexpected
   until the allowlist is retired.
+  Each unit shard step carries a 12-minute budget, raised from upstream's 8 after
+  shard 1 measured 412-488 seconds across five 2026-09-15 pushes and twice had a
+  complete passing run cancelled. The budget bounds a hung shard; per-test hangs
+  stay capped by the suite's own 120-second timeout, so this raise weakens no
+  hang detection and changes no reporting requirement.
 - POLICY-01 Question lifecycle: registration, Asked publication and answer
   waiting share one resource lifetime. Abort, interruption, publication failure
   and instance disposal remove only a still-owned pending question and publish
@@ -1477,3 +1483,31 @@ logged`, and the peer `success`/`failure` variants of
 - Tests/evidence: `packages/opencode/test/history/` NUL/projection/media/attachment-around tests and the C05 record in [selected synchronization](upstream-sync-2026-09-15-5198ff54.md). The accepted final history run has 68 passes, five upstream benchmark skips, and 625 assertions; this audit does not rerun or relabel that evidence.
 - Review basis: upstream `5198ff540efb5ca9fff2baa64555324d43a721b9`, main runtime/test behavior `4eacc84dccf83c22f533c35bea282d4c5a38cacd` (history fixes already present at `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d`).
 - Retirement condition: upstream supplies equivalent NUL fidelity, SQL-side field/list budgets and structural locator-safe omission behavior, proven against raw retrieval and real preview formatting.
+
+## FC-018 — explicit empty values in actor shell flags
+
+- Status: active
+- Canonical owner: fork `main` actor shell argument parsing
+- Observable contract: `extractNamedFlags` rejects an explicitly empty value in
+  both flag forms. `--flag=` already failed; `--flag ""` now fails the same way
+  with `actor: --<flag> requires a value`. A recognized flag is therefore either
+  absent or carries a non-empty value, so the verb mappings' truthiness spreads
+  cannot silently drop a value the caller supplied. Non-empty values, position-
+  independent flag scanning, heredoc prompts and unrelated tokens are unchanged.
+- Upstream relationship: upstream accepts the empty space-form value and then
+  drops the selector while mapping, so `actor run explore "d" "p" --model ""`
+  launches at the default model instead of reporting the empty value. This is
+  fork hardening of shared code, not a rejected upstream decision.
+- Watch surfaces: `packages/opencode/src/tool/actor.ts` — `extractNamedFlags`
+  and the run/spawn/send flag mappings that consume its result.
+- Tests/evidence: `packages/opencode/test/tool/actor.shell.test.ts`, "an
+  explicitly empty flag value fails like a missing one", covering `--model ""`,
+  `--model=""`, `--task ""` and `--command ""`. Reverting the guard to the
+  `undefined`-only check fails that case and nothing else.
+- Propagation note: `dev/compat`'s DC-ACTOR-002 keeps an explicitly empty
+  `--variant ""` so its strict schema rejects it. Once this entry reaches that
+  branch the parser rejects the same input earlier, so DC-ACTOR-002's shell
+  clause and its empty-variant test move to the parse-time error.
+- Retirement condition: upstream rejects empty values in both flag forms, or the
+  flag mappings stop depending on truthiness so an empty value reaches schema
+  validation with an equivalent error.
