@@ -1644,10 +1644,12 @@ files remain byte-identical to the accepted main correction.
   `--variant ""` is rejected by the shared parser (FC-018) before the schema
   sees it, so the shell mapping keeps the same truthiness spread as every other
   flag. Without an explicit variant the tool adopts the agent's own configured
-  variant when the child runs on the agent's configured model — including the
-  group member resolved for the caller's provider, which the prompt-side
-  comparison would treat as a different model — and drops that configured value
-  when the resolved model does not define it. With neither an explicit nor a
+  variant when the child's model is the agent's configured model, compared as
+  provider-aware resolved identities. That holds for the group member picked for
+  the caller's provider, and however the call names that model — the agent's own
+  group reference or the resolved member itself — while the prompt-side
+  comparison would treat it as a different model. A configured value the
+  resolved model does not define is dropped. With neither an explicit nor a
   configured variant, the spawn input, prompt input, tool metadata and
   model/variant selection are unchanged and no extra provider lookup runs. Tool
   metadata adds `variant` only when set. `actor models` appends

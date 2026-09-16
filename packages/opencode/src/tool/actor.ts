@@ -968,12 +968,24 @@ export const ActorTool = Tool.define(
               modelID: msg.info.modelID,
               providerID: msg.info.providerID,
             })
-        // The agent's configured variant applies when the child runs on the agent's own
-        // model. `createUserMessage` decides that by resolving the agent's model ref
-        // WITHOUT provider context, so the group member picked for the caller's provider
-        // above looks like a different model there and silently loses the variant. Adopt
-        // it here, where the group was already resolved provider-aware.
-        const inherited = op.variant || op.model || !(next.modelRef || next.model) ? undefined : next.variant
+        // The agent's configured variant applies when the child ends up on the agent's own
+        // configured model. `createUserMessage` decides that by resolving the agent's model
+        // ref WITHOUT provider context, so a group member picked for the caller's provider
+        // looks like a different model there and silently loses the variant. Decide it here
+        // by comparing provider-aware resolved identities, which also holds when the call
+        // names that same model itself — as the agent's own group ref, or as a literal.
+        const agentModel =
+          op.variant || !next.variant
+            ? undefined
+            : next.modelRef
+              ? yield* provider
+                  .resolveModelRef(next.modelRef, msg.info.providerID)
+                  .pipe(Effect.map((m) => ({ modelID: m.id, providerID: m.providerID })))
+              : next.model
+        const inherited =
+          agentModel && agentModel.providerID === model.providerID && agentModel.modelID === model.modelID
+            ? next.variant
+            : undefined
         // Validate before admission so a wrong variant never starts a child at a
         // different cost or quality than the caller asked for. Own keys only: the
         // provider has already merged configured variants and removed disabled ones.

@@ -1640,6 +1640,42 @@ describe("Actor tool agent variant inheritance", () => {
       { config: agentVariantModels },
     ),
   )
+
+  // Naming the agent's own model — as its group ref or as the resolved member — is still
+  // "the agent's model", so the configured variant survives an explicit `model`.
+  it.live("adopts it when the call names the agent's own model itself", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          yield* spawn("group-probe", { model: "squad" })
+          yield* spawn("group-probe", { model: "test/reasoner" })
+
+          expect(spawned.map((input) => [input.model, input.variant])).toEqual([
+            [{ providerID: ProviderID.make("test"), modelID: ModelID.make("reasoner") }, "high"],
+            [{ providerID: ProviderID.make("test"), modelID: ModelID.make("reasoner") }, "high"],
+          ])
+        }),
+      { config: agentVariantModels },
+    ),
+  )
+
+  it.live("leaves the variant behind when the call picks a different model", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          yield* spawn("group-probe", { model: "test/test-model" })
+
+          expect(spawned.map((input) => [input.model, Object.hasOwn(input, "variant")])).toEqual([
+            [{ providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") }, false],
+          ])
+        }),
+      { config: agentVariantModels },
+    ),
+  )
 })
 
 describe("Actor tool task_id degradation", () => {
