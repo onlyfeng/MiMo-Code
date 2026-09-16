@@ -60,8 +60,13 @@ jobs:
       # shard neighbors. If a new mock lands on the same hash bucket as a test
       # that needs the real implementation, isolate that file the same way as
       # stdio-exit-observe rather than assuming hash-sharding alone is enough.
+      # Step budget: shard 1 takes ~450s (412-488s observed across five pushes on
+      # 2026-09-15), so an 8-minute step cancelled two runs that had already
+      # printed a complete passing summary. 12 minutes absorbs runner variance
+      # while still bounding a hung shard; per-test hangs stay capped by the
+      # `--timeout 120000` below.
       - name: Run unit tests (shard ${{ matrix.shard }})
-        timeout-minutes: 8
+        timeout-minutes: 12
         shell: bash
         working-directory: packages/opencode
         run: |

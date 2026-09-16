@@ -154,7 +154,10 @@ function extractNamedFlags(
     const bare = names.find((n) => a === `--${n}`)
     if (bare) {
       const next = args[i + 1]
-      if (next === undefined)
+      // Truthiness on purpose: a missing value and an explicitly empty one are both
+      // rejected, matching the `--flag=` form below. Accepting "" here would let the
+      // verb mappings drop it as falsy and launch with a default the caller never asked for.
+      if (!next)
         return Effect.fail({ kind: "flag" as const, line, detail: `actor: --${bare} requires a value` })
       flags[bare] = next
       i++

@@ -151,6 +151,21 @@ describe("actor.shell.parse: --model flag", () => {
     expect(err.detail).toContain("--model requires a value")
   })
 
+  // The equals form already rejected `--model=`, but the space form tokenizes
+  // `--model ""` to an empty string, which the caller then dropped as falsy —
+  // launching at the default model instead of reporting the empty value.
+  test("an explicitly empty flag value fails like a missing one", async () => {
+    for (const script of [
+      'actor run explore "d" "p" --model ""',
+      'actor spawn general "d" "p" --model=""',
+      'actor run explore "d" "p" --task ""',
+      'actor spawn general "d" "p" --command ""',
+    ]) {
+      const err = await Effect.runPromise(Effect.flip(parseActorScript(script)))
+      expect(err).toMatchObject({ kind: "flag", detail: expect.stringContaining("requires a value") })
+    }
+  })
+
   test("no flag, 3 args still parses (arity unchanged)", async () => {
     const out = await parse('actor run explore "d" "p"')
     expect(out).toEqual([{ operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p" } }])
