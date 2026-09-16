@@ -1504,10 +1504,12 @@ logged`, and the peer `success`/`failure` variants of
   explicitly empty flag value fails like a missing one", covering `--model ""`,
   `--model=""`, `--task ""` and `--command ""`. Reverting the guard to the
   `undefined`-only check fails that case and nothing else.
-- Propagation note: `dev/compat`'s DC-ACTOR-002 keeps an explicitly empty
-  `--variant ""` so its strict schema rejects it. Once this entry reaches that
-  branch the parser rejects the same input earlier, so DC-ACTOR-002's shell
-  clause and its empty-variant test move to the parse-time error.
+- Propagation note: propagated to `dev/compat` on 2026-09-16 through merge
+  `e3920adbbb91f44959a6110a48d6ca5cb1f5087d` with adaptation
+  `452123b7b4941ef0f605961fd9e8f8a23a079462`. That branch previously kept an
+  explicitly empty `--variant ""` for its strict schema; the shared parser now
+  rejects it at parse time, its shell test asserts that error, and DC-ACTOR-002
+  records the parse-time contract.
 - Retirement condition: upstream rejects empty values in both flag forms, or the
   flag mappings stop depending on truthiness so an empty value reaches schema
   validation with an equivalent error.
