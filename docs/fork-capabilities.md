@@ -817,6 +817,11 @@ not change their implementation. The preceding review is retained in the
   The explicit Linux zero-case inputs are still loaded by Bun and excluded only
   from the expected suite set, so a future registered case fails as unexpected
   until the allowlist is retired.
+  Each unit shard step carries a 12-minute budget, raised from upstream's 8 after
+  shard 1 measured 412-488 seconds across five 2026-09-15 pushes and twice had a
+  complete passing run cancelled. The budget bounds a hung shard; per-test hangs
+  stay capped by the suite's own 120-second timeout, so this raise weakens no
+  hang detection and changes no reporting requirement.
 - POLICY-01 Question lifecycle: registration, Asked publication and answer
   waiting share one resource lifetime. Abort, interruption, publication failure
   and instance disposal remove only a still-owned pending question and publish
