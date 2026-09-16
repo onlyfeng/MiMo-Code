@@ -1640,11 +1640,11 @@ files remain byte-identical to the accepted main correction.
   user. No-script argument recovery keeps an explicit variant from flat fields
   or beside an operation envelope, including malformed values, and leaves
   conflicting root and envelope copies in place so the strict schema rejects
-  the call instead of silently using the default. The shell parser likewise
-  keeps an explicitly empty `--variant ""` for strict rejection. Without a
-  variant, the spawn input, prompt input, tool metadata and model/variant
-  selection are unchanged
-  and no extra provider lookup runs. Tool
+  the call instead of silently using the default. An explicitly empty
+  `--variant ""` is rejected by the shared parser (FC-018) before the schema
+  sees it, so the shell mapping keeps the same truthiness spread as every other
+  flag. Without a variant, the spawn input, prompt input, tool metadata and
+  model/variant selection are unchanged and no extra provider lookup runs. Tool
   metadata adds `variant` only when set. `actor models` appends
   `[variants: …]` to models that define variants. DC-TUI-001 renders the
   persisted value in the subagent footer without a TUI change.

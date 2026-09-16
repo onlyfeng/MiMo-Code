@@ -204,17 +204,18 @@ describe("actor.shell.parse: --variant flag", () => {
     ])
   })
 
-  // `--variant ""` tokenizes to an empty string. Dropping it would launch at the
-  // default variant; keeping it lets the strict schema's min(1) reject the call.
-  test("an explicitly empty --variant is kept for strict rejection, not dropped", async () => {
-    expect(await parse('actor spawn general "d" "p" --variant ""')).toEqual([
-      { operation: { action: "spawn", subagent_type: "general", description: "d", prompt: "p", variant: "" } },
-    ])
-    expect(await parse('actor run explore "d" "p" --variant ""')).toEqual([
-      { operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p", variant: "" } },
-    ])
-    const err = await Effect.runPromise(Effect.flip(parseActorScript('actor spawn general "d" "p" --variant=""')))
-    expect(err).toMatchObject({ kind: "flag", detail: expect.stringContaining("--variant requires a value") })
+  // FC-018: the shared parser rejects an explicitly empty value in both flag forms,
+  // so `--variant ""` never reaches the mapping and cannot launch at the default
+  // variant. Before that landed, the space form was kept for the schema to reject.
+  test("an explicitly empty --variant fails at parse time", async () => {
+    for (const script of [
+      'actor spawn general "d" "p" --variant ""',
+      'actor run explore "d" "p" --variant ""',
+      'actor spawn general "d" "p" --variant=""',
+    ]) {
+      const err = await Effect.runPromise(Effect.flip(parseActorScript(script)))
+      expect(err).toMatchObject({ kind: "flag", detail: expect.stringContaining("--variant requires a value") })
+    }
   })
 
   test("--variant with no value fails with kind: flag", async () => {
