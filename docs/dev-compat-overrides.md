@@ -1643,17 +1643,24 @@ files remain byte-identical to the accepted main correction.
   the call instead of silently using the default. An explicitly empty
   `--variant ""` is rejected by the shared parser (FC-018) before the schema
   sees it, so the shell mapping keeps the same truthiness spread as every other
-  flag. Without a variant, the spawn input, prompt input, tool metadata and
+  flag. Without an explicit variant the tool adopts the agent's own configured
+  variant when the child's model is the agent's configured model, compared as
+  provider-aware resolved identities. That holds for the group member picked for
+  the caller's provider, and however the call names that model — the agent's own
+  group reference or the resolved member itself — while the prompt-side
+  comparison would treat it as a different model. A configured value the
+  resolved model does not define is dropped. With neither an explicit nor a
+  configured variant, the spawn input, prompt input, tool metadata and
   model/variant selection are unchanged and no extra provider lookup runs. Tool
   metadata adds `variant` only when set. `actor models` appends
   `[variants: …]` to models that define variants. DC-TUI-001 renders the
   persisted value in the subagent footer without a TUI change.
 - Boundaries: no parent-variant inheritance, no variant inside `model`, no
   workflow `agent()` or session-tool peer selector, and no resume override. The
-  agent fallback is unchanged, including its pre-existing group-reference gap:
-  actor model selection resolves a group provider-aware, while the prompt-side
-  comparison resolves the agent's group without provider context, so a member on
-  the caller's provider can miss the agent's configured variant.
+  prompt-side fallback is unchanged and still resolves the agent's group without
+  provider context for every other caller; the actor path no longer depends on
+  it, because it adopts the agent's configured variant itself after resolving
+  that group provider-aware.
 - Source surfaces: `packages/opencode/src/tool/actor.ts`,
   `packages/opencode/src/tool/actor.txt`,
   `packages/opencode/src/tool/actor.shell.txt`, and
@@ -1668,10 +1675,14 @@ files remain byte-identical to the accepted main correction.
 - Evidence: shell, recovery and strict-schema tests cover the entry points.
   Actor tool tests prove forwarding against an overridden model, rejection of
   unknown and disabled variants and of models without variants before any
-  spawn, and an unchanged spawn input when omitted. A real prompt-loop test
-  proves the persisted child variant and the request's reasoning effort, and the
-  drain-seed test proves a woken turn keeps the variant. Forwarding, validation,
-  schema and drain-seed assertions were each mutation-checked.
+  spawn, and an unchanged spawn input when omitted. A cross-provider group
+  fixture proves the agent's configured variant reaches the member picked for
+  the caller's provider, that an unsupported configured value is dropped rather
+  than failing the call, and that an explicit variant outranks it. A real
+  prompt-loop test proves the persisted child variant and the request's
+  reasoning effort, and the drain-seed test proves a woken turn keeps the
+  variant. Forwarding, validation, schema, drain-seed and agent-variant
+  assertions were each mutation-checked.
 - Exit condition: retire when shared `main` exposes an equivalent validated
   per-actor variant selector for model-created actors with the same precedence,
   pre-admission validation and actor lifetime. If this capability is propagated

@@ -968,21 +968,44 @@ export const ActorTool = Tool.define(
               modelID: msg.info.modelID,
               providerID: msg.info.providerID,
             })
+        // The agent's configured variant applies when the child ends up on the agent's own
+        // configured model. `createUserMessage` decides that by resolving the agent's model
+        // ref WITHOUT provider context, so a group member picked for the caller's provider
+        // looks like a different model there and silently loses the variant. Decide it here
+        // by comparing provider-aware resolved identities, which also holds when the call
+        // names that same model itself — as the agent's own group ref, or as a literal.
+        const agentModel =
+          op.variant || !next.variant
+            ? undefined
+            : next.modelRef
+              ? yield* provider
+                  .resolveModelRef(next.modelRef, msg.info.providerID)
+                  .pipe(Effect.map((m) => ({ modelID: m.id, providerID: m.providerID })))
+              : next.model
+        const inherited =
+          agentModel && agentModel.providerID === model.providerID && agentModel.modelID === model.modelID
+            ? next.variant
+            : undefined
         // Validate before admission so a wrong variant never starts a child at a
         // different cost or quality than the caller asked for. Own keys only: the
         // provider has already merged configured variants and removed disabled ones.
-        if (op.variant) {
-          const variants = Object.keys((resolved ?? (yield* provider.getModel(model.providerID, model.modelID))).variants ?? {})
-          if (!variants.includes(op.variant))
-            return yield* Effect.fail(
-              new RecoverableError(
-                variants.length > 0
-                  ? `Model "${model.providerID}/${model.modelID}" has no variant "${op.variant}". Valid variants: ${variants.join(", ")}. Pass one of these, or omit variant to use the default.`
-                  : `Model "${model.providerID}/${model.modelID}" defines no variants, so variant "${op.variant}" cannot apply. Omit variant, or choose a model that lists variants in \`actor models\`.`,
-              ),
-            )
-        }
-        const selection = op.variant ? { model, variant: op.variant } : { model }
+        const variants =
+          op.variant || inherited
+            ? Object.keys((resolved ?? (yield* provider.getModel(model.providerID, model.modelID))).variants ?? {})
+            : []
+        if (op.variant && !variants.includes(op.variant))
+          return yield* Effect.fail(
+            new RecoverableError(
+              variants.length > 0
+                ? `Model "${model.providerID}/${model.modelID}" has no variant "${op.variant}". Valid variants: ${variants.join(", ")}. Pass one of these, or omit variant to use the default.`
+                : `Model "${model.providerID}/${model.modelID}" defines no variants, so variant "${op.variant}" cannot apply. Omit variant, or choose a model that lists variants in \`actor models\`.`,
+            ),
+          )
+        // An unsupported configured variant is dropped rather than failing the call: the
+        // agent's config is not this call's request, and the prompt-side fallback ignores
+        // an undefined variant the same way.
+        const variant = op.variant ?? (inherited && variants.includes(inherited) ? inherited : undefined)
+        const selection = variant ? { model, variant } : { model }
 
         const forkContext: ForkContext | undefined = yield* (op.context === "full"
           ? Effect.gen(function* () {

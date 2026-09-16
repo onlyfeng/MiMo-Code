@@ -1527,6 +1527,157 @@ describe("Actor tool variant selection", () => {
   )
 })
 
+// `squad` spans two providers: its default lives on `alt`, and `test/reasoner` is the
+// member on the provider the parent session uses. That is the shape where the
+// prompt-side fallback resolves the group without provider context and drops the
+// agent's variant.
+const agentVariantModels = {
+  ...variantModels,
+  provider: {
+    ...variantModels.provider,
+    alt: {
+      name: "Alt",
+      id: "alt",
+      env: [],
+      npm: "@ai-sdk/openai-compatible",
+      options: { apiKey: "alt-key", baseURL: "http://localhost:1/v1" },
+      models: {
+        other: {
+          id: "other",
+          name: "Other",
+          attachment: false,
+          reasoning: false,
+          temperature: false,
+          tool_call: true,
+          release_date: "2025-01-01",
+          limit: { context: 100000, output: 10000 },
+          cost: { input: 0, output: 0 },
+          options: {},
+          variants: { high: { reasoningEffort: "high" } },
+        },
+      },
+    },
+  },
+  model_groups: { squad: { default: "alt/other", models: ["test/reasoner", "alt/other"] } },
+  agent: {
+    "group-probe": { description: "Group probe", mode: "subagent", model: "squad", variant: "high" },
+    "plain-probe": { description: "Plain probe", mode: "subagent", model: "test/test-model", variant: "high" },
+  },
+}
+
+describe("Actor tool agent variant inheritance", () => {
+  const spawn = (subagent_type: string, selection: { model?: string; variant?: string } = {}) =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* ActorTool).init()
+      return yield* def.execute(
+        {
+          operation: {
+            action: "run",
+            description: "probe",
+            prompt: "probe the change",
+            subagent_type,
+            ...selection,
+          },
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: {},
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+    })
+
+  it.live("adopts the agent's variant for the group member on the caller's provider", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          const result = yield* spawn("group-probe")
+
+          expect(spawned.map((input) => [input.model, input.variant])).toEqual([
+            [{ providerID: ProviderID.make("test"), modelID: ModelID.make("reasoner") }, "high"],
+          ])
+          expect(result.metadata.variant).toBe("high")
+        }),
+      { config: agentVariantModels },
+    ),
+  )
+
+  it.live("drops a configured variant the resolved model does not define", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          const result = yield* spawn("plain-probe")
+
+          expect(spawned.map((input) => [input.model, Object.hasOwn(input, "variant")])).toEqual([
+            [{ providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") }, false],
+          ])
+          expect(Object.hasOwn(result.metadata, "variant")).toBe(false)
+        }),
+      { config: agentVariantModels },
+    ),
+  )
+
+  it.live("an explicit variant outranks the agent's configured one", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          yield* spawn("group-probe", { variant: "low" })
+
+          expect(spawned.map((input) => input.variant)).toEqual(["low"])
+        }),
+      { config: agentVariantModels },
+    ),
+  )
+
+  // Naming the agent's own model — as its group ref or as the resolved member — is still
+  // "the agent's model", so the configured variant survives an explicit `model`.
+  it.live("adopts it when the call names the agent's own model itself", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          yield* spawn("group-probe", { model: "squad" })
+          yield* spawn("group-probe", { model: "test/reasoner" })
+
+          expect(spawned.map((input) => [input.model, input.variant])).toEqual([
+            [{ providerID: ProviderID.make("test"), modelID: ModelID.make("reasoner") }, "high"],
+            [{ providerID: ProviderID.make("test"), modelID: ModelID.make("reasoner") }, "high"],
+          ])
+        }),
+      { config: agentVariantModels },
+    ),
+  )
+
+  it.live("leaves the variant behind when the call picks a different model", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const spawned: SpawnInput[] = []
+          yield* installMockSpawn((input) => spawned.push(input))
+          yield* spawn("group-probe", { model: "test/test-model" })
+
+          expect(spawned.map((input) => [input.model, Object.hasOwn(input, "variant")])).toEqual([
+            [{ providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") }, false],
+          ])
+        }),
+      { config: agentVariantModels },
+    ),
+  )
+})
+
 describe("Actor tool task_id degradation", () => {
   it.live("malformed task_id degrades to ad-hoc with a notice", () =>
     provideTmpdirInstance(() =>
