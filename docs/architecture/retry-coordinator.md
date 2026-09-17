@@ -8,7 +8,7 @@ Retry 必须区分两个问题：错误是否可能恢复，以及当前 scope �
 
 - 用户取消、鉴权、额度、上下文溢出和确定性请求错误立即停止。
 - 网络连接失败可以长时间等待网络恢复，适合 long-running harness。
-- 已建立的 stream 使用有限预算，避免重复推理和重复计费。
+- 普通 stream 错误默认使用有限预算；network、server 和 rateLimit 分别使用自己的预算。
 - 已执行 tool side effect 后禁止自动重放整个 model step。
 - 所有 retry scope 使用同一个分类器、退避算法、Retry-After 解析器和事件模型。
 - 次数、deadline、退避和 persistent network 模式可以配置，provider 可以覆盖全局默认值。
@@ -17,25 +17,35 @@ Retry 必须区分两个问题：错误是否可能恢复，以及当前 scope �
 
 ## 配置
 
-全局配置提供默认预算，provider.<id>.retry 对同名字段做覆盖。顶层 jitterRatio 是各预算的默认值，同层的预算级 jitterRatio 优先，provider 层再覆盖 global 层。maxRetries 是初始 attempt 之外的重试次数，schema 硬上限为 100；deadlineMs 必须是正整数，且不能与 noDeadline 同时出现。需要取消 wall-clock deadline 时必须显式设置 noDeadline: true；该选项不会取消 bounded budget 的 maxRetries 限制。network 从 persistent 切换为 bounded 且省略 maxRetries 时使用 5 次，不能退化为无限重试。 persistent 模式忽略 maxRetries，maxElapsedMs=0 表示无 deadline。
+全局配置提供默认预算，provider.<id>.retry 对同名字段做覆盖。顶层 jitterRatio 是各预算的默认值，同层的预算级 jitterRatio 优先，provider 层再覆盖 global 层。maxRetries 是初始 attempt 之外的重试次数，schema 硬上限为 100；deadlineMs 必须是正整数，且不能与 noDeadline: true 同时出现。需要取消 wall-clock deadline 时必须显式设置 noDeadline: true；该选项不会取消 bounded budget 的 maxRetries 限制。network 从 persistent 切换为 bounded 且省略 maxRetries 时使用 5 次，不能退化为无限重试。persistent 模式忽略 maxRetries，maxElapsedMs=0 表示无 deadline。
 
-配置示例（server/rateLimit 的 persistent 为显式开启，不是默认值）：
+用户级配置通常放在 `~/.config/mimocode/mimocode.jsonc`；设置 `XDG_CONFIG_HOME` 时使用其下的 `mimocode/mimocode.jsonc`，设置 `MIMOCODE_HOME` 时使用 `$MIMOCODE_HOME/config/mimocode.jsonc`。项目配置仍可覆盖用户配置。以下是普通对话等待服务端或限流恢复的最小配置，合并到既有文件即可；这是显式选择，不改变程序默认值：
 
-    {
-      "retry": {
-        "request": { "maxRetries": 4, "deadlineMs": 30000, "initialDelayMs": 200 },
-        "stream": { "maxRetries": 5, "deadlineMs": 600000, "initialDelayMs": 2000 },
-        "maxCandidate": { "maxRetries": 3, "deadlineMs": 180000, "initialDelayMs": 500 },
-        "maxJudge": { "maxRetries": 3, "deadlineMs": 180000, "initialDelayMs": 500 },
-        "network": { "mode": "persistent", "noDeadline": true, "initialDelayMs": 5000, "maxDelayMs": 60000, "jitterRatio": 0 },
-        "server": { "mode": "persistent", "noDeadline": true, "initialDelayMs": 2000, "maxDelayMs": 30000 },
-        "rateLimit": { "mode": "persistent", "noDeadline": true, "initialDelayMs": 2000, "maxDelayMs": 300000 },
-        "unknown": { "maxRetries": 8, "deadlineMs": 900000 },
-        "jitterRatio": 0.1
-      }
-    }
+```json
+{
+  "retry": {
+    "server": { "mode": "persistent", "noDeadline": true },
+    "rateLimit": { "mode": "persistent", "noDeadline": true }
+  }
+}
+```
 
-Persistent 可恢复类 retry 仍受 AbortSignal、进程退出和 provider chunkTimeout 约束。默认 provider chunkTimeout 为 8 分钟；provider 可以用 chunkTimeout 覆盖该单次 stream idle timeout。
+network 的 live-step 默认已为 persistent 且无 deadline。上例保留 request、stream、unknown、maxCandidate 和 maxJudge 的原预算；仅某个 provider 需要长等待时，将相同的 `retry` 对象放在该 provider 的配置内。仅设置 `mode: "persistent"` 会取消次数上限，但 server/rateLimit 仍继承默认 15 分钟 deadline。
+
+若希望将 server/rateLimit 的重试窗口限制为一小时，使用下面的替代配置，并移除同一预算的 `noDeadline: true`：
+
+```json
+{
+  "retry": {
+    "server": { "mode": "persistent", "deadlineMs": 3600000 },
+    "rateLimit": { "mode": "persistent", "deadlineMs": 3600000 }
+  }
+}
+```
+
+request 应保留有限预算：普通对话的内层 request 重试耗尽（默认 4 次、30 秒）后，会将原错误交给 processor 外层 live-step，后者按 network/server/rateLimit 等类别继续等待；30 秒不是整个会话的总停止线。MaxMode candidate/judge 也共用这个内层 request，再在外层应用各自预算（默认 3 次、3 分钟）。将 request 设为无限重试会使外层长期收不到失败，从而无法执行 candidate/judge 的停止策略。`deadlineMs` 从首次失败后的重试调度开始计时，仅限制后续重试，不会强制中断正在进行的单次请求。
+
+Persistent 仍保留用户取消、进程退出及工具副作用边界；鉴权、额度和其他终态错误不会因配置而变得可重试。provider 的 request/header/chunk timeout 仍约束单次请求，不应为长等待而一并关闭；默认 chunkTimeout 为 8 分钟，可通过 `provider.<id>.options.chunkTimeout` 调整。main processor 还有精确的 GPT overload 特例：错误 body 同时匹配 `type: "error"`、`error.type: "service_unavailable_error"` 和 `error.code: "server_is_overloaded"` 时，silent retry 最多 3 次，persistent 配置不会取消此上限；普通 HTTP 503 不等同于该特例。
 
 ## 退避
 
