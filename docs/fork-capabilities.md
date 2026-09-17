@@ -731,6 +731,31 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-09-17 per-run test roots: `test/preload.ts` roots the process-wide data
+  directory (`mimocode-test-data-<pid>`, holding the XDG directories and HOME)
+  under the resolved `os.tmpdir()` again, as upstream does. Its home-directory
+  placement predated `62fd366c`, after which Instance accepts temp-tree project
+  directories such as worktrees under `Global.Path.data`. The temp directory is
+  resolved because macOS's sits behind the `/var` symlink and runtime events
+  report canonical paths: unresolved, three `test/workflow/runtime-worktree.test.ts`
+  cases failed on macOS, which Linux CI's `/tmp` cannot reproduce. Default fixture
+  projects deliberately stay outside the temp tree: Bash exempts temp-only
+  deletions, so a fixture project there would let the "target outside temp"
+  deletion cases pass through project containment instead. `outsideGit`
+  fixtures now sit under a per-process `/tmp` root that the preload passes to
+  `test/fixture/fixture.ts`. Every root is `<prefix><pid>`. Preload startup
+  reclaims roots whose process no longer exists and never touches a live or
+  EPERM PID, which covers killed and timed-out runs. afterAll removes the roots
+  synchronously before any timer await; only a root that fails there (Windows
+  EBUSY) takes the existing GC-and-retry path, followed by a last synchronous
+  pass. Under Bun 1.3.14 `bun test` runs no `exit` listeners, stops awaiting
+  afterAll at its first timer when a test file fails to load, and detached
+  Config dependency installs recreate removed paths whenever the hook yields.
+  Before: a concurrent-writer reproduction leaked the data root in 3 of 3 runs,
+  and each probed load-failure run left its root. After: 0 of 6 and 0 of 3. The
+  three roots of a SIGKILLed run were reclaimed by the next run while a
+  concurrently running process kept its own.
+
 - 2026-09-15 runtime acceptance infrastructure: the shared test workflow adds
   a Windows job for compat PR/push and explicit manual dispatch. Bun follows the
   package declaration and dependencies use `bun ci`, including the shared
@@ -898,6 +923,7 @@ logged`, and the peer `success`/`failure` variants of
   `packages/opencode/src/workflow/runtime.ts`,
   `packages/opencode/src/workflow/sandbox.ts`,
   `packages/opencode/bunfig.toml`, `packages/opencode/test/preload.ts`,
+  `packages/opencode/test/fixture/fixture.ts`,
   `packages/opencode/test/workflow/runtime-worktree.test.ts`,
   `packages/enterprise/bunfig.toml`, `packages/enterprise/test/preload.ts`,
   `packages/enterprise/src/core/storage.ts`,

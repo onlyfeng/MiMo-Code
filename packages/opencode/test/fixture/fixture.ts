@@ -60,7 +60,11 @@ export async function prepareConfigDependencies(dir: string) {
   ])
 }
 
+// The preload supplies a per-process root under the same parent so a killed
+// run's outsideGit fixtures can be reclaimed.
 function outsideGitTmpRoot() {
+  const root = process.env["MIMOCODE_TEST_OUTSIDE_GIT_ROOT"]
+  if (root) return root
   if (process.platform === "win32") return os.tmpdir()
   return "/tmp"
 }
