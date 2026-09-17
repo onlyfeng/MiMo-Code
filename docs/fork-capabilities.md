@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-15
-- Upstream: `26aa00fc7e243a90586f5895ddcad2b7ce76b935`
-- Prior reviewed upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
-- Main behavior (runtime/tests): `0b8c5d634077f19c2d8c03179f2c869a01a18cec`
-- Bundled guidance content: `0b8c5d634077f19c2d8c03179f2c869a01a18cec`
-- Prior fork `main` tip: `2bbd3c0b20f2fb9c005c593585bd320c0e0a91d8`
+- Last reviewed: 2026-09-17
+- Upstream: `4cb859dd7c962b13eee5f34146350f520a380217`
+- Prior reviewed upstream: `26aa00fc7e243a90586f5895ddcad2b7ce76b935`
+- Main behavior (runtime/tests): `5a4c29189b5f52de5ac91a2263dc4bfd068cdeb5`
+- Bundled guidance content: `9c05eacb2817b0e100fb4b788b8085af6ba2aef5`
+- Prior fork `main` tip: `89ee712592a371742740e705cc72f49fdd1bb9ea`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: exact catalog tool names at `26aa00fc`; the [single-capability review](upstream-sync-2026-09-15-26aa00fc.md) records lookup, GitLab and nested MCP dispatch, retained parameter normalization, authoritative checkpoint guidance, and validation. Explicit advertised adapters and existing request/permission boundaries remain intact.
+Latest reviewed synchronization: [2026-09-17 full sync](upstream-sync-2026-09-17.md), eleven capabilities through `4cb859dd`. Retain FC-007 opt-in notices and FC-013 bounded scope budgets, adopt image routing, stable reminders and atomic empty-residue recovery.
+
+Previous synchronization: exact catalog tool names at `26aa00fc`; the [single-capability review](upstream-sync-2026-09-15-26aa00fc.md) records lookup, GitLab and nested MCP dispatch, retained parameter normalization, authoritative checkpoint guidance, and validation. Explicit advertised adapters and existing request/permission boundaries remain intact.
 
 Previous synchronization: gateway error aliases at `b4cc11cd`, accepted on main through PR #128; propagation and exact-SHA validation are recorded in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
 
@@ -70,6 +72,8 @@ not change their implementation. The preceding review is retained in the
 | FC-018 | actor shell flag values (`extractNamedFlags` and the verb mappings)                                       | Fork hardening of shared parsing                                 | Reject an explicitly empty value in both flag forms                                      |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-09-17 synchronization: Empty-residue recovery deletes parent-scoped shells and binds any task within the existing immediate admission transaction. Ownership handoff precedes postcommit publication; failed/busy/stale/cancelled admission cannot clean up. Useful assistant output retains settlement and continuation. Recovery still selects the latest same-actor candidate; completed abandoned errors are not revived. The parent user is never fabricated or rewritten except the existing authorized task binding.
 
 - 2026-09-10 title authority: inherit transactional title revisions and protected
   manual titles across imports, replay and HTTP conflicts. First genuine input
@@ -627,6 +631,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-007 — protected roots, fixed instance cwd, inert SDK event, deletion boundaries, and optional context
 
+- 2026-09-17 synchronization: Upstream removed automatic isolation and its notice. Retain this owner's explicit opt-in post-success notice, config and mutation metadata; reject the intermediate hard write gate. Adopt removal of the unused conflict-detection auto-create route and regenerate its SDK/OpenAPI removal. Ordinary explicit worktree operations remain. The notice is independent of auto-creation.
+
 - Status: active
 - Canonical owner: fork `main` instance and Bash path-safety boundary
 - Observable contract: session cwd is the fixed `Instance.directory`;
@@ -1106,6 +1112,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
 
+- 2026-09-17 synchronization: Compose, recall and loop-streak reminders are persisted with stable IDs. Hydration restores Compose protocol priority. User image attachments use a synthetic provenance envelope rather than a fabricated Read result; its tagged envelope is placed before genuine user content after reload without changing IDs. Responses tool images remain tied to their tool call, using the actual adapter provider and shared image limits.
+
 - 2026-09-10 title isolation: automatic titles use persisted genuine user text,
   configured lite then the exact source model, and an isolated StructuredOutput
   request. Attachment-only input keeps a filename fallback; image bytes never
@@ -1324,6 +1332,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-013 — retry budget resolution and MaxMode final-step enforcement
 
+- 2026-09-17 synchronization: Retain bounded server/rate-limit defaults and scope-first request/candidate/judge budgets against upstream persistent defaults. Adopt expanded transport classification and processor-owned visible retry status. Request retries publish diagnostics only for durable main requests; ensemble calls suppress that diagnostic stream. Jitter precedence, bounded network fallback, immutable instructions, side-effect replay guards and MaxMode final-step enforcement remain.
+
 - Status: active
 - Canonical owner: fork `main` session run loop
 - Observable contract: MaxMode orchestration may run before the configured
@@ -1342,7 +1352,7 @@ logged`, and the peer `success`/`failure` variants of
   identity. `docs/architecture/retry-coordinator.md` and retry tests describe
   the same precedence. This previously under-specified delta is recorded by the
   2026-09-15 code audit; no implementation changes are made by that audit.
-- Upstream relationship: adopts shared bounded retry while retaining fork
+- Upstream relationship: adapts upstream retry while retaining bounded defaults and fork
   budget resolution, final-step enforcement and subagent status isolation.
 - Watch surfaces: `packages/opencode/src/session/max-mode.ts`,
   `packages/opencode/src/session/prompt.ts`,
@@ -1567,6 +1577,8 @@ logged`, and the peer `success`/`failure` variants of
   regressions.
 
 ## FC-017 — faithful and bounded history previews
+
+- 2026-09-17 synchronization: Adopt shared tool-result previews and resumable migration version 6, including legacy chunk deduplication and Node SQLite query planning. Projection/media retain the registered SQL NUL, field/list budget and attachment-locator rules. This index preview is separate from raw history retrieval.
 
 - Status: active; explicit owner added by the 2026-09-15 code audit for already accepted fixes.
 - Canonical owner: fork `main` history projection; inherited unchanged by `dev/compat`.

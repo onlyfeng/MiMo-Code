@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-15
-- Upstream: `26aa00fc7e243a90586f5895ddcad2b7ce76b935`
-- Prior reviewed upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`
-- Main behavior (runtime/tests): `0b8c5d634077f19c2d8c03179f2c869a01a18cec`
-- Bundled guidance content: `0b8c5d634077f19c2d8c03179f2c869a01a18cec`
-- Prior fork `main` tip: `2bbd3c0b20f2fb9c005c593585bd320c0e0a91d8`
+- Last reviewed: 2026-09-17
+- Upstream: `4cb859dd7c962b13eee5f34146350f520a380217`
+- Prior reviewed upstream: `26aa00fc7e243a90586f5895ddcad2b7ce76b935`
+- Main behavior (runtime/tests): `5a4c29189b5f52de5ac91a2263dc4bfd068cdeb5`
+- Bundled guidance content: `9c05eacb2817b0e100fb4b788b8085af6ba2aef5`
+- Prior fork `main` tip: `89ee712592a371742740e705cc72f49fdd1bb9ea`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,7 +29,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: exact catalog tool names at `26aa00fc`; the [single-capability review](upstream-sync-2026-09-15-26aa00fc.md) records lookup, GitLab and nested MCP dispatch, retained parameter normalization, authoritative checkpoint guidance, and validation. Explicit advertised adapters and existing request/permission boundaries remain intact.
+Latest reviewed synchronization: [2026-09-17 full sync](upstream-sync-2026-09-17.md), eleven capabilities through `4cb859dd`. Retain FC-007 opt-in notices and FC-013 bounded scope budgets, adopt image routing, stable reminders and atomic empty-residue recovery.
+
+Previous synchronization: exact catalog tool names at `26aa00fc`; the [single-capability review](upstream-sync-2026-09-15-26aa00fc.md) records lookup, GitLab and nested MCP dispatch, retained parameter normalization, authoritative checkpoint guidance, and validation. Explicit advertised adapters and existing request/permission boundaries remain intact.
 
 Previous synchronization: gateway error aliases at `b4cc11cd`, accepted on main through PR #128; propagation and exact-SHA validation are recorded in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
 

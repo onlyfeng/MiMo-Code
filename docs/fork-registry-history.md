@@ -3277,3 +3277,7 @@ with package typecheck passing. New final-tip CI is required on both branches.
 - C01 adopts exact catalog lookup across ordinary repair, GitLab execution and nested MCP dispatch. Parameter normalization and raw exec wrapping remain. Fork checkpoint instructions retain the generated runtime contract; FD-006 keeps its request-owned pool, explicit adapters and control authority. No owner retires.
 - Local main validation: 118 tool tests and 28 request/checkpoint/prefix tests pass; package typecheck and repository lint pass (4509 warnings, zero errors).
 - Complete reconciliation, environment and compat evidence: [sync record](upstream-sync-2026-09-15-26aa00fc.md). This documentation update does not itself advance runtime behavior. Final tip CI is verified after publication.
+
+## 2026-09-17 full synchronization
+
+Selected upstream `4cb859dd7c962b13eee5f34146350f520a380217`, starting main `89ee712592a371742740e705cc72f49fdd1bb9ea`, runtime/guidance `9c05eacb2817b0e100fb4b788b8085af6ba2aef5`, final test snapshot `5a4c29189b5f52de5ac91a2263dc4bfd068cdeb5`. The [eleven-capability record](upstream-sync-2026-09-17.md) covers every incoming capability, retained FD/FC boundaries, generated APIs and local validation. Final published SHA CI and remote ancestry are separate post-publication evidence.
