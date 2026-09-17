@@ -33,7 +33,7 @@ Dispositions below were checked against the merged main source and the compat in
 ## Resolution and local evidence
 
 Main runtime/guidance source: `9c05eacb2817b0e100fb4b788b8085af6ba2aef5`;
-final main test snapshot: `5a4c29189b5f52de5ac91a2263dc4bfd068cdeb5`. C08 retains the notice but removes the
+final main test snapshot: `4cedfa97e7fa6a6f19c3cbf7b0a2e58201df57e7`. C08 retains the notice but removes the
 unused auto-create API. C06 retains bounded defaults as well as request priority.
 No other FD/FC is retired or consolidated. The eight DC owners remain compat-owned.
 
@@ -52,6 +52,7 @@ Main evidence:
 - Recovery-commit, resume-empty, compaction-projection and retry-scope final group: 41 pass. Deletion-trigger failure proves task/message transaction rollback and no ownership callback.
 - Real HTTP actor recovery: 13 pass after adopting empty-shell removal assertions, retaining concurrent admission, unchanged parent users, frozen systems and task/actor identity checks.
 - Bash notice metadata plus deletion permission group: 64 pass. The notice file alone has an ActorControl circular-import initialization failure, reproduced on the untouched starting compat checkout; the actual grouped execution is green. This is a process-arrangement limit, not a new production fix or a waived CI failure.
+- Complete Actor spawn/resume suite: 75 pass after updating empty-shell assertions; user identity, frozen context, admission and cancellation assertions remain. Complete config suite: 91 pass.
 - Core package `bun typecheck` and root `bun lint` pass (lint retains existing warnings).
 - SDK and OpenAPI regenerated from the resolved source. Main exposes 139 operations; compat retains its extra checkpoint-coverage operation (140). Neither exposes the removed auto-create endpoint. All remaining registered API differences stay intact.
 
