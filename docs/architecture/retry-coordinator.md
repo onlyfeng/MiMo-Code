@@ -1,6 +1,6 @@
-# Retry Coordinator Design
+# Retry Coordinator
 
-本文是 MiMoCode provider retry 的单一设计来源。实现位于 packages/opencode/src/session/retry.ts，配置 schema 位于 packages/opencode/src/config/config.ts 与 packages/opencode/src/config/provider.ts。
+Retry 必须区分两个问题：错误是否可能恢复，以及当前 scope 还允许多少次尝试。transport retry 不做语义修复，只在预算内重建同一次请求。
 
 ## 目标
 
@@ -13,33 +13,13 @@ Retry 必须区分两个问题：错误是否可能恢复，以及当前 scope �
 - 所有 retry scope 使用同一个分类器、退避算法、Retry-After 解析器和事件模型。
 - 次数、deadline、退避和 persistent network 模式可以配置，provider 可以覆盖全局默认值。
 
-## 分层模型
-
-原始 provider / transport error -> cause summary -> RetryDecision(kind, phase, scope) -> budget -> exponential backoff -> RetryAttempt event。
-
-| Scope         | 语义                                    | 默认策略                        |
-| ------------- | --------------------------------------- | ------------------------------- |
-| request       | 尚未产生 provider output 的请求建立失败 | 4 次，200ms 起步，30s deadline  |
-| live-step     | 已建立 stream、但未完成的普通 turn      | 按错误 kind 选择预算            |
-| max-candidate | max-mode 内存 candidate                 | 3 次，500ms 起步，3min deadline |
-| max-judge     | max-mode 内存 judge                     | 3 次，500ms 起步，3min deadline |
-
-| Kind       | 默认策略                                                                      |
-| ---------- | ----------------------------------------------------------------------------- |
-| network    | live stream persistent，5s 起步，最大间隔 60s，无 jitter；request 阶段使用 request budget |
-| stream     | 5 次，2s 起步，10min deadline                                                 |
-| server     | 8 次，2s 起步，15min deadline                                                 |
-| rate_limit | 5 次，优先 Retry-After，最大 delay 5min                                       |
-| unknown    | 8 次，2s 起步，15min deadline                                                 |
-| terminal   | 0 次                                                                          |
-
-Persistent network retry 只适用于 transport connection failure，不适用于 quota、auth、context overflow 或已经跨过 tool side-effect boundary 的 live step。每次等待只更新同一个 retry 状态，不能向 transcript 无限追加 Reconnecting 文本。
+请求、candidate 和 judge 优先使用对应 scope 的预算；其余按错误类型选择。server/rateLimit 默认仍有限，网络 live-step 默认 persistent。顶层 jitter 与 bounded network 默认次数保持 FC-013。
 
 ## 配置
 
-全局配置提供默认预算，provider.<id>.retry 对同名字段做覆盖。顶层 jitterRatio 是各预算的默认值，同层的预算级 jitterRatio 优先，provider 层再覆盖 global 层。maxRetries 是初始 attempt 之外的重试次数，schema 硬上限为 100；deadlineMs 必须是正整数，且不能与 noDeadline 同时出现。需要取消 wall-clock deadline 时必须显式设置 noDeadline: true；该选项不会取消 bounded budget 的 maxRetries 限制。network 从 persistent 切换为 bounded 且省略 maxRetries 时使用 5 次，不能退化为无限重试。
+全局配置提供默认预算，provider.<id>.retry 对同名字段做覆盖。顶层 jitterRatio 是各预算的默认值，同层的预算级 jitterRatio 优先，provider 层再覆盖 global 层。maxRetries 是初始 attempt 之外的重试次数，schema 硬上限为 100；deadlineMs 必须是正整数，且不能与 noDeadline 同时出现。需要取消 wall-clock deadline 时必须显式设置 noDeadline: true；该选项不会取消 bounded budget 的 maxRetries 限制。network 从 persistent 切换为 bounded 且省略 maxRetries 时使用 5 次，不能退化为无限重试。 persistent 模式忽略 maxRetries，maxElapsedMs=0 表示无 deadline。
 
-配置示例：
+配置示例（server/rateLimit 的 persistent 为显式开启，不是默认值）：
 
     {
       "retry": {
@@ -48,14 +28,14 @@ Persistent network retry 只适用于 transport connection failure，不适用�
         "maxCandidate": { "maxRetries": 3, "deadlineMs": 180000, "initialDelayMs": 500 },
         "maxJudge": { "maxRetries": 3, "deadlineMs": 180000, "initialDelayMs": 500 },
         "network": { "mode": "persistent", "noDeadline": true, "initialDelayMs": 5000, "maxDelayMs": 60000, "jitterRatio": 0 },
-        "server": { "maxRetries": 8, "deadlineMs": 900000 },
-        "rateLimit": { "maxRetries": 5, "maxDelayMs": 300000 },
+        "server": { "mode": "persistent", "noDeadline": true, "initialDelayMs": 2000, "maxDelayMs": 30000 },
+        "rateLimit": { "mode": "persistent", "noDeadline": true, "initialDelayMs": 2000, "maxDelayMs": 300000 },
         "unknown": { "maxRetries": 8, "deadlineMs": 900000 },
         "jitterRatio": 0.1
       }
     }
 
-Persistent network retry 仍受 AbortSignal、进程退出和 provider chunkTimeout 约束。默认 provider chunkTimeout 为 8 分钟；provider 可以用 chunkTimeout 覆盖该单次 stream idle timeout。
+Persistent 可恢复类 retry 仍受 AbortSignal、进程退出和 provider chunkTimeout 约束。默认 provider chunkTimeout 为 8 分钟；provider 可以用 chunkTimeout 覆盖该单次 stream idle timeout。
 
 ## 退避
 
@@ -67,7 +47,20 @@ Persistent network retry 仍受 AbortSignal、进程退出和 provider chunkTime
 
 ## 可观测性
 
-每次实际 retry 发布 session.retry.attempt，包含 phase、scope、kind、attempt、phaseAttempt、maxAttempts、nextDelayMs 和 reason。attempt 是当前 session 跨 request/stream 的连续序号，phaseAttempt 是当前 phase 内的局部序号；attempt counter 独立于 busy/notice 状态，只在 session 回到 idle 时清零。maxAttempts 为 0 表示 persistent retry。terminal UI notice 使用独立的 session status notice，不伪装成 retry attempt。Persistent network retry 不重复创建 transcript message；UI 只更新当前状态。成功、终止、取消都必须清理 retry 状态并回到 idle。
+每次实际 retry 可发布 `Session.Event.RetryAttempt`，包含 phase、scope、kind、attempt、phaseAttempt、maxAttempts、nextDelayMs 和 reason。
+
+- **processor stream 阶段**（`isMain`）：`status.setRetry` 同时维护 session 级 `retryAttempts` 计数并写入 `session.status{type:"retry"}` 的 `attempt`——该计数跨 request/stream 在 **processor 可见 status** 上连续，session 回到 idle 时清零。
+- **llm request 阶段**：仅 durable main 且非 quietRetryDiagnostics 时发 `RetryAttempt` 作诊断，**不**写 session.status；其 `attempt`/`phaseAttempt` 是 **phase 局部序号**（每个 processor 外层周期从 1 起），不是 session 全局连续序号。
+
+maxAttempts 为 0 表示 persistent retry。terminal UI notice 使用独立的 session status notice，不伪装成 retry attempt。Persistent network retry 不重复创建 transcript message；UI 只更新当前状态。成功、终止、取消都必须清理 retry 状态并回到 idle。
+
+`session.status{type:"retry"}` 是 **session 维度** 的展示状态，不是 per-model-call 计数。
+
+**发布归属**：`session.status{retry}` 只由 **processor stream 阶段**（`isMain`）通过 `status.setRetry` 发布，对应用户可见等待。`llm.ts` **request 阶段** 退避只发布 `Session.Event.RetryAttempt`（诊断），**不再**写 session.status——否则每个 processor 外层周期会重置 200ms×4 的 request 阶梯，在上游不可达时实测约 32s 内叠满 ~20 条 UI「正在重新连接」帧（`Cannot connect to API` 时 stream 侧按 ~2s 起步的 server/stream 阶梯，多轮 `4 request + 1 stream` 打包），观感上完全不像指数退避。
+
+**request 阶段对 TUI 更安静**：在 request 微退避期间没有 `session.status{retry}`，界面保持 busy，直到 processor stream 重试才出现重连/倒计时。这是 ownership 契约的刻意取舍（用户可见等待 = stream 阶梯），不是回归。
+
+max-mode propose-only ensemble（candidates/judge）共用 sessionID 并行跑 `llm.stream`：request 阶段已不写 session.status；ensemble 传 `quietRetryDiagnostics: true` 以抑制 N 路 request `RetryAttempt` 总线噪音。**不要**为此设置 `ephemeral`（还会跳过 plugin trigger、session-affinity 头、OTel functionId、system 组装）。ensemble 内部退避走 max-candidate / max-judge budget + `onRetry`。
 
 ## 兼容性
 

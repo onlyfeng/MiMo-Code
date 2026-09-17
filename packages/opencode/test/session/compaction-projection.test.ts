@@ -183,7 +183,10 @@ describe("compaction projection", () => {
     const budget = projectionTailBudget({ cfg, model, fixed })
     const tail = await Effect.runPromise(
       buildTail({
-        messages: [user("msg_window_user", "x".repeat(8_000)), assistant("msg_window_assistant", "msg_window_user", [])],
+        messages: [
+          user("msg_window_user", "x".repeat(8_000)),
+          assistant("msg_window_assistant", "msg_window_user", []),
+        ],
         model,
         budget,
       }),
@@ -235,4 +238,39 @@ describe("terminal compaction finish", () => {
       expect(isTerminalCompactionFinish(finish)).toBe(false)
     }
   })
+})
+
+test("tail budgets native Responses images using the parent adapter", async () => {
+  const model = ProviderTest.model()
+  model.capabilities.input.image = true
+  const part = tool("msg_image", "screenshot", {}, "Screenshot")
+  const messages = [
+    user("msg_user", "inspect"),
+    assistant("msg_image", "msg_user", [
+      {
+        ...part,
+        state: {
+          ...part.state,
+          attachments: [
+            {
+              id: PartID.ascending(),
+              sessionID,
+              messageID: MessageID.make("msg_image"),
+              type: "file",
+              mime: "image/png",
+              url: "data:image/png;base64,AQID",
+            },
+          ],
+        },
+      },
+    ]),
+  ]
+  const native = await MessageV2.toModelMessages(messages, model, { languageProvider: "openai.responses" })
+  const fallback = await MessageV2.toModelMessages(messages, model)
+  const budget = Token.estimate(JSON.stringify(native))
+  expect(Token.estimate(JSON.stringify(fallback))).toBeGreaterThan(budget)
+  expect(await Effect.runPromise(buildTail({ messages, model, budget, languageProvider: "openai.responses" }))).toEqual(
+    messages,
+  )
+  expect(await Effect.runPromise(buildTail({ messages, model, budget, languageProvider: "openai.chat" }))).toEqual([])
 })

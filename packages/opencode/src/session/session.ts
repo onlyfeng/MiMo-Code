@@ -221,7 +221,11 @@ export const GlobalInfo = Info.extend({
 })
 export type GlobalInfo = z.output<typeof GlobalInfo>
 
-export const ManualTitle = z.string().trim().min(1).transform(value => Array.from(value).slice(0, 80).join(""))
+export const ManualTitle = z
+  .string()
+  .trim()
+  .min(1)
+  .transform((value) => Array.from(value).slice(0, 80).join(""))
 
 export const CreateInput = z
   .object({
@@ -235,25 +239,42 @@ export const CreateInput = z
   .optional()
 export type CreateInput = z.output<typeof CreateInput>
 
-export const ForkInput = z.object({ sessionID: SessionID.zod, messageID: MessageID.zod.optional(), title: ManualTitle.optional() })
+export const ForkInput = z.object({
+  sessionID: SessionID.zod,
+  messageID: MessageID.zod.optional(),
+  title: ManualTitle.optional(),
+})
 export const GetInput = SessionID.zod
 export const ChildrenInput = SessionID.zod
 export const RemoveInput = SessionID.zod
-export const TitleSnapshot = z.object({
-  sessionID: SessionID.zod,
-  title: z.string(),
-  titleSource: Info.shape.titleSource,
-  titleRevision: Info.shape.titleRevision,
-}).meta({ ref: "TitleSnapshot" })
+export const TitleSnapshot = z
+  .object({
+    sessionID: SessionID.zod,
+    title: z.string(),
+    titleSource: Info.shape.titleSource,
+    titleRevision: Info.shape.titleRevision,
+  })
+  .meta({ ref: "TitleSnapshot" })
 export type TitleSnapshot = z.infer<typeof TitleSnapshot>
-export const TitleConflict = z.object({ name: z.literal("TitleConflictError"), data: z.object({ current: TitleSnapshot }) })
-export class TitleRevisionError extends Error { override readonly name = "TitleRevisionError" }
+export const TitleConflict = z.object({
+  name: z.literal("TitleConflictError"),
+  data: z.object({ current: TitleSnapshot }),
+})
+export class TitleRevisionError extends Error {
+  override readonly name = "TitleRevisionError"
+}
 export class TitleConflictError extends Error {
   override readonly name = "TitleConflictError"
-  constructor(readonly current: TitleSnapshot) { super("Title changed by another writer") }
-  toObject() { return { name: this.name, data: { current: this.current } } }
+  constructor(readonly current: TitleSnapshot) {
+    super("Title changed by another writer")
+  }
+  toObject() {
+    return { name: this.name, data: { current: this.current } }
+  }
 }
-export const SetTitleInput = z.object({ sessionID: SessionID.zod, title: ManualTitle, expectedRevision: Info.shape.titleRevision }).strict()
+export const SetTitleInput = z
+  .object({ sessionID: SessionID.zod, title: ManualTitle, expectedRevision: Info.shape.titleRevision })
+  .strict()
 export type SetTitleInput = z.infer<typeof SetTitleInput>
 export type AutoTitleInput = SetTitleInput & { source?: "fallback" | "generated" }
 
@@ -263,27 +284,45 @@ export function titleSnapshot(info: Info): TitleSnapshot {
 
 // The read, arbitration, projection and optional event log share this immediate
 // transaction. No process-local mutex can arbitrate a second SQLite connection.
-export function writeTitle(input: SetTitleInput, source: "user" | "fallback" | "generated", mode: "initial" | "machine" = "initial"): TitleSnapshot | false {
+export function writeTitle(
+  input: SetTitleInput,
+  source: "user" | "fallback" | "generated",
+  mode: "initial" | "machine" = "initial",
+): TitleSnapshot | false {
   const parsed = SetTitleInput.parse(input)
-  return Database.transaction((db) => {
-    const row = db.select().from(SessionTable).where(eq(SessionTable.id, parsed.sessionID)).get()
-    if (!row) throw new NotFoundError({ message: `Session not found: ${parsed.sessionID}` })
-    const current = titleSnapshot(fromRow(row))
-    if (source === "user") {
-      if (parsed.expectedRevision > current.titleRevision) throw new TitleRevisionError("expectedRevision is in the future")
-      if (parsed.expectedRevision < current.titleRevision && current.titleSource === "user") throw new TitleConflictError(current)
-    } else if (current.titleSource === "user" || (mode === "initial" && current.titleSource !== "fallback") || parsed.expectedRevision !== current.titleRevision) return false
-    // Revision zero is uninitialized; the first fallback commit records completion even for identical text.
-    if (((source === "fallback" && current.titleRevision > 0) || mode === "machine") && current.title === parsed.title) return false
-    if (current.titleRevision === Number.MAX_SAFE_INTEGER) throw new RangeError("Title revision exhausted")
-    const next = { ...current, title: parsed.title, titleSource: source, titleRevision: current.titleRevision + 1 }
-    SyncEvent.run(Event.Updated, {
-      sessionID: parsed.sessionID,
-      previousRevision: current.titleRevision,
-      info: { title: next.title, titleSource: next.titleSource, titleRevision: next.titleRevision },
-    })
-    return next
-  }, { behavior: "immediate" })
+  return Database.transaction(
+    (db) => {
+      const row = db.select().from(SessionTable).where(eq(SessionTable.id, parsed.sessionID)).get()
+      if (!row) throw new NotFoundError({ message: `Session not found: ${parsed.sessionID}` })
+      const current = titleSnapshot(fromRow(row))
+      if (source === "user") {
+        if (parsed.expectedRevision > current.titleRevision)
+          throw new TitleRevisionError("expectedRevision is in the future")
+        if (parsed.expectedRevision < current.titleRevision && current.titleSource === "user")
+          throw new TitleConflictError(current)
+      } else if (
+        current.titleSource === "user" ||
+        (mode === "initial" && current.titleSource !== "fallback") ||
+        parsed.expectedRevision !== current.titleRevision
+      )
+        return false
+      // Revision zero is uninitialized; the first fallback commit records completion even for identical text.
+      if (
+        ((source === "fallback" && current.titleRevision > 0) || mode === "machine") &&
+        current.title === parsed.title
+      )
+        return false
+      if (current.titleRevision === Number.MAX_SAFE_INTEGER) throw new RangeError("Title revision exhausted")
+      const next = { ...current, title: parsed.title, titleSource: source, titleRevision: current.titleRevision + 1 }
+      SyncEvent.run(Event.Updated, {
+        sessionID: parsed.sessionID,
+        previousRevision: current.titleRevision,
+        info: { title: next.title, titleSource: next.titleSource, titleRevision: next.titleRevision },
+      })
+      return next
+    },
+    { behavior: "immediate" },
+  )
 }
 export const SetArchivedInput = z.object({ sessionID: SessionID.zod, time: z.number().optional() })
 export const SetPermissionInput = z.object({ sessionID: SessionID.zod, permission: Permission.Ruleset.zod })
@@ -297,8 +336,16 @@ export const MessagesInput = z.object({ sessionID: SessionID.zod, limit: z.numbe
 // v1 is replay-only. Its already accepted but provenance-less titles are
 // conservatively protected. New commands may only emit the revisioned v2 event.
 export const LegacyUpdated = SyncEvent.define({
-  type: "session.updated", version: 1, aggregate: "sessionID",
-  schema: z.object({ sessionID: SessionID.zod, info: updateSchema(Info.omit({ titleSource: true, titleRevision: true })).extend({ share: updateSchema(Info.shape.share.unwrap()).optional(), time: updateSchema(Info.shape.time).optional() }) }),
+  type: "session.updated",
+  version: 1,
+  aggregate: "sessionID",
+  schema: z.object({
+    sessionID: SessionID.zod,
+    info: updateSchema(Info.omit({ titleSource: true, titleRevision: true })).extend({
+      share: updateSchema(Info.shape.share.unwrap()).optional(),
+      time: updateSchema(Info.shape.time).optional(),
+    }),
+  }),
 })
 
 export const Event = {
@@ -552,7 +599,7 @@ export interface Interface {
     taskID?: string
     taskSessionID?: SessionID
     shouldCommit?: () => boolean
-    onCommitted?: () => void
+    onCommitted?: (result: { redispatch: boolean }) => void
   }) => Effect.Effect<MessageV2.User, InstanceType<typeof NotFoundError> | RecoveryConflictError>
   readonly commitUserMessageIfLatest: (input: {
     expectedUserID: MessageID | undefined
@@ -636,25 +683,25 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       log.info("created", result)
 
       if (input.worktreeOwnership) {
-        yield* storage
-          .write(worktreeOwnershipKey(result.id), input.worktreeOwnership)
-          .pipe(Effect.orDie)
+        yield* storage.write(worktreeOwnershipKey(result.id), input.worktreeOwnership).pipe(Effect.orDie)
       }
       yield* Effect.sync(() => SyncEvent.run(Event.Created, { sessionID: result.id, info: result }))
 
-      yield* actorReg.register({
-        sessionID: result.id,
-        actorID: "main",
-        mode: "main",
-        parentActorID: undefined,
-        agent: "main",
-        description: "main agent",
-        contextMode: "full",
-        contextWatermark: undefined,
-        background: false,
-        lifecycle: "persistent",
-        tools: "INHERIT",
-      }).pipe(Effect.ignore)
+      yield* actorReg
+        .register({
+          sessionID: result.id,
+          actorID: "main",
+          mode: "main",
+          parentActorID: undefined,
+          agent: "main",
+          description: "main agent",
+          contextMode: "full",
+          contextWatermark: undefined,
+          background: false,
+          lifecycle: "persistent",
+          tools: "INHERIT",
+        })
+        .pipe(Effect.ignore)
 
       if (!Flag.MIMOCODE_EXPERIMENTAL_WORKSPACES) {
         // This only exist for backwards compatibility. We should not be
@@ -684,11 +731,11 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       },
     )
 
-    const clearWorktreeOwnership: Interface["clearWorktreeOwnership"] = Effect.fn(
-      "Session.clearWorktreeOwnership",
-    )(function* (sessionID) {
-      yield* storage.remove(worktreeOwnershipKey(sessionID)).pipe(Effect.catch(() => Effect.void))
-    })
+    const clearWorktreeOwnership: Interface["clearWorktreeOwnership"] = Effect.fn("Session.clearWorktreeOwnership")(
+      function* (sessionID) {
+        yield* storage.remove(worktreeOwnershipKey(sessionID)).pipe(Effect.catch(() => Effect.void))
+      },
+    )
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID, options?: { visible?: boolean }) {
       const rows = yield* db((d) =>
@@ -721,7 +768,15 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         d
           .select({ session_id: ActorRegistryTable.session_id })
           .from(ActorRegistryTable)
-          .where(and(inArray(ActorRegistryTable.session_id, rows.map((r) => r.id)), eq(ActorRegistryTable.mode, "peer")))
+          .where(
+            and(
+              inArray(
+                ActorRegistryTable.session_id,
+                rows.map((r) => r.id),
+              ),
+              eq(ActorRegistryTable.mode, "peer"),
+            ),
+          )
           .all(),
       )
       const peers = new Set(peerRows.map((r) => r.session_id))
@@ -769,7 +824,11 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
     const updateMessage = <T extends MessageV2.Info>(msg: T): Effect.Effect<T> =>
       Effect.sync(() => {
         const existing = Database.use((db) =>
-          db.select({ time_created: MessageTable.time_created }).from(MessageTable).where(eq(MessageTable.id, msg.id)).get(),
+          db
+            .select({ time_created: MessageTable.time_created })
+            .from(MessageTable)
+            .where(eq(MessageTable.id, msg.id))
+            .get(),
         )
         const info: T = existing
           ? {
@@ -793,16 +852,22 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         MessageV2.Info.parse(msg)
         return Database.transaction(
           (tx) => {
-            const owner = tx.select({ id: SessionTable.id }).from(SessionTable).where(eq(SessionTable.id, msg.sessionID)).get()
+            const owner = tx
+              .select({ id: SessionTable.id })
+              .from(SessionTable)
+              .where(eq(SessionTable.id, msg.sessionID))
+              .get()
             if (!owner) throw new NotFoundError({ message: `Session not found: ${msg.sessionID}` })
-            const existing = tx.select({ id: MessageTable.id }).from(MessageTable).where(eq(MessageTable.id, msg.id)).get()
+            const existing = tx
+              .select({ id: MessageTable.id })
+              .from(MessageTable)
+              .where(eq(MessageTable.id, msg.id))
+              .get()
             if (existing) throw new Error(`Message ID already exists: ${msg.id}`)
             const latest = tx
               .select({ time_created: MessageTable.time_created })
               .from(MessageTable)
-              .where(
-                and(eq(MessageTable.session_id, msg.sessionID), eq(MessageTable.agent_id, msg.agentID ?? "main")),
-              )
+              .where(and(eq(MessageTable.session_id, msg.sessionID), eq(MessageTable.agent_id, msg.agentID ?? "main")))
               .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
               .get()
             const created = Math.max(Date.now(), (latest?.time_created ?? -1) + 1)
@@ -898,9 +963,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         // The prompt producer regenerates IDs for anonymous input parts on a
         // retry. Reuse only those IDs, in their original relative order, while
         // keeping caller/plugin-supplied identities and all content strict.
-        const explicitIDs = new Set(
-          parts.filter((part) => !generatedPartIDs?.has(part.id)).map((part) => part.id),
-        )
+        const explicitIDs = new Set(parts.filter((part) => !generatedPartIDs?.has(part.id)).map((part) => part.id))
         const reusable = existingParts.filter((part) => !explicitIDs.has(part.id))
         const replacements = new Map(
           parts
@@ -996,9 +1059,6 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           try {
             const user = Database.transaction(
               (tx) => {
-                // First postcommit effect: a publisher may throw after SQLite
-                // commits, but must not prevent supervisor ownership transfer.
-                Database.effect(() => input.onCommitted?.())
                 const latest = tx
                   .select()
                   .from(MessageTable)
@@ -1042,11 +1102,16 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                 } as MessageV2.Info
                 if (
                   assistant.role !== "assistant" ||
-                  "completed" in assistant.time ||
+                  ("completed" in assistant.time &&
+                    assistant.finish !== "tool-calls" &&
+                    assistant.finish !== "length") ||
                   assistant.parentID !== input.parentMessageID ||
                   original.role !== "user"
                 )
                   throw new NotFoundError({ message: "Recovery candidate changed before settlement" })
+                const redispatch = !MessageV2.hasUsefulAssistantParts(MessageV2.parts(assistant.id))
+                // Register ownership transfer before any postcommit event publisher.
+                Database.effect(() => input.onCommitted?.({ redispatch }))
                 if (input.taskID !== undefined && original.task_id !== undefined && input.taskID !== original.task_id)
                   throw new RecoveryConflictError("Recovery task conflicts with the original user task")
                 const user =
@@ -1054,7 +1119,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                     ? { ...original, task_id: input.taskID }
                     : original
                 if (user !== original) {
-                  if (!input.taskSessionID) throw new NotFoundError({ message: "Recovery task namespace is unavailable" })
+                  if (!input.taskSessionID)
+                    throw new NotFoundError({ message: "Recovery task namespace is unavailable" })
                   const claim = claimRecoveryTask(tx, {
                     sessionID: input.taskSessionID,
                     taskID: input.taskID!,
@@ -1069,18 +1135,39 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                   if (claim.changed)
                     Database.effect(() => {
                       bridge.fork(
-                        bus.publish(TaskUpdated, { sessionID: claim.task.session_id, task: claim.task, kind: "started" }),
+                        bus.publish(TaskUpdated, {
+                          sessionID: claim.task.session_id,
+                          task: claim.task,
+                          kind: "started",
+                        }),
                       )
                     })
                 }
-                SyncEvent.run(MessageV2.Event.Updated, {
-                  sessionID: input.sessionID,
-                  info: {
-                    ...assistant,
-                    time: { ...assistant.time, completed: Math.max(Date.now(), assistant.time.created) },
-                    error: new MessageV2.AbortedError({ message: "Abandoned: resumed as a new assistant turn" }).toObject(),
-                  },
-                })
+                // Read and delete siblings inside the same admission transaction. Busy,
+                // stale, task-conflict and cancelled admission paths have no cleanup effects.
+                const siblings = tx
+                  .select()
+                  .from(MessageTable)
+                  .where(and(eq(MessageTable.session_id, input.sessionID), eq(MessageTable.agent_id, input.actorID)))
+                  .all()
+                for (const row of siblings) {
+                  const sibling = { ...row.data, id: row.id, sessionID: row.session_id } as MessageV2.Info
+                  if (sibling.role !== "assistant" || sibling.parentID !== input.parentMessageID) continue
+                  if (!redispatch && sibling.error) continue
+                  if (MessageV2.hasUsefulAssistantParts(MessageV2.parts(row.id))) continue
+                  SyncEvent.run(MessageV2.Event.Removed, { sessionID: input.sessionID, messageID: row.id })
+                }
+                if (!redispatch)
+                  SyncEvent.run(MessageV2.Event.Updated, {
+                    sessionID: input.sessionID,
+                    info: {
+                      ...assistant,
+                      time: { ...assistant.time, completed: Math.max(Date.now(), assistant.time.created) },
+                      error: new MessageV2.AbortedError({
+                        message: "Abandoned: resumed as a new assistant turn",
+                      }).toObject(),
+                    },
+                  })
                 return user
               },
               { behavior: "immediate" },
@@ -1121,9 +1208,13 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           },
           { behavior: "immediate" },
         )
-      }).pipe(Effect.tap((committed) => Effect.sync(() => {
-        if (committed) RunApproval.register(runApproval, input.message.id, input.expectedUserID)
-      })))
+      }).pipe(
+        Effect.tap((committed) =>
+          Effect.sync(() => {
+            if (committed) RunApproval.register(runApproval, input.message.id, input.expectedUserID)
+          }),
+        ),
+      )
     })
 
     const updatePart = <T extends MessageV2.Part>(part: T): Effect.Effect<T> =>
@@ -1241,10 +1332,11 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
 
     const setGeneratedTitle = (input: SetTitleInput) => Effect.sync(() => writeTitle(input, "generated", "machine"))
 
-    const setTitleIfDefault = (input: AutoTitleInput) => Effect.sync(() => {
-      const { source = "generated", ...command } = input
-      return writeTitle(command, source) !== false
-    })
+    const setTitleIfDefault = (input: AutoTitleInput) =>
+      Effect.sync(() => {
+        const { source = "generated", ...command } = input
+        return writeTitle(command, source) !== false
+      })
 
     const setArchived = Effect.fn("Session.setArchived")(function* (input: { sessionID: SessionID; time?: number }) {
       yield* patch(input.sessionID, { time: { archived: input.time } })
@@ -1267,8 +1359,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           if (session.prompt) return session.prompt
           const firstUser = (yield* messages({ sessionID: input.sessionID })).find(
             (message) =>
-              message.info.role === "user" &&
-              message.parts.some((part) => !("synthetic" in part) || !part.synthetic),
+              message.info.role === "user" && message.parts.some((part) => !("synthetic" in part) || !part.synthetic),
           )
           if (firstUser?.info.role === "user") {
             const prompt: PromptConfig = {

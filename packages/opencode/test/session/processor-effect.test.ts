@@ -290,9 +290,7 @@ scripted.live("session.processor cleans up hook-created text before retry", () =
         const parts = yield* processTextStream(dir, "retry")
         expect(processorLLM.calls).toBe(2)
         expect(
-          parts
-            .filter((part): part is MessageV2.TextPart => part.type === "text")
-            .map((part) => part.text),
+          parts.filter((part): part is MessageV2.TextPart => part.type === "text").map((part) => part.text),
         ).toEqual(["hook text"])
       }),
     { git: true, config: (url) => providerCfg(url) },
@@ -789,81 +787,93 @@ it.live("session.processor effect tests retry recognized structured json errors"
   ),
 )
 
-it.live("session.processor effect tests publish retry status updates", () =>
-  provideTmpdirServer(
-    ({ dir, llm }) =>
-      Effect.gen(function* () {
-        const { processors, session, provider } = yield* boot()
-        const bus = yield* Bus.Service
+it.live(
+  "session.processor effect tests publish retry status updates",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const { processors, session, provider } = yield* boot()
+          const bus = yield* Bus.Service
 
-        yield* llm.error(503, { error: "boom" })
-        yield* llm.error(503, { error: "boom" })
-        yield* llm.text("")
+          yield* llm.error(503, { error: "boom" })
+          yield* llm.error(503, { error: "boom" })
+          yield* llm.text("")
 
-        const chat = yield* session.create({})
-        const parent = yield* user(chat.id, "retry")
-        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
-        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
-        const states: number[] = []
-        const retryEvents: Array<{ attempt: number; phaseAttempt: number; maxAttempts: number; phase: string; kind: string; scope: string }> = []
-        const off = yield* bus.subscribeCallback(SessionStatus.Event.Status, (evt) => {
-          if (evt.properties.sessionID !== chat.id) return
-          if (evt.properties.status.type === "retry") states.push(evt.properties.status.attempt)
-        })
-        const offRetry = yield* bus.subscribeCallback(Session.Event.RetryAttempt, (evt) => {
-          if (evt.properties.sessionID !== chat.id) return
-          retryEvents.push({
-            attempt: evt.properties.attempt,
-            phaseAttempt: evt.properties.phaseAttempt,
-            maxAttempts: evt.properties.maxAttempts,
-            phase: evt.properties.phase,
-            kind: evt.properties.kind,
-            scope: evt.properties.scope,
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "retry")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const states: number[] = []
+          const retryEvents: Array<{
+            attempt: number
+            phaseAttempt: number
+            maxAttempts: number
+            phase: string
+            kind: string
+            scope: string
+          }> = []
+          const off = yield* bus.subscribeCallback(SessionStatus.Event.Status, (evt) => {
+            if (evt.properties.sessionID !== chat.id) return
+            if (evt.properties.status.type === "retry") states.push(evt.properties.status.attempt)
           })
-        })
-        const handle = yield* processors.create({
-          assistantMessage: msg,
-          sessionID: chat.id,
-          model: mdl,
-        })
-
-        const value = yield* handle.process({
-          user: {
-            id: parent.id,
+          const offRetry = yield* bus.subscribeCallback(Session.Event.RetryAttempt, (evt) => {
+            if (evt.properties.sessionID !== chat.id) return
+            retryEvents.push({
+              attempt: evt.properties.attempt,
+              phaseAttempt: evt.properties.phaseAttempt,
+              maxAttempts: evt.properties.maxAttempts,
+              phase: evt.properties.phase,
+              kind: evt.properties.kind,
+              scope: evt.properties.scope,
+            })
+          })
+          const handle = yield* processors.create({
+            assistantMessage: msg,
             sessionID: chat.id,
-            role: "user",
-            time: parent.time,
-            agent: parent.agent,
-            model: { providerID: ref.providerID, modelID: ref.modelID },
-          } satisfies MessageV2.User,
-          sessionID: chat.id,
-          model: mdl,
-          agent: agent(),
-          system: [],
-          messages: [{ role: "user", content: "retry" }],
-          tools: {},
-        })
+            model: mdl,
+          })
 
-        off()
-        offRetry()
+          const value = yield* handle.process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies MessageV2.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "retry" }],
+            tools: {},
+          })
 
-        expect(value).toBe("continue")
-        expect(yield* llm.calls).toBe(3)
-        expect(states).toStrictEqual([1, 2])
-        expect(retryEvents).toContainEqual({
-          attempt: 2,
-          phaseAttempt: 1,
-          maxAttempts: 8,
-          phase: "stream",
-          kind: "server",
-          scope: "live-step",
-        })
-      }),
-    {
-      git: true,
-      config: (url) => ({ ...providerCfg(url), retry: { request: { maxRetries: 1 } } }),
-    },
-  ),
+          off()
+          offRetry()
+
+          expect(value).toBe("continue")
+          expect(yield* llm.calls).toBe(3)
+          // The bounded request ladder is diagnostic-only; the outer live step
+          // publishes exactly one visible retry after that ladder is exhausted.
+          expect(states).toStrictEqual([1])
+          expect(retryEvents).toContainEqual({
+            attempt: 1,
+            phaseAttempt: 1,
+            maxAttempts: 8,
+            phase: "stream",
+            kind: "server",
+            scope: "live-step",
+          })
+        }),
+      {
+        git: true,
+        config: (url) => ({ ...providerCfg(url), retry: { request: { maxRetries: 1 } } }),
+      },
+    ),
+  15_000,
 )
 
 it.live("session.processor effect tests keep subagent request retries out of session status", () =>

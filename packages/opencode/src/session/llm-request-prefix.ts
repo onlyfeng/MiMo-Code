@@ -51,6 +51,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   sessionID: SessionID
   agent: Agent.Info
   model: Provider.Model
+  languageProvider?: string
   msgs: MessageV2.WithParts[]
   permission?: Permission.Ruleset
   mcpTools?: Record<string, AITool>
@@ -81,6 +82,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   const inheritedMessages = yield* MessageV2.toModelMessagesEffect(input.msgs, input.model, {
     collapseCheckpointTail: input.collapseCheckpointTail,
     skillCatalogInSystem: input.skillCatalogInSystem,
+    languageProvider: input.languageProvider,
   })
 
   // Find the last user message; required for system "user.system" pass-through

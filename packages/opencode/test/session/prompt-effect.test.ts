@@ -504,8 +504,12 @@ afterEach(() => {
   sessionTaskIDs.post.length = 0
 })
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
-function makeHttp(mcpService = mcp, input?: { actor?: boolean; plugin?: Layer.Layer<Plugin.Service> }) {
+function makeHttp(
+  mcpService = mcp,
+  input?: { actor?: boolean; plugin?: Layer.Layer<Plugin.Service>; provider?: typeof ProviderSvc.defaultLayer },
+) {
   const plugin = input?.plugin ?? Plugin.defaultLayer
+  const providerLayer = input?.provider ?? ProviderSvc.defaultLayer
   const taskRegistry = ActorRegistry.defaultLayer
   const deps = Layer.mergeAll(
     Session.defaultLayer,
@@ -517,7 +521,7 @@ function makeHttp(mcpService = mcp, input?: { actor?: boolean; plugin?: Layer.La
     Permission.defaultLayer,
     plugin,
     Config.defaultLayer,
-    ProviderSvc.defaultLayer,
+    providerLayer,
     lsp,
     mcpService,
     AppFileSystem.defaultLayer,
@@ -2075,6 +2079,15 @@ it.live("resume continues an incomplete assistant without creating or rewriting 
       expect(after.filter((message) => message.info.role === "user")).toHaveLength(1)
       expect(after.length).toBe(before.length + 1)
       expect(after.find((message) => message.info.id === seeded.assistant.id)?.info).toMatchObject(seeded.assistant)
+      // tool-resume must stamp Abandoned-as-resumed on the continued assistant
+      const seededAfter = after.find((message) => message.info.id === seeded.assistant.id)?.info
+      const abandonMsg =
+        seededAfter && seededAfter.role === "assistant" && seededAfter.error
+          ? ((seededAfter.error as { data?: { message?: string }; message?: string }).data?.message ??
+            (seededAfter.error as { message?: string }).message ??
+            "")
+          : ""
+      expect(abandonMsg).toContain("Abandoned: resumed as a new assistant turn")
       expect(result.info.role).toBe("assistant")
       expect(result.info.id).not.toBe(seeded.assistant.id)
       expect(result.parts.some((part) => part.type === "text" && part.text === "world")).toBe(true)
@@ -2133,7 +2146,7 @@ taskMetadataIt.live("resume settles the old assistant before returning admission
 )
 
 taskMetadataIt.live(
-  "a non-retryable processor error remains an explicit recovery candidate and settles before resuming",
+  "a non-retryable empty error remains a recovery candidate and is removed only after admission",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -2167,8 +2180,10 @@ taskMetadataIt.live(
         const abandoned = (yield* sessions.messages({ sessionID: chat.id })).find(
           (message) => message.info.id === assistant.info.id,
         )?.info
-        expect(abandoned?.role === "assistant" && abandoned.time.completed).toEqual(expect.any(Number))
-        expect(abandoned?.role === "assistant" && abandoned.error?.name).toBe("MessageAbortedError")
+        expect(abandoned).toBeUndefined()
+        expect(
+          (yield* sessions.messages({ sessionID: chat.id })).filter((message) => message.info.role === "user"),
+        ).toHaveLength(1)
         yield* Deferred.await(gate.entered).pipe(Effect.timeout("10 seconds"))
         expect(yield* llm.calls).toBe(1)
         yield* Deferred.succeed(gate.release, undefined)
@@ -3262,6 +3277,92 @@ it.live("loop continues when finish is tool-calls", () =>
     { git: true, config: providerCfg },
   ),
 )
+
+for (const isError of [false, true]) {
+  const screenshots = Array.from({ length: 51 }, () => ({
+    type: "image" as const,
+    data: mcpErrorImage,
+    mimeType: "image/png",
+  }))
+  const screenshotsIt = testEffect(
+    makeHttp(
+      mcpLayer(() => ({
+        mcp_screenshots: dynamicTool({
+          description: "Capture screenshots",
+          inputSchema: jsonSchema({ type: "object", properties: {} }),
+          execute: async () => ({
+            content: [{ type: "text", text: isError ? "Capture failed" : "Captured" }, ...screenshots],
+            isError,
+          }),
+        }),
+      })),
+    ),
+  )
+
+  screenshotsIt.live(`Responses preserves 51 MCP screenshots through followup and resume (error=${isError})`, () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({
+          title: "Pinned",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: mcpRef,
+          noReply: true,
+          parts: [{ type: "text", text: "Capture screenshots" }],
+        })
+        yield* llm.tool("mcp_tool_search", { query: "screenshots" })
+        yield* llm.tool("mcp_screenshots", {})
+        yield* llm.text("Screenshots received")
+        yield* prompt.loop({ sessionID: session.id })
+
+        const part = (yield* MessageV2.filterCompactedEffect(session.id))
+          .flatMap((message) => message.parts)
+          .find((part) => part.type === "tool" && part.tool === "mcp_screenshots")
+        if (part?.type !== "tool") throw new Error("Expected screenshot tool result")
+        expect(part.state.status).toBe(isError ? "error" : "completed")
+        const assertImages = (request: Record<string, unknown>) => {
+          expect(request.input).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                type: "function_call_output",
+                call_id: part.callID,
+                output: [
+                  { type: "input_text", text: isError ? "Tool failed: Capture failed" : "Captured" },
+                  ...screenshots.map(() => ({ type: "input_image", image_url: mcpErrorImageURL })),
+                ],
+              }),
+            ]),
+          )
+          expect(JSON.stringify(request)).not.toContain(MessageV2.SYNTHETIC_ATTACHMENT_PROMPT)
+        }
+        assertImages((yield* llm.inputs).at(-1)!)
+        yield* llm.text("History received")
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: mcpRef,
+          parts: [{ type: "text", text: "Inspect the previous screenshots again" }],
+        })
+        assertImages((yield* llm.inputs).at(-1)!)
+      }),
+      {
+        git: true,
+        config: (url) => {
+          const config = mediaProviderCfg(url)
+          return {
+            ...config,
+            provider: { ...config.provider, test: { ...config.provider.test, npm: "@ai-sdk/openai" } },
+          }
+        },
+      },
+    ),
+  )
+}
 
 mcpIt.live("MCP isError becomes a tool error without losing standard result fields", () =>
   provideTmpdirServer(
@@ -4488,10 +4589,9 @@ it.live(
         yield* Effect.sleep(50)
 
         // Bound cancellation independently of fixture and first-request setup.
-        const [exitA, exitB] = yield* prompt.cancel(chat.id).pipe(
-          Effect.andThen(Effect.all([Fiber.await(a), Fiber.await(b)])),
-          Effect.timeout("3 seconds"),
-        )
+        const [exitA, exitB] = yield* prompt
+          .cancel(chat.id)
+          .pipe(Effect.andThen(Effect.all([Fiber.await(a), Fiber.await(b)])), Effect.timeout("3 seconds"))
         expect(Exit.isSuccess(exitA)).toBe(true)
         expect(Exit.isSuccess(exitB)).toBe(true)
         if (Exit.isSuccess(exitA) && Exit.isSuccess(exitB)) {
@@ -4699,38 +4799,61 @@ itActor.live(
   15_000,
 )
 
-itActor.live("a main inbox follower does not retry a joined failure without progress", () =>
-  provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
-    const prompt = yield* SessionPrompt.Service
-    const state = yield* SessionRunState.Service
-    const sessions = yield* Session.Service
-    const chat = yield* sessions.create({ title: "joined inbox failure" })
-    yield* seed(chat.id)
-    const inboxID = crypto.randomUUID()
-    Database.use((db) => db.insert(InboxTable).values({
-      id: inboxID, receiver_session_id: chat.id, receiver_actor_id: "main",
-      content: { text: "must remain queued" }, created_at: Date.now(),
-    }).run())
-    const release = yield* Deferred.make<void>()
-    const attached = yield* Deferred.make<void>()
-    yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
-    lateRunGate = {
-      sessionID: chat.id, actorID: "main", ownerArmed: false, followerArmed: true,
-      ownerExit: yield* Deferred.make<void>(), releaseOwner: release, followerAttached: attached,
-    }
-    const owner = yield* state.startRunning(chat.id, "main", Effect.die("unexpected interrupt"),
-      Deferred.await(release).pipe(Effect.andThen(Effect.die(new Error("failure before drain")))))
-    yield* llm.text("unexpected follower retry")
-    const follower = yield* prompt.loop({ sessionID: chat.id, inboxID }).pipe(Effect.forkChild)
-    yield* Deferred.await(attached)
-    yield* Deferred.succeed(release, undefined)
-    const result = yield* Fiber.await(follower).pipe(Effect.timeout("5 seconds"))
-    yield* owner.pipe(Effect.exit)
-    expect(result._tag).toBe("Failure")
-    expect(yield* llm.calls).toBe(0)
-    expect(yield* inboxServiceRef.current!.has(inboxID)).toBe(true)
-  }), { git: true, config: providerCfg }),
-15_000)
+itActor.live(
+  "a main inbox follower does not retry a joined failure without progress",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const state = yield* SessionRunState.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "joined inbox failure" })
+        yield* seed(chat.id)
+        const inboxID = crypto.randomUUID()
+        Database.use((db) =>
+          db
+            .insert(InboxTable)
+            .values({
+              id: inboxID,
+              receiver_session_id: chat.id,
+              receiver_actor_id: "main",
+              content: { text: "must remain queued" },
+              created_at: Date.now(),
+            })
+            .run(),
+        )
+        const release = yield* Deferred.make<void>()
+        const attached = yield* Deferred.make<void>()
+        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
+        lateRunGate = {
+          sessionID: chat.id,
+          actorID: "main",
+          ownerArmed: false,
+          followerArmed: true,
+          ownerExit: yield* Deferred.make<void>(),
+          releaseOwner: release,
+          followerAttached: attached,
+        }
+        const owner = yield* state.startRunning(
+          chat.id,
+          "main",
+          Effect.die("unexpected interrupt"),
+          Deferred.await(release).pipe(Effect.andThen(Effect.die(new Error("failure before drain")))),
+        )
+        yield* llm.text("unexpected follower retry")
+        const follower = yield* prompt.loop({ sessionID: chat.id, inboxID }).pipe(Effect.forkChild)
+        yield* Deferred.await(attached)
+        yield* Deferred.succeed(release, undefined)
+        const result = yield* Fiber.await(follower).pipe(Effect.timeout("5 seconds"))
+        yield* owner.pipe(Effect.exit)
+        expect(result._tag).toBe("Failure")
+        expect(yield* llm.calls).toBe(0)
+        expect(yield* inboxServiceRef.current!.has(inboxID)).toBe(true)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  15_000,
+)
 
 // Queue semantics
 
@@ -5938,16 +6061,28 @@ for (const agentID of ["main", "worker"])
           const seen: Permission.Request[] = []
           const off = yield* bus.subscribeCallback(Permission.Event.Asked, (event) => {
             seen.push(event.properties)
-            Effect.runFork(Effect.gen(function* () {
-              if (agentID === "main" && seen.length === 1) {
-                // Seed a completed checkpoint before overflow, so this test
-                // exercises rebuild rather than starting a separate writer.
-                const boundary = (yield* sessions.messages({ sessionID: chat.id })).findLast((message) => message.info.role === "user")!
-                yield* Effect.promise(() => Bun.write(checkpointPath(chat.id), "Topic: Continue the second marker\n"))
-                yield* Effect.sync(() => Database.use((db) => db.update(SessionTable).set({ last_checkpoint_message_id: boundary.info.id }).where(eq(SessionTable.id, chat.id)).run()))
-              }
-              yield* permission.reply({ requestID: event.properties.id, reply: "once" })
-            }))
+            Effect.runFork(
+              Effect.gen(function* () {
+                if (agentID === "main" && seen.length === 1) {
+                  // Seed a completed checkpoint before overflow, so this test
+                  // exercises rebuild rather than starting a separate writer.
+                  const boundary = (yield* sessions.messages({ sessionID: chat.id })).findLast(
+                    (message) => message.info.role === "user",
+                  )!
+                  yield* Effect.promise(() => Bun.write(checkpointPath(chat.id), "Topic: Continue the second marker\n"))
+                  yield* Effect.sync(() =>
+                    Database.use((db) =>
+                      db
+                        .update(SessionTable)
+                        .set({ last_checkpoint_message_id: boundary.info.id })
+                        .where(eq(SessionTable.id, chat.id))
+                        .run(),
+                    ),
+                  )
+                }
+                yield* permission.reply({ requestID: event.properties.id, reply: "once" })
+              }),
+            )
           })
           try {
             yield* llm.push(
@@ -6251,58 +6386,95 @@ it.live("run approval reaches processor doom-loop asks without tool ownership me
   ),
 )
 
-
 for (const mode of ["matching", "changed", "legacy", "legacy-json"] as const) {
-  itActor.live(`frozen native Actor shell contract ${mode} cannot borrow a live enum`, () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
-        const sessions = yield* Session.Service
-        const actors = yield* Effect.serviceOption(Actor.Service)
-        if (actors._tag === "None") throw new Error("real Actor service was not provided")
-        const model = { providerID: ref.providerID, modelID: ModelID.make("gpt-5-test") }
-        const parent = yield* sessions.create({ title: "Frozen native Actor", permission: [{ permission: "*", pattern: "*", action: "allow" }] })
-        yield* prompt.prompt({ sessionID: parent.id, model, noReply: true, parts: [{ type: "text", text: "capture Actor native contract" }] })
-        const capture = prefixCaptureRef.current
-        if (!capture) throw new Error("prefix capture unavailable")
-        const messages = yield* sessions.messages({ sessionID: parent.id })
-        const prefix = yield* capture({ sessionID: parent.id, agentName: "build", providerID: model.providerID, modelID: model.modelID, msgs: messages })
-        const snapshot = yield* Effect.promise(() => SessionPrefixSnapshot.snapshotTools(prefix.tools, [...(prefix.activeTools ?? Object.keys(prefix.tools))]))
-        const actorSnapshot = snapshot.find((item) => item.name === "actor")
-        if (!actorSnapshot?.native_input_schema) throw new Error("missing captured native Actor schema")
-        expect(actorSnapshot.input_schema.properties).toHaveProperty(mode === "legacy-json" ? "operation" : "script")
-        expect(JSON.stringify(actorSnapshot.native_input_schema)).toContain('"general"')
-        if (mode === "changed") actorSnapshot.native_input_schema = JSON.parse(JSON.stringify(actorSnapshot.native_input_schema).replaceAll('"general"', '"retired-agent"'))
-        if (mode.startsWith("legacy")) delete actorSnapshot.native_input_schema
-        const tools = SessionPrefixSnapshot.restoreTools(JSON.parse(JSON.stringify(snapshot)))
-        const marker = `native-frozen-${mode}`
-        yield* llm.tool("exec", { code: `return await tools.actor({operation:{action:"send",to_actor_id:"main",content:${JSON.stringify(marker)}}})` })
-        yield* llm.text("done")
-        const spawned = yield* actors.value.spawn({
-          mode: "subagent", sessionID: parent.id, agentType: "build", task: "send parent update",
-          context: "full", tools: ["actor"], background: false, model,
-          forkContext: { ...prefix, tools, model, watermarkMsgID: messages.at(-1)!.info.id },
-        })
-        expect((yield* Deferred.await(spawned.outcome)).status).toBe("success")
-        const turns = yield* llm.inputs
-        expect(turns.length).toBeGreaterThanOrEqual(2)
-        expect(JSON.stringify(turns[0].tools)).not.toContain("nativeInputSchema")
-        const parts = (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).flatMap((message) => message.parts)
-        const exec = parts.find((part) => part.type === "tool" && part.tool === "exec")
-        if (exec?.type !== "tool" || exec.state.status !== "completed") throw new Error("missing settled exec")
-        if (mode === "matching" || mode === "legacy-json") {
-          expect(exec.state.metadata.status).toBe("completed")
-          expect(exec.state.output).toContain("inboxID")
-          const nested = viewExecSubtools(exec.state.metadata)
-          expect(nested).toHaveLength(1)
-          expect(nested[0].state.status).toBe("completed")
-          expect(nested[0].state.input).toEqual({ operation: { action: "send", to_actor_id: "main", content: marker } })
-          expect(nested[0].state.metadata).toMatchObject({ receiver_actor_id: "main" })
-        }
-        else expect(exec.state.metadata).toMatchObject({ rejected: true, reason: "tool-whitelist" })
-      }),
-      { git: true, config: (url) => ({ ...providerCfg(url), tool: { invocation_style_by_tool: { actor: mode === "legacy-json" ? "json" : "shell" } } }) },
-    ),
+  itActor.live(
+    `frozen native Actor shell contract ${mode} cannot borrow a live enum`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const prompt = yield* SessionPrompt.Service
+          const sessions = yield* Session.Service
+          const actors = yield* Effect.serviceOption(Actor.Service)
+          if (actors._tag === "None") throw new Error("real Actor service was not provided")
+          const model = { providerID: ref.providerID, modelID: ModelID.make("gpt-5-test") }
+          const parent = yield* sessions.create({
+            title: "Frozen native Actor",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          yield* prompt.prompt({
+            sessionID: parent.id,
+            model,
+            noReply: true,
+            parts: [{ type: "text", text: "capture Actor native contract" }],
+          })
+          const capture = prefixCaptureRef.current
+          if (!capture) throw new Error("prefix capture unavailable")
+          const messages = yield* sessions.messages({ sessionID: parent.id })
+          const prefix = yield* capture({
+            sessionID: parent.id,
+            agentName: "build",
+            providerID: model.providerID,
+            modelID: model.modelID,
+            msgs: messages,
+          })
+          const snapshot = yield* Effect.promise(() =>
+            SessionPrefixSnapshot.snapshotTools(prefix.tools, [...(prefix.activeTools ?? Object.keys(prefix.tools))]),
+          )
+          const actorSnapshot = snapshot.find((item) => item.name === "actor")
+          if (!actorSnapshot?.native_input_schema) throw new Error("missing captured native Actor schema")
+          expect(actorSnapshot.input_schema.properties).toHaveProperty(mode === "legacy-json" ? "operation" : "script")
+          expect(JSON.stringify(actorSnapshot.native_input_schema)).toContain('"general"')
+          if (mode === "changed")
+            actorSnapshot.native_input_schema = JSON.parse(
+              JSON.stringify(actorSnapshot.native_input_schema).replaceAll('"general"', '"retired-agent"'),
+            )
+          if (mode.startsWith("legacy")) delete actorSnapshot.native_input_schema
+          const tools = SessionPrefixSnapshot.restoreTools(JSON.parse(JSON.stringify(snapshot)))
+          const marker = `native-frozen-${mode}`
+          yield* llm.tool("exec", {
+            code: `return await tools.actor({operation:{action:"send",to_actor_id:"main",content:${JSON.stringify(marker)}}})`,
+          })
+          yield* llm.text("done")
+          const spawned = yield* actors.value.spawn({
+            mode: "subagent",
+            sessionID: parent.id,
+            agentType: "build",
+            task: "send parent update",
+            context: "full",
+            tools: ["actor"],
+            background: false,
+            model,
+            forkContext: { ...prefix, tools, model, watermarkMsgID: messages.at(-1)!.info.id },
+          })
+          expect((yield* Deferred.await(spawned.outcome)).status).toBe("success")
+          const turns = yield* llm.inputs
+          expect(turns.length).toBeGreaterThanOrEqual(2)
+          expect(JSON.stringify(turns[0].tools)).not.toContain("nativeInputSchema")
+          const parts = (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).flatMap(
+            (message) => message.parts,
+          )
+          const exec = parts.find((part) => part.type === "tool" && part.tool === "exec")
+          if (exec?.type !== "tool" || exec.state.status !== "completed") throw new Error("missing settled exec")
+          if (mode === "matching" || mode === "legacy-json") {
+            expect(exec.state.metadata.status).toBe("completed")
+            expect(exec.state.output).toContain("inboxID")
+            const nested = viewExecSubtools(exec.state.metadata)
+            expect(nested).toHaveLength(1)
+            expect(nested[0].state.status).toBe("completed")
+            expect(nested[0].state.input).toEqual({
+              operation: { action: "send", to_actor_id: "main", content: marker },
+            })
+            expect(nested[0].state.metadata).toMatchObject({ receiver_actor_id: "main" })
+          } else expect(exec.state.metadata).toMatchObject({ rejected: true, reason: "tool-whitelist" })
+        }),
+        {
+          git: true,
+          config: (url) => ({
+            ...providerCfg(url),
+            tool: { invocation_style_by_tool: { actor: mode === "legacy-json" ? "json" : "shell" } },
+          }),
+        },
+      ),
     15000,
   )
 }
@@ -6403,7 +6575,8 @@ it.live(
           .pipe(Effect.exit)
         expect(Exit.isFailure(conflict)).toBe(true)
         expect(
-          (yield* sessions.messages({ sessionID: chat.id })).find((message) => message.info.id === directMessageID)
+          (yield* sessions.messages({ sessionID: chat.id }))
+            .find((message) => message.info.id === directMessageID)
             ?.parts.some((part) => part.type === "text" && part.text === "newer direct request"),
         ).toBe(true)
 
@@ -6595,7 +6768,8 @@ it.live("atomic user admission rejects reused and duplicate part IDs without cha
       expect(messages.some((message) => message.info.id === collisionMessageID)).toBe(false)
       expect(messages.some((message) => message.info.id === duplicateMessageID)).toBe(false)
       expect(
-        messages.find((message) => message.info.id === originalMessageID)
+        messages
+          .find((message) => message.info.id === originalMessageID)
           ?.parts.some((part) => part.id === partID && part.type === "text" && part.text === "original part"),
       ).toBe(true)
 
@@ -7459,3 +7633,135 @@ it.live("prompt retries keep rejecting stored runtime additions", () =>
     { git: true, config: providerCfg },
   ),
 )
+
+// [TP-SR-R21-16] user-resume: empty residue assistant → re-dispatch parent user without assistant prefill.
+it.live("resume empty residue re-dispatches parent user without assistant prefill", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const parent = yield* user(chat.id, "look for new resumes")
+      const shell = yield* sessions.updateMessage({
+        id: MessageID.ascending(),
+        role: "assistant",
+        parentID: parent.id,
+        sessionID: chat.id,
+        mode: "build",
+        agent: "build",
+        path: { cwd: "/tmp", root: "/tmp" },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ref.modelID,
+        providerID: ref.providerID,
+        time: { created: Date.now() },
+      })
+      yield* llm.text("found 2 resumes")
+
+      const candidates = yield* prompt.recovery({ sessionID: chat.id })
+      expect(candidates.some((c) => c.assistantMessageID === shell.id)).toBe(true)
+      expect(
+        candidates.every((c) => Object.keys(c).sort().join(",") === "assistantMessageID,created,parentMessageID"),
+      ).toBe(true)
+
+      const result = yield* prompt.resume({
+        sessionID: chat.id,
+        assistantMessageID: shell.id,
+        model: ref,
+      })
+      const requests = yield* llm.inputs
+      expect(requests.length).toBeGreaterThan(0)
+      const messages = ((requests[0]?.messages ?? []) as { role: string; content?: unknown }[]).filter(
+        (m) => m.role === "user" || m.role === "assistant",
+      )
+      expect(messages.length).toBeGreaterThan(0)
+      expect(messages[messages.length - 1]?.role).toBe("user")
+      expect(JSON.stringify(requests[0]?.messages ?? [])).toContain("look for new resumes")
+      expect(JSON.stringify(requests[0]?.messages ?? [])).not.toContain("Abandoned: resumed as a new assistant turn")
+
+      const after = yield* sessions.messages({ sessionID: chat.id })
+      expect(after.find((m) => m.info.id === shell.id)).toBeUndefined()
+      expect(after.filter((m) => m.info.role === "user")).toHaveLength(1)
+      const assistants = after.filter((m) => m.info.role === "assistant")
+      expect(assistants.length).toBeGreaterThan(0)
+      // success path: no stacked empty residue under parent
+      expect(
+        assistants.every(
+          (m) =>
+            m.info.role !== "assistant" ||
+            m.parts.some(
+              (part) =>
+                (part.type === "text" && part.text.trim().length > 0) ||
+                part.type === "tool" ||
+                (part.type === "reasoning" && part.text.trim().length > 0),
+            ) ||
+            Boolean(m.info.role === "assistant" && m.info.error),
+        ),
+      ).toBe(true)
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "found 2 resumes")).toBe(true)
+    }),
+    {
+      git: true,
+      config: providerCfg,
+    },
+  ),
+)
+
+for (const failure of ["throw", "rejection", "interruption"] as const) {
+  let resolutions = 0
+  const failingProvider = Layer.effect(
+    ProviderSvc.Service,
+    Effect.gen(function* () {
+      const provider = yield* ProviderSvc.Service
+      return ProviderSvc.Service.of({
+        ...provider,
+        getLanguage: () => {
+          resolutions++
+          if (failure === "interruption") return Effect.interrupt
+          return failure === "throw"
+            ? Effect.sync(() => {
+                throw new Error("test adapter unavailable")
+              })
+            : Effect.promise(() => Promise.reject(new Error("test adapter unavailable")))
+        },
+      })
+    }),
+  ).pipe(Layer.provide(ProviderSvc.defaultLayer))
+
+  testEffect(makeHttp(mcp, { provider: failingProvider })).live(
+    `checkpoint prefix capture soft-fails adapter ${failure}`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* () {
+          yield* SessionPrompt.Service
+          const sessions = yield* Session.Service
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* user(chat.id, "inspect")
+          const before = resolutions
+          const capture = prefixCaptureRef.current!
+          expect(capture).toBeDefined()
+          const result = yield* Effect.exit(
+            capture({
+              sessionID: chat.id,
+              agentName: "build",
+              ...ref,
+              msgs: yield* sessions.messages({ sessionID: chat.id }),
+            }),
+          )
+          expect(resolutions).toBe(before + 1)
+          if (failure === "interruption") {
+            expect(Exit.isFailure(result) && Cause.hasInterrupts(result.cause)).toBe(true)
+          } else {
+            expect(Exit.isSuccess(result)).toBe(true)
+            if (Exit.isSuccess(result))
+              expect(result.value).toEqual({ system: [], tools: {}, inheritedMessages: [], parentPermission: [], activeTools: [], loadedMcpTools: [] })
+          }
+          expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
+        }),
+        { git: true, config: providerCfg },
+      ),
+  )
+}

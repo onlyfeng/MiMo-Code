@@ -2281,7 +2281,7 @@ export type Config = {
    */
   snapshot?: boolean
   /**
-   * Enable the once-per-session Auto-Worktree Notice when a primary root session mutates a git main worktree. Defaults to false (notice is off). When true, inject the existing soft-hint system-reminder; when false or omitted, inject nothing. Scope is the notice only — conflict detection and experimental worktree auto-create are not gated by this flag.
+   * Enable the once-per-session Auto-Worktree Notice when a primary root session mutates a git main worktree. Defaults to false (notice is off). When true, inject the existing soft-hint system-reminder; when false or omitted, inject nothing. Scope is the notice only; this flag neither blocks writes nor creates worktrees.
    */
   auto_worktree?: boolean
   plugin?: Array<
@@ -4524,34 +4524,6 @@ export type WorktreeResetResponses = {
 }
 
 export type WorktreeResetResponse = WorktreeResetResponses[keyof WorktreeResetResponses]
-
-export type WorktreeAutoData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/experimental/worktree/auto"
-}
-
-export type WorktreeAutoErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type WorktreeAutoError = WorktreeAutoErrors[keyof WorktreeAutoErrors]
-
-export type WorktreeAutoResponses = {
-  /**
-   * Worktree info or null
-   */
-  200: Worktree | null
-}
-
-export type WorktreeAutoResponse = WorktreeAutoResponses[keyof WorktreeAutoResponses]
 
 export type ExperimentalTitleGenerateData = {
   body: {
