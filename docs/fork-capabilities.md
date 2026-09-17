@@ -778,6 +778,35 @@ not change their implementation. The preceding review is retained in the
   three roots of a SIGKILLed run were reclaimed by the next run while a
   concurrently running process kept its own.
 
+- 2026-09-17 tests no longer write into the checkout: a package test run used to
+  leave `.mimocode/package.json`, a lockfile and `node_modules` at the
+  repository root, and `packages/opencode/.mimocode/` (`.cron-lock`,
+  `.gitignore`, installed dependencies) inside the checkout. Upstream's copies of
+  the same tests use the same paths. There were two writers. A session boot
+  starts the cron bridge, which is on by default, and its scheduler lock and
+  task file default to `process.cwd()`: this package directory, shared by every
+  concurrent test process. The preload now sets `MIMOCODE_EXPERIMENTAL_CRON=false`
+  as a harness baseline flag. The cron suites (`cron-bridge.integration`,
+  `keepalive.integration` and `end-to-end`) enable
+  `Flag.MIMOCODE_EXPERIMENTAL_CRON` themselves, and the first two root the
+  scheduler in the workspace their bridge was started for. The second writer was
+  instances rooted in the repository, which ran config discovery against its
+  `.mimocode` and installed dependencies there. `bash.test.ts`,
+  `webfetch.test.ts` and `websearch.test.ts` now use a git fixture instead of the
+  checkout, and `read.test.ts` reads a copy of its large image from a fixture.
+  Route requests that named no directory booted an instance for
+  `process.cwd()`. The `workflows-route`, `session-messages`,
+  `session-task-route`, `session-select`, `title-authority` and
+  `session-actions` server tests now send their fixture directory on every
+  request. Unauthenticated servers only admit directories under cwd, so those
+  fixtures move under `root: "cwd"`.
+  `worker-listener.test.ts` gives its cwd fixtures a git root and names that
+  directory on the requests that boot an instance (`/config`, and `/v1/models`,
+  whose route bootstraps before checking its token). The writers were located
+  file by file and, for those that only wrote alongside others, by
+  order-preserving bisection of the CI shard order. Before the change, each of
+  those tests left repository artifacts; after it, none did.
+
 - 2026-09-15 runtime acceptance infrastructure: the shared test workflow adds
   a Windows job for compat PR/push and explicit manual dispatch. Bun follows the
   package declaration and dependencies use `bun ci`, including the shared
@@ -947,6 +976,11 @@ logged`, and the peer `success`/`failure` variants of
   `packages/opencode/bunfig.toml`, `packages/opencode/test/preload.ts`,
   `packages/opencode/test/fixture/fixture.ts`,
   `packages/opencode/test/fixture/fixture-root.test.ts`,
+  `packages/opencode/test/session/cron-bridge.integration.test.ts`,
+  `packages/opencode/test/session/keepalive.integration.test.ts`,
+  `packages/opencode/test/tool/{bash,webfetch,websearch,read}.test.ts`,
+  `packages/opencode/test/server/{workflows-route,session-messages,session-task-route,session-select,title-authority,session-actions}.test.ts`,
+  `packages/opencode/test/cli/tui/worker-listener.test.ts`,
   `packages/opencode/test/workflow/runtime-worktree.test.ts`,
   `packages/enterprise/bunfig.toml`, `packages/enterprise/test/preload.ts`,
   `packages/enterprise/src/core/storage.ts`,

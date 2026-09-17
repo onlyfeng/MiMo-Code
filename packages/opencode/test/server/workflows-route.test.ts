@@ -20,8 +20,15 @@ afterEach(async () => {
 })
 
 describe("workflows routes", () => {
+  // Name the fixture on every request: without a directory, InstanceMiddleware
+  // boots an instance for process.cwd(), which is this checkout, and config
+  // discovery installs dependencies into its .mimocode. Unauthenticated servers
+  // only admit directories under cwd, so these fixtures use root: "cwd".
+  const request = (directory: string, path: string, init: RequestInit) =>
+    Server.Default().app.request(path, { ...init, headers: { "x-mimocode-directory": directory } })
+
   test("GET /workflows returns [] when the workflow runtime is not running", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -29,8 +36,7 @@ describe("workflows routes", () => {
         workflowRef.current = undefined
 
         // #when — a valid session-shaped sessionID (now REQUIRED) is supplied
-        const app = Server.Default().app
-        const response = await app.request("/workflows?sessionID=ses_16ec185f2ffexEGkbWeMqWSucv", { method: "GET" })
+        const response = await request(tmp.path, "/workflows?sessionID=ses_16ec185f2ffexEGkbWeMqWSucv", { method: "GET" })
 
         // #then — runtime absent short-circuits to [] (the session passes validation)
         expect(response.status).toBe(200)
@@ -40,7 +46,7 @@ describe("workflows routes", () => {
   })
 
   test("POST /workflows/:runID/resume returns { resumed: false } when the runtime is not running", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -48,8 +54,7 @@ describe("workflows routes", () => {
         workflowRef.current = undefined
 
         // #when — a real minted-shape runID (wf_ + 26-char payload) with no persisted run
-        const app = Server.Default().app
-        const response = await app.request("/workflows/wf_16ec185f2ffexEGkbWeMqWSucv/resume", { method: "POST" })
+        const response = await request(tmp.path, "/workflows/wf_16ec185f2ffexEGkbWeMqWSucv/resume", { method: "POST" })
 
         // #then
         expect(response.status).toBe(200)
@@ -59,13 +64,13 @@ describe("workflows routes", () => {
   })
 
   test("POST /workflows/:runID/resume accepts a minted v2 descending runID", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         workflowRef.current = undefined
         const runID = Identifier.descending("workflow")
-        const response = await Server.Default().app.request(`/workflows/${runID}/resume`, { method: "POST" })
+        const response = await request(tmp.path, `/workflows/${runID}/resume`, { method: "POST" })
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({ runID, resumed: false })
       },
@@ -86,7 +91,7 @@ describe("workflows routes", () => {
     "wf_..", // bare dot-dot after a legit prefix
   ]) {
     test(`POST /workflows/:runID/resume REJECTS traversal runID ${JSON.stringify(evil)}`, async () => {
-      await using tmp = await tmpdir({ git: true })
+      await using tmp = await tmpdir({ git: true, root: "cwd" })
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
@@ -95,8 +100,7 @@ describe("workflows routes", () => {
           workflowRef.current = undefined
 
           // #when
-          const app = Server.Default().app
-          const response = await app.request(`/workflows/${encodeURIComponent(evil)}/resume`, { method: "POST" })
+          const response = await request(tmp.path, `/workflows/${encodeURIComponent(evil)}/resume`, { method: "POST" })
 
           // #then — rejected by the param validator before any path.join / file read.
           expect(response.status).toBe(400)
@@ -114,12 +118,12 @@ describe("workflows routes", () => {
   const childRunID = "wf_" + "a".repeat(64)
   for (const path of [`/workflows/${childRunID}/transcript`, `/workflows/${childRunID}/structure`]) {
     test(`GET ${path} accepts a 64-hex child runID (200, not 400)`, async () => {
-      await using tmp = await tmpdir({ git: true })
+      await using tmp = await tmpdir({ git: true, root: "cwd" })
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
           workflowRef.current = undefined
-          const response = await Server.Default().app.request(path, { method: "GET" })
+          const response = await request(tmp.path, path, { method: "GET" })
           expect(response.status).toBe(200)
         },
       })
@@ -128,12 +132,12 @@ describe("workflows routes", () => {
 
   for (const path of ["/workflows/wf_..%2F..%2Fetc/transcript", "/workflows/not-a-run/structure"]) {
     test(`GET ${path} still REJECTS a malformed runID (400)`, async () => {
-      await using tmp = await tmpdir({ git: true })
+      await using tmp = await tmpdir({ git: true, root: "cwd" })
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
           workflowRef.current = undefined
-          const response = await Server.Default().app.request(path, { method: "GET" })
+          const response = await request(tmp.path, path, { method: "GET" })
           expect(response.status).toBe(400)
         },
       })
@@ -142,7 +146,7 @@ describe("workflows routes", () => {
 
   // ── P0 (MR104 #3): GET /workflows must NOT leak all-session runs ──────────
   test("GET /workflows with NO sessionID returns 400 (does not list all runs)", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -152,8 +156,7 @@ describe("workflows routes", () => {
         workflowRef.current = undefined
 
         // #when — omit sessionID entirely
-        const app = Server.Default().app
-        const response = await app.request("/workflows", { method: "GET" })
+        const response = await request(tmp.path, "/workflows", { method: "GET" })
 
         // #then — rejected, NOT a 200 with the unfiltered all-runs branch.
         expect(response.status).toBe(400)
@@ -162,13 +165,12 @@ describe("workflows routes", () => {
   })
 
   test("GET /workflows with a non-session-shaped sessionID returns 400", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         workflowRef.current = undefined
-        const app = Server.Default().app
-        const response = await app.request("/workflows?sessionID=not-a-session", { method: "GET" })
+        const response = await request(tmp.path, "/workflows?sessionID=not-a-session", { method: "GET" })
         expect(response.status).toBe(400)
       },
     })

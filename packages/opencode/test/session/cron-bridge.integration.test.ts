@@ -1,4 +1,4 @@
-import { test, expect, beforeEach } from "bun:test"
+import { test, expect, beforeEach, afterEach } from "bun:test"
 import { Effect, Layer } from "effect"
 import { mkdtempSync, rmSync } from "fs"
 import { tmpdir } from "os"
@@ -94,11 +94,30 @@ const makeCaptureLayer = (captured: { value: CapturedPrompt[] }) =>
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "cron-bridge-"))
 
+// The bridge starts the scheduler without opts.dir, so its lock and task file
+// would default to process.cwd(): this package directory inside the checkout.
+// Root them in the workspace the bridge was started for.
+const SchedulerInWorkspace = Layer.effect(
+  Scheduler,
+  Effect.gen(function* () {
+    const scheduler = yield* Scheduler
+    return Scheduler.of({ ...scheduler, start: (opts) => scheduler.start({ ...opts, dir: opts.dir ?? opts.workspaceRoot }) })
+  }),
+).pipe(Layer.provide(SchedulerDefaultLayer))
+
+const originalCronFlag = Flag.MIMOCODE_EXPERIMENTAL_CRON
+afterEach(() => {
+  ;(Flag as { MIMOCODE_EXPERIMENTAL_CRON: boolean }).MIMOCODE_EXPERIMENTAL_CRON = originalCronFlag
+})
+
 beforeEach(() => {
   clearAllLoopStates()
   removeSessionCronTasks(getSessionCronTasks().map((t) => t.id))
   delete process.env.MIMOCODE_DISABLE_CRON
   process.env.MIMOCODE_EXPERIMENTAL_CRON = "1"
+  // The flag is read once at import and the package preload turns cron off, so
+  // the environment variable alone cannot enable the bridge for these cases.
+  ;(Flag as { MIMOCODE_EXPERIMENTAL_CRON: boolean }).MIMOCODE_EXPERIMENTAL_CRON = true
 })
 
 const sid = SessionID.make("ses_cronbridge_test")
@@ -108,7 +127,7 @@ const harness = <A>(captured: { value: CapturedPrompt[] }, work: (ctx: {
   scheduler: SchedulerInterface
 }) => Effect.Effect<A, unknown, SessionPrompt.Service>) => {
   const capture = makeCaptureLayer(captured)
-  const base = Layer.mergeAll(SchedulerDefaultLayer, SessionStatus.defaultLayer, Bus.layer, capture)
+  const base = Layer.mergeAll(SchedulerInWorkspace, SessionStatus.defaultLayer, Bus.layer, capture)
   const bridge = cronBridgeLayer.pipe(Layer.provide(base))
   const eff = Effect.gen(function* () {
     const b = yield* CronBridge
@@ -255,7 +274,7 @@ test("cron-bridge is resolvable via CronBridge.use (matches prompt.ts hook patte
   const instanceDir = mkdtempSync(join(tmpdir(), "cron-bridge-instance-"))
   try {
     const capture = makeCaptureLayer(captured)
-    const base = Layer.mergeAll(SchedulerDefaultLayer, SessionStatus.defaultLayer, Bus.layer, capture)
+    const base = Layer.mergeAll(SchedulerInWorkspace, SessionStatus.defaultLayer, Bus.layer, capture)
     const bridge = cronBridgeLayer.pipe(Layer.provide(base))
     const layered = Layer.mergeAll(bridge, base)
     await Effect.runPromise(
@@ -293,7 +312,7 @@ test("cron-bridge resets sentinel cache on main-agent Compacted, ignores subagen
     writeFileSync2(join(wsDir, ".mimocode", "loop.md"), "cached body")
 
     const capture = makeCaptureLayer(captured)
-    const base = Layer.mergeAll(SchedulerDefaultLayer, SessionStatus.defaultLayer, Bus.layer, capture)
+    const base = Layer.mergeAll(SchedulerInWorkspace, SessionStatus.defaultLayer, Bus.layer, capture)
     const bridge = cronBridgeLayer.pipe(Layer.provide(base))
     const layered = Layer.mergeAll(bridge, base)
 

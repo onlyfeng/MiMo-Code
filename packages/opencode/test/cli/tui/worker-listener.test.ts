@@ -42,7 +42,7 @@ function closed(url: string) {
 test("worker listener authenticates automatically without changing operator directory or bind authority", async () => {
   Flag.MIMOCODE_SERVER_PASSWORD = undefined
   const env = process.env.MIMOCODE_SERVER_PASSWORD
-  await using local = await tmpdir({ root: "cwd", config: {} })
+  await using local = await tmpdir({ root: "cwd", git: true, config: {} })
   await using outside = await tmpdir({ config: {} })
   const listener = createWorkerListener({ directory: local.path })
   try {
@@ -62,7 +62,7 @@ test("worker listener authenticates automatically without changing operator dire
         await status(result.url, `${endpoint}?directory=${encodeURIComponent(outside.path)}`, serverAuthHeaders()),
       ).toBe(403)
     }
-    expect(await status(result.url, "/v1/models", serverAuthHeaders())).toBe(401)
+    expect(await status(result.url, `/v1/models?directory=${encodeURIComponent(local.path)}`, serverAuthHeaders())).toBe(401)
     await expect(Server.listen({ hostname: "0.0.0.0", port: 0 })).rejects.toThrow("Refusing to bind")
     expect(await LLMServerTokens.addresses(local.path)).toHaveLength(1)
     await listener.stop()
@@ -78,7 +78,7 @@ test("worker listener authenticates automatically without changing operator dire
 test("worker listener preserves operator authentication and explicit network permission", async () => {
   Flag.MIMOCODE_SERVER_PASSWORD = "operator-fixture-password"
   Flag.MIMOCODE_SERVER_USERNAME = "operator"
-  await using local = await tmpdir({ root: "cwd", config: {} })
+  await using local = await tmpdir({ root: "cwd", git: true, config: {} })
   await using outside = await tmpdir({ config: {} })
   const listener = createWorkerListener({ directory: local.path })
   try {
@@ -103,7 +103,7 @@ test("worker listener preserves operator authentication and explicit network per
 
 test("concurrent worker starts share one real socket and shutdown blocks further admission", async () => {
   Flag.MIMOCODE_SERVER_PASSWORD = undefined
-  await using tmp = await tmpdir({ root: "cwd", config: {} })
+  await using tmp = await tmpdir({ root: "cwd", git: true, config: {} })
   const listener = createWorkerListener({ directory: tmp.path })
   try {
     const [first, second] = await Promise.all([listener.start(), listener.start({ http: true })])
@@ -126,7 +126,7 @@ test("concurrent worker starts share one real socket and shutdown blocks further
 for (const bindFirst of [false, true]) {
   test(`worker shutdown joins a pending start with real bind ${bindFirst ? "before" : "after"} the gate`, async () => {
     Flag.MIMOCODE_SERVER_PASSWORD = undefined
-    await using tmp = await tmpdir({ root: "cwd", config: {} })
+    await using tmp = await tmpdir({ root: "cwd", git: true, config: {} })
     const entered = Promise.withResolvers<void>()
     const gate = Promise.withResolvers<void>()
     const sockets: Server.Listener[] = []
@@ -163,7 +163,7 @@ for (const bindFirst of [false, true]) {
 
 test("real occupied port gives a bounded safe result and a later worker start can retry", async () => {
   Flag.MIMOCODE_SERVER_PASSWORD = undefined
-  await using tmp = await tmpdir({ root: "cwd", config: {} })
+  await using tmp = await tmpdir({ root: "cwd", git: true, config: {} })
   const occupied = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("occupied") })
   const listener = createWorkerListener({ directory: tmp.path })
   try {
@@ -187,7 +187,7 @@ test("real occupied port gives a bounded safe result and a later worker start ca
 
 test("automatic authentication permits external binding only with the existing explicit noAuth option", async () => {
   Flag.MIMOCODE_SERVER_PASSWORD = undefined
-  await using tmp = await tmpdir({ root: "cwd", config: {} })
+  await using tmp = await tmpdir({ root: "cwd", git: true, config: {} })
   const listener = createWorkerListener({ directory: tmp.path })
   try {
     const result = await listener.start({ hostname: "0.0.0.0", noAuth: true, http: true })
@@ -198,8 +198,9 @@ test("automatic authentication permits external binding only with the existing e
     // Explicit network permission does not disable the authentication itself.
     const url = new URL(result.url)
     url.hostname = "127.0.0.1"
-    expect(await status(url.toString(), "/config")).toBe(401)
-    expect(await status(url.toString(), "/config", result.headers)).toBe(200)
+    const config = `/config?directory=${encodeURIComponent(tmp.path)}`
+    expect(await status(url.toString(), config)).toBe(401)
+    expect(await status(url.toString(), config, result.headers)).toBe(200)
   } finally {
     await listener.stop()
     listener.clearAuthentication()
@@ -208,16 +209,17 @@ test("automatic authentication permits external binding only with the existing e
 
 test("operator changes override a live automatic credential and survive worker cleanup", async () => {
   Flag.MIMOCODE_SERVER_PASSWORD = undefined
-  await using tmp = await tmpdir({ root: "cwd", config: {} })
+  await using tmp = await tmpdir({ root: "cwd", git: true, config: {} })
   const listener = createWorkerListener({ directory: tmp.path })
   try {
     const result = await listener.start({ http: true })
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error(result.error)
-    expect(await status(result.url, "/config", result.headers)).toBe(200)
+    const config = `/config?directory=${encodeURIComponent(tmp.path)}`
+    expect(await status(result.url, config, result.headers)).toBe(200)
     Flag.MIMOCODE_SERVER_PASSWORD = "later-operator-fixture"
-    expect(await status(result.url, "/config", result.headers)).toBe(401)
-    expect(await status(result.url, "/config", serverAuthHeaders())).toBe(200)
+    expect(await status(result.url, config, result.headers)).toBe(401)
+    expect(await status(result.url, config, serverAuthHeaders())).toBe(200)
     await listener.stop()
     listener.clearAuthentication()
     expect(Flag.MIMOCODE_SERVER_PASSWORD === "later-operator-fixture").toBe(true)

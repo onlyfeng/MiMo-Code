@@ -47,7 +47,9 @@ const ctx = {
 Shell.acceptable.reset()
 const quote = (text: string) => `"${text}"`
 const squote = (text: string) => `'${text}'`
-const projectRoot = path.join(__dirname, "../..")
+// A git fixture rather than this checkout: an instance rooted in the repository
+// runs config discovery against its .mimocode and installs dependencies there.
+const projectRoot = (await tmpdir({ git: true })).path
 const bin = quote(process.execPath.replaceAll("\\", "/"))
 const bash = (() => {
   const shell = Shell.acceptable()

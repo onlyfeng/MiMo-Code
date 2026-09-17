@@ -478,7 +478,12 @@ describe("tool.read truncation", () => {
 
   it.live("large image files are properly attached without error", () =>
     Effect.gen(function* () {
-      const result = yield* exec(FIXTURES_DIR, { file_path: path.join(FIXTURES_DIR, "large-image.png") })
+      // Read a copy: an instance rooted in test/tool/fixtures sits inside the
+      // checkout, whose .mimocode config discovery would install dependencies into.
+      const dir = yield* tmpdirScoped()
+      const image = path.join(dir, "large-image.png")
+      yield* Effect.promise(() => Bun.write(image, Bun.file(path.join(FIXTURES_DIR, "large-image.png"))))
+      const result = yield* exec(dir, { file_path: image })
       expect(result.metadata.truncated).toBe(false)
       expect(result.attachments).toBeDefined()
       expect(result.attachments?.length).toBe(1)

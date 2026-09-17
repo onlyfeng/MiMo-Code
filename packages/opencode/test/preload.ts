@@ -236,6 +236,12 @@ process.env["MIMOCODE_DB"] = ":memory:"
 // feature, so enable it here (Flag is read once at import — must be set first).
 process.env["MIMOCODE_EXPERIMENTAL_ORCHESTRATOR"] = "true"
 
+// Keep the cron bridge inert in tests (default ON in prod). A session boot starts
+// its scheduler, whose lock and task file default to process.cwd(): this package
+// directory inside the checkout, shared by every concurrent test process. The
+// cron suites opt in by setting Flag.MIMOCODE_EXPERIMENTAL_CRON themselves.
+process.env["MIMOCODE_EXPERIMENTAL_CRON"] = "false"
+
 // Now safe to import from src/
 const { Log } = await import("../src/util")
 const { initProjectors } = await import("../src/server/projectors")

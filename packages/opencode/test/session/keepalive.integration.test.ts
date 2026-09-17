@@ -85,14 +85,25 @@ const stubPrompt = Layer.succeed(
   }),
 )
 
+// The bridge starts the scheduler without opts.dir, so its lock and task file
+// would default to process.cwd(): this package directory inside the checkout.
+// Root them in the workspace the bridge was started for.
+const SchedulerInWorkspace = Layer.effect(
+  Scheduler,
+  Effect.gen(function* () {
+    const scheduler = yield* Scheduler
+    return Scheduler.of({ ...scheduler, start: (opts) => scheduler.start({ ...opts, dir: opts.dir ?? opts.workspaceRoot }) })
+  }),
+).pipe(Layer.provide(SchedulerDefaultLayer))
+
 const env = Layer.mergeAll(
-  SchedulerDefaultLayer,
+  SchedulerInWorkspace,
   SessionStatus.defaultLayer,
   Bus.layer,
   CrossSpawnSpawner.defaultLayer,
   stubPrompt,
   cronBridgeLayer.pipe(
-    Layer.provide(SchedulerDefaultLayer),
+    Layer.provide(SchedulerInWorkspace),
     Layer.provide(SessionStatus.defaultLayer),
     Layer.provide(Bus.layer),
     Layer.provide(stubPrompt),
