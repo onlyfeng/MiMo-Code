@@ -27,6 +27,7 @@ import { useLanguage } from "@tui/context/language"
 import { useRenderer, type JSX } from "@opentui/solid"
 import * as Editor from "@tui/util/editor"
 import * as Model from "@tui/util/model"
+import { createModelPreview } from "@tui/util/model-preview"
 import * as Voice from "@tui/util/voice"
 import * as VoiceEdit from "@tui/util/voice-edit"
 import { useExit } from "../../context/exit"
@@ -154,23 +155,47 @@ export function Prompt(props: PromptProps) {
   const voiceEnabled = createMemo(() => kv.get("voice_enabled", false))
   const voiceSendEnabled = createMemo(() => kv.get("voice_send_command", false))
   const voiceControlEnabled = createMemo(() => kv.get("voice_control_enabled", false))
+  const modelPreview = createModelPreview(
+    () => {
+      const model = local.model.current()
+      const agent = local.agent.current()
+      if (!model || !agent) return
+      const session = props.sessionID ? sync.session.get(props.sessionID) : undefined
+      if (props.sessionID && !session) return
+      return {
+        agent: agent.name,
+        model,
+        variant: local.model.variant.current(),
+        workspace: props.sessionID ? session?.workspaceID : props.workspaceID,
+      }
+    },
+    async (selection, signal) => {
+      const result = await sdk.client.experimental.resolveModelSelection(selection, { signal, throwOnError: true })
+      return result.data
+    },
+    () =>
+      JSON.stringify([
+        props.sessionID,
+        props.workspaceID,
+        project.instance.directory(),
+        local.agent.current(),
+        sync.data.config.model,
+        sync.data.config.model_groups,
+        sync.data.provider.map((provider) => [provider.id, Object.keys(provider.models)]),
+        Model.get(sync.data.provider, local.model.current()?.providerID ?? "", local.model.current()?.modelID ?? "")
+          ?.variants,
+      ]),
+  )
   const currentModelMetadata = createMemo(() => {
     const current = local.model.current()
-    return current
-      ? Model.displayMetadata(
-          sync.data.provider,
-          {
-            ...current,
-            variant: Model.effectiveVariant(sync.data.provider, {
-              agent: local.agent.current(),
-              groups: sync.data.config.model_groups,
-              selection: current,
-              selected: local.model.variant.current(),
-            }),
-          },
-          local.model.parsed().model,
-        )
-      : undefined
+    if (!current) return
+    const preview = modelPreview()
+    if (preview.status === "ready")
+      return Model.displayMetadata(sync.data.provider, preview.selection, local.model.parsed().model)
+    return {
+      alias: local.model.parsed().model,
+      detail: `${current.providerID}/${current.modelID} · variant: ${preview.status === "pending" ? "resolving" : "unknown"}`,
+    }
   })
   const [voiceState, setVoiceState] = createSignal<VoiceState>(
     activeVoice ? (activeVoice.pending > 0 ? "processing" : "listening") : "idle",

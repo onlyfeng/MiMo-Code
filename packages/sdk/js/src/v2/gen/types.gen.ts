@@ -3021,6 +3021,12 @@ export type Provider = {
   }
 }
 
+export type ResolvedModelSelection = {
+  providerID: string
+  modelID: string
+  variant?: string
+}
+
 export type ConsoleState = {
   consoleManagedProviders: Array<string>
   activeOrgName?: string
@@ -4319,6 +4325,47 @@ export type ConfigProvidersResponses = {
 }
 
 export type ConfigProvidersResponse = ConfigProvidersResponses[keyof ConfigProvidersResponses]
+
+export type ExperimentalResolveModelSelectionData = {
+  body: {
+    agent?: string
+    model: {
+      providerID: string
+      modelID: string
+    }
+    variant?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/model-selection"
+}
+
+export type ExperimentalResolveModelSelectionErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ExperimentalResolveModelSelectionError =
+  ExperimentalResolveModelSelectionErrors[keyof ExperimentalResolveModelSelectionErrors]
+
+export type ExperimentalResolveModelSelectionResponses = {
+  /**
+   * Resolved model selection
+   */
+  200: ResolvedModelSelection
+}
+
+export type ExperimentalResolveModelSelectionResponse =
+  ExperimentalResolveModelSelectionResponses[keyof ExperimentalResolveModelSelectionResponses]
 
 export type ExperimentalConsoleGetData = {
   body?: never

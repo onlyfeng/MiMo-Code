@@ -1704,6 +1704,17 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-TUI-001 — request provider/model/variant display
 
+- 2026-09-18 model-selection correction: ordinary prompt metadata is resolved
+  by `POST /experimental/model-selection`, using the same server resolver as
+  actual user-message creation. The TUI sends its selected model, agent and
+  explicit variant; it no longer mirrors agent model-group or default-model
+  selection. Preview results never update the selected variant store or delay
+  submission. Pending and failed previews display `resolving` and `unknown`,
+  respectively; `none` requires a successful response without a named variant.
+  Replaced requests and disposed components cannot accept late responses.
+  Preview requests carry the submitting session's workspace, or the selected
+  workspace for a new session; an unloaded session cannot publish a result.
+
 - 2026-09-09 full sync: retain provider/model/variant metadata and titleLocale; the multimodal title test now sends actual PNG/JPEG bytes through the inherited image transform.
 
 - POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
@@ -1721,8 +1732,9 @@ files remain byte-identical to the accepted main correction.
   `ec963d93abcc41a41aff9a65a6fd8f4b5aabfdef` displays one request-oriented
   `alias · providerID/modelID · variant: <value>` row in the prompt and
   subagent footer.
-- Delta: provider/model is unconditional, the persisted or explicitly selected
-  named variant is shown, and the absence of such a value is rendered as
+- Delta: provider/model is unconditional. Ordinary prompt variants come from
+  the server preview; subagent variants come from persisted messages. A
+  successfully resolved or persisted absence of a named variant is rendered as
   `variant: none` instead of inventing a provider default. Metadata shrinks
   before established footer controls on narrow terminals. The same prompt
   submits `language.intl()` as `titleLocale`; presentation metadata does not
@@ -1731,10 +1743,17 @@ files remain byte-identical to the accepted main correction.
   `packages/opencode/src/cli/cmd/tui/component/model-metadata.tsx`,
   `packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx`,
   `packages/opencode/src/cli/cmd/tui/routes/session/subagent-footer.tsx`, and
-  `packages/opencode/src/cli/cmd/tui/util/model.ts`.
+  `packages/opencode/src/cli/cmd/tui/util/model.ts`,
+  `packages/opencode/src/cli/cmd/tui/util/model-preview.ts`,
+  `packages/opencode/src/session/model-selection.ts`,
+  `packages/opencode/src/session/prompt.ts`,
+  `packages/opencode/src/server/routes/instance/experimental.ts`, and the
+  generated SDK/OpenAPI model-selection operation.
 - Test surfaces:
   `packages/opencode/test/cli/tui/model-metadata.test.tsx` and
-  `packages/opencode/test/cli/tui/model.test.ts`.
+  `packages/opencode/test/cli/tui/model.test.ts`,
+  `packages/opencode/test/cli/tui/model-preview.test.tsx`, and
+  `packages/opencode/test/server/model-selection.test.ts`.
 - 2026-09-05 synchronization: No TUI component or locale submission path
   changed. Title context now strips leading mentions while
   provider/model/variant metadata remains authoritative.
@@ -1747,10 +1766,15 @@ files remain byte-identical to the accepted main correction.
 - Review basis: inherited main
   `37bbc8229ca70a92b5eaaa7bafd725d070f3f271`; compat behavior
   `ec963d93abcc41a41aff9a65a6fd8f4b5aabfdef`.
-- Evidence: rendering tests cover the unified label and narrow layout; model
-  tests cover explicit and persisted variants, literal/group agent refs,
-  mismatched models, absent variants, and unknown built-in tiers. Prompt and
-  App submission tests cover the independently inherited locale path.
+- Evidence: rendering tests cover the unified label and narrow layout. HTTP
+  preview tests compare literal/group/tier resolution and explicit/default
+  variants with actual persisted no-reply prompts. Reactive preview tests
+  cover reordered responses, repeated selections, scope refresh, failure and
+  disposal. SDK tests verify workspace query placement and request cancellation;
+  real local-workspace routing agrees with session-ID-routed submissions.
+  Model tests retain persisted metadata and context-budget coverage;
+  the removed client inference tests are replaced by server behavior coverage.
+  Prompt and App submission tests cover the independently inherited locale path.
 - 2026-09-01 review: incoming `main` changes had no TUI metadata or locale-path
   overlap. The compat follow-up changed adjacent prompt, model-ordering,
   checkpoint-context, and global revert/redo paths without changing the
@@ -1778,16 +1802,18 @@ files remain byte-identical to the accepted main correction.
 - 2026-09-04 PR #74 propagation: no TUI component path changed. Shared handoff
   now drains persisted queued turns; provider/model/variant truth and locale
   submission remain unchanged.
-- Known limits: an unconfigured built-in tier can display `variant: none` while
-  the server resolves an agent variant through its default-model path. An
-  in-session agent switch can likewise display `variant: none` until the TUI has
-  request-persisted metadata that reflects the server's resolved agent variant.
+- Known limits: a preview describes ordinary prompt selection at resolution
+  time, not a reservation of future configuration. Shell and commands with
+  their own agent/model overrides use separate execution paths. An older
+  attached server without the preview endpoint displays an unknown variant
+  instead of falling back to client inference. Subagent metadata continues to
+  describe persisted requests.
 - 2026-09-07 selected-capability review: No owned TUI metadata or locale-submission
   implementation overlap. Request provider/model/variant truth, both
   `titleLocale` paths, narrow-layout behavior, and the existing variant-display
   limits remain unchanged. The shared backend harness alias does not create
   a second compat metadata resolver.
 - 2026-09-08 selected Actor/MCP completion: No metadata or titleLocale component changed; provider/model/variant presentation and existing known limits remain unchanged.
-- Exit condition: retire when the server exposes authoritative pending-request
-  provider/model/variant metadata, or shared `main` renders equivalent truth
-  without client-side default-model guessing and covers both known limits.
+- Exit condition: the client inference portion is removed by the server
+  resolver correction. Retire the remaining compat presentation/API overlay
+  when shared `main` exposes the equivalent preview and metadata display.
