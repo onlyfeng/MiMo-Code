@@ -29,6 +29,7 @@ import { EffectLogger } from "@/effect"
 import {
   inlineToolAttachment,
   routeToolAttachment,
+  supportsResponsesToolContent,
   toolAttachmentFilename,
   toolAttachmentPlaceholder,
 } from "./tool-attachment"
@@ -602,13 +603,15 @@ export const Assistant = Base.extend({
     }),
   }),
   structured: z.any().optional(),
-  actorResult: z.object({
-    finalText: z.string().optional(),
-    structured: z.unknown().optional(),
-    reportedStatus: z.enum(["success", "partial", "failed", "blocked"]).optional(),
-    reportedSummary: z.string().optional(),
-    warnings: z.array(z.string()).optional(),
-  }).optional(),
+  actorResult: z
+    .object({
+      finalText: z.string().optional(),
+      structured: z.unknown().optional(),
+      reportedStatus: z.enum(["success", "partial", "failed", "blocked"]).optional(),
+      reportedSummary: z.string().optional(),
+      warnings: z.array(z.string()).optional(),
+    })
+    .optional(),
   variant: z.string().optional(),
   finish: z.string().optional(),
 }).meta({
@@ -821,6 +824,58 @@ const part = (row: typeof PartTable.$inferSelect) =>
     messageID: row.message_id,
   }) as Part
 
+/** Empty shells contain no model output or tool side effect to continue. */
+export function hasUsefulAssistantParts(parts: readonly Part[]) {
+  return parts.some((part) => {
+    if (part.type === "text") return !part.synthetic && !part.ignored && part.text.trim().length > 0
+    if (part.type === "tool") return true
+    if (part.type === "reasoning") return part.text.trim().length > 0
+    return false
+  })
+}
+
+/** Stable substring for the compose-agent synthetic protocol (request-order head). */
+export const COMPOSE_REMINDER_MARKER = "MiMoCode Compose Agent"
+
+/**
+ * DB orders parts by `PartTable.id` (ascending). Compose protocol must sit at the
+ * head of the user message for every consumer (runLoop request, checkpoint fork
+ * capture, trajectory) or parent/fork prompt prefixes diverge. Promote on hydrate
+ * so position is a load-time invariant, not a request-layer compensating projection.
+ *
+ * Mutates `parts` in place (splice/unshift) and returns the same array. Callers
+ * must not share the array with a consumer that requires PartID-asc order.
+ */
+export function promoteComposeProtocolFirst(parts: Part[]): Part[] {
+  const idx = parts.findIndex(
+    (p) => p.type === "text" && p.synthetic === true && !p.ignored && p.text.includes(COMPOSE_REMINDER_MARKER),
+  )
+  if (idx <= 0) return parts
+  const found = parts[idx]
+  if (!found) return parts
+  parts.splice(idx, 1)
+  parts.unshift(found)
+  return parts
+}
+
+// Part identities stay unchanged. Restore synthetic framing before the genuine
+// user body after DB ordering, including caller-supplied non-monotonic IDs.
+function orderUserParts(parts: Part[]) {
+  const envelope = parts.findIndex(
+    (part) =>
+      part.type === "text" && part.synthetic === true && !part.ignored && part.metadata?.userImageAttachment === true,
+  )
+  const anchor = parts.findIndex(
+    (part) =>
+      !("synthetic" in part && part.synthetic) && (part.type === "file" || (part.type === "text" && !part.ignored)),
+  )
+  if (envelope >= 0 && anchor >= 0 && envelope > anchor) {
+    const [part] = parts.splice(envelope, 1)
+    parts.splice(anchor, 0, part!)
+  }
+  return promoteComposeProtocolFirst(parts)
+}
+
 const older = (row: Cursor) =>
   or(lt(MessageTable.time_created, row.time), and(eq(MessageTable.time_created, row.time), lt(MessageTable.id, row.id)))
 
@@ -846,7 +901,7 @@ function hydrate(rows: (typeof MessageTable.$inferSelect)[]) {
 
   return rows.map((row) => ({
     info: info(row),
-    parts: partByMessage.get(row.id) ?? [],
+    parts: orderUserParts(partByMessage.get(row.id) ?? []),
   }))
 }
 
@@ -867,7 +922,12 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
    * skillCatalogInSystem is internal: enable only when the paired frozen system
    * already owns the catalog, including an explicitly empty catalog.
    */
-  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean; skillCatalogInSystem?: boolean },
+  options?: {
+    stripMedia?: boolean
+    collapseCheckpointTail?: boolean
+    skillCatalogInSystem?: boolean
+    languageProvider?: string
+  },
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
@@ -1004,7 +1064,11 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
         }
         // text/plain and directory files are converted into text parts, ignore them
         if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
-          if (part.url.startsWith("file:") && part.mime !== "application/pdf" && !/^(?:image|audio|video)\//.test(part.mime)) {
+          if (
+            part.url.startsWith("file:") &&
+            part.mime !== "application/pdf" &&
+            !/^(?:image|audio|video)\//.test(part.mime)
+          ) {
             userMessage.parts.push({ type: "text", text: `[Attached local file: ${fileURLToPath(part.url)}]` })
           } else if (options?.stripMedia && isMedia(part.mime)) {
             userMessage.parts.push({
@@ -1062,7 +1126,12 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
         const native: FilePart[] = []
         const parts: (typeof syntheticGroups)[number]["parts"] = []
         for (const attachment of input.attachments) {
-          const route = routeToolAttachment({ model, attachment, allowNative: input.allowNative })
+          const route = routeToolAttachment({
+            model,
+            attachment,
+            allowNative: input.allowNative,
+            languageProvider: options?.languageProvider,
+          })
           if (route === "native") native.push(attachment)
           if (route === "synthetic") {
             parts.push({
@@ -1169,21 +1238,31 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
           }
           if (part.state.status === "error") {
             const attachments = options?.stripMedia ? [] : (part.state.attachments ?? [])
-            routeAttachments({
+            const finalAttachments = routeAttachments({
               tool: part.tool,
               callID: part.callID,
               status: "error",
               attachments,
-              allowNative: false,
+              allowNative: supportsResponsesToolContent(model, options?.languageProvider),
             })
             const output = part.state.metadata?.interrupted === true ? part.state.metadata.output : undefined
-            if (typeof output === "string") {
+            if (finalAttachments.length > 0 || typeof output === "string") {
               assistantMessage.parts.push({
                 type: ("tool-" + part.tool) as `tool-${string}`,
                 state: "output-available",
                 toolCallId: part.callID,
                 input: capModelReplayToolInput(part.state.input),
-                output: capModelReplayToolText(output),
+                // Responses has no separate error-image output variant. Keep the
+                // failure explicit in text and its images under the same call ID.
+                output:
+                  finalAttachments.length > 0
+                    ? {
+                        text: capModelReplayToolText(
+                          `Tool failed: ${part.state.error}${typeof output === "string" ? `\n${output}` : ""}`,
+                        ),
+                        attachments: finalAttachments,
+                      }
+                    : capModelReplayToolText(output),
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
               })
@@ -1270,7 +1349,12 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
 export const toModelMessagesEffect = Effect.fnUntraced(function* (
   input: WithParts[],
   model: Provider.Model,
-  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean; skillCatalogInSystem?: boolean },
+  options?: {
+    stripMedia?: boolean
+    collapseCheckpointTail?: boolean
+    skillCatalogInSystem?: boolean
+    languageProvider?: string
+  },
 ) {
   return (yield* toModelMessagesWithCurrentTurnInternalEffect(input, model, undefined, options)).messages
 })
@@ -1279,7 +1363,12 @@ export const toModelMessagesWithCurrentTurnEffect = Effect.fnUntraced(function* 
   input: WithParts[],
   model: Provider.Model,
   currentUserID: MessageID,
-  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean; skillCatalogInSystem?: boolean },
+  options?: {
+    stripMedia?: boolean
+    collapseCheckpointTail?: boolean
+    skillCatalogInSystem?: boolean
+    languageProvider?: string
+  },
 ) {
   return yield* toModelMessagesWithCurrentTurnInternalEffect(input, model, currentUserID, options)
 })
@@ -1287,7 +1376,12 @@ export const toModelMessagesWithCurrentTurnEffect = Effect.fnUntraced(function* 
 export function toModelMessages(
   input: WithParts[],
   model: Provider.Model,
-  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean; skillCatalogInSystem?: boolean },
+  options?: {
+    stripMedia?: boolean
+    collapseCheckpointTail?: boolean
+    skillCatalogInSystem?: boolean
+    languageProvider?: string
+  },
 ): Promise<ModelMessage[]> {
   return Effect.runPromise(toModelMessagesEffect(input, model, options).pipe(Effect.provide(EffectLogger.layer)))
 }
@@ -1296,7 +1390,12 @@ export function toModelMessagesWithCurrentTurn(
   input: WithParts[],
   model: Provider.Model,
   currentUserID: MessageID,
-  options?: { stripMedia?: boolean; collapseCheckpointTail?: boolean; skillCatalogInSystem?: boolean },
+  options?: {
+    stripMedia?: boolean
+    collapseCheckpointTail?: boolean
+    skillCatalogInSystem?: boolean
+    languageProvider?: string
+  },
 ) {
   return Effect.runPromise(
     toModelMessagesWithCurrentTurnEffect(input, model, currentUserID, options).pipe(Effect.provide(EffectLogger.layer)),
@@ -1372,14 +1471,16 @@ export function parts(message_id: MessageID) {
   const rows = Database.use((db) =>
     db.select().from(PartTable).where(eq(PartTable.message_id, message_id)).orderBy(PartTable.id).all(),
   )
-  return rows.map(
-    (row) =>
-      ({
-        ...row.data,
-        id: row.id,
-        sessionID: row.session_id,
-        messageID: row.message_id,
-      }) as Part,
+  return orderUserParts(
+    rows.map(
+      (row) =>
+        ({
+          ...row.data,
+          id: row.id,
+          sessionID: row.session_id,
+          messageID: row.message_id,
+        }) as Part,
+    ),
   )
 }
 
@@ -1448,9 +1549,7 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
         msg === rebuild.marker
           ? {
               ...msg,
-              parts: msg.parts.map((part) =>
-                part.type === "checkpoint" ? { ...part, digestUpTo: undefined } : part,
-              ),
+              parts: msg.parts.map((part) => (part.type === "checkpoint" ? { ...part, digestUpTo: undefined } : part)),
             }
           : msg,
       ),

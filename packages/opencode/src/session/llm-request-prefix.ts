@@ -51,6 +51,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   sessionID: SessionID
   agent: Agent.Info
   model: Provider.Model
+  languageProvider?: string
   msgs: MessageV2.WithParts[]
   /** Exact source user boundary for the active model-visible turn. */
   currentUserID?: MessageID
@@ -88,7 +89,11 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     input.msgs,
     input.model,
     input.currentUserID ?? lastUserMsg.info.id,
-    { collapseCheckpointTail: input.collapseCheckpointTail, skillCatalogInSystem: input.skillCatalogInSystem },
+    {
+      collapseCheckpointTail: input.collapseCheckpointTail,
+      skillCatalogInSystem: input.skillCatalogInSystem,
+      languageProvider: input.languageProvider,
+    },
   )
   const inheritedMessages = converted.messages
   const lastUser = input.prompt

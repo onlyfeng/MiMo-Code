@@ -130,7 +130,7 @@ describe("SessionRunState tuple key — independent Runners per (sid, agentID)",
           }),
       })
 
-      // Start first run
+      // Wait until the first run body is executing before testing reentry.
       const fiber1 = yield* runner
         .ensureRunning(
           Effect.gen(function* () {

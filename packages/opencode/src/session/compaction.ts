@@ -204,6 +204,7 @@ export const buildTail = Effect.fn("SessionCompaction.buildTail")(function* (inp
   messages: MessageV2.WithParts[]
   model: Provider.Model
   budget?: number
+  languageProvider?: string
 }) {
   const rounds = groupByApiRound(input.messages)
   const kept: MessageV2.WithParts[][] = []
@@ -211,7 +212,13 @@ export const buildTail = Effect.fn("SessionCompaction.buildTail")(function* (inp
   for (let i = rounds.length - 1; i >= 0; i--) {
     const round = shrinkLargeToolResults(rounds[i])
     const cost = Token.estimate(
-      JSON.stringify(yield* Effect.promise(() => MessageV2.toModelMessages(round, input.model))),
+      JSON.stringify(
+        yield* Effect.promise(() =>
+          MessageV2.toModelMessages(round, input.model, {
+            languageProvider: input.languageProvider,
+          }),
+        ),
+      ),
     )
     if (used + cost > (input.budget ?? COMPACTION_TAIL_BUDGET)) break
     kept.unshift(round)
@@ -223,6 +230,7 @@ export const buildTail = Effect.fn("SessionCompaction.buildTail")(function* (inp
 export const buildProjectionTail = Effect.fn("SessionCompaction.buildProjectionTail")(function* (input: {
   messages: MessageV2.WithParts[]
   model: Provider.Model
+  languageProvider?: string
   budget?: number
 }) {
   const requiredIdx = input.messages.findIndex(MessageV2.isExternalUserMessage)
@@ -235,12 +243,17 @@ export const buildProjectionTail = Effect.fn("SessionCompaction.buildProjectionT
   // Older complete rounds may use only the remaining optional budget.
   const required = shrinkLargeToolResults(input.messages.slice(requiredIdx))
   const requiredCost = Token.estimate(
-    JSON.stringify(yield* Effect.promise(() => MessageV2.toModelMessages(required, input.model))),
+    JSON.stringify(
+      yield* Effect.promise(() =>
+        MessageV2.toModelMessages(required, input.model, { languageProvider: input.languageProvider }),
+      ),
+    ),
   )
   return [
     ...(yield* buildTail({
       messages: input.messages.slice(0, requiredIdx),
       model: input.model,
+      languageProvider: input.languageProvider,
       budget: Math.max(0, (input.budget ?? COMPACTION_TAIL_BUDGET) - requiredCost),
     })),
     ...required,
@@ -524,14 +537,11 @@ export const layer: Layer.Layer<
         compacting.prompt ?? [agent.prompt, ...compacting.context].filter((item): item is string => !!item).join("\n\n")
       const msgs = structuredClone(history)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-      const modelMessages = yield* MessageV2.toModelMessagesEffect(
-        msgs,
-        model,
-        {
-          ...(input.overflow ? { stripMedia: true } : { collapseCheckpointTail: true }),
-          skillCatalogInSystem: Boolean(frozen?.skill_catalog),
-        },
-      )
+      const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {
+        ...(input.overflow ? { stripMedia: true } : { collapseCheckpointTail: true }),
+        skillCatalogInSystem: Boolean(frozen?.skill_catalog),
+        languageProvider: (yield* provider.getLanguage(model)).provider,
+      })
       const ctx = yield* InstanceState.context
       const msg: MessageV2.Assistant = yield* session.createMessage({
         id: MessageID.ascending(),
@@ -803,6 +813,7 @@ export const layer: Layer.Layer<
         const tail = yield* buildProjectionTail({
           messages: arrived,
           model: parentModel,
+          languageProvider: (yield* provider.getLanguage(parentModel)).provider,
           // A missing frozen prefix leaves no optional tail budget. External
           // requests remain mandatory so sizing cannot silently discard work
           // that the summary never saw.

@@ -177,8 +177,9 @@ export function budgetFor(config: ResolvedRetryConfig, decision: RetryDecision):
   if (decision.scope === "max-candidate") return config.maxCandidate
   if (decision.scope === "max-judge") return config.maxJudge
   if (decision.kind === "network") return config.network
-  if (decision.kind === "server") return config.server
   if (decision.kind === "rate_limit") return config.rateLimit
+  if (decision.kind === "server") return config.server
+  if (decision.phase === "request") return config.request
   if (decision.kind === "unknown") return config.unknown
   return config.stream
 }

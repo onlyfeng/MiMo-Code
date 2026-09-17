@@ -300,3 +300,38 @@ describe("terminal compaction finish", () => {
     }
   })
 })
+
+test("tail budgets native Responses images using the parent adapter", async () => {
+  const model = ProviderTest.model()
+  model.capabilities.input.image = true
+  const part = tool("msg_image", "screenshot", {}, "Screenshot")
+  const messages = [
+    user("msg_user", "inspect"),
+    assistant("msg_image", "msg_user", [
+      {
+        ...part,
+        state: {
+          ...part.state,
+          attachments: [
+            {
+              id: PartID.ascending(),
+              sessionID,
+              messageID: MessageID.make("msg_image"),
+              type: "file",
+              mime: "image/png",
+              url: "data:image/png;base64,AQID",
+            },
+          ],
+        },
+      },
+    ]),
+  ]
+  const native = await MessageV2.toModelMessages(messages, model, { languageProvider: "openai.responses" })
+  const fallback = await MessageV2.toModelMessages(messages, model)
+  const budget = Token.estimate(JSON.stringify(native))
+  expect(Token.estimate(JSON.stringify(fallback))).toBeGreaterThan(budget)
+  expect(await Effect.runPromise(buildTail({ messages, model, budget, languageProvider: "openai.responses" }))).toEqual(
+    messages,
+  )
+  expect(await Effect.runPromise(buildTail({ messages, model, budget, languageProvider: "openai.chat" }))).toEqual([])
+})

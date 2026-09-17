@@ -4,7 +4,7 @@ import { Bus } from "../../src/bus"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
-import { MessageID } from "../../src/session/schema"
+import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { TaskRegistry } from "../../src/task/registry"
 import { Updated as TaskUpdated } from "../../src/task/events"
@@ -18,7 +18,7 @@ import { testEffect } from "../lib/effect"
 const it = testEffect(
   Layer.mergeAll(Session.defaultLayer, TaskRegistry.defaultLayer, Bus.defaultLayer, CrossSpawnSpawner.defaultLayer),
 )
-const seed = Effect.fn(function* (actorID = "main", taskID?: string) {
+const seed = Effect.fn(function* (actorID = "main", taskID?: string, empty = false) {
   const sessions = yield* Session.Service
   const session = yield* sessions.create({ title: "Atomic recovery" })
   const user: MessageV2.User = {
@@ -48,6 +48,10 @@ const seed = Effect.fn(function* (actorID = "main", taskID?: string) {
   }
   yield* sessions.updateMessage(user)
   yield* sessions.updateMessage(assistant)
+  if (!empty) yield* sessions.updatePart({
+    id: PartID.ascending(), sessionID: session.id, messageID: assistant.id,
+    type: "text", text: "Partial answer before interruption",
+  })
   return {
     sessions,
     session,
@@ -381,4 +385,35 @@ describe("Session.commitRecoveryCandidate", () => {
       }),
     ),
   )
+  for (const reject of [false, true])
+    it.live(`empty-residue deletion and task claim are atomic when reject=${reject}`, () =>
+      provideTmpdirInstance(() => Effect.gen(function* () {
+        const f = yield* seed("main", undefined, true)
+        const tasks = yield* TaskRegistry.Service
+        const task = yield* tasks.create({ session_id: f.session.id, summary: "Empty recovery" })
+        const before = { user: stored(f.user.id), assistant: stored(f.assistant.id), ...taskRows() }
+        let committed = false
+        if (reject) Database.use((db) => db.run(sql`CREATE TEMP TRIGGER reject_empty_recovery BEFORE DELETE ON message BEGIN SELECT RAISE(ABORT, 'empty recovery deletion failure'); END`))
+        const result = yield* f.sessions.commitRecoveryCandidate({
+          ...f.input, taskID: task.id, taskSessionID: f.session.id,
+          onCommitted: ({ redispatch }) => {
+            expect(redispatch).toBe(true)
+            expect(stored(f.assistant.id)).toBeUndefined()
+            expect(stored(f.user.id)?.data).toMatchObject({ task_id: task.id })
+            committed = true
+          },
+        }).pipe(Effect.exit, Effect.ensuring(Effect.sync(() => {
+          if (reject) Database.use((db) => db.run(sql`DROP TRIGGER reject_empty_recovery`))
+        })))
+        expect(Exit.isFailure(result)).toBe(reject)
+        expect(committed).toBe(!reject)
+        if (reject) {
+          expect({ user: stored(f.user.id), assistant: stored(f.assistant.id), ...taskRows() }).toEqual(before)
+          return
+        }
+        expect(stored(f.assistant.id)).toBeUndefined()
+        expect((yield* tasks.get({ session_id: f.session.id, id: task.id }))?.status).toBe("in_progress")
+      })),
+    )
+
 })

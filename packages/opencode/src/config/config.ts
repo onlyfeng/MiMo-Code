@@ -126,7 +126,7 @@ const InfoSchema = Schema.Struct({
   }),
   auto_worktree: Schema.optional(Schema.Boolean).annotate({
     description:
-      "Enable the once-per-session Auto-Worktree Notice when a primary root session mutates a git main worktree. Defaults to false (notice is off). When true, inject the existing soft-hint system-reminder; when false or omitted, inject nothing. Scope is the notice only — conflict detection and experimental worktree auto-create are not gated by this flag.",
+      "Enable the once-per-session Auto-Worktree Notice when a primary root session mutates a git main worktree. Defaults to false (notice is off). When true, inject the existing soft-hint system-reminder; when false or omitted, inject nothing. Scope is the notice only; this flag neither blocks writes nor creates worktrees.",
   }),
   // User-facing plugin config is stored as Specs; provenance gets attached later while configs are merged.
   plugin: Schema.optional(Schema.mutable(Schema.Array(ConfigPlugin.Spec))),
