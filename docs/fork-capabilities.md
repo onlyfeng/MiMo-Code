@@ -785,18 +785,18 @@ not change their implementation. The preceding review is retained in the
   the same tests use the same paths. There were two writers. A session boot
   starts the cron bridge, which is on by default, and its scheduler lock and
   task file follow `process.cwd()`, which is this package directory. The harness
-  keeps that production path enabled instead of switching cron off, and removes
-  `process.cwd()/.mimocode` after the run under four conditions: a test run
-  created it (a marker in the temp directory, keyed by the path, is written only
-  when the directory was absent at startup); no other test process is alive (a
-  live `mimocode-test-data-<pid>` root); no other live process holds its
-  `.cron-lock`, for example MiMo started from the package directory; and it holds nothing beyond runtime
-  artifacts (`.cron-lock`, `.gitignore`, `package.json`, `package-lock.json`,
-  `bun.lock` and `node_modules`). Any other content, such as
-  `scheduled_tasks.json`, hands the directory over by dropping the marker.
-  Startup applies the same check to what a killed run left. A directory the
-  user created is never touched, and a shorter concurrent run leaves a
-  longer one's lock in place. Without the end-of-run removal,
+  keeps that production path enabled instead of switching cron off. When
+  `process.cwd()/.mimocode` is absent at startup, the preload creates it and
+  records the directory's identity (device, inode and birth time) in a marker in
+  the temp directory. A directory someone else created, or deleted and
+  recreated, never matches that identity. The owned directory is removed at the
+  end of the run, and a killed run's is reclaimed at the next startup, unless
+  another test process (a live `mimocode-test-data-<pid>` root) or a live
+  foreign `.cron-lock` owner may still use it. It is removed only while it holds
+  nothing beyond runtime artifacts (`.cron-lock`, `.gitignore`,
+  `package.json`, `package-lock.json`, `bun.lock` and `node_modules`). Any
+  other content, such as `scheduled_tasks.json`, hands the directory over by
+  dropping the marker. Without the end-of-run release,
   `cancel-notification.test.ts` leaves the directory behind. The cron suites
   stay in upstream's form. The second writer was instances rooted in the repository,
   which ran config discovery against its `.mimocode` and installed dependencies

@@ -3,7 +3,7 @@
 import os from "os"
 import path from "path"
 import { createHash } from "crypto"
-import { constants as fsConstants, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs"
+import { constants as fsConstants, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "fs"
 import fs from "fs/promises"
 import { setTimeout as sleep } from "node:timers/promises"
 import { afterAll } from "bun:test"
@@ -139,11 +139,13 @@ process.env["MIMOCODE_TEST_OUTSIDE_GIT_ROOT"] = outsideGitRoot
 
 // A session boot starts the cron scheduler (on by default), whose lock and task
 // file live in process.cwd()/.mimocode: this package directory inside the checkout.
-// Tests keep that production path, so the harness removes the directory, but only
-// one a test run created (recorded by a marker outside the checkout), only while
-// it holds nothing beyond runtime artifacts, and only when no other test process
-// is alive to still use it. Startup applies the same check to what a killed run
-// left behind; afterAll applies it to this run.
+// Tests keep that production path, so the harness owns and removes that directory
+// when it had to create it. Ownership is the created directory's identity (device,
+// inode and birth time), recorded in a marker outside the checkout: a directory
+// deleted and recreated by someone else never matches. Release also waits while
+// any other test process or a live foreign lock owner may still use the directory,
+// and hands over a directory holding anything beyond runtime artifacts. Startup
+// applies it to what a killed run left; afterAll to this run.
 const tmpRoot = await fs.realpath(os.tmpdir())
 const cwdMimocode = path.join(process.cwd(), ".mimocode")
 const cwdMimocodeMarker = path.join(
@@ -151,38 +153,41 @@ const cwdMimocodeMarker = path.join(
   "mimocode-test-cwd-" + createHash("sha256").update(cwdMimocode).digest("hex").slice(0, 16),
 )
 const runtimeArtifacts = [".cron-lock", ".gitignore", "package.json", "package-lock.json", "bun.lock", "node_modules"]
+const identity = (target: string) => {
+  const stat = statSync(target)
+  return `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`
+}
 const releaseCwdMimocode = () => {
-  const list = (directory: string) => {
+  const read = <T>(fn: () => T, fallback: T) => {
     try {
-      return readdirSync(directory)
+      return fn()
     } catch {
-      return []
+      return fallback
     }
   }
   if (!existsSync(cwdMimocodeMarker)) return
-  const otherTestRun = list(tmpRoot)
+  if (read(() => readFileSync(cwdMimocodeMarker, "utf8") !== identity(cwdMimocode), true)) {
+    rmSync(cwdMimocodeMarker, { force: true })
+    return
+  }
+  const otherTestRun = read(() => readdirSync(tmpRoot), [] as string[])
     .map((name) => /^mimocode-test-data-(\d+)$/.exec(name)?.[1])
     .some((pid) => pid && Number(pid) !== process.pid && !processGone(Number(pid)))
   if (otherTestRun) return
-  // A live process other than this run holding the scheduler lock is using the
-  // directory right now, e.g. MiMo started from this package directory. Keep it,
-  // and the marker, until a later run finds that owner gone.
-  const lockOwner = (() => {
-    try {
-      const lock: unknown = JSON.parse(readFileSync(path.join(cwdMimocode, ".cron-lock"), "utf8"))
-      return typeof lock === "object" && lock !== null && "pid" in lock ? Number(lock.pid) : undefined
-    } catch {
-      return undefined
-    }
-  })()
+  const lockOwner = read(() => {
+    const lock: unknown = JSON.parse(readFileSync(path.join(cwdMimocode, ".cron-lock"), "utf8"))
+    return typeof lock === "object" && lock !== null && "pid" in lock ? Number(lock.pid) : undefined
+  }, undefined)
   if (lockOwner && lockOwner !== process.pid && !processGone(lockOwner)) return
-  // Anything beyond runtime artifacts makes it someone's real state: hand it over.
-  if (list(cwdMimocode).every((name) => runtimeArtifacts.includes(name)))
+  if (read(() => readdirSync(cwdMimocode), [] as string[]).every((name) => runtimeArtifacts.includes(name)))
     rmSync(cwdMimocode, { recursive: true, force: true })
   rmSync(cwdMimocodeMarker, { force: true })
 }
 releaseCwdMimocode()
-if (!existsSync(cwdMimocode)) writeFileSync(cwdMimocodeMarker, "")
+if (!existsSync(cwdMimocode)) {
+  mkdirSync(cwdMimocode, { recursive: true })
+  writeFileSync(cwdMimocodeMarker, identity(cwdMimocode))
+}
 
 afterAll(async () => {
   const { Database } = await import("../src/storage")
