@@ -227,7 +227,16 @@ for (const scenario of [
               const messages = yield* sessions.messages({ sessionID: session.id })
               const user = messages.find((message) => message.info.id === original.info.id)
               expect(user?.info).toEqual({ ...original.info, task_id: task.id })
-              expect(user?.parts).toEqual(original.parts)
+              expect(user?.parts.filter((part) => original.parts.some((original) => original.id === part.id))).toEqual(
+                original.parts,
+              )
+              const reminders = user?.parts.filter((part) => !original.parts.some((original) => original.id === part.id))
+              expect(reminders).toHaveLength(1)
+              expect(reminders?.[0]).toMatchObject({
+                type: "text",
+                synthetic: true,
+                text: expect.stringContaining("This session has memory at"),
+              })
               const continuation = messages.find(
                 (message) => message.info.role === "user" && message.info.source === "hook",
               )
@@ -236,9 +245,7 @@ for (const scenario of [
                 agent: original.info.agent,
                 model: original.info.model,
               })
-              expect(
-                messages.find((message) => message.info.id === candidates[0].assistantMessageID)?.info.time,
-              ).toHaveProperty("completed")
+              expect(messages.find((message) => message.info.id === candidates[0].assistantMessageID)).toBeUndefined()
               expect(yield* tasks.get({ session_id: session.id, id: task.id })).toMatchObject({
                 status: "in_progress",
                 owner: "main",

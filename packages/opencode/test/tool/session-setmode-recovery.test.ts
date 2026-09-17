@@ -5,7 +5,7 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Session } from "../../src/session"
 import { ActorRegistry } from "../../src/actor/registry"
 import { TaskRegistry } from "../../src/task/registry"
-import { MessageID } from "../../src/session/schema"
+import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { SessionTool } from "../../src/tool/session"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -56,6 +56,13 @@ it.live(
           time: { created: 200 },
           cost: 1,
           tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+        })
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          sessionID: child.id,
+          messageID: assistant.id,
+          type: "text",
+          text: "Partial useful output",
         })
         const task = yield* tasks.create({ session_id: parent.id, summary: "Peer task" })
         const hit = yield* Deferred.make<void>()
