@@ -33,7 +33,7 @@ Dispositions below were checked against the merged main source and the compat in
 ## Resolution and local evidence
 
 Main runtime/guidance source: `9c05eacb2817b0e100fb4b788b8085af6ba2aef5`;
-final main test snapshot: `4cedfa97e7fa6a6f19c3cbf7b0a2e58201df57e7`. C08 retains the notice but removes the
+final main test snapshot: `13d287aac076b4b113f194991ad88c3786631625`. C08 retains the notice but removes the
 unused auto-create API. C06 retains bounded defaults as well as request priority.
 No other FD/FC is retired or consolidated. The eight DC owners remain compat-owned.
 
@@ -53,6 +53,8 @@ Main evidence:
 - Real HTTP actor recovery: 13 pass after adopting empty-shell removal assertions, retaining concurrent admission, unchanged parent users, frozen systems and task/actor identity checks.
 - Bash notice metadata plus deletion permission group: 64 pass. The notice file alone has an ActorControl circular-import initialization failure, reproduced on the untouched starting compat checkout; the actual grouped execution is green. This is a process-arrangement limit, not a new production fix or a waived CI failure.
 - Complete Actor spawn/resume suite: 75 pass after updating empty-shell assertions; user identity, frozen context, admission and cancellation assertions remain. Complete config suite: 91 pass.
+- Real HTTP recovery-task and concurrent setmode suites: 12 pass on each branch. Original user part IDs/content remain identical; exactly one new persisted recall reminder is asserted. The setmode fixture now contains useful assistant output, retaining its settlement and concurrent field-preservation assertions.
+- Initial main CI at `1c0fe133` failed on obsolete empty-shell and non-persisted-reminder assumptions in these tests and Actor spawn/resume. The corrected suites passed locally; final-SHA CI must supersede that failed run.
 - Core package `bun typecheck` and root `bun lint` pass (lint retains existing warnings).
 - SDK and OpenAPI regenerated from the resolved source. Main exposes 139 operations; compat retains its extra checkpoint-coverage operation (140). Neither exposes the removed auto-create endpoint. All remaining registered API differences stay intact.
 
