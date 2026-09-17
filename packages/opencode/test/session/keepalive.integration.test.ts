@@ -1,4 +1,4 @@
-import { describe, expect, beforeEach, afterEach } from "bun:test"
+import { describe, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test"
 import { Effect, Layer } from "effect"
 
 import { Bus } from "@/bus"
@@ -22,7 +22,7 @@ import {
 import { Flag } from "@/flag/flag"
 import { Instance } from "@/project/instance"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
-import { provideTmpdirInstance } from "../fixture/fixture"
+import { provideTmpdirInstance, tmpdir as tmpdirFixture } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 // The flag is captured at module-load time. Tests force it ON so the bridge
@@ -85,25 +85,29 @@ const stubPrompt = Layer.succeed(
   }),
 )
 
-// The bridge starts the scheduler without opts.dir, so its lock and task file
-// would default to process.cwd(): this package directory inside the checkout.
-// Root them in the workspace the bridge was started for.
-const SchedulerInWorkspace = Layer.effect(
-  Scheduler,
-  Effect.gen(function* () {
-    const scheduler = yield* Scheduler
-    return Scheduler.of({ ...scheduler, start: (opts) => scheduler.start({ ...opts, dir: opts.dir ?? opts.workspaceRoot }) })
-  }),
-).pipe(Layer.provide(SchedulerDefaultLayer))
+// The bridge starts the scheduler without a dir, so its lock and task file land
+// in process.cwd(): during a test run, this package directory inside the checkout.
+// Run the file from a scratch directory so the unmodified bridge and scheduler
+// write there instead.
+const originalCwd = process.cwd()
+let scratch: Awaited<ReturnType<typeof tmpdirFixture>>
+beforeAll(async () => {
+  scratch = await tmpdirFixture()
+  process.chdir(scratch.path)
+})
+afterAll(async () => {
+  process.chdir(originalCwd)
+  await scratch[Symbol.asyncDispose]()
+})
 
 const env = Layer.mergeAll(
-  SchedulerInWorkspace,
+  SchedulerDefaultLayer,
   SessionStatus.defaultLayer,
   Bus.layer,
   CrossSpawnSpawner.defaultLayer,
   stubPrompt,
   cronBridgeLayer.pipe(
-    Layer.provide(SchedulerInWorkspace),
+    Layer.provide(SchedulerDefaultLayer),
     Layer.provide(SessionStatus.defaultLayer),
     Layer.provide(Bus.layer),
     Layer.provide(stubPrompt),

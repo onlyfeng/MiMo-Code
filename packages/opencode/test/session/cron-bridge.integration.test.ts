@@ -1,9 +1,9 @@
-import { test, expect, beforeEach, afterEach } from "bun:test"
+import { test, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test"
 import { Effect, Layer } from "effect"
 import { mkdtempSync, rmSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
-import { provideInstance } from "../fixture/fixture"
+import { provideInstance, tmpdir as tmpdirFixture } from "../fixture/fixture"
 import { Flag } from "@/flag/flag"
 
 import { Bus } from "@/bus"
@@ -94,16 +94,20 @@ const makeCaptureLayer = (captured: { value: CapturedPrompt[] }) =>
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "cron-bridge-"))
 
-// The bridge starts the scheduler without opts.dir, so its lock and task file
-// would default to process.cwd(): this package directory inside the checkout.
-// Root them in the workspace the bridge was started for.
-const SchedulerInWorkspace = Layer.effect(
-  Scheduler,
-  Effect.gen(function* () {
-    const scheduler = yield* Scheduler
-    return Scheduler.of({ ...scheduler, start: (opts) => scheduler.start({ ...opts, dir: opts.dir ?? opts.workspaceRoot }) })
-  }),
-).pipe(Layer.provide(SchedulerDefaultLayer))
+// The bridge starts the scheduler without a dir, so its lock and task file land
+// in process.cwd(): during a test run, this package directory inside the checkout.
+// Run the file from a scratch directory so the unmodified bridge and scheduler
+// write there instead.
+const originalCwd = process.cwd()
+let scratch: Awaited<ReturnType<typeof tmpdirFixture>>
+beforeAll(async () => {
+  scratch = await tmpdirFixture()
+  process.chdir(scratch.path)
+})
+afterAll(async () => {
+  process.chdir(originalCwd)
+  await scratch[Symbol.asyncDispose]()
+})
 
 const originalCronFlag = Flag.MIMOCODE_EXPERIMENTAL_CRON
 afterEach(() => {
@@ -127,7 +131,7 @@ const harness = <A>(captured: { value: CapturedPrompt[] }, work: (ctx: {
   scheduler: SchedulerInterface
 }) => Effect.Effect<A, unknown, SessionPrompt.Service>) => {
   const capture = makeCaptureLayer(captured)
-  const base = Layer.mergeAll(SchedulerInWorkspace, SessionStatus.defaultLayer, Bus.layer, capture)
+  const base = Layer.mergeAll(SchedulerDefaultLayer, SessionStatus.defaultLayer, Bus.layer, capture)
   const bridge = cronBridgeLayer.pipe(Layer.provide(base))
   const eff = Effect.gen(function* () {
     const b = yield* CronBridge
@@ -274,7 +278,7 @@ test("cron-bridge is resolvable via CronBridge.use (matches prompt.ts hook patte
   const instanceDir = mkdtempSync(join(tmpdir(), "cron-bridge-instance-"))
   try {
     const capture = makeCaptureLayer(captured)
-    const base = Layer.mergeAll(SchedulerInWorkspace, SessionStatus.defaultLayer, Bus.layer, capture)
+    const base = Layer.mergeAll(SchedulerDefaultLayer, SessionStatus.defaultLayer, Bus.layer, capture)
     const bridge = cronBridgeLayer.pipe(Layer.provide(base))
     const layered = Layer.mergeAll(bridge, base)
     await Effect.runPromise(
@@ -312,7 +316,7 @@ test("cron-bridge resets sentinel cache on main-agent Compacted, ignores subagen
     writeFileSync2(join(wsDir, ".mimocode", "loop.md"), "cached body")
 
     const capture = makeCaptureLayer(captured)
-    const base = Layer.mergeAll(SchedulerInWorkspace, SessionStatus.defaultLayer, Bus.layer, capture)
+    const base = Layer.mergeAll(SchedulerDefaultLayer, SessionStatus.defaultLayer, Bus.layer, capture)
     const bridge = cronBridgeLayer.pipe(Layer.provide(base))
     const layered = Layer.mergeAll(bridge, base)
 

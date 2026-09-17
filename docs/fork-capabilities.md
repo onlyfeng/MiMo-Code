@@ -788,8 +788,10 @@ not change their implementation. The preceding review is retained in the
   concurrent test process. The preload now sets `MIMOCODE_EXPERIMENTAL_CRON=false`
   as a harness baseline flag. The cron suites (`cron-bridge.integration`,
   `keepalive.integration` and `end-to-end`) enable
-  `Flag.MIMOCODE_EXPERIMENTAL_CRON` themselves, and the first two root the
-  scheduler in the workspace their bridge was started for. The second writer was
+  `Flag.MIMOCODE_EXPERIMENTAL_CRON` themselves. The first two run from a scratch
+  working directory, so the unmodified bridge and scheduler put the lock there;
+  removing that `chdir` makes `keepalive.integration` recreate
+  `packages/opencode/.mimocode`. The second writer was
   instances rooted in the repository, which ran config discovery against its
   `.mimocode` and installed dependencies there. `bash.test.ts`,
   `webfetch.test.ts` and `websearch.test.ts` now use a git fixture instead of the
