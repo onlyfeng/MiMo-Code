@@ -784,30 +784,31 @@ not change their implementation. The preceding review is retained in the
   `.gitignore`, installed dependencies) inside the checkout. Upstream's copies of
   the same tests use the same paths. There were two writers. A session boot
   starts the cron bridge, which is on by default, and its scheduler lock and
-  task file default to `process.cwd()`: this package directory, shared by every
-  concurrent test process. The preload now sets `MIMOCODE_EXPERIMENTAL_CRON=false`
-  as a harness baseline flag. The cron suites (`cron-bridge.integration`,
-  `keepalive.integration` and `end-to-end`) enable
-  `Flag.MIMOCODE_EXPERIMENTAL_CRON` themselves. The first two run from a scratch
-  working directory, so the unmodified bridge and scheduler put the lock there;
-  removing that `chdir` makes `keepalive.integration` recreate
-  `packages/opencode/.mimocode`. The second writer was
-  instances rooted in the repository, which ran config discovery against its
-  `.mimocode` and installed dependencies there. `bash.test.ts`,
-  `webfetch.test.ts` and `websearch.test.ts` now use a git fixture instead of the
-  checkout, and `read.test.ts` reads a copy of its large image from a fixture.
-  Route requests that named no directory booted an instance for
-  `process.cwd()`. The `workflows-route`, `session-messages`,
+  task file follow `process.cwd()`, which is this package directory. The harness
+  keeps that production path enabled instead of switching cron off. The preload
+  removes `process.cwd()/.mimocode` after the run when the run created it. At
+  startup it reclaims one left by a killed run, but only while the directory
+  holds nothing beyond runtime artifacts (`.cron-lock`, `.gitignore`,
+  `package.json`, `package-lock.json`, `bun.lock` and `node_modules`) and the
+  lock's owner is gone. User data such as `scheduled_tasks.json`, and a lock held
+  by a live process, keep it. Without the end-of-run removal,
+  `cancel-notification.test.ts` leaves the directory behind. The cron suites stay
+  in upstream's form. The second writer was instances rooted in the repository,
+  which ran config discovery against its `.mimocode` and installed dependencies
+  there. `bash.test.ts`, `webfetch.test.ts` and `websearch.test.ts` now use a git
+  fixture instead of the checkout, and `read.test.ts` reads a copy of its large
+  image from a fixture. Route requests that named no directory booted an
+  instance for `process.cwd()`. The `workflows-route`, `session-messages`,
   `session-task-route`, `session-select`, `title-authority` and
   `session-actions` server tests now send their fixture directory on every
   request. Unauthenticated servers only admit directories under cwd, so those
-  fixtures move under `root: "cwd"`.
-  `worker-listener.test.ts` gives its cwd fixtures a git root and names that
-  directory on the requests that boot an instance (`/config`, and `/v1/models`,
-  whose route bootstraps before checking its token). The writers were located
-  file by file and, for those that only wrote alongside others, by
-  order-preserving bisection of the CI shard order. Before the change, each of
-  those tests left repository artifacts; after it, none did.
+  fixtures move under `root: "cwd"`. `worker-listener.test.ts` gives its cwd
+  fixtures a git root and names that directory on the requests that boot an
+  instance (`/config`, and `/v1/models`, whose route bootstraps before checking
+  its token). The writers were located file by file and, for those that only
+  wrote alongside others, by order-preserving bisection of the CI shard order.
+  Before the change, each of those tests left repository artifacts; after it,
+  none did.
 
 - 2026-09-15 runtime acceptance infrastructure: the shared test workflow adds
   a Windows job for compat PR/push and explicit manual dispatch. Bun follows the
@@ -978,8 +979,6 @@ logged`, and the peer `success`/`failure` variants of
   `packages/opencode/bunfig.toml`, `packages/opencode/test/preload.ts`,
   `packages/opencode/test/fixture/fixture.ts`,
   `packages/opencode/test/fixture/fixture-root.test.ts`,
-  `packages/opencode/test/session/cron-bridge.integration.test.ts`,
-  `packages/opencode/test/session/keepalive.integration.test.ts`,
   `packages/opencode/test/tool/{bash,webfetch,websearch,read}.test.ts`,
   `packages/opencode/test/server/{workflows-route,session-messages,session-task-route,session-select,title-authority,session-actions}.test.ts`,
   `packages/opencode/test/cli/tui/worker-listener.test.ts`,

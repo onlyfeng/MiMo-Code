@@ -136,10 +136,33 @@ const outsideGitRoot = await claimRoot(
 )
 process.env["MIMOCODE_TEST_OUTSIDE_GIT_ROOT"] = outsideGitRoot
 
+// A session boot starts the cron scheduler (on by default), whose lock and task
+// file live in process.cwd()/.mimocode: this package directory inside the checkout.
+// Tests keep that production path, so the directory is removed afterwards when
+// this run created it. One left by a killed run is reclaimed first, but only while
+// it holds nothing beyond those runtime artifacts and no live process owns the lock.
+const cwdMimocode = path.join(process.cwd(), ".mimocode")
+const runtimeArtifacts = [".cron-lock", ".gitignore", "package.json", "package-lock.json", "bun.lock", "node_modules"]
+const leftover = await fs.readdir(cwdMimocode).catch(() => undefined)
+if (leftover?.every((name) => runtimeArtifacts.includes(name))) {
+  const owner = await fs
+    .readFile(path.join(cwdMimocode, ".cron-lock"), "utf8")
+    .then((text) => {
+      const lock: unknown = JSON.parse(text)
+      return typeof lock === "object" && lock !== null && "pid" in lock ? Number(lock.pid) : undefined
+    })
+    .catch(() => undefined)
+  if (!owner || processGone(owner)) await fs.rm(cwdMimocode, { recursive: true, force: true })
+}
+const cwdMimocodeExisted = await fs
+  .stat(cwdMimocode)
+  .then(() => true)
+  .catch(() => false)
+
 afterAll(async () => {
   const { Database } = await import("../src/storage")
   Database.close()
-  const roots = [dir, fixtureRoot, outsideGitRoot]
+  const roots = [dir, fixtureRoot, outsideGitRoot, ...(cwdMimocodeExisted ? [] : [cwdMimocode])]
   const removeSync = (target: string) => {
     try {
       rmSync(target, { recursive: true, force: true })
@@ -235,12 +258,6 @@ process.env["MIMOCODE_DB"] = ":memory:"
 // MIMOCODE_EXPERIMENTAL_ORCHESTRATOR; the orchestrator test suites exercise the
 // feature, so enable it here (Flag is read once at import — must be set first).
 process.env["MIMOCODE_EXPERIMENTAL_ORCHESTRATOR"] = "true"
-
-// Keep the cron bridge inert in tests (default ON in prod). A session boot starts
-// its scheduler, whose lock and task file default to process.cwd(): this package
-// directory inside the checkout, shared by every concurrent test process. The
-// cron suites opt in by setting Flag.MIMOCODE_EXPERIMENTAL_CRON themselves.
-process.env["MIMOCODE_EXPERIMENTAL_CRON"] = "false"
 
 // Now safe to import from src/
 const { Log } = await import("../src/util")
