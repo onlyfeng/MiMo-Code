@@ -3944,3 +3944,20 @@ All seven capability results in that entry remain valid; runtime/test behavior s
 - C01 inherits exact ordinary/GitLab/nested MCP lookup and authoritative checkpoint guidance. Main's control guards and argument normalization remain, as do all seven compat policies. The package overlay is unchanged apart from blob identities and hunk positions.
 - Validation: 118 tool and 127 request/checkpoint/prefix/overflow tests pass; package typecheck passes; lint reports 4565 warnings and zero errors. Full commands/environment and the single result row are in the [shared sync record](upstream-sync-2026-09-15-26aa00fc.md).
 - Shared registry files are inherited unchanged. This documentation commit advances no runtime/test snapshot; final CI and remote proof are checked after publication.
+
+## 2026-09-17 full upstream synchronization
+
+Selected upstream `4cb859dd7c962b13eee5f34146350f520a380217`, starting compat
+`d7ae31894c6b5b4362076ca4b21ddf54c4b4c11a`, accepted main
+`b903e3aa9f62cb7c3658fb25e9d618ec4561f5b4`. Compat runtime and generated artifacts are bound to `b277eca8`; final test snapshot is `3e39edd3084e5e31b96e67a7844bc5e067d0e4d3`, with shared record inheritance at `c4ba4d3fb1899133cbbf1448e8104c2022133bc7`.
+The [shared inventory](upstream-sync-2026-09-17.md) has exactly eleven rows,
+all inherited with the declared DC adaptations. No DC owner retires.
+
+- DC-NET-001/002 and DC-PLATFORM-001: no owned production changes; retain approved intranet behavior and Windows/restricted-network fallbacks. Actual final Windows acceptance belongs to final-SHA CI.
+- DC-MODEL-001: per-agent MaxMode remains; new quiet request diagnostics do not make ensemble calls ephemeral or grant subagents session-global status.
+- DC-CONTEXT-001: actual Responses provider flows through the source-ID-aware current-turn converter; replay input/text caps, active schema budgets, recovery receipts and checkpoint coverage remain.
+- DC-ACTOR-001/002: frozen full-context admission, task identity, cancellation ownership and validated per-actor variants remain. Empty shells are removed atomically after admission, while useful output continues normally.
+- DC-TUI-001: request metadata/titleLocale and coverage/revert pagination coexist with the inherited recovery-badge cleanup and slash-prefix title input.
+
+Local evidence: 309 passing tests across 21 focused files, 77 complete Actor tests, 62 prompt attachment tests and 12 HTTP recovery-task/setmode tests. The full prompt-effect run had 170 pass, 2 existing skips and 2 adapter-fallback assertion mismatches; all 3 fallback cases pass after the assertion correction. This is a complete-run plus focused-fix record, not a claim that the full local file was rerun. Package typecheck and lint pass; SDK/OpenAPI regeneration preserves the 140-operation compat surface. Test environment uses the shared record's explicit selector unsets and package-owned preload baseline. Final remote tips, exact-SHA CI and the complete
+upstream → main → compat ancestry chain are verified after publication.

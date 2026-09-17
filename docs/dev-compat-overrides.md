@@ -10,16 +10,25 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Status: active; the seven DC owners reviewed in this synchronization remain compat-owned. DC-ACTOR-002 was added afterwards, so eight owners are now active.
-- Last reviewed: 2026-09-15, full upstream synchronization through `26aa00fc7e243a90586f5895ddcad2b7ce76b935`.
-- Prior upstream: `b4cc11cd652195af9a80297ed543218f3172e6c4`.
-- Starting compat: `1caf307ff8c26137cfd095fe9fa5374293e2e208`.
-- Accepted main: `a288fb47233e390d8cb984dfcf78108918501011`.
-- Main runtime/tests and inherited guidance: `0b8c5d634077f19c2d8c03179f2c869a01a18cec`.
-- Compat source integration: `252f81e93973671580b139a4d55b7bddd5aa4d3b`.
-- Review: [exact tool-name synchronization](upstream-sync-2026-09-15-26aa00fc.md), C01, inherited with no compat-specific code correction.
-- Evidence: 245 relevant tests pass, package typecheck and lint pass. The complete package overlay against main is unchanged. DC-CONTEXT-001 retains the active wire-schema helpers and passing request-budget tests; remaining DC owners retain their existing source contracts. No SDK generation inputs changed.
-- Publication: final-tip CI and remote/ancestry proof follow this record; the earlier Windows/runtime acceptance evidence below remains bound to its historical snapshots.
+- Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-09-17, full upstream synchronization through `4cb859dd7c962b13eee5f34146350f520a380217`.
+- Prior upstream: `26aa00fc7e243a90586f5895ddcad2b7ce76b935`.
+- Starting compat: `d7ae31894c6b5b4362076ca4b21ddf54c4b4c11a`.
+- Accepted main: `b903e3aa9f62cb7c3658fb25e9d618ec4561f5b4`.
+- Main runtime: `9c05eacb2817b0e100fb4b788b8085af6ba2aef5`; final main test snapshot: `13d287aac076b4b113f194991ad88c3786631625`.
+- Compat source integration: `b277eca8`; final compat test snapshot: `3e39edd3084e5e31b96e67a7844bc5e067d0e4d3`; inherited shared records: `c4ba4d3fb1899133cbbf1448e8104c2022133bc7`.
+- Review: [eleven-capability synchronization](upstream-sync-2026-09-17.md), C01–C11.
+- Resolution: actual adapter-provider routing passes through current-turn conversion and frozen prefix capture. Native Responses error outputs retain compat input/text caps. Recall reminders remain disabled for structured-output requests while gaining persisted stable IDs. Empty-residue redispatch coexists with bounded preflight and overflow-placeholder receipts. Mandatory compaction tails, active-only schema budgets, checkpoint coverage, TUI metadata, per-agent MaxMode and full-context/variant Actor behavior remain.
+- Scope: 36 compat-different source paths before and after integration; no DC owner or unrelated platform/private-network boundary moved to main. Shared FD/FC registries are inherited byte-for-byte.
+- Validation: 21 focused matrix files pass (309 tests); complete Actor spawn/resume passes 77 tests, prompt attachments pass 62, and HTTP recovery-task/concurrent setmode pass 12. Full prompt-effect initially had 170 pass, 2 existing skips and 2 adapter-fallback assertion failures; after including the compat empty current-turn field, all 3 adapter fallback cases pass in a focused rerun. Final CI supplies the complete-file acceptance. Package typecheck and lint pass. SDK/OpenAPI regenerated with 140 operations, preserving checkpoint coverage, maxMode and Actor variant/full-context differences while removing only the upstream-retired auto-create operation.
+- Publication: final-tip CI and live remote ancestry are checked after this record is committed; earlier acceptance runs remain historical.
+
+## Previous synchronization review
+
+The 2026-09-15 review through `26aa00fc` used starting compat `1caf307f`,
+accepted main `a288fb47`, runtime `0b8c5d63` and compat integration `252f81e9`.
+Its 245 passing tests and previous snapshot limits remain recorded in
+[compat history](dev-compat-registry-history.md); they are not current-SHA evidence.
 
 ## Previous runtime review record
 
