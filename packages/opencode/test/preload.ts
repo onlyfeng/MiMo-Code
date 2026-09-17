@@ -174,11 +174,17 @@ const releaseCwdMimocode = () => {
     .map((name) => /^mimocode-test-data-(\d+)$/.exec(name)?.[1])
     .some((pid) => pid && Number(pid) !== process.pid && !processGone(Number(pid)))
   if (otherTestRun) return
-  const lockOwner = read(() => {
-    const lock: unknown = JSON.parse(readFileSync(path.join(cwdMimocode, ".cron-lock"), "utf8"))
-    return typeof lock === "object" && lock !== null && "pid" in lock ? Number(lock.pid) : undefined
+  const lockPath = path.join(cwdMimocode, ".cron-lock")
+  const lock = read(() => {
+    const ageMs = Date.now() - statSync(lockPath).mtimeMs
+    const parsed: unknown = read(() => JSON.parse(readFileSync(lockPath, "utf8")), undefined)
+    const pid = typeof parsed === "object" && parsed !== null && "pid" in parsed ? Number(parsed.pid) : undefined
+    return { pid, ageMs }
   }, undefined)
-  if (lockOwner && lockOwner !== process.pid && !processGone(lockOwner)) return
+  // A lock nobody can parse yet may be one another process has just opened and is
+  // still writing; only a minute without changes makes it a killed run's debris.
+  if (lock && !lock.pid && lock.ageMs < 60_000) return
+  if (lock?.pid && lock.pid !== process.pid && !processGone(lock.pid)) return
   if (read(() => readdirSync(cwdMimocode), [] as string[]).every((name) => runtimeArtifacts.includes(name)))
     rmSync(cwdMimocode, { recursive: true, force: true })
   rmSync(cwdMimocodeMarker, { force: true })

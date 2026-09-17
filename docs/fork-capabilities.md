@@ -792,7 +792,9 @@ not change their implementation. The preceding review is retained in the
   recreated, never matches that identity. The owned directory is removed at the
   end of the run, and a killed run's is reclaimed at the next startup, unless
   another test process (a live `mimocode-test-data-<pid>` root) or a live
-  foreign `.cron-lock` owner may still use it. It is removed only while it holds
+  foreign `.cron-lock` owner may still use it. A lock that cannot be parsed yet
+  counts as live, because a scheduler opens it before writing its owner, until
+  it has gone a minute without changes. It is removed only while it holds
   nothing beyond runtime artifacts (`.cron-lock`, `.gitignore`,
   `package.json`, `package-lock.json`, `bun.lock` and `node_modules`). Any
   other content, such as `scheduled_tasks.json`, hands the directory over by
