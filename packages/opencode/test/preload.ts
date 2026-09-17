@@ -175,18 +175,26 @@ const releaseCwdMimocode = () => {
     .some((pid) => pid && Number(pid) !== process.pid && !processGone(Number(pid)))
   if (otherTestRun) return
   const lockPath = path.join(cwdMimocode, ".cron-lock")
-  const lock = read(() => {
-    const ageMs = Date.now() - statSync(lockPath).mtimeMs
-    const parsed: unknown = read(() => JSON.parse(readFileSync(lockPath, "utf8")), undefined)
-    const pid = typeof parsed === "object" && parsed !== null && "pid" in parsed ? Number(parsed.pid) : undefined
-    return { pid, ageMs }
+  const readLock = () => read(() => ({ raw: readFileSync(lockPath, "utf8"), ageMs: Date.now() - statSync(lockPath).mtimeMs }), undefined)
+  const lock = readLock()
+  const owner = read(() => {
+    const parsed: unknown = JSON.parse(lock?.raw ?? "")
+    return typeof parsed === "object" && parsed !== null && "pid" in parsed ? Number(parsed.pid) : undefined
   }, undefined)
   // A lock nobody can parse yet may be one another process has just opened and is
   // still writing; only a minute without changes makes it a killed run's debris.
-  if (lock && !lock.pid && lock.ageMs < 60_000) return
-  if (lock?.pid && lock.pid !== process.pid && !processGone(lock.pid)) return
-  if (read(() => readdirSync(cwdMimocode), [] as string[]).every((name) => runtimeArtifacts.includes(name)))
-    rmSync(cwdMimocode, { recursive: true, force: true })
+  if (lock && !owner && lock.ageMs < 60_000) return
+  if (owner && owner !== process.pid && !processGone(owner)) return
+  // Anything beyond runtime artifacts makes it someone's real state: hand it over.
+  if (!read(() => readdirSync(cwdMimocode), [] as string[]).every((name) => runtimeArtifacts.includes(name))) {
+    rmSync(cwdMimocodeMarker, { force: true })
+    return
+  }
+  // A scheduler may take over a dead lock between the checks above and this point.
+  // Re-read it right before deleting and back off if it changed at all; the
+  // interval left is the same check-then-rename one the scheduler's own takeover has.
+  if (readLock()?.raw !== lock?.raw) return
+  rmSync(cwdMimocode, { recursive: true, force: true })
   rmSync(cwdMimocodeMarker, { force: true })
 }
 releaseCwdMimocode()
