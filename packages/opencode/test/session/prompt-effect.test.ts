@@ -9601,9 +9601,17 @@ for (const failure of ["throw", "rejection", "interruption"] as const) {
             expect(Exit.isFailure(result) && Cause.hasInterrupts(result.cause)).toBe(true)
           } else {
             expect(Exit.isSuccess(result)).toBe(true)
-            if (Exit.isSuccess(result))
-              expect(result.value).toEqual({ system: [], tools: {}, inheritedMessages: [], parentPermission: [], activeTools: [],
-              turnContext: undefined, currentTurnMessages: [], loadedMcpTools: [] })
+            const empty = {
+              system: [],
+              tools: {},
+              inheritedMessages: [],
+              parentPermission: [],
+              activeTools: [],
+              turnContext: undefined,
+              currentTurnMessages: [],
+              loadedMcpTools: [],
+            }
+            if (Exit.isSuccess(result)) expect(result.value).toEqual(empty)
           }
           expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
         }),
