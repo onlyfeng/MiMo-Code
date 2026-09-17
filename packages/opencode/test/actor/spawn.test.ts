@@ -2378,10 +2378,7 @@ describe("Actor resume", () => {
         yield* llm.text("resumed result")
         const completion = yield* actor.resume(spawned)
         const admitted = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
-        expect(admitted.find((m) => m.info.id === old.info.id)?.info).toMatchObject({
-          time: { completed: expect.any(Number) },
-          error: { name: "MessageAbortedError" },
-        })
+        expect(admitted.find((m) => m.info.id === old.info.id)).toBeUndefined()
         const result = yield* completion
         const after = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
         expect(after.filter((m) => m.info.role === "user")).toEqual(before.filter((m) => m.info.role === "user"))
@@ -3280,11 +3277,11 @@ it.live("resume committed handoff cancellation settles admission after the owned
     expect(result._tag).toBe("Some")
     if (result._tag === "Some") expect(result.value._tag).toBe("Failure")
     const old = spawned.messages.at(-1)!
-    expect(MessageV2.get({ sessionID: spawned.sessionID, messageID: old.info.id }).info).toMatchObject({
-      id: old.info.id,
-      time: { completed: expect.any(Number) },
-      error: { name: "MessageAbortedError" },
-    })
+    const after = yield* (yield* Session.Service).messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+    expect(after.find((message) => message.info.id === old.info.id)).toBeUndefined()
+    expect(after.filter((message) => message.info.role === "user")).toEqual(
+      spawned.messages.filter((message) => message.info.role === "user"),
+    )
   }), { git: true, config: providerCfg }),
   15_000,
 )
