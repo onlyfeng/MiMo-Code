@@ -374,7 +374,8 @@ not change their implementation. The preceding review is retained in the
   `packages/opencode/src/cli/cmd/tui/worker-listener.ts`,
   `packages/opencode/src/flag/flag.ts`, `packages/opencode/src/llm-server/`,
   `packages/opencode/src/config/llm-server.ts`, `packages/opencode/src/util/self.ts`.
-- Fixture convention: this fork roots test fixtures outside `process.cwd()` and
+- Fixture convention: this fork roots test fixtures outside `process.cwd()`
+  (under `/var/tmp` on POSIX; FC-008 owns the location and its evidence) and
   asks cases that depend on the InstanceMiddleware containment check to opt in
   with `root: "cwd"`, where upstream's preload roots every fixture under cwd.
   `implicit-listener.test.ts` carries that opt-in with a comment saying why.

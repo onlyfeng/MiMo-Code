@@ -2,22 +2,15 @@
 // xdg-basedir reads env vars at import time, so we must set these first
 import os from "os"
 import path from "path"
-import { constants as fsConstants } from "fs"
+import { constants as fsConstants, rmSync } from "fs"
 import fs from "fs/promises"
 import { setTimeout as sleep } from "node:timers/promises"
 import { afterAll } from "bun:test"
 
-const forbiddenFixtureRoots = [
-  "/etc",
-  "/proc",
-  "/sys",
-  "/dev",
-  "/boot",
-  "/root",
-  "/var",
-  "/private/etc",
-  "/private/var",
-]
+// Mirrors assertSafeDirectory in src/project/instance.ts: a fixture base it
+// rejects could never become a project instance.
+const protectedExactPaths = ["/private", "/var", "/private/var"]
+const protectedPathPrefixes = ["/etc", "/proc", "/sys", "/dev", "/boot", "/private/etc", "/var/log", "/private/var/log"]
 
 function containsPath(parent: string, child: string) {
   const relative = path.relative(path.resolve(parent), path.resolve(child))
@@ -60,13 +53,24 @@ async function isFixtureBaseBlocked(candidate: string) {
   const resolved = path.resolve(candidate)
   if (resolved === path.parse(resolved).root) return true
   if (await findGitRoot(resolved)) return true
-  if (forbiddenFixtureRoots.some((forbidden) => containsPath(forbidden, resolved))) return true
+  if (process.platform !== "win32" && protectedExactPaths.includes(resolved)) return true
+  if (process.platform !== "win32" && protectedPathPrefixes.some((prefix) => containsPath(prefix, resolved))) return true
   return !(await isWritableDirectory(resolved))
 }
 
+// A non-git fixture's worktree is "/", so config, command and skill discovery
+// walk every ancestor of the fixture. Under the home directory that pulls in a
+// developer's own ~/.mimocode and ~/.claude skills; inside the checkout, the
+// repository's .mimocode. /var/tmp has no such ancestors, is not a temp root that
+// Bash exempts from delete confirmation, and is writable on POSIX systems.
 async function fixtureBase() {
   const candidates = await Promise.all(
-    [os.homedir(), await gitFreeParent(process.cwd()), os.tmpdir()].map(async (candidate) => ({
+    [
+      ...(process.platform === "win32" ? [] : [await fs.realpath("/var/tmp").catch(() => "/var/tmp")]),
+      os.homedir(),
+      await gitFreeParent(process.cwd()),
+      os.tmpdir(),
+    ].map(async (candidate) => ({
       candidate,
       blocked: await isFixtureBaseBlocked(candidate),
     })),
@@ -75,23 +79,84 @@ async function fixtureBase() {
   return selected?.candidate ?? os.tmpdir()
 }
 
-// Set XDG env vars FIRST, before any src/ imports. Keep the process-wide data
-// root outside protected system paths because worktree bootstrap creates real
-// project instances under Global.Path.data.
-const base = await fixtureBase()
-const dir = path.join(base, "mimocode-test-data-" + process.pid)
+function processGone(pid: number) {
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return !(typeof error === "object" && error !== null && "code" in error && error.code === "EPERM")
+  }
+}
+
+// Every per-run root is `<prefix><pid>` and belongs to exactly one test process.
+// A killed or timed-out run never reaches afterAll, so first reclaim, best
+// effort, the roots whose process no longer exists. Another live PID, including
+// another user's (EPERM), is never touched.
+async function claimRoot(parent: string, prefix: string) {
+  const names = await fs.readdir(parent).catch(() => [] as string[])
+  await Promise.all(
+    names
+      .filter((name) => name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length)))
+      .filter((name) => processGone(Number(name.slice(prefix.length))))
+      .map((name) => fs.rm(path.join(parent, name), { recursive: true, force: true }).catch(() => undefined)),
+  )
+  // A root already named for this process was left by an earlier run whose PID
+  // this one reuses. Its removal is not best effort: if it still fails after
+  // retries, the run must stop rather than start on inherited state.
+  const root = path.join(parent, prefix + process.pid)
+  await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  return root
+}
+
+// Set XDG env vars FIRST, before any src/ imports. The process-wide data root
+// lives under the OS temp directory, as upstream's does. Worktree bootstrap
+// creates real project instances under Global.Path.data, which Instance accepts
+// there: it rejects only the exact /var and /private/var roots and their log
+// directories, not macOS's /private/var/folders temp tree. Resolve the temp
+// directory first: on macOS it sits behind the /var symlink, and runtime events
+// report canonical paths that tests compare with paths built from Global.Path.
+const dir = await claimRoot(await fs.realpath(os.tmpdir()), "mimocode-test-data-")
 await fs.mkdir(dir, { recursive: true })
 
-// Route default fixture tmpdirs outside both the repository checkout and
-// protected system paths. HTTP route tests that must pass the
-// InstanceMiddleware cwd containment check opt into root: "cwd" in the fixture
-// helper.
-const fixtureRoot = path.join(base, ".mimocode-test-fixtures-" + process.pid)
+// Route default fixture tmpdirs outside the repository checkout, protected
+// system paths, and preferably outside temp roots (see fixtureBase): Bash
+// exempts temp-only deletions from confirmation, so a fixture project under temp
+// would let the "target outside temp" deletion cases pass for a different
+// reason. HTTP route tests that must pass the InstanceMiddleware cwd containment
+// check opt into root: "cwd" in the fixture helper.
+const fixtureRoot = await claimRoot(await fixtureBase(), ".mimocode-test-fixtures-")
 await fs.mkdir(fixtureRoot, { recursive: true })
 process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = fixtureRoot
+
+// outsideGit fixtures need a directory no checkout can contain; /tmp is that on
+// POSIX. Group them per process so a killed run's leftovers are reclaimable too.
+const outsideGitRoot = await claimRoot(
+  process.platform === "win32" ? os.tmpdir() : "/tmp",
+  "mimocode-test-outside-git-",
+)
+process.env["MIMOCODE_TEST_OUTSIDE_GIT_ROOT"] = outsideGitRoot
+
 afterAll(async () => {
   const { Database } = await import("../src/storage")
   Database.close()
+  const roots = [dir, fixtureRoot, outsideGitRoot]
+  const removeSync = (target: string) => {
+    try {
+      rmSync(target, { recursive: true, force: true })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  // Remove synchronously before anything awaits a timer. When a test file fails
+  // to load, bun test stops waiting for this hook at its first timer, and
+  // detached background work such as Config's dependency install recreates
+  // removed paths whenever the hook yields. bun test runs no exit listeners, so
+  // there is no later chance.
+  const left = roots.filter((target) => !removeSync(target))
+  if (left.length === 0) return
+
   const busy = (error: unknown) =>
     typeof error === "object" && error !== null && "code" in error && error.code === "EBUSY"
   const rm = async (target: string, left: number): Promise<void> => {
@@ -106,8 +171,10 @@ afterAll(async () => {
 
   // Windows can keep SQLite WAL handles alive until GC finalizers run, so we
   // force GC and retry teardown to avoid flaky EBUSY in test cleanup.
-  await rm(dir, 30)
-  await rm(fixtureRoot, 30)
+  for (const target of left) await rm(target, 30)
+  // Those awaits yielded to background writers; a path they recreated is left
+  // for the next run to reclaim if this last pass cannot remove it.
+  roots.forEach(removeSync)
 })
 
 process.env["XDG_DATA_HOME"] = path.join(dir, "share")
