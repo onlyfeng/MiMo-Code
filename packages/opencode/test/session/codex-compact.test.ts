@@ -1,5 +1,6 @@
 import { expect } from "bun:test"
 import { dynamicTool, jsonSchema } from "ai"
+import type { JSONSchema7 } from "@ai-sdk/provider"
 import { Deferred, Effect, Fiber, Layer } from "effect"
 import path from "path"
 import { Bus } from "../../src/bus"
@@ -97,7 +98,7 @@ function config(url: string): Partial<Config.Info> {
 }
 
 function wireTools(input: Record<string, unknown>) {
-  return (input.tools as Array<{ type: string; function: { name: string; description: string } }>).map(
+  return (input.tools as Array<{ type: string; function: { name: string; description: string; parameters: JSONSchema7 } }>).map(
     (tool) => tool.function,
   )
 }
@@ -276,6 +277,8 @@ it.live("Codex compact production wire retains control tools and nests ordinary 
       expect(tools.map((tool) => tool.name)).toContain("actor")
       expect(tools.map((tool) => tool.name)).toContain("question")
       const exec = tools.find((tool) => tool.name === "exec")!
+      expect(exec.parameters.properties?.timeout).toMatchObject({ type: "integer", minimum: 1, maximum: 600000 })
+      expect(exec.parameters.properties?.timeout_seconds).toMatchObject({ type: "integer", minimum: 1, maximum: 600 })
       expect(exec.description).toContain("exec_command(input:")
       expect(exec.description).toContain("task(input:")
       expect(exec.description).toContain("skill(input:")
