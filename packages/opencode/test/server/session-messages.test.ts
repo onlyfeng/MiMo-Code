@@ -79,8 +79,11 @@ async function fill(
 }
 
 describe("session messages endpoint", () => {
+  // root: "cwd" fixtures named on every request: without a directory, InstanceMiddleware
+  // boots an instance for process.cwd(), this checkout, and installs dependencies into its
+  // .mimocode. Unauthenticated servers only admit directories under cwd.
   test("returns cursor headers for older pages", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await withoutWatcher(() =>
       Instance.provide({
         directory: tmp.path,
@@ -89,7 +92,7 @@ describe("session messages endpoint", () => {
           const ids = await fill(session.id, 5)
           const app = Server.Default().app
 
-          const a = await app.request(`/session/${session.id}/message?limit=2`)
+          const a = await app.request(`/session/${session.id}/message?limit=2`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(a.status).toBe(200)
           const aBody = (await a.json()) as MessageV2.WithParts[]
           expect(aBody.map((item) => item.info.id)).toEqual(ids.slice(-2))
@@ -97,7 +100,7 @@ describe("session messages endpoint", () => {
           expect(cursor).toBeTruthy()
           expect(a.headers.get("link")).toContain('rel="next"')
 
-          const b = await app.request(`/session/${session.id}/message?limit=2&before=${encodeURIComponent(cursor!)}`)
+          const b = await app.request(`/session/${session.id}/message?limit=2&before=${encodeURIComponent(cursor!)}`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(b.status).toBe(200)
           const bBody = (await b.json()) as MessageV2.WithParts[]
           expect(bBody.map((item) => item.info.id)).toEqual(ids.slice(-4, -2))
@@ -109,7 +112,7 @@ describe("session messages endpoint", () => {
   })
 
   test("keeps full-history responses when limit is omitted", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await withoutWatcher(() =>
       Instance.provide({
         directory: tmp.path,
@@ -118,7 +121,7 @@ describe("session messages endpoint", () => {
           const ids = await fill(session.id, 3)
           const app = Server.Default().app
 
-          const res = await app.request(`/session/${session.id}/message`)
+          const res = await app.request(`/session/${session.id}/message`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(res.status).toBe(200)
           const body = (await res.json()) as MessageV2.WithParts[]
           expect(body.map((item) => item.info.id)).toEqual(ids)
@@ -130,7 +133,7 @@ describe("session messages endpoint", () => {
   })
 
   test("rejects invalid cursors and missing sessions", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await withoutWatcher(() =>
       Instance.provide({
         directory: tmp.path,
@@ -138,10 +141,10 @@ describe("session messages endpoint", () => {
           const session = await svc.create({})
           const app = Server.Default().app
 
-          const bad = await app.request(`/session/${session.id}/message?limit=2&before=bad`)
+          const bad = await app.request(`/session/${session.id}/message?limit=2&before=bad`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(bad.status).toBe(400)
 
-          const miss = await app.request(`/session/ses_missing/message?limit=2`)
+          const miss = await app.request(`/session/ses_missing/message?limit=2`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(miss.status).toBe(404)
 
           await svc.remove(session.id)
@@ -151,7 +154,7 @@ describe("session messages endpoint", () => {
   })
 
   test("filters out subagent slices by default; opts in via agent_id query param", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await withoutWatcher(() =>
       Instance.provide({
         directory: tmp.path,
@@ -167,26 +170,26 @@ describe("session messages endpoint", () => {
           const app = Server.Default().app
 
           // Default — main slice only (the bug we're fixing).
-          const def = await app.request(`/session/${session.id}/message`)
+          const def = await app.request(`/session/${session.id}/message`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(def.status).toBe(200)
           const defBody = (await def.json()) as MessageV2.WithParts[]
           expect(defBody.map((m) => m.info.id)).toEqual([...main, ...more])
 
           // ?agent_id=<id> — that subagent's slice only.
-          const sub = await app.request(`/session/${session.id}/message?agent_id=checkpoint-writer-1`)
+          const sub = await app.request(`/session/${session.id}/message?agent_id=checkpoint-writer-1`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(sub.status).toBe(200)
           const subBody = (await sub.json()) as MessageV2.WithParts[]
           expect(subBody.map((m) => m.info.id)).toEqual(writer)
 
           // ?agent_id=* — all slices, preserves the legacy "no filter" behavior
           // for callers that explicitly opt in.
-          const all = await app.request(`/session/${session.id}/message?agent_id=*`)
+          const all = await app.request(`/session/${session.id}/message?agent_id=*`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(all.status).toBe(200)
           const allBody = (await all.json()) as MessageV2.WithParts[]
           expect(allBody.map((m) => m.info.id)).toEqual([...main, ...writer, ...more])
 
           // Same defaulting on the cursor-paginated path.
-          const limited = await app.request(`/session/${session.id}/message?limit=10`)
+          const limited = await app.request(`/session/${session.id}/message?limit=10`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(limited.status).toBe(200)
           const limitedBody = (await limited.json()) as MessageV2.WithParts[]
           expect(limitedBody.map((m) => m.info.id)).toEqual([...main, ...more])
@@ -198,7 +201,7 @@ describe("session messages endpoint", () => {
   })
 
   test("does not truncate large legacy limit requests", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await withoutWatcher(() =>
       Instance.provide({
         directory: tmp.path,
@@ -207,7 +210,7 @@ describe("session messages endpoint", () => {
           await fill(session.id, 520)
           const app = Server.Default().app
 
-          const res = await app.request(`/session/${session.id}/message?limit=510`)
+          const res = await app.request(`/session/${session.id}/message?limit=510`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(res.status).toBe(200)
           const body = (await res.json()) as MessageV2.WithParts[]
           expect(body).toHaveLength(510)

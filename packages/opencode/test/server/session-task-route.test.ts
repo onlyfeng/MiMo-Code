@@ -43,8 +43,11 @@ async function withoutWatcher<T>(fn: () => Promise<T>) {
 }
 
 describe("session task route", () => {
+  // root: "cwd" fixtures named on every request: without a directory, InstanceMiddleware
+  // boots an instance for process.cwd(), this checkout, and installs dependencies into its
+  // .mimocode. Unauthenticated servers only admit directories under cwd.
   test("GET /:sid/task returns [] for a fresh session, then created tasks", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await withoutWatcher(() =>
       Instance.provide({
         directory: tmp.path,
@@ -52,14 +55,14 @@ describe("session task route", () => {
           const session = await createSession()
           const app = Server.Default().app
 
-          const empty = await app.request(`/session/${session.id}/task`)
+          const empty = await app.request(`/session/${session.id}/task`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(empty.status).toBe(200)
           expect(await empty.json()).toEqual([])
 
           await runTask(TaskRegistry.Service.use((reg) => reg.create({ session_id: session.id, summary: "first" })))
           await runTask(TaskRegistry.Service.use((reg) => reg.create({ session_id: session.id, summary: "second" })))
 
-          const res = await app.request(`/session/${session.id}/task`)
+          const res = await app.request(`/session/${session.id}/task`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(res.status).toBe(200)
           const body = (await res.json()) as Task[]
           expect(body.map((t) => t.id)).toEqual(["T1", "T2"])
@@ -71,13 +74,13 @@ describe("session task route", () => {
   })
 
   test("GET /:sid/task 404s for a missing session", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await withoutWatcher(() =>
       Instance.provide({
         directory: tmp.path,
         fn: async () => {
           const app = Server.Default().app
-          const res = await app.request(`/session/ses_missing/task`)
+          const res = await app.request(`/session/ses_missing/task`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(res.status).toBe(404)
         },
       }),
@@ -85,7 +88,7 @@ describe("session task route", () => {
   })
 
   test("GET /:sid/todo projects task data with status mapping when tasks exist", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await withoutWatcher(() =>
       Instance.provide({
         directory: tmp.path,
@@ -116,7 +119,7 @@ describe("session task route", () => {
           void open
 
           const app = Server.Default().app
-          const res = await app.request(`/session/${session.id}/todo`)
+          const res = await app.request(`/session/${session.id}/todo`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(res.status).toBe(200)
           const body = (await res.json()) as { content: string; status: string }[]
           expect(body).toEqual([
@@ -132,7 +135,7 @@ describe("session task route", () => {
   })
 
   test("GET /:sid/todo falls back to the todo table when no tasks exist", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await withoutWatcher(() =>
       Instance.provide({
         directory: tmp.path,
@@ -151,7 +154,7 @@ describe("session task route", () => {
           )
 
           const app = Server.Default().app
-          const res = await app.request(`/session/${session.id}/todo`)
+          const res = await app.request(`/session/${session.id}/todo`, { headers: { "x-mimocode-directory": tmp.path } })
           expect(res.status).toBe(200)
           const body = (await res.json()) as { content: string; status: string }[]
           expect(body).toEqual([

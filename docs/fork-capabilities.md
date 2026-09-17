@@ -778,6 +778,48 @@ not change their implementation. The preceding review is retained in the
   three roots of a SIGKILLed run were reclaimed by the next run while a
   concurrently running process kept its own.
 
+- 2026-09-17 tests no longer write into the checkout: a package test run used to
+  leave `.mimocode/package.json`, a lockfile and `node_modules` at the
+  repository root, and `packages/opencode/.mimocode/` (`.cron-lock`,
+  `.gitignore`, installed dependencies) inside the checkout. Upstream's copies of
+  the same tests use the same paths. There were two writers. A session boot
+  starts the cron bridge, which is on by default, and its scheduler lock and
+  task file follow `process.cwd()`, which is this package directory. The harness
+  keeps that production path enabled instead of switching cron off. When
+  `process.cwd()/.mimocode` is absent at startup, the preload creates it with a
+  non-recursive mkdir. Only when that call created it does the preload record the
+  directory's identity (device, inode and birth time) in a marker in
+  the temp directory. A directory someone else created, or deleted and
+  recreated, never matches that identity. The owned directory is removed at the
+  end of the run, and a killed run's is reclaimed at the next startup, unless
+  another test process (a live `mimocode-test-data-<pid>` root) or a live
+  foreign `.cron-lock` owner may still use it. A lock that cannot be parsed yet
+  counts as live, because a scheduler opens it before writing its owner, until
+  it has gone a minute without changes. The lock is re-read immediately before
+  the removal, which backs off if the lock changed; what remains is the same
+  check-then-rename interval the scheduler's own takeover has. It is removed only while it holds
+  nothing beyond runtime artifacts (`.cron-lock`, `.gitignore`,
+  `package.json`, `package-lock.json`, `bun.lock` and `node_modules`). Any
+  other content, such as `scheduled_tasks.json`, hands the directory over by
+  dropping the marker. Without the end-of-run release,
+  `cancel-notification.test.ts` leaves the directory behind. The cron suites
+  stay in upstream's form. The second writer was instances rooted in the repository,
+  which ran config discovery against its `.mimocode` and installed dependencies
+  there. `bash.test.ts`, `webfetch.test.ts` and `websearch.test.ts` now use a git
+  fixture instead of the checkout, and `read.test.ts` reads a copy of its large
+  image from a fixture. Route requests that named no directory booted an
+  instance for `process.cwd()`. The `workflows-route`, `session-messages`,
+  `session-task-route`, `session-select`, `title-authority` and
+  `session-actions` server tests now send their fixture directory on every
+  request. Unauthenticated servers only admit directories under cwd, so those
+  fixtures move under `root: "cwd"`. `worker-listener.test.ts` gives its cwd
+  fixtures a git root and names that directory on the requests that boot an
+  instance (`/config`, and `/v1/models`, whose route bootstraps before checking
+  its token). The writers were located file by file and, for those that only
+  wrote alongside others, by order-preserving bisection of the CI shard order.
+  Before the change, each of those tests left repository artifacts; after it,
+  none did.
+
 - 2026-09-15 runtime acceptance infrastructure: the shared test workflow adds
   a Windows job for compat PR/push and explicit manual dispatch. Bun follows the
   package declaration and dependencies use `bun ci`, including the shared
@@ -947,6 +989,9 @@ logged`, and the peer `success`/`failure` variants of
   `packages/opencode/bunfig.toml`, `packages/opencode/test/preload.ts`,
   `packages/opencode/test/fixture/fixture.ts`,
   `packages/opencode/test/fixture/fixture-root.test.ts`,
+  `packages/opencode/test/tool/{bash,webfetch,websearch,read}.test.ts`,
+  `packages/opencode/test/server/{workflows-route,session-messages,session-task-route,session-select,title-authority,session-actions}.test.ts`,
+  `packages/opencode/test/cli/tui/worker-listener.test.ts`,
   `packages/opencode/test/workflow/runtime-worktree.test.ts`,
   `packages/enterprise/bunfig.toml`, `packages/enterprise/test/preload.ts`,
   `packages/enterprise/src/core/storage.ts`,

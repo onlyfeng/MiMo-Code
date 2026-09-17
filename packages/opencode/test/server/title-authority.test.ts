@@ -20,15 +20,18 @@ test("machine titles can revise generated titles but never overwrite manual or s
   } })
 })
 
+// root: "cwd" fixtures named on every request: without a directory, InstanceMiddleware
+// boots an instance for process.cwd(), this checkout, and installs dependencies into its
+// .mimocode. Unauthenticated servers only admit directories under cwd.
 test("fork persists an explicit protected title at creation",  async () => {
-  await using tmp = await tmpdir({ git: true })
+  await using tmp = await tmpdir({ git: true, root: "cwd" })
   await Instance.provide({
     directory: tmp.path,
     fn: async () => {
       const original = await AppRuntime.runPromise(Session.Service.use((svc) => svc.create({ title: "Original" })))
       const response = await Server.Default().app.request(`/session/${original.id}/fork`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "x-mimocode-directory": tmp.path, "content-type": "application/json" },
         body: JSON.stringify({ title: "  Custom branch  " }),
       })
       expect(response.status).toBe(200)
@@ -42,7 +45,7 @@ test("fork persists an explicit protected title at creation",  async () => {
 
 // [TP-ST-R2-05, TP-ST-R2-06, TP-ST-R2-08] Real HTTP validator and SQLite command.
 test("PATCH requires revision, rejects provenance/future revisions and returns a complete 409 snapshot", async () => {
-  await using tmp = await tmpdir({ git: true })
+  await using tmp = await tmpdir({ git: true, root: "cwd" })
   await Instance.provide({
     directory: tmp.path,
     fn: async () => {
@@ -51,7 +54,7 @@ test("PATCH requires revision, rejects provenance/future revisions and returns a
       const patch = (body: unknown) =>
         app.request(`/session/${s.id}`, {
           method: "PATCH",
-          headers: { "content-type": "application/json" },
+          headers: { "x-mimocode-directory": tmp.path, "content-type": "application/json" },
           body: JSON.stringify(body),
         })
       for (const body of [
