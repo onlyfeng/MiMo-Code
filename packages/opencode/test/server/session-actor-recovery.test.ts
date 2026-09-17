@@ -271,8 +271,7 @@ for (const mode of ["subagent", "peer", "isolated peer"] as const) {
           const admitted = await AppRuntime.runPromise(
             fixture.sessions.messages({ sessionID: fixture.spawned.sessionID, agentID: fixture.spawned.actorID }),
           )
-          const settled = admitted.find((message) => message.info.id === fixture.interrupted.info.id)!.info
-          expect(settled.role === "assistant" && settled.time.completed).toBeNumber()
+          expect(admitted.find((message) => message.info.id === fixture.interrupted.info.id)).toBeUndefined()
           const busy = await fixture.request(`${base}/recovery?${selector}`)
           expect(await busy.json()).toEqual([])
           fixture.release()
