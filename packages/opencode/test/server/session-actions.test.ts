@@ -29,15 +29,18 @@ afterEach(async () => {
 })
 
 describe("session action routes", () => {
+  // root: "cwd" fixtures named on every request: without a directory, InstanceMiddleware
+  // boots an instance for process.cwd(), this checkout, and installs dependencies into its
+  // .mimocode. Unauthenticated servers only admit directories under cwd.
   test("abort route returns success", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         const session = await svc.create({})
         const app = Server.Default().app
 
-        const res = await app.request(`/session/${session.id}/abort`, { method: "POST" })
+        const res = await app.request(`/session/${session.id}/abort`, { method: "POST", headers: { "x-mimocode-directory": tmp.path } })
 
         expect(res.status).toBe(200)
         expect(await res.json()).toBe(true)

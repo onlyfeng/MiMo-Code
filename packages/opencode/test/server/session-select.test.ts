@@ -28,8 +28,11 @@ afterEach(async () => {
 })
 
 describe("tui.selectSession endpoint", () => {
+  // root: "cwd" fixtures named on every request: without a directory, InstanceMiddleware
+  // boots an instance for process.cwd(), this checkout, and installs dependencies into its
+  // .mimocode. Unauthenticated servers only admit directories under cwd.
   test("should return 200 when called with valid session", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -40,7 +43,7 @@ describe("tui.selectSession endpoint", () => {
         const app = Server.Default().app
         const response = await app.request("/tui/select-session", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "x-mimocode-directory": tmp.path, "Content-Type": "application/json" },
           body: JSON.stringify({ sessionID: session.id }),
         })
 
@@ -55,7 +58,7 @@ describe("tui.selectSession endpoint", () => {
   })
 
   test("should return 404 when session does not exist", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -66,7 +69,7 @@ describe("tui.selectSession endpoint", () => {
         const app = Server.Default().app
         const response = await app.request("/tui/select-session", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "x-mimocode-directory": tmp.path, "Content-Type": "application/json" },
           body: JSON.stringify({ sessionID: nonExistentSessionID }),
         })
 
@@ -77,7 +80,7 @@ describe("tui.selectSession endpoint", () => {
   })
 
   test("should return 400 when session ID format is invalid", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -88,7 +91,7 @@ describe("tui.selectSession endpoint", () => {
         const app = Server.Default().app
         const response = await app.request("/tui/select-session", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "x-mimocode-directory": tmp.path, "Content-Type": "application/json" },
           body: JSON.stringify({ sessionID: invalidSessionID }),
         })
 

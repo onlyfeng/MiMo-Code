@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import path from "path"
 import { Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Agent } from "../../src/agent/agent"
@@ -10,8 +9,11 @@ import { WebSearchTool } from "../../src/tool/websearch"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { ProviderTest } from "../fake/provider"
+import { tmpdir } from "../fixture/fixture"
 
-const projectRoot = path.join(import.meta.dir, "../..")
+// A git fixture rather than this checkout: an instance rooted in the repository
+// runs config discovery against its .mimocode and installs dependencies there.
+const projectRoot = (await tmpdir({ git: true })).path
 
 const sse = (model: string) => {
   const frame = {
