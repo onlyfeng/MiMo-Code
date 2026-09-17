@@ -1365,6 +1365,11 @@ files remain byte-identical to the accepted main correction.
   `packages/opencode/test/session/prompt-rebuild-loop.test.ts`, and
   `packages/opencode/test/lib/llm-server.ts` supporting request-boundary
   assertions.
+- 2026-09-17 test hygiene: `checkpoint-coverage.test.ts` follows the inherited
+  FC-008 convention. Its fixtures are `root: "cwd"`, and it names the fixture
+  directory on every request, so the suite no longer boots an instance for the
+  checkout and installs dependencies into the repository's `.mimocode`. The
+  endpoint assertions are unchanged.
 - 2026-09-05 synchronization: The new default Bash preview can exceed the
   existing 50 KiB model-replay cap. Completed Bash output with truncated=true
   and a non-empty archive outputPath now uses the existing head+tail slice
