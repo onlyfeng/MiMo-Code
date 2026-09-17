@@ -763,9 +763,11 @@ not change their implementation. The preceding review is retained in the
   home directories. `outsideGit`
   fixtures now sit under a per-process `/tmp` root that the preload passes to
   `test/fixture/fixture.ts`. Every root is `<prefix><pid>`. Preload startup
-  reclaims roots whose process no longer exists, and any root already named for
-  the current PID so a reused PID starts clean; it never touches another live or
-  EPERM PID, which covers killed and timed-out runs. afterAll removes the roots
+  reclaims, best effort, roots whose process no longer exists and never touches
+  another live or EPERM PID, which covers killed and timed-out runs. A root
+  already named for the current PID belongs to a run whose PID was reused; it
+  is removed with retries, and a removal that still fails stops the run instead
+  of letting it inherit that state. afterAll removes the roots
   synchronously before any timer await; only a root that fails there (Windows
   EBUSY) takes the existing GC-and-retry path, followed by a last synchronous
   pass. Under Bun 1.3.14 `bun test` runs no `exit` listeners, stops awaiting

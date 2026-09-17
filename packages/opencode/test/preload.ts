@@ -89,22 +89,23 @@ function processGone(pid: number) {
 }
 
 // Every per-run root is `<prefix><pid>` and belongs to exactly one test process.
-// A killed or timed-out run never reaches afterAll, so first reclaim the roots
-// whose process no longer exists, and any root already named for this process:
-// its PID may be a reused one, and this run must not inherit that state. Another
-// live PID, including another user's (EPERM), is never touched.
+// A killed or timed-out run never reaches afterAll, so first reclaim, best
+// effort, the roots whose process no longer exists. Another live PID, including
+// another user's (EPERM), is never touched.
 async function claimRoot(parent: string, prefix: string) {
   const names = await fs.readdir(parent).catch(() => [] as string[])
   await Promise.all(
     names
       .filter((name) => name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length)))
-      .filter((name) => {
-        const pid = Number(name.slice(prefix.length))
-        return pid === process.pid || processGone(pid)
-      })
+      .filter((name) => processGone(Number(name.slice(prefix.length))))
       .map((name) => fs.rm(path.join(parent, name), { recursive: true, force: true }).catch(() => undefined)),
   )
-  return path.join(parent, prefix + process.pid)
+  // A root already named for this process was left by an earlier run whose PID
+  // this one reuses. Its removal is not best effort: if it still fails after
+  // retries, the run must stop rather than start on inherited state.
+  const root = path.join(parent, prefix + process.pid)
+  await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  return root
 }
 
 // Set XDG env vars FIRST, before any src/ imports. The process-wide data root
