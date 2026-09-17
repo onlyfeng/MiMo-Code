@@ -190,10 +190,17 @@ const releaseCwdMimocode = () => {
   rmSync(cwdMimocodeMarker, { force: true })
 }
 releaseCwdMimocode()
-if (!existsSync(cwdMimocode)) {
-  mkdirSync(cwdMimocode, { recursive: true })
-  writeFileSync(cwdMimocodeMarker, identity(cwdMimocode))
-}
+// A non-recursive mkdir fails on an existing directory, so ownership is recorded
+// only when this call is what created it, never for one that appeared meanwhile.
+const createdCwdMimocode = (() => {
+  try {
+    mkdirSync(cwdMimocode)
+    return true
+  } catch {
+    return false
+  }
+})()
+if (createdCwdMimocode) writeFileSync(cwdMimocodeMarker, identity(cwdMimocode))
 
 afterAll(async () => {
   const { Database } = await import("../src/storage")

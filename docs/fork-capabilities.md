@@ -786,8 +786,9 @@ not change their implementation. The preceding review is retained in the
   starts the cron bridge, which is on by default, and its scheduler lock and
   task file follow `process.cwd()`, which is this package directory. The harness
   keeps that production path enabled instead of switching cron off. When
-  `process.cwd()/.mimocode` is absent at startup, the preload creates it and
-  records the directory's identity (device, inode and birth time) in a marker in
+  `process.cwd()/.mimocode` is absent at startup, the preload creates it with a
+  non-recursive mkdir. Only when that call created it does the preload record the
+  directory's identity (device, inode and birth time) in a marker in
   the temp directory. A directory someone else created, or deleted and
   recreated, never matches that identity. The owned directory is removed at the
   end of the run, and a killed run's is reclaimed at the next startup, unless
