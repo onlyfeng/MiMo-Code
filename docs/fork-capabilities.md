@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-09-17
 - Upstream: `4cb859dd7c962b13eee5f34146350f520a380217`
 - Prior reviewed upstream: `26aa00fc7e243a90586f5895ddcad2b7ce76b935`
-- Main behavior (runtime/tests): `5a4c29189b5f52de5ac91a2263dc4bfd068cdeb5`
+- Main behavior (runtime/tests): `4cedfa97e7fa6a6f19c3cbf7b0a2e58201df57e7`
 - Bundled guidance content: `9c05eacb2817b0e100fb4b788b8085af6ba2aef5`
 - Prior fork `main` tip: `89ee712592a371742740e705cc72f49fdd1bb9ea`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
