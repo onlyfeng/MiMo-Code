@@ -731,6 +731,53 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-09-17 per-run test roots: `test/preload.ts` roots the process-wide data
+  directory (`mimocode-test-data-<pid>`, holding the XDG directories and HOME)
+  under the resolved `os.tmpdir()` again, as upstream does. Its home-directory
+  placement predated `62fd366c`, after which Instance accepts temp-tree project
+  directories such as worktrees under `Global.Path.data`. The temp directory is
+  resolved because macOS's sits behind the `/var` symlink and runtime events
+  report canonical paths: unresolved, three `test/workflow/runtime-worktree.test.ts`
+  cases failed on macOS, which Linux CI's `/tmp` cannot reproduce.
+  Default fixture projects are rooted under the resolved `/var/tmp` on POSIX
+  (then the home directory, the git-free parent of cwd, and temp as fallbacks;
+  Windows keeps those fallbacks). A non-git fixture's worktree is `/`, so config,
+  command and skill discovery walk every ancestor. Measured on macOS: rooted
+  under home, a probe fixture discovered the developer's own `~/.mimocode` and
+  `~/.claude`, and 23 of its 63 skills came from the real home; rooted inside the
+  checkout as upstream does, it loaded the repository's `.mimocode`, and a full
+  6458-case run failed seven fork-only deletion/listener security cases
+  deterministically because their "outside" directory joined the project
+  worktree; rooted under `/var/tmp`, nothing was discovered and the full run
+  passed.
+  CI runners have no such home directories, which is why the home placement
+  stayed green there. The root also stays outside the temp tree: Bash exempts
+  temp-only deletions, so a fixture project there would let the "target outside
+  temp" deletion cases pass through project containment instead. The candidate
+  filter mirrors Instance's current protected paths; its earlier `/root` and
+  `/var` prefixes had been stale since upstream `20b79f71`. `root: "home"` is
+  removed: `test/file/path-traversal.test.ts` passes in upstream's form, so its
+  helper and the shared `~/.mimocode-home-fixtures` directory are gone.
+  `test/fixture/fixture-root.test.ts` requires that nothing discoverable lies
+  above a non-git fixture; with the home root restored it fails, listing the
+  home directories. `outsideGit`
+  fixtures now sit under a per-process `/tmp` root that the preload passes to
+  `test/fixture/fixture.ts`. Every root is `<prefix><pid>`. Preload startup
+  reclaims, best effort, roots whose process no longer exists and never touches
+  another live or EPERM PID, which covers killed and timed-out runs. A root
+  already named for the current PID belongs to a run whose PID was reused; it
+  is removed with retries, and a removal that still fails stops the run instead
+  of letting it inherit that state. afterAll removes the roots
+  synchronously before any timer await; only a root that fails there (Windows
+  EBUSY) takes the existing GC-and-retry path, followed by a last synchronous
+  pass. Under Bun 1.3.14 `bun test` runs no `exit` listeners, stops awaiting
+  afterAll at its first timer when a test file fails to load, and detached
+  Config dependency installs recreate removed paths whenever the hook yields.
+  Before: a concurrent-writer reproduction leaked the data root in 3 of 3 runs,
+  and each probed load-failure run left its root. After: 0 of 6 and 0 of 3. The
+  three roots of a SIGKILLed run were reclaimed by the next run while a
+  concurrently running process kept its own.
+
 - 2026-09-15 runtime acceptance infrastructure: the shared test workflow adds
   a Windows job for compat PR/push and explicit manual dispatch. Bun follows the
   package declaration and dependencies use `bun ci`, including the shared
@@ -898,6 +945,8 @@ logged`, and the peer `success`/`failure` variants of
   `packages/opencode/src/workflow/runtime.ts`,
   `packages/opencode/src/workflow/sandbox.ts`,
   `packages/opencode/bunfig.toml`, `packages/opencode/test/preload.ts`,
+  `packages/opencode/test/fixture/fixture.ts`,
+  `packages/opencode/test/fixture/fixture-root.test.ts`,
   `packages/opencode/test/workflow/runtime-worktree.test.ts`,
   `packages/enterprise/bunfig.toml`, `packages/enterprise/test/preload.ts`,
   `packages/enterprise/src/core/storage.ts`,

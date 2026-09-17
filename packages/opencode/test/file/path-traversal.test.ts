@@ -54,7 +54,6 @@ describe("File.read path traversal protection", () => {
   test("rejects ../ traversal attempting to read /etc/passwd", () =>
     withTmpdirOutsideGit(async () => {
       await using tmp = await tmpdir({
-        root: "home",
         init: async (dir) => {
           await Bun.write(path.join(dir, "allowed.txt"), "allowed content")
         },
@@ -101,7 +100,7 @@ describe("File.read path traversal protection", () => {
 describe("File.list path traversal protection", () => {
   test("rejects ../ traversal attempting to list /etc", () =>
     withTmpdirOutsideGit(async () => {
-      await using tmp = await tmpdir({ root: "home" })
+      await using tmp = await tmpdir()
 
       await Instance.provide({
         directory: tmp.path,
