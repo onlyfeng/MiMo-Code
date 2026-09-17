@@ -73,8 +73,11 @@ async function checkpoint(
 }
 
 describe("session checkpoint coverage endpoint", () => {
+  // root: "cwd" fixtures named on every request: without a directory, InstanceMiddleware
+  // boots an instance for process.cwd(), this checkout, and installs dependencies into its
+  // .mimocode. Unauthenticated servers only admit directories under cwd.
   test("returns every main marker with canonical order and exact effective watermark resolution", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -130,7 +133,9 @@ describe("session checkpoint coverage endpoint", () => {
           }
         })
 
-        const response = await Server.Default().app.request(`/session/${session.id}/checkpoint-coverage`)
+        const response = await Server.Default().app.request(`/session/${session.id}/checkpoint-coverage`, {
+          headers: { "x-mimocode-directory": tmp.path },
+        })
         expect(response.status).toBe(200)
         expect((await response.json()) as Coverage[]).toEqual([
           {
@@ -176,11 +181,13 @@ describe("session checkpoint coverage endpoint", () => {
   })
 
   test("returns 404 for a missing session", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const response = await Server.Default().app.request("/session/ses_missing/checkpoint-coverage")
+        const response = await Server.Default().app.request("/session/ses_missing/checkpoint-coverage", {
+          headers: { "x-mimocode-directory": tmp.path },
+        })
         expect(response.status).toBe(404)
       },
     })
