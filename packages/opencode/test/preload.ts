@@ -3,7 +3,7 @@
 import os from "os"
 import path from "path"
 import { createHash } from "crypto"
-import { constants as fsConstants, existsSync, readdirSync, rmSync, writeFileSync } from "fs"
+import { constants as fsConstants, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs"
 import fs from "fs/promises"
 import { setTimeout as sleep } from "node:timers/promises"
 import { afterAll } from "bun:test"
@@ -164,6 +164,18 @@ const releaseCwdMimocode = () => {
     .map((name) => /^mimocode-test-data-(\d+)$/.exec(name)?.[1])
     .some((pid) => pid && Number(pid) !== process.pid && !processGone(Number(pid)))
   if (otherTestRun) return
+  // A live process other than this run holding the scheduler lock is using the
+  // directory right now, e.g. MiMo started from this package directory. Keep it,
+  // and the marker, until a later run finds that owner gone.
+  const lockOwner = (() => {
+    try {
+      const lock: unknown = JSON.parse(readFileSync(path.join(cwdMimocode, ".cron-lock"), "utf8"))
+      return typeof lock === "object" && lock !== null && "pid" in lock ? Number(lock.pid) : undefined
+    } catch {
+      return undefined
+    }
+  })()
+  if (lockOwner && lockOwner !== process.pid && !processGone(lockOwner)) return
   // Anything beyond runtime artifacts makes it someone's real state: hand it over.
   if (list(cwdMimocode).every((name) => runtimeArtifacts.includes(name)))
     rmSync(cwdMimocode, { recursive: true, force: true })

@@ -786,10 +786,11 @@ not change their implementation. The preceding review is retained in the
   starts the cron bridge, which is on by default, and its scheduler lock and
   task file follow `process.cwd()`, which is this package directory. The harness
   keeps that production path enabled instead of switching cron off, and removes
-  `process.cwd()/.mimocode` after the run under three conditions: a test run
+  `process.cwd()/.mimocode` after the run under four conditions: a test run
   created it (a marker in the temp directory, keyed by the path, is written only
   when the directory was absent at startup); no other test process is alive (a
-  live `mimocode-test-data-<pid>` root); and it holds nothing beyond runtime
+  live `mimocode-test-data-<pid>` root); no other live process holds its
+  `.cron-lock`, for example MiMo started from the package directory; and it holds nothing beyond runtime
   artifacts (`.cron-lock`, `.gitignore`, `package.json`, `package-lock.json`,
   `bun.lock` and `node_modules`). Any other content, such as
   `scheduled_tasks.json`, hands the directory over by dropping the marker.
