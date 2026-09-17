@@ -7,17 +7,10 @@ import fs from "fs/promises"
 import { setTimeout as sleep } from "node:timers/promises"
 import { afterAll } from "bun:test"
 
-const forbiddenFixtureRoots = [
-  "/etc",
-  "/proc",
-  "/sys",
-  "/dev",
-  "/boot",
-  "/root",
-  "/var",
-  "/private/etc",
-  "/private/var",
-]
+// Mirrors assertSafeDirectory in src/project/instance.ts: a fixture base it
+// rejects could never become a project instance.
+const protectedExactPaths = ["/private", "/var", "/private/var"]
+const protectedPathPrefixes = ["/etc", "/proc", "/sys", "/dev", "/boot", "/private/etc", "/var/log", "/private/var/log"]
 
 function containsPath(parent: string, child: string) {
   const relative = path.relative(path.resolve(parent), path.resolve(child))
@@ -60,13 +53,24 @@ async function isFixtureBaseBlocked(candidate: string) {
   const resolved = path.resolve(candidate)
   if (resolved === path.parse(resolved).root) return true
   if (await findGitRoot(resolved)) return true
-  if (forbiddenFixtureRoots.some((forbidden) => containsPath(forbidden, resolved))) return true
+  if (process.platform !== "win32" && protectedExactPaths.includes(resolved)) return true
+  if (process.platform !== "win32" && protectedPathPrefixes.some((prefix) => containsPath(prefix, resolved))) return true
   return !(await isWritableDirectory(resolved))
 }
 
+// A non-git fixture's worktree is "/", so config, command and skill discovery
+// walk every ancestor of the fixture. Under the home directory that pulls in a
+// developer's own ~/.mimocode and ~/.claude skills; inside the checkout, the
+// repository's .mimocode. /var/tmp has no such ancestors, is not a temp root that
+// Bash exempts from delete confirmation, and is writable on POSIX systems.
 async function fixtureBase() {
   const candidates = await Promise.all(
-    [os.homedir(), await gitFreeParent(process.cwd()), os.tmpdir()].map(async (candidate) => ({
+    [
+      ...(process.platform === "win32" ? [] : [await fs.realpath("/var/tmp").catch(() => "/var/tmp")]),
+      os.homedir(),
+      await gitFreeParent(process.cwd()),
+      os.tmpdir(),
+    ].map(async (candidate) => ({
       candidate,
       blocked: await isFixtureBaseBlocked(candidate),
     })),
@@ -85,15 +89,19 @@ function processGone(pid: number) {
 }
 
 // Every per-run root is `<prefix><pid>` and belongs to exactly one test process.
-// A killed or timed-out run never reaches afterAll, so first reclaim the
-// roots whose process no longer exists. A live PID, including another user's
-// (EPERM), is never touched.
+// A killed or timed-out run never reaches afterAll, so first reclaim the roots
+// whose process no longer exists, and any root already named for this process:
+// its PID may be a reused one, and this run must not inherit that state. Another
+// live PID, including another user's (EPERM), is never touched.
 async function claimRoot(parent: string, prefix: string) {
   const names = await fs.readdir(parent).catch(() => [] as string[])
   await Promise.all(
     names
       .filter((name) => name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length)))
-      .filter((name) => processGone(Number(name.slice(prefix.length))))
+      .filter((name) => {
+        const pid = Number(name.slice(prefix.length))
+        return pid === process.pid || processGone(pid)
+      })
       .map((name) => fs.rm(path.join(parent, name), { recursive: true, force: true }).catch(() => undefined)),
   )
   return path.join(parent, prefix + process.pid)
@@ -110,11 +118,11 @@ const dir = await claimRoot(await fs.realpath(os.tmpdir()), "mimocode-test-data-
 await fs.mkdir(dir, { recursive: true })
 
 // Route default fixture tmpdirs outside the repository checkout, protected
-// system paths, and preferably the OS temp directory: Bash exempts temp-only
-// deletions from confirmation, so a fixture project under temp would let the
-// "target outside temp" deletion cases pass for a different reason. HTTP route
-// tests that must pass the InstanceMiddleware cwd containment check opt into
-// root: "cwd" in the fixture helper.
+// system paths, and preferably outside temp roots (see fixtureBase): Bash
+// exempts temp-only deletions from confirmation, so a fixture project under temp
+// would let the "target outside temp" deletion cases pass for a different
+// reason. HTTP route tests that must pass the InstanceMiddleware cwd containment
+// check opt into root: "cwd" in the fixture helper.
 const fixtureRoot = await claimRoot(await fixtureBase(), ".mimocode-test-fixtures-")
 await fs.mkdir(fixtureRoot, { recursive: true })
 process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = fixtureRoot

@@ -90,25 +90,8 @@ async function stop(dir: string) {
 // so VCS detection stops at the fixture instead of walking up to this repo.
 const cwdFixtureRoot = () => path.join(process.cwd(), "node_modules", ".mimocode-cwd-fixtures")
 
-// "home" roots a fixture outside cwd and away from conservative system fixture
-// roots. That lets tests exercise the non-git/project-marker path without using
-// os.tmpdir(), which sits under /tmp on Linux and can trigger server/middleware
-// assumptions unrelated to the behavior under test.
-// Prefer os.homedir() (/home/runner on CI, /Users/x on macOS), but it is often
-// /root under root containers, so pick the first non-system candidate between it
-// and cwd's parent. If the whole tree sits under a system path, fall back to
-// cwd's parent so the result is at least deterministic.
-const SYSTEM_PREFIXES = ["/etc", "/proc", "/sys", "/var", "/boot", "/root", "/dev", "/usr", "/bin", "/sbin", "/lib", "/tmp"]
-const underSystemPath = (p: string) => SYSTEM_PREFIXES.some((s) => p === s || p.startsWith(s + "/"))
-function homeFixtureRoot() {
-  const parent = path.dirname(process.cwd())
-  const base = [os.homedir(), parent].find((c) => !underSystemPath(c)) ?? parent
-  return path.join(base, ".mimocode-home-fixtures")
-}
-
-function tmpdirBase(root?: "cwd" | "tmp" | "home") {
+function tmpdirBase(root?: "cwd") {
   if (root === "cwd") return cwdFixtureRoot()
-  if (root === "home") return homeFixtureRoot()
   return process.env["MIMOCODE_TEST_TMPDIR_ROOT"] ?? os.tmpdir()
 }
 
@@ -118,7 +101,7 @@ type TmpDirOptions<T> = {
   config?: Partial<Config.Info>
   init?: (dir: string) => Promise<T>
   dispose?: (dir: string) => Promise<T>
-  root?: "cwd" | "tmp" | "home"
+  root?: "cwd"
 }
 export async function tmpdir<T>(options?: TmpDirOptions<T>) {
   const prevRoot = options?.outsideGit ? process.env["MIMOCODE_TEST_TMPDIR_ROOT"] : undefined
@@ -168,7 +151,7 @@ export async function tmpdir<T>(options?: TmpDirOptions<T>) {
 type ScopedTmpDirOptions = {
   git?: boolean
   config?: Partial<Config.Info>
-  root?: "cwd" | "tmp" | "home"
+  root?: "cwd"
   outsideGit?: boolean
 }
 
@@ -263,7 +246,7 @@ export function provideTmpdirInstance<A, E, R>(
 
 export function provideTmpdirServer<A, E, R>(
   self: (input: { dir: string; llm: TestLLMServer["Service"] }) => Effect.Effect<A, E, R>,
-  options?: { git?: boolean; config?: (url: string) => Partial<Config.Info>; root?: "cwd" | "tmp" | "home"; outsideGit?: boolean },
+  options?: { git?: boolean; config?: (url: string) => Partial<Config.Info>; root?: "cwd"; outsideGit?: boolean },
 ): Effect.Effect<
   A,
   E | PlatformError.PlatformError,
