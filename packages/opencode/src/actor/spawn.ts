@@ -341,7 +341,8 @@ export interface Interface {
     task_id?: TaskID
     signal?: AbortSignal
   }) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>
-  readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
+  readonly markGroupAbort?: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
+  readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced", options?: { wake?: boolean }) => Effect.Effect<void>
   readonly getForkContext: (sessionID: SessionID, actorID: string) => Effect.Effect<ForkContext | undefined>
   /**
    * Record whether the parent has already been told about this actor's current
@@ -577,6 +578,7 @@ export const layer = Layer.effect(
                       senderSessionID: input.sessionID,
                       senderActorID: input.actorID,
                       type: "actor_notification",
+                      ...(input.execution.groupAbort || input.generation.groupAbort ? { wake: false } : {}),
                       content: renderActorNotification({
                         actorID: input.actorID,
                         description,
@@ -588,7 +590,7 @@ export const layer = Layer.effect(
                       (effect) => withNotificationTarget(notificationTarget, effect, source),
                       Effect.ignoreCause({ log: "Warn", message: "actor terminal notification failed" }),
                     ),
-                  bus
+                  input.execution.groupAbort || input.generation.groupAbort ? Effect.void : bus
                     .publish(TuiEvent.ToastShow, {
                       message: `Child "${description}" ${status}`,
                       variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
@@ -1119,7 +1121,7 @@ export const layer = Layer.effect(
           // The fork may be interrupted before its first instruction installs
           // finishForkWork. Always settle this exact admission's generation
           // and outcome; an existing delivered result remains authoritative.
-          Effect.all([cancel(sessionID, actorID, "forced", generation), Fiber.interrupt(fiber)], {
+          Effect.all([cancel(sessionID, actorID, "forced", undefined, generation), Fiber.interrupt(fiber)], {
             concurrency: "unbounded",
             discard: true,
           }).pipe(
@@ -1326,6 +1328,7 @@ export const layer = Layer.effect(
       status: TerminalStatus,
       extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string } = {},
       source?: RunDisposalState,
+      wake = true,
     ) =>
       Effect.gen(function* () {
         const origin = source ?? (yield* RunDisposal)
@@ -1338,7 +1341,9 @@ export const layer = Layer.effect(
         // its parentID); a subagent shares the parent's session.
         const parentSessionID = actor.mode === "peer" ? (yield* session.get(sessionID)).parentID : sessionID
         if (!parentSessionID || isRunDisposing(origin)) return
-        const notificationTarget = yield* resolveNotificationTarget(actorKey(sessionID, actorID), parentSessionID)
+        const notificationTarget = yield* resolveNotificationTarget(actorKey(sessionID, actorID), parentSessionID).pipe(
+          state.withRunDisposal,
+        )
         if (!notificationTarget) return
         yield* withNotificationTarget(
           notificationTarget,
@@ -1348,6 +1353,7 @@ export const layer = Layer.effect(
             senderSessionID: sessionID,
             senderActorID: actorID,
             type: "actor_notification",
+            ...(!wake ? { wake: false } : {}),
             content: renderActorNotification({
               actorID,
               description: actor.description,
@@ -1357,6 +1363,7 @@ export const layer = Layer.effect(
           }),
           origin,
         )
+        if (!wake) return
         yield* withNotificationTarget(
           notificationTarget,
           bus.publish(TuiEvent.ToastShow, {
@@ -1458,6 +1465,7 @@ export const layer = Layer.effect(
                       ? { error }
                       : {},
                   source,
+                  !owner.groupAbort,
                 )
               }
             }).pipe(Effect.ensuring(lifecycleState.settleTerminal(owner)))
@@ -1657,12 +1665,14 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       actorID: string,
       mode: "graceful" | "forced",
+      options?: { wake?: boolean },
       expected?: ForkGenerationOwner,
     ) => Effect.Effect<void> = Effect.fn("Actor.cancel")(
-      (sessionID: SessionID, actorID: string, mode: "graceful" | "forced", expected?: ForkGenerationOwner) =>
+      (sessionID: SessionID, actorID: string, mode: "graceful" | "forced", options?: { wake?: boolean }, expected?: ForkGenerationOwner) =>
         Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
             const key = actorKey(sessionID, actorID)
+            if (options?.wake === false) yield* markGroupAbort(sessionID, actorID)
             const receiver = yield* lifecycleState.getForkContext(key)
             const inReceiver = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
               receiver ? withNotificationTarget(receiver, effect) : effect
@@ -1707,7 +1717,7 @@ export const layer = Layer.effect(
                       yield* Effect.forEach(
                         children,
                         (child) =>
-                          cancel(sessionID, child.actorID, mode).pipe(
+                          cancel(sessionID, child.actorID, mode, options).pipe(
                             Effect.catchCause((cause) =>
                               Effect.sync(() =>
                                 log.warn("actor child cancellation failed; continuing parent cleanup", {
@@ -1808,7 +1818,7 @@ export const layer = Layer.effect(
                             })
                             .pipe(inReceiver, Effect.ignoreCause)
                           yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-                          yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
+                          yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal, options?.wake !== false)
                           yield* retire
                         })
                         return
@@ -1869,7 +1879,7 @@ export const layer = Layer.effect(
                       // notify, while cancelling queued rows supersedes the receipt of the
                       // preceding execution that has already been joined.
                       if (!notifiedSettlements.has(key))
-                        yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal)
+                        yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal, options?.wake !== false)
                       yield* retire
                     }).pipe(
                       Effect.ensuring(settleClaim),
@@ -2042,7 +2052,13 @@ export const layer = Layer.effect(
         if (notified) notifiedSettlements.add(key)
         else notifiedSettlements.delete(key)
       })
-    const impl = Service.of({ spawn, recovery, resume, cancel, getForkContext, markTerminalNotified, scanStalledOnce })
+    const markGroupAbort = (sessionID: SessionID, actorID: string) =>
+      Effect.gen(function* () {
+        yield* lifecycleState.markGroupAbort(actorKey(sessionID, actorID))
+        const execution = yield* executions.current(sessionID, actorID)
+        if (execution) execution.groupAbort = true
+      })
+    const impl = Service.of({ spawn, recovery, resume, markGroupAbort, cancel, getForkContext, markTerminalNotified, scanStalledOnce })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it

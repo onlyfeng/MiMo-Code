@@ -20,6 +20,8 @@ export interface TerminalNotification {
   reportedStatus?: string
   reportedSummary?: string
   warnings?: string[]
+  /** Persist inbox row without auto-waking the parent (session abort). Default true. */
+  wake?: boolean
 }
 
 /**
@@ -50,6 +52,7 @@ export function makeTerminalNotifier(deps: {
         senderSessionID: input.sessionID,
         senderActorID: input.actorID,
         type: "actor_notification",
+        ...(input.wake === false ? { wake: false } : {}),
         content: renderActorNotification({
           actorID: input.actorID,
           description: actor.description,
@@ -62,7 +65,7 @@ export function makeTerminalNotifier(deps: {
         }),
       })
       // Written either way; a continuation only skips the toast.
-      if (input.source === "continuation") return true
+      if (input.source === "continuation" || input.wake === false) return true
       yield* Effect.promise(() =>
         Bus.publish(TuiEvent.ToastShow, {
           message: `Child "${actor.description}" ${input.status}`,

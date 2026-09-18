@@ -57,7 +57,11 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunState") {}
 
-const runnerKey = (sessionID: SessionID, agentID: string) => `${sessionID}:${agentID}`
+/**
+ * Runners are keyed by session then agentID — NOT a flat `${sessionID}:${agentID}`
+ * string. Flat prefixes are ambiguous when a legal imported session id itself
+ * contains a colon (`ses_example` vs `ses_example:child`).
+ */
 
 // A child executor must observe cancellation, not the stale assistant its caller
 // happens to pass. Upstream applies this in its runner factory, which takes
@@ -77,13 +81,13 @@ export const layer = Layer.effect(
         const data = {
           instance,
           scope: yield* Scope.make("parallel"),
-          runners: new Map<string, RunnerEntry>(),
+          runners: new Map<SessionID, Map<string, RunnerEntry>>(),
           disposing: false,
         }
         yield* Effect.addFinalizer(
           Effect.fnUntraced(function* () {
             data.disposing = true
-            const runners = [...data.runners.values()]
+            const runners = [...data.runners.values()].flatMap((actors) => [...actors.values()])
             data.runners.clear()
             yield* Effect.forEach(runners, (entry) => entry.runner.cancelDetached, {
               concurrency: "unbounded",
@@ -120,12 +124,11 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       agentID: string,
     ) {
-      const key = runnerKey(sessionID, agentID)
       const inherited = yield* RunDisposal
       if (isRunDisposing(inherited)) return yield* Effect.interrupt
       const data = yield* currentState()
       if (isRunDisposing(inherited) || data.disposing) return yield* Effect.interrupt
-      const existing = data.runners.get(key)
+      const existing = data.runners.get(sessionID)?.get(agentID)
       if (existing) {
         existing.control.leases++
         return { data, entry: existing }
@@ -138,16 +141,18 @@ export const layer = Layer.effect(
         leases: 1,
       }
       const cleanup = () => {
-        const current = data.runners.get(key)
+        const current = data.runners.get(sessionID)?.get(agentID)
         if (control.leases !== 0 || control.active || current?.control !== control || current.runner.busy) return
-        data.runners.delete(key)
+        const actors = data.runners.get(sessionID)
+        actors?.delete(agentID)
+        if (actors?.size === 0) data.runners.delete(sessionID)
       }
       const next: Runner.Runner<MessageV2.WithParts, never, Session.BusyError> = Runner.make<
         MessageV2.WithParts,
         never,
         Session.BusyError
       >(data.scope, {
-        label: key,
+        label: `${sessionID}:${agentID}`,
         onReentryWarn: (info) => elog.warn("runner-reentry", info),
         onStart: (id) => {
           control.latest = id
@@ -156,7 +161,7 @@ export const layer = Layer.effect(
         onIdle: (id) =>
           control.statusLock.withPermits(1)(
             Effect.gen(function* () {
-              if (data.runners.get(key)?.runner !== next || id !== control.latest) return
+              if (data.runners.get(sessionID)?.get(agentID)?.runner !== next || id !== control.latest) return
               control.active = false
               if (isMain && !data.disposing) yield* status.set(sessionID, { type: "idle" })
               cleanup()
@@ -167,7 +172,9 @@ export const layer = Layer.effect(
         busy: () => new Session.BusyError(sessionID),
       })
       const entry = { runner: next, control, cleanup }
-      data.runners.set(key, entry)
+      const actors = data.runners.get(sessionID) ?? new Map<string, RunnerEntry>()
+      actors.set(agentID, entry)
+      data.runners.set(sessionID, actors)
       return { data, entry }
     })
 
@@ -176,7 +183,7 @@ export const layer = Layer.effect(
       agentID = "main",
     ) {
       const data = yield* currentState()
-      const existing = data.runners.get(runnerKey(sessionID, agentID))
+      const existing = data.runners.get(sessionID)?.get(agentID)
       if (existing && (existing.control.active || existing.runner.busy))
         return yield* Effect.fail(new Session.BusyError(sessionID))
       return
@@ -198,21 +205,25 @@ export const layer = Layer.effect(
       return
     })
 
+    // Cancel a snapshot of this session's runners; leases and generation-aware
+    // cleanup keep a replacement admitted during interruption reachable.
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
-      const existing = (yield* runner(sessionID, "main")).entry
-      yield* Effect.gen(function* () {
-        if (existing.control.active || existing.runner.busy) {
-          yield* existing.runner.cancel
-          return
-        }
-        yield* existing.control.statusLock.withPermits(1)(
+      const main = yield* runner(sessionID, "main")
+      const targets = [...(main.data.runners.get(sessionID)?.values() ?? [])]
+      targets.forEach((entry) => entry.control.leases++)
+      yield* Effect.forEach(targets, (entry) => entry.runner.cancel, {
+        concurrency: "unbounded",
+        discard: true,
+      }).pipe(
+        Effect.andThen(main.entry.control.statusLock.withPermits(1)(
           Effect.gen(function* () {
-            if (existing.control.active || existing.runner.busy) return
+            const current = main.data.runners.get(sessionID)
+            if (current && [...current.values()].some((entry) => entry.control.active || entry.runner.busy)) return
             yield* status.set(sessionID, { type: "idle" })
           }),
-        )
-      }).pipe(
-        Effect.ensuring(release(existing)),
+        )),
+        Effect.ensuring(Effect.forEach(targets, release, { discard: true })),
+        Effect.ensuring(release(main.entry)),
       )
     })
 
@@ -220,9 +231,8 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       agentID: string,
     ) {
-      const key = runnerKey(sessionID, agentID)
       const data = yield* currentState()
-      const existing = data.runners.get(key)
+      const existing = data.runners.get(sessionID)?.get(agentID)
       if (!existing) return
       existing.control.leases++
       yield* (existing.control.active || existing.runner.busy ? existing.runner.cancel : Effect.void).pipe(
@@ -234,9 +244,8 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       agentID: string,
     ) {
-      const key = runnerKey(sessionID, agentID)
       const data = yield* currentState()
-      const existing = data.runners.get(key)
+      const existing = data.runners.get(sessionID)?.get(agentID)
       if (!existing) return
       existing.control.leases++
       yield* (existing.control.active || existing.runner.busy ? existing.runner.cancelDetached : Effect.void).pipe(

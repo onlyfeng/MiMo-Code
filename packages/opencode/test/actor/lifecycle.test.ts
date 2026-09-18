@@ -48,6 +48,24 @@ describe("actor lifecycle coordinator", () => {
     }),
   )
 
+  it.effect(
+    "group abort stays with a retired generation and does not quiet its successor",
+    Effect.gen(function* () {
+      const lifecycle = createActorLifecycle<string, string>()
+      const key = lifecycle.key(SessionID.make("ses_example"), "actor")
+      yield* lifecycle.retainPersistent(key)
+      const old = yield* lifecycle.acquireWake(key)
+      if (old._tag !== "owner") throw new Error("Expected wake owner")
+      yield* lifecycle.markGroupAbort(key)
+      yield* lifecycle.finishWake(key, old.owner, Exit.succeed("done"))
+      const next = yield* lifecycle.acquireWake(key)
+      if (next._tag !== "owner") throw new Error("Expected successor owner")
+      expect(old.owner.groupAbort).toBe(true)
+      expect(next.owner.groupAbort).toBeUndefined()
+      yield* lifecycle.finishWake(key, next.owner, Exit.succeed("done"))
+    }),
+  )
+
   test("keys include both the session and actor identity", () => {
     const lifecycle = createActorLifecycle<string, string>()
     const first = lifecycle.key(SessionID.make("session-a"), "actor")

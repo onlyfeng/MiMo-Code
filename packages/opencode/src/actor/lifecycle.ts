@@ -12,6 +12,7 @@ type GenerationBase = {
   generation: number
   done: Deferred.Deferred<void>
   terminalDone: Deferred.Deferred<void>
+  groupAbort?: boolean
   terminal?: TerminalClaim
 }
 
@@ -197,6 +198,10 @@ export function createActorLifecycle<Result, ContextValue, NotificationTarget = 
     setNotificationTarget: (actorKey: string, target: NotificationTarget) =>
       Effect.sync(() => notificationTargets.set(actorKey, target)),
     getNotificationTarget: (actorKey: string) => Effect.sync(() => notificationTargets.get(actorKey)),
+    markGroupAbort: (actorKey: string) => Effect.sync(() => {
+      const owner = generationOwners.get(actorKey)
+      if (owner) owner.groupAbort = true
+    }),
     startFork,
     currentGeneration: (actorKey: string) => Effect.sync(() => generationOwners.get(actorKey)),
     hasGeneration: (actorKey: string) => Effect.sync(() => generationOwners.has(actorKey)),
