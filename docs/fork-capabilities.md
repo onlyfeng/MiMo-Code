@@ -64,7 +64,7 @@ not change their implementation. The preceding review is retained in the
 | FC-010 | WebFetch and SSRF destination classification                                                              | Adapted contract plus fork hardening                             | Preserve complete `fe80::/10` classification, per-hop authorization, and resource bounds |
 | FC-011 | model prompts, path guidance, and bundled skills                                                          | Fork-facing guidance                                             | Preserve factual shared guidance                                                         |
 | FC-012 | publication, contribution, security                                                                       | Fork-specific process                                            | Preserve fork routing                                                                    |
-| FC-013 | Retry configuration, request/candidate/judge scopes and MaxMode final step                                | Shared retry plus fork policy corrections                        | Preserve budget precedence, bounded defaults, tool-free final step and status isolation  |
+| FC-013 | Retry configuration, request/candidate/judge scopes and MaxMode final step                                | Shared retry plus fork policy corrections                        | Preserve scope budgets, persistent live-step recovery, tool-free final step and status isolation |
 | FC-014 | `.cursor/environment.json` Cloud Agent dev environment                                                    | Fork-only infra absent from upstream                             | Preserve Bun bootstrap and read-only `upstream` remote; never send to upstream           |
 | FC-015 | compaction context budget, projection, frozen prefix, and trigger ratio                                   | Upstream trigger plus bounded fork projection                    | Preserve ratio parity, no-tool summaries, and config precedence                          |
 | FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets                                               | Upstream voice protocol plus fork lifecycle/editor hardening     | Preserve owner identity, drain-before-idle, and grapheme boundaries                      |
@@ -1334,6 +1334,13 @@ logged`, and the peer `success`/`failure` variants of
 
 - 2026-09-17 synchronization: Retain bounded server/rate-limit defaults and scope-first request/candidate/judge budgets against upstream persistent defaults. Adopt expanded transport classification and processor-owned visible retry status. Request retries publish diagnostics only for durable main requests; ensemble calls suppress that diagnostic stream. Jitter precedence, bounded network fallback, immutable instructions, side-effect replay guards and MaxMode final-step enforcement remain.
 
+- Current default policy: server and rate-limit live-step recovery now use
+  persistent retry without a deadline, matching network and upstream defaults.
+  Request, stream, unknown, candidate and judge budgets remain bounded. This
+  supersedes the server/rate-limit default retained in the 2026-09-17 sync;
+  explicit user, project and provider overrides still apply. Cancellation,
+  terminal errors, side-effect replay guards and the exact GPT overload
+  silent-retry limit of three remain enforced.
 - Status: active
 - Canonical owner: fork `main` session run loop
 - Observable contract: MaxMode orchestration may run before the configured
@@ -1345,20 +1352,30 @@ logged`, and the peer `success`/`failure` variants of
   may publish session-global retry status or `RetryAttempt` events.
 - Configuration delta: `session/retry.ts` resolves top-level jitter as each
   budget's default. Priority from lowest to highest is global top-level jitter, global budget jitter,
-  provider top-level jitter, then provider budget jitter. Switching network
-  retry from persistent to bounded without `maxRetries` supplies 5 rather than
-  leaving it unbounded. Request, max-candidate and max-judge scopes select their
+  provider top-level jitter, then provider budget jitter. Switching network,
+  server or rate-limit retry from persistent to bounded without `maxRetries`
+  supplies 5, 8 or 5 respectively. `mode: "bounded"` restores the count limit;
+  restoring the former server/rate-limit 15-minute window also requires
+  `deadlineMs: 900000`. For server/rate-limit only, an explicit `maxRetries`
+  retains bounded behavior when neither global nor provider config sets a
+  mode; `maxRetries: 0` therefore still disables retries. With neither mode
+  nor count configured, the new persistent default applies. Any explicit mode
+  keeps the existing provider-over-global precedence, and persistent mode
+  ignores the count. Network behavior is unchanged by this compatibility rule.
+  Request, max-candidate and max-judge scopes select their
   corresponding retry budgets; these rules are shared policy, not harness
   identity. `docs/architecture/retry-coordinator.md` and retry tests describe
-  the same precedence. This previously under-specified delta is recorded by the
-  2026-09-15 code audit; no implementation changes are made by that audit.
-- Upstream relationship: adapts upstream retry while retaining bounded defaults and fork
-  budget resolution, final-step enforcement and subagent status isolation.
+  the same precedence. The jitter precedence and bounded network fallback were
+  recorded by the 2026-09-15 code audit without changing their implementation.
+- Upstream relationship: adopts persistent network/server/rate-limit defaults
+  while retaining bounded request/stream/unknown/candidate/judge budgets and
+  fork budget resolution, final-step enforcement and subagent status isolation.
 - Watch surfaces: `packages/opencode/src/session/max-mode.ts`,
   `packages/opencode/src/session/prompt.ts`,
   `packages/opencode/src/session/retry.ts`,
   `packages/opencode/src/session/status.ts`, and processor final-step routing.
-- Tests/evidence: the MaxMode final-step regressions in
+- Tests/evidence: default budgets, overrides and classification in
+  `packages/opencode/test/session/retry.test.ts`; the MaxMode final-step regressions in
   `packages/opencode/test/session/prompt-effect.test.ts`, step-budget coverage in
   `packages/opencode/test/session/max-mode.test.ts`, and candidate/judge
   EConnReset coverage in `packages/opencode/test/session/max-mode-econnreset.test.ts`

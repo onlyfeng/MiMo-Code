@@ -56,7 +56,39 @@ const ExecCommandParameters = z.strictObject({
 })
 
 function execCommandArgs(args: unknown) {
-  const input = ExecCommandParameters.parse(args)
+  const parsed = ExecCommandParameters.safeParse(args)
+  if (!parsed.success) {
+    const fields = Object.keys(ExecCommandParameters.shape)
+    const unknown = parsed.error.issues.flatMap((issue) => issue.code === "unrecognized_keys" ? issue.keys : [])
+    const hints = unknown.flatMap((key) => {
+      const canonical = ToolCompat.canonical(key)
+      const matches = fields.filter((field) => {
+        const candidate = ToolCompat.canonical(field)
+        if (candidate === canonical) return true
+        if (candidate.length < 5 || Math.abs(candidate.length - canonical.length) > 1) return false
+        const index = candidate.split("").findIndex((char, i) => char !== canonical[i])
+        if (index < 0) return canonical.length === candidate.length + 1
+        return (
+          candidate.slice(index + 1) === canonical.slice(index + 1) ||
+          candidate.slice(index) === canonical.slice(index + 1) ||
+          candidate.slice(index + 1) === canonical.slice(index)
+        )
+      })
+      if (matches.length !== 1) return []
+      const field = JSON.stringify(matches[0])
+      return [
+        args && typeof args === "object" && Object.hasOwn(args, matches[0])
+          ? `Remove ${JSON.stringify(key)}; ${field} is already present.`
+          : `Did you mean ${field} instead of ${JSON.stringify(key)}? Rewrite this call; it was not executed.`,
+      ]
+    })
+    throw new Error([
+      Tool.validationErrorMessage("exec_command", parsed.error),
+      ...(unknown.length ? [`Allowed fields: ${fields.join(", ")}`] : []),
+      ...hints,
+    ].join("\n"))
+  }
+  const input = parsed.data
   const description = input.description ?? input.cmd
   return {
     command: input.cmd,
@@ -634,13 +666,24 @@ export const ToolScriptTool = Tool.define(
           .max(ACTIVE_DEADLINE_S_CEILING)
           .optional()
           .describe(
-            `Compute-time budget in seconds (default ${ACTIVE_DEADLINE_S_DEFAULT}, max ${ACTIVE_DEADLINE_S_CEILING}). Counts only active script compute — time parked on tool calls is not charged.`,
+            `Compute-time budget in seconds (default ${ACTIVE_DEADLINE_S_DEFAULT}, max ${ACTIVE_DEADLINE_S_CEILING}). Specify only one of timeout_seconds or timeout. Counts only active script compute — time parked on tool calls is not charged.`,
           ),
+        timeout: z
+          .number()
+          .int()
+          .min(1)
+          .max(ACTIVE_DEADLINE_S_CEILING * 1000)
+          .optional()
+          .describe(
+            `Upstream-compatible compute-time budget in milliseconds (default ${ACTIVE_DEADLINE_S_DEFAULT * 1000}, max ${ACTIVE_DEADLINE_S_CEILING * 1000}). Specify only one of timeout or timeout_seconds. Time parked on tool calls is not charged.`,
+          ),
+      }).refine((input) => input.timeout == null || input.timeout_seconds == null, {
+        message: "Specify only one of timeout (milliseconds) or timeout_seconds (seconds).",
       }),
-      execute: (params: { code: string; max_tool_calls?: number; timeout_seconds?: number }, ctx: Tool.Context) =>
+      execute: (params: { code: string; max_tool_calls?: number; timeout_seconds?: number; timeout?: number }, ctx: Tool.Context) =>
         Effect.gen(function* () {
           const maxToolCalls = params.max_tool_calls ?? MAX_TOOL_CALLS_DEFAULT
-          const activeDeadlineMs = (params.timeout_seconds ?? ACTIVE_DEADLINE_S_DEFAULT) * 1000
+          const activeDeadlineMs = params.timeout ?? (params.timeout_seconds ?? ACTIVE_DEADLINE_S_DEFAULT) * 1000
           const plan = {
             pending: false,
             receipt: undefined as { version: 1; sessionID: string; callID: string; messageID: string; agent: "build" } | undefined,
@@ -1407,7 +1450,7 @@ return { __undef: __out.value === undefined, json: __out.value === undefined ? "
             // reads like an engine fault — explain which budget was exhausted.
             const explained =
               status === "timeout"
-                ? `execution exceeded its time budget (${activeDeadlineMs / 1000}s of active compute, ${WALL_DEADLINE_MS / 60000}min wall clock — time parked on tool calls is not charged against the compute budget; raise via timeout_seconds, max ${ACTIVE_DEADLINE_S_CEILING}). Original error: ${message}`
+                ? `execution exceeded its time budget (${activeDeadlineMs / 1000}s of active compute, ${WALL_DEADLINE_MS / 60000}min wall clock — time parked on tool calls is not charged against the compute budget; raise via timeout_seconds, max ${ACTIVE_DEADLINE_S_CEILING} seconds, or timeout, max ${ACTIVE_DEADLINE_S_CEILING * 1000} milliseconds; specify only one). Original error: ${message}`
                 : message
             log.warn("exec failed", { status, message: explained.slice(0, 500) })
             yield* flushProgress()
