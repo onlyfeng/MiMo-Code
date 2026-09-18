@@ -3281,3 +3281,16 @@ with package typecheck passing. New final-tip CI is required on both branches.
 ## 2026-09-17 full synchronization
 
 Selected upstream `4cb859dd7c962b13eee5f34146350f520a380217`, starting main `89ee712592a371742740e705cc72f49fdd1bb9ea`, runtime/guidance `9c05eacb2817b0e100fb4b788b8085af6ba2aef5`, final test snapshot `13d287aac076b4b113f194991ad88c3786631625`. The [eleven-capability record](upstream-sync-2026-09-17.md) covers every incoming capability, retained FD/FC boundaries, generated APIs and local validation. Final published SHA CI and remote ancestry are separate post-publication evidence.
+
+
+## 2026-09-18 — session abort process group
+
+Reviewed upstream `4cb859dd7c962b13eee5f34146350f520a380217..2bda17944b346ab85c8ee3cf0a0d4ab24819d37c`
+against starting main `912d81687be1f923aebd9c33d8bdb03391efca34`.
+Main runtime/tests: `759b6431963cbeb7b0940f4b7a92dc64690624d5`; guidance content
+is unchanged. [C01 and validation](upstream-sync-2026-09-18.md) record adoption
+of same-session cancellation, durable quiet notification and exact runner tuple
+identity through FC-001 generation/episode ownership. No FD/FC retires. A quiet
+cancel follower is reproduced red before correction and green afterwards.
+Shared registries propagate unchanged to compat; final published SHA acceptance
+requires the subsequent exact-SHA CI and remote ancestry checks.

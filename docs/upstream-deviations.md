@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-17
-- Upstream: `4cb859dd7c962b13eee5f34146350f520a380217`
-- Prior reviewed upstream: `26aa00fc7e243a90586f5895ddcad2b7ce76b935`
-- Main behavior (runtime/tests): `13d287aac076b4b113f194991ad88c3786631625`
+- Last reviewed: 2026-09-18
+- Upstream: `2bda17944b346ab85c8ee3cf0a0d4ab24819d37c`
+- Prior reviewed upstream: `4cb859dd7c962b13eee5f34146350f520a380217`
+- Main behavior (runtime/tests): `759b6431963cbeb7b0940f4b7a92dc64690624d5`
 - Bundled guidance content: `9c05eacb2817b0e100fb4b788b8085af6ba2aef5`
-- Prior fork `main` tip: `89ee712592a371742740e705cc72f49fdd1bb9ea`
+- Prior fork `main` tip: `912d81687be1f923aebd9c33d8bdb03391efca34`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,7 +29,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-09-17 full sync](upstream-sync-2026-09-17.md), eleven capabilities through `4cb859dd`. Retain FC-007 opt-in notices and FC-013 bounded scope budgets, adopt image routing, stable reminders and atomic empty-residue recovery.
+Latest reviewed synchronization: [2026-09-18 full sync](upstream-sync-2026-09-18.md), one capability through `2bda1794`. Adopt same-session Actor cancellation and durable quiet terminal notifications, preserving FC-001 generation ownership and all compat boundaries.
+
+Previous synchronization: [2026-09-17 full sync](upstream-sync-2026-09-17.md), eleven capabilities through `4cb859dd`. Retain FC-007 opt-in notices and FC-013 bounded scope budgets, adopt image routing, stable reminders and atomic empty-residue recovery.
 
 Previous synchronization: exact catalog tool names at `26aa00fc`; the [single-capability review](upstream-sync-2026-09-15-26aa00fc.md) records lookup, GitLab and nested MCP dispatch, retained parameter normalization, authoritative checkpoint guidance, and validation. Explicit advertised adapters and existing request/permission boundaries remain intact.
 
