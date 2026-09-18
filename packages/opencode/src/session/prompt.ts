@@ -989,9 +989,81 @@ export const layer = Layer.effect(
       } satisfies ActorPromptOps
     })
 
+    // Session abort = process-group kill (product contract, not Orchestrator-specific):
+    // interrupt main AND cascade-cancel every same-session actor/subagent so stop
+    // is not limited to the main fiber while children keep running.
+    //
+    // Quiet abort is bound to EACH execution (execution.groupAbort), not a
+    // session-level switch: a new main turn must not re-arm wake for a cancelled
+    // execution's late terminal notify, and resume must not inherit quiet.
+    //
+    // Order: mark every known non-main execution BEFORE any interrupt can fire
+    // terminal handlers, then cancel runners, then Actor.cancel({wake:false}).
+    //
+    // Registry status is NOT a pre-filter: an idle registry row can still hold an
+    // ActorExecution. Actor.cancel checks the execution registry first.
     const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
       yield* elog.info("cancel", { sessionID })
+      const actors = yield* actorRegistry.listBySession(sessionID)
+      const nonMain = actors.filter((actor) => actor.actorID !== "main")
+      // Phase 1 — mark executions before interrupt (terminal handlers read this flag).
+      yield* Effect.forEach(
+        nonMain,
+        (actor) =>
+          Effect.gen(function* () {
+            yield* (boundActor ?? spawnRef.current)?.markGroupAbort?.(sessionID, actor.actorID) ?? Effect.void
+            const execution = yield* executions.current(sessionID, actor.actorID)
+            if (execution) execution.groupAbort = true
+          }).pipe(Effect.ignore),
+        { concurrency: "unbounded", discard: true },
+      )
+      // Phase 2 — interrupt runners.
       yield* state.cancel(sessionID)
+      // Phase 3 — cascade Actor.cancel; wake:false for any registry-only terminal.
+      yield* Effect.forEach(
+        nonMain,
+        (actor) =>
+          Effect.gen(function* () {
+            const svc = boundActor ?? spawnRef.current
+            if (svc) {
+              yield* svc.cancel(sessionID, actor.actorID, "graceful", { wake: false })
+              return
+            }
+            const execution = yield* executions.current(sessionID, actor.actorID)
+            if (execution) {
+              execution.groupAbort = true
+              yield* executions.requestCancel(execution)
+              yield* state.cancelActor(sessionID, actor.actorID)
+              yield* executions.interrupt(execution)
+              return
+            }
+            if (actor.status === "idle") return
+            yield* state.cancelActor(sessionID, actor.actorID)
+            const current = yield* actorRegistry.get(sessionID, actor.actorID)
+            if (!current || current.status === "idle") return
+            yield* actorRegistry.updateStatus(sessionID, actor.actorID, {
+              status: "idle",
+              lastOutcome: "cancelled",
+            })
+            // Registry-only path: no live fiber → no notifyTerminal. Materialize
+            // a cancelled notification into parent history so chat inline can
+            // show terminal state (wake still false — no LLM turn).
+            yield* notifyTerminal({
+              sessionID,
+              actorID: actor.actorID,
+              source: "pending",
+              status: "cancelled",
+              wake: false,
+            })
+          }).pipe(Effect.ignore),
+        { concurrency: "unbounded", discard: true },
+      )
+      // R14 terminal inline: quiet abort still persists cancelled notifications
+      // (wake:false skips auto-fork only). Drain parent main inbox NOW so those
+      // rows become synthetic <actor-notification> message parts on the parent
+      // session — desktop live/history both read that part for the terminal pill.
+      // drain does NOT start an LLM turn.
+      yield* inbox.drain(sessionID, "main").pipe(Effect.ignore)
     })
 
     // Shared rebuild-from-checkpoint step used by BOTH the automatic overflow
@@ -6366,6 +6438,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           actorID: agentID,
                           source: "continuation",
                           status,
+                          ...(exec.groupAbort ? { wake: false } : {}),
                           ...(status === "completed"
                             ? {
                                 result: text ?? "(no output)",
