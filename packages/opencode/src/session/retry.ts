@@ -26,8 +26,8 @@ export const NETWORK_MAX_RETRIES = STREAM_MAX_RETRIES
 export const SERVER_MAX_RETRIES = 8
 export const SERVER_RETRY_DEADLINE_MS = 15 * 60_000
 export const RATE_LIMIT_MAX_RETRIES = 5
-// Provider-declared retryable errors without a known subtype deserve the same
-// recovery window as server capacity errors; unknown means uncatalogued, not terminal.
+// Provider-declared retryable errors without a known subtype retain a finite
+// recovery window; unknown means uncatalogued, not terminal.
 export const UNKNOWN_MAX_RETRIES = SERVER_MAX_RETRIES
 export const UNKNOWN_RETRY_DEADLINE_MS = SERVER_RETRY_DEADLINE_MS
 
@@ -99,17 +99,17 @@ const DEFAULT_RETRY_CONFIG: ResolvedRetryConfig = {
     jitterRatio: 0,
   },
   server: {
-    mode: "bounded",
+    mode: "persistent",
     maxRetries: SERVER_MAX_RETRIES,
-    maxElapsedMs: SERVER_RETRY_DEADLINE_MS,
+    maxElapsedMs: 0,
     initialDelayMs: RETRY_INITIAL_DELAY,
     maxDelayMs: RETRY_MAX_DELAY_NO_HEADERS,
     jitterRatio: RETRY_JITTER_RATIO,
   },
   rateLimit: {
-    mode: "bounded",
+    mode: "persistent",
     maxRetries: RATE_LIMIT_MAX_RETRIES,
-    maxElapsedMs: SERVER_RETRY_DEADLINE_MS,
+    maxElapsedMs: 0,
     initialDelayMs: RETRY_INITIAL_DELAY,
     maxDelayMs: RETRY_MAX_DELAY_MESSAGE,
     jitterRatio: RETRY_JITTER_RATIO,
@@ -151,9 +151,17 @@ export function resolve(config: RetryConfigSource | undefined, providerID?: stri
     base: RetryBudget,
     globalBudget: RetryBudgetConfig | undefined,
     providerBudget: RetryBudgetConfig | undefined,
+    preserveConfiguredCount = false,
   ) =>
     mergeBudget(
-      base,
+      // Server/rate-limit counts predate their persistent default. Preserve an
+      // explicit count (including zero) unless a mode was explicitly selected.
+      preserveConfiguredCount &&
+        globalBudget?.mode === undefined &&
+        providerBudget?.mode === undefined &&
+        (globalBudget?.maxRetries !== undefined || providerBudget?.maxRetries !== undefined)
+        ? { ...base, mode: "bounded" }
+        : base,
       global?.jitterRatio === undefined ? undefined : { jitterRatio: global.jitterRatio },
       globalBudget,
       provider?.jitterRatio === undefined ? undefined : { jitterRatio: provider.jitterRatio },
@@ -165,8 +173,8 @@ export function resolve(config: RetryConfigSource | undefined, providerID?: stri
     maxCandidate: configuredBudget(DEFAULT_RETRY_CONFIG.maxCandidate, global?.maxCandidate, provider?.maxCandidate),
     maxJudge: configuredBudget(DEFAULT_RETRY_CONFIG.maxJudge, global?.maxJudge, provider?.maxJudge),
     network: configuredBudget(DEFAULT_RETRY_CONFIG.network, global?.network, provider?.network),
-    server: configuredBudget(DEFAULT_RETRY_CONFIG.server, global?.server, provider?.server),
-    rateLimit: configuredBudget(DEFAULT_RETRY_CONFIG.rateLimit, global?.rateLimit, provider?.rateLimit),
+    server: configuredBudget(DEFAULT_RETRY_CONFIG.server, global?.server, provider?.server, true),
+    rateLimit: configuredBudget(DEFAULT_RETRY_CONFIG.rateLimit, global?.rateLimit, provider?.rateLimit, true),
     unknown: configuredBudget(DEFAULT_RETRY_CONFIG.unknown, global?.unknown, provider?.unknown),
     jitterRatio: provider?.jitterRatio ?? global?.jitterRatio ?? DEFAULT_RETRY_CONFIG.jitterRatio,
   }

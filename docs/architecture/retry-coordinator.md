@@ -7,19 +7,19 @@ Retry 必须区分两个问题：错误是否可能恢复，以及当前 scope �
 Retry 必须区分两个问题：错误是否可能恢复，以及当前 scope 是否应该继续等待。事实归一化、终态判断、预算选择和 UI 通知必须分离。
 
 - 用户取消、鉴权、额度、上下文溢出和确定性请求错误立即停止。
-- 网络连接失败可以长时间等待网络恢复，适合 long-running harness。
+- 网络连接失败、服务端故障和限流默认持续等待恢复，适合 long-running harness。
 - 普通 stream 错误默认使用有限预算；network、server 和 rateLimit 分别使用自己的预算。
 - 已执行 tool side effect 后禁止自动重放整个 model step。
 - 所有 retry scope 使用同一个分类器、退避算法、Retry-After 解析器和事件模型。
-- 次数、deadline、退避和 persistent network 模式可以配置，provider 可以覆盖全局默认值。
+- 次数、deadline、退避和 persistent 模式可以配置，provider 可以覆盖全局默认值。
 
-请求、candidate 和 judge 优先使用对应 scope 的预算；其余按错误类型选择。server/rateLimit 默认仍有限，网络 live-step 默认 persistent。顶层 jitter 与 bounded network 默认次数保持 FC-013。
+请求、candidate 和 judge 优先使用对应 scope 的预算；其余按错误类型选择。network、server 和 rateLimit 的 live-step 默认均为 persistent 且无 deadline；request、stream、unknown、maxCandidate 和 maxJudge 保留有限预算。顶层 jitter 与 bounded 模式的默认次数保持 FC-013。
 
 ## 配置
 
-全局配置提供默认预算，provider.<id>.retry 对同名字段做覆盖。顶层 jitterRatio 是各预算的默认值，同层的预算级 jitterRatio 优先，provider 层再覆盖 global 层。maxRetries 是初始 attempt 之外的重试次数，schema 硬上限为 100；deadlineMs 必须是正整数，且不能与 noDeadline: true 同时出现。需要取消 wall-clock deadline 时必须显式设置 noDeadline: true；该选项不会取消 bounded budget 的 maxRetries 限制。network 从 persistent 切换为 bounded 且省略 maxRetries 时使用 5 次，不能退化为无限重试。persistent 模式忽略 maxRetries，maxElapsedMs=0 表示无 deadline。
+全局配置提供默认预算，provider.<id>.retry 对同名字段做覆盖。顶层 jitterRatio 是各预算的默认值，同层的预算级 jitterRatio 优先，provider 层再覆盖 global 层。maxRetries 是初始 attempt 之外的重试次数，schema 硬上限为 100；deadlineMs 必须是正整数，且不能与 noDeadline: true 同时出现。覆盖已有 wall-clock deadline 为无限时使用 noDeadline: true；该选项不会取消 bounded budget 的 maxRetries 限制。persistent 模式忽略 maxRetries，maxElapsedMs=0 表示无 deadline。
 
-用户级配置通常放在 `~/.config/mimocode/mimocode.jsonc`；设置 `XDG_CONFIG_HOME` 时使用其下的 `mimocode/mimocode.jsonc`，设置 `MIMOCODE_HOME` 时使用 `$MIMOCODE_HOME/config/mimocode.jsonc`。项目配置仍可覆盖用户配置。以下是普通对话等待服务端或限流恢复的最小配置，合并到既有文件即可；这是显式选择，不改变程序默认值：
+用户级配置通常放在 `~/.config/mimocode/mimocode.jsonc`；设置 `XDG_CONFIG_HOME` 时使用其下的 `mimocode/mimocode.jsonc`，设置 `MIMOCODE_HOME` 时使用 `$MIMOCODE_HOME/config/mimocode.jsonc`。项目配置仍可覆盖用户配置。普通对话等待服务端或限流恢复已是内置默认行为，无需添加配置；以下只是可选的显式配置：
 
 ```json
 {
@@ -30,7 +30,22 @@ Retry 必须区分两个问题：错误是否可能恢复，以及当前 scope �
 }
 ```
 
-network 的 live-step 默认已为 persistent 且无 deadline。上例保留 request、stream、unknown、maxCandidate 和 maxJudge 的原预算；仅某个 provider 需要长等待时，将相同的 `retry` 对象放在该 provider 的配置内。仅设置 `mode: "persistent"` 会取消次数上限，但 server/rateLimit 仍继承默认 15 分钟 deadline。
+上例保留其他预算；也可将相同的 `retry` 对象放在某个 provider 的配置内。`mode: "persistent"` 只控制次数上限，不清除其他配置层设置的 deadline；没有 deadline 覆盖时，server/rateLimit 默认不再继承 15 分钟限制。
+
+若要恢复原先有限次数和 15 分钟窗口，使用以下替代配置，并移除同一预算的 `noDeadline: true`：
+
+```json
+{
+  "retry": {
+    "server": { "mode": "bounded", "deadlineMs": 900000 },
+    "rateLimit": { "mode": "bounded", "deadlineMs": 900000 }
+  }
+}
+```
+
+切换为 bounded 且省略 maxRetries 时，network/server/rateLimit 分别使用 5/8/5 次。仅设置 `mode: "bounded"` 会恢复次数限制，仍无默认 deadline；需要 15 分钟窗口必须显式设置 `deadlineMs: 900000`。
+
+server/rateLimit 保留已有次数配置的兼容性：全局和 provider 均未显式设置该预算的 mode，但任一层设置了 maxRetries 时，按 bounded 处理，因此 `maxRetries: 0` 仍关闭重试。两层都未设置 mode 或 maxRetries 时才使用新的 persistent 默认值。任一层显式设置 mode 时，按 provider 覆盖全局的原优先级选择；显式 persistent 仍忽略 maxRetries。这项兼容规则不改变 network 的既有语义。
 
 若希望将 server/rateLimit 的重试窗口限制为一小时，使用下面的替代配置，并移除同一预算的 `noDeadline: true`：
 
@@ -62,7 +77,7 @@ Persistent 仍保留用户取消、进程退出及工具副作用边界；鉴权
 - **processor stream 阶段**（`isMain`）：`status.setRetry` 同时维护 session 级 `retryAttempts` 计数并写入 `session.status{type:"retry"}` 的 `attempt`——该计数跨 request/stream 在 **processor 可见 status** 上连续，session 回到 idle 时清零。
 - **llm request 阶段**：仅 durable main 且非 quietRetryDiagnostics 时发 `RetryAttempt` 作诊断，**不**写 session.status；其 `attempt`/`phaseAttempt` 是 **phase 局部序号**（每个 processor 外层周期从 1 起），不是 session 全局连续序号。
 
-maxAttempts 为 0 表示 persistent retry。terminal UI notice 使用独立的 session status notice，不伪装成 retry attempt。Persistent network retry 不重复创建 transcript message；UI 只更新当前状态。成功、终止、取消都必须清理 retry 状态并回到 idle。
+maxAttempts 为 0 表示 persistent retry。terminal UI notice 使用独立的 session status notice，不伪装成 retry attempt。Persistent retry 不重复创建 transcript message；UI 只更新当前状态。成功、终止、取消都必须清理 retry 状态并回到 idle。
 
 `session.status{type:"retry"}` 是 **session 维度** 的展示状态，不是 per-model-call 计数。
 
