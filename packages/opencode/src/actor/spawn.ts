@@ -1703,7 +1703,7 @@ export const layer = Layer.effect(
                       yield* Effect.forEach(
                         children,
                         (child) =>
-                          cancel(sessionID, child.actorID, mode, options).pipe(
+                          cancel(sessionID, child.actorID, mode, ownership.episode.groupAbort ? { wake: false } : options).pipe(
                             Effect.catchCause((cause) =>
                               Effect.sync(() =>
                                 log.warn("actor child cancellation failed; continuing parent cleanup", {
@@ -1804,7 +1804,7 @@ export const layer = Layer.effect(
                             })
                             .pipe(inReceiver, Effect.ignoreCause)
                           yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
-                          yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal, options?.wake !== false)
+                          yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal, options?.wake !== false && !ownership.episode.groupAbort)
                           yield* retire
                         })
                         return
@@ -1865,7 +1865,7 @@ export const layer = Layer.effect(
                       // notify, while cancelling queued rows supersedes the receipt of the
                       // preceding execution that has already been joined.
                       if (!notifiedSettlements.has(key))
-                        yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal, options?.wake !== false)
+                        yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal, options?.wake !== false && !ownership.episode.groupAbort)
                       yield* retire
                     }).pipe(
                       Effect.ensuring(settleClaim),

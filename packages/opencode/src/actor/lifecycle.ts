@@ -27,7 +27,7 @@ export type WakeGenerationOwner<Result> = GenerationBase & {
 }
 
 export type GenerationOwner<Result> = ForkGenerationOwner | WakeGenerationOwner<Result>
-export type CancelEpisode = { id: number; done: Deferred.Deferred<void> }
+export type CancelEpisode = { id: number; done: Deferred.Deferred<void>; groupAbort?: boolean }
 
 export type WakeOwnership<Result> =
   | { _tag: "blocked" }
@@ -201,6 +201,8 @@ export function createActorLifecycle<Result, ContextValue, NotificationTarget = 
     markGroupAbort: (actorKey: string) => Effect.sync(() => {
       const owner = generationOwners.get(actorKey)
       if (owner) owner.groupAbort = true
+      const episode = cancelEpisodes.get(actorKey)
+      if (episode) episode.groupAbort = true
     }),
     startFork,
     currentGeneration: (actorKey: string) => Effect.sync(() => generationOwners.get(actorKey)),
