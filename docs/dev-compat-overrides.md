@@ -1038,6 +1038,10 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-MODEL-001 — per-agent MaxMode
 
+- 2026-09-18 retry defaults: inherit persistent server/rate-limit live-step
+  recovery. Per-agent MaxMode candidate/judge budgets, final-step enforcement
+  and subagent retry-status isolation remain unchanged.
+
 - 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
 
 - POLICY-02 review: Inherited recovery query/schema and Session changes preserve MaxMode, retry/status isolation and generated compat APIs. Fresh standard SDK/OpenAPI generation matches the resolved artifacts.
@@ -1060,8 +1064,9 @@ files remain byte-identical to the accepted main correction.
   Max agent continues to work, absent experimental MaxMode configuration stays
   disabled, structured-output requests skip the mode, and the final step
   preserves FC-013's `toolChoice: "none"` termination boundary. Eligible
-  subagents inherit bounded retry but cannot write session-global retry status
-  or publish `RetryAttempt` events. The source-generated title API and
+  subagents' MaxMode candidate/judge calls inherit bounded retry. Subagents
+  cannot write session-global retry status or publish `RetryAttempt` events.
+  The source-generated title API and
   `titleLocale` path stay shared; this override neither routes the ephemeral
   title call through per-agent MaxMode nor gives it session-global status.
 - Source surfaces: `packages/opencode/src/agent/agent.ts`,
