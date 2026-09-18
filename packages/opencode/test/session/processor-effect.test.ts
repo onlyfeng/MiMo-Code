@@ -862,7 +862,7 @@ it.live(
           expect(retryEvents).toContainEqual({
             attempt: 1,
             phaseAttempt: 1,
-            maxAttempts: 8,
+            maxAttempts: 0,
             phase: "stream",
             kind: "server",
             scope: "live-step",

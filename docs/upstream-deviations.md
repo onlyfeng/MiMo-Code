@@ -568,9 +568,13 @@ the complete resolved model identity` case. FD-005 keeps only identity
   boundary. Question terminal cleanup is owned by FC-008; durable plan and
   Actor lifecycle settlement by FC-001. The existing resolver precedence,
   actor task source and recovery admission remain unchanged.
-  The public compute budget remains `timeout_seconds` in seconds. The strict
-  `exec_command` adapter uses `yield_time_ms` as a command timeout in milliseconds,
-  with no background terminal resume semantics or fuzzy argument repair.
+  The public compute budget accepts `timeout_seconds` (integer 1–600 seconds)
+  or upstream-compatible `timeout` (integer 1–600000 milliseconds), never both;
+  omitting both retains the 60-second default. Conversion occurs once at execution.
+  The strict `exec_command` adapter uses `yield_time_ms` as a command timeout in milliseconds,
+  with no background terminal resume semantics or automatic argument repair.
+  Unknown fields fail before Bash admission; a unique field-name suggestion
+  helps the caller rewrite the request without changing or executing it.
   Code is bounded at 128 KiB before and after normalization, serialized script
   return values and replayable nested records at 256 KiB each. Logs, traces and
   warnings have their separate existing bounds. The host relays at most eight

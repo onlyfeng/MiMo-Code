@@ -1,8 +1,8 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import type { NamedError } from "@mimo-ai/shared/util/error"
 import { APICallError, RetryError } from "ai"
 import { setTimeout as sleep } from "node:timers/promises"
-import { Effect, Schedule, Schema } from "effect"
+import { Cause, Duration, Effect, Exit, Schedule, Schema } from "effect"
 import { ConfigRetry } from "../../src/config/retry"
 import { SessionRetry, decide, isRetryableTransientError, retryable } from "../../src/session/retry"
 import { MessageV2 } from "../../src/session/message-v2"
@@ -557,7 +557,9 @@ describe("session.retry.retryable", () => {
   test("silently retries GPT overload three times before stopping", async () => {
     const error = new MessageV2.APIError({
       message: "Our servers are currently overloaded. Please try again later.",
+      statusCode: 503,
       isRetryable: true,
+      responseHeaders: { "retry-after-ms": "0" },
       responseBody: JSON.stringify({
         type: "error",
         error: { type: "service_unavailable_error", code: "server_is_overloaded" },
@@ -575,8 +577,8 @@ describe("session.retry.retryable", () => {
           Effect.retry(
             SessionRetry.policy({
               parse: (input) => input as MessageV2.APIError,
+              budget: (decision) => SessionRetry.budgetFor(SessionRetry.resolve(undefined), decision),
               silentRetry: SessionRetry.isGptServerOverloadedError,
-              initialDelayMs: 0,
               set: (info) => Effect.sync(() => visible.push(info.attempt)),
             }),
           ),
@@ -1019,6 +1021,148 @@ describe("retryable() with raw Error (Spec ③ P2 regression)", () => {
 })
 
 describe("retry decision and coordinator budget", () => {
+  for (const [statusCode, kind] of [
+    [503, "server"],
+    [429, "rate_limit"],
+  ] as const) {
+    test(`unconfigured ${kind} retries continue beyond the old count and deadline`, async () => {
+      const resolved = SessionRetry.resolve(undefined)
+      const error = new MessageV2.APIError({
+        message: "temporarily unavailable",
+        statusCode,
+        isRetryable: true,
+        responseHeaders: { "retry-after-ms": "901000" },
+      }).toObject()
+      const updates: { attempt: number; maxAttempts: number; kind: string }[] = []
+      const clock = spyOn(Date, "now").mockReturnValue(1_000_000)
+      try {
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const step = yield* Schedule.toStep(
+              SessionRetry.policy({
+                parse: (input) => input as MessageV2.APIError,
+                budget: (decision) => SessionRetry.budgetFor(resolved, decision),
+                set: (info) =>
+                  Effect.sync(() => {
+                    updates.push(info)
+                  }),
+              }),
+            )
+            return yield* Effect.forEach(Array.from({ length: 12 }), (_, index) => {
+              clock.mockReturnValue(1_000_000 + index * 960_000)
+              return step(Date.now(), error)
+            })
+          }),
+        )
+        expect(result).toHaveLength(12)
+        expect(result.map(([, duration]) => Duration.toMillis(duration))).toEqual(
+          Array(12).fill(statusCode === 503 ? 30000 : 300000),
+        )
+        expect(updates.at(-1)).toMatchObject({ attempt: 12, maxAttempts: 0, kind })
+      } finally {
+        clock.mockRestore()
+      }
+    })
+  }
+
+  test("unconfigured persistent retries remain cancellable during the delay", async () => {
+    const resolved = SessionRetry.resolve(undefined)
+    const controller = new AbortController()
+    const error = new MessageV2.APIError({ message: "server", statusCode: 503, isRetryable: true }).toObject()
+    let attempts = 0
+    const exit = await Effect.runPromiseExit(
+      Effect.suspend(() => {
+        attempts++
+        return Effect.fail(error)
+      }).pipe(
+        Effect.retry(
+          SessionRetry.policy({
+            parse: (input) => input as MessageV2.APIError,
+            budget: (decision) => SessionRetry.budgetFor(resolved, decision),
+            set: () =>
+              Effect.sync(() => {
+                queueMicrotask(() => controller.abort())
+              }),
+          }),
+        ),
+      ),
+      { signal: controller.signal },
+    )
+    expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true)
+    expect(attempts).toBe(1)
+  })
+
+  test("explicit bounded server and rate-limit modes retain finite default counts", () => {
+    const resolved = SessionRetry.resolve({ retry: { server: { mode: "bounded" }, rateLimit: { mode: "bounded" } } })
+    expect(resolved.server).toMatchObject({ mode: "bounded", maxRetries: 8 })
+    expect(resolved.rateLimit).toMatchObject({ mode: "bounded", maxRetries: 5 })
+  })
+
+  for (const name of ["server", "rateLimit"] as const) {
+    for (const scope of ["global", "provider"] as const) {
+      test(`explicit ${scope} ${name} zero retries still disables scheduling without a mode`, async () => {
+        const retry = { [name]: { maxRetries: 0 } }
+        const resolved = SessionRetry.resolve(
+          scope === "global" ? { retry } : { provider: { test: { retry } } },
+          "test",
+        )
+        const error = new MessageV2.APIError({
+          message: "temporarily unavailable",
+          statusCode: name === "server" ? 503 : 429,
+          isRetryable: true,
+        }).toObject()
+        let scheduled = 0
+        const exit = await Effect.runPromiseExit(
+          Effect.gen(function* () {
+            const step = yield* Schedule.toStep(
+              SessionRetry.policy({
+                parse: (input) => input as MessageV2.APIError,
+                budget: (decision) => SessionRetry.budgetFor(resolved, decision),
+                set: () =>
+                  Effect.sync(() => {
+                    scheduled++
+                  }),
+              }),
+            )
+            return yield* step(Date.now(), error)
+          }),
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(scheduled).toBe(0)
+      })
+    }
+  }
+
+  test("explicit retry modes take precedence over inherited server counts", () => {
+    expect(
+      SessionRetry.resolve(
+        {
+          retry: { server: { maxRetries: 2 } },
+          provider: { test: { retry: { server: { maxRetries: 1 } } } },
+        },
+        "test",
+      ).server,
+    ).toMatchObject({ mode: "bounded", maxRetries: 1 })
+    expect(
+      SessionRetry.resolve(
+        {
+          retry: { server: { mode: "persistent" } },
+          provider: { test: { retry: { server: { maxRetries: 0 } } } },
+        },
+        "test",
+      ).server,
+    ).toMatchObject({ mode: "persistent", maxRetries: undefined })
+    expect(
+      SessionRetry.resolve(
+        {
+          retry: { server: { mode: "bounded", maxRetries: 2 } },
+          provider: { test: { retry: { server: { mode: "persistent" } } } },
+        },
+        "test",
+      ).server,
+    ).toMatchObject({ mode: "persistent", maxRetries: undefined })
+  })
+
   test("terminal abort wins over a retryable status in its cause chain", () => {
     const cause = Object.assign(new Error("socket reset"), { code: "ECONNRESET" })
     const error = Object.assign(new DOMException("user aborted", "AbortError"), { cause, status: 503 })
@@ -1115,7 +1259,7 @@ describe("retry decision and coordinator budget", () => {
     let retryEvents = 0
     const schedule = SessionRetry.policy({
       phase: "stream",
-      maxRetries: 5,
+      budget: (decision) => SessionRetry.budgetFor(SessionRetry.resolve(undefined), decision),
       replaySafe: () => false,
       parse: (input) => input as ReturnType<NamedError["toObject"]>,
       set: () => Effect.sync(() => retryEvents++),

@@ -40,6 +40,7 @@ import type { JSONObject, JSONSchema7 } from "@ai-sdk/provider"
 import { SessionPrune } from "./prune"
 import { SessionCheckpoint } from "./checkpoint"
 import { SessionCompaction } from "./compaction"
+import { SessionModelSelection } from "./model-selection"
 import { computeLastMessageInfo } from "./last-message-info"
 import { classifyRequestOverflow, contextPressureLevel, usable, isOverflow as overflowCheck } from "./overflow"
 import { Config } from "@/config"
@@ -3214,23 +3215,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         throw error
       }
 
-      const inputModel = input.modelRef
-        ? yield* provider
-            .resolveModelRef(input.modelRef)
-            .pipe(Effect.map((m) => ({ providerID: m.providerID, modelID: m.id })))
-        : input.model
-      const agentModel = ag.modelRef
-        ? yield* provider
-            .resolveModelRef(ag.modelRef)
-            .pipe(Effect.map((m) => ({ providerID: m.providerID, modelID: m.id })))
-        : ag.model
-      const model = inputModel ?? agentModel ?? (yield* lastModel(input.sessionID))
-      const same = agentModel && model.providerID === agentModel.providerID && model.modelID === agentModel.modelID
-      const full =
-        !input.variant && ag.variant && same
-          ? yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
-          : undefined
-      const variant = input.variant ?? (ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined)
+      const model = yield* SessionModelSelection.resolve(
+        provider,
+        { agent: ag, model: input.model, modelRef: input.modelRef, variant: input.variant },
+        lastModel(input.sessionID),
+      )
 
       const info: MessageV2.User = {
         id: messageID,
@@ -3240,11 +3229,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         time: { created: Date.now() },
         tools: input.tools,
         agent: ag.name,
-        model: {
-          providerID: model.providerID,
-          modelID: model.modelID,
-          variant,
-        },
+        model,
         system: input.system,
         systemMode: input.systemMode,
         harness: input.harness,

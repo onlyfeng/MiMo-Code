@@ -157,6 +157,7 @@ async function runToolScript(
     requestTools?: Tool.Def[]
     maxToolCalls?: number
     timeoutSeconds?: number
+    timeoutMilliseconds?: number
     toolWhitelist?: Set<string> | string[]
     mcp?: Record<string, unknown>
     model?: {
@@ -187,6 +188,7 @@ async function runToolScript(
               code,
               ...(opts?.maxToolCalls !== undefined && { max_tool_calls: opts.maxToolCalls }),
               ...(opts?.timeoutSeconds !== undefined && { timeout_seconds: opts.timeoutSeconds }),
+              ...(opts?.timeoutMilliseconds !== undefined && { timeout: opts.timeoutMilliseconds }),
             },
             {
               sessionID: "ses_test" as any,
@@ -394,6 +396,48 @@ describe("exec", () => {
       expect(result.output).not.toContain("unknown tool")
     }
     expect(calls).toBe(0)
+  })
+
+  test("exec_command suggests a unique field correction without admitting bash", async () => {
+    const received: unknown[] = []
+    const bash = fakeDef("bash", async (args) => {
+      received.push(args)
+      return "executed"
+    })
+    for (const [input, field] of [
+      [{ cmd: "pwd", yieldTimeMs: 100 }, "yield_time_ms"],
+      [{ cmd: "pwd", yield_time_m: 100 }, "yield_time_ms"],
+      [{ cmd: "pwd", workdr: "/tmp/example" }, "workdir"],
+    ] as const) {
+      const result = await runToolScript(`return await tools.exec_command(${JSON.stringify(input)})`, [bash])
+      expect(result.metadata.status).toBe("code_error")
+      expect(result.output).toContain("Did you mean")
+      expect(result.output).toContain(field)
+      expect(result.metadata.toolCalls).toBe(0)
+    }
+    const duplicate = await runToolScript(
+      'return await tools.exec_command({ cmd: "pwd", yield_time_ms: 100, yieldTimeMs: 200 })',
+      [bash],
+    )
+    expect(duplicate.metadata.status).toBe("code_error")
+    expect(duplicate.output).toContain('"yield_time_ms" is already present')
+    const unknown = await runToolScript('return await tools.exec_command({ cmd: "pwd", unrelated: true })', [bash])
+    expect(unknown.metadata.status).toBe("code_error")
+    expect(unknown.output).not.toContain("Did you mean")
+    expect(unknown.output).toContain("Allowed fields: cmd, yield_time_ms, max_output_tokens, workdir, description")
+    expect(received).toEqual([])
+
+    const corrected = await runToolScript(
+      `try { await tools.exec_command({ cmd: "pwd", yieldTimeMs: 100 }) } catch (error) {
+        if (!error.message.includes("yield_time_ms")) throw error
+      }
+      return await tools.exec_command({ cmd: "pwd", yield_time_ms: 100 })`,
+      [bash],
+    )
+    expect(corrected.metadata.status).toBe("completed")
+    expect(received).toEqual([
+      { command: "pwd", timeout: 100, max_output_tokens: 10000, workdir: undefined, description: "pwd" },
+    ])
   })
 
   test("forwards authorized nested attachments on every outer terminal path", async () => {
@@ -1066,6 +1110,50 @@ describe("exec", () => {
     expect(result.output).toContain("1s of active compute")
     expect(result.output).toContain("timeout_seconds")
   }, 15_000)
+
+  test("timeout milliseconds enforce the compute budget without converting it twice", async () => {
+    const result = await runToolScript(
+      "const until = Date.now() + 500; while (Date.now() < until) {} return 'budget was ignored'",
+      [],
+      undefined,
+      { timeoutMilliseconds: 100 },
+    )
+    expect(result.metadata.status).toBe("timeout")
+    expect(result.output).toContain("0.1s of active compute")
+  }, 15_000)
+
+  test("exec timeout fields validate their own units and reject simultaneous budgets", async () => {
+    const info = await runtime.runPromise(Effect.flatMap(ToolScriptTool, Tool.init))
+    for (const input of [{}, { timeout: 1 }, { timeout: 600000 }, { timeout_seconds: 1 }, { timeout_seconds: 600 }]) {
+      expect(info.parameters.safeParse({ code: "return 1", ...input }).success).toBe(true)
+    }
+    for (const input of [
+      { timeout: 0 },
+      { timeout: -1 },
+      { timeout: 1.5 },
+      { timeout: 600001 },
+      { timeout: "1000" },
+      { timeout: null },
+      { timeout_seconds: 0 },
+      { timeout_seconds: 1.5 },
+      { timeout_seconds: 601 },
+      { timeout: 1000, timeout_seconds: 1 },
+    ]) {
+      expect(info.parameters.safeParse({ code: "return 1", ...input }).success).toBe(false)
+    }
+    let calls = 0
+    const error = await runToolScript(
+      "return await tools.ping({})",
+      [fakeDef("ping", async () => {
+        calls++
+        return "unexpected"
+      })],
+      undefined,
+      { timeoutMilliseconds: 1000, timeoutSeconds: 1 },
+    ).then(() => undefined, (error: unknown) => error)
+    expect(String(error)).toContain("only one")
+    expect(calls).toBe(0)
+  })
 
   test("syntax error → code_error", async () => {
     const result = await runToolScript(`const = broken (`, [])

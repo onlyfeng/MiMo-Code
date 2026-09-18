@@ -9,6 +9,8 @@ import { Project } from "@/project"
 import { MCP } from "@/mcp"
 import { Session } from "@/session"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionModelSelection } from "@/session/model-selection"
+import { NotFoundError } from "@/storage"
 import { Config } from "@/config"
 import { ConsoleState } from "@/config/console-state"
 import { Account } from "@/account/account"
@@ -69,8 +71,39 @@ const GenTitleRequestBody = {
   required: true,
   content: { "application/json": { schema: z.toJSONSchema(GenTitleBody, { io: "input" }) } },
 } as unknown as NonNullable<Parameters<typeof describeRoute>[0]["requestBody"]>
+const ModelSelectionRequestBody = {
+  required: true,
+  content: { "application/json": { schema: z.toJSONSchema(SessionModelSelection.PreviewInput, { io: "input" }) } },
+} as unknown as NonNullable<Parameters<typeof describeRoute>[0]["requestBody"]>
 export const ExperimentalRoutes = lazy(() =>
   new Hono()
+    .post(
+      "/model-selection",
+      describeRoute({
+        summary: "Resolve prompt model selection",
+        description: "Resolve the selected model and agent variant without creating a session or submitting a prompt.",
+        operationId: "experimental.resolveModelSelection",
+        requestBody: ModelSelectionRequestBody,
+        responses: {
+          200: {
+            description: "Resolved model selection",
+            content: { "application/json": { schema: resolver(SessionModelSelection.Selection) } },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("json", SessionModelSelection.PreviewInput),
+      async (c) =>
+        jsonRequest("ExperimentalRoutes.resolveModelSelection", c, function* () {
+          const body = c.req.valid("json")
+          const agents = yield* Agent.Service
+          const providers = yield* Provider.Service
+          const name = body.agent || (yield* agents.defaultAgent())
+          const agent = yield* agents.get(name)
+          if (!agent) throw new NotFoundError({ message: `Agent not found: "${name}".` })
+          return yield* SessionModelSelection.resolve(providers, { ...body, agent }, providers.defaultModel())
+        }),
+    )
     .get(
       "/console",
       describeRoute({

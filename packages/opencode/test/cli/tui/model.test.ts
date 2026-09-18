@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { AssistantMessage, Config, Model, Provider, UserMessage } from "@mimo-ai/sdk/v2"
-import { displayMetadata, effectiveVariant, initial, latestMessageSelection } from "../../../src/cli/cmd/tui/util/model"
+import { displayMetadata, initial, latestMessageSelection } from "../../../src/cli/cmd/tui/util/model"
 import * as Models from "../../../src/cli/cmd/tui/util/model"
 
 const providers = [
@@ -133,95 +133,6 @@ describe("latest message model selection", () => {
 
   test("does not invent model metadata when no actor message is loaded", () => {
     expect(latestMessageSelection([])).toBeUndefined()
-  })
-})
-
-describe("effective variant", () => {
-  const selection = { providerID: "openai", modelID: "gpt-5.6-sol" }
-
-  test("an explicit selection always wins over the agent default", () => {
-    expect(
-      effectiveVariant(providers, {
-        agent: { variant: "xhigh", model: selection },
-        groups: undefined,
-        selection,
-        selected: "high",
-      }),
-    ).toBe("high")
-  })
-
-  test("falls back to the agent variant the server will apply to its own model", () => {
-    expect(
-      effectiveVariant(providers, {
-        agent: { variant: "xhigh", model: selection },
-        groups: undefined,
-        selection,
-      }),
-    ).toBe("xhigh")
-  })
-
-  test("resolves the agent model from a literal modelRef", () => {
-    expect(
-      effectiveVariant(providers, {
-        agent: { variant: "xhigh", modelRef: "openai/gpt-5.6-sol" },
-        groups: undefined,
-        selection,
-      }),
-    ).toBe("xhigh")
-  })
-
-  test("resolves a group modelRef through the group default", () => {
-    expect(
-      effectiveVariant(providers, {
-        agent: { variant: "xhigh", modelRef: "smart" },
-        groups: { smart: { default: "openai/gpt-5.6-sol", models: ["ppio/deepseek-v3"] } },
-        selection,
-      }),
-    ).toBe("xhigh")
-  })
-
-  test("ignores the agent variant when the request targets another model", () => {
-    expect(
-      effectiveVariant(providers, {
-        agent: { variant: "xhigh", model: { providerID: "ppio", modelID: "deepseek-v3" } },
-        groups: undefined,
-        selection,
-      }),
-    ).toBeUndefined()
-  })
-
-  test("ignores the agent variant when the model does not define it", () => {
-    expect(
-      effectiveVariant(providers, {
-        agent: { variant: "medium", model: selection },
-        groups: undefined,
-        selection,
-      }),
-    ).toBeUndefined()
-  })
-
-  test("treats an unconfigured built-in tier as unknown rather than a match", () => {
-    expect(
-      effectiveVariant(providers, {
-        agent: { variant: "xhigh", modelRef: "lite" },
-        groups: undefined,
-        selection,
-      }),
-    ).toBeUndefined()
-  })
-
-  test("resolves a built-in tier name once it has a model_groups entry", () => {
-    expect(
-      effectiveVariant(providers, {
-        agent: { variant: "xhigh", modelRef: "lite" },
-        groups: { lite: "openai/gpt-5.6-sol" },
-        selection,
-      }),
-    ).toBe("xhigh")
-  })
-
-  test("reports no variant when neither the user nor the agent chose one", () => {
-    expect(effectiveVariant(providers, { agent: { model: selection }, groups: undefined, selection })).toBeUndefined()
   })
 })
 

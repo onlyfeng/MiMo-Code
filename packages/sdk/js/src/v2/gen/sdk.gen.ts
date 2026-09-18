@@ -31,6 +31,8 @@ import type {
   ExperimentalConsoleGetResponses,
   ExperimentalConsoleListOrgsResponses,
   ExperimentalConsoleSwitchOrgResponses,
+  ExperimentalResolveModelSelectionErrors,
+  ExperimentalResolveModelSelectionResponses,
   ExperimentalResourceListResponses,
   ExperimentalSessionListResponses,
   ExperimentalTitleGenerateErrors,
@@ -1073,6 +1075,54 @@ export class Resource extends HeyApiClient {
 }
 
 export class Experimental extends HeyApiClient {
+  /**
+   * Resolve prompt model selection
+   *
+   * Resolve the selected model and agent variant without creating a session or submitting a prompt.
+   */
+  public resolveModelSelection<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      agent?: string
+      model?: {
+        providerID: string
+        modelID: string
+      }
+      variant?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "agent" },
+            { in: "body", key: "model" },
+            { in: "body", key: "variant" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalResolveModelSelectionResponses,
+      ExperimentalResolveModelSelectionErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/model-selection",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   private _workspace?: Workspace
   get workspace(): Workspace {
     return (this._workspace ??= new Workspace({ client: this.client }))
