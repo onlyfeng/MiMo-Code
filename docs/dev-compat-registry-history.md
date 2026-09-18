@@ -3961,3 +3961,17 @@ all inherited with the declared DC adaptations. No DC owner retires.
 
 Local evidence: 309 passing tests across 21 focused files, 77 complete Actor tests, 62 prompt attachment tests and 12 HTTP recovery-task/setmode tests. The full prompt-effect run had 170 pass, 2 existing skips and 2 adapter-fallback assertion mismatches; all 3 fallback cases pass after the assertion correction. This is a complete-run plus focused-fix record, not a claim that the full local file was rerun. Package typecheck and lint pass; SDK/OpenAPI regeneration preserves the 140-operation compat surface. Test environment uses the shared record's explicit selector unsets and package-owned preload baseline. Final remote tips, exact-SHA CI and the complete
 upstream → main → compat ancestry chain are verified after publication.
+
+
+## 2026-09-18 — quiet session-wide cancellation
+
+Starting compat `d3d25ec611bbd2c13462acfeaf4cfbcb79efdf4a` inherits main
+`1435d830`, whose runtime/tests are `759b6431963cbeb7b0940f4b7a92dc64690624d5`.
+Compat runtime integration is `cd49ecf343e08e04e13209b4e4bb00c46320a978`.
+[C01](upstream-sync-2026-09-18.md) covers upstream `4cb859dd..2bda1794`.
+All 39 existing compat source overlays are unchanged in content; eight DC owners
+remain active. Final-source cancellation/lifecycle tests pass 43 cases and
+cascade/registry-only/session-key tests pass 3 (77 filtered); typecheck and lint
+pass. Prior broad integration runs are not final-SHA evidence. Shared records
+remain main-owned. Final branch CI, remote equality and ancestry follow the
+record-only commit and are verified separately.

@@ -11,6 +11,19 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-09-18, full upstream synchronization through `2bda17944b346ab85c8ee3cf0a0d4ab24819d37c`.
+- Prior upstream: `4cb859dd7c962b13eee5f34146350f520a380217`.
+- Starting compat: `d3d25ec611bbd2c13462acfeaf4cfbcb79efdf4a`.
+- Accepted main: `1435d830` (runtime/tests `759b6431963cbeb7b0940f4b7a92dc64690624d5`).
+- Compat runtime integration: `cd49ecf343e08e04e13209b4e4bb00c46320a978`; subsequent commits update records only.
+- Review: [single-capability synchronization](upstream-sync-2026-09-18.md), C01.
+- Resolution: inherit session-wide Actor cancellation, generation/episode-bound quiet notifications and exact runner session/actor keys. Preserve FC-001 leases, terminal claims, retirement and disposal checks. All 39 compat-different production paths retain identical overlay content after excluding diff line offsets and blob IDs; full-context/variant Actors, bounded preflight, per-agent MaxMode and authoritative TUI model preview remain intact. No private-network or platform policy changes.
+- Validation: complete final-source cancellation/Actor lifecycle files pass 43 tests; cascade/registry-only/runner isolation cases pass 3 tests (77 filtered). Package typecheck and lint pass with existing lint warnings. No public schema or generated output changed. Full prompt and final-SHA CI acceptance are collected after publication rather than inferred from these local results.
+- Shared ownership: FD/FC registries and history are inherited byte-for-byte; no owner retires or moves between branches.
+
+## Previous review record — 2026-09-17
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-09-17, full upstream synchronization through `4cb859dd7c962b13eee5f34146350f520a380217`.
 - Prior upstream: `26aa00fc7e243a90586f5895ddcad2b7ce76b935`.
 - Starting compat: `d7ae31894c6b5b4362076ca4b21ddf54c4b4c11a`.
