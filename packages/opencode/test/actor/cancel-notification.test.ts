@@ -993,6 +993,44 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
     15_000,
   )
 
+  it.live("quiet cancel follower suppresses the registry-only owner wake", () =>
+    provideTmpdirServer(Effect.fnUntraced(function* () {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const registry = yield* ActorRegistry.Service
+      const inbox = yield* Inbox.Service
+      const parent = yield* sessions.create({ title: "quiet cancel follower" })
+      const actorID = "pending-child"
+      yield* registry.register({
+        sessionID: parent.id, actorID, mode: "subagent", agent: "build",
+        description: "pending child", contextMode: "none", parentActorID: "main",
+        background: true, lifecycle: "ephemeral",
+      })
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      firstCancelListGate = { sessionID: parent.id, actorID, entered, release, armed: true }
+      let wakes = 0
+      const restore = inbox.bindPrompt!({ loop: () => Effect.sync(() => { wakes++ }).pipe(Effect.andThen(Effect.interrupt)) })
+      yield* Effect.addFinalizer(() => Effect.sync(restore))
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
+      const owner = yield* actor.cancel(parent.id, actorID, "forced").pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      const follower = yield* actor.cancel(parent.id, actorID, "forced", { wake: false }).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      )
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(owner)
+      yield* Fiber.join(follower)
+      yield* Effect.yieldNow
+      expect(wakes).toBe(0)
+      const rows = yield* parentInboxRows(parent.id)
+      expect(rows).toHaveLength(1)
+      expect((rows[0].content as { text: string }).text).toContain("cancelled")
+      expect((yield* registry.get(parent.id, actorID))?.lastOutcome).toBe("cancelled")
+    }), { git: true, config: providerCfg }),
+  )
+
   it.live("scheduler interruption during cancel acquisition cannot leak an owner episode", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* () {
