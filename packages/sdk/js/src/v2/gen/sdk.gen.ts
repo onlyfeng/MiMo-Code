@@ -2869,6 +2869,8 @@ export class Session2 extends HeyApiClient {
       messageID?: string
       agent?: string
       model?: string
+      source?: "user" | "spawn" | "hook"
+      provenance?: Provenance
       arguments?: string
       command?: string
       titleLocale?: string
@@ -2915,6 +2917,8 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "messageID" },
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
+            { in: "body", key: "source" },
+            { in: "body", key: "provenance" },
             { in: "body", key: "arguments" },
             { in: "body", key: "command" },
             { in: "body", key: "titleLocale" },

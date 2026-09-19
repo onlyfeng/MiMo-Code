@@ -26,6 +26,7 @@ export interface SessionPromptLoopRef {
     // boolean `inboxWake`: a present id means the same thing and also says which
     // row, which the fork's drain/settle path needs.
     inboxID?: string
+    source?: "user" | "spawn" | "hook"
   }) => Effect.Effect<MessageV2.WithParts>
 }
 

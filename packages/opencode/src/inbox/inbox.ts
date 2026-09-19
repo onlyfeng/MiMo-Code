@@ -216,6 +216,7 @@ export const layer: Layer.Layer<
             // the sole notifier for turn 1 — no double-notify.
             notifyParentOnComplete: true,
             inboxID,
+            source: "spawn",
           }))),
           Fiber.await,
           Fiber.interrupt,

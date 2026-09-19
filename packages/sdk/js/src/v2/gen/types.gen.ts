@@ -984,12 +984,18 @@ export type OutputFormatJsonSchema = {
 
 export type OutputFormat = OutputFormatText | OutputFormatJsonSchema
 
-export type Provenance = {
+export type HookProvenance = {
   hookPhase: "pre" | "post"
   hookIteration: number
   pluginNames: Array<string>
   hookIDs: Array<string>
 }
+
+export type MachineProvenance = {
+  machine: string
+}
+
+export type Provenance = HookProvenance | MachineProvenance
 
 export type UserMessage = {
   id: string
@@ -2838,6 +2844,15 @@ export type Config = {
        * Max assistant messages cropped from the trailing streak (default 64).
        */
       max_span?: number
+    }
+    /**
+     * Turn-end uncommitted-changes soft hint (experimental).
+     */
+    uncommitted_hint?: {
+      /**
+       * After a completed user-source main turn, if the session workspace has uncommitted git changes, inject a soft hint (may repeat on later dirty user turns; hook turns never re-inject; does not force a commit). Default off.
+       */
+      enabled?: boolean
     }
     /**
      * Timeout in milliseconds for model context protocol (MCP) requests
@@ -5823,6 +5838,8 @@ export type SessionCommandData = {
     messageID?: string
     agent?: string
     model?: string
+    source?: "user" | "spawn" | "hook"
+    provenance?: Provenance
     arguments: string
     command: string
     /**

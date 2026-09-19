@@ -237,7 +237,9 @@ it.live(`progress-chain ${scenario}`, () =>
         (message) =>
           message.info.role === "user" &&
           message.info.source === "hook" &&
-          message.info.provenance?.hookPhase === "post",
+          message.info.provenance &&
+          "hookPhase" in message.info.provenance &&
+          message.info.provenance.hookPhase === "post",
       )
       const ownHooks = executed.filter((event) => event.actorID === result.actorID)
 
