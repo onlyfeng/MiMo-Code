@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-18
-- Upstream: `2bda17944b346ab85c8ee3cf0a0d4ab24819d37c`
-- Prior reviewed upstream: `4cb859dd7c962b13eee5f34146350f520a380217`
-- Main behavior (runtime/tests): `759b6431963cbeb7b0940f4b7a92dc64690624d5`
-- Bundled guidance content: `9c05eacb2817b0e100fb4b788b8085af6ba2aef5`
-- Prior fork `main` tip: `912d81687be1f923aebd9c33d8bdb03391efca34`
+- Last reviewed: 2026-09-19
+- Upstream: `50cd713989f47225cfc717868b245e1de32b35b7`
+- Prior reviewed upstream: `2bda17944b346ab85c8ee3cf0a0d4ab24819d37c`
+- Main behavior (runtime/tests): `6af6931fd6ee73999847d81809bd2476e419885d`
+- Bundled guidance content: `7199810dcfe61becd47e4c4becd0166964ea5d40`
+- Prior fork `main` tip: `1435d83080210dd996f7d0292153ff78fee7f75a`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-09-18 full sync](upstream-sync-2026-09-18.md), one capability through `2bda1794`. Adopt same-session Actor cancellation and durable quiet terminal notifications, preserving FC-001 generation ownership and all compat boundaries.
+Latest reviewed synchronization: [2026-09-19 full sync](upstream-sync-2026-09-19.md), two capabilities through `50cd7139`. Adopt optional uncommitted-change hints and adapt main-resume subagent cascade to retained Actor ownership, preserving atomic message admission and compat boundaries.
+
+Previous synchronization: [2026-09-18 full sync](upstream-sync-2026-09-18.md), one capability through `2bda1794`. Adopt same-session Actor cancellation and durable quiet terminal notifications, preserving FC-001 generation ownership and all compat boundaries.
 
 Previous synchronization: [2026-09-17 full sync](upstream-sync-2026-09-17.md), eleven capabilities through `4cb859dd`. Retain FC-007 opt-in notices and FC-013 bounded scope budgets, adopt image routing, stable reminders and atomic empty-residue recovery.
 
@@ -74,6 +76,8 @@ not change their implementation. The preceding review is retained in the
 | FC-018 | actor shell flag values (`extractNamedFlags` and the verb mappings)                                       | Fork hardening of shared parsing                                 | Reject an explicitly empty value in both flag forms                                      |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-09-19 synchronization: Main resume captures a cancellation epoch before atomic admission, then cascades only eligible same-session subagents through Actor.recovery/resume. No registry-only or released-context takeover; child supervisors retain task/model/context ownership and terminal publication. Pending admission is bounded and withdrawn on Stop or timeout.
 
 - 2026-09-17 synchronization: Empty-residue recovery deletes parent-scoped shells and binds any task within the existing immediate admission transaction. Ownership handoff precedes postcommit publication; failed/busy/stale/cancelled admission cannot clean up. Useful assistant output retains settlement and continuation. Recovery still selects the latest same-actor candidate; completed abandoned errors are not revived. The parent user is never fabricated or rewritten except the existing authorized task binding.
 
@@ -746,6 +750,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-09-19 synchronization: The three new subagent-resume suites share the dedicated real-AppRuntime recovery job. Combined unit execution reproduced a missing prefix captor after focused test layers disposed the global reference; discovery requires all four recovery files and JUnit verifies every file. This changes test isolation, not product behavior.
+
 - 2026-09-17 per-run test roots: `test/preload.ts` roots the process-wide data
   directory (`mimocode-test-data-<pid>`, holding the XDG directories and HOME)
   under the resolved `os.tmpdir()` again, as upstream does. Its home-directory
@@ -1120,6 +1126,8 @@ logged`, and the peer `success`/`failure` variants of
   cleanup; the current actor/quarantine result is unaffected.
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
+
+- 2026-09-19 synchronization: Machine provenance joins hook provenance as an explicit union. Internal GitHub/command/inbox source labels remain non-user. Optional uncommitted hints persist source=hook with inherited task/model variant and atomic latest-user/token checks; their worker owns no prior run-approval scope.
 
 - 2026-09-17 synchronization: Compose, recall and loop-streak reminders are persisted with stable IDs. Hydration restores Compose protocol priority. User image attachments use a synthetic provenance envelope rather than a fabricated Read result; its tagged envelope is placed before genuine user content after reload without changing IDs. Responses tool images remain tied to their tool call, using the actual adapter provider and shared image limits.
 
