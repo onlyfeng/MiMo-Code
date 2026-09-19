@@ -11,6 +11,20 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-09-19, full upstream synchronization through `50cd713989f47225cfc717868b245e1de32b35b7`.
+- Prior upstream: `2bda17944b346ab85c8ee3cf0a0d4ab24819d37c`.
+- Starting compat: `94b8005cd336136da9c47c077a7faab643c3eb0a`.
+- Main runtime/tests: `6af6931fd6ee73999847d81809bd2476e419885d`; shared guidance: `7199810dcfe61becd47e4c4becd0166964ea5d40`.
+- Integrated main: `b40391abfd0624894a966ff39a39285152e5f439`.
+- Compat source/tests/CI: `b1aaec311837fa74af6526ea9137b6bac08d5967`.
+- Review: [two-capability synchronization](upstream-sync-2026-09-19.md), C01 and C02.
+- Resolution: inherit optional hints and main-resume cascade through retained Actor admission. The 39 compat production overlays remain; only a blank-line boundary and the location of shared actor guidance change in the normalized overlay diff. Full-context/variant transport, bounded preflight, per-agent MaxMode and authoritative TUI preview remain intact. No network or platform policy changes.
+- Validation: isolated recovery 25 pass; full prompt/receipt/approval matrix 244 pass and 2 existing skips plus one obsolete fixed-delay assertion, corrected and passing on both branches; variant 13 pass; TUI metadata/preview 20 pass. Package typecheck passes; lint has zero errors. Compat SDK/OpenAPI independently regenerate without drift. Final push-SHA CI is checked after this record, not inferred from local results.
+- Shared ownership: FD/FC registries are inherited byte-for-byte; no owner retires or moves between branches.
+
+## Previous review record — 2026-09-18
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-09-18, full upstream synchronization through `2bda17944b346ab85c8ee3cf0a0d4ab24819d37c`.
 - Prior upstream: `4cb859dd7c962b13eee5f34146350f520a380217`.
 - Starting compat: `d3d25ec611bbd2c13462acfeaf4cfbcb79efdf4a`.
