@@ -44,7 +44,7 @@ jobs:
       # ObservingStdioTransport. lifecycle.test.ts mock.module's that path
       # process-wide, so sharing a bun test process with it always breaks
       # these tests. It runs in the dedicated job below.
-      # session-actor-recovery.test.ts also needs a dedicated process: it
+      # HTTP recovery and subagent-resume tests also need a dedicated process: they
       # exercises the real AppRuntime prefix captor, while focused prompt
       # layers in unit tests replace and dispose that process-wide reference.
       #
@@ -113,10 +113,15 @@ jobs:
               has_stdio=1
               continue
             fi
-            if [[ "$f" == test/server/session-actor-recovery.test.ts ]]; then
-              has_actor_recovery=1
-              continue
-            fi
+            case "$f" in
+              test/server/session-actor-recovery.test.ts | \
+              test/actor/subagent-resume-cascade.test.ts | \
+              test/actor/subagent-resume-negatives.test.ts | \
+              test/actor/subagent-resume-route.integration.test.ts)
+                has_actor_recovery=$((has_actor_recovery + 1))
+                continue
+                ;;
+            esac
 
             h="$(printf '%s' "$f" | cksum | awk '{print $1}')"
             if (( h % n == idx - 1 )); then
@@ -130,7 +135,7 @@ jobs:
             fi
           done
 
-          if (( !has_tsx || !has_runtime || !has_stdio || !has_actor_recovery )); then
+          if (( !has_tsx || !has_runtime || !has_stdio || has_actor_recovery != 4 )); then
             echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio actor_recovery=$has_actor_recovery"
             exit 1
           fi
@@ -197,7 +202,7 @@ jobs:
 
   session-actor-recovery:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -213,11 +218,17 @@ jobs:
           mkdir -p .artifacts/unit
           report=.artifacts/unit/junit.xml
           rm -f -- "$report"
-          bun test test/server/session-actor-recovery.test.ts --timeout 120000 \
+          files=(
+            test/server/session-actor-recovery.test.ts
+            test/actor/subagent-resume-cascade.test.ts
+            test/actor/subagent-resume-negatives.test.ts
+            test/actor/subagent-resume-route.integration.test.ts
+          )
+          bun test "${files[@]}" --timeout 120000 \
             --reporter=junit --reporter-outfile="$report"
           test -s "$report"
           python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" \
-            "$report" test/server/session-actor-recovery.test.ts
+            "$report" "${files[@]}"
 
       - name: Upload JUnit
         if: always()
