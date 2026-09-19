@@ -467,7 +467,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           .set({
             status: "idle",
             last_outcome: "failure",
-            last_error: "Process restarted while actor was active; settled by abandon threshold.",
+            last_error:
+              "Process restarted while actor was active; settled by abandon threshold. Not final when retained context remains — actor send can recover; otherwise spawn a new actor.",
             time_completed: Date.now(),
             time_updated: Date.now(),
           })

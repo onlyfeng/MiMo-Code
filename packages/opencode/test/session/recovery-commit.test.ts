@@ -398,3 +398,19 @@ describe("Session.commitRecoveryCandidate", () => {
     )
 
 })
+
+it.live("conditional hint commit rejects cancelled or superseded work without message or part writes", () =>
+  provideTmpdirInstance(() => Effect.gen(function* () {
+    const f = yield* seed()
+    const message: MessageV2.User = { ...f.user, id: MessageID.ascending(), source: "hook", time: { created: 300 } }
+    const parts: MessageV2.Part[] = [{ id: PartID.ascending(), sessionID: f.session.id, messageID: message.id,
+      type: "text", text: "test reminder", synthetic: true }]
+    expect(yield* f.sessions.commitUserMessageIfLatest({ expectedUserID: f.user.id, shouldCommit: () => false, message, parts })).toBe(false)
+    expect(stored(message.id)).toBeUndefined()
+    expect(MessageV2.parts(message.id)).toEqual([])
+    yield* f.sessions.updateMessage({ ...f.user, id: MessageID.ascending(), time: { created: 400 } })
+    expect(yield* f.sessions.commitUserMessageIfLatest({ expectedUserID: f.user.id, shouldCommit: () => true, message, parts })).toBe(false)
+    expect(stored(message.id)).toBeUndefined()
+    expect(MessageV2.parts(message.id)).toEqual([])
+  })),
+)

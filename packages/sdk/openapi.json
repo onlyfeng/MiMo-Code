@@ -5111,6 +5111,13 @@
                   "model": {
                     "type": "string"
                   },
+                  "source": {
+                    "type": "string",
+                    "enum": ["user", "spawn", "hook"]
+                  },
+                  "provenance": {
+                    "$ref": "#/components/schemas/Provenance"
+                  },
                   "arguments": {
                     "type": "string"
                   },
@@ -12271,7 +12278,7 @@
           }
         ]
       },
-      "Provenance": {
+      "HookProvenance": {
         "type": "object",
         "properties": {
           "hookPhase": {
@@ -12297,6 +12304,26 @@
           }
         },
         "required": ["hookPhase", "hookIteration", "pluginNames", "hookIDs"]
+      },
+      "MachineProvenance": {
+        "type": "object",
+        "properties": {
+          "machine": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["machine"]
+      },
+      "Provenance": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/HookProvenance"
+          },
+          {
+            "$ref": "#/components/schemas/MachineProvenance"
+          }
+        ]
       },
       "UserMessage": {
         "type": "object",
@@ -16759,6 +16786,16 @@
                     "type": "integer",
                     "exclusiveMinimum": 0,
                     "maximum": 9007199254740991
+                  }
+                }
+              },
+              "uncommitted_hint": {
+                "description": "Turn-end uncommitted-changes soft hint (experimental).",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "description": "After a completed user-source main turn, if the session workspace has uncommitted git changes, inject a soft hint (may repeat on later dirty user turns; hook turns never re-inject; does not force a commit). Default off.",
+                    "type": "boolean"
                   }
                 }
               },

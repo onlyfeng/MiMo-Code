@@ -137,7 +137,10 @@ async function disposeCached(directory: string, current: Promise<InstanceContext
   ctx.disposing = true
   cache.delete(directory)
   Log.Default.info("disposing instance", { directory })
+  const hint = await import("@/session/prompt/uncommitted-hint")
+  const finishHintDispose = hint.beginHintStateDisposeForDirectory(directory)
   await context.provide(ctx, () => disposeInstance(directory, ctx))
+  finishHintDispose()
 
   GlobalBus.emit("event", {
     directory,
@@ -240,7 +243,10 @@ export const Instance = {
       const current = cache.get(directory)
       const ctx = await current?.catch(() => undefined)
       if (ctx && cache.get(directory) === current) ctx.disposing = true
+      const hint = await import("@/session/prompt/uncommitted-hint")
+      const finishHintDispose = hint.beginHintStateDisposeForDirectory(directory)
       await disposeInstance(directory, ctx)
+      finishHintDispose()
       if (cache.get(directory) === current) cache.delete(directory)
       const next = track(directory, boot({ ...input, directory }))
 

@@ -602,6 +602,7 @@ export interface Interface {
     onCommitted?: (result: { redispatch: boolean }) => void
   }) => Effect.Effect<MessageV2.User, InstanceType<typeof NotFoundError> | RecoveryConflictError>
   readonly commitUserMessageIfLatest: (input: {
+    shouldCommit?: () => boolean
     expectedUserID: MessageID | undefined
     message: MessageV2.User
     parts: MessageV2.Part[]
@@ -812,6 +813,13 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           promptLocks.delete(sessionID)
         })
         yield* clearWorktreeOwnership(sessionID).pipe(Effect.ignore)
+        // uncommitted-hint episode state is process-local; drop it when the session dies.
+        yield* Effect.promise(async () => {
+          try {
+            const mod = await import("./prompt/uncommitted-hint")
+            mod.clearAllHintStateForSession(sessionID)
+          } catch { /* best-effort */ }
+        }).pipe(Effect.ignore)
       } catch (e) {
         log.error(e)
       }
@@ -1202,7 +1210,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
               .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
               .limit(1)
               .get()
-            if (latest?.id !== input.expectedUserID) return false
+            if (input.shouldCommit?.() === false || latest?.id !== input.expectedUserID) return false
             commitUserMessageInTransaction(tx, parsed.message, parsed.parts)
             return true
           },
