@@ -1407,7 +1407,7 @@ it.live("[TP-R1-01][TP-R4-02][TP-R7-01] uncommitted-hint dirty USER turn produce
         // Queue user-turn reply AND hook follow-up reply before prompt so inject path has LLM.
         yield* llm.text("done without commit")
         yield* llm.text("will commit next")
-        yield* prompt.prompt({
+        const original = yield* prompt.prompt({
           sessionID: chat.id,
           agent: "build",
           model: ref,
@@ -1415,7 +1415,19 @@ it.live("[TP-R1-01][TP-R4-02][TP-R7-01] uncommitted-hint dirty USER turn produce
           variant: "high",
           parts: [{ type: "text", text: "please edit dirty work" }],
         })
-        yield* Effect.sleep("2500 millis")
+        expect(original.parts.some((part) => part.type === "text" && part.text === "done without commit")).toBe(true)
+        // A hint starts its own busy turn after the original caller settles.
+        // Observe that turn's completion rather than treating a fixed delay as idle.
+        yield* Effect.gen(function* () {
+          const status = yield* SessionStatus.Service
+          while (true) {
+            const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
+            if (messages.some((message) => message.info.role === "assistant" && message.parts.some(
+              (part) => part.type === "text" && part.text === "will commit next",
+            )) && (yield* status.get(chat.id)).type === "idle") return
+            yield* Effect.sleep("20 millis")
+          }
+        }).pipe(Effect.timeout("10 seconds"))
         const msgs = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
         const hintUsers = msgs.filter(
           (m) =>
