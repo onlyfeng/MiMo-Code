@@ -28,7 +28,7 @@ Final source and publication snapshots are recorded separately below.
 | C05 | Metadata-only abandoned Actor startup recovery and execution-owned question/orphan settlement before idle. Actor registry, bootstrap, selected-session prompt finalizers, status idle hook. | Adopt metadata-only startup with no transcript scan; repair questions only in the selected execution, retain owned-message snapshots, conditional retained-context recovery guidance and generation boundaries. | Inherited with the same shared contract. | FC-001/008/009, FD-009; complementary cleanup. Registry, bootstrap, orphan-tool, cancellation tests. |
 | C06 | Exclusive trailing-user resume, unified recovery dispatch, completed-tool continuation and terminal-answer protection. Prompt/session transaction, HTTP recovery routes, TUI recover flow and generated API. | Adopt main-user recovery through the existing immediate transaction; retain constrained frozen Actor assistant recovery, task binding and no side-effect replay. | Inherited; preserve bounded request preflight, frozen context, variants and title locale. | FC-001/009, FD-009, DC-CONTEXT-001/DC-ACTOR-001/002/DC-TUI-001; adapted contract. Recovery-commit, HTTP, retained Actor, processor and TUI tests. |
 | C07 | Default `.mimocode` + `.agents` skill roots, explicit brand-root opt-in and dotted-directory exclusion. Skill scanner, flags, config guidance and isolation consumers. | Adopt root policy; retain frozen authorized catalog and permission parity. | Inherited with the same shared contract. | FC-005/011; complementary discovery policy. External-root/discovery/permission tests and isolated non-test flag check. |
-| C08 | Bounded UnknownError retries, original error identity and persisted timeout classification. Retry policy and MessageV2 error conversion. | Adopt classification and bounded fallback; request/candidate/judge scope budgets still take precedence over persistent live-step network policy. | Inherited; retain per-agent MaxMode and main-only retry status. | FC-013/009, FD-005, DC-MODEL-001; adapted budget semantics. Retry/error/classify and MaxMode contract tests. |
+| C08 | Bounded UnknownError retries, original error identity and persisted timeout classification. Retry policy and MessageV2 error conversion. | Adopt classification and bounded fallback; request/candidate/judge scope budgets still take precedence over persistent live-step network policy; local ModelError contracts remain terminal before message classification. | Inherited; retain per-agent MaxMode and main-only retry status. | FC-013/009, FD-005/011, DC-MODEL-001; adapted budget semantics. Retry/error/classify and MaxMode contract tests. |
 | C09 | Disable tool-directory and home-hook auto-loading; remove bundled evolve and stale extracted copies. Tool registry, plugin init, bundle extraction, TUI tips and docs. | Adopt retirement; preserve explicit plugin tools, configured hooks and existing permission gates. | Inherited with the same shared contract. | FC-005/006/011; adopted retirement, no unrelated owner retirement. Registry/file-hook/bundle tests. |
 | C10 | Compose worktree base selection and short delivery commit ranges. Bundled compose-next skill. | Adopt upstream guidance. | Inherited with the same shared contract. | FC-011; no runtime overlap or new API. Bundled content review. |
 | C11 | Per-step FIFO model tool admission, concurrent read/grep/glob, barriers for mutation, cancellation-safe release. `tool/gate.ts`, prompt native/MCP dispatch. | Adopt outer gate with existing request authority and nested exec composition; independent sessions/actors retain independent gates. | Inherited with the same shared contract. | FD-006, FC-001/009; complementary scheduling. Gate unit/cancel/hook/orchestration and exec tests. |
@@ -136,3 +136,49 @@ not proven to be a platform defect or flake. Final exact-SHA CI remains required
 Final push-SHA workflow URLs, remote-tip equality, ancestry and cleanup are
 checked after the registry commits and reported on publication. Local source
 acceptance does not establish that an installed client was upgraded.
+
+
+## Final-CI follow-up — 2026-09-22
+
+The initial published snapshots `840a5810` and `1082c39d` passed lint,
+typecheck, Actor/MCP/stdio isolation, shard 1 and shard 3; compat also passed
+Windows. Both test workflows failed only on four cases in shards 2 and 4:
+[main run](https://github.com/onlyfeng/MiMo-Code/actions/runs/35622687337) and
+[compat run](https://github.com/onlyfeng/MiMo-Code/actions/runs/35622785765).
+They are failed historical runs, not final acceptance.
+
+- Three fixture files still assumed retired tool-directory loading.
+  `control-origin`, `registry-invocation-style` and `whitelist` now use explicit
+  plugin registration, retaining every previous authority and visibility
+  assertion. Whitelist also asserts the custom tool actually registered; this
+  assertion failed against its former fixture, exposing an otherwise empty
+  negative test. All three full files pass (20 tests / 126 assertions). The
+  five-second local default was insufficient for one unchanged whitelist case;
+  the explicit 30-second local run passed, below CI's existing 120-second budget.
+- Bounded UnknownError retries exposed a real FD-011 regression: a forbidden
+  summary tool call could be retried on the same summary message and then
+  accepted. Both processor guards now throw the existing ModelError, conversion
+  preserves that identity, and retry classification makes it terminal before
+  network/rate-limit keyword matching. Valid tool names such as `ETIMEDOUT`
+  cannot turn that local contract failure into a network retry. Normal unknown
+  and provider-network retries remain unchanged.
+- Two processor event regressions require stop and one stream attempt; the
+  integration test requires the rejected summary's original boundary to roll
+  back and no tool part to be written. It permits the existing outer loop to
+  create a separate new compaction attempt. Frozen-prefix tests retain literal
+  `tool_choice: none` coverage. Final main matrix: 204 pass, two existing skips,
+  zero failures / 1229 assertions across six files. Typecheck and lint pass;
+  an independent review also reproduced both processor branches and the
+  keyword classification boundary. Ten think-only/content-filter/empty-summary
+  fallback tests passed on the earlier guard snapshot and are not relabelled
+  as final-source validation.
+
+Current main runtime/tests: `3e1fe1607a5ec87fa2f919493b77078d44c60330`.
+Bundled guidance remains at its previously recorded snapshot. No public schema
+changed, so existing independently regenerated SDK/OpenAPI remain valid.
+Compat follow-up runtime/tests: `43ea9dc20fe6ce8e36198aa3d452a56bed51e019`.
+The combined nine-file matrix passes 242 tests, two existing skips, zero failures
+and 1418 assertions (exit 0). Package typecheck and root lint exit 0, with the
+same 4806 warnings and no errors. The merge is conflict-free and changes no
+compat production overlay; all previous DC boundaries remain. Both new final
+commit SHAs require fresh CI.

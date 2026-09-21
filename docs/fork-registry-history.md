@@ -3305,3 +3305,10 @@ requires the subsequent exact-SHA CI and remote ancestry checks.
 - Retain atomic run/recovery/task admission, retained frozen Actor authority, progress-aware inbox followers, manual imported MCP connection policy, bounded request scopes and request-owned nested controls. Ordinary cancellation joins cleanup; disposal acknowledges the signal without blocking on old cleanup and cannot release a successor generation.
 - Adopt metadata-only startup recovery; historical question parts are touched only by selected-session execution. Remove retired tool-directory/home-hook loading and bundled evolve, while retaining explicit plugin registration and configured hooks. Native `.mimocode`/`.agents` roots remain default; brand roots require explicit opt-in.
 - All active FD/FC owners retain their canonical ownership; compat inherits this record byte-for-byte. Final published-SHA CI and ancestry are separate publication checks, not inferred from the local matrix.
+
+
+## 2026-09-22 follow-up to the September 21 synchronization
+
+- Upstream remains `479201262a0f08e6abe9c29022d2fb38b63e29b0`; main runtime/tests advance to `3e1fe1607a5ec87fa2f919493b77078d44c60330`. Bundled guidance is unchanged.
+- Initial final-tip CI found three stale tool-directory fixtures and one summary-rejection regression introduced by bounded unknown-error retry. Explicit plugin fixtures retain all old assertions and add a positive whitelist registration check. Summary ModelError identity and early terminal classification preserve FD-011, including network-looking tool names.
+- [Updated synchronization evidence](upstream-sync-2026-09-21.md) retains failed first-tip CI, reproduced failures, the 20-test plugin set and final 204-pass/two-existing-skip session matrix. Typecheck and lint pass. New published tips must obtain their own CI; no same-SHA rerun substitutes for these corrections.
