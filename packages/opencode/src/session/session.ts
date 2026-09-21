@@ -594,7 +594,7 @@ export interface Interface {
   readonly commitRecoveryCandidate: (input: {
     sessionID: SessionID
     actorID: string
-    assistantMessageID: MessageID
+    assistantMessageID?: MessageID
     parentMessageID: MessageID
     taskID?: string
     taskSessionID?: SessionID
@@ -1093,7 +1093,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                   .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
                   .limit(1)
                   .get()
-                if (!latest || latest.id !== input.assistantMessageID || !parent || parent.id !== input.parentMessageID)
+                if (!latest || latest.id !== (input.assistantMessageID ?? input.parentMessageID) || !parent || parent.id !== input.parentMessageID)
                   throw new NotFoundError({ message: "Recovery candidate changed before settlement" })
                 // Same persisted-message hydration as MessageV2; preserve all stored fields.
                 const assistant = {
@@ -1109,15 +1109,15 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                   agentID: parent.agent_id,
                 } as MessageV2.Info
                 if (
-                  assistant.role !== "assistant" ||
-                  ("completed" in assistant.time &&
-                    assistant.finish !== "tool-calls" &&
-                    assistant.finish !== "length") ||
-                  assistant.parentID !== input.parentMessageID ||
-                  original.role !== "user"
+                  original.role !== "user" ||
+                  (input.assistantMessageID
+                    ? assistant.role !== "assistant" ||
+                      ("completed" in assistant.time && assistant.finish !== "tool-calls" && assistant.finish !== "length") ||
+                      assistant.parentID !== input.parentMessageID
+                    : assistant.role !== "user")
                 )
                   throw new NotFoundError({ message: "Recovery candidate changed before settlement" })
-                const redispatch = !MessageV2.hasUsefulAssistantParts(MessageV2.parts(assistant.id))
+                const redispatch = !input.assistantMessageID || !MessageV2.hasUsefulAssistantParts(MessageV2.parts(assistant.id))
                 // Register ownership transfer before any postcommit event publisher.
                 Database.effect(() => input.onCommitted?.({ redispatch }))
                 if (input.taskID !== undefined && original.task_id !== undefined && input.taskID !== original.task_id)
@@ -1133,7 +1133,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                     sessionID: input.taskSessionID,
                     taskID: input.taskID!,
                     actorID: input.actorID,
-                    summary: `Recovery of ${input.sessionID}/${input.assistantMessageID} from user ${input.parentMessageID}`,
+                    summary: `Recovery of ${input.sessionID}/${input.assistantMessageID ?? input.parentMessageID} from user ${input.parentMessageID}`,
                   })
                   if ("error" in claim) {
                     if (claim.error === "missing") throw new NotFoundError({ message: "Recovery task is unavailable" })
@@ -1165,7 +1165,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                   if (MessageV2.hasUsefulAssistantParts(MessageV2.parts(row.id))) continue
                   SyncEvent.run(MessageV2.Event.Removed, { sessionID: input.sessionID, messageID: row.id })
                 }
-                if (!redispatch)
+                if (!redispatch && assistant.role === "assistant")
                   SyncEvent.run(MessageV2.Event.Updated, {
                     sessionID: input.sessionID,
                     info: {

@@ -107,6 +107,7 @@ import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
 import { ToolRegistry } from "../tool"
 import { MCP } from "../mcp"
 import { normalizeToolResult } from "../mcp/tool-result"
+import { toolPresentationProgress } from "../mcp/tool-progress"
 import { LSP } from "../lsp"
 import { Flag } from "../flag/flag"
 import { ulid } from "ulid"
@@ -139,6 +140,7 @@ import { spawnRef } from "@/actor/spawn-ref"
 import type { Interface as ActorInterface } from "@/actor/spawn"
 import { Inbox } from "@/inbox"
 import { sessionPromptRef, defaultModelRef } from "@/inbox/inbox-ref"
+import { orphanToolIdleSweepRef, assistantMessageIdsSnapshotRef } from "./orphan-tool-idle-hook"
 import { Tool } from "@/tool"
 import { Permission } from "@/permission"
 import { SessionStatus } from "./status"
@@ -152,8 +154,10 @@ import { Process } from "@/util"
 import { Cause, Deferred, Effect, Exit, Layer, Option, Scope, Context } from "effect"
 import { EffectLogger } from "@/effect"
 import { InstanceState } from "@/effect"
+import { ToolGate } from "@/tool/gate"
 import { ActorTool, type ActorPromptOps } from "@/tool/actor"
 import { SessionRunState } from "./run-state"
+import { ResumeTestHooks } from "./resume-test-hooks"
 import { Goal } from "./goal"
 import { TaskRegistry } from "@/task/registry"
 import type { TaskID } from "@/task/schema"
@@ -167,6 +171,7 @@ import { runTurn } from "@/actor/turn"
 import { Metrics } from "@/metrics"
 import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
 import { ToolResultError } from "../tool/result-error"
+import { errorMessage } from "../util/error"
 import { RecoverableError } from "../tool/recoverable"
 import {
   shouldAutoDream,
@@ -236,7 +241,7 @@ export function buildRecallReminderText(input: { sessMemDir: string; hints: stri
     `${RECALL_REMINDER_MARKER} ${input.sessMemDir}/. Recall content`,
     "not in your context with:",
     input.hints[0],
-    `- Read(file_path="${input.sessMemDir}/...")`,
+    `- read(file_path="${input.sessMemDir}/...")`,
     ...input.hints.slice(1),
     "",
     "Don't ask the user about something memory may already record.",
@@ -709,6 +714,7 @@ export interface Interface {
     agentID?: string
     modelIdentity?: string
   }) => Effect.Effect<RecoveryCandidate[], InstanceType<typeof NotFoundError>>
+  readonly resumeBackground: (input: ResumeTurnInput) => Effect.Effect<void, InstanceType<typeof NotFoundError> | Session.BusyError | Session.RecoveryConflictError>
   readonly startResume: (
     input: ResumeTurnInput,
   ) => Effect.Effect<
@@ -754,22 +760,36 @@ export interface Interface {
     model?: { providerID: ProviderID; modelID: ModelID }
   }) => Effect.Effect<{ title: string; status: "generated" | "fallback" | "untitled" }>
   readonly sweepOrphanAssistants: (sessionID: SessionID, immediate?: boolean) => Effect.Effect<void>
-  readonly sweepOrphanToolParts: (sessionID: SessionID, immediate?: boolean) => Effect.Effect<void>
+  readonly sweepOrphanToolParts: (
+    sessionID: SessionID,
+    opts?: { before?: number; ownedMessageIds?: ReadonlySet<string>; idleAtAdmission?: boolean },
+  ) => Effect.Effect<void>
   readonly predict: (input: { sessionID: SessionID }) => Effect.Effect<string>
   /** Internal cycle-breaker: binds this prompt layer to its owning Actor layer. */
   readonly bindActor?: (actor: ActorInterface) => () => void
 }
 
-export interface RecoveryCandidate {
-  assistantMessageID: MessageID
-  parentMessageID: MessageID
-  created: number
-}
+export type RecoveryCandidate =
+  | {
+      kind: "assistant"
+      assistantMessageID: MessageID
+      parentMessageID: MessageID
+      created: number
+    }
+  | {
+      kind: "parent-user"
+      userMessageID: MessageID
+      created: number
+    }
 
 export interface ResumeTurnInput {
   signal?: AbortSignal
   sessionID: SessionID
-  assistantMessageID: MessageID
+  /** tool/user-resume of an incomplete assistant (existing). */
+  assistantMessageID?: MessageID
+  /** trailing-user resume: start a new run from this user (no new user message). */
+  userMessageID?: MessageID
+  agentID?: string
   task_id?: TaskID
   titleLocale?: string
   /** Optional model override: use the newly selected model for the recovery step. */
@@ -2191,6 +2211,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       harness?: MessageV2.User["harness"]
     }) {
       using _ = log.time("resolveTools")
+      // One agent's assistant step owns this queue. Other agents and sessions
+      // resolve independent tool maps, even when they use the same directory.
+      const gate = new ToolGate()
       const tools: Record<string, AITool> = {}
       const activeTools = new Set<string>()
       const loadedMcpTools = new Set<string>()
@@ -2535,7 +2558,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   yield* input.processor.completeToolCall(options.toolCallId, output)
                 }
                 return output
-              }),
+              }).pipe((body) => gate.run(item.id, options?.toolCallId ?? "?", body, { signal: options.abortSignal })),
             )
           },
         })
@@ -2588,7 +2611,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const executeMcp = (
           args: Parameters<typeof execute>[0],
           opts: Parameters<typeof execute>[1],
-          requireLoaded: boolean,
+          modelFacing: boolean,
         ) =>
           run.promise(
             Effect.gen(function* () {
@@ -2605,7 +2628,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   new RecoverableError(`The MCP tool "${key}" is unavailable for this request.`),
                 )
               }
-              if (requireLoaded && useMcpToolSearch && !useGPTTools && !loadedMcpTools.has(key)) {
+              if (modelFacing && useMcpToolSearch && !useGPTTools && !loadedMcpTools.has(key)) {
                 return yield* Effect.fail(
                   new RecoverableError(
                     `The MCP tool "${key}" is not loaded for this request. Call ${MCP_TOOL_SEARCH_ID} first, then retry on the next step.`,
@@ -2654,9 +2677,41 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 return cancelResult
               }
               yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
-              const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.promise(() =>
-                execute(mcpBeforeOutput.args, opts),
-              )
+              const presentation: Record<string, unknown> = {}
+              const progress = toolPresentationProgress(opts.experimental_context)
+              const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.tryPromise({
+                try: () => execute(mcpBeforeOutput.args, {
+                  ...opts,
+                  experimental_context: {
+                    onMcpToolProgress: async (meta: Record<string, unknown>) => {
+                      Object.assign(presentation, meta)
+                      progress.update({ _meta: meta })
+                      await Promise.all([
+                        progress.drain(),
+                        run.promise(
+                          input.processor.updateToolCall(opts.toolCallId, (part) => {
+                            if (part.state.status !== "running") return part
+                            return { ...part, state: { ...part.state, metadata: {
+                              ...part.state.metadata, mcp: { _meta: meta },
+                            } } }
+                          }),
+                        ),
+                      ])
+                    },
+                  },
+                }),
+                catch: (error) => error,
+              }).pipe(Effect.catch((error) => Effect.gen(function* () {
+                // Catch SDK execution failures here, before direct/exec paths persist
+                // or forward them. Successful results (including diffs) never enter.
+                if (opts.abortSignal?.aborted) return yield* Effect.fail(error)
+                const truncated = yield* truncate.output(errorMessage(error), { outcome: "error" }, input.agent)
+                if (!truncated.truncated) return yield* Effect.fail(error)
+                return yield* Effect.fail(new ToolResultError(truncated.content, {
+                  truncated: true,
+                  outputPath: truncated.outputPath,
+                }))
+              })))
               yield* plugin.trigger(
                 "tool.execute.after",
                 { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args: mcpBeforeOutput.args },
@@ -2678,6 +2733,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
               const metadata = {
                 ...normalized.metadata,
+                ...(Object.keys(presentation).length
+                  ? { mcp: { ...normalized.metadata.mcp, _meta: { ...presentation, ...normalized.metadata.mcp._meta } } }
+                  : {}),
                 truncated: truncated.truncated,
                 ...(truncated.truncated && { outputPath: truncated.outputPath }),
               }
@@ -2719,7 +2777,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 yield* input.processor.completeToolCall(opts.toolCallId, output)
               }
               return output
-            }),
+            }).pipe((body) =>
+              // Only model-facing calls join this batch. Exec guest calls keep
+              // the same execution pipeline with script-controlled concurrency.
+              modelFacing ? gate.run(key, opts?.toolCallId ?? "?", body, { signal: opts.abortSignal }) : body,
+            ),
           )
         item.execute = (args, opts) => executeMcp(args, opts, true)
         tools[key] = item
@@ -3424,7 +3486,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     sessionID: input.sessionID,
                     type: "text",
                     synthetic: true,
-                    text: `Called the Read tool with the following input: ${JSON.stringify({ file_path: part.filename })}`,
+                    text: `Called the \`read\` tool with the following input: ${JSON.stringify({ file_path: part.filename })}`,
                   },
                   {
                     messageID: info.id,
@@ -3550,7 +3612,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     sessionID: input.sessionID,
                     type: "text",
                     synthetic: true,
-                    text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
+                    text: `Called the \`read\` tool with the following input: ${JSON.stringify(args)}`,
                   },
                 ]
                 const exit = yield* provider.getModel(info.model.providerID, info.model.modelID).pipe(
@@ -3592,7 +3654,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     sessionID: input.sessionID,
                     type: "text",
                     synthetic: true,
-                    text: `Read tool failed to read ${filepath} with the following error: ${message}`,
+                    text: `\`read\` tool failed to read ${filepath} with the following error: ${message}`,
                   })
                 }
                 return pieces
@@ -3615,7 +3677,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       sessionID: input.sessionID,
                       type: "text",
                       synthetic: true,
-                      text: `Read tool failed to read ${filepath} with the following error: ${message}`,
+                      text: `\`read\` tool failed to read ${filepath} with the following error: ${message}`,
                     },
                   ]
                 }
@@ -3625,7 +3687,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     sessionID: input.sessionID,
                     type: "text",
                     synthetic: true,
-                    text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
+                    text: `Called the \`read\` tool with the following input: ${JSON.stringify(args)}`,
                   },
                   {
                     messageID: info.id,
@@ -3648,7 +3710,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     sessionID: input.sessionID,
                     type: "text",
                     synthetic: true,
-                    text: `Called the Read tool with the following input: {"file_path":"${filepath}"}`,
+                    text: `Called the \`read\` tool with the following input: {"file_path":"${filepath}"}`,
                   }
               // Size gate on stat, before the file is read (see classifyAttachment):
               // an under-limit file is inlined as-is, an oversized image within
@@ -3931,17 +3993,27 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     //      publishes status for the main slice (`if (isMain) status.set(...)`), so a
     //      subagent slice can be executing tools while the session status reads
     //      `idle` — its parts are out of scope.
+    // `ownedMessageIds`: only tools on these assistant messages. Callers
+    // snapshot IDs while still on a lifecycle boundary (work ensuring). New
+    // turns create new messages and cannot enter an earlier snapshot — this is
+    // ownership by message identity (RL-ORPHAN-D01), covering incomplete
+    // messages that field evidence shows carry the original orphans.
+    // Full sweep (no ownedMessageIds) requires status==idle (prompt entry).
     const sweepOrphanToolParts = Effect.fn("SessionPrompt.sweepOrphanToolParts")(function* (
       sessionID: SessionID,
-      idleAtAdmission?: boolean,
+      opts?: { before?: number; ownedMessageIds?: ReadonlySet<string>; idleAtAdmission?: boolean },
     ) {
-      const idle = idleAtAdmission ?? (yield* status.get(sessionID)).type === "idle"
-      if (!idle) return
+      const owned = opts?.ownedMessageIds
+      if (!owned && !(opts?.idleAtAdmission ?? (yield* status.get(sessionID)).type === "idle")) return
       for (const m of yield* sessions.messages({ sessionID })) {
         if (m.info.role !== "assistant") continue
+        if (owned && !owned.has(m.info.id)) continue
         for (const part of m.parts) {
           if (part.type !== "tool") continue
           if (part.state.status !== "pending" && part.state.status !== "running") continue
+          if (!owned && !(opts?.idleAtAdmission ?? (yield* status.get(sessionID)).type === "idle")) return
+          const started = part.state.status === "running" ? part.state.time.start : undefined
+          if (opts?.before !== undefined && started !== undefined && started > opts.before) continue
           yield* sessions
             .updatePart({ ...part, state: MessageV2.abortedToolState(part.state) })
             .pipe(
@@ -3958,6 +4030,33 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
       }
     })
+
+    // Sweep orphan tool parts on the busy→idle edge, not only at the next prompt
+    // entry. A tool whose abort finalizer was skipped (crash / process kill /
+    // registration race) stays `running` in the DB after a natural turn end; the
+    // Desktop UI settles that step as `completed` so the user sees nothing, then
+    // the next prompt's entry sweep emits `Tool execution aborted` into the NEW
+    // turn's stream. Cleaning on idle closes that window.
+    // Wired via module ref: SessionRunState main-work ensuring invokes the
+    // sweep (ownedMessageIds snapshot). SessionStatus.commit does NOT sweep.
+    // Wire the idle-edge sweep. Identity-guarded clear so a rebuilt layer does
+    // not wipe a newer registration (same pattern as sessionPromptRef).
+    const idleSweep = (sid: SessionID, opts?: { before?: number; ownedMessageIds?: ReadonlySet<string>; idleAtAdmission?: boolean }) =>
+      sweepOrphanToolParts(sid, opts)
+    orphanToolIdleSweepRef.current = idleSweep
+    const snapshotAssistantIds = (sid: SessionID) =>
+      Effect.gen(function* () {
+        const msgs = yield* sessions.messages({ sessionID: sid })
+        return new Set(msgs.filter((m) => m.info.role === "assistant").map((m) => m.info.id as string))
+      })
+    assistantMessageIdsSnapshotRef.current = snapshotAssistantIds
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        if (orphanToolIdleSweepRef.current === idleSweep) orphanToolIdleSweepRef.current = undefined
+        if (assistantMessageIdsSnapshotRef.current === snapshotAssistantIds)
+          assistantMessageIdsSnapshotRef.current = undefined
+      }),
+    )
 
     const coversPrompt = (messages: MessageV2.WithParts[], targetID: MessageID, parentID: MessageID) => {
       const targetIndex = messages.findIndex((item) => item.info.id === targetID)
@@ -4013,7 +4112,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // here, which is precisely where that property would get lost. The cost is
         // also smaller than it looks: this returns after one status lookup unless the
         // session is genuinely idle.
-        yield* sweepOrphanToolParts(input.sessionID, idleAtAdmission)
+        yield* sweepOrphanToolParts(input.sessionID, { idleAtAdmission })
       }
       const eligibleTitle =
         input.source !== "hook" &&
@@ -4123,7 +4222,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
       function* (input: PromptInput) {
-        return yield* promptWork(input, runSharedLoop)
+        return yield* promptWork(input, (next) => runSharedLoop(next, true))
       },
     )
 
@@ -4246,9 +4345,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         if (msgs.slice(index + 1).some((later) => later.info.role === "user" || later.info.role === "assistant"))
           continue
         candidates.push({
+          kind: "assistant",
           assistantMessageID: assistant.id,
           parentMessageID: assistant.parentID,
           created: assistant.time.created,
+        })
+      }
+      // [SR-R21 D16f] Trailing user with no following assistant: explicit Resume starts the next
+      // turn from that user. Source (manual/notification/synthetic/noReply) is irrelevant — Resume
+      // is the user's intent to run now.
+      const last = msgs.at(-1)
+      if (last?.info.role === "user") {
+        candidates.push({
+          kind: "parent-user",
+          userMessageID: last.info.id,
+          created: last.info.time.created,
         })
       }
       return candidates
@@ -4282,7 +4393,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         .pipe(Effect.match({ onSuccess: () => true, onFailure: () => false }))
       if (!idle) return []
       yield* validateActorRecovery({ ...input, actorID })
-      return yield* recoveryCandidates(input.sessionID, actorID)
+      return (yield* recoveryCandidates(input.sessionID, actorID)).filter((item) => item.kind === "assistant")
     })
 
     const abandonRecoveredAssistant = Effect.fn("SessionPrompt.abandonRecoveredAssistant")(function* (input: {
@@ -4323,6 +4434,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       deferInbox?: boolean,
       userRedispatch?: boolean,
       turnSource?: "user" | "spawn" | "hook",
+      parentUserID?: MessageID,
+      strictParentTail?: boolean,
     ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(function* (
       sessionID: SessionID,
       agentID?: string,
@@ -4334,6 +4447,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       deferInbox?: boolean,
       userRedispatch = false,
       turnSource?: "user" | "spawn" | "hook",
+      parentUserID?: MessageID,
+      strictParentTail?: boolean,
     ) {
       const ctx = yield* InstanceState.context
       const slog = elog.with({ sessionID })
@@ -5222,6 +5337,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // Every recovery owns its original user, including main without an Actor model identity.
           if (!recovery && !deferInbox) yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
           yield* slog.info("loop", { step })
+          // [C003/C004] Test seam: stop after inbox drain, before step-0 parent lock.
+          const beforeStep0 = step === 0 ? ResumeTestHooks.beforeStep0ParentCheck : undefined
+          if (beforeStep0) yield* beforeStep0()
 
           // F37: filter by agentID so subagent slices stay isolated from the
           // main agent's slice within the same session. Without this, an actor
@@ -5258,6 +5376,37 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           let lastAssistant: MessageV2.Assistant | undefined
           let lastFinished: MessageV2.Assistant | undefined
           let tasks: MessageV2.SubtaskPart[] = []
+          // [R003] user-resume first step: bind parent to the planned user; do not adopt newer lastUser.
+          // After inbox drain, the locked parent must still be the last user — a later user would
+          // enter the model context while parent stays old. Later assistants are allowed only when
+          // plan did not require strict tail (empty-shell siblings); trailing-user is strict.
+          const lockParentOnStep0 = step === 0 && parentUserID !== undefined
+          if (lockParentOnStep0) {
+            const lockedIdx = msgs.findIndex((m) => m.info.role === "user" && m.info.id === parentUserID)
+            if (lockedIdx < 0) {
+              throw new Error(
+                `Resume parent user ${parentUserID} is no longer in session slice ${sessionID}`,
+              )
+            }
+            const laterUser = msgs.slice(lockedIdx + 1).some((m) => m.info.role === "user")
+            if (laterUser) {
+              throw new Error(
+                `Resume parent user ${parentUserID} is no longer the last user in ${sessionID}`,
+              )
+            }
+            if (strictParentTail && msgs.slice(lockedIdx + 1).some((m) => m.info.role === "assistant")) {
+              throw new Error(
+                `Resume parent user ${parentUserID} is no longer the slice tail in ${sessionID}`,
+              )
+            }
+            const locked = msgs[lockedIdx]!
+            if (locked.info.role !== "user") {
+              throw new Error(
+                `Resume parent user ${parentUserID} is no longer in session slice ${sessionID}`,
+              )
+            }
+            lastUser = locked.info
+          }
           for (let i = msgs.length - 1; i >= 0; i--) {
             const msg = msgs[i]
             if (!lastUser && msg.info.role === "user") lastUser = msg.info
@@ -5266,6 +5415,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             if (lastUser && lastFinished) break
             const task = msg.parts.filter((part): part is MessageV2.SubtaskPart => part.type === "subtask")
             if (task && !lastFinished) tasks.push(...task)
+          }
+          if (!lastUser) {
+            throw new Error("No user message found in stream. This should never happen.")
           }
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
@@ -5621,9 +5773,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               writerWaitMs: AUTO_WRITER_WAIT_MS,
               // The turn is mid-flight, so explain the stall: without this the
               // TUI would sit on a bare spinner for minutes with no reason.
-              onWaitingForWriter: status
-                .set(sessionID, { type: "busy", message: "Writing checkpoint\u2026" })
-                .pipe(Effect.catch(() => Effect.void)),
+              // F55: only main owns session status — subagent onIdle never clears it.
+              onWaitingForWriter: (!agentID || agentID === "main")
+                ? status
+                    .set(sessionID, { type: "busy", message: "Writing checkpoint\u2026" })
+                    .pipe(Effect.catch(() => Effect.void))
+                : Effect.void,
             })
             if (attempt === "rebuilt") {
               skipOverflowCheck = true
@@ -6683,9 +6838,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 model: { providerID: model.providerID, id: model.id },
                 task_id: lastUser.task_id,
                 writerWaitMs: AUTO_WRITER_WAIT_MS,
-                onWaitingForWriter: status
-                  .set(sessionID, { type: "busy", message: "Writing checkpoint\u2026" })
-                  .pipe(Effect.catch(() => Effect.void)),
+                // F55: only main owns session status — subagent onIdle never clears it.
+                onWaitingForWriter: (!agentID || agentID === "main")
+                  ? status
+                      .set(sessionID, { type: "busy", message: "Writing checkpoint\u2026" })
+                      .pipe(Effect.catch(() => Effect.void))
+                  : Effect.void,
               })
               if (attempt2 === "rebuilt") {
                 skipOverflowCheck = true
@@ -6821,6 +6979,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         return final
       }).pipe(
         Effect.onExit(firePostSession),
+        Effect.ensuring(MCP.releaseTurnClients(mcpContext)),
         Effect.catchCause((cause) =>
           // A failing post hook must not erase an earlier cancellation decision.
           Effect.failCause(
@@ -6837,7 +6996,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       )
     })
 
-    const runSharedLoop = Effect.fn("SessionPrompt.runSharedLoop")(function* (input: z.infer<typeof LoopInput>) {
+    const runSharedLoop = Effect.fn("SessionPrompt.runSharedLoop")(function* (input: z.infer<typeof LoopInput>, joinRunning = false) {
       const agentID = input.agentID ?? "main"
       let started = false
       const work = Effect.sync(() => {
@@ -6990,7 +7149,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               while (true) {
                 const head = input.inboxID ? yield* inbox.head(input.sessionID, agentID) : undefined
                 const result = yield* state
-                  .ensureRunning(input.sessionID, agentID, lastAssistant(input.sessionID, agentID), work)
+                  .ensureRunning(input.sessionID, agentID, lastAssistant(input.sessionID, agentID), work, joinRunning || !!input.inboxID)
                   .pipe(Effect.exit)
                 const stalled = Exit.isFailure(result) && (!head || (yield* inbox.has(head)))
                 if (input.inboxID && !isTurnCancelled(result) && !stalled && (yield* inbox.has(input.inboxID))) continue
@@ -7420,6 +7579,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       sessionID: SessionID
       actorID: string
       assistantMessageID?: MessageID
+      userMessageID?: MessageID
+      exclusiveHook?: boolean
       titleLocale?: string
       task_id?: TaskID
       taskSessionID?: SessionID
@@ -7430,10 +7591,28 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       resumeIdentity?: string
       model?: { providerID: string; modelID: string }
     }) {
+      yield* state.assertNotBusy(input.sessionID, input.actorID)
+      const candidates = yield* recoveryCandidates(input.sessionID, input.actorID)
+      const candidate = input.userMessageID
+        ? candidates.find((item) => item.kind === "parent-user" && item.userMessageID === input.userMessageID)
+        : input.assistantMessageID
+          ? candidates.find((item) => item.kind === "assistant" && item.assistantMessageID === input.assistantMessageID)
+          : candidates.at(-1)
+      if (!candidate || (input.actorID !== "main" && candidate.kind !== "assistant"))
+        return yield* Effect.fail(new NotFoundError({ message: input.userMessageID ? "No resumable trailing user found for message " + input.userMessageID : "No resumable interrupted turn found for " + (input.assistantMessageID ?? input.actorID) }))
+      const assistantMessageID = candidate.kind === "assistant" ? candidate.assistantMessageID : undefined
+      const parentMessageID = candidate.kind === "assistant" ? candidate.parentMessageID : candidate.userMessageID
+      const strictTail = candidate.kind === "parent-user"
+      ResumeTestHooks.onPlanResolved?.({
+        action: strictTail || !MessageV2.hasUsefulAssistantParts(MessageV2.parts(assistantMessageID!)) ? "user-resume" : "tool-resume",
+        assistantMessageID,
+        parentMessageID,
+      })
+      if (input.exclusiveHook && ResumeTestHooks.beforeExclusiveOccupy) yield* ResumeTestHooks.beforeExclusiveOccupy()
       const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError> | Session.RecoveryConflictError>()
       const recovered: { id?: MessageID; parentID?: MessageID; redispatch?: boolean } = {}
       const abandon = Effect.suspend(() =>
-        recovered.redispatch && recovered.parentID
+        !strictTail && recovered.redispatch && recovered.parentID
           ? cleanupEmptyResidueAssistants({
               sessionID: input.sessionID,
               agentID: input.actorID,
@@ -7450,16 +7629,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             : Effect.void,
       )
       const validate = Effect.gen(function* () {
-        const candidates = yield* recoveryCandidates(input.sessionID, input.actorID)
-        const candidate = input.assistantMessageID
-          ? candidates.find((item) => item.assistantMessageID === input.assistantMessageID)
-          : candidates.at(-1)
-        if (!candidate)
-          return yield* Effect.fail(
-            new NotFoundError({
-              message: "No resumable interrupted turn found for " + (input.assistantMessageID ?? input.actorID),
-            }),
-          )
+        if (ResumeTestHooks.beforeAdmissionRecheck) yield* ResumeTestHooks.beforeAdmissionRecheck()
         // A model override is resolved before the candidate is settled: a model
         // that cannot be resolved must not leave the turn abandoned with no
         // successor, which is what settling first would do.
@@ -7473,8 +7643,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           if (
             !current.some(
               (item) =>
-                item.assistantMessageID === candidate.assistantMessageID &&
-                item.parentMessageID === candidate.parentMessageID,
+                item.kind === "assistant" && item.assistantMessageID === assistantMessageID &&
+                item.parentMessageID === parentMessageID,
             )
           )
             return yield* Effect.fail(
@@ -7486,27 +7656,28 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         yield* sessions.commitRecoveryCandidate({
           sessionID: input.sessionID,
           actorID: input.actorID,
-          assistantMessageID: candidate.assistantMessageID,
-          parentMessageID: candidate.parentMessageID,
+          assistantMessageID,
+          parentMessageID,
           taskID: input.task_id,
           taskSessionID: input.taskSessionID,
           shouldCommit: input.shouldCommit,
           onCommitted: ({ redispatch }) => {
             recovered.redispatch = redispatch
-            recovered.id = candidate.assistantMessageID
-            recovered.parentID = candidate.parentMessageID
+            recovered.id = assistantMessageID
+            recovered.parentID = parentMessageID
             input.onCommitted?.()
           },
         })
         if (input.onAdmitted) yield* input.onAdmitted
       })
-      const completion = yield* state.startRunning(
+      const owned = yield* state.startOwned(
         input.sessionID,
         input.actorID,
         lastAssistant(input.sessionID, input.actorID),
         validate.pipe(
           Effect.onExit((exit) => Deferred.done(admitted, Exit.isSuccess(exit) ? Exit.void : exit).pipe(Effect.ignore)),
           Effect.orDie,
+          Effect.andThen(Effect.suspend(() => ResumeTestHooks.afterAdmissionBeforeCleanup?.() ?? Effect.void)),
           Effect.andThen(
             Effect.suspend(() =>
               runLoop(
@@ -7522,6 +7693,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 undefined,
                 recovered.redispatch,
                 recovered.redispatch ? "user" : "hook",
+                recovered.redispatch ? recovered.parentID : undefined,
+                strictTail,
               ),
             ).pipe(
               Effect.ensuring(
@@ -7546,19 +7719,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           ),
         ),
       )
+      const completion = owned.completion
       const admission = yield* Effect.raceFirst(
         Deferred.await(admitted),
         completion.pipe(Effect.andThen(Effect.interrupt)),
-      ).pipe(Effect.exit)
+      ).pipe(Effect.timeout("5 seconds"), Effect.exit)
       if (Exit.isSuccess(admission)) return completion
-      yield* completion.pipe(Effect.exit)
-      return yield* Effect.failCause(admission.cause)
+      yield* owned.interruptOwned
+      if (Cause.hasInterruptsOnly(admission.cause)) return yield* Effect.failCause(admission.cause)
+      const error = Cause.squash(admission.cause)
+      if (error instanceof NotFoundError || error instanceof Session.RecoveryConflictError) return yield* Effect.fail(error)
+      return yield* Effect.fail(new NotFoundError({ message: "Resume admission did not complete" }))
     })
 
-    const startResume = Effect.fn("SessionPrompt.startResume")(function* (input: ResumeTurnInput) {
+    const startResume = Effect.fn("SessionPrompt.startResume")(function* (input: ResumeTurnInput, exclusiveHook = false) {
+      if (input.agentID && input.agentID !== "main") return yield* Effect.fail(new NotFoundError({ message: "Actor recovery requires its owning lifecycle" }))
       const epoch = cascadeEpochBySession.get(input.sessionID) ?? 0
       const completion = yield* startResumeTurn({
         ...input,
+        exclusiveHook,
         actorID: "main",
         taskSessionID: input.sessionID,
         shouldCommit: () => !input.signal?.aborted,
@@ -7574,7 +7753,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       })
 
     const resume = Effect.fn("SessionPrompt.resume")(function* (input: ResumeTurnInput) {
-      return yield* yield* startResume(input)
+      return yield* yield* startResume(input, true)
     })
 
     // Reuse Actor.resume's retained-context, generation, task and cancellation
@@ -7596,7 +7775,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           const candidates = yield* (service?.recovery?.({ sessionID, actorID: actor.actorID }) ?? Effect.succeed([]))
             .pipe(Effect.catch(() => Effect.succeed([])))
           const latest = candidates.at(-1)
-          if (!latest || !service?.resume) {
+          if (!latest || latest.kind !== "assistant" || !service?.resume) {
             outcomes.push({ actorID: actor.actorID, status: "skipped", reason: "no-recovery-candidate" })
             continue
           }
@@ -7638,6 +7817,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       startPrompt,
       recovery,
       startResume,
+      resumeBackground: (input) => startResume(input).pipe(Effect.asVoid),
       startActorResume,
       resume,
       startSummarize,

@@ -34,7 +34,7 @@ test("real non-test TUI workers default model API keeps authentication and same-
     MIMOCODE_DISABLE_DEFAULT_PLUGINS: "true",
     MIMOCODE_DISABLE_BUILTIN_SKILLS: "true",
     MIMOCODE_DISABLE_COMPOSE_SKILLS: "true",
-    MIMOCODE_DISABLE_EXTERNAL_SKILLS: "true",
+    MIMOCODE_DISABLE_AGENTS_SKILLS: "true",
     MIMOCODE_DISABLE_INSTRUCTIONS: "true",
     MIMOCODE_DISABLE_AUTOUPDATE: "true",
     MIMOCODE_ENABLE_ANALYSIS: "false",

@@ -433,3 +433,42 @@ it.live("conditional hint commit rejects cancelled or superseded work without me
     expect(MessageV2.parts(message.id)).toEqual([])
   })),
 )
+
+for (const scenario of ["claim", "stale-user", "stale-assistant", "task-conflict", "cancelled", "rollback"] as const)
+  it.live(`trailing-user recovery commits atomically: ${scenario}`, () =>
+    provideTmpdirInstance(() => Effect.gen(function* () {
+      const f = yield* seed("main", scenario === "task-conflict" ? "T99" : undefined)
+      yield* f.sessions.removeMessage({ sessionID: f.session.id, messageID: f.assistant.id })
+      const tasks = yield* TaskRegistry.Service
+      const task = yield* tasks.create({ session_id: f.session.id, summary: "Trailing user task" })
+      if (scenario === "stale-user") yield* f.sessions.updateMessage({ ...f.user, id: MessageID.ascending(), time: { created: 300 } })
+      if (scenario === "stale-assistant") yield* f.sessions.updateMessage(f.assistant)
+      const before = { messages: yield* f.sessions.messages({ sessionID: f.session.id }), ...taskRows() }
+      let committed = false
+      if (scenario === "rollback") Database.use((db) => db.run(sql`CREATE TEMP TRIGGER reject_trailing_binding BEFORE UPDATE ON message BEGIN SELECT RAISE(ABORT, 'trailing recovery binding failure'); END`))
+      const result = yield* f.sessions.commitRecoveryCandidate({
+        sessionID: f.session.id,
+        actorID: "main",
+        parentMessageID: f.user.id,
+        taskID: task.id,
+        taskSessionID: f.session.id,
+        shouldCommit: () => scenario !== "cancelled",
+        onCommitted: ({ redispatch }) => {
+          expect(redispatch).toBe(true)
+          expect(stored(f.user.id)?.data).toMatchObject({ task_id: task.id })
+          expect(taskRows().tasks.find((row) => row.session_id === f.session.id)?.owner).toBe("main")
+          committed = true
+        },
+      }).pipe(Effect.exit, Effect.ensuring(Effect.sync(() => {
+        if (scenario === "rollback") Database.use((db) => db.run(sql`DROP TRIGGER reject_trailing_binding`))
+      })))
+      expect(Exit.isSuccess(result)).toBe(scenario === "claim")
+      expect(committed).toBe(scenario === "claim")
+      if (scenario !== "claim") {
+        expect({ messages: yield* f.sessions.messages({ sessionID: f.session.id }), ...taskRows() }).toEqual(before)
+        return
+      }
+      expect(yield* f.sessions.messages({ sessionID: f.session.id })).toHaveLength(1)
+      expect(stored(f.user.id)?.data).toMatchObject({ model: f.user.model, task_id: task.id })
+    })),
+  )

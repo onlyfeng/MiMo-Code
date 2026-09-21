@@ -7,9 +7,12 @@ import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { RunDisposal } from "../../src/session/run-disposal"
 import { SessionRunState } from "../../src/session/run-state"
-import { SessionID } from "../../src/session/schema"
+import { MessageID, PartID, SessionID } from "../../src/session/schema"
+import { MessageV2 } from "../../src/session/message-v2"
+import { SessionPrompt } from "../../src/session/prompt"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 import { SessionStatus } from "../../src/session/status"
-import { provideTmpdirInstance } from "../fixture/fixture"
+import { provideInstance, provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 let statusRaceGate:
@@ -241,7 +244,7 @@ describe("SessionRunState instance disposal", () => {
   )
 
   it.live(
-    "stale cancelled cleanup cannot delete a replacement runner",
+    "joined cancellation preserves replacement runner ownership",
     () =>
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
@@ -251,6 +254,12 @@ describe("SessionRunState instance disposal", () => {
           const cleanupStarted = yield* Deferred.make<void>()
           const releaseCleanup = yield* Deferred.make<void>()
           const releaseThird = yield* Deferred.make<void>()
+          yield* Effect.addFinalizer(() =>
+            Effect.all(
+              [Deferred.succeed(releaseCleanup, undefined), Deferred.succeed(releaseThird, undefined)],
+              { discard: true },
+            ),
+          )
 
           yield* run
             .startRunning(
@@ -272,12 +281,16 @@ describe("SessionRunState instance disposal", () => {
           const cancelling = yield* run.cancel(sessionID).pipe(Effect.forkChild)
           yield* Deferred.await(cleanupStarted)
 
-          const second = yield* run.startRunning(
+          const admittingSecond = yield* run.startRunning(
             sessionID,
             "main",
             Effect.interrupt,
             Effect.die("second run completed"),
-          )
+          ).pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          expect(admittingSecond.pollUnsafe()).toBeUndefined()
+          yield* Deferred.succeed(releaseCleanup, undefined)
+          const second = yield* Fiber.join(admittingSecond)
           yield* second.pipe(Effect.exit)
 
           const third = yield* run.startRunning(
@@ -287,7 +300,6 @@ describe("SessionRunState instance disposal", () => {
             Deferred.await(releaseThird).pipe(Effect.andThen(Effect.die("third run completed"))),
           )
 
-          yield* Deferred.succeed(releaseCleanup, undefined)
           yield* Fiber.await(cancelling)
           const fourth = yield* run
             .startRunning(sessionID, "main", Effect.interrupt, Effect.die("fourth work must not run"))
@@ -734,3 +746,107 @@ describe("SessionRunState instance disposal", () => {
     5_000,
   )
 })
+
+const itWithOrphanSweep = testEffect(
+  Layer.mergeAll(
+    SessionPrompt.defaultLayer,
+    Session.defaultLayer,
+    SessionRunState.defaultLayer,
+    CrossSpawnSpawner.defaultLayer,
+  ),
+)
+
+itWithOrphanSweep.live(
+  "disposed instance cleanup cannot abort a replacement instance running tool",
+  () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const run = yield* SessionRunState.Service
+        const session = yield* sessions.create({})
+        const cleanupStarted = yield* Deferred.make<void>()
+        const releaseCleanup = yield* Deferred.make<void>()
+        yield* Effect.addFinalizer(() => Deferred.succeed(releaseCleanup, undefined).pipe(Effect.asVoid))
+        const old = yield* run.startRunning(
+          session.id,
+          "main",
+          Effect.interrupt,
+          Effect.never.pipe(
+            Effect.onInterrupt(() =>
+              Deferred.succeed(cleanupStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseCleanup))),
+            ),
+          ),
+        )
+        const disposing = yield* Effect.promise(() => Instance.dispose()).pipe(
+          Effect.forkDetach({ startImmediately: true }),
+        )
+        yield* Deferred.await(cleanupStarted).pipe(Effect.timeout("2 seconds"))
+        yield* Fiber.join(disposing).pipe(Effect.timeout("2 seconds"))
+
+        yield* Effect.gen(function* () {
+          const replacement = yield* SessionRunState.Service
+          const part = yield* Deferred.make<MessageV2.ToolPart>()
+          const current = yield* replacement.startRunning(
+            session.id,
+            "main",
+            Effect.interrupt,
+            Effect.gen(function* () {
+              const user = yield* sessions.updateMessage({
+                id: MessageID.ascending(),
+                role: "user",
+                sessionID: session.id,
+                agent: "build",
+                model: { providerID: ProviderID.make("test"), modelID: ModelID.make("model") },
+                time: { created: Date.now() },
+              })
+              const assistant = yield* sessions.updateMessage({
+                id: MessageID.ascending(),
+                role: "assistant",
+                sessionID: session.id,
+                parentID: user.id,
+                mode: "build",
+                agent: "build",
+                path: { cwd: dir, root: dir },
+                cost: 0,
+                tokens: { output: 0, input: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                modelID: ModelID.make("model"),
+                providerID: ProviderID.make("test"),
+                time: { created: Date.now() },
+              })
+              const running = yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: assistant.id,
+                sessionID: session.id,
+                type: "tool",
+                tool: "bash",
+                callID: "call-example",
+                state: { status: "running", input: { command: "example" }, time: { start: Date.now() } },
+              })
+              yield* Deferred.succeed(part, running)
+              return yield* Effect.never
+            }),
+          )
+          yield* Effect.gen(function* () {
+            const running = yield* Deferred.await(part).pipe(Effect.timeout("2 seconds"))
+            yield* Deferred.succeed(releaseCleanup, undefined)
+            yield* old.pipe(Effect.exit, Effect.timeout("2 seconds"))
+            const persisted = yield* sessions.getPart({
+              sessionID: session.id,
+              messageID: running.messageID,
+              partID: running.id,
+            })
+            expect(persisted?.type).toBe("tool")
+            if (persisted?.type !== "tool") throw new Error("Expected a tool part")
+            expect(persisted.state.status).toBe("running")
+            const admission = yield* replacement.assertNotBusy(session.id).pipe(Effect.exit)
+            expect(Exit.isFailure(admission) && Cause.squash(admission.cause)).toBeInstanceOf(Session.BusyError)
+          }).pipe(
+            Effect.ensuring(replacement.cancel(session.id)),
+            Effect.ensuring(current.pipe(Effect.exit, Effect.asVoid)),
+          )
+        }).pipe(provideInstance(dir))
+      }),
+    ),
+  15_000,
+)

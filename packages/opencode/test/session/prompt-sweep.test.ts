@@ -135,13 +135,14 @@ describe("sweepOrphanAssistants", () => {
 
         expect(yield* svc.recovery({ sessionID: session.id })).toEqual([
           {
+            kind: "assistant",
             assistantMessageID: assistant.id,
             parentMessageID: userMsg.id,
             created: assistant.time.created,
           },
         ])
         yield* svc.sweepOrphanAssistants(session.id)
-        expect((yield* svc.recovery({ sessionID: session.id })).map((item) => item.assistantMessageID)).toEqual([
+        expect((yield* svc.recovery({ sessionID: session.id })).filter((item) => item.kind === "assistant").map((item) => item.assistantMessageID)).toEqual([
           assistant.id,
         ])
 

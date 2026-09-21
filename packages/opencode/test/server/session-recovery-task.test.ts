@@ -145,8 +145,10 @@ for (const scenario of [
                 .pipe(Effect.exit)
               const candidates = yield* prompt.recovery({ sessionID: session.id })
               expect(candidates).toHaveLength(1)
+              const candidate = candidates[0]
+              if (candidate.kind !== "assistant") throw new Error("Expected an interrupted assistant candidate")
               const before = yield* sessions.messages({ sessionID: session.id })
-              const original = before.find((message) => message.info.id === candidates[0].parentMessageID)
+              const original = before.find((message) => message.info.id === candidate.parentMessageID)
               if (!original || original.info.role !== "user") throw new Error("Missing interrupted original user")
               const task = yield* tasks.create({ session_id: session.id, summary: "Bind the interrupted source" })
               // A notification can already be durable when an interrupted main turn is recovered.
@@ -198,7 +200,7 @@ for (const scenario of [
                   ? llm.text("QUEUED_NOTIFICATION_FINISHED")
                   : llm.error(400, { error: { message: "Queued first batch failed" } })
               }
-              const response = yield* resume(dir, session.id, candidates[0].assistantMessageID, task.id)
+              const response = yield* resume(dir, session.id, candidate.assistantMessageID, task.id)
               expect(response.status).toBe(202)
               if (scenario.cancelHook) {
                 yield* Effect.promise(() => state.cancelledDone.promise).pipe(Effect.timeout("10 seconds"))
@@ -245,7 +247,7 @@ for (const scenario of [
                 agent: original.info.agent,
                 model: original.info.model,
               })
-              expect(messages.find((message) => message.info.id === candidates[0].assistantMessageID)).toBeUndefined()
+              expect(messages.find((message) => message.info.id === candidate.assistantMessageID)).toBeUndefined()
               expect(yield* tasks.get({ session_id: session.id, id: task.id })).toMatchObject({
                 status: "in_progress",
                 owner: "main",
