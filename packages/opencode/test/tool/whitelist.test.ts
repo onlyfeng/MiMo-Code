@@ -3,8 +3,8 @@ import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
-import fs from "fs/promises"
 import path from "path"
+import { pathToFileURL } from "node:url"
 import { tool } from "ai"
 import z from "zod"
 import { Agent as AgentSvc } from "../../src/agent/agent"
@@ -363,23 +363,30 @@ describe("Tool whitelist (Task 14)", () => {
   it.live("exec cannot bypass actor or message tool restrictions", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ dir, llm }) {
-        yield* Effect.promise(() => fs.mkdir(path.join(dir, ".mimocode", "tool"), { recursive: true }))
+        const file = path.join(dir, "plugin.ts")
         yield* Effect.promise(() =>
           Bun.write(
-            path.join(dir, ".mimocode", "tool", "secret_custom.ts"),
+            file,
             [
-              "export default {",
-              "  description: 'test-only custom tool',",
-              "  args: {},",
-              "  execute: async () => 'custom ran',",
-              "}",
+              "export default async () => ({",
+              "  tool: {",
+              "    secret_custom: { description: 'test-only custom tool', args: {}, execute: async () => 'custom ran' },",
+              "  },",
+              "})",
             ].join("\n"),
           ),
         )
 
+        yield* Effect.promise(async () => {
+          const config = Bun.file(path.join(dir, "mimocode.json"))
+          await Bun.write(config, JSON.stringify({ ...(await config.json()), plugin: [pathToFileURL(file).href] }))
+        })
+
         const prompt = yield* SessionPrompt.Service
         const sessions = yield* Session.Service
         const reg = yield* ActorRegistry.Service
+        const custom = (yield* (yield* ToolRegistry.Service).all()).find((tool) => tool.id === "secret_custom")
+        expect(custom?.description).toBe("test-only custom tool")
         const session = yield* sessions.create({
           title: "nested whitelist test",
           permission: [{ permission: "*", pattern: "*", action: "allow" }],

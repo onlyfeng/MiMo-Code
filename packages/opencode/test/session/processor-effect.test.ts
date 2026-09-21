@@ -245,6 +245,48 @@ const writeTextHook = Effect.fn("test.writeTextHook")(function* (dir: string, st
 // Tests
 // ---------------------------------------------------------------------------
 
+for (const event of ["tool-input-start", "tool-call"] as const) {
+  scripted.live(`session.processor rejects summary ${event} without retrying`, () =>
+    provideTmpdirServer(
+      ({ dir }) =>
+        Effect.gen(function* () {
+          processorLLM.enqueue([
+            { type: "start-step" },
+            event === "tool-input-start"
+              ? { type: event, id: "summary-tool", toolName: "ETIMEDOUT" }
+              : { type: event, toolCallId: "summary-tool", toolName: "ETIMEDOUT", input: { filePath: "/tmp/example" } },
+          ])
+          processorLLM.enqueue(textReply("must not retry"))
+          const { processors, session, provider } = yield* boot()
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "summarize")
+          const msg = { ...(yield* assistant(chat.id, parent.id, path.resolve(dir))), summary: true }
+          yield* session.updateMessage(msg)
+          const model = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model })
+          const result = yield* handle.process({
+            user: parent,
+            sessionID: chat.id,
+            model,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "summarize" }],
+            tools: {},
+            toolChoice: "none",
+          })
+          expect(result).toBe("stop")
+          expect(processorLLM.calls).toBe(1)
+          expect(handle.message.error).toEqual({
+            name: "ModelError",
+            data: { message: "Tool call not allowed while generating summary: ETIMEDOUT" },
+          })
+          expect(MessageV2.parts(msg.id).some((part) => part.type === "tool")).toBe(false)
+        }),
+      { git: true, config: providerCfg },
+    ),
+  )
+}
+
 scripted.live("session.processor does not persist empty streamed text parts", () =>
   provideTmpdirServer(
     ({ dir }) =>

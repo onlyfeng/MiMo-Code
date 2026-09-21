@@ -321,6 +321,9 @@ export function decide(
   if (MessageV2.AbortedError.isInstance(error)) {
     return { retryable: false, phase, scope, kind: "terminal", message: error.data.message }
   }
+  if (MessageV2.ModelError.isInstance(error)) {
+    return { retryable: false, phase, scope, kind: "terminal", message: error.data.message }
+  }
   if (MessageV2.AuthError.isInstance(error)) {
     return { retryable: false, phase, scope, kind: "terminal", message: error.data.message }
   }

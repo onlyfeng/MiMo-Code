@@ -1341,6 +1341,18 @@ describe("retry decision and coordinator budget", () => {
     expect(retries).toBe(2)
   })
 
+  test("ModelError stays terminal before transient message classification in every retry scope", () => {
+    for (const message of ["ETIMEDOUT", "Too Many Requests"]) {
+      const error = new MessageV2.ModelError({ message: `Tool call not allowed while generating summary: ${message}` })
+      for (const input of [error, error.toObject()]) {
+        const parsed = MessageV2.fromError(input, { providerID })
+        for (const phase of ["request", "stream"] as const) {
+          expect(decide(parsed, phase)).toMatchObject({ retryable: false, kind: "terminal", phase })
+        }
+      }
+    }
+  })
+
   test("terminal kinds stay terminal and are not swallowed by UnknownError retry", () => {
     const aborted = new MessageV2.AbortedError({ message: "Aborted" }).toObject()
     expect(decide(aborted)).toMatchObject({ retryable: false, kind: "terminal" })

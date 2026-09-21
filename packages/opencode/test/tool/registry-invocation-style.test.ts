@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
-import fs from "fs/promises"
 import path from "path"
+import { pathToFileURL } from "node:url"
 import { Effect, Layer } from "effect"
 import { ToolRegistry } from "../../src/tool"
 import { Agent } from "../../src/agent/agent"
@@ -291,18 +291,21 @@ describe("ToolRegistry.tools: invocation style resolution", () => {
     () =>
       provideTmpdirInstance((dir) =>
         Effect.gen(function* () {
-          yield* Effect.promise(() => fs.mkdir(path.join(dir, ".mimocode/tool"), { recursive: true }))
+          const file = path.join(dir, "plugin.ts")
           yield* Effect.promise(() =>
             Bun.write(
-              path.join(dir, ".mimocode/tool/multiedit.ts"),
+              file,
               [
-                "export default {",
-                "  description: 'multi-edit files',",
-                "  args: {},",
-                "  execute: async () => 'done',",
-                "}",
+                "export default async () => ({",
+                "  tool: {",
+                "    multiedit: { description: 'multi-edit files', args: {}, execute: async () => 'done' },",
+                "  },",
+                "})",
               ].join("\n"),
             ),
+          )
+          yield* Effect.promise(() =>
+            Bun.write(path.join(dir, "mimocode.json"), JSON.stringify({ plugin: [pathToFileURL(file).href] })),
           )
           const reg = yield* ToolRegistry.Service
           const agents = yield* Agent.Service
