@@ -493,7 +493,9 @@ export const layer: Layer.Layer<
 
           case "tool-input-start":
             if (ctx.assistantMessage.summary) {
-              throw new Error(`Tool call not allowed while generating summary: ${value.toolName}`)
+              throw new MessageV2.ModelError({
+                message: `Tool call not allowed while generating summary: ${value.toolName}`,
+              })
             }
             const part = yield* session.updatePart({
               id: ctx.toolcalls[value.id]?.partID ?? PartID.ascending(),
@@ -522,7 +524,9 @@ export const layer: Layer.Layer<
 
           case "tool-call": {
             if (ctx.assistantMessage.summary) {
-              throw new Error(`Tool call not allowed while generating summary: ${value.toolName}`)
+              throw new MessageV2.ModelError({
+                message: `Tool call not allowed while generating summary: ${value.toolName}`,
+              })
             }
             // A tool call may already have caused an external side effect before
             // the provider stream fails. Replaying the whole model step is unsafe.

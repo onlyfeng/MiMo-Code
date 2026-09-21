@@ -62,6 +62,15 @@ it.live(
         // If this ever stops throwing, summary messages have gained real tool
         // support and the `"none"` guard can be revisited.
         expect(yield* sessionErrors(session.id)).toContain("Tool call not allowed while generating summary")
+        const messages = yield* sessions.messages({ sessionID: session.id, agentID: "main" })
+        const summary = messages.find((message) => message.info.role === "assistant" && message.info.summary)
+        expect(summary?.info.role === "assistant" && summary.info.error?.name).toBe("ModelError")
+        if (!summary || summary.info.role !== "assistant") throw new Error("missing rejected summary")
+        // The outer loop may start a new compaction. The rejected attempt must
+        // roll back its own boundary, rather than accept a retry on this message.
+        const parentID = summary.info.parentID
+        expect(messages.some((message) => message.info.id === parentID)).toBe(false)
+        expect(summary.parts.some((part) => part.type === "tool")).toBe(false)
       }),
       { git: true, config: (url) => ({ ...providerCfg(url), ...compactionCfg }) },
     ),

@@ -1514,6 +1514,13 @@ describe("session.message-v2.toModelMessage", () => {
 })
 
 describe("session.message-v2.fromError", () => {
+  test("preserves terminal ModelError identity for instances and serialized errors", () => {
+    const error = new MessageV2.ModelError({ message: "Tool call not allowed while generating summary: read" })
+    for (const input of [error, error.toObject()]) {
+      expect(MessageV2.fromError(input, { providerID })).toEqual(error.toObject())
+    }
+  })
+
   test("normalizes stream_read_error as a retryable APIError", () => {
     const input = {
       type: "error",

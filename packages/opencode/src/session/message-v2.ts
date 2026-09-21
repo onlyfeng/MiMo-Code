@@ -1528,6 +1528,9 @@ export function fromError(
       if (inner !== undefined && inner !== e) return fromError(inner, ctx)
       return new NamedError.Unknown({ message: e.message }, { cause: e }).toObject()
     }
+    // Local model-contract failures are terminal, not uncatalogued provider errors.
+    case ModelError.isInstance(e):
+      return { name: e.name, data: e.data }
     case OutputLengthError.isInstance(e):
       return e
     case LoadAPIKeyError.isInstance(e):
