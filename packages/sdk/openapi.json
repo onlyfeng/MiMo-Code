@@ -4653,7 +4653,7 @@
           }
         ],
         "summary": "List interrupted turn recovery candidates",
-        "description": "Return incomplete turns for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Recovery never creates a user message or overrides its task.",
+        "description": "Return incomplete assistant turns or a trailing user for the main agent, or incomplete turns for a controllable persistent full-context actor retaining its original live context. Recovery never creates a user message or overrides its task.",
         "responses": {
           "200": {
             "description": "Recovery candidates",
@@ -4662,21 +4662,46 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "assistantMessageID": {
-                        "type": "string",
-                        "pattern": "^msg.*"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "assistant"
+                          },
+                          "assistantMessageID": {
+                            "type": "string",
+                            "pattern": "^msg.*"
+                          },
+                          "parentMessageID": {
+                            "type": "string",
+                            "pattern": "^msg.*"
+                          },
+                          "created": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["kind", "assistantMessageID", "parentMessageID", "created"]
                       },
-                      "parentMessageID": {
-                        "type": "string",
-                        "pattern": "^msg.*"
-                      },
-                      "created": {
-                        "type": "number"
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "parent-user"
+                          },
+                          "userMessageID": {
+                            "type": "string",
+                            "pattern": "^msg.*"
+                          },
+                          "created": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["kind", "userMessageID", "created"]
                       }
-                    },
-                    "required": ["assistantMessageID", "parentMessageID", "created"]
+                    ]
                   }
                 }
               }
@@ -4832,6 +4857,130 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.resume({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/resume": {
+      "post": {
+        "operationId": "session.resumeUser",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "agentID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "schema": {
+              "type": "string",
+              "pattern": "^T\\d+(\\.\\d+)*$"
+            }
+          },
+          {
+            "in": "query",
+            "name": "titleLocale",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "modelProviderID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "modelID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Resume from a trailing user",
+        "description": "Start the next turn from a trailing user message without creating another user message.",
+        "responses": {
+          "202": {
+            "description": "Resume accepted"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — session resource is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userMessageID": {
+                    "type": "string",
+                    "pattern": "^msg.*"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.resumeUser({\n  ...\n})"
           }
         ]
       }

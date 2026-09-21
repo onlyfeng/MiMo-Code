@@ -27,6 +27,7 @@ if (!process.env.MIMOCODE_TEST_CLAUDE_MCP_CHILD) {
   const { NodeFileSystem, NodePath } = await import("@effect/platform-node")
   const CrossSpawnSpawner = await import("../../src/effect/cross-spawn-spawner")
   const { MCP } = await import("../../src/mcp")
+  const { HostMcp } = await import("../../src/mcp/host")
   const { provideTmpdirInstance } = await import("../fixture/fixture")
   const { testEffect } = await import("../lib/effect")
   const infra = CrossSpawnSpawner.defaultLayer.pipe(
@@ -67,6 +68,47 @@ if (!process.env.MIMOCODE_TEST_CLAUDE_MCP_CHILD) {
       }),
       (fixture) => Effect.promise(() => fixture.stop()),
     )
+
+  for (const origin of ["claude", "native"] as const) {
+    it.live(`host removal restores ${origin} pending admission without connecting the user server`, () =>
+      Effect.gen(function* () {
+        const host = yield* server()
+        const user = yield* server()
+        HostMcp.set({ selected: { type: "remote", url: host.url, oauth: false } })
+        yield* Effect.addFinalizer(() => Effect.sync(() => HostMcp.set({})))
+        yield* withConfig(
+          () =>
+            Effect.gen(function* () {
+              const mcp = yield* MCP.Service
+              expect((yield* mcp.status()).selected).toEqual({ status: "connected" })
+              expect(host.requests).toContain("initialize")
+              expect(user.requests).toEqual([])
+              HostMcp.set({})
+              expect((yield* mcp.status()).selected).toEqual({ status: "pending" })
+              expect(Object.keys(yield* mcp.tools())).toEqual([])
+              expect(user.requests).toEqual([])
+              yield* mcp.connect("selected")
+              expect((yield* mcp.status()).selected).toEqual({ status: "connected" })
+              expect(user.requests.filter((method) => method === "initialize")).toHaveLength(1)
+            }),
+          {
+            init: (dir) =>
+              origin === "claude"
+                ? Bun.write(
+                    `${dir}/.claude.json`,
+                    JSON.stringify({ mcpServers: { selected: { type: "http", url: user.url, oauth: false } } }),
+                  )
+                : Bun.write(
+                    `${dir}/mimocode.json`,
+                    JSON.stringify({
+                      mcp: { selected: { type: "remote", url: user.url, oauth: false, auto_connect: false } },
+                    }),
+                  ),
+          },
+        )
+      }),
+    )
+  }
 
   it.live("Claude import stays pending despite its own auto_connect and permits manual connection", () =>
     Effect.gen(function* () {

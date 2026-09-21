@@ -70,6 +70,7 @@ const stubPrompt = Layer.succeed(
       }),
     startPrompt: () => Effect.die("startPrompt not expected in keepalive test"),
     recovery: () => Effect.succeed([]),
+    resumeBackground: () => Effect.die("resumeBackground not expected in scheduling test"),
     startResume: () => Effect.die("startResume not expected in keepalive test"),
     resume: () => Effect.die("resume not expected in keepalive test"),
     cascadeSubagentResume: () => Effect.succeed([]),

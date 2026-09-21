@@ -872,6 +872,7 @@ describe("exec", () => {
     const started: string[] = []
     const cancelled: string[] = []
     const sideEffects: string[] = []
+    const completion = Promise.withResolvers<void>()
     const parameters = z.object({ value: z.string() })
     const slow: Tool.Def<typeof parameters> = {
       id: "slow",
@@ -882,12 +883,12 @@ describe("exec", () => {
           () =>
             new Promise<{ title: string; output: string; metadata: Record<string, unknown> }>((resolve, reject) => {
               started.push(args.value)
-              const timer = setTimeout(() => {
+              void completion.promise.then(() => {
+                if (ctx.abort.aborted) return
                 sideEffects.push(args.value)
                 resolve({ title: "Slow", output: args.value, metadata: {} })
-              }, 100)
+              })
               const onAbort = () => {
-                clearTimeout(timer)
                 cancelled.push(args.value)
                 reject(new Error("nested exec aborted"))
               }
@@ -912,7 +913,8 @@ describe("exec", () => {
     expect(started.toSorted()).toEqual(["0", "1", "2", "3", "4", "5", "6", "7"])
     expect(cancelled.toSorted()).toEqual(["0", "1", "2", "3", "4", "5", "6", "7"])
     expect(sideEffects).toEqual([])
-    await new Promise((resolve) => setTimeout(resolve, 150))
+    completion.resolve()
+    await completion.promise
     expect(started).not.toContain("queued")
     expect(sideEffects).toEqual([])
   })
@@ -1592,7 +1594,7 @@ describe("exec MCP dispatch", () => {
   // Mimics the SessionPrompt-wrapped MCP execute: resolves with the normalized
   // {output, metadata, attachments} shape (permission/hooks/truncation already
   // applied by the wrapper), rejects on tool failure.
-  function fakeMcpTool(execute: (args: any) => Promise<any>) {
+  function fakeMcpTool(execute: (args: any, options?: any) => Promise<any>) {
     return {
       description: "fake mcp tool",
       inputSchema: z.object({}),
@@ -1682,6 +1684,27 @@ describe("exec MCP dispatch", () => {
     )
     expect(result.metadata.status).toBe("completed")
     expect(result.output).toContain("caught: srv_fail: server exploded")
+  })
+
+  test("MCP progress updates the nested exec subpart", async () => {
+    const mcp = {
+      srv_progress: fakeMcpTool(async (_args: any, options: any) => {
+        await options.experimental_context.onMcpToolProgress({
+          "mimo/toolSurface": { kind: "browserUse", browserId: "iab" },
+        })
+        return { output: "done", metadata: { mcp: { isError: false } }, attachments: [] }
+      }),
+    }
+    const result = await runToolScript(
+      `const r = await tools.srv_progress({}); return r.output`,
+      [],
+      undefined,
+      { mcp },
+    )
+    const subparts = result.metadata.sub_parts as ExecSubPartSnapshot[]
+    expect(subparts[0]?.state.metadata).toEqual({
+      mcp: { isError: false, _meta: { "mimo/toolSurface": { kind: "browserUse", browserId: "iab" } } },
+    })
   })
 
   test("builtin id wins on collision with an MCP tool", async () => {

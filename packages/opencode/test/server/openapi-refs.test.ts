@@ -72,7 +72,7 @@ test("published OpenAPI exposes controlled actor recovery and validated task bin
     expect(parameterNames(resume)).toContain("task_id")
     expect(resume?.responses).toHaveProperty("409")
     expect(resume?.description).toContain("atomic task validation or binding")
-    expect(recovery?.description).toContain("main agent by default")
+    expect(recovery?.description).toContain("trailing user for the main agent")
     expect(resume?.description).toContain("main agent by default")
     expect(recovery?.description).toContain("controllable persistent full-context actor")
     expect(resume?.description).toContain("controllable persistent full-context actor")

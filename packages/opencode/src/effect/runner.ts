@@ -3,11 +3,13 @@ import { Cause, Deferred, Effect, Exit, Fiber, Schema, Scope, SynchronizedRef } 
 export interface Runner<A, E = never, B = never> {
   readonly state: State<A, E>
   readonly busy: boolean
-  readonly ensureRunning: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<A, E>
+  readonly ensureRunning: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>, joinRunning?: boolean) => Effect.Effect<A, E>
   readonly startRunning: (
     work: Effect.Effect<A, E>,
     onInterrupt?: Effect.Effect<A, E>,
   ) => Effect.Effect<Effect.Effect<A, E>, B>
+  readonly ensureExclusive: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<A, E | B>
+  readonly startOwned: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<{ readonly runId: number; readonly interruptOwned: Effect.Effect<void>; readonly completion: Effect.Effect<A, E> }, B>
   readonly start: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<void, B>
   readonly startShell: (
     work: Effect.Effect<A, E>,
@@ -24,6 +26,7 @@ interface RunHandle<A, E> {
   done: Deferred.Deferred<A, E | Cancelled>
   start: Deferred.Deferred<void>
   entered: Deferred.Deferred<void>
+  pending?: { work: Effect.Effect<A, E>; done: Deferred.Deferred<A, E | Cancelled>; onInterrupt: Effect.Effect<A, E> | undefined }
   fiber: Fiber.Fiber<A, E>
   onInterrupt: Effect.Effect<A, E> | undefined
 }
@@ -49,6 +52,7 @@ type ActiveState<A, E> =
 interface CancellationHandle<A, E> {
   active: ActiveState<A, E>
   committed: Deferred.Deferred<void>
+  signalled: Deferred.Deferred<void>
 }
 
 export type State<A, E> =
@@ -98,25 +102,24 @@ export const make = <A, E = never, B = never>(
   const idleIfCurrent = (id: number) =>
     Effect.suspend(() => state()._tag === "Idle" && id === ids ? idle(id) : Effect.void)
 
-  const finishRun = (id: number, done: Deferred.Deferred<A, E | Cancelled>, exit: Exit.Exit<A, E>) =>
-    SynchronizedRef.modify(
-      ref,
-      (st) =>
-        [
-          Effect.gen(function* () {
-            if (st._tag === "Running" && st.run.id === id) yield* idle(id)
-            yield* complete(done, exit)
-          }),
-          st._tag === "Running" && st.run.id === id ? ({ _tag: "Idle" } as const) : st,
-        ] as const,
-    ).pipe(Effect.flatten)
+  const finishRun = (id: number, done: Deferred.Deferred<A, E | Cancelled>, exit: Exit.Exit<A, E>): Effect.Effect<void> =>
+    SynchronizedRef.modifyEffect(ref, Effect.fnUntraced(function* (st) {
+      if (st._tag !== "Running" || st.run.id !== id) return [complete(done, exit), st] as const
+      const pending = st.run.pending
+      if (pending && opts?.canStart?.() !== false) {
+        const run = yield* startRun(pending.work, pending.done, pending.onInterrupt)
+        return [Effect.sync(() => Deferred.doneUnsafe(run.start, Effect.void)).pipe(Effect.andThen(complete(done, exit))), { _tag: "Running", run }] as const
+      }
+      if (pending) yield* Deferred.fail(pending.done, new Cancelled())
+      return [idleIfCurrent(id).pipe(Effect.andThen(complete(done, exit))), { _tag: "Idle" }] as const
+    })).pipe(Effect.flatten)
 
   const startRun = (
     work: Effect.Effect<A, E>,
     done: Deferred.Deferred<A, E | Cancelled>,
     onInterrupt = defaultOnInterrupt,
     id = next(),
-  ) =>
+  ): Effect.Effect<RunHandle<A, E>> =>
     Effect.gen(function* () {
       const start = yield* Deferred.make<void>()
       const entered = yield* Deferred.make<void>()
@@ -178,6 +181,7 @@ export const make = <A, E = never, B = never>(
   const ensureRunning = (
     work: Effect.Effect<A, E>,
     onInterrupt = defaultOnInterrupt,
+    joinRunning = false,
   ): Effect.Effect<A, E> =>
     Effect.uninterruptibleMask((restore) =>
       SynchronizedRef.modifyEffect(
@@ -185,11 +189,34 @@ export const make = <A, E = never, B = never>(
         Effect.fnUntraced(function* (st) {
           if (opts?.canStart?.() === false) return [Effect.interrupt, st] as const
           switch (st._tag) {
-            case "Running":
-            case "ShellThenRun":
-              if (opts?.onReentryWarn)
-                yield* opts.onReentryWarn({ label: opts.label ?? "(unlabeled)", existingRunId: st.run.id })
-              return [restore(awaitRun(st.run.done, st.run.onInterrupt)), st] as const
+            case "Running": {
+              const exit = st.run.fiber.pollUnsafe()
+              if (exit !== undefined) {
+                if (st.run.pending) yield* Deferred.fail(st.run.pending.done, new Cancelled())
+                yield* complete(st.run.done, exit)
+                const done = yield* Deferred.make<A, E | Cancelled>()
+                const run = yield* startRun(work, done, onInterrupt)
+                return [Effect.sync(() => Deferred.doneUnsafe(run.start, Effect.void)).pipe(Effect.andThen(restore(awaitRun(done, onInterrupt)))), { _tag: "Running", run }] as const
+              }
+              if (opts?.onReentryWarn) yield* opts.onReentryWarn({ label: opts.label ?? "(unlabeled)", existingRunId: st.run.id })
+              // Inbox observers retain the original exit so a failure before drain
+              // cannot turn an attached wake into an implicit retry.
+              if (joinRunning) return [restore(awaitRun(st.run.done, st.run.onInterrupt)), st] as const
+              if (st.run.pending) return [restore(awaitRun(st.run.pending.done, st.run.pending.onInterrupt)), st] as const
+              const pending = { work, done: yield* Deferred.make<A, E | Cancelled>(), onInterrupt }
+              return [restore(awaitRun(pending.done, onInterrupt)), { _tag: "Running", run: { ...st.run, pending } }] as const
+            }
+            case "ShellThenRun": {
+              const exit = st.shell.fiber.pollUnsafe()
+              if (exit !== undefined) {
+                yield* Deferred.fail(st.run.done, new Cancelled())
+                const done = yield* Deferred.make<A, E | Cancelled>()
+                const run = yield* startRun(work, done, onInterrupt)
+                return [Effect.sync(() => Deferred.doneUnsafe(run.start, Effect.void)).pipe(Effect.andThen(restore(awaitRun(done, onInterrupt)))), { _tag: "Running", run }] as const
+              }
+              if (opts?.onReentryWarn) yield* opts.onReentryWarn({ label: opts.label ?? "(unlabeled)", existingRunId: st.run.id })
+              return [restore(awaitRun(st.run.done, st.run.onInterrupt)), { ...st, run: { ...st.run, work } }] as const
+            }
             case "Shell": {
               const run = {
                 id: next(),
@@ -203,7 +230,7 @@ export const make = <A, E = never, B = never>(
               return [
                 restore(
                   Deferred.await(st.cancellation.committed).pipe(
-                    Effect.andThen(ensureRunning(work, onInterrupt)),
+                    Effect.andThen(ensureRunning(work, onInterrupt, joinRunning)),
                   ),
                 ),
                 st,
@@ -232,17 +259,19 @@ export const make = <A, E = never, B = never>(
   const startRunning = (
     work: Effect.Effect<A, E>,
     onInterrupt = defaultOnInterrupt,
+    onReserved?: (id: number) => void,
+    exclusive = false,
   ): Effect.Effect<Effect.Effect<A, E>, B> =>
     Effect.uninterruptibleMask((restore) =>
       SynchronizedRef.modifyEffect(
         ref,
         Effect.fnUntraced(function* (st) {
           if (opts?.canStart?.() === false) return [Effect.interrupt, st] as const
-          if (st._tag === "Cancelling")
+          if (st._tag === "Cancelling" && !exclusive)
             return [
               restore(
                 Deferred.await(st.cancellation.committed).pipe(
-                  Effect.andThen(startRunning(work, onInterrupt)),
+                  Effect.andThen(startRunning(work, onInterrupt, onReserved)),
                 ),
               ),
               st,
@@ -256,6 +285,7 @@ export const make = <A, E = never, B = never>(
             return [idle(id).pipe(Effect.andThen(Effect.interrupt)), st] as const
           const done = yield* Deferred.make<A, E | Cancelled>()
           const run = yield* startRun(work, done, onInterrupt, id)
+          onReserved?.(id)
           return [
             (opts?._testHooks?.beforeRunStart ?? Effect.void).pipe(
               Effect.andThen(Effect.sync(() => Deferred.doneUnsafe(run.start, Effect.void))),
@@ -276,7 +306,7 @@ export const make = <A, E = never, B = never>(
   const start = (
     work: Effect.Effect<A, E>,
     onInterrupt = defaultOnInterrupt,
-  ): Effect.Effect<void, B> => startRunning(work, onInterrupt).pipe(Effect.asVoid)
+  ): Effect.Effect<void, B> => startRunning(work, onInterrupt, undefined, true).pipe(Effect.asVoid)
 
   const startShell = (
     work: Effect.Effect<A, E>,
@@ -333,10 +363,11 @@ export const make = <A, E = never, B = never>(
       }),
     )
 
-  // Cancellation reserves a transient state, dispatches the stop signal outside
-  // the runner lock, then commits Idle and publishes it. This whole sequence is
-  // masked; only target cleanup waits restore caller interruption.
-  const makeCancel = (detached: boolean) => {
+  // Cancellation reserves the generation and signals outside the runner lock.
+  // Ordinary/owned cancellation retains it until finalizers exit; detached
+  // cancellation releases after signalling for Actor and instance disposal.
+  // The completion monitor survives interruption of the cancelling caller.
+  const makeCancel = (detached: boolean, ownedID?: number) => {
     const claim = (
       st: State<A, E>,
     ): Effect.Effect<
@@ -344,8 +375,10 @@ export const make = <A, E = never, B = never>(
     > =>
       Effect.gen(function* () {
         if (st._tag === "Idle") return [undefined, st] as const
+        const active = st._tag === "Cancelling" ? st.cancellation.active : st
+        if (ownedID !== undefined && (active._tag !== "Running" || active.run.id !== ownedID)) return [undefined, st] as const
         if (st._tag === "Cancelling") return [{ cancellation: st.cancellation, owner: false }, st] as const
-        const cancellation = { active: st, committed: yield* Deferred.make<void>() }
+        const cancellation = { active: st, committed: yield* Deferred.make<void>(), signalled: yield* Deferred.make<void>() }
         return [{ cancellation, owner: true }, { _tag: "Cancelling", cancellation }] as const
       })
     return Effect.uninterruptibleMask((restore) =>
@@ -354,25 +387,33 @@ export const make = <A, E = never, B = never>(
         if (!claimed) return
         const active = claimed.cancellation.active
         const fiber = active._tag === "Running" ? active.run.fiber : active.shell.fiber
+        const commit = Effect.gen(function* () {
+          const changed = yield* SynchronizedRef.modify(ref, (st) => {
+            if (st._tag !== "Cancelling" || st.cancellation !== claimed.cancellation) return [false, st] as const
+            return [true, { _tag: "Idle" }] as const
+          })
+          if (changed) yield* idleIfCurrent(active._tag === "Running" ? active.run.id : active._tag === "Shell" ? active.shell.id : active.run.id)
+          yield* Deferred.succeed(claimed.cancellation.committed, undefined)
+        })
         if (claimed.owner) {
           if (opts?._testHooks?.beforeCancelSignal) yield* opts._testHooks.beforeCancelSignal
           yield* signalInterrupt(fiber)
           if (active._tag === "ShellThenRun")
             yield* Deferred.fail(active.run.done, new Cancelled()).pipe(Effect.asVoid)
-          yield* SynchronizedRef.modify(ref, (st) => {
-            if (st._tag !== "Cancelling" || st.cancellation !== claimed.cancellation) return [false, st] as const
-            return [true, { _tag: "Idle" }] as const
-          })
-          yield* idleIfCurrent(
-            active._tag === "Running" ? active.run.id : active._tag === "Shell" ? active.shell.id : active.run.id,
-          )
-          yield* Deferred.succeed(claimed.cancellation.committed, undefined)
+          if (active._tag === "Running" && active.run.pending)
+            yield* Deferred.fail(active.run.pending.done, new Cancelled()).pipe(Effect.asVoid)
+          yield* Deferred.succeed(claimed.cancellation.signalled, undefined)
+          if (detached) yield* commit
+          else yield* Fiber.await(fiber).pipe(Effect.andThen(commit), Effect.uninterruptible, Effect.forkIn(scope))
         }
         if (detached) {
-          if (!claimed.owner) yield* Deferred.await(claimed.cancellation.committed)
+          if (!claimed.owner) {
+            yield* Deferred.await(claimed.cancellation.signalled)
+            yield* commit
+          }
           return
         }
-        if (!claimed.owner) yield* restore(Deferred.await(claimed.cancellation.committed))
+        yield* restore(Deferred.await(claimed.cancellation.committed))
         if (active._tag === "Running") {
           yield* restore(Fiber.interrupt(active.run.fiber))
           yield* restore(Deferred.await(active.run.done).pipe(Effect.ignore))
@@ -382,6 +423,16 @@ export const make = <A, E = never, B = never>(
       }),
     )
   }
+
+  const ensureExclusive = (work: Effect.Effect<A, E>, onInterrupt = defaultOnInterrupt): Effect.Effect<A, E | B> =>
+    startRunning(work, onInterrupt, undefined, true).pipe(Effect.flatten)
+
+  const startOwned = (work: Effect.Effect<A, E>, onInterrupt = defaultOnInterrupt) =>
+    Effect.gen(function* () {
+      let runId = 0
+      const completion = yield* startRunning(work, onInterrupt, (id) => { runId = id }, true)
+      return { runId, interruptOwned: makeCancel(false, runId), completion }
+    })
 
   const cancel = makeCancel(false)
   const cancelDetached = makeCancel(true)
@@ -394,8 +445,10 @@ export const make = <A, E = never, B = never>(
       return state()._tag !== "Idle"
     },
     ensureRunning,
+    ensureExclusive,
     startRunning,
     start,
+    startOwned,
     startShell,
     cancel,
     cancelDetached,

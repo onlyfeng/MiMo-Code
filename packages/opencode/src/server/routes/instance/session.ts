@@ -985,7 +985,7 @@ export const SessionRoutes = lazy(() =>
       describeRoute({
         summary: "List interrupted turn recovery candidates",
         description:
-          "Return incomplete turns for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Recovery never creates a user message or overrides its task.",
+          "Return incomplete assistant turns or a trailing user for the main agent, or incomplete turns for a controllable persistent full-context actor retaining its original live context. Recovery never creates a user message or overrides its task.",
         operationId: "session.recovery",
         responses: {
           200: {
@@ -993,13 +993,21 @@ export const SessionRoutes = lazy(() =>
             content: {
               "application/json": {
                 schema: resolver(
-                  z
-                    .object({
-                      assistantMessageID: MessageID.zod,
-                      parentMessageID: MessageID.zod,
-                      created: z.number(),
-                    })
-                    .array(),
+                  z.array(
+                    z.discriminatedUnion("kind", [
+                      z.object({
+                        kind: z.literal("assistant"),
+                        assistantMessageID: MessageID.zod,
+                        parentMessageID: MessageID.zod,
+                        created: z.number(),
+                      }),
+                      z.object({
+                        kind: z.literal("parent-user"),
+                        userMessageID: MessageID.zod,
+                        created: z.number(),
+                      }),
+                    ]),
+                  ),
                 ),
               },
             },
@@ -1126,6 +1134,126 @@ export const SessionRoutes = lazy(() =>
               : new NamedError.Unknown({ message: error instanceof Error ? error.message : String(error) }).toObject()
           void Bus.publish(Session.Event.Error, { sessionID: params.sessionID, error: failure })
         })
+        return c.body(null, 202)
+      },
+    )
+    .post(
+      "/:sessionID/resume",
+      describeRoute({
+        summary: "Resume from a trailing user",
+        description: "Start the next turn from a trailing user message without creating another user message.",
+        operationId: "session.resumeUser",
+        responses: {
+          202: { description: "Resume accepted" },
+          ...errors(400, 404, 409),
+        },
+      }),
+      validator("param", z.object({
+        sessionID: SessionID.zod,
+      })),
+      validator("query", z.object({
+        directory: z.string().optional(),
+        workspace: z.string().optional(),
+        agentID: z.string().optional(),
+        task_id: TaskID.optional(),
+        titleLocale: z.string().optional(),
+        modelProviderID: z.string().optional(),
+        modelID: z.string().optional(),
+      })),
+      // Body is optional: empty/{} = resume latest recovery candidate.
+      // userMessageID still accepted for explicit trailing-user targeting (TUI / cascade).
+      validator("json", z.object({
+        userMessageID: MessageID.zod.optional(),
+      }).optional()),
+      async (c) => {
+        const params = c.req.valid("param")
+        const query = c.req.valid("query")
+        const body = c.req.valid("json")
+        if (!!query.modelProviderID !== !!query.modelID) {
+          return c.json({ data: { name: "InvalidRequest", data: { message: "modelProviderID and modelID must be provided together" } } }, 400)
+        }
+        if (query.agentID && query.agentID !== "main") {
+          if (query.modelProviderID || body?.userMessageID)
+            return c.json(new NamedError.Unknown({ message: "Trailing-user and model override recovery are available for main-agent resume only" }).toObject(), 400)
+          await runRequest("SessionRoutes.actorResume.start", c, Effect.gen(function* () {
+            const target = yield* ActorRecoveryTarget.resolve({ sessionID: params.sessionID, actorID: query.agentID! })
+            const actor = yield* Actor.Service
+            if (!actor.resume) return yield* Effect.fail(new NotFoundError({ message: "Actor recovery is unavailable" }))
+            yield* actor.resume({ ...target, task_id: query.task_id, signal: c.req.raw.signal })
+          }))
+          return c.body(null, 202)
+        }
+        await runRequest(
+          "SessionRoutes.resumeUser.assertNotBusy",
+          c,
+          SessionRunState.Service.use((svc) => svc.assertNotBusy(params.sessionID, query.agentID)),
+        )
+        // Explicit userMessageID → validate it is still the trailing user.
+        // Omitted → the engine resolves the latest recovery candidate (404 if none).
+        if (body?.userMessageID) {
+          await runRequest(
+            "SessionRoutes.resumeUser.validate",
+            c,
+            SessionPrompt.Service.use((svc) =>
+              svc.recovery({ sessionID: params.sessionID, agentID: query.agentID }).pipe(
+                Effect.flatMap((candidates) =>
+                  candidates.some(
+                    (candidate) => candidate.kind === "parent-user" && candidate.userMessageID === body.userMessageID,
+                  )
+                    ? Effect.void
+                    : Effect.fail(
+                        new NotFoundError({
+                          message: "No resumable trailing user found for message " + body.userMessageID,
+                        }),
+                      ),
+                ),
+              ),
+            ),
+          )
+        }
+        // [TP-SR-R21-10] 202 = admission complete (plan + exclusive start), not fire-and-forget.
+        // Main agent also cascades subagent recovery (same as /turn/:id/resume).
+        const admitted = await runRequest(
+          "SessionRoutes.resumeUser",
+          c,
+          SessionPrompt.Service.use((svc) =>
+            (query.agentID === undefined || query.agentID === "main")
+              ? svc.resumeMainCascading({
+                  sessionID: params.sessionID,
+                  signal: c.req.raw.signal,
+                  ...(body?.userMessageID ? { userMessageID: body.userMessageID } : {}),
+                  agentID: query.agentID,
+                  task_id: query.task_id,
+                  titleLocale: query.titleLocale,
+                  ...(query.modelProviderID && query.modelID ? { model: { providerID: query.modelProviderID, modelID: query.modelID } } : {}),
+                })
+              : svc.resumeBackground({
+                  sessionID: params.sessionID,
+                  signal: c.req.raw.signal,
+                  ...(body?.userMessageID ? { userMessageID: body.userMessageID } : {}),
+                  agentID: query.agentID,
+                  task_id: query.task_id,
+                  titleLocale: query.titleLocale,
+                  ...(query.modelProviderID && query.modelID ? { model: { providerID: query.modelProviderID, modelID: query.modelID } } : {}),
+                }),
+          ),
+        ).then(() => ({ ok: true as const }))
+          .catch((error: unknown) => ({ ok: false as const, error }))
+        if (!admitted.ok) {
+          const error = admitted.error
+          log.error("session resume failed", { sessionID: params.sessionID, error })
+          if (error instanceof Session.BusyError) {
+            return c.json({ data: { name: "BusyError", data: { message: error.message } } }, 409)
+          }
+          if (error instanceof NotFoundError) {
+            // NamedError.message is the tag; the human reason lives in data.message.
+            return c.json({ data: { name: "NotFoundError", data: { message: error.data.message } } }, 404)
+          }
+          return c.json(
+            { data: { name: "UnknownError", data: { message: error instanceof Error ? error.message : String(error) } } },
+            400,
+          )
+        }
         return c.body(null, 202)
       },
     )

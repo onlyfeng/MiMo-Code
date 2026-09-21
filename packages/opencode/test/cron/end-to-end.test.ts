@@ -78,6 +78,7 @@ const stubPrompt = Layer.succeed(
       }),
     startPrompt: () => Effect.die("startPrompt not expected in cron end-to-end test"),
     recovery: () => Effect.succeed([]),
+    resumeBackground: () => Effect.die("resumeBackground not expected in scheduling test"),
     startResume: () => Effect.die("startResume not expected in cron end-to-end test"),
     resume: () => Effect.die("resume not expected in cron end-to-end test"),
     cascadeSubagentResume: () => Effect.succeed([]),

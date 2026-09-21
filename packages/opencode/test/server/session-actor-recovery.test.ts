@@ -36,13 +36,20 @@ for (const mode of ["subagent", "peer", "isolated peer"] as const) {
         expect(listed.response.status).toBe(200)
         expect(listed.data).toEqual([
           {
-            assistantMessageID: fixture.interrupted.info.id,
+            kind: "assistant",
+          assistantMessageID: fixture.interrupted.info.id,
             parentMessageID: fixture.before.find((message) => message.info.role === "user")!.info.id,
             created: fixture.interrupted.info.time.created,
           },
         ])
         const withoutSelector = await fixture.request(`${base}/recovery`)
-        expect(await withoutSelector.json()).toEqual([])
+        const parentMessages = await AppRuntime.runPromise(fixture.sessions.messages({ sessionID: fixture.parent.id, agentID: "main" }))
+        const parentUser = parentMessages.findLast((message) => message.info.role === "user")!
+        expect(await withoutSelector.json()).toEqual([{
+          kind: "parent-user",
+          userMessageID: parentUser.info.id,
+          created: parentUser.info.time.created,
+        }])
         const missing = await fixture.request(`${base}/turn/${MessageID.ascending()}/resume?${selector}`, {
           method: "POST",
         })
@@ -71,7 +78,8 @@ for (const mode of ["subagent", "peer", "isolated peer"] as const) {
           expect(self.status).toBe(200)
           expect(await self.json()).toEqual([
             {
-              assistantMessageID: fixture.interrupted.info.id,
+              kind: "assistant",
+          assistantMessageID: fixture.interrupted.info.id,
               parentMessageID: original[0].info.id,
               created: fixture.interrupted.info.time.created,
             },
@@ -418,6 +426,7 @@ test("HTTP actor recovery resumes a retained child managed by a real registered 
       expect(listed.status).toBe(200)
       expect(await listed.json()).toEqual([
         {
+          kind: "assistant",
           assistantMessageID: fixture.interrupted.info.id,
           parentMessageID: fixture.before[0].info.id,
           created: fixture.interrupted.info.time.created,

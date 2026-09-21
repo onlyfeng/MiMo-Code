@@ -17,10 +17,12 @@ export async function checkIsolation() {
   for (const flag of [
     "MIMOCODE_DISABLE_PROJECT_CONFIG",
     "MIMOCODE_DISABLE_DEFAULT_PLUGINS",
-    "MIMOCODE_DISABLE_EXTERNAL_SKILLS",
+    "MIMOCODE_DISABLE_AGENTS_SKILLS",
     "MIMOCODE_DISABLE_CLAUDE_CODE",
   ])
     if (process.env[flag] !== "true") throw new Error(`Isolation requires ${flag}=true`)
+  for (const flag of ["MIMOCODE_ENABLE_CLAUDE_CODE_SKILLS", "MIMOCODE_ENABLE_CODEX_SKILLS", "MIMOCODE_ENABLE_OPENCODE_SKILLS"])
+    if (process.env[flag] !== undefined) throw new Error(`Isolation requires ${flag} to be unset`)
   if (process.env.MIMOCODE_CONFIG_CONTENT) throw new Error("Inline config is not accepted by this experiment launcher")
   for (const name of ["MIMOCODE_CONFIG", "MIMOCODE_HOME", "MIMOCODE_TEST_MANAGED_CONFIG_DIR"]) {
     const configured = process.env[name]

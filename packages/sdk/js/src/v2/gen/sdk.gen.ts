@@ -174,6 +174,8 @@ import type {
   SessionRecoveryResponses,
   SessionResumeErrors,
   SessionResumeResponses,
+  SessionResumeUserErrors,
+  SessionResumeUserResponses,
   SessionRevertErrors,
   SessionRevertResponses,
   SessionShareErrors,
@@ -2616,7 +2618,7 @@ export class Session2 extends HeyApiClient {
   /**
    * List interrupted turn recovery candidates
    *
-   * Return incomplete turns for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Recovery never creates a user message or overrides its task.
+   * Return incomplete assistant turns or a trailing user for the main agent, or incomplete turns for a controllable persistent full-context actor retaining its original live context. Recovery never creates a user message or overrides its task.
    */
   public recovery<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2688,6 +2690,55 @@ export class Session2 extends HeyApiClient {
       url: "/session/{sessionID}/turn/{assistantMessageID}/resume",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Resume from a trailing user
+   *
+   * Start the next turn from a trailing user message without creating another user message.
+   */
+  public resumeUser<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      agentID?: string
+      task_id?: string
+      titleLocale?: string
+      modelProviderID?: string
+      modelID?: string
+      userMessageID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "agentID" },
+            { in: "query", key: "task_id" },
+            { in: "query", key: "titleLocale" },
+            { in: "query", key: "modelProviderID" },
+            { in: "query", key: "modelID" },
+            { in: "body", key: "userMessageID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionResumeUserResponses, SessionResumeUserErrors, ThrowOnError>({
+      url: "/session/{sessionID}/resume",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

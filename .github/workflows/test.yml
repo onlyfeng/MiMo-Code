@@ -40,6 +40,8 @@ jobs:
           git config --global user.email "ci@mimo.ai"
           git config --global user.name "mimo-ci"
 
+      # MCP SDK mock suites run in separate processes to preserve ManagedClient
+      # class identity and real transport consumers.
       # stdio-exit-observe.test.ts excluded from shards: it needs the real
       # ObservingStdioTransport. lifecycle.test.ts mock.module's that path
       # process-wide, so sharing a bun test process with it always breaks
@@ -88,6 +90,7 @@ jobs:
           has_runtime=0
           has_stdio=0
           has_actor_recovery=0
+          has_mcp_mocks=0
           files=()
           reported_files=()
 
@@ -114,6 +117,13 @@ jobs:
               continue
             fi
             case "$f" in
+              test/mcp/lifecycle.test.ts | \
+              test/mcp/headers.test.ts | \
+              test/mcp/oauth-auto-connect.test.ts | \
+              test/mcp/oauth-browser.test.ts)
+                has_mcp_mocks=$((has_mcp_mocks + 1))
+                continue
+                ;;
               test/server/session-actor-recovery.test.ts | \
               test/actor/subagent-resume-cascade.test.ts | \
               test/actor/subagent-resume-negatives.test.ts | \
@@ -135,8 +145,8 @@ jobs:
             fi
           done
 
-          if (( !has_tsx || !has_runtime || !has_stdio || has_actor_recovery != 4 )); then
-            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio actor_recovery=$has_actor_recovery"
+          if (( !has_tsx || !has_runtime || !has_stdio || has_actor_recovery != 4 || has_mcp_mocks != 4 )); then
+            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio actor_recovery=$has_actor_recovery mcp_mocks=$has_mcp_mocks"
             exit 1
           fi
 
@@ -166,6 +176,43 @@ jobs:
         with:
           name: junit-shard-${{ strategy.job-index }}
           path: packages/opencode/.artifacts/unit/junit.xml
+          if-no-files-found: error
+
+  mcp-mock-suites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Run MCP SDK mock suites in independent processes
+        shell: bash
+        working-directory: packages/opencode
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/mcp-mocks
+          for file in \
+            test/mcp/lifecycle.test.ts \
+            test/mcp/headers.test.ts \
+            test/mcp/oauth-auto-connect.test.ts \
+            test/mcp/oauth-browser.test.ts; do
+            report=".artifacts/mcp-mocks/$(basename "$file").xml"
+            rm -f -- "$report"
+            bun test "$file" --timeout 120000 \
+              --reporter=junit --reporter-outfile="$report"
+            test -s "$report"
+            python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" "$report" "$file"
+          done
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-mcp-mocks
+          path: packages/opencode/.artifacts/mcp-mocks/*.xml
           if-no-files-found: error
 
   stdio-exit-observe:

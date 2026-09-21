@@ -6,6 +6,7 @@ import { MessageV2 } from "./message-v2"
 import { isRunDisposing, RunDisposal } from "./run-disposal"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
+import { orphanToolIdleSweepRef, assistantMessageIdsSnapshotRef } from "./orphan-tool-idle-hook"
 
 type RunnerEntry = {
   runner: Runner.Runner<MessageV2.WithParts, never, Session.BusyError>
@@ -40,6 +41,7 @@ export interface Interface {
     agentID: string,
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
+    joinRunning?: boolean,
   ) => Effect.Effect<MessageV2.WithParts>
   readonly startRunning: (
     sessionID: SessionID,
@@ -47,6 +49,8 @@ export interface Interface {
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
   ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, Session.BusyError>
+  readonly startOwned: (sessionID: SessionID, agentID: string, onInterrupt: Effect.Effect<MessageV2.WithParts>, work: Effect.Effect<MessageV2.WithParts>) => Effect.Effect<{ readonly runId: number; readonly interruptOwned: Effect.Effect<void>; readonly completion: Effect.Effect<MessageV2.WithParts> }, Session.BusyError>
+  readonly ensureExclusive: (sessionID: SessionID, agentID: string, onInterrupt: Effect.Effect<MessageV2.WithParts>, work: Effect.Effect<MessageV2.WithParts>) => Effect.Effect<MessageV2.WithParts, Session.BusyError>
   readonly startShell: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
@@ -189,6 +193,34 @@ export const layer = Layer.effect(
       return
     })
 
+    /**
+     * Snapshot assistant message IDs while work is still exiting, then sweep
+     * orphans only on that set (RL-ORPHAN-D01). Field evidence: the original
+     * orphan sat on an INCOMPLETE assistant (completed only stamped at next
+     * prompt entry as Abandoned). Snapshot covers those messages; new turns
+     * create new message IDs and cannot enter an earlier snapshot.
+     */
+    const withOrphanSweep = (sessionID: SessionID, agentID: string, work: Effect.Effect<MessageV2.WithParts>) => {
+      if (agentID !== "main") return work
+      return Effect.gen(function* () {
+        // A retiring instance may finish after its replacement has registered
+        // new hooks. Keep this run bound to its original services and lifetime.
+        const disposal = yield* RunDisposal
+        const sweep = orphanToolIdleSweepRef.current
+        const snapshot = assistantMessageIdsSnapshotRef.current
+        return yield* work.pipe(
+          Effect.ensuring(
+            Effect.gen(function* () {
+              if (!sweep || !snapshot || isRunDisposing(disposal)) return
+              const ownedMessageIds = yield* snapshot(sessionID)
+              if (isRunDisposing(disposal)) return
+              yield* sweep(sessionID, { ownedMessageIds }).pipe(Effect.ignore)
+            }),
+          ),
+        )
+      })
+    }
+
     const start: Interface["start"] = Effect.fn("SessionRunState.start")(function* (
       sessionID: SessionID,
       agentID: string,
@@ -197,7 +229,7 @@ export const layer = Layer.effect(
     ) {
       const current = yield* runner(sessionID, agentID)
       yield* current.entry.runner
-        .start(work, interruptFor(agentID, onInterrupt))
+        .start(withOrphanSweep(sessionID, agentID, work), interruptFor(agentID, onInterrupt))
         .pipe(
           Effect.provideService(RunDisposal, current.data),
           Effect.ensuring(release(current.entry)),
@@ -258,10 +290,11 @@ export const layer = Layer.effect(
       agentID: string,
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
+      joinRunning = false,
     ) {
       const current = yield* runner(sessionID, agentID)
       return yield* current.entry.runner
-        .ensureRunning(work, interruptFor(agentID, onInterrupt))
+        .ensureRunning(withOrphanSweep(sessionID, agentID, work), interruptFor(agentID, onInterrupt), joinRunning)
         .pipe(
           Effect.provideService(RunDisposal, current.data),
           Effect.ensuring(release(current.entry)),
@@ -290,12 +323,27 @@ export const layer = Layer.effect(
     ) {
       const current = yield* runner(sessionID, agentID)
       const completion = yield* current.entry.runner
-        .startRunning(work, interruptFor(agentID, onInterrupt))
+        .startRunning(withOrphanSweep(sessionID, agentID, work), interruptFor(agentID, onInterrupt))
         .pipe(
           Effect.provideService(RunDisposal, current.data),
           Effect.ensuring(release(current.entry)),
         )
       return completion.pipe(Effect.provideService(RunDisposal, current.data))
+    })
+
+    const startOwned: Interface["startOwned"] = Effect.fn("SessionRunState.startOwned")(function* (sessionID, agentID, onInterrupt, work) {
+      const current = yield* runner(sessionID, agentID)
+      return yield* current.entry.runner.startOwned(withOrphanSweep(sessionID, agentID, work), interruptFor(agentID, onInterrupt)).pipe(
+        Effect.provideService(RunDisposal, current.data),
+        Effect.ensuring(release(current.entry)),
+      )
+    })
+    const ensureExclusive: Interface["ensureExclusive"] = Effect.fn("SessionRunState.ensureExclusive")(function* (sessionID, agentID, onInterrupt, work) {
+      const current = yield* runner(sessionID, agentID)
+      return yield* current.entry.runner.ensureExclusive(withOrphanSweep(sessionID, agentID, work), interruptFor(agentID, onInterrupt)).pipe(
+        Effect.provideService(RunDisposal, current.data),
+        Effect.ensuring(release(current.entry)),
+      )
     })
 
     return Service.of({
@@ -306,6 +354,8 @@ export const layer = Layer.effect(
       ensureRunning,
       start,
       startRunning,
+      startOwned,
+      ensureExclusive,
       startShell,
       withRunDisposal,
     })

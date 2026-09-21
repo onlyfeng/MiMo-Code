@@ -187,6 +187,7 @@ it.live(
           yield* (yield* ToolRegistry.Service).reload()
           const candidates = yield* prompt.recovery({ sessionID: session.id })
           expect(candidates).toHaveLength(1)
+              if (candidates[0].kind !== "assistant") throw new Error("Expected an interrupted assistant candidate")
           expect(candidates[0].parentMessageID).toBe(user.info.id)
           yield* llm.text("resumed stored turn")
           yield* prompt.resume({ sessionID: session.id, assistantMessageID: candidates[0].assistantMessageID })
