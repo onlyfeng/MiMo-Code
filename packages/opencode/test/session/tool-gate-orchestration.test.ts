@@ -39,7 +39,8 @@ function config(origin: string) {
           model: {
             name: "Test",
             tool_call: true,
-            limit: { context: 32000, output: 2000 },
+            // Keep the complete tool prefix inside compat request preflight.
+            limit: { context: 128000, output: 2000 },
             modalities: { input: ["text"], output: ["text"] },
           },
         },
