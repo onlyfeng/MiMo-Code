@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-19
-- Upstream: `50cd713989f47225cfc717868b245e1de32b35b7`
-- Prior reviewed upstream: `2bda17944b346ab85c8ee3cf0a0d4ab24819d37c`
-- Main behavior (runtime/tests): `6af6931fd6ee73999847d81809bd2476e419885d`
-- Bundled guidance content: `7199810dcfe61becd47e4c4becd0166964ea5d40`
-- Prior fork `main` tip: `1435d83080210dd996f7d0292153ff78fee7f75a`
+- Last reviewed: 2026-09-21
+- Upstream: `479201262a0f08e6abe9c29022d2fb38b63e29b0`
+- Prior reviewed upstream: `50cd713989f47225cfc717868b245e1de32b35b7`
+- Main behavior (runtime/tests): `6bbef7997c6f067558fb89100e17742e732720ca`
+- Bundled guidance content: `d19ea19f02ac4a4e9d0c0ff760c1da5a4a6ac7b8`
+- Prior fork `main` tip: `b40391abfd0624894a966ff39a39285152e5f439`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,7 +29,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-09-19 full sync](upstream-sync-2026-09-19.md), two capabilities through `50cd7139`. Adopt optional uncommitted-change hints and adapt main-resume subagent cascade to retained Actor ownership, preserving atomic message admission and compat boundaries.
+Latest reviewed synchronization: [2026-09-21 full sync](upstream-sync-2026-09-21.md), eleven capabilities through `47920126`. Adopt concise prompts, explicit external skill roots, retired directory loaders, FIFO tool admission, generation-owned MCP connections and selected-session question cleanup. Adapt trailing-user recovery and cancellation to atomic admission, retained frozen Actor context, durable inbox progress and bounded retry scopes. No shared owner retires or moves.
+
+Previous synchronization: [2026-09-19 full sync](upstream-sync-2026-09-19.md), two capabilities through `50cd7139`. Adopt optional uncommitted-change hints and adapt main-resume subagent cascade to retained Actor ownership, preserving atomic message admission and compat boundaries.
 
 Previous synchronization: [2026-09-18 full sync](upstream-sync-2026-09-18.md), one capability through `2bda1794`. Adopt same-session Actor cancellation and durable quiet terminal notifications, preserving FC-001 generation ownership and all compat boundaries.
 

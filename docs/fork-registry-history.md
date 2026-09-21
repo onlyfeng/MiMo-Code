@@ -3294,3 +3294,14 @@ identity through FC-001 generation/episode ownership. No FD/FC retires. A quiet
 cancel follower is reproduced red before correction and green afterwards.
 Shared registries propagate unchanged to compat; final published SHA acceptance
 requires the subsequent exact-SHA CI and remote ancestry checks.
+
+
+## 2026-09-21 full synchronization
+
+- Upstream: `50cd713989f47225cfc717868b245e1de32b35b7` → `479201262a0f08e6abe9c29022d2fb38b63e29b0`; 21 commits / 145 changed paths.
+- Starting main: `b40391abfd0624894a966ff39a39285152e5f439`.
+- Main runtime/tests: `6bbef7997c6f067558fb89100e17742e732720ca`; bundled guidance snapshot: `d19ea19f02ac4a4e9d0c0ff760c1da5a4a6ac7b8`.
+- Inventory and validation: [eleven-capability record](upstream-sync-2026-09-21.md), C01–C11.
+- Retain atomic run/recovery/task admission, retained frozen Actor authority, progress-aware inbox followers, manual imported MCP connection policy, bounded request scopes and request-owned nested controls. Ordinary cancellation joins cleanup; disposal acknowledges the signal without blocking on old cleanup and cannot release a successor generation.
+- Adopt metadata-only startup recovery; historical question parts are touched only by selected-session execution. Remove retired tool-directory/home-hook loading and bundled evolve, while retaining explicit plugin registration and configured hooks. Native `.mimocode`/`.agents` roots remain default; brand roots require explicit opt-in.
+- All active FD/FC owners retain their canonical ownership; compat inherits this record byte-for-byte. Final published-SHA CI and ancestry are separate publication checks, not inferred from the local matrix.
