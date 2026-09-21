@@ -3985,3 +3985,11 @@ record-only commit and are verified separately.
 - Inventory: inherit all C01–C11 in [the shared review](upstream-sync-2026-09-21.md). All eight DC owners remain active. No production overlay path is added or removed; canonical ownership and network/platform policy are unchanged.
 - Resolve classify by preserving overflow recovery while inheriting completed-tool/final-answer detection. Preserve both compat preflight fixtures and incoming MCP progress tests. Three incoming gate fixture models require 128K capacity to exercise tools under the existing compat budget; real persisted ModelError and absent tool parts established the prior preflight rejection. No production budget was relaxed.
 - Validation: 412 session/Actor/context/variant/gate tests pass across the reported groups (337 + 25 + 27 + 19 + 4); separate root matrix 173 pass before its four fixture corrections, and MCP/DC-NET 76 pass. These overlapping groups are not a unique-suite total. Typecheck and lint exit 0; independently regenerated SDK/OpenAPI have no drift. Final branch-tip CI and ancestry remain separate publication checks.
+
+
+## 2026-09-22 final-CI correction inheritance
+
+- Inherited main: `16394bdc9766c37980a5dce098e3a425ae92c6c8`; main runtime/tests: `3e1fe1607a5ec87fa2f919493b77078d44c60330`.
+- Compat runtime/tests: `43ea9dc20fe6ce8e36198aa3d452a56bed51e019`. Upstream baseline remains `479201262a0f08e6abe9c29022d2fb38b63e29b0`; bundled guidance and all eight DC owners remain unchanged.
+- Conflict-free inheritance fixes summary protocol rejection being retried as UnknownError and migrates three test fixtures to explicit plugins. Final compat nine-file affected matrix: 242 pass, two existing skips, zero failures / 1418 assertions. Typecheck and lint exit 0. No generated API changes.
+- Initial `1082c39d` CI passed Windows, lint/typecheck, shard 1/3 and all isolated suites, but failed four now-reproduced cases in shards 2/4; it is not acceptance evidence for the corrected new tip. Fresh final-SHA workflows and remote ancestry are required after publication.

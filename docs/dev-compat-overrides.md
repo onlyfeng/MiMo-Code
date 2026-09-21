@@ -14,12 +14,13 @@ registry/history commit does not advance either behavior reference below.
 - Last reviewed: 2026-09-21, full upstream synchronization through `479201262a0f08e6abe9c29022d2fb38b63e29b0`.
 - Prior upstream: `50cd713989f47225cfc717868b245e1de32b35b7`.
 - Starting compat: `1d5237f121854d65c4ca6d3bcd7e83312d5a7a8b`.
-- Main runtime/tests: `6bbef7997c6f067558fb89100e17742e732720ca`; shared guidance: `d19ea19f02ac4a4e9d0c0ff760c1da5a4a6ac7b8`.
-- Integrated main: `840a5810f7e5d14eb0f543d13afe982aff97e10e`.
-- Compat source/tests/CI: `96c64b4854b97365e3ae8358a51f4024ff296f1e`.
+- Main runtime/tests: `3e1fe1607a5ec87fa2f919493b77078d44c60330`; shared guidance: `d19ea19f02ac4a4e9d0c0ff760c1da5a4a6ac7b8`.
+- Integrated main: `16394bdc9766c37980a5dce098e3a425ae92c6c8`.
+- Compat source/tests/CI: `43ea9dc20fe6ce8e36198aa3d452a56bed51e019`.
 - Review: [eleven-capability synchronization](upstream-sync-2026-09-21.md), C01–C11.
 - Resolution: inherit generation-owned MCP admission, trailing-user recovery, cancellation acknowledgement, selected-session orphan cleanup and FIFO tool gating. Preserve bounded preflight and active-schema caps, full-context/variant Actors, per-agent MaxMode, authoritative TUI metadata and all network/platform policies. The same 39 production overlay paths remain; 37 normalized diffs are unchanged, TUI sync changes only import context, and classify loses only formatting drift while inheriting the completed-tool/final-answer predicate. No owner retires or moves.
 - Validation: Actor/variant/overflow/prefix/MaxMode/caps 337 pass; real Actor HTTP recovery 25 pass across four files; focused preflight/frozen-context/MCP prompt 27 pass; checkpoint/history 19 pass; tool gate integration 4 pass. The broader root matrix had 173 passing cases plus four gate fixtures rejected by compat preflight; only those test models changed from 32K to 128K, preserving output limits and all assertions. MCP/DC-NET 76 pass including real OAuth and both RFC1918 sentinels. Package typecheck passes; lint exits 0 with 4806 warnings and no errors. SDK/OpenAPI regenerate without drift.
+- 2026-09-22 final-CI follow-up: inherit terminal summary ModelError conversion and early retry exclusion, including network-looking tool names. Migrate three retired directory-loader fixtures to explicit plugins without removing authority/visibility assertions; add a positive whitelist registration assertion. Final nine-file matrix: 242 pass, two existing skips, zero failures / 1418 assertions. Package typecheck and lint pass (4806 warnings, zero errors). Initial CI failures and reproduced fixes are retained in the shared record; final new tips require fresh CI.
 - Shared ownership: FD/FC registries and shared history inherit main byte-for-byte. Final exact-tip CI and remote ancestry are checked after this record; local results are not publication evidence.
 
 ## Previous review record — 2026-09-19
