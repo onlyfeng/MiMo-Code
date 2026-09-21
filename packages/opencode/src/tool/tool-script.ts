@@ -44,12 +44,11 @@ const TRACE_TAIL_ENTRIES = 20
 const EXEC_COMMAND_DEFAULT_YIELD_TIME_MS = 10_000
 const EXEC_COMMAND_DEFAULT_MAX_OUTPUT_TOKENS = 10_000
 const nativeParameters = (def: Tool.Def) => def.nativeParameters ?? def.parameters
-const controls = new Set(["actor", "plan_exit"])
-const canNest = (def: Tool.Def) => {
-  if (def.id === "actor") return def.control === Tool.ActorControl
-  if (def.id === "plan_exit") return def.control === Tool.PlanExitControl
-  return true
-}
+const controls = new Map([
+  ["actor", Tool.ActorControl],
+  ["plan_exit", Tool.PlanExitControl],
+])
+const canNest = (def: Tool.Def) => !controls.has(def.id) || def.control === controls.get(def.id)
 
 const ExecCommandParameters = z.strictObject({
   cmd: z.string().describe("Shell command to execute."),
