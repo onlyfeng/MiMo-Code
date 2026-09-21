@@ -3975,3 +3975,13 @@ cascade/registry-only/session-key tests pass 3 (77 filtered); typecheck and lint
 pass. Prior broad integration runs are not final-SHA evidence. Shared records
 remain main-owned. Final branch CI, remote equality and ancestry follow the
 record-only commit and are verified separately.
+
+
+## 2026-09-21 full synchronization
+
+- Selected upstream: `479201262a0f08e6abe9c29022d2fb38b63e29b0`; starting compat: `1d5237f121854d65c4ca6d3bcd7e83312d5a7a8b`.
+- Integrated main: `840a5810f7e5d14eb0f543d13afe982aff97e10e`; main runtime/tests: `6bbef7997c6f067558fb89100e17742e732720ca`.
+- Compat runtime/tests: `96c64b4854b97365e3ae8358a51f4024ff296f1e`; subsequent shared and compat records change no runtime behavior.
+- Inventory: inherit all C01–C11 in [the shared review](upstream-sync-2026-09-21.md). All eight DC owners remain active. No production overlay path is added or removed; canonical ownership and network/platform policy are unchanged.
+- Resolve classify by preserving overflow recovery while inheriting completed-tool/final-answer detection. Preserve both compat preflight fixtures and incoming MCP progress tests. Three incoming gate fixture models require 128K capacity to exercise tools under the existing compat budget; real persisted ModelError and absent tool parts established the prior preflight rejection. No production budget was relaxed.
+- Validation: 412 session/Actor/context/variant/gate tests pass across the reported groups (337 + 25 + 27 + 19 + 4); separate root matrix 173 pass before its four fixture corrections, and MCP/DC-NET 76 pass. These overlapping groups are not a unique-suite total. Typecheck and lint exit 0; independently regenerated SDK/OpenAPI have no drift. Final branch-tip CI and ancestry remain separate publication checks.
