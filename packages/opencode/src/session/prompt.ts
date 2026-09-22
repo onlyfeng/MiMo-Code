@@ -1,5 +1,6 @@
 import { isTurnCancelled, PluginCancelledError } from "./turn-cancellation"
 import * as RunApproval from "./run-approval"
+import { HostModelTransport } from "../provider/host-transport"
 import type { NamedTool } from "@/tool/names"
 import path from "path"
 import os from "os"
@@ -3889,6 +3890,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         systemMode: prompt.systemMode,
         harness: prompt.harness,
       }
+
+      HostModelTransport.userMessage({ sessionID: input.sessionID, userMessageID: message.id, parts })
 
       yield* plugin.trigger(
         "chat.message",

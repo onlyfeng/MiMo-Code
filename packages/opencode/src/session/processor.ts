@@ -889,7 +889,7 @@ export const layer: Layer.Layer<
             ctx.retrySafe = true
             ctx.textNgramRepeat = false
             ctx.textNgramMonitor = createTextNgramMonitor()
-            const stream = llm.stream(streamInput)
+            const stream = llm.stream({ ...streamInput, assistantMessageID: ctx.assistantMessage.id })
             let flooding: ToolCallFloodingError | undefined
 
             yield* stream.pipe(
