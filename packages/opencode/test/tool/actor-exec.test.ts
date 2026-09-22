@@ -79,7 +79,9 @@ return { sent: JSON.parse(sent.output), status: JSON.parse(status.output) }`,
           { ...fixture.context, extra: { execTools: { current: [actor] } } },
         )
         expect(result.metadata.status).toBe("completed")
-        expect(result.output).toMatch(/"status":\s*"running"/)
+        expect(result.output).toMatch(/"status":\s*"idle"/)
+        expect(result.output).toMatch(/"executionActive":\s*false/)
+        expect(result.output).toMatch(/"executionState":\s*"stopped"/)
         const rows = yield* Effect.sync(() =>
           Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, fixture.session.id)).all()),
         )

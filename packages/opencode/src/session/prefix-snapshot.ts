@@ -1,6 +1,7 @@
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { createHash } from "node:crypto"
-import { jsonSchema, tool, type Tool as AITool } from "ai"
+import type { NamedTool } from "@/tool/names"
+import { jsonSchema, tool } from "ai"
 import { asSchema } from "@ai-sdk/provider-utils"
 import { Effect } from "effect"
 import { and, Database, eq } from "@/storage"
@@ -9,9 +10,9 @@ import type { MessageID, SessionID } from "./schema"
 import type { SkillCatalogSnapshot } from "./skill-catalog"
 import { SessionPrefixSnapshotTable, type SessionPrefixToolSnapshot } from "./session.sql"
 
-export type NativeTool = AITool & { nativeInputSchema?: JSONSchema7 }
+export type NativeTool = NamedTool & { nativeInputSchema?: JSONSchema7 }
 
-export const nativeSchema = (tool: AITool) => (tool as NativeTool).nativeInputSchema
+export const nativeSchema = (tool: NamedTool) => (tool as NativeTool).nativeInputSchema
 
 export type Info = typeof SessionPrefixSnapshotTable.$inferSelect
 
@@ -56,7 +57,7 @@ export function systemHash(system: string[]) {
   return hash(system)
 }
 
-export function toolsHash(tools: Record<string, AITool>, activeTools: string[]) {
+export function toolsHash(tools: Record<string, NamedTool>, activeTools: string[]) {
   // Identity includes hidden schemas as well as the wire membership: hidden MCP
   // changes must invalidate the immutable executable pool captured by a fork.
   return hash(
@@ -66,6 +67,7 @@ export function toolsHash(tools: Record<string, AITool>, activeTools: string[]) 
         const item = tools[name]
         return {
           name,
+          modelName: item.modelName,
           description: item.description,
           inputSchema: item.inputSchema,
           nativeInputSchema: nativeSchema(item),
@@ -75,12 +77,13 @@ export function toolsHash(tools: Record<string, AITool>, activeTools: string[]) 
   )
 }
 
-export async function snapshotTools(tools: Record<string, AITool>, activeTools: string[]) {
+export async function snapshotTools(tools: Record<string, NamedTool>, activeTools: string[]) {
   return Promise.all(
     Object.entries(tools).map(([name, item]) =>
       Promise.resolve(asSchema(item.inputSchema).jsonSchema).then(
         (input_schema): SessionPrefixToolSnapshot => ({
           name,
+          ...(item.modelName ? { model_name: item.modelName } : {}),
           description: item.description,
           input_schema,
           ...(nativeSchema(item) ? { native_input_schema: nativeSchema(item) } : {}),
@@ -101,6 +104,7 @@ export function restoreTools(items: SessionPrefixToolSnapshot[]) {
       item.name,
       {
         ...tool({ description: item.description, inputSchema: jsonSchema(item.input_schema) }),
+        ...(item.model_name ? { modelName: item.model_name } : {}),
         ...(item.native_input_schema ? { nativeInputSchema: item.native_input_schema } : {}),
       },
     ]),

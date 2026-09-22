@@ -54,6 +54,7 @@ export interface ExecuteResult<M extends Metadata = Metadata> {
 
 export interface Def<Parameters extends z.ZodType = z.ZodType, M extends Metadata = Metadata> {
   id: string
+  modelName?: string
   description: string
   parameters: Parameters
   /** Internal native invocation schema, retained separately from shell wire parameters. */

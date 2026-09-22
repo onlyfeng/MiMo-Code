@@ -82,8 +82,10 @@ import { DialogSubagent } from "./dialog-subagent.tsx"
 import { ExecExpandedBody } from "./exec-expanded"
 import { isActorToolRunning } from "./actor-tool-state"
 import { Flag } from "@/flag/flag"
-import { parseActorNotification } from "@/inbox/render"
+import { parseActorNotification, parseAgentInboxPart } from "@/inbox/render"
 import { ActorNotificationWarnings } from "./actor-notification-warnings"
+import { AgentInboxMessages } from "./agent-inbox-messages"
+import { UserMessageBubble } from "./user-message-bubble"
 import { LANGUAGE_EXTENSIONS } from "@/lsp/language"
 import parsers from "../../../../../../parsers-config.ts"
 import * as Clipboard from "../../util/clipboard"
@@ -419,6 +421,7 @@ export function Session() {
             part.type === "text" &&
             !part.ignored &&
             (!part.synthetic ||
+              (currentAgentID() !== "main" && !!parseAgentInboxPart(part)) ||
               (part.metadata as { origin?: { kind?: string } } | undefined)?.origin?.kind === "cron"),
         )
       })
@@ -1641,6 +1644,7 @@ function UserMessage(props: {
 }) {
   const ctx = use()
   const local = useLocal()
+  const currentAgentID = useCurrentAgentID()
   const text = createMemo(() => props.parts.flatMap((x) => (x.type === "text" && !x.synthetic ? [x] : []))[0])
   // Cron-fired synthetic prompts: surface as a one-line clock row instead of
   // hiding them. Backend (cron-bridge.ts:onFire) stores the ISO timestamp at
@@ -1695,6 +1699,16 @@ function UserMessage(props: {
 
   return (
     <>
+      <AgentInboxMessages
+        agentID={currentAgentID()}
+        messageID={props.message.id}
+        parts={props.parts}
+        label={(from) => t("tui.session.inbox.from", { from })}
+        color={theme.text}
+        borderColor={color()}
+        backgroundColor={theme.backgroundPanel}
+        hoverColor={theme.backgroundElement}
+      />
       <Show when={cronFire()}>
         {(fire) => {
           // Strip the "[cron fire @ ISO] " prefix from part.text to get the
@@ -1776,65 +1790,51 @@ function UserMessage(props: {
         </box>
       </Show>
       <Show when={text() && !actorNotification()}>
-        <box
+        <UserMessageBubble
           id={props.message.id}
-          border={["left"]}
           borderColor={color()}
-          customBorderChars={SplitBorder.customBorderChars}
           marginTop={props.index === 0 ? 0 : 1}
+          onMouseUp={props.onMouseUp}
+          backgroundColor={theme.backgroundPanel}
+          hoverColor={theme.backgroundElement}
         >
-          <box
-            onMouseOver={() => {
-              setHover(true)
-            }}
-            onMouseOut={() => {
-              setHover(false)
-            }}
-            onMouseUp={props.onMouseUp}
-            paddingTop={1}
-            paddingBottom={1}
-            paddingLeft={2}
-            backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
-            flexShrink={0}
+          <text fg={theme.text}>{text()?.text}</text>
+          <Show when={files().length}>
+            <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
+              <For each={files()}>
+                {(file) => {
+                  const bg = createMemo(() => {
+                    if (file.mime.startsWith("image/")) return theme.accent
+                    if (file.mime === "application/pdf") return theme.primary
+                    return theme.secondary
+                  })
+                  return (
+                    <text fg={theme.text}>
+                      <span style={{ bg: bg(), fg: theme.background }}> {MIME_BADGE[file.mime] ?? file.mime} </span>
+                      <span style={{ bg: theme.backgroundElement, fg: theme.textMuted }}> {file.filename} </span>
+                    </text>
+                  )
+                }}
+              </For>
+            </box>
+          </Show>
+          <Show
+            when={queued()}
+            fallback={
+              <Show when={ctx.showTimestamps()}>
+                <text fg={theme.textMuted}>
+                  <span style={{ fg: theme.textMuted }}>
+                    {Locale.todayTimeOrDateTime(props.message.time.created)}
+                  </span>
+                </text>
+              </Show>
+            }
           >
-            <text fg={theme.text}>{text()?.text}</text>
-            <Show when={files().length}>
-              <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
-                <For each={files()}>
-                  {(file) => {
-                    const bg = createMemo(() => {
-                      if (file.mime.startsWith("image/")) return theme.accent
-                      if (file.mime === "application/pdf") return theme.primary
-                      return theme.secondary
-                    })
-                    return (
-                      <text fg={theme.text}>
-                        <span style={{ bg: bg(), fg: theme.background }}> {MIME_BADGE[file.mime] ?? file.mime} </span>
-                        <span style={{ bg: theme.backgroundElement, fg: theme.textMuted }}> {file.filename} </span>
-                      </text>
-                    )
-                  }}
-                </For>
-              </box>
-            </Show>
-            <Show
-              when={queued()}
-              fallback={
-                <Show when={ctx.showTimestamps()}>
-                  <text fg={theme.textMuted}>
-                    <span style={{ fg: theme.textMuted }}>
-                      {Locale.todayTimeOrDateTime(props.message.time.created)}
-                    </span>
-                  </text>
-                </Show>
-              }
-            >
-              <text fg={theme.textMuted}>
-                <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
-              </text>
-            </Show>
-          </box>
-        </box>
+            <text fg={theme.textMuted}>
+              <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
+            </text>
+          </Show>
+        </UserMessageBubble>
       </Show>
     </>
   )
@@ -3578,8 +3578,8 @@ function Task(props: ToolProps<typeof ActorTool>) {
       header = `${agent} Task — ${desc}`
     }
 
-    if (status === "cancelled" && action !== "cancel") {
-      header += " (cancelled)"
+    if ((status === "cancelled" && action !== "cancel") || status === "stopped") {
+      header += ` (${status})`
     }
 
     let content = [header]
