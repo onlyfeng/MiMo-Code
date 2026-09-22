@@ -1,4 +1,5 @@
 import * as RunApproval from "@/session/run-approval"
+import { HostModelTransport } from "../provider/host-transport"
 import path from "path"
 import { Provider, ProviderError } from "@/provider"
 import { Log } from "@/util"
@@ -250,6 +251,7 @@ export type StreamInput = {
   quietRetryDiagnostics?: boolean
   ephemeral?: boolean
   requestID?: string
+  assistantMessageID?: string
 }
 
 export type StreamRequest = StreamInput & {
@@ -860,6 +862,12 @@ const live: Layer.Layer<
             toolCallFloodingMiddleware,
             {
               specificationVersion: "v3" as const,
+              wrapStream: ({ doStream }) => HostModelTransport.modelCall({
+                sessionID: input.sessionID, userMessageID: input.user.id,
+                assistantMessageID: input.assistantMessageID,
+                providerID: input.model.providerID, modelID: input.model.id, sdk: input.model.api.npm,
+                agent: input.agent.name, ephemeral: !!input.ephemeral, format: input.user.format?.type,
+              }, async () => doStream()),
               async transformParams(args) {
                 // `generate || stream`, matching session/prompt.ts:597. This file's
                 // only SDK entrypoint is `streamText` (:599), so narrowing to
