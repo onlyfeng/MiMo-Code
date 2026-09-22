@@ -4,18 +4,18 @@
 
 Full synchronization authorized by “同步 upstream 更新”, using branch-only,
 tag-preserving fetch. Selected upstream range:
-`479201262a0f08e6abe9c29022d2fb38b63e29b0..14dfe68a1c121f859544ba810b3c308e8501bfb2`.
+`479201262a0f08e6abe9c29022d2fb38b63e29b0..1579e7d9ee5fca87b707c3892dc725316674a9d6`.
 Starting main: `9fa2563885e1ee3742f27b4ca2e46fc9c0696d07`;
 starting compat: `72c7b04b714ca9c2fe59cf37b07feb71030b5eea`.
-The delta contains seven first-parent commits and 89 paths. The root checkout had
+The delta contains nine first-parent commits and 100 paths. The root checkout had
 the pre-existing untracked `api.json`; two existing Paseo worktrees are outside
 this operation. This operation owns only `sync/upstream-20260922-main`,
 `sync/upstream-20260922-compat` and their matching `.worktrees` entries.
 
-## Capability inventory (8)
+## Capability inventory (10)
 
 Every row uses the immutable range above. The reviewed main runtime snapshot is
-`623d5cd1f5dad65d374e078aa2e315b4ea65eb65`; publication and exact-SHA CI are
+`a08d967102b0199c828fb53f187ceb8494c40b91`; publication and exact-SHA CI are
 recorded after the registry commit lands.
 
 | ID | Selected behavior and decisive producers / consumers | main disposition | dev/compat disposition | Ownership, relationship and planned evidence |
@@ -28,6 +28,8 @@ recorded after the registry commit lands.
 | C06 | Automatic title requests may use tool-capable compatible endpoints without allowing title tool execution, while main-only orphan recovery remains isolated. Prompt/LLM request construction and title tests. | Adopted `toolChoice: auto`; title remains ephemeral, permission-denied and output-validated. | Inherit from main; recheck MaxMode and server-authoritative title metadata. | FD-005/006/011, FC-009/013, DC-MODEL-001/DC-TUI-001; adapted hidden-title request contract. Title-first-turn, LLM request and structured-output tests. |
 | C07 | MiMo v2.6 advertises explicit PascalCase builtin tool names, preserves canonical internal IDs, permissions, history and frozen prefix hashes; external/Codex names remain unchanged. `tool/names.ts`, registry/tool metadata, LLM projection and prefix snapshots. | Adopted as a model-facing projection. Internal IDs, permission keys, exec nesting, persisted history and snapshot membership stay canonical. | Inherit from main; recheck compat request/preflight and Actor schema projection. | FD-005/006, FC-002/005/009/011, DC-CONTEXT-001/DC-ACTOR-001; broad request-surface overlap with shared-main ownership. Flag, names, live PascalCase, permission, prefix and flooding integration tests. |
 | C08 | Regenerate OpenAPI and the JavaScript SDK, then bump all workspace packages and the lockfile to 0.1.15. Generated Actor status docs must match the merged runtime while fork recovery routes remain published. | Adopted release metadata; regenerated from the resolved fork route graph rather than choosing either generated conflict side. | Inherit versions and regenerate after compat route reconciliation. | FC-008/012; generated publication surface. Generator idempotence, OpenAPI refs, callable SDK samples and actor route tests. |
+| C09 | MCP servers may request an explicit empty-form confirmation while one tool call owns an unambiguous session; overlapping, cancelled, closed or schema-bearing requests fail closed. `mcp/elicitation.ts`, MCP execution and Question lifecycle. | Adopted through the existing generation-owned Question service. Caller interruption withdraws the UI exactly once; instance retirement and abort races retain fork cleanup. | Inherit from main; recheck DC-NET MCP transport boundaries without broadening remote admission. | FC-001/004/009 and FD-006; complementary protocol support with direct cancellation and authority overlap. Real MCP elicitation plus lifecycle tests. |
+| C10 | An optional in-process host transport observes user messages, scopes model calls and may wrap provider HTTP without changing standalone behavior. `provider/host-transport.ts`, prompt/LLM/provider integration and Node export. | Adopted as an opt-in embedder seam. Fork model identity, retry, tool, permission and request construction remain the producers of the scoped call. | Inherit from main; recheck compat request prefix, MaxMode and Actor calls. | FC-008/009/013, DC-CONTEXT-001/DC-MODEL-001/DC-ACTOR-001; observational wrapper around existing calls. Host-transport, prompt and retry tests. |
 
 ## Semantic decisions
 
@@ -59,6 +61,13 @@ recorded after the registry commit lands.
   conflicts are resolved by running the required SDK generator over the merged
   fork routes, retaining fork recovery operations and adding the Actor execution
   status description.
+- MCP elicitation advertises only empty form confirmation. The MCP client tracks
+  the single owning call and cancels ambiguous overlaps; the fork's generation-
+  safe Question release publishes one terminal rejection on interruption,
+  abort, defect or instance retirement.
+- Host model transport is inert unless an embedder explicitly installs it. It
+  observes resolved IDs and wraps the already-selected model/fetch call; it
+  cannot choose a model, grant tool authority or bypass retry/request policy.
 
 ## Validation and source snapshot
 
@@ -77,9 +86,10 @@ baseline.
 | Import/exec/Codex regressions after correction | Codex/import 11 pass; tool-script 99 pass; actor/system 31 pass. |
 | Static checks | Package `bun typecheck` and repository `git diff --check`, exit 0. |
 | Release increment | Root `bun ci` reports no changes; SDK generation is idempotent; OpenAPI/SDK/Actor route matrix 6 pass / 1173 assertions. Root `bun lint` reports 4756 warnings and 0 errors. |
+| Late MCP/host increment | Elicitation, MCP lifecycle, host transport and Question lifecycle: 45 pass / 153 assertions; package typecheck passes. |
 
 Main runtime/tests and bundled guidance:
-`623d5cd1f5dad65d374e078aa2e315b4ea65eb65`. Release and generated SDK
+`a08d967102b0199c828fb53f187ceb8494c40b91`. Release and generated SDK
 snapshot: `2c1ffc93b6bd3b6f816c438fa5a5e67c75555e93`; the synchronized version bump
 updates package manifests and `bun.lock` together. No database migration or
 workflow file changed in the selected range.
