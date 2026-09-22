@@ -70,6 +70,26 @@ const noRgExit = await run("no-rg", [
 ])
 console.log(`POSIX-only cases not executed or counted: ${posixOnly.join("; ")}`)
 
+const focusedTests = {
+  hiddenTools: {
+    name: "hidden-tools",
+    args: ["test", "--timeout", "120000", "test/session/prompt-effect.test.ts", "-t", "frozen hidden tools"],
+  },
+  runApproval: {
+    name: "run-approval",
+    args: ["test", "--timeout", "120000", "test/session/prompt-effect.test.ts", "-t", "run approval"],
+  },
+  toolGate: {
+    name: "tool-gate-orchestration",
+    args: ["test", "--timeout", "120000", "test/session/tool-gate-orchestration.test.ts"],
+  },
+}
+const focusedExits = {
+  [focusedTests.hiddenTools.name]: await run(focusedTests.hiddenTools.name, focusedTests.hiddenTools.args),
+  [focusedTests.runApproval.name]: await run(focusedTests.runApproval.name, focusedTests.runApproval.args),
+  [focusedTests.toolGate.name]: await run(focusedTests.toolGate.name, focusedTests.toolGate.args),
+}
+
 const files = ["src/util/archive.ts", "src/util/process.ts", "src/file/ripgrep.ts"]
 await fs.writeFile(
   path.join(artifacts, "runtime.json"),
@@ -81,8 +101,10 @@ await fs.writeFile(
       github_sha: process.env.GITHUB_SHA ?? null,
       archiveExit,
       noRgExit,
+      focusedExits,
       selectedArchiveCases: archiveCaseNames,
       selectedNoRgTests: noRgTests,
+      selectedFocusedTests: Object.values(focusedTests),
       removedSelectors: selectors,
       packageTestPreload: ["@opentui/solid/preload", "test/preload.ts (ORCHESTRATOR=true)"],
       posixOnlyNotCovered: posixOnly,
@@ -103,6 +125,7 @@ await fs.writeFile(
 )
 assert.equal(archiveExit, 0, "Actual Windows archive verification failed")
 assert.equal(noRgExit, 0, "Actual Windows no-rg verification failed")
+assert.deepEqual(focusedExits, Object.fromEntries(Object.values(focusedTests).map((test) => [test.name, 0])))
 const archive = z
   .object({
     platform: z.literal("win32"),
@@ -134,5 +157,5 @@ assert.ok(
   "A platform-guard return without assertions is not a pass",
 )
 console.log(
-  `Windows runtime verification passed: ${archive.cases.length} archive cases and ${cases.length} no-rg tests`,
+  `Windows runtime verification passed: ${archive.cases.length} archive cases, ${cases.length} no-rg tests, and ${Object.keys(focusedTests).length} focused cross-platform suites`,
 )
