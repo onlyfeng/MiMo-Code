@@ -66,7 +66,7 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Ripgrep } from "../../src/file/ripgrep"
 import { Format } from "../../src/format"
 import { Instance } from "../../src/project/instance"
-import { provideTmpdirInstance, provideTmpdirServer } from "../fixture/fixture"
+import { bunEval, provideTmpdirInstance, provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
@@ -3849,9 +3849,9 @@ for (const changed of [false, true]) {
           const schema = yield* Effect.promise(() =>
             Promise.resolve(asSchema(prefix.tools.bash.inputSchema).jsonSchema),
           )
-          const original = `bun -e 'require("node:fs").writeFileSync("compact-original.txt", "")'`
-          const nested = `bun -e 'require("node:fs").writeFileSync("compact-nested.txt", "")'`
-          const direct = `bun -e 'require("node:fs").writeFileSync("compact-direct.txt", "")'`
+          const original = bunEval("require(`node:fs`).writeFileSync(`compact-original.txt`, ``)")
+          const nested = bunEval("require(`node:fs`).writeFileSync(`compact-nested.txt`, ``)")
+          const direct = bunEval("require(`node:fs`).writeFileSync(`compact-direct.txt`, ``)")
           // The older captured contract allowed a single command. The current
           // registry contract is wider; neither entry point may silently adopt it.
           const tools = changed
@@ -7360,7 +7360,7 @@ it.live("run approval does not authorize an unrelated user queued into its admit
       try {
         yield* llm.hold("first run complete", release.promise)
         yield* llm.tool("bash", {
-          command: `bun -e 'require("node:fs").writeFileSync("queued-result.txt", "queued\\n")'`,
+          command: bunEval("require(`node:fs`).writeFileSync(`queued-result.txt`, `queued\\n`)"),
           description: "Unrelated queued work",
         })
         yield* llm.text("queued work complete")

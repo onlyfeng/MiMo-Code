@@ -8,7 +8,7 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionPrompt } from "../../src/session/prompt"
-import { provideTmpdirInstance } from "../fixture/fixture"
+import { bunEval, provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import {
   startScriptedLLMServer,
@@ -158,8 +158,10 @@ describe("tool gate orchestration", () => {
     "top-level Codex exec calls serialize while each script retains Promise.all",
     () =>
       Effect.gen(function* () {
-        const write = `bun -e 'setTimeout(() => require("node:fs").writeFileSync("ready.txt", "command complete"), 200)'`
-        const read = `bun -e 'process.stdout.write(require("node:fs").readFileSync("ready.txt"))'`
+        const write = bunEval(
+          "setTimeout(() => require(`node:fs`).writeFileSync(`ready.txt`, `command complete`), 200)",
+        )
+        const read = bunEval("process.stdout.write(require(`node:fs`).readFileSync(`ready.txt`))")
         const server = startScriptedLLMServer([
           {
             lines: toolCallsResponse([

@@ -10,6 +10,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type { Config } from "../../src/config"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { Instance } from "../../src/project/instance"
+import { Shell } from "../../src/shell/shell"
 import { TestLLMServer } from "../lib/llm-server"
 
 // Strip null bytes from paths (defensive fix for CI environment issues)
@@ -22,6 +23,11 @@ function exists(dir: string) {
     .stat(dir)
     .then(() => true)
     .catch(() => false)
+}
+
+export function bunEval(code: string) {
+  const arg = Shell.name(Shell.acceptable()) === "cmd" ? `"${code}"` : `'${code}'`
+  return `bun -e ${arg}`
 }
 
 async function clean(dir: string) {
