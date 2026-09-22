@@ -66,7 +66,7 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Ripgrep } from "../../src/file/ripgrep"
 import { Format } from "../../src/format"
 import { Instance } from "../../src/project/instance"
-import { provideTmpdirInstance, provideTmpdirServer } from "../fixture/fixture"
+import { bunEval, provideTmpdirInstance, provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
@@ -3849,6 +3849,9 @@ for (const changed of [false, true]) {
           const schema = yield* Effect.promise(() =>
             Promise.resolve(asSchema(prefix.tools.bash.inputSchema).jsonSchema),
           )
+          const original = bunEval("require(`node:fs`).writeFileSync(`compact-original.txt`, ``)")
+          const nested = bunEval("require(`node:fs`).writeFileSync(`compact-nested.txt`, ``)")
+          const direct = bunEval("require(`node:fs`).writeFileSync(`compact-direct.txt`, ``)")
           // The older captured contract allowed a single command. The current
           // registry contract is wider; neither entry point may silently adopt it.
           const tools = changed
@@ -3858,16 +3861,16 @@ for (const changed of [false, true]) {
                   ...prefix.tools.bash,
                   inputSchema: jsonSchema({
                     ...schema,
-                    properties: { ...schema.properties, command: { type: "string", enum: ["printf original"] } },
+                    properties: { ...schema.properties, command: { type: "string", enum: [original] } },
                   }),
                 },
               }
             : prefix.tools
           yield* llm.tool("exec", {
-            code: 'return await tools.bash({command:"printf nested > compact-nested.txt",description:"Write nested fixture"})',
+            code: `return await tools.bash(${JSON.stringify({ command: nested, description: "Write nested fixture" })})`,
           })
           yield* llm.tool("bash", {
-            command: "printf direct > compact-direct.txt",
+            command: direct,
             description: "Write direct fixture",
           })
           yield* llm.text("done")
@@ -7356,7 +7359,10 @@ it.live("run approval does not authorize an unrelated user queued into its admit
       const release = defer<void>()
       try {
         yield* llm.hold("first run complete", release.promise)
-        yield* llm.tool("bash", { command: "echo queued > queued-result.txt", description: "Unrelated queued work" })
+        yield* llm.tool("bash", {
+          command: bunEval("require(`node:fs`).writeFileSync(`queued-result.txt`, `queued\\n`)"),
+          description: "Unrelated queued work",
+        })
         yield* llm.text("queued work complete")
         const completion = yield* prompt.startPrompt({
           sessionID: chat.id,
