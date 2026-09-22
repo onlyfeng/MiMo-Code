@@ -25,14 +25,17 @@ function exists(dir: string) {
 }
 
 async function clean(dir: string) {
+  const remove = async (left: number): Promise<void> =>
+    fs.rm(dir, { recursive: true, force: true }).catch(async (error) => {
+      if (!(typeof error === "object" && error !== null && "code" in error && error.code === "EBUSY") || left === 0)
+        throw error
+      Bun.gc(true)
+      await sleep(100)
+      return remove(left - 1)
+    })
+
   Bun.gc(true)
-  await sleep(100)
-  await fs.rm(dir, {
-    recursive: true,
-    force: true,
-    maxRetries: 30,
-    retryDelay: 100,
-  })
+  await remove(12)
 }
 
 export async function cleanupTmpdir(dir: string, cleanup = clean) {

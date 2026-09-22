@@ -158,6 +158,8 @@ describe("tool gate orchestration", () => {
     "top-level Codex exec calls serialize while each script retains Promise.all",
     () =>
       Effect.gen(function* () {
+        const write = `bun -e 'setTimeout(() => require("node:fs").writeFileSync("ready.txt", "command complete"), 200)'`
+        const read = `bun -e 'process.stdout.write(require("node:fs").readFileSync("ready.txt"))'`
         const server = startScriptedLLMServer([
           {
             lines: toolCallsResponse([
@@ -167,14 +169,14 @@ describe("tool gate orchestration", () => {
                 args: JSON.stringify({
                   code: `return await Promise.all([
                   tools.apply_patch({ patch_text: "*** Begin Patch\\n*** Add File: example.txt\\n+example\\n*** End Patch" }),
-                  tools.exec_command({ cmd: "sleep 0.2; printf 'command complete' > ready.txt" }),
+                  tools.exec_command({ cmd: ${JSON.stringify(write)} }),
                 ])`,
                 }),
               },
               {
                 id: "next-exec",
                 name: "exec",
-                args: JSON.stringify({ code: 'return await tools.exec_command({ cmd: "cat ready.txt" })' }),
+                args: JSON.stringify({ code: `return await tools.exec_command({ cmd: ${JSON.stringify(read)} })` }),
               },
             ]),
           },
