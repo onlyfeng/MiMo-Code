@@ -107,10 +107,17 @@ contract while inheriting C01–C10. Six new upstream live-request fixtures move
 from 32K to 128K context so compat preflight reaches the intended behavior;
 their output limit and assertions are unchanged.
 
+The late C09/C10 propagation adds no compat-owned production path. MCP
+elicitation keeps the fork's generation-safe Question cleanup and existing
+RFC1918 transport policy; host transport wraps the resolved compat request and
+does not choose models, tools, MaxMode or Actor context. The corresponding
+seven-file matrix passes 75 tests / 269 assertions on compat.
+
 Local compat evidence is 456 passing tests and zero failures: 39 frozen-prefix,
 PascalCase and flooding-stream cases; 79 failure/PascalCase request cases; 188
 Actor/status/Inbox/TUI cases; and 150 context/preflight/MaxMode/TUI-metadata
 cases. Package typecheck passes, SDK/OpenAPI regeneration is idempotent, and
-root lint reports 4817 warnings and zero errors. These results bind the source
-merge `2da82b08d2b5ac7019b577252420f566b2c8db70`; final push-SHA CI remains the
+root lint reports 4818 warnings and zero errors. These results bind the source
+initial merge `2da82b08d2b5ac7019b577252420f566b2c8db70`; the late source merge is
+`ca4550bb54253d5b0cc6ea27f0d229bd7d834fa4`. Final push-SHA CI remains the
 publication authority.
