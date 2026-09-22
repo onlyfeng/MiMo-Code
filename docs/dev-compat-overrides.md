@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-09-22, full upstream synchronization through `14dfe68a1c121f859544ba810b3c308e8501bfb2`.
+- Prior upstream: `479201262a0f08e6abe9c29022d2fb38b63e29b0`.
+- Starting compat: `72c7b04b714ca9c2fe59cf37b07feb71030b5eea`.
+- Integrated main: `8c0bbe8bee24957a6b34aa0feca6ec78757448f3`; compat source/tests: `2da82b08d2b5ac7019b577252420f566b2c8db70`.
+- Review: [eight-capability synchronization](upstream-sync-2026-09-22.md), C01–C08.
+- Resolution: inherit tool-call flooding and failure cascade, runtime-local Actor execution state, Inbox/TUI presentation, automatic title requests, PascalCase MiMo v2.6 tool projection and the 0.1.15 release. Preserve bounded preflight and active-schema caps, hidden MCP and frozen-prefix identity, full-context/variant Actors, per-agent MaxMode, authoritative TUI metadata and all network/platform policies. The same 39 compat production overlays remain. Thirty-four per-path patch IDs are unchanged; the five adapted paths carry Inbox caps, current-turn request projection, provider tool-name projection plus request preflight, hidden-MCP/model-name snapshot identity, and compat Actor guidance. No owner retires or moves.
+- Validation: frozen prefix/PascalCase/flooding stream 39 pass; failure/PascalCase/live request matrix 79 pass; Actor/status/Inbox/TUI matrix 188 pass; context/preflight/MaxMode/model-metadata matrix 150 pass. The six new live-request fixtures use 128K rather than 32K input capacity so compat preflight reaches the behavior under test; output limits and assertions are unchanged. Package typecheck and SDK/OpenAPI regeneration pass; lint exits 0 with 4817 warnings and no errors.
+- Shared ownership: FD/FC registries and shared history inherit main byte-for-byte. Final exact-tip CI and remote ancestry are checked after this record; local results are not publication evidence.
+
+## Previous review record — 2026-09-21
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-09-21, full upstream synchronization through `479201262a0f08e6abe9c29022d2fb38b63e29b0`.
 - Prior upstream: `50cd713989f47225cfc717868b245e1de32b35b7`.
 - Starting compat: `1d5237f121854d65c4ca6d3bcd7e83312d5a7a8b`.
