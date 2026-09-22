@@ -4,15 +4,15 @@
 
 Full synchronization authorized by “同步 upstream 更新”, using branch-only,
 tag-preserving fetch. Selected upstream range:
-`479201262a0f08e6abe9c29022d2fb38b63e29b0..799e5052362d1067e8eb795528460023fbb3d07f`.
+`479201262a0f08e6abe9c29022d2fb38b63e29b0..14dfe68a1c121f859544ba810b3c308e8501bfb2`.
 Starting main: `9fa2563885e1ee3742f27b4ca2e46fc9c0696d07`;
 starting compat: `72c7b04b714ca9c2fe59cf37b07feb71030b5eea`.
-The delta contains five first-parent commits and 69 paths. The root checkout had
+The delta contains seven first-parent commits and 89 paths. The root checkout had
 the pre-existing untracked `api.json`; two existing Paseo worktrees are outside
 this operation. This operation owns only `sync/upstream-20260922-main`,
 `sync/upstream-20260922-compat` and their matching `.worktrees` entries.
 
-## Capability inventory (7)
+## Capability inventory (8)
 
 Every row uses the immutable range above. The reviewed main runtime snapshot is
 `623d5cd1f5dad65d374e078aa2e315b4ea65eb65`; publication and exact-SHA CI are
@@ -27,6 +27,7 @@ recorded after the registry commit lands.
 | C05 | Preserve background Actor messages across new prompts and present inbox messages as user bubbles while showing stopped actors distinctly from terminal outcomes. Inbox renderer, session/TUI sync and routes. | Adopted; orphan sweeps remain main-slice-only and chronological projection is retained. | Inherit from main; reconcile TUI metadata/context overlays. | FC-001/009, DC-CONTEXT-001/DC-TUI-001; complementary inbox behavior with TUI projection overlap. Inbox/TUI actor-status and prompt-orphan tests. |
 | C06 | Automatic title requests may use tool-capable compatible endpoints without allowing title tool execution, while main-only orphan recovery remains isolated. Prompt/LLM request construction and title tests. | Adopted `toolChoice: auto`; title remains ephemeral, permission-denied and output-validated. | Inherit from main; recheck MaxMode and server-authoritative title metadata. | FD-005/006/011, FC-009/013, DC-MODEL-001/DC-TUI-001; adapted hidden-title request contract. Title-first-turn, LLM request and structured-output tests. |
 | C07 | MiMo v2.6 advertises explicit PascalCase builtin tool names, preserves canonical internal IDs, permissions, history and frozen prefix hashes; external/Codex names remain unchanged. `tool/names.ts`, registry/tool metadata, LLM projection and prefix snapshots. | Adopted as a model-facing projection. Internal IDs, permission keys, exec nesting, persisted history and snapshot membership stay canonical. | Inherit from main; recheck compat request/preflight and Actor schema projection. | FD-005/006, FC-002/005/009/011, DC-CONTEXT-001/DC-ACTOR-001; broad request-surface overlap with shared-main ownership. Flag, names, live PascalCase, permission, prefix and flooding integration tests. |
+| C08 | Regenerate OpenAPI and the JavaScript SDK, then bump all workspace packages and the lockfile to 0.1.15. Generated Actor status docs must match the merged runtime while fork recovery routes remain published. | Adopted release metadata; regenerated from the resolved fork route graph rather than choosing either generated conflict side. | Inherit versions and regenerate after compat route reconciliation. | FC-008/012; generated publication surface. Generator idempotence, OpenAPI refs, callable SDK samples and actor route tests. |
 
 ## Semantic decisions
 
@@ -53,6 +54,11 @@ recorded after the registry commit lands.
   Controlled nested-tool checks are now lazy and string-keyed, avoiding module
   initialization reads while preserving the exact Actor/PlanExit control tokens.
   The incoming HTTP actor test also uses the fork's cwd-contained fixture root.
+- The late upstream release increment changes no runtime decision. All workspace
+  packages and `bun.lock` move together to 0.1.15. The three generated-file
+  conflicts are resolved by running the required SDK generator over the merged
+  fork routes, retaining fork recovery operations and adding the Actor execution
+  status description.
 
 ## Validation and source snapshot
 
@@ -70,9 +76,12 @@ baseline.
 | Exact four CI unit shards | 6805 pass, 43 existing skips, 1 todo, 0 fail. Shards: 1775/9, 1853/10, 1611/8 plus 1 todo, 1566/16. |
 | Import/exec/Codex regressions after correction | Codex/import 11 pass; tool-script 99 pass; actor/system 31 pass. |
 | Static checks | Package `bun typecheck` and repository `git diff --check`, exit 0. |
+| Release increment | Root `bun ci` reports no changes; SDK generation is idempotent; OpenAPI/SDK/Actor route matrix 6 pass / 1173 assertions. Root `bun lint` reports 4756 warnings and 0 errors. |
 
 Main runtime/tests and bundled guidance:
-`623d5cd1f5dad65d374e078aa2e315b4ea65eb65`. No SDK/OpenAPI input,
-dependency lockfile, migration or workflow file changed in the selected range.
+`623d5cd1f5dad65d374e078aa2e315b4ea65eb65`. Release and generated SDK
+snapshot: `2c1ffc93b6bd3b6f816c438fa5a5e67c75555e93`; the synchronized version bump
+updates package manifests and `bun.lock` together. No database migration or
+workflow file changed in the selected range.
 Compat reconciliation, exact final-SHA CI, refreshed remote-tip equality and
 `upstream/main -> main -> dev/compat` ancestry remain publication gates.
