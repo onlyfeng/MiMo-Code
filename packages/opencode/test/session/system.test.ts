@@ -292,8 +292,8 @@ describe("session.system", () => {
     const prompt = SystemPrompt.provider(ProviderTest.model({ id: ModelID.make("model-default") }))[0]
 
     expect(prompt).toContain("# Using your tools")
-    expect(prompt).toContain("Use the `task` tool for any work of roughly 3+ steps")
-    expect(prompt).toContain("Delegate with the `actor` tool")
+    expect(prompt).toContain("Use the Task tool for any work of roughly 3+ steps")
+    expect(prompt).toContain("Delegate with the Actor tool")
     expect(prompt).toContain("`spawn` is the default (background, parallel")
     expect(prompt).toContain("`run` blocks the whole turn")
     expect(prompt).not.toContain("The tool registry lives in `packages/opencode/src/tool/`")

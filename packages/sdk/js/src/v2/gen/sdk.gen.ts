@@ -3152,7 +3152,7 @@ export class Session2 extends HeyApiClient {
   /**
    * List session actors
    *
-   * List actors registered for a session.
+   * List actors with execution status in this server runtime; persisted outcomes are preserved.
    */
   public actors<ThrowOnError extends boolean = false>(
     parameters: {

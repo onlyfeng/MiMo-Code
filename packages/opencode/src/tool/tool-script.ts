@@ -44,11 +44,12 @@ const TRACE_TAIL_ENTRIES = 20
 const EXEC_COMMAND_DEFAULT_YIELD_TIME_MS = 10_000
 const EXEC_COMMAND_DEFAULT_MAX_OUTPUT_TOKENS = 10_000
 const nativeParameters = (def: Tool.Def) => def.nativeParameters ?? def.parameters
-const controls = new Map([
-  ["actor", Tool.ActorControl],
-  ["plan_exit", Tool.PlanExitControl],
-])
-const canNest = (def: Tool.Def) => !controls.has(def.id) || def.control === controls.get(def.id)
+const isControlled = (id: string) => id === "actor" || id === "plan_exit"
+const canNest = (def: Tool.Def) => {
+  if (def.id === "actor") return def.control === Tool.ActorControl
+  if (def.id === "plan_exit") return def.control === Tool.PlanExitControl
+  return true
+}
 
 const ExecCommandParameters = z.strictObject({
   cmd: z.string().describe("Shell command to execute."),
@@ -886,7 +887,7 @@ export const ToolScriptTool = Tool.define(
             Object.entries(mcpTools).filter(
               ([id]) =>
                 !byId.has(id) &&
-                !controls.has(ToolCompat.canonical(id)) &&
+                !isControlled(ToolCompat.canonical(id)) &&
                 !TOOL_SCRIPT_EXCLUDED.has(id) &&
                 !Object.hasOwn(TOOL_SCRIPT_ALIASES, id) &&
                 (!toolWhitelist || toolWhitelist.has(id)) &&

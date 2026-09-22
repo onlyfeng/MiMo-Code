@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { asSchema, tool, jsonSchema, type Tool as AITool } from "ai"
+import type { NamedTool } from "@/tool/names"
 import z from "zod"
 import { MessageV2 } from "./message-v2"
 import type { MessageID, SessionID } from "./schema"
@@ -130,7 +131,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     additionalTools: Object.entries(input.mcpTools ?? {}).flatMap(([id, item]) => (item.execute ? [id] : [])),
     harness: lastUser.harness,
   })
-  const rawTools: Record<string, AITool> = {}
+  const rawTools: Record<string, NamedTool> = {}
   for (const item of toolDefs) {
     const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
     rawTools[item.id] = tool({
@@ -139,6 +140,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     })
     if (item.nativeParameters)
       Object.assign(rawTools[item.id], { nativeInputSchema: z.toJSONSchema(item.nativeParameters) })
+    rawTools[item.id].modelName = item.modelName
   }
   const localToolNames = new Set(Object.keys(rawTools))
   const compact =

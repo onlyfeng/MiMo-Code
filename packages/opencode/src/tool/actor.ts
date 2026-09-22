@@ -778,9 +778,11 @@ export const ActorTool = Tool.define(
         if (op.action ==="status") {
           const found = yield* findActor(op.actor_id)
           if (!found) return unknownResponse("status", op.actor_id)
-          const entry = found.entry
+          const entry = yield* waiter.status(found.entry)
           const snapshot = {
             status: entry.status,
+            executionActive: entry.executionActive,
+            executionState: entry.executionState,
             actor_id: entry.actorID,
             description: entry.description,
             agent: entry.agent,
@@ -792,7 +794,7 @@ export const ActorTool = Tool.define(
             time: entry.time,
           }
           return {
-            title: `Actor status: ${entry.status}`,
+            title: `Actor status: ${entry.executionState}`,
             output: JSON.stringify(snapshot),
             metadata: { actor_id: entry.actorID, status: entry.status } as Record<string, any>,
           }
