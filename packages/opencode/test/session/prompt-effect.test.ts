@@ -7396,7 +7396,13 @@ it.live("run approval does not authorize an unrelated user queued into its admit
 )
 
 it.live("run approval reaches processor doom-loop asks without tool ownership metadata", () =>
-  provideTmpdirServer(
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.env.MIMOCODE_DISABLE_TOOLCALL_DUPLICATE_DETECT
+      process.env.MIMOCODE_DISABLE_TOOLCALL_DUPLICATE_DETECT = "true"
+      return previous
+    }),
+    () => provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
       const prompt = yield* SessionPrompt.Service
       const sessions = yield* Session.Service
@@ -7446,7 +7452,12 @@ it.live("run approval reaches processor doom-loop asks without tool ownership me
         off()
       }
     }),
-    { git: true, config: (url) => ({ ...providerCfg(url), permission: { bash: "allow", doom_loop: "ask" } }) },
+      { git: true, config: (url) => ({ ...providerCfg(url), permission: { bash: "allow", doom_loop: "ask" } }) },
+    ),
+    (previous) => Effect.sync(() => {
+      if (previous === undefined) delete process.env.MIMOCODE_DISABLE_TOOLCALL_DUPLICATE_DETECT
+      else process.env.MIMOCODE_DISABLE_TOOLCALL_DUPLICATE_DETECT = previous
+    }),
   ),
 )
 

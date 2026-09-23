@@ -60,7 +60,6 @@ export const SessionTable = sqliteTable(
 
 export type SessionPrefixToolSnapshot = {
   name: string
-  model_name?: string
   description?: string
   input_schema: JSONSchema7
   /** Internal nested contract; never appended to the provider wire schema. */
