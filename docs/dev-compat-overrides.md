@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-09-23, full upstream synchronization through `a273d3450ee05ba5163320eae59d7716b778e480`.
+- Prior upstream: `1579e7d9ee5fca87b707c3892dc725316674a9d6`.
+- Starting compat: `c28a6dbe53735a209bfe4952abae4729665ee13e`.
+- Integrated main: `616fc5fa0a132d6899aaaafc3a7b0eacb12e20aa`; compat source/tests: `bc1525552a25c724b728d4815d8b45195237b8f6`.
+- Review: [three-capability synchronization](upstream-sync-2026-09-23.md), C01–C03.
+- Resolution: inherit canonical lowercase model-facing tool names, removal of the flooding middleware and its synthetic recovery, and same-step exact duplicate cancellation before FIFO. Retain the independent failure cascade, bounded request preflight, hidden MCP/native Actor snapshot identity, full-context/variant Actors, per-agent MaxMode, request metadata and all network/platform policies. The same 39 compat production overlay paths remain; 37 per-path stable patch IDs are unchanged. `llm-request-prefix.ts` and `prefix-snapshot.ts` adapt the retired model-name projection while retaining compat-loaded MCP membership, current-turn request projection and frozen native schemas. The three old PascalCase/flooding test files had only 32K-to-128K compat fixture edits; they retire with their upstream behavior. The new duplicate test fixture uses 128K to reach tool execution without changing output limits or assertions. No DC owner retires or moves.
+- Validation: 344 passed, 2 existing skips across 16 request, duplicate, gate, prompt and frozen-context files; 83 passed across Actor spawn and model-context files; zero failures. Package typecheck passes; root lint exits 0 with 4818 warnings and zero errors. `bun.lock` matches accepted `main`.
+- Shared ownership: FD/FC registries inherit main byte-for-byte. Exact-tip CI and remote ancestry are checked after this record; local results are not publication evidence.
+
+## Previous review record — 2026-09-22
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-09-22, full upstream synchronization through `1579e7d9ee5fca87b707c3892dc725316674a9d6`.
 - Prior upstream: `14dfe68a1c121f859544ba810b3c308e8501bfb2`; initial selected baseline: `479201262a0f08e6abe9c29022d2fb38b63e29b0`.
 - Starting compat: `72c7b04b714ca9c2fe59cf37b07feb71030b5eea`.
