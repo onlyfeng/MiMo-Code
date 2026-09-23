@@ -72,7 +72,6 @@ import { ToolScriptTool, renderToolScriptDeclarations } from "./tool-script"
 import { bindToolScriptRef, GPT_TOP_LEVEL_TOOLS, TOOL_SCRIPT_EXCLUDED, toolScriptRegistry } from "./tool-script-ref"
 import { type HarnessMode, resolveHarnessMode } from "./gpt"
 import { canSearchSkills } from "../skill/search-access"
-import { defaultToolName, usesPascalCaseTools } from "./names"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -453,7 +452,6 @@ export const layer = Layer.effect(
 
     const registered: Interface["registered"] = Effect.fn("ToolRegistry.registered")(function* (input) {
       const availableTools = yield* available(input)
-      const pascal = usesPascalCaseTools(input.modelID, input.harness, input.modelAPIID, input.modelFamily)
 
       const cfg = yield* config.get()
       const resolveStyle = (toolId: string): "json" | "shell" => resolveInvocationStyle(cfg.tool, toolId)
@@ -477,7 +475,6 @@ export const layer = Layer.effect(
           const description = useShell ? tool.shell!.description : output.description
           return {
             id: tool.id,
-            modelName: pascal ? defaultToolName(tool.id) : undefined,
             description: [
               description,
               tool.id === ReadTool.id ? yield* describeReadMedia(input) : undefined,

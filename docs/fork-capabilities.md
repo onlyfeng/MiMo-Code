@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-22
-- Upstream: `1579e7d9ee5fca87b707c3892dc725316674a9d6`
-- Prior reviewed upstream: `479201262a0f08e6abe9c29022d2fb38b63e29b0`
-- Main behavior (runtime/tests): `a08d967102b0199c828fb53f187ceb8494c40b91`
+- Last reviewed: 2026-09-23
+- Upstream: `a273d3450ee05ba5163320eae59d7716b778e480`
+- Prior reviewed upstream: `1579e7d9ee5fca87b707c3892dc725316674a9d6`
+- Main behavior (runtime/tests): `2c53e908ac96eb4f7d00deb3a719780991abaea5`
 - Bundled guidance content: `a08d967102b0199c828fb53f187ceb8494c40b91`
-- Prior fork `main` tip: `9fa2563885e1ee3742f27b4ca2e46fc9c0696d07`
+- Prior fork `main` tip: `b02cd8669ab99051db713749f3a5651e18cb8984`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-09-22 full sync](upstream-sync-2026-09-22.md), ten capabilities through `1579e7d9`. Adopt bounded tool-call flooding and same-batch failure cascade, runtime-local Actor status, inbox/TUI projections, automatic title tool choice, MiMo v2.6 PascalCase model names, the synchronized 0.1.15 release, MCP confirmation elicitation and opt-in host model transport. Preserve canonical internal tool IDs, generation-safe Question cleanup, frozen prefix authority, main-only orphan cleanup, retained Actor recovery, fork request admission and all active FD/FC boundaries.
+Latest reviewed synchronization: [2026-09-23 full sync](upstream-sync-2026-09-23.md), three capabilities through `a273d345`. Remove the upstream-retired PascalCase model-facing projection and tool-call flooding middleware, and adopt same-step exact duplicate cancellation with coordinated `doom_loop` opt-out. Preserve canonical tool IDs, FIFO and failure cascade, fork replay boundaries, hidden-MCP/native Actor snapshot identity and all active FD/FC contracts. The preceding day's flooding and PascalCase dispositions are historical, not active behavior.
+
+Previous synchronization: [2026-09-22 full sync](upstream-sync-2026-09-22.md), ten capabilities through `1579e7d9`. It introduced the now-retired flooding and PascalCase projection alongside still-active failure cascade, runtime-local Actor status, inbox/TUI projections, automatic title tool choice, the 0.1.15 release, MCP confirmation elicitation and opt-in host model transport.
 
 Previous synchronization: [2026-09-21 full sync](upstream-sync-2026-09-21.md), eleven capabilities through `47920126`. Adopt concise prompts, explicit external skill roots, retired directory loaders, FIFO tool admission, generation-owned MCP connections and selected-session question cleanup. Adapt trailing-user recovery and cancellation to atomic admission, retained frozen Actor context, durable inbox progress and bounded retry scopes. No shared owner retires or moves.
 
