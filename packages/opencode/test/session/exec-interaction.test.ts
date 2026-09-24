@@ -163,13 +163,7 @@ const plan = await tools.plan_exit({}); return { question, plan };`,
               })
               .pipe(Effect.timeout("15 seconds"))
             expect(yield* llm.inputs).toHaveLength(2)
-            expect(seen).toHaveLength(mode === "peer" ? 1 : 0)
-            if (mode === "peer") {
-              expect(seen[0].sessionID).toBe(parent.id)
-              const original = yield* sessions.messages({ sessionID: session.id, agentID: actorID })
-              expect(original.some((message) => message.info.id === seen[0].tool?.messageID)).toBe(true)
-              expect(seen[0].tool?.callID).toContain(":")
-            }
+            expect(seen).toHaveLength(0)
             expect(yield* question.list()).toEqual([])
             const messages = yield* sessions.messages({ sessionID: session.id, agentID: actorID })
             const execution = messages
@@ -177,7 +171,7 @@ const plan = await tools.plan_exit({}); return { question, plan };`,
               .find((part) => part.type === "tool" && part.tool === "exec")
             expect(execution?.type === "tool" && execution.state.status).toBe("completed")
             if (execution?.type === "tool" && execution.state.status === "completed") {
-              expect(execution.state.output).toContain(mode === "peer" ? "Red" : "[Never-Ask]")
+              expect(execution.state.output).toContain("[Never-Ask]")
               expect(execution.state.output).toContain("Plan approval unavailable")
             }
             expect(

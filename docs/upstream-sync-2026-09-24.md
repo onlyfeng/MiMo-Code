@@ -26,6 +26,7 @@ Main source/test integration: `22f3ea5e1b597dd60709ed6e96256042a421414b`. Defaul
 - `bun typecheck` passed. Root `bun lint` exited 0 with 4604 warnings and zero errors. The intended merge passed `git diff --check`.
 - The first affected 14-file matrix ran 366 tests: 362 passed, two existing skips, and two `/ask` failures. The two failing fixtures stored user messages with no text part; the fork's retained empty-prefix guard correctly rejected them. After adding real text parts, the full `/ask` file passed 3/3.
 - A second 13-file matrix ran 148 tests: 145 passed and three `external-directory` fixture failures. Upstream's new helper returned a pending Promise while its `using` Git fixture was disposed. Awaiting the helper's callback fixed that lifetime error; the full file then passed 9/9. Other files in the two matrices were unchanged after their passing run.
+- First pushed tip `f91ad3f1` passed lint and typecheck CI but failed three unit assertions across two shards. Two OpenAPI tests exposed a stale published spec: live generation had callable v2 samples and current recovery text, while the committed artifact did not. Regeneration from the main worktree synchronized it; a focused three-file rerun passed 11/11. The remaining failure expected a peer to forward a question to its parent after C01 removed that path. The focused runtime rerun confirms background peers receive `[Never-Ask]` and no question event; the assertion now checks that behavior. Current-tip CI must still pass before acceptance.
 
 ## Publication gates
 
