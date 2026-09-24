@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-09-24, full upstream synchronization through `2b993ac98283bb1283313982e699df706e9ad235`.
+- Prior upstream: `a273d3450ee05ba5163320eae59d7716b778e480`.
+- Starting compat: `6516e800e2bfc9bd2403ad90572c538c31339bf7`.
+- Integrated main: `825ada48a02f276459fc03c9b9df0b39bcd5b84d`; compat source/tests: `42cbdb495b662572a48bfdaa4957eba5956c551c`.
+- Review: [three-capability synchronization](upstream-sync-2026-09-24.md), C01–C03.
+- Resolution: inherit the Orchestrator removal, local image path provenance, and JSON-only tool invocation. Keep the eight DC owners, including full/state Actor context and JSON `variant` selection. Retire compat shell `--variant` and no-script recovery with the shared FC-018 shell interface. Keep inherited Actor peer sessions but route background interaction through parent grants; no Orchestrator-only forwarding survives. The production overlay has 38 paths after `actor.shell.txt` retires; no DC owner retires or moves.
+- Validation: 58 Actor JSON/context/variant cases pass; 221 pass across 13 Actor, recovery, request, image, OpenAPI and exec-interaction files; the session-recovery file passes 22/22 after fixing its temporary-directory lifetime. Package `bun typecheck` passes. Root lint exits 0 with 4661 warnings and zero errors. SDK/OpenAPI regeneration is stable and `bun.lock` matches main. Final exact-tip CI remains the publication gate.
+- Shared ownership: FD/FC registries inherit main byte-for-byte. Exact-tip CI and remote ancestry are checked after this record; local results are not publication evidence.
+
+## Previous review record — 2026-09-23
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-09-23, full upstream synchronization through `a273d3450ee05ba5163320eae59d7716b778e480`.
 - Prior upstream: `1579e7d9ee5fca87b707c3892dc725316674a9d6`.
 - Starting compat: `c28a6dbe53735a209bfe4952abae4729665ee13e`.
@@ -415,17 +427,18 @@ Shared FD/FC records are inherited byte-for-byte.
 | DC-ACTOR-001    | Retain and adapt none/state/full and persistent creation     | Preserve complete capture/execute chain and bounded state; repair input recovery without dropping explicit values; validate runtime-created and model-created persistent recovery |
 | DC-TUI-001      | Retain provider/model/variant display                        | Metadata and coverage synchronization tests pass; no equivalent upstream UI replaces this overlay                                                                                 |
 
-The actor overlay includes JSON schema, shell parser, no-script argument
-recovery, execution, tool descriptions and public creation tests. Missing
-captured history or a prefix captor still fails before admission. Captured
+At the 2026-09-15 review, the actor overlay included JSON schema, shell
+parser, no-script argument recovery, execution, tool descriptions and public
+creation tests. Missing captured history or a prefix captor still fails before admission. Captured
 system, tool schemas, active/loaded MCP membership, permissions, model identity,
 turnContext, watermark and cwd remain tied to the same frozen request. State
 uses the existing UTF-8 cap; persistent creation requires full context.
 
 Recovery preserves valid context/lifecycle fields in all supported envelope
 forms. Malformed values are rejected; conflicting inner/outer copies are
-rejected instead of choosing an actor lifetime silently. The shared generic
-shell wrapper's mixed script/outer-field policy is unchanged.
+rejected instead of choosing an actor lifetime silently. That review left the
+shared generic shell wrapper's mixed script/outer-field policy unchanged; the
+2026-09-24 synchronization retires the wrapper and its compat extensions.
 
 The shared history preview follow-up is inherited from accepted main PR #123.
 Its SQL byte budgets and structural omission formatting preserve raw parts and
@@ -890,7 +903,7 @@ files remain byte-identical to the accepted main correction.
 | DC-MODEL-001    | Agent config, MaxMode, retry status, title path, SDK/OpenAPI                                                                               | Per-agent extension over shared bounded retry; title generation stays shared | Preserve opt-in, final-step bound, title isolation, and subagent status isolation                                         |
 | DC-CONTEXT-001  | Model-visible text, request preflight, title/skills/memory, compaction, checkpoint coverage, chronology, and TUI context/revert projection | Bounded-content hardening around shared request construction                 | Preserve caps, snapshots, stable paths, effective-window preflight, positional coverage, chronology, and recovery routing |
 | DC-ACTOR-001    | Actor context, default-fork checkpoint, replace-agent, static-prefix overflow                                                              | Full-context extension beyond shared capture and actor identity scope        | Preserve frozen membership/system/cwd and fail unrecoverable prefixes                                                     |
-| DC-ACTOR-002    | Actor run/spawn `variant`, shell `--variant`, argument recovery, `actor models` listing, spawn-to-prompt propagation                       | Model-facing extension over inherited actor model selection                  | Preserve pre-admission validation, explicit precedence, non-inheritance, and actor-lifetime persistence                   |
+| DC-ACTOR-002    | Actor run/spawn JSON `variant`, `actor models` listing, spawn-to-prompt propagation                       | Model-facing extension over inherited actor model selection                  | Preserve pre-admission validation, explicit precedence, non-inheritance, and actor-lifetime persistence                   |
 | DC-TUI-001      | Prompt/footer model metadata and title locale                                                                                              | Request-metadata display override alongside shared locale propagation        | Preserve provider/model/variant truth, locale submission, and known-limit disclosure                                      |
 
 ## DC-NET-001 — approved private-network WebFetch
@@ -1559,6 +1572,11 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-ACTOR-001 — full-context actor and static-prefix overflow extensions
 
+- 2026-09-24 synchronization: preserve the strict JSON `context` and `lifecycle`
+  selectors, bounded state capture, and frozen full-context actor lifecycle.
+  Retire only the historical shell and no-script argument recovery surfaces
+  with shared FC-018; runtime and HTTP actor recovery remain.
+
 - 2026-09-15 Inbox crash consistency: inherit FC-001's atomic drain without
   changing full-context capture, system/model actor ownership, persistent-peer
   retirement or recovery. No model-facing context field is added to main.
@@ -1710,8 +1728,8 @@ files remain byte-identical to the accepted main correction.
   uses the agent's configured model and that model defines it. The caller's own
   variant is never inherited.
 - Overrides: compat adds an optional `variant` selector to `run`/`spawn` across
-  the strict JSON schema, shell `--variant`, no-script argument recovery, tool
-  descriptions and `actor models`, starting from compat
+  the strict JSON schema, tool descriptions and `actor models`, starting from
+  compat
   `3ff9794a0b5a2568e819b4876f2448f9d666dc15`.
 - Delta: the tool resolves the child model exactly as before, then requires the
   variant to be an own key of that model's merged, non-disabled `variants`.
@@ -1722,15 +1740,12 @@ files remain byte-identical to the accepted main correction.
   post-stop re-entry), outranks the agent fallback, and is persisted on each
   child user message. Woken `send` turns reuse it through the drain seed's
   persisted user model; `resume` accepts no variant and retries the original
-  user. No-script argument recovery keeps an explicit variant from flat fields
-  or beside an operation envelope, including malformed values, and leaves
-  conflicting root and envelope copies in place so the strict schema rejects
-  the call instead of silently using the default. An explicitly empty
-  `--variant ""` is rejected by the shared parser (FC-018) before the schema
-  sees it, so the shell mapping keeps the same truthiness spread as every other
-  flag. Without an explicit variant the tool adopts the agent's own configured
-  variant when the child's model is the agent's configured model, compared as
-  provider-aware resolved identities. That holds for the group member picked for
+  user. The 2026-09-24 sync removes the shell and no-script entry points with
+  shared FC-018; strict JSON validation still rejects malformed values and
+  conflicting operation envelopes before spawning. Without an explicit
+  variant, the tool adopts the agent's own configured value when the child's
+  model is the agent's configured model, compared as provider-aware resolved
+  identities. That holds for the group member picked for
   the caller's provider, and however the call names that model — the agent's own
   group reference or the resolved member itself — while the prompt-side
   comparison would treat it as a different model. A configured value the
@@ -1747,17 +1762,14 @@ files remain byte-identical to the accepted main correction.
   it, because it adopts the agent's configured variant itself after resolving
   that group provider-aware.
 - Source surfaces: `packages/opencode/src/tool/actor.ts`,
-  `packages/opencode/src/tool/actor.txt`,
-  `packages/opencode/src/tool/actor.shell.txt`, and
+  `packages/opencode/src/tool/actor.txt`, and
   `packages/opencode/src/actor/spawn.ts`.
 - Test surfaces: `packages/opencode/test/tool/actor.test.ts`,
-  `packages/opencode/test/tool/actor.shell.test.ts`,
-  `packages/opencode/test/tool/actor-recover.test.ts`,
   `packages/opencode/test/tool/actor-models.test.ts`,
   `packages/opencode/test/tool/actor-variant-guidance.test.ts`,
   `packages/opencode/test/actor/spawn.test.ts`, and
   `packages/opencode/test/inbox/drain-seed-variant.test.ts`.
-- Evidence: shell, recovery and strict-schema tests cover the entry points.
+- Evidence: JSON schema and runtime tests cover the remaining entry points.
   Actor tool tests prove forwarding against an overridden model, rejection of
   unknown and disabled variants and of models without variants before any
   spawn, and an unchanged spawn input when omitted. A cross-provider group
