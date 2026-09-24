@@ -2312,9 +2312,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 sessionID: input.session.id,
                 tool: { messageID: input.processor.message.id, callID: options.toolCallId },
                 ruleset: effectivePermission,
-                // System-spawned + non-peer background agents have no human to answer
-                // → fail clean, don't hang. Orchestrator peers FORWARD for approval;
-                // ordinary background subagents INHERIT the parent's held grants.
+                // System-spawned background agents have no human to answer.
+                // Background peers and subagents inherit the parent's held grants
+                // when an explicit parent edge exists; otherwise they fail closed.
                 interactive: askInteractive,
                 ...(askInherit ? { inherit: askInherit } : {}),
               },
