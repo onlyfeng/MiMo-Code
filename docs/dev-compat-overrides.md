@@ -14,10 +14,10 @@ registry/history commit does not advance either behavior reference below.
 - Last reviewed: 2026-09-24, full upstream synchronization through `2b993ac98283bb1283313982e699df706e9ad235`.
 - Prior upstream: `a273d3450ee05ba5163320eae59d7716b778e480`.
 - Starting compat: `6516e800e2bfc9bd2403ad90572c538c31339bf7`.
-- Integrated main: `825ada48a02f276459fc03c9b9df0b39bcd5b84d`; compat source/tests: `42cbdb495b662572a48bfdaa4957eba5956c551c`.
+- Integrated main: `d1d42cfac9a9d530b86f4877c0e4433be02f569d`; compat source/tests: `9ec7ad539aadf1f32571bf6b2506251e72724097`.
 - Review: [three-capability synchronization](upstream-sync-2026-09-24.md), C01–C03.
 - Resolution: inherit the Orchestrator removal, local image path provenance, and JSON-only tool invocation. Keep the eight DC owners, including full/state Actor context and JSON `variant` selection. Retire compat shell `--variant` and no-script recovery with the shared FC-018 shell interface. Keep inherited Actor peer sessions but route background interaction through parent grants; no Orchestrator-only forwarding survives. The production overlay has 38 paths after `actor.shell.txt` retires; no DC owner retires or moves.
-- Validation: 58 Actor JSON/context/variant cases pass; 221 pass across 13 Actor, recovery, request, image, OpenAPI and exec-interaction files; the session-recovery file passes 22/22 after fixing its temporary-directory lifetime. Package `bun typecheck` passes. Root lint exits 0 with 4661 warnings and zero errors. SDK/OpenAPI regeneration is stable and `bun.lock` matches main. Final exact-tip CI remains the publication gate.
+- Validation: 58 Actor JSON/context/variant cases pass; 221 pass across 13 Actor, recovery, request, image, OpenAPI and exec-interaction files; the session-recovery file passes 22/22 after fixing its temporary-directory lifetime. The real MCP OAuth transport passes 1/1 after preventing the laboratory from reusing the callback port. Package `bun typecheck` passes after the final source merge. Root lint exited 0 with 4661 warnings and zero errors before the shared fixture-only correction; current-tip CI supplies the final lint gate. SDK/OpenAPI regeneration is stable and `bun.lock` matches main. Final exact-tip CI remains the publication gate.
 - Shared ownership: FD/FC registries inherit main byte-for-byte. Exact-tip CI and remote ancestry are checked after this record; local results are not publication evidence.
 
 ## Previous review record — 2026-09-23
