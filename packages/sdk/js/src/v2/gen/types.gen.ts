@@ -57,70 +57,6 @@ export type EventTaskUpdated = {
   }
 }
 
-export type EventTuiPromptAppend = {
-  type: "tui.prompt.append"
-  properties: {
-    text: string
-  }
-}
-
-export type EventTuiCommandExecute = {
-  type: "tui.command.execute"
-  properties: {
-    command:
-      | "session.list"
-      | "session.new"
-      | "session.share"
-      | "session.interrupt"
-      | "session.compact"
-      | "session.page.up"
-      | "session.page.down"
-      | "session.line.up"
-      | "session.line.down"
-      | "session.half.page.up"
-      | "session.half.page.down"
-      | "session.first"
-      | "session.last"
-      | "prompt.clear"
-      | "prompt.submit"
-      | "agent.cycle"
-      | string
-  }
-}
-
-export type EventTuiToastShow = {
-  type: "tui.toast.show"
-  properties: {
-    title?: string
-    message: string
-    variant: "info" | "success" | "warning" | "error"
-    /**
-     * Duration in milliseconds
-     */
-    duration?: number
-  }
-}
-
-export type EventTuiSessionSelect = {
-  type: "tui.session.select"
-  properties: {
-    /**
-     * Session ID to navigate to
-     */
-    sessionID: string
-  }
-}
-
-export type EventTuiInstructionsLoaded = {
-  type: "tui.instructions.loaded"
-  properties: {
-    /**
-     * Display labels of loaded instruction files: worktree-relative path, ~-path, or absolute
-     */
-    files: Array<string>
-  }
-}
-
 export type EventActorRegistered = {
   type: "actor.registered"
   properties: {
@@ -192,6 +128,70 @@ export type EventInboxArrived = {
     senderActorID?: string
     inboxID: string
     type: string
+  }
+}
+
+export type EventTuiPromptAppend = {
+  type: "tui.prompt.append"
+  properties: {
+    text: string
+  }
+}
+
+export type EventTuiCommandExecute = {
+  type: "tui.command.execute"
+  properties: {
+    command:
+      | "session.list"
+      | "session.new"
+      | "session.share"
+      | "session.interrupt"
+      | "session.compact"
+      | "session.page.up"
+      | "session.page.down"
+      | "session.line.up"
+      | "session.line.down"
+      | "session.half.page.up"
+      | "session.half.page.down"
+      | "session.first"
+      | "session.last"
+      | "prompt.clear"
+      | "prompt.submit"
+      | "agent.cycle"
+      | string
+  }
+}
+
+export type EventTuiToastShow = {
+  type: "tui.toast.show"
+  properties: {
+    title?: string
+    message: string
+    variant: "info" | "success" | "warning" | "error"
+    /**
+     * Duration in milliseconds
+     */
+    duration?: number
+  }
+}
+
+export type EventTuiSessionSelect = {
+  type: "tui.session.select"
+  properties: {
+    /**
+     * Session ID to navigate to
+     */
+    sessionID: string
+  }
+}
+
+export type EventTuiInstructionsLoaded = {
+  type: "tui.instructions.loaded"
+  properties: {
+    /**
+     * Display labels of loaded instruction files: worktree-relative path, ~-path, or absolute
+     */
+    files: Array<string>
   }
 }
 
@@ -805,11 +805,10 @@ export type EventSessionIdle = {
   }
 }
 
-export type EventSessionCompacted = {
-  type: "session.compacted"
+export type EventVcsBranchUpdated = {
+  type: "vcs.branch.updated"
   properties: {
-    sessionID: string
-    agentID?: string
+    branch?: string
   }
 }
 
@@ -835,31 +834,6 @@ export type EventCommandExecuted = {
     sessionID: string
     arguments: string
     messageID: string
-  }
-}
-
-export type EventSessionGoal = {
-  type: "session.goal"
-  properties: {
-    sessionID: string
-    goal?: {
-      condition: string
-    }
-    lastVerdict?: {
-      ok: boolean
-      impossible?: boolean
-      reason: string
-      attempt: number
-      messageID?: string
-      error?: boolean
-    }
-  }
-}
-
-export type EventVcsBranchUpdated = {
-  type: "vcs.branch.updated"
-  properties: {
-    branch?: string
   }
 }
 
@@ -894,6 +868,32 @@ export type EventTodoUpdated = {
   properties: {
     sessionID: string
     todos: Array<Todo>
+  }
+}
+
+export type EventSessionGoal = {
+  type: "session.goal"
+  properties: {
+    sessionID: string
+    goal?: {
+      condition: string
+    }
+    lastVerdict?: {
+      ok: boolean
+      impossible?: boolean
+      reason: string
+      attempt: number
+      messageID?: string
+      error?: boolean
+    }
+  }
+}
+
+export type EventSessionCompacted = {
+  type: "session.compacted"
+  properties: {
+    sessionID: string
+    agentID?: string
   }
 }
 
@@ -1623,17 +1623,17 @@ export type GlobalEvent = {
     | EventGlobalDisposed
     | EventTaskCreated
     | EventTaskUpdated
-    | EventTuiPromptAppend
-    | EventTuiCommandExecute
-    | EventTuiToastShow
-    | EventTuiSessionSelect
-    | EventTuiInstructionsLoaded
     | EventActorRegistered
     | EventActorStatus
     | EventActorStuck
     | EventActorStalled
     | EventWriterCachePerf
     | EventInboxArrived
+    | EventTuiPromptAppend
+    | EventTuiCommandExecute
+    | EventTuiToastShow
+    | EventTuiSessionSelect
+    | EventTuiInstructionsLoaded
     | EventMetricsModelCall
     | EventMetricsToolCall
     | EventMetricsAgentRequest
@@ -1672,15 +1672,15 @@ export type GlobalEvent = {
     | EventBashInteractiveReplied
     | EventSessionStatus
     | EventSessionIdle
-    | EventSessionCompacted
+    | EventVcsBranchUpdated
     | EventMcpToolsChanged
     | EventMcpBrowserOpenFailed
     | EventCommandExecuted
-    | EventSessionGoal
-    | EventVcsBranchUpdated
     | EventWorktreeReady
     | EventWorktreeFailed
     | EventTodoUpdated
+    | EventSessionGoal
+    | EventSessionCompacted
     | EventPtyCreated
     | EventPtyUpdated
     | EventPtyExited
@@ -2607,21 +2607,6 @@ export type Config = {
   tools?: {
     [key: string]: boolean
   }
-  /**
-   * Tool invocation style configuration (JSON vs shell-style).
-   */
-  tool?: {
-    /**
-     * Default invocation style for all tools. 'json' (default) exposes the original Zod schema; 'shell' exposes a single `script` parameter and uses the tool's shell.parse mapping.
-     */
-    invocation_style?: "json" | "shell"
-    /**
-     * Per-tool override of invocation_style. Keys are tool IDs. A tool without a `shell` field falls back to JSON regardless of this setting.
-     */
-    invocation_style_by_tool?: {
-      [key: string]: "json" | "shell"
-    }
-  }
   enterprise?: {
     /**
      * Enterprise URL
@@ -3279,17 +3264,17 @@ export type Event =
   | EventGlobalDisposed
   | EventTaskCreated
   | EventTaskUpdated
-  | EventTuiPromptAppend
-  | EventTuiCommandExecute
-  | EventTuiToastShow
-  | EventTuiSessionSelect
-  | EventTuiInstructionsLoaded
   | EventActorRegistered
   | EventActorStatus
   | EventActorStuck
   | EventActorStalled
   | EventWriterCachePerf
   | EventInboxArrived
+  | EventTuiPromptAppend
+  | EventTuiCommandExecute
+  | EventTuiToastShow
+  | EventTuiSessionSelect
+  | EventTuiInstructionsLoaded
   | EventMetricsModelCall
   | EventMetricsToolCall
   | EventMetricsAgentRequest
@@ -3328,15 +3313,15 @@ export type Event =
   | EventBashInteractiveReplied
   | EventSessionStatus
   | EventSessionIdle
-  | EventSessionCompacted
+  | EventVcsBranchUpdated
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
-  | EventSessionGoal
-  | EventVcsBranchUpdated
   | EventWorktreeReady
   | EventWorktreeFailed
   | EventTodoUpdated
+  | EventSessionGoal
+  | EventSessionCompacted
   | EventPtyCreated
   | EventPtyUpdated
   | EventPtyExited

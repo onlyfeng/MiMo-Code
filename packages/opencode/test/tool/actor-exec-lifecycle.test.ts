@@ -18,11 +18,10 @@ import { TestLLMServer } from "../lib/llm-server"
 
 const it = testEffect(Layer.mergeAll(AppLayer, TestLLMServer.layer, CrossSpawnSpawner.defaultLayer))
 const ref = { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") }
-const config = (url: string, style: "json" | "shell") => ({
+const config = (url: string) => ({
   model: "test/test-model",
   checkpoint: { thresholds: [] },
   experimental: { predict_next_prompt: false },
-  tool: { invocation_style_by_tool: { actor: style } },
   provider: {
     test: {
       npm: "@ai-sdk/openai-compatible",
@@ -86,7 +85,7 @@ const setup = (dir: string) =>
   })
 const operation = { subagent_type: "worker", description: "Lifecycle worker", prompt: "Keep working" }
 
-for (const style of ["json", "shell"] as const) {
+for (const style of ["abort", "interrupt"] as const) {
   it.live(
     `real QuickJS ${style} spawn survives VM completion and waiter cancellation before cancel and wait`,
     () =>
@@ -156,13 +155,13 @@ for (const style of ["json", "shell"] as const) {
               yield* fixture.actor.cancel(fixture.session.id, actorID, "forced")
             }
           }),
-        { git: true, config: (url) => config(url, style) },
+        { git: true, config: (url) => config(url) },
       ),
     30000,
   )
 
   it.live(
-    `real QuickJS ${style} foreground run ${style === "json" ? "abort" : "Effect interruption"} joins its actual child`,
+    `real QuickJS ${style} foreground run ${style === "abort" ? "abort" : "Effect interruption"} joins its actual child`,
     () =>
       provideTmpdirServer(
         ({ dir, llm }) =>
@@ -189,7 +188,7 @@ for (const style of ["json", "shell"] as const) {
             const actorID = yield* Deferred.await(ready)
             yield* llm.wait(1)
             try {
-              if (style === "json") {
+              if (style === "abort") {
                 fixture.controller.abort()
                 const result = yield* Fiber.join(work).pipe(Effect.timeout("5 seconds"))
                 expect(result.metadata.status).toBe("cancelled")
@@ -203,7 +202,7 @@ for (const style of ["json", "shell"] as const) {
               yield* fixture.actor.cancel(fixture.session.id, actorID, "forced")
             }
           }),
-        { git: true, config: (url) => config(url, style) },
+        { git: true, config: (url) => config(url) },
       ),
     30000,
   )

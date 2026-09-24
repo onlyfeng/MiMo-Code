@@ -9,7 +9,6 @@ import { ModelID, ProviderID } from "../../src/provider/schema"
 import { MessageID } from "../../src/session/schema"
 import { Log } from "../../src/util"
 import { ToolRegistry } from "../../src/tool"
-import { shellWrap } from "../../src/tool/shell-wrap"
 import { ToolScriptTool } from "../../src/tool/tool-script"
 import type * as Tool from "../../src/tool/tool"
 import { tmpdir } from "../fixture/fixture"
@@ -249,7 +248,7 @@ test("HTTP actor recovery validates the original task and rejects a different bi
   })
 }, 30_000)
 
-for (const style of ["json", "shell", "nested shell"] as const) {
+for (const style of ["json", "nested json"] as const) {
   test(`actor recovery binds an unbound retained user through the real ${style} tool entry`, async () => {
     await withActor(
       async (fixture) => {
@@ -275,12 +274,6 @@ for (const style of ["json", "shell", "nested shell"] as const) {
                 { operation: { action: "resume", actor_id: fixture.spawned.actorID, task_id: fixture.task.id } },
                 context,
               )
-            const actor = shellWrap(native)
-            if (style === "shell")
-              return yield* actor.execute(
-                { script: `actor resume ${fixture.spawned.actorID} --task ${fixture.task.id}` },
-                context,
-              )
             const exec = yield* (yield* ToolScriptTool).init()
             return yield* exec.execute(
               {
@@ -288,7 +281,7 @@ for (const style of ["json", "shell", "nested shell"] as const) {
               },
               {
                 ...context,
-                extra: { execTools: { current: [actor] } },
+                extra: { execTools: { current: [native] } },
               },
             )
           }),

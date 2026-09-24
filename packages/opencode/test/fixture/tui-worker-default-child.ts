@@ -27,10 +27,8 @@ const selectors = [
   "MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL",
   "MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS",
   "MIMOCODE_AUTO_APPROVE_DELETE",
-  "MIMOCODE_EXPERIMENTAL_ORCHESTRATOR",
 ]
 assert(selectors.every((key) => process.env[key] === undefined))
-assert.equal(Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR, false)
 assert.equal(process.env.MIMOCODE_SERVER_PASSWORD, undefined)
 assert.equal(process.env.MIMOCODE_DB, undefined)
 assert.equal(path.resolve(process.env.MIMOCODE_HOME ?? ""), path.join(process.cwd(), "runtime"))
@@ -261,7 +259,6 @@ try {
     JSON.stringify({
       runtime: Bun.version,
       childTestPreload: false,
-      orchestrator: Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR,
       selectorsAbsent: selectors.every((key) => process.env[key] === undefined),
       workers: 2,
       samePid: true,

@@ -15,7 +15,6 @@ import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { ActorTool, type ActorPromptOps } from "../../src/tool/actor"
-import { shellWrap } from "../../src/tool/shell-wrap"
 import { ActorRegistry } from "../../src/actor/registry"
 import { TaskRegistry } from "../../src/task/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
@@ -946,8 +945,7 @@ describe("Actor tool model context boundary", () => {
             ask: () => Effect.void,
           }
           yield* def.execute({ operation: { action, subagent_type: "general", description: "Brief task", prompt: "Only this briefing" } }, ctx)
-          yield* shellWrap({ ...def, id: "actor" }).execute({ script: `actor ${action} general "Brief task" "Only this briefing"` }, ctx)
-          expect(spawned).toHaveLength(2)
+          expect(spawned).toHaveLength(1)
           for (const input of spawned) {
             expect(input.context).toBe("none")
             expect(input.forkContext).toBeUndefined()
@@ -958,7 +956,7 @@ describe("Actor tool model context boundary", () => {
       ),
     )
 
-    it.live(`${action} rejects context and lifecycle through JSON and shell recovery before admission`, () =>
+    it.live(`${action} rejects context and lifecycle through JSON before admission`, () =>
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           let spawnCount = 0
@@ -966,7 +964,6 @@ describe("Actor tool model context boundary", () => {
           yield* installMockSpawn(() => { spawnCount += 1 })
           const { chat, assistant } = yield* seed()
           const def = yield* (yield* ActorTool).init()
-          const wrapped = shellWrap({ ...def, id: "actor" })
           const ctx = {
             sessionID: chat.id,
             messageID: assistant.id,
@@ -986,17 +983,6 @@ describe("Actor tool model context boundary", () => {
           ]) {
             const operation = { ...base, ...extra }
             expect(Exit.isFailure(yield* Effect.exit(def.execute({ operation }, ctx)))).toBe(true)
-            for (const raw of [
-              operation,
-              { operation },
-              { operation: JSON.stringify(operation) },
-              { operation: base, ...extra },
-              { operation: JSON.stringify(base), ...extra },
-            ]) {
-              const result = yield* wrapped.execute(raw as never, ctx)
-              expect(result.metadata.success).toBe(0)
-              expect(result.output).toMatch(/context|lifecycle/)
-            }
           }
           expect(spawnCount).toBe(0)
           expect(approvalCount).toBe(0)

@@ -480,7 +480,6 @@ export async function runExperiment(input: Input) {
           maxProviderRequests: limits.cases * limits.repeats * 2 * limits.maxSteps,
           environment: {
             packageTestPreload: !!process.env.MIMOCODE_TEST_TMPDIR_ROOT,
-            orchestrator: Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR,
             isolationRootProvided: !!process.env.MIMOCODE_SCHEMA_ISOLATION_ROOT,
           },
           catalog: {

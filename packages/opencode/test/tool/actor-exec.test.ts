@@ -13,7 +13,6 @@ import { Database, eq } from "../../src/storage"
 import { ToolRegistry, Truncate } from "../../src/tool"
 import { ToolScriptTool, renderToolScriptDeclarations, viewExecSubtools } from "../../src/tool/tool-script"
 import type * as Tool from "../../src/tool/tool"
-import { shellWrap } from "../../src/tool/shell-wrap"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -64,12 +63,12 @@ const setup = Effect.gen(function* () {
   return { session, registry, actor, exec, context }
 })
 
-for (const style of ["json", "shell"] as const) {
+for (const style of ["json"] as const) {
   it.live(`nested actor send and status use real inbox and registry in ${style} mode`, () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const fixture = yield* setup
-        const actor = style === "shell" ? { ...shellWrap(fixture.actor), nativeParameters: fixture.actor.parameters } : fixture.actor
+        const actor = fixture.actor
         const result = yield* fixture.exec.execute(
           {
             code: `const sent = await tools.actor({ operation: { action: "send", to_actor_id: "general-1", content: "nested hello" } });

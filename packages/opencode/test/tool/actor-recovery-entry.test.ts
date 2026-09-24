@@ -9,7 +9,6 @@ import { Plugin } from "../../src/plugin"
 import { Session } from "../../src/session"
 import { MessageID } from "../../src/session/schema"
 import { ToolRegistry, Truncate } from "../../src/tool"
-import { shellWrap } from "../../src/tool/shell-wrap"
 import { ToolScriptTool, renderToolScriptDeclarations } from "../../src/tool/tool-script"
 import type * as Tool from "../../src/tool/tool"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -29,7 +28,7 @@ const it = testEffect(
   ),
 )
 
-for (const style of ["json", "shell"] as const) {
+for (const style of ["json"] as const) {
   it.live(`actor recovery task schema and nested intake retain the native contract in ${style} mode`, () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
@@ -48,7 +47,7 @@ for (const style of ["json", "shell"] as const) {
           lifecycle: "ephemeral",
         })
         const native = (yield* (yield* ToolRegistry.Service).named()).actor
-        const actor = style === "shell" ? { ...shellWrap(native), nativeParameters: native.parameters } : native
+        const actor = native
         for (const task_id of [undefined, "T2.1"])
           expect(
             native.parameters.safeParse({ operation: { action: "resume", actor_id: "missing", task_id } }).success,
@@ -95,7 +94,7 @@ for (const style of ["json", "shell"] as const) {
           },
           { ...context, agent: "general", actorID: "general-1" },
         )
-        expect(blocked.metadata.status).toBe(style === "shell" ? "completed" : "code_error")
+        expect(blocked.metadata.status).toBe("code_error")
         expect(blocked.output).toContain("Subagents can only use actor send")
         expect((yield* registry.get(session.id, "general-1"))?.status).toBe("pending")
       }),
