@@ -278,9 +278,9 @@ export interface SpawnInput {
   // policy (the session tool creates a worktree and passes its dir here). When
   // unset, the child shares the spawner's directory.
   cwd?: string
-  // Peer-only deletion provenance. SessionTool supplies this only when it
-  // created the cwd via `session create --isolate`; spawnPeer persists it before
-  // publishing/registering the child so cancellation never infers ownership.
+  // Peer-only deletion provenance. An explicit workspace owner may supply this
+  // with cwd; spawnPeer persists it before publishing/registering the child so
+  // cancellation never infers ownership.
   worktreeOwnership?: { directory: string; branch: string }
   forkContext?: ForkContext // NEW
   lifecycle?: Lifecycle
@@ -629,7 +629,7 @@ export const layer = Layer.effect(
             const error = Cause.pretty(cause)
             const status = cancelled ? ("cancelled" as const) : ("failed" as const)
             // Recover the classification runAgentLoop attached. Squash is the
-            // established idiom here (see session/prompt.ts, tool/shell-wrap.ts).
+            // established idiom here (see session/prompt.ts).
             // A failure raised anywhere else carries none, and the field stays
             // absent rather than being guessed from `error`.
             const squashed = Cause.squash(cause)
@@ -1151,8 +1151,8 @@ export const layer = Layer.effect(
       // actor_id === child.id, mode "peer") SYNCHRONOUSLY here — before spawn
       // resolves and before the child's first turn. This is the single
       // spawn-time registration that makes a child addressable the instant
-      // `session create` returns: Inbox.send's ESRCH pre-check (reg.get) and
-      // `session send` both resolve against this row without waiting for the
+      // spawn returns: Inbox.send's ESRCH pre-check (reg.get) and
+      // any later relay both resolve against this row without waiting for the
       // child to arm anything on its first turn. turn_count/status start at 0/
       // "pending"; the per-step turn heartbeat (registry.updateTurn) advances
       // them later. No double-registration: nothing on the first-turn path

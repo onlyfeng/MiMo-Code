@@ -5835,34 +5835,6 @@ it.live("static loop returns assistant text through local provider", () =>
   ),
 )
 
-it.live("injects orchestrator system prompt for agent 'orchestrator'", () =>
-  provideTmpdirServer(
-    Effect.fnUntraced(function* ({ llm }) {
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const session = yield* sessions.create({
-        title: "Orchestrator",
-        permission: [{ permission: "*", pattern: "*", action: "allow" }],
-      })
-
-      yield* prompt.prompt({
-        sessionID: session.id,
-        agent: "orchestrator",
-        model: ref,
-        noReply: true,
-        parts: [{ type: "text", text: "kick things off" }],
-      })
-
-      yield* llm.text("ok")
-      yield* prompt.loop({ sessionID: session.id })
-
-      const inputs = yield* llm.inputs
-      expect(JSON.stringify(inputs)).toContain("MiMoCode Orchestrator")
-    }),
-    { git: true, config: providerCfg },
-  ),
-)
-
 it.live("static loop consumes queued replies across turns", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
@@ -10081,9 +10053,9 @@ it.live("run approval reaches processor doom-loop asks without tool ownership me
   ),
 )
 
-for (const mode of ["matching", "changed", "legacy", "legacy-json"] as const) {
+for (const mode of ["matching", "changed", "legacy-json"] as const) {
   itActor.live(
-    `frozen native Actor shell contract ${mode} cannot borrow a live enum`,
+    `frozen native Actor JSON contract ${mode} cannot borrow a live enum`,
     () =>
       provideTmpdirServer(
         Effect.fnUntraced(function* ({ llm }) {
@@ -10117,7 +10089,7 @@ for (const mode of ["matching", "changed", "legacy", "legacy-json"] as const) {
           )
           const actorSnapshot = snapshot.find((item) => item.name === "actor")
           if (!actorSnapshot?.native_input_schema) throw new Error("missing captured native Actor schema")
-          expect(actorSnapshot.input_schema.properties).toHaveProperty(mode === "legacy-json" ? "operation" : "script")
+          expect(actorSnapshot.input_schema.properties).toHaveProperty("operation")
           expect(JSON.stringify(actorSnapshot.native_input_schema)).toContain('"general"')
           if (mode === "changed")
             actorSnapshot.native_input_schema = JSON.parse(
@@ -10166,7 +10138,6 @@ for (const mode of ["matching", "changed", "legacy", "legacy-json"] as const) {
           git: true,
           config: (url) => ({
             ...providerCfg(url),
-            tool: { invocation_style_by_tool: { actor: mode === "legacy-json" ? "json" : "shell" } },
           }),
         },
       ),

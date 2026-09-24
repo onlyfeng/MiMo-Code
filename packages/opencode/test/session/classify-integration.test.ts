@@ -28,7 +28,6 @@ import type { Actor } from "../../src/actor/spawn"
 import { MessageID, type SessionID } from "../../src/session/schema"
 import { prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 import { ProviderID, ModelID } from "../../src/provider/schema"
-import { Flag } from "../../src/flag/flag"
 import { Log } from "../../src/util"
 import { asSchema, jsonSchema, tool } from "ai"
 import { tmpdir } from "../fixture/fixture"
@@ -540,9 +539,7 @@ describe("classifier routing — integration", () => {
     ])
     const forkActorID = "explore-fork-frozen-tools"
     const prevSpawnRef = spawnRef.current
-    const prevOrchestrator = Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR
     try {
-      Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR = true
       await Bun.write(readmePath, "# Frozen Tool Dispatch\n")
       await writeConfig(tmp.path, stub.origin)
       await Instance.provide({
@@ -626,11 +623,7 @@ describe("classifier routing — integration", () => {
 
               const read = stub.captures[0]?.tools?.find((item) => item.function.name === "read")
               const names = stub.captures[0]?.tools?.map((item) => item.function.name)
-              expect(names).toEqual([
-                "session",
-                "grep",
-                "read",
-              ])
+              expect(names).toEqual(["grep", "read"])
               expect(names).not.toContain("missing_frozen")
               expect(names).not.toContain("bash")
               expect(read?.function.description).toBe("frozen parent read description")
@@ -647,96 +640,6 @@ describe("classifier routing — integration", () => {
           ),
       })
     } finally {
-      Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR = prevOrchestrator
-      spawnRef.current = prevSpawnRef
-      await stub.stop()
-    }
-  }, 20_000)
-
-  test("full-context fork exposes parent session schema but rejects it for a non-orchestrator child", async () => {
-    await using tmp = await tmpdir({ git: true })
-    const stub = startScriptedLLMServer([
-      {
-        lines: toolCallResponse({
-          id: "call_frozen_session",
-          name: "session",
-          args: JSON.stringify({ command: "list" }),
-        }),
-      },
-      { lines: textStopResponse("done") },
-    ])
-    const forkActorID = "build-fork-frozen-session"
-    const prevSpawnRef = spawnRef.current
-    const prevOrchestrator = Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR
-    try {
-      Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR = true
-      await writeConfig(tmp.path, stub.origin)
-      await Instance.provide({
-        directory: tmp.path,
-        fn: () =>
-          runFork(
-            Effect.gen(function* () {
-              const sessions = yield* Session.Service
-              const prompt = yield* SessionPrompt.Service
-              const registry = yield* ActorRegistry.Service
-              const session = yield* sessions.create({ title: "fork-frozen-session" })
-
-              yield* registry.register({
-                sessionID: session.id,
-                actorID: forkActorID,
-                mode: "subagent",
-                agent: "build",
-                description: "fork identity gate test",
-                contextMode: "full",
-                background: false,
-                lifecycle: "ephemeral",
-                tools: "INHERIT",
-              })
-
-              const forkCtx: Actor.ForkContext = {
-                system: ["fork-system-prompt"],
-                turnContext: undefined,
-                tools: {
-                  session: tool({
-                    description: "frozen parent session description",
-                    inputSchema: jsonSchema({
-                      type: "object",
-                      properties: { command: { type: "string" } },
-                      required: ["command"],
-                      additionalProperties: false,
-                    }),
-                  }),
-                },
-                inheritedMessages: [],
-                parentPermission: [],
-                watermarkMsgID: MessageID.ascending(),
-                model: { providerID: ProviderID.make("alibaba"), modelID: ModelID.make("qwen-plus") },
-              }
-              spawnRef.current = {
-                getForkContext: (_sessionID: string, id: string) =>
-                  Effect.succeed(id === forkActorID ? forkCtx : undefined),
-                spawn: () => Effect.die("spawn not used in fork identity test"),
-                cancel: () => Effect.die("cancel not used in fork identity test"),
-              } as unknown as NonNullable<typeof spawnRef.current>
-              const releaseActor = prompt.bindActor?.(spawnRef.current)
-
-              yield* prompt.prompt({
-                sessionID: session.id,
-                agent: "build",
-                agentID: forkActorID,
-                parts: [{ type: "text", text: "List peer sessions." }],
-              })
-              releaseActor?.()
-
-              expect(stub.captures[0]?.tools?.map((item) => item.function.name)).toEqual(["session"])
-              expect(JSON.stringify(stub.captures[1].messages)).toContain(
-                "only available to the orchestrator agent",
-              )
-            }),
-          ),
-      })
-    } finally {
-      Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR = prevOrchestrator
       spawnRef.current = prevSpawnRef
       await stub.stop()
     }

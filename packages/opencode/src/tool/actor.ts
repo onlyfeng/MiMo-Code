@@ -3,9 +3,7 @@ import { RecoverableError } from "./recoverable"
 import { NotFoundError } from "@/storage"
 import DESCRIPTION from "./actor.txt"
 import DESCRIPTION_CHECKPOINT from "./actor.checkpoint.txt"
-import SHELL_DESCRIPTION from "./actor.shell.txt"
 import { withCheckpointDescription, withCheckpointClause } from "./checkpoint-description"
-import { tokenize } from "./shell-tokenize"
 import z from "zod"
 import { Session } from "../session"
 import { SessionID, MessageID, PartID } from "../session/schema"
@@ -77,7 +75,6 @@ const MODEL_PARAM_DESCRIPTION =
 const VARIANT_PARAM_DESCRIPTION =
   "(optional) Named variant of this subagent's model, usually a reasoning-effort level (e.g. low/high/max). It must be one the resolved model lists — run `actor models` to see each model's variants; an unknown name fails before the subagent starts and lists the valid ones. Omit it for the default: the agent's configured variant when the subagent uses the agent's configured model, otherwise none. Your own current variant is not inherited, and the variant stays fixed for the actor's lifetime."
 
-const KNOWN_ACTOR_VERBS = ["run", "spawn", "status", "wait", "cancel", "resume", "send", "models"]
 // Default token budget for checkpoint context injected into subagent prompts.
 // ~11K tokens ≈ 44KB UTF-8, enough for a concise progress summary without
 // overwhelming the subagent's context window.
@@ -95,328 +92,6 @@ function capStateContext(text: string, maxTokens: number) {
   const head = Math.floor(budget * 0.65)
   const tail = budget - head
   return takeUtf8PrefixByBytes(text, head) + marker + (tail > 0 ? takeUtf8SuffixByBytes(text, tail) : "")
-}
-
-function levenshteinActor(a: string, b: string): number {
-  const m = a.length, n = b.length
-  if (m === 0) return n
-  if (n === 0) return m
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
-  for (let i = 0; i <= m; i++) dp[i][0] = i
-  for (let j = 0; j <= n; j++) dp[0][j] = j
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
-    }
-  }
-  return dp[m][n]
-}
-
-function suggestActorVerb(input: string): string | undefined {
-  const candidates = KNOWN_ACTOR_VERBS.map((v) => ({ v, d: levenshteinActor(input, v) })).filter((c) => c.d <= 2)
-  if (candidates.length !== 1) return undefined
-  return candidates[0].v
-}
-
-// Static args type for shell parsing — mirrors the discriminated union shape but
-// uses z.string() for subagent_type since the dynamic enum is only needed at
-// Zod validation time (inside execute), not at parse time.
-type ActorShellArgs =
-  | { operation: { action: "run"; subagent_type: string; description: string; prompt: string; model?: string; variant?: string; task_id?: string; timeout_ms?: number; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
-  | { operation: { action: "spawn"; subagent_type: string; description: string; prompt: string; lifecycle?: "persistent"; model?: string; variant?: string; task_id?: string; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
-  | { operation: { action: "status"; actor_id: string } }
-  | { operation: { action: "wait"; actor_id: string; timeout_ms?: number } }
-  | { operation: { action: "cancel"; actor_id: string } }
-  | { operation: { action: "resume"; actor_id: string; task_id?: string } }
-  | { operation: { action: "send"; to_actor_id: string; content: string; to_session_id?: string; type?: string } }
-  | { operation: { action: "models"; vision?: boolean; limit?: number } }
-
-function actorArityError(verb: string, expected: string, args: string[], line: number) {
-  return Effect.fail({
-    kind: "arity",
-    line,
-    detail: `actor: ${verb}: arity mismatch\n  got:      actor ${verb} ${args.join(" ")}\n  expected: actor ${verb} ${expected}`,
-  })
-}
-
-// Generic `--name value` / `--name=value` extractor for a fixed set of optional
-// flags. Positionals (and any unrecognized tokens) fall through to `rest`.
-function extractNamedFlags(
-  args: string[],
-  names: string[],
-  line: number,
-): Effect.Effect<{ flags: Record<string, string>; rest: string[] }, { kind: "flag"; line: number; detail: string }> {
-  const rest: string[] = []
-  const flags: Record<string, string> = {}
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i]
-    const bare = names.find((n) => a === `--${n}`)
-    if (bare) {
-      const next = args[i + 1]
-      // Truthiness on purpose: a missing value and an explicitly empty one are both
-      // rejected, matching the `--flag=` form below. Accepting "" here would let the
-      // verb mappings drop it as falsy and launch with a default the caller never asked for.
-      if (!next)
-        return Effect.fail({ kind: "flag" as const, line, detail: `actor: --${bare} requires a value` })
-      flags[bare] = next
-      i++
-      continue
-    }
-    const eq = names.find((n) => a.startsWith(`--${n}=`))
-    if (eq) {
-      const v = a.slice(`--${eq}=`.length)
-      if (v === "") return Effect.fail({ kind: "flag" as const, line, detail: `actor: --${eq} requires a value` })
-      flags[eq] = v
-      continue
-    }
-    rest.push(a)
-  }
-  return Effect.succeed({ flags, rest })
-}
-
-// `--actor` is no longer a flag on spawn/run. Reject it only when it appears
-// AFTER the three positionals are accounted for, i.e. where a flag would go —
-// scanning every token would misfire on a prompt/description that is literally
-// "--actor". Returns the teachable failure, or undefined to fall through.
-function rejectActorFlag(verb: string, args: string[], line: number) {
-  const flagIdx = args.findIndex((a) => a === "--actor" || a.startsWith("--actor="))
-  if (flagIdx < 3) return undefined
-  return Effect.fail({
-    kind: "flag" as const,
-    line,
-    detail: `actor: ${verb}: unknown flag --actor. To give more work to a subagent you already have: actor send <actor_id> "<message>".`,
-  })
-}
-
-const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefined, args: string[], line: number) {
-  switch (verb) {
-    case "run": {
-      const rejected = rejectActorFlag(verb, args, line)
-      if (rejected) return yield* rejected
-      const { flags, rest } = yield* extractNamedFlags(
-        args,
-        ["model", "variant", "task", "timeout", "command", "context", "output-schema"],
-        line,
-      )
-      if (rest.length !== 3) return yield* actorArityError("run", '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--variant <name>] [--task <TID>] [--timeout <ms>] [--command <cmd>] [--context none|state|full] [--output-schema <json>]', rest, line)
-      return {
-        operation: {
-          action: "run" as const,
-          subagent_type: rest[0],
-          description: rest[1],
-          prompt: rest[2],
-          ...(flags.model ? { model: flags.model } : {}),
-          ...(flags.variant ? { variant: flags.variant } : {}),
-          ...(flags.task ? { task_id: flags.task } : {}),
-          ...(flags.timeout ? { timeout_ms: Number(flags.timeout) } : {}),
-          ...(flags.command ? { command: flags.command } : {}),
-          ...(flags.context ? { context: flags.context } : {}),
-          // JSON.parse throw surfaces as a parse-error for the whole script (parse
-          // is all-or-nothing); bad enum/number flag values instead defer to zod at execute.
-          ...(flags["output-schema"] ? { output_schema: JSON.parse(flags["output-schema"]) } : {}),
-        },
-      } as ActorShellArgs
-    }
-    case "spawn": {
-      const rejected = rejectActorFlag(verb, args, line)
-      if (rejected) return yield* rejected
-      const { flags, rest } = yield* extractNamedFlags(
-        args,
-        ["model", "variant", "task", "command", "context", "lifecycle", "output-schema"],
-        line,
-      )
-      if (rest.length !== 3) return yield* actorArityError("spawn", '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--variant <name>] [--task <TID>] [--command <cmd>] [--context none|state|full] [--lifecycle persistent] [--output-schema <json>]', rest, line)
-      return {
-        operation: {
-          action: "spawn" as const,
-          subagent_type: rest[0],
-          description: rest[1],
-          prompt: rest[2],
-          ...(flags.model ? { model: flags.model } : {}),
-          ...(flags.variant ? { variant: flags.variant } : {}),
-          ...(flags.task ? { task_id: flags.task } : {}),
-          ...(flags.command ? { command: flags.command } : {}),
-          ...(flags.context ? { context: flags.context } : {}),
-          ...(flags.lifecycle ? { lifecycle: flags.lifecycle } : {}),
-          ...(flags["output-schema"] ? { output_schema: JSON.parse(flags["output-schema"]) } : {}),
-        },
-      } as ActorShellArgs
-    }
-    case "status":
-      if (args.length !== 1) return yield* actorArityError("status", "<actor_id>", args, line)
-      return { operation: { action: "status" as const, actor_id: args[0] } } as ActorShellArgs
-    case "wait": {
-      const { flags, rest } = yield* extractNamedFlags(args, ["timeout"], line)
-      if (rest.length !== 1) return yield* actorArityError("wait", "<actor_id> [--timeout <ms>]", rest, line)
-      return {
-        operation: {
-          action: "wait" as const,
-          actor_id: rest[0],
-          ...(flags.timeout ? { timeout_ms: Number(flags.timeout) } : {}),
-        },
-      } as ActorShellArgs
-    }
-    case "resume": {
-      const { flags, rest } = yield* extractNamedFlags(args, ["task"], line)
-      if (rest.length !== 1) return yield* actorArityError("resume", "<actor_id> [--task <TID>]", rest, line)
-      return {
-        operation: {
-          action: "resume" as const,
-          actor_id: rest[0],
-          ...(flags.task ? { task_id: flags.task } : {}),
-        },
-      } as ActorShellArgs
-    }
-    case "cancel":
-      if (args.length !== 1) return yield* actorArityError("cancel", "<actor_id>", args, line)
-      return { operation: { action: "cancel" as const, actor_id: args[0] } } as ActorShellArgs
-    case "send": {
-      const { flags, rest } = yield* extractNamedFlags(args, ["session", "type"], line)
-      if (rest.length !== 2)
-        return yield* actorArityError("send", '<to_actor_id> "<content>" [--session <id>] [--type <t>]', rest, line)
-      // NOT the layer that makes a blank body unreachable — `parameters` DOES
-      // re-validate a shell-parsed op. shell-wrap.ts calls `def.execute(parsed)`
-      // on the def produced by Tool.init, which is wrap()-decorated, and wrap()
-      // runs `parameters.parse(args)` inside execute — so `content:
-      // z.string().min(1)` already rejects `actor send x ""` (verified: with
-      // this guard removed the shell route still enqueues nothing and reports
-      // `Too small: expected string to have >=1 characters → at
-      // operation.content`).
-      //
-      // This guard earns its place for two other reasons: it turns that generic
-      // zod dump into one specific, teachable message, and `.trim()` also
-      // rejects whitespace-only bodies, which `min(1)` accepts.
-      if (rest[1].trim() === "")
-        return yield* Effect.fail({
-          kind: "flag" as const,
-          line,
-          detail: "actor: send: content must not be empty",
-        })
-      return {
-        operation: {
-          action: "send" as const,
-          to_actor_id: rest[0],
-          content: rest[1],
-          ...(flags.session ? { to_session_id: flags.session } : {}),
-          ...(flags.type ? { type: flags.type } : {}),
-        },
-      } as ActorShellArgs
-    }
-    case "models": {
-      const vision = args.includes("--vision")
-      const withoutVision = args.filter((a) => a !== "--vision")
-      const { flags, rest } = yield* extractNamedFlags(withoutVision, ["limit"], line)
-      if (rest.length !== 0)
-        return yield* actorArityError("models", "[--vision] [--limit <n>]", rest, line)
-      return {
-        operation: {
-          action: "models" as const,
-          ...(vision ? { vision: true } : {}),
-          ...(Number.isInteger(Number(flags.limit)) && Number(flags.limit) > 0 ? { limit: Number(flags.limit) } : {}),
-        },
-      } as ActorShellArgs
-    }
-    default: {
-      const suggestion = suggestActorVerb(verb ?? "")
-      const detail =
-        `actor: unknown verb "${verb ?? ""}"\n` +
-        `  available verbs: ${KNOWN_ACTOR_VERBS.join(", ")}` +
-        (suggestion ? `\n  did you mean: ${suggestion}?` : "")
-      return yield* Effect.fail({ kind: "unknown-verb", line, detail })
-    }
-  }
-})
-
-export function parseActorScript(
-  script: string,
-): Effect.Effect<ActorShellArgs[], unknown> {
-  return Effect.gen(function* () {
-    const argvList = yield* tokenize(script)
-    const out: ActorShellArgs[] = []
-    for (const argv of argvList) {
-      const [head, verb, ...rest] = argv.tokens
-      if (head !== "actor") {
-        // Teaching error: a command starting with a flag is almost always a flag
-        // that trailed a heredoc onto its own line (after the closing EOF). Point
-        // back at the run/spawn line so the model moves it before <<EOF.
-        const flagHint = head?.startsWith("--")
-          ? " — a flag can't start a command; if it followed a heredoc, move it before <<EOF on the run/spawn line"
-          : ""
-        return yield* Effect.fail({
-          kind: "unknown-verb",
-          line: argv.line,
-          detail: `actor: every command must start with 'actor' (got '${head ?? ""}')${flagHint}`,
-        })
-      }
-      const parsed = yield* mapActorVerb(verb, rest, argv.line)
-      out.push(parsed)
-    }
-    return out
-  })
-}
-
-function inferAction(o: Record<string, unknown>): "run" | "spawn" {
-  if (o.action === "spawn" || o.action === "run") return o.action
-  if (o.background === true || o.async === true) return "spawn"
-  return "run"
-}
-
-// Recover a shell-mode actor call that arrived shaped like the JSON tool args
-// (no `script`): the Task-prior bare `{subagent_type, description, prompt}`, a
-// stringified `{operation:"..."}` envelope, or an already-nested `{operation:{}}`.
-// Returns the parsed shape for shellWrap to route to execute (which zod-validates
-// it), or undefined if rawArgs can't be lifted.
-export function recoverActorArgs(rawArgs: unknown): ActorShellArgs | undefined {
-  if (rawArgs == null || typeof rawArgs !== "object") return undefined
-  let obj = rawArgs as Record<string, unknown>
-  if (typeof obj.operation === "string") {
-    try {
-      const inner = JSON.parse(obj.operation)
-      if (inner && typeof inner === "object" && !Array.isArray(inner)) obj = { ...obj, operation: inner }
-    } catch {}
-  }
-  if (obj.operation && typeof obj.operation === "object" && !Array.isArray(obj.operation)) {
-    const operation = obj.operation as Record<string, unknown>
-    // Conflicting copies cannot choose a different context, lifetime or variant
-    // silently. Keep the extra root fields so the native strict schema rejects this shape.
-    if (["context", "lifecycle", "variant"].some((key) =>
-      Object.hasOwn(obj, key) && Object.hasOwn(operation, key) && obj[key] !== operation[key],
-    )) return { ...obj, operation } as ActorShellArgs
-    return {
-      operation: {
-        ...operation,
-        ...(Object.hasOwn(obj, "context") ? { context: obj.context } : {}),
-        ...(Object.hasOwn(obj, "lifecycle") ? { lifecycle: obj.lifecycle } : {}),
-        ...(Object.hasOwn(obj, "variant") ? { variant: obj.variant } : {}),
-      },
-    } as ActorShellArgs
-  }
-  const subagent_type = obj.subagent_type
-  const description = obj.description
-  const prompt = obj.prompt
-  if (typeof subagent_type === "string" && typeof description === "string" && typeof prompt === "string") {
-    const op: Record<string, unknown> = { action: inferAction(obj), subagent_type, description, prompt }
-    // Preserve explicit context and lifetime requests, including malformed
-    // values, for the native schema and persistent/full admission guard. Dropping
-    // them would silently create a plain ephemeral actor instead.
-    if (Object.hasOwn(obj, "context")) op.context = obj.context
-    if (Object.hasOwn(obj, "lifecycle")) op.lifecycle = obj.lifecycle
-    if (typeof obj.model === "string") op.model = obj.model
-    // Like context and lifecycle, keep an explicit variant even when malformed:
-    // the strict schema rejects it instead of silently using the default.
-    if (Object.hasOwn(obj, "variant")) op.variant = obj.variant
-    if (typeof obj.task_id === "string") op.task_id = obj.task_id
-    // Carried on purpose even though no action accepts it, so the strict schema
-    // rejects the call and the model is told the argument does not exist. This is
-    // NOT dead code: dropping it would recover the call into a valid spawn and
-    // hand back a fresh, empty subagent — the exact silent failure that removing
-    // the argument is meant to end, reached through the path a model confused
-    // enough to still pass actor_id is most likely to take.
-    if (typeof obj.actor_id === "string") op.actor_id = obj.actor_id
-    return { operation: op } as ActorShellArgs
-  }
-  return undefined
 }
 
 export const ActorTool = Tool.define(
@@ -878,7 +553,7 @@ export const ActorTool = Tool.define(
           const more = ordered.length > shown.length ? `\n… and ${ordered.length - shown.length} more (raise --limit)` : ""
           const output = shown.length === 0
             ? (op.vision ? "No vision-capable models are configured. Configure a vision model or use an OCR tool." : "No models are configured.")
-            : `${header} (${shown.length} of ${ordered.length}):\n${lines.join("\n")}${more}\nPass any of these to actor --model, and optionally one of that model's listed variants to --variant.`
+            : `${header} (${shown.length} of ${ordered.length}):\n${lines.join("\n")}${more}\nPass a listed model and, optionally, one of its variants in actor run/spawn JSON arguments.`
           return { title: header, output, metadata: { count: shown.length, total: ordered.length, vision: !!op.vision } as Record<string, any> }
         }
 
@@ -1192,11 +867,6 @@ export const ActorTool = Tool.define(
         description: withCheckpointDescription(DESCRIPTION, DESCRIPTION_CHECKPOINT),
         parameters,
         execute: (input: z.infer<typeof parameters>, ctx: Tool.Context) => run(input, ctx).pipe(Effect.orDie),
-        shell: {
-          description: SHELL_DESCRIPTION,
-          parse: parseActorScript,
-          recover: recoverActorArgs,
-        },
       }
     })
   }),

@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-23
-- Upstream: `a273d3450ee05ba5163320eae59d7716b778e480`
-- Prior reviewed upstream: `1579e7d9ee5fca87b707c3892dc725316674a9d6`
-- Main behavior (runtime/tests): `2c53e908ac96eb4f7d00deb3a719780991abaea5`
-- Bundled guidance content: `a08d967102b0199c828fb53f187ceb8494c40b91`
-- Prior fork `main` tip: `b02cd8669ab99051db713749f3a5651e18cb8984`
+- Last reviewed: 2026-09-24
+- Upstream: `2b993ac98283bb1283313982e699df706e9ad235`
+- Prior reviewed upstream: `a273d3450ee05ba5163320eae59d7716b778e480`
+- Main behavior (runtime/tests): `22f3ea5e1b597dd60709ed6e96256042a421414b`
+- Bundled guidance content: `22f3ea5e1b597dd60709ed6e96256042a421414b`
+- Prior fork `main` tip: `616fc5fa0a132d6899aaaafc3a7b0eacb12e20aa`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-09-23 full sync](upstream-sync-2026-09-23.md), three capabilities through `a273d345`. Remove the upstream-retired PascalCase model-facing projection and tool-call flooding middleware, and adopt same-step exact duplicate cancellation with coordinated `doom_loop` opt-out. Preserve canonical tool IDs, FIFO and failure cascade, fork replay boundaries, hidden-MCP/native Actor snapshot identity and all active FD/FC contracts. The preceding day's flooding and PascalCase dispositions are historical, not active behavior.
+Latest reviewed synchronization: [2026-09-24 full sync](upstream-sync-2026-09-24.md), three capabilities through `2b993ac9`. Retire Orchestrator and tool-specific shell invocation, preserve local image attachment paths, and keep the shared fork permission, Actor, frozen context and request-authority contracts. FC-018 retires with its parser; the remaining FD/FC owners stay active.
+
+Previous synchronization: [2026-09-23 full sync](upstream-sync-2026-09-23.md), three capabilities through `a273d345`. It removed PascalCase model-facing projection and tool-call flooding middleware, and adopted same-step exact duplicate cancellation with coordinated `doom_loop` opt-out. Canonical tool IDs, FIFO and failure cascade, fork replay boundaries and hidden-MCP/native Actor snapshot identity remain active.
 
 Previous synchronization: [2026-09-22 full sync](upstream-sync-2026-09-22.md), ten capabilities through `1579e7d9`. It introduced the now-retired flooding and PascalCase projection alongside still-active failure cascade, runtime-local Actor status, inbox/TUI projections, automatic title tool choice, the 0.1.15 release, MCP confirmation elicitation and opt-in host model transport.
 
@@ -79,7 +81,6 @@ not change their implementation. The preceding review is retained in the
 | FC-015 | compaction context budget, projection, frozen prefix, and trigger ratio                                   | Upstream trigger plus bounded fork projection                    | Preserve ratio parity, no-tool summaries, and config precedence                          |
 | FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets                                               | Upstream voice protocol plus fork lifecycle/editor hardening     | Preserve owner identity, drain-before-idle, and grapheme boundaries                      |
 | FC-017 | History SQLite projection and attachment preview formatting                                               | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds and original attachment locators                  |
-| FC-018 | actor shell flag values (`extractNamedFlags` and the verb mappings)                                       | Fork hardening of shared parsing                                 | Reject an explicitly empty value in both flag forms                                      |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -667,8 +668,8 @@ not change their implementation. The preceding review is retained in the
   project/worktree cannot receive the temporary-file no-confirmation exemption.
   A non-temporary deletion uses one `bash_delete` confirmation for the full
   command, after checking explicit denies for its Bash and external-directory
-  effects. Only an actual reply or explicit forwarded one-shot approval of
-  that full-command request replaces ordinary asks; automatic deletion approval still runs ordinary Bash/path authorization.
+  effects. Only an actual reply to that full-command request replaces ordinary
+  asks; automatic deletion approval still runs ordinary Bash/path authorization.
   Delete auto-approval, including dangerous startup, is evaluated in
   the Permission service after explicit `bash_delete` denies; it cannot skip
   those earlier Bash/path deny checks. Broad ordinary allow rules do not
@@ -1630,9 +1631,10 @@ logged`, and the peer `success`/`failure` variants of
 - Review basis: upstream `5198ff540efb5ca9fff2baa64555324d43a721b9`, main runtime/test behavior `4eacc84dccf83c22f533c35bea282d4c5a38cacd` (history fixes already present at `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d`).
 - Retirement condition: upstream supplies equivalent NUL fidelity, SQL-side field/list budgets and structural locator-safe omission behavior, proven against raw retrieval and real preview formatting.
 
-## FC-018 — explicit empty values in actor shell flags
+## FC-018 — explicit empty values in actor shell flags (retired)
 
-- Status: active
+- Status: retired on 2026-09-24 by upstream `2b993ac9`: the tool shell invocation format, parser and flag mappings were removed. JSON Actor schema validation remains active under FD-006, but this shell-only hardening has no runtime surface. The former contract and evidence below are historical.
+- Former status: active
 - Canonical owner: fork `main` actor shell argument parsing
 - Observable contract: `extractNamedFlags` rejects an explicitly empty value in
   both flag forms. `--flag=` already failed; `--flag ""` now fails the same way

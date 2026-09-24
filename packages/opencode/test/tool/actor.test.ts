@@ -15,7 +15,6 @@ import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { ActorTool, type ActorPromptOps } from "../../src/tool/actor"
-import { shellWrap } from "../../src/tool/shell-wrap"
 import { ActorRegistry } from "../../src/actor/registry"
 import { TaskRegistry } from "../../src/task/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
@@ -1254,8 +1253,7 @@ describe("Actor tool default context", () => {
             ask: () => Effect.void,
           }
           yield* def.execute({ operation: { action, subagent_type: "general", description: "Brief task", prompt: "Only this briefing" } }, ctx)
-          yield* shellWrap({ ...def, id: "actor" }).execute({ script: `actor ${action} general "Brief task" "Only this briefing"` }, ctx)
-          expect(spawned).toHaveLength(2)
+          expect(spawned).toHaveLength(1)
           for (const input of spawned) {
             expect(input.context).toBe("none")
             expect(input.forkContext).toBeUndefined()
@@ -1269,8 +1267,8 @@ describe("Actor tool default context", () => {
   }
 })
 
-describe("Actor tool recovered context", () => {
-  it.live("valid recovered modes and persistent full context reach the spawn implementation", () =>
+describe("Actor tool JSON context", () => {
+  it.live("valid context modes and persistent full context reach spawn", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const spawned: SpawnInput[] = []
@@ -1283,7 +1281,6 @@ describe("Actor tool recovered context", () => {
           activeTools: [], loadedMcpTools: [], inheritedMessages, parentPermission: [],
         })
         const def = yield* (yield* ActorTool).init()
-        const wrapped = shellWrap({ ...def, id: "actor" })
         const ctx = {
           sessionID: chat.id, messageID: assistant.id, agent: "build",
           abort: new AbortController().signal, extra: {}, messages,
@@ -1293,31 +1290,26 @@ describe("Actor tool recovered context", () => {
           { context: "none" }, { context: "state" }, { context: "full" },
           { context: "full", lifecycle: "persistent" },
         ] as const) {
-          const base = { action: "spawn", subagent_type: "general", description: "Recovered briefing", prompt: "Brief task" }
-          const operation = { ...base, ...mode }
-          for (const raw of [
-            operation, { operation }, { operation: JSON.stringify(operation) },
-            { operation: base, ...mode }, { operation: JSON.stringify(base), ...mode },
-          ]) {
-            const result = yield* wrapped.execute(raw as never, ctx)
-            expect(result.metadata.success).toBe(1)
-            const input = spawned.at(-1)!
-            expect(input.context).toBe(mode.context)
-            expect(input.lifecycle).toBe("lifecycle" in mode ? mode.lifecycle : undefined)
-            if (mode.context === "full") {
-              expect(input.forkContext?.inheritedMessages).toEqual(inheritedMessages)
-              expect(input.forkContext?.system).toEqual(["frozen system"])
-              expect(input.forkContext?.turnContext).toBe("frozen turn context")
-              expect(input.forkContext?.watermarkMsgID).toBe(messages.at(-1)!.info.id)
-            } else expect(input.forkContext).toBeUndefined()
-          }
+          yield* def.execute({ operation: {
+            action: "spawn", subagent_type: "general", description: "Context briefing",
+            prompt: "Brief task", ...mode,
+          } }, ctx)
+          const input = spawned.at(-1)!
+          expect(input.context).toBe(mode.context)
+          expect(input.lifecycle).toBe("lifecycle" in mode ? mode.lifecycle : undefined)
+          if (mode.context === "full") {
+            expect(input.forkContext?.inheritedMessages).toEqual(inheritedMessages)
+            expect(input.forkContext?.system).toEqual(["frozen system"])
+            expect(input.forkContext?.turnContext).toBe("frozen turn context")
+            expect(input.forkContext?.watermarkMsgID).toBe(messages.at(-1)!.info.id)
+          } else expect(input.forkContext).toBeUndefined()
         }
-        expect(spawned).toHaveLength(20)
+        expect(spawned).toHaveLength(4)
       }),
     ),
   )
 
-  it.live("malformed recovered context or lifecycle fails before capture or spawn", () =>
+  it.live("malformed context and lifecycle fail before capture or spawn", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         let spawnCount = 0
@@ -1329,13 +1321,12 @@ describe("Actor tool recovered context", () => {
         })
         const { chat, assistant } = yield* seed()
         const def = yield* (yield* ActorTool).init()
-        const wrapped = shellWrap({ ...def, id: "actor" })
         const ctx = {
           sessionID: chat.id, messageID: assistant.id, agent: "build",
           abort: new AbortController().signal, extra: {}, messages: [],
           metadata: () => Effect.void, ask: () => Effect.void,
         }
-        const base = { action: "spawn", subagent_type: "general", description: "Recovered briefing", prompt: "Brief task" }
+        const base = { action: "spawn", subagent_type: "general", description: "Invalid briefing", prompt: "Brief task" }
         for (const extra of [
           { context: null }, { context: false }, { context: 1 }, { context: {} }, { context: "invalid" },
           { lifecycle: null }, { lifecycle: false }, { lifecycle: "ephemeral" },
@@ -1343,23 +1334,7 @@ describe("Actor tool recovered context", () => {
           { context: "state", lifecycle: "persistent" },
         ]) {
           const operation = { ...base, ...extra }
-          for (const raw of [
-            operation, { operation }, { operation: JSON.stringify(operation) },
-            { operation: base, ...extra }, { operation: JSON.stringify(base), ...extra },
-          ]) {
-            const result = yield* wrapped.execute(raw as never, ctx)
-            expect(result.metadata.success).toBe(0)
-            expect(result.output).toMatch(/context|lifecycle|Persistent/)
-          }
-        }
-        for (const raw of [
-          { operation: { ...base, context: "full" }, context: "none" },
-          { operation: JSON.stringify({ ...base, context: "full" }), context: "none" },
-          { operation: { ...base, context: "full", lifecycle: "persistent" }, lifecycle: "ephemeral" },
-        ]) {
-          const result = yield* wrapped.execute(raw as never, ctx)
-          expect(result.metadata.success).toBe(0)
-          expect(result.output).toMatch(/context|lifecycle/)
+          expect(Exit.isFailure(yield* Effect.exit(def.execute({ operation } as never, ctx)))).toBe(true)
         }
         expect(spawnCount).toBe(0)
         expect(captureCount).toBe(0)

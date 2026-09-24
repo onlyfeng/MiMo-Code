@@ -57,7 +57,6 @@ test("real non-test TUI workers default model API keeps authentication and same-
     expect(result).toEqual({
       runtime: Bun.version,
       childTestPreload: false,
-      orchestrator: false,
       selectorsAbsent: true,
       workers: 2,
       samePid: true,

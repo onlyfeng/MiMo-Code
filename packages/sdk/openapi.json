@@ -36,7 +36,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.global.health({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.global.health({\n  ...\n})"
           }
         ]
       }
@@ -61,7 +61,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.global.event({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.global.event({\n  ...\n})"
           }
         ]
       }
@@ -86,7 +86,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.global.config.get({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.global.config.get({\n  ...\n})"
           }
         ]
       },
@@ -128,7 +128,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.global.config.update({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.global.config.update({\n  ...\n})"
           }
         ]
       }
@@ -153,7 +153,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.global.dispose({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.global.dispose({\n  ...\n})"
           }
         ]
       }
@@ -229,7 +229,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.global.upgrade({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.global.upgrade({\n  ...\n})"
           }
         ]
       }
@@ -273,7 +273,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.global.import.scan({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.global.import.scan({\n  ...\n})"
           }
         ]
       }
@@ -357,7 +357,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.global.import.run({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.global.import.run({\n  ...\n})"
           }
         ]
       }
@@ -411,7 +411,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.auth.set({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.auth.set({\n  ...\n})"
           }
         ]
       },
@@ -454,7 +454,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.auth.remove({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.auth.remove({\n  ...\n})"
           }
         ]
       }
@@ -538,7 +538,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.app.log({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.app.log({\n  ...\n})"
           }
         ]
       }
@@ -594,7 +594,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.adaptor.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.adaptor.list({\n  ...\n})"
           }
         ]
       }
@@ -682,7 +682,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.create({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.create({\n  ...\n})"
           }
         ]
       },
@@ -724,7 +724,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.list({\n  ...\n})"
           }
         ]
       }
@@ -779,7 +779,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.status({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.status({\n  ...\n})"
           }
         ]
       }
@@ -839,7 +839,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.remove({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.remove({\n  ...\n})"
           }
         ]
       }
@@ -923,7 +923,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.sessionRestore({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.workspace.sessionRestore({\n  ...\n})"
           }
         ]
       }
@@ -967,7 +967,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.project.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.project.list({\n  ...\n})"
           }
         ]
       }
@@ -1008,7 +1008,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.project.current({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.project.current({\n  ...\n})"
           }
         ]
       }
@@ -1049,7 +1049,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.project.initGit({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.project.initGit({\n  ...\n})"
           }
         ]
       }
@@ -1155,7 +1155,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.project.update({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.project.update({\n  ...\n})"
           }
         ]
       }
@@ -1199,7 +1199,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.pty.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.pty.list({\n  ...\n})"
           }
         ]
       },
@@ -1283,7 +1283,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.pty.create({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.pty.create({\n  ...\n})"
           }
         ]
       }
@@ -1343,7 +1343,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.pty.get({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.pty.get({\n  ...\n})"
           }
         ]
       },
@@ -1427,7 +1427,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.pty.update({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.pty.update({\n  ...\n})"
           }
         ]
       },
@@ -1485,7 +1485,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.pty.remove({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.pty.remove({\n  ...\n})"
           }
         ]
       }
@@ -1557,7 +1557,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.pty.connectToken({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.pty.connectToken({\n  ...\n})"
           }
         ]
       }
@@ -1617,7 +1617,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.pty.connect({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.pty.connect({\n  ...\n})"
           }
         ]
       }
@@ -1658,7 +1658,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.config.get({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.config.get({\n  ...\n})"
           }
         ]
       },
@@ -1716,7 +1716,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.config.update({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.config.update({\n  ...\n})"
           }
         ]
       }
@@ -1775,7 +1775,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.config.providers({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.config.providers({\n  ...\n})"
           }
         ]
       }
@@ -1908,7 +1908,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.console.get({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.console.get({\n  ...\n})"
           }
         ]
       }
@@ -1979,7 +1979,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.console.listOrgs({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.console.listOrgs({\n  ...\n})"
           }
         ]
       }
@@ -2038,7 +2038,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.console.switchOrg({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.console.switchOrg({\n  ...\n})"
           }
         ]
       }
@@ -2089,7 +2089,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tool.ids({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tool.ids({\n  ...\n})"
           }
         ]
       }
@@ -2156,7 +2156,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tool.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tool.list({\n  ...\n})"
           }
         ]
       }
@@ -2216,7 +2216,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.worktree.create({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.worktree.create({\n  ...\n})"
           }
         ]
       },
@@ -2258,7 +2258,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.worktree.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.worktree.list({\n  ...\n})"
           }
         ]
       },
@@ -2316,7 +2316,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.worktree.remove({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.worktree.remove({\n  ...\n})"
           }
         ]
       }
@@ -2376,7 +2376,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.worktree.reset({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.worktree.reset({\n  ...\n})"
           }
         ]
       }
@@ -2515,7 +2515,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.title.generate({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.title.generate({\n  ...\n})"
           }
         ]
       }
@@ -2608,7 +2608,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.session.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.session.list({\n  ...\n})"
           }
         ]
       }
@@ -2655,7 +2655,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.experimental.resource.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.experimental.resource.list({\n  ...\n})"
           }
         ]
       }
@@ -2732,7 +2732,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.list({\n  ...\n})"
           }
         ]
       },
@@ -2815,7 +2815,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.create({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.create({\n  ...\n})"
           }
         ]
       }
@@ -2872,7 +2872,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.status({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.status({\n  ...\n})"
           }
         ]
       }
@@ -2943,7 +2943,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.get({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.get({\n  ...\n})"
           }
         ]
       },
@@ -3011,7 +3011,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.delete({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.delete({\n  ...\n})"
           }
         ]
       },
@@ -3137,7 +3137,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.update({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.update({\n  ...\n})"
           }
         ]
       }
@@ -3219,7 +3219,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.children({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.children({\n  ...\n})"
           }
         ]
       }
@@ -3292,7 +3292,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.todo({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.todo({\n  ...\n})"
           }
         ]
       }
@@ -3402,7 +3402,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.task({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.task({\n  ...\n})"
           }
         ]
       }
@@ -3467,16 +3467,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "Conflict — session resource is busy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConflictError"
-                }
-              }
-            }
           }
         },
         "requestBody": {
@@ -3504,7 +3494,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.init({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.init({\n  ...\n})"
           }
         ]
       }
@@ -3573,7 +3563,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.fork({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.fork({\n  ...\n})"
           }
         ]
       }
@@ -3643,7 +3633,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.abort({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.abort({\n  ...\n})"
           }
         ]
       }
@@ -3713,7 +3703,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.share({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.share({\n  ...\n})"
           }
         ]
       },
@@ -3781,7 +3771,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.unshare({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.unshare({\n  ...\n})"
           }
         ]
       }
@@ -3842,7 +3832,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.diff({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.diff({\n  ...\n})"
           }
         ]
       }
@@ -3907,16 +3897,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "Conflict — session resource is busy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConflictError"
-                }
-              }
-            }
           }
         },
         "requestBody": {
@@ -3944,7 +3924,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.summarize({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.summarize({\n  ...\n})"
           }
         ]
       }
@@ -4042,7 +4022,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.ask({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.ask({\n  ...\n})"
           }
         ]
       }
@@ -4152,7 +4132,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.messages({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.messages({\n  ...\n})"
           }
         ]
       },
@@ -4245,12 +4225,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "runID": {
-                    "description": "Opaque CLI invocation identifier for permission events; does not grant authorization.",
-                    "type": "string",
-                    "format": "uuid",
-                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                  },
                   "messageID": {
                     "type": "string",
                     "pattern": "^msg.*"
@@ -4318,7 +4292,7 @@
                     "enum": ["append", "replace-agent"]
                   },
                   "harness": {
-                    "description": "Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.",
+                    "description": "Harness mode selected by the session's first user query. Later values are ignored. Auto preserves model/process inference and explicit default forces the native tool schema for non-GPT models. MIMOCODE_CODEX_MODE=false forces the default harness for every model, including GPT.",
                     "type": "string",
                     "enum": ["auto", "codex", "default"]
                   },
@@ -4354,7 +4328,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.prompt({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.prompt({\n  ...\n})"
           }
         ]
       }
@@ -4519,7 +4493,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.message({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.message({\n  ...\n})"
           }
         ]
       },
@@ -4596,7 +4570,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.deleteMessage({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.deleteMessage({\n  ...\n})"
           }
         ]
       }
@@ -4683,7 +4657,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.part.delete({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.part.delete({\n  ...\n})"
           }
         ]
       },
@@ -4777,7 +4751,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.part.update({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.part.update({\n  ...\n})"
           }
         ]
       }
@@ -4813,13 +4787,12 @@
             "in": "query",
             "name": "agentID",
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             }
           }
         ],
         "summary": "List interrupted turn recovery candidates",
-        "description": "Return incomplete assistant turns or a trailing user for the main agent, or incomplete turns for a controllable persistent full-context actor retaining its original live context. Recovery never creates a user message or overrides its task.",
+        "description": "Return resumable targets: incomplete assistant turns and/or a trailing parent user (D16f).",
         "responses": {
           "200": {
             "description": "Recovery candidates",
@@ -4897,7 +4870,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.recovery({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.recovery({\n  ...\n})"
           }
         ]
       }
@@ -4940,50 +4913,42 @@
           },
           {
             "in": "query",
-            "name": "titleLocale",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Title locale for main-agent recovery only"
-          },
-          {
-            "in": "query",
             "name": "agentID",
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             }
           },
           {
             "in": "query",
             "name": "task_id",
             "schema": {
-              "type": "string",
-              "pattern": "^T\\d+(\\.\\d+)*$"
-            },
-            "description": "Validate the original task or bind an unbound interrupted user; never replace an existing task"
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "titleLocale",
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "in": "query",
             "name": "modelProviderID",
             "schema": {
-              "type": "string",
-              "minLength": 1
-            },
-            "description": "Model override for main-agent resume only; requires modelID"
+              "type": "string"
+            }
           },
           {
             "in": "query",
             "name": "modelID",
             "schema": {
-              "type": "string",
-              "minLength": 1
-            },
-            "description": "Model override for main-agent resume only; requires modelProviderID"
+              "type": "string"
+            }
           }
         ],
         "summary": "Resume an interrupted turn",
-        "description": "Resume the specified incomplete turn for the main agent by default, or a controllable persistent full-context actor retaining its original live context. Admission and atomic task validation or binding finish before 202. The original user and any existing task binding remain authoritative.",
+        "description": "Resume an incomplete assistant turn without creating another user message.",
         "responses": {
           "202": {
             "description": "Resume accepted"
@@ -5022,7 +4987,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.resume({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.resume({\n  ...\n})"
           }
         ]
       }
@@ -5065,8 +5030,7 @@
             "in": "query",
             "name": "task_id",
             "schema": {
-              "type": "string",
-              "pattern": "^T\\d+(\\.\\d+)*$"
+              "type": "string"
             }
           },
           {
@@ -5146,7 +5110,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.resumeUser({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.resumeUser({\n  ...\n})"
           }
         ]
       }
@@ -5279,7 +5243,7 @@
                     "enum": ["append", "replace-agent"]
                   },
                   "harness": {
-                    "description": "Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.",
+                    "description": "Harness mode selected by the session's first user query. Later values are ignored. Auto preserves model/process inference and explicit default forces the native tool schema for non-GPT models. MIMOCODE_CODEX_MODE=false forces the default harness for every model, including GPT.",
                     "type": "string",
                     "enum": ["auto", "codex", "default"]
                   },
@@ -5315,7 +5279,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.promptAsync({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.prompt_async({\n  ...\n})"
           }
         ]
       }
@@ -5392,16 +5356,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "Conflict — session resource is busy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConflictError"
-                }
-              }
-            }
           }
         },
         "requestBody": {
@@ -5410,12 +5364,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "runID": {
-                    "description": "Opaque CLI invocation identifier for permission events; does not grant authorization.",
-                    "type": "string",
-                    "format": "uuid",
-                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                  },
                   "messageID": {
                     "type": "string",
                     "pattern": "^msg.*"
@@ -5456,7 +5404,7 @@
                     "enum": ["append", "replace-agent"]
                   },
                   "harness": {
-                    "description": "Harness mode selected by the session's first user command. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.",
+                    "description": "Harness mode selected by the session's first user command. Later values are ignored. Auto preserves model/process inference and explicit default forces the native tool schema for non-GPT models. MIMOCODE_CODEX_MODE=false forces the default harness for every model, including GPT.",
                     "type": "string",
                     "enum": ["auto", "codex", "default"]
                   },
@@ -5544,7 +5492,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.command({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.command({\n  ...\n})"
           }
         ]
       }
@@ -5620,7 +5568,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.predict({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.predict({\n  ...\n})"
           }
         ]
       }
@@ -5697,16 +5645,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "Conflict — session resource is busy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConflictError"
-                }
-              }
-            }
           }
         },
         "requestBody": {
@@ -5750,7 +5688,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.shell({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.shell({\n  ...\n})"
           }
         ]
       }
@@ -5840,7 +5778,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.revert({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.revert({\n  ...\n})"
           }
         ]
       }
@@ -5910,7 +5848,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.unrevert({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.unrevert({\n  ...\n})"
           }
         ]
       }
@@ -6006,7 +5944,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.permission.respond({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.permission.respond({\n  ...\n})"
           }
         ]
       }
@@ -6040,7 +5978,7 @@
           }
         ],
         "summary": "List session actors",
-        "description": "List actors registered for a session.",
+        "description": "List actors with execution status in this server runtime; persisted outcomes are preserved.",
         "responses": {
           "200": {
             "description": "Actor list"
@@ -6069,7 +6007,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.session.actors({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.session.actors({\n  ...\n})"
           }
         ]
       }
@@ -6148,11 +6086,6 @@
                   },
                   "message": {
                     "type": "string"
-                  },
-                  "scope": {
-                    "description": "Limit rejection to this request. When omitted, rejection also cancels other pending requests in the session. Does not change once or always approvals.",
-                    "type": "string",
-                    "const": "request"
                   }
                 },
                 "required": ["reply"]
@@ -6163,7 +6096,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.permission.reply({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.permission.reply({\n  ...\n})"
           }
         ]
       }
@@ -6207,7 +6140,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.permission.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.permission.list({\n  ...\n})"
           }
         ]
       }
@@ -6248,7 +6181,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.permission.skipAll({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.permission.skipAll({\n  ...\n})"
           }
         ]
       },
@@ -6271,7 +6204,7 @@
           }
         ],
         "summary": "Set skip-all state",
-        "description": "Enable or disable runtime auto-allow for permission asks in this directory instance. Same-directory subagents share the state; isolated worktrees and other directories do not. Explicit deny rules and forced-ask permissions (e.g. bash_delete) still apply.",
+        "description": "Enable or disable runtime auto-allow for permission asks. Applies instance-wide, so subagents inherit it. Explicit deny rules and forced-ask permissions (e.g. bash_delete) still apply.",
         "responses": {
           "200": {
             "description": "Updated skip-all state",
@@ -6313,7 +6246,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.permission.setSkipAll({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.permission.setSkipAll({\n  ...\n})"
           }
         ]
       }
@@ -6338,7 +6271,7 @@
           }
         ],
         "summary": "Get auto-approve-delete state",
-        "description": "Whether irreversible deletes skip human confirmation after explicit deny checks. Instance-scoped; initialized from MIMOCODE_AUTO_APPROVE_DELETE or dangerous startup mode.",
+        "description": "Whether irreversible deletes skip the extra bash_delete confirmation. Instance-scoped; defaults to the MIMOCODE_AUTO_APPROVE_DELETE env var.",
         "responses": {
           "200": {
             "description": "Current auto-approve-delete state",
@@ -6354,7 +6287,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.permission.autoApproveDelete({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.permission.autoApproveDelete({\n  ...\n})"
           }
         ]
       },
@@ -6377,7 +6310,7 @@
           }
         ],
         "summary": "Set auto-approve-delete state",
-        "description": "Trust the model with irreversible deletes after explicit deny checks. This runtime control is independent of skip-all. Applies to this directory instance: same-directory subagents share it, while isolated worktrees and other directories do not. Explicit bash, bash_delete, and external_directory denies still block. Already-pending delete asks are left for a human.",
+        "description": "Trust the model with irreversible deletes, skipping the extra bash_delete confirmation. Distinct from skip-all, which deliberately does NOT cover forced-ask permissions. Applies instance-wide (this directory only, so other directories served by the same process are unaffected) and subagents inherit it. Explicit `bash: deny` rules still block. Already-pending delete asks are left for a human — the command they guard is irreversible.",
         "responses": {
           "200": {
             "description": "Updated auto-approve-delete state",
@@ -6419,7 +6352,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.permission.setAutoApproveDelete({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.permission.setAutoApproveDelete({\n  ...\n})"
           }
         ]
       }
@@ -6467,7 +6400,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.permission.askTimeout({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.permission.askTimeout({\n  ...\n})"
           }
         ]
       },
@@ -6490,7 +6423,7 @@
           }
         ],
         "summary": "Set permission ask timeout",
-        "description": "Set the timeout in milliseconds for permission asks that require human confirmation. null disables the timeout (wait indefinitely). Applies to this directory instance; same-directory subagents share it, while isolated worktrees and other directories do not. Orthogonal to skip-all — both can be enabled independently.",
+        "description": "Set the timeout in milliseconds for permission asks that require human confirmation. null disables the timeout (wait indefinitely). Applies instance-wide; subagents inherit it. Orthogonal to skip-all — both can be enabled independently.",
         "responses": {
           "200": {
             "description": "Updated ask timeout in ms, or null",
@@ -6548,7 +6481,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.permission.setAskTimeout({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.permission.setAskTimeout({\n  ...\n})"
           }
         ]
       }
@@ -6599,7 +6532,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.workflow.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.workflow.list({\n  ...\n})"
           }
         ]
       }
@@ -6658,7 +6591,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.workflow.resume({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.workflow.resume({\n  ...\n})"
           }
         ]
       }
@@ -6730,7 +6663,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.workflow.transcript({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.workflow.transcript({\n  ...\n})"
           }
         ]
       }
@@ -6790,7 +6723,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.workflow.structure({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.workflow.structure({\n  ...\n})"
           }
         ]
       }
@@ -6834,7 +6767,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.question.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.question.list({\n  ...\n})"
           }
         ]
       }
@@ -6875,7 +6808,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.question.neverAsk({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.question.neverAsk({\n  ...\n})"
           }
         ]
       },
@@ -6940,7 +6873,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.question.setNeverAsk({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.question.setNeverAsk({\n  ...\n})"
           }
         ]
       }
@@ -7029,7 +6962,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.question.reply({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.question.reply({\n  ...\n})"
           }
         ]
       }
@@ -7099,7 +7032,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.question.reject({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.question.reject({\n  ...\n})"
           }
         ]
       }
@@ -7158,7 +7091,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.bash.interactive.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.bash.interactive.list({\n  ...\n})"
           }
         ]
       }
@@ -7247,7 +7180,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.bash.interactive.reply({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.bash.interactive.reply({\n  ...\n})"
           }
         ]
       }
@@ -7318,7 +7251,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.provider.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.provider.list({\n  ...\n})"
           }
         ]
       }
@@ -7368,7 +7301,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.provider.auth({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.provider.auth({\n  ...\n})"
           }
         ]
       }
@@ -7454,7 +7387,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.provider.oauth.authorize({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.provider.oauth.authorize({\n  ...\n})"
           }
         ]
       }
@@ -7534,7 +7467,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.provider.oauth.callback({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.provider.oauth.callback({\n  ...\n})"
           }
         ]
       }
@@ -7575,7 +7508,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.sync.start({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.sync.start({\n  ...\n})"
           }
         ]
       }
@@ -7678,7 +7611,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.sync.replay({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.sync.replay({\n  ...\n})"
           }
         ]
       }
@@ -7771,7 +7704,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.sync.history.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.sync.history.list({\n  ...\n})"
           }
         ]
       }
@@ -7874,7 +7807,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.find.text({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.find.text({\n  ...\n})"
           }
         ]
       }
@@ -7951,7 +7884,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.find.files({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.find.files({\n  ...\n})"
           }
         ]
       }
@@ -8003,7 +7936,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.find.symbols({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.find.symbols({\n  ...\n})"
           }
         ]
       }
@@ -8055,7 +7988,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.file.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.file.list({\n  ...\n})"
           }
         ]
       }
@@ -8104,7 +8037,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.file.read({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.file.read({\n  ...\n})"
           }
         ]
       }
@@ -8148,7 +8081,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.file.status({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.file.status({\n  ...\n})"
           }
         ]
       }
@@ -8189,7 +8122,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.event.subscribe({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.event.subscribe({\n  ...\n})"
           }
         ]
       }
@@ -8236,7 +8169,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.mcp.status({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.mcp.status({\n  ...\n})"
           }
         ]
       },
@@ -8316,7 +8249,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.mcp.add({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.mcp.add({\n  ...\n})"
           }
         ]
       }
@@ -8392,7 +8325,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.mcp.auth.start({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.mcp.auth.start({\n  ...\n})"
           }
         ]
       },
@@ -8456,7 +8389,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.mcp.auth.remove({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.mcp.auth.remove({\n  ...\n})"
           }
         ]
       }
@@ -8541,7 +8474,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.mcp.auth.callback({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.mcp.auth.callback({\n  ...\n})"
           }
         ]
       }
@@ -8610,7 +8543,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.mcp.auth.authenticate({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.mcp.auth.authenticate({\n  ...\n})"
           }
         ]
       }
@@ -8658,7 +8591,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.mcp.connect({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.mcp.connect({\n  ...\n})"
           }
         ]
       }
@@ -8706,7 +8639,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.mcp.disconnect({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.mcp.disconnect({\n  ...\n})"
           }
         ]
       }
@@ -8772,7 +8705,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.appendPrompt({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.appendPrompt({\n  ...\n})"
           }
         ]
       }
@@ -8813,7 +8746,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.openHelp({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.openHelp({\n  ...\n})"
           }
         ]
       }
@@ -8854,7 +8787,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.openSessions({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.openSessions({\n  ...\n})"
           }
         ]
       }
@@ -8895,7 +8828,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.openThemes({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.openThemes({\n  ...\n})"
           }
         ]
       }
@@ -8936,7 +8869,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.openModels({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.openModels({\n  ...\n})"
           }
         ]
       }
@@ -8977,7 +8910,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.submitPrompt({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.submitPrompt({\n  ...\n})"
           }
         ]
       }
@@ -9018,7 +8951,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.clearPrompt({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.clearPrompt({\n  ...\n})"
           }
         ]
       }
@@ -9084,7 +9017,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.executeCommand({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.executeCommand({\n  ...\n})"
           }
         ]
       }
@@ -9152,7 +9085,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.showToast({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.showToast({\n  ...\n})"
           }
         ]
       }
@@ -9228,7 +9161,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.publish({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.publish({\n  ...\n})"
           }
         ]
       }
@@ -9306,7 +9239,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.selectSession({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.selectSession({\n  ...\n})"
           }
         ]
       }
@@ -9354,7 +9287,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.control.next({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.control.next({\n  ...\n})"
           }
         ]
       }
@@ -9402,7 +9335,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.tui.control.response({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.tui.control.response({\n  ...\n})"
           }
         ]
       }
@@ -9443,7 +9376,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.instance.dispose({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.instance.dispose({\n  ...\n})"
           }
         ]
       }
@@ -9484,7 +9417,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.path.get({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.path.get({\n  ...\n})"
           }
         ]
       }
@@ -9525,7 +9458,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.vcs.get({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.vcs.get({\n  ...\n})"
           }
         ]
       }
@@ -9578,7 +9511,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.vcs.diff({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.vcs.diff({\n  ...\n})"
           }
         ]
       }
@@ -9622,7 +9555,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.command.list({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.command.list({\n  ...\n})"
           }
         ]
       }
@@ -9666,7 +9599,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.app.agents({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.app.agents({\n  ...\n})"
           }
         ]
       }
@@ -9737,7 +9670,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.app.skills({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.app.skills({\n  ...\n})"
           }
         ]
       }
@@ -9781,7 +9714,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.lsp.status({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.lsp.status({\n  ...\n})"
           }
         ]
       }
@@ -9825,7 +9758,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.formatter.status({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk\"\n\nconst client = createOpencodeClient()\nawait client.formatter.status({\n  ...\n})"
           }
         ]
       }
@@ -9857,6 +9790,236 @@
           "properties": {
             "type": "object",
             "properties": {}
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.actor.registered": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "actor.registered"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "actorID": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": ["peer", "subagent", "main"]
+              },
+              "parentActorID": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "background": {
+                "type": "boolean"
+              }
+            },
+            "required": ["sessionID", "actorID", "mode", "description", "agent", "background"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.actor.status": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "actor.status"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "actorID": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["pending", "running", "idle"]
+              },
+              "lastOutcome": {
+                "type": "string",
+                "enum": ["success", "failure", "cancelled"]
+              },
+              "turnCount": {
+                "type": "number"
+              },
+              "lastTurnTime": {
+                "type": "number"
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["sessionID", "actorID", "status", "turnCount", "lastTurnTime"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.actor.stuck": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "actor.stuck"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "actorID": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "lastTurnTime": {
+                "type": "number"
+              },
+              "stuckDuration": {
+                "type": "number"
+              }
+            },
+            "required": ["sessionID", "actorID", "description", "lastTurnTime", "stuckDuration"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.actor.stalled": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "actor.stalled"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "actorID": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "lastActivityTime": {
+                "type": "number"
+              },
+              "stalledDuration": {
+                "type": "number"
+              }
+            },
+            "required": ["sessionID", "actorID", "description", "lastActivityTime", "stalledDuration"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.writer.cache_perf": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "writer.cache_perf"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "writerActorID": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["completed", "failed"]
+              },
+              "total_input_tokens": {
+                "type": "number"
+              },
+              "cache_read_tokens": {
+                "type": "number"
+              },
+              "cache_write_tokens": {
+                "type": "number"
+              },
+              "cache_hit_rate": {
+                "type": "number"
+              },
+              "num_llm_calls": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "sessionID",
+              "writerActorID",
+              "status",
+              "total_input_tokens",
+              "cache_read_tokens",
+              "cache_write_tokens",
+              "cache_hit_rate",
+              "num_llm_calls"
+            ]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.inbox.arrived": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "inbox.arrived"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "receiverSessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "receiverActorID": {
+                "type": "string"
+              },
+              "senderSessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "senderActorID": {
+                "type": "string"
+              },
+              "inboxID": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": ["receiverSessionID", "receiverActorID", "inboxID", "type"]
           }
         },
         "required": ["type", "properties"]
@@ -10119,236 +10282,6 @@
               }
             },
             "required": ["files"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.actor.registered": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "actor.registered"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "actorID": {
-                "type": "string"
-              },
-              "mode": {
-                "type": "string",
-                "enum": ["peer", "subagent", "main"]
-              },
-              "parentActorID": {
-                "type": "string"
-              },
-              "description": {
-                "type": "string"
-              },
-              "agent": {
-                "type": "string"
-              },
-              "background": {
-                "type": "boolean"
-              }
-            },
-            "required": ["sessionID", "actorID", "mode", "description", "agent", "background"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.actor.status": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "actor.status"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "actorID": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": ["pending", "running", "idle"]
-              },
-              "lastOutcome": {
-                "type": "string",
-                "enum": ["success", "failure", "cancelled"]
-              },
-              "turnCount": {
-                "type": "number"
-              },
-              "lastTurnTime": {
-                "type": "number"
-              },
-              "error": {
-                "type": "string"
-              }
-            },
-            "required": ["sessionID", "actorID", "status", "turnCount", "lastTurnTime"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.actor.stuck": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "actor.stuck"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "actorID": {
-                "type": "string"
-              },
-              "description": {
-                "type": "string"
-              },
-              "lastTurnTime": {
-                "type": "number"
-              },
-              "stuckDuration": {
-                "type": "number"
-              }
-            },
-            "required": ["sessionID", "actorID", "description", "lastTurnTime", "stuckDuration"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.actor.stalled": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "actor.stalled"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "actorID": {
-                "type": "string"
-              },
-              "description": {
-                "type": "string"
-              },
-              "lastActivityTime": {
-                "type": "number"
-              },
-              "stalledDuration": {
-                "type": "number"
-              }
-            },
-            "required": ["sessionID", "actorID", "description", "lastActivityTime", "stalledDuration"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.writer.cache_perf": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "writer.cache_perf"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "writerActorID": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": ["completed", "failed"]
-              },
-              "total_input_tokens": {
-                "type": "number"
-              },
-              "cache_read_tokens": {
-                "type": "number"
-              },
-              "cache_write_tokens": {
-                "type": "number"
-              },
-              "cache_hit_rate": {
-                "type": "number"
-              },
-              "num_llm_calls": {
-                "type": "number"
-              }
-            },
-            "required": [
-              "sessionID",
-              "writerActorID",
-              "status",
-              "total_input_tokens",
-              "cache_read_tokens",
-              "cache_write_tokens",
-              "cache_hit_rate",
-              "num_llm_calls"
-            ]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.inbox.arrived": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "inbox.arrived"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "receiverSessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "receiverActorID": {
-                "type": "string"
-              },
-              "senderSessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "senderActorID": {
-                "type": "string"
-              },
-              "inboxID": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string"
-              }
-            },
-            "required": ["receiverSessionID", "receiverActorID", "inboxID", "type"]
           }
         },
         "required": ["type", "properties"]
@@ -11041,12 +10974,6 @@
           "sessionID": {
             "type": "string",
             "pattern": "^ses.*"
-          },
-          "runID": {
-            "description": "Correlation identifier for the requesting CLI run; it does not grant permission.",
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           },
           "permission": {
             "type": "string"
@@ -12092,25 +12019,20 @@
         },
         "required": ["type", "properties"]
       },
-      "Event.session.compacted": {
+      "Event.vcs.branch.updated": {
         "type": "object",
         "properties": {
           "type": {
             "type": "string",
-            "const": "session.compacted"
+            "const": "vcs.branch.updated"
           },
           "properties": {
             "type": "object",
             "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "agentID": {
+              "branch": {
                 "type": "string"
               }
-            },
-            "required": ["sessionID"]
+            }
           }
         },
         "required": ["type", "properties"]
@@ -12182,77 +12104,6 @@
               }
             },
             "required": ["name", "sessionID", "arguments", "messageID"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.session.goal": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "session.goal"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "goal": {
-                "type": "object",
-                "properties": {
-                  "condition": {
-                    "type": "string"
-                  }
-                },
-                "required": ["condition"]
-              },
-              "lastVerdict": {
-                "type": "object",
-                "properties": {
-                  "ok": {
-                    "type": "boolean"
-                  },
-                  "impossible": {
-                    "type": "boolean"
-                  },
-                  "reason": {
-                    "type": "string"
-                  },
-                  "attempt": {
-                    "type": "number"
-                  },
-                  "messageID": {
-                    "type": "string"
-                  },
-                  "error": {
-                    "type": "boolean"
-                  }
-                },
-                "required": ["ok", "reason", "attempt"]
-              }
-            },
-            "required": ["sessionID"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "Event.vcs.branch.updated": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "vcs.branch.updated"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "branch": {
-                "type": "string"
-              }
-            }
           }
         },
         "required": ["type", "properties"]
@@ -12334,6 +12185,82 @@
               }
             },
             "required": ["sessionID", "todos"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.session.goal": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "session.goal"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "goal": {
+                "type": "object",
+                "properties": {
+                  "condition": {
+                    "type": "string"
+                  }
+                },
+                "required": ["condition"]
+              },
+              "lastVerdict": {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "impossible": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "attempt": {
+                    "type": "number"
+                  },
+                  "messageID": {
+                    "type": "string"
+                  },
+                  "error": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["ok", "reason", "attempt"]
+              }
+            },
+            "required": ["sessionID"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.session.compacted": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "session.compacted"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "agentID": {
+                "type": "string"
+              }
+            },
+            "required": ["sessionID"]
           }
         },
         "required": ["type", "properties"]
@@ -12717,9 +12644,6 @@
             "type": "string",
             "enum": ["auto", "codex", "default"]
           },
-          "task_id": {
-            "type": "string"
-          },
           "tools": {
             "type": "object",
             "propertyNames": {
@@ -12728,10 +12652,6 @@
             "additionalProperties": {
               "type": "boolean"
             }
-          },
-          "source": {
-            "type": "string",
-            "enum": ["user", "spawn", "hook"]
           },
           "provenance": {
             "$ref": "#/components/schemas/Provenance"
@@ -14748,6 +14668,24 @@
                 "$ref": "#/components/schemas/Event.global.disposed"
               },
               {
+                "$ref": "#/components/schemas/Event.actor.registered"
+              },
+              {
+                "$ref": "#/components/schemas/Event.actor.status"
+              },
+              {
+                "$ref": "#/components/schemas/Event.actor.stuck"
+              },
+              {
+                "$ref": "#/components/schemas/Event.actor.stalled"
+              },
+              {
+                "$ref": "#/components/schemas/Event.writer.cache_perf"
+              },
+              {
+                "$ref": "#/components/schemas/Event.inbox.arrived"
+              },
+              {
                 "$ref": "#/components/schemas/Event.task.created"
               },
               {
@@ -14767,24 +14705,6 @@
               },
               {
                 "$ref": "#/components/schemas/Event.tui.instructions.loaded"
-              },
-              {
-                "$ref": "#/components/schemas/Event.actor.registered"
-              },
-              {
-                "$ref": "#/components/schemas/Event.actor.status"
-              },
-              {
-                "$ref": "#/components/schemas/Event.actor.stuck"
-              },
-              {
-                "$ref": "#/components/schemas/Event.actor.stalled"
-              },
-              {
-                "$ref": "#/components/schemas/Event.writer.cache_perf"
-              },
-              {
-                "$ref": "#/components/schemas/Event.inbox.arrived"
               },
               {
                 "$ref": "#/components/schemas/Event.metrics.model_call"
@@ -14901,7 +14821,7 @@
                 "$ref": "#/components/schemas/Event.session.idle"
               },
               {
-                "$ref": "#/components/schemas/Event.session.compacted"
+                "$ref": "#/components/schemas/Event.vcs.branch.updated"
               },
               {
                 "$ref": "#/components/schemas/Event.mcp.tools.changed"
@@ -14913,12 +14833,6 @@
                 "$ref": "#/components/schemas/Event.command.executed"
               },
               {
-                "$ref": "#/components/schemas/Event.session.goal"
-              },
-              {
-                "$ref": "#/components/schemas/Event.vcs.branch.updated"
-              },
-              {
                 "$ref": "#/components/schemas/Event.worktree.ready"
               },
               {
@@ -14926,6 +14840,12 @@
               },
               {
                 "$ref": "#/components/schemas/Event.todo.updated"
+              },
+              {
+                "$ref": "#/components/schemas/Event.session.goal"
+              },
+              {
+                "$ref": "#/components/schemas/Event.session.compacted"
               },
               {
                 "$ref": "#/components/schemas/Event.pty.created"
@@ -15680,11 +15600,6 @@
                 "family": {
                   "type": "string"
                 },
-                "harness_model": {
-                  "description": "Explicitly trusted canonical GPT-5 or newer identity for automatic harness inference. Does not change the API model or transport; session/process choices and MiMo/GPT-4/OSS exclusions take precedence.",
-                  "type": "string",
-                  "pattern": "^gpt-(?:[5-9]|[1-9][0-9]+)(?:\\.[0-9]+)*(?:-(?!oss(?:-|$)|mimo(?:-|$)|gpt-4)[a-z0-9]+)*$"
-                },
                 "release_date": {
                   "type": "string"
                 },
@@ -15888,10 +15803,6 @@
             "description": "Enable or disable the MCP server on startup",
             "type": "boolean"
           },
-          "auto_connect": {
-            "description": "Connect automatically when the instance starts. Defaults to false for Claude-imported servers and true for native servers. enabled: false takes precedence.",
-            "type": "boolean"
-          },
           "timeout": {
             "description": "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
             "type": "number"
@@ -15937,10 +15848,6 @@
           },
           "enabled": {
             "description": "Enable or disable the MCP server on startup",
-            "type": "boolean"
-          },
-          "auto_connect": {
-            "description": "Connect automatically when the instance starts. Defaults to false for Claude-imported servers and true for native servers. enabled: false takes precedence.",
             "type": "boolean"
           },
           "headers": {
@@ -16071,10 +15978,6 @@
           },
           "snapshot": {
             "description": "Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.",
-            "type": "boolean"
-          },
-          "auto_worktree": {
-            "description": "Enable the once-per-session Auto-Worktree Notice when a primary root session mutates a git main worktree. Defaults to false (notice is off). When true, inject the existing soft-hint system-reminder; when false or omitted, inject nothing. Scope is the notice only; this flag neither blocks writes nor creates worktrees.",
             "type": "boolean"
           },
           "plugin": {
@@ -16599,34 +16502,14 @@
                   ]
                 },
                 {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "enabled": {
-                          "type": "boolean"
-                        },
-                        "auto_connect": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": ["enabled"],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "auto_connect": {
-                          "type": "boolean"
-                        },
-                        "enabled": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": ["auto_connect"],
-                      "additionalProperties": false
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
                     }
-                  ]
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false
                 }
               ]
             }
@@ -16759,28 +16642,6 @@
               "type": "boolean"
             }
           },
-          "tool": {
-            "description": "Tool invocation style configuration (JSON vs shell-style).",
-            "type": "object",
-            "properties": {
-              "invocation_style": {
-                "description": "Default invocation style for all tools. 'json' (default) exposes the original Zod schema; 'shell' exposes a single `script` parameter and uses the tool's shell.parse mapping.",
-                "type": "string",
-                "enum": ["json", "shell"]
-              },
-              "invocation_style_by_tool": {
-                "description": "Per-tool override of invocation_style. Keys are tool IDs. A tool without a `shell` field falls back to JSON regardless of this setting.",
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {
-                  "type": "string",
-                  "enum": ["json", "shell"]
-                }
-              }
-            }
-          },
           "enterprise": {
             "type": "object",
             "properties": {
@@ -16808,13 +16669,13 @@
                 "maximum": 9007199254740991
               },
               "preserve_recent_tokens": {
-                "description": "Deprecated compatibility setting. Optional older API rounds use at most 40000 tokens, capped by the ratio-based trigger after frozen prefix and projection overhead. New external requests arriving during compaction and their following messages are retained even beyond that optional budget.",
+                "description": "Deprecated compatibility setting. Compression-time API rounds now use a fixed 40000-token hard budget.",
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
               },
               "reserved": {
-                "description": "Compatibility buffer used to validate compaction.max_context, together with any output reservation. It is not subtracted from the ratio-based compaction trigger (default: up to 33000, capped by the model's maximum output).",
+                "description": "Token buffer for compaction. Leaves enough window to avoid overflow during compaction (default: up to 33000, capped by the model's maximum output).",
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
@@ -17359,11 +17220,6 @@
           },
           "family": {
             "type": "string"
-          },
-          "harness_model": {
-            "description": "Explicitly trusted canonical GPT-5 or newer identity for automatic harness inference. Does not change the API model or transport; session/process choices and MiMo/GPT-4/OSS exclusions take precedence.",
-            "type": "string",
-            "pattern": "^gpt-(?:[5-9]|[1-9][0-9]+)(?:\\.[0-9]+)*(?:-(?!oss(?:-|$)|mimo(?:-|$)|gpt-4)[a-z0-9]+)*$"
           },
           "capabilities": {
             "type": "object",
@@ -18426,6 +18282,24 @@
             "$ref": "#/components/schemas/Event.global.disposed"
           },
           {
+            "$ref": "#/components/schemas/Event.actor.registered"
+          },
+          {
+            "$ref": "#/components/schemas/Event.actor.status"
+          },
+          {
+            "$ref": "#/components/schemas/Event.actor.stuck"
+          },
+          {
+            "$ref": "#/components/schemas/Event.actor.stalled"
+          },
+          {
+            "$ref": "#/components/schemas/Event.writer.cache_perf"
+          },
+          {
+            "$ref": "#/components/schemas/Event.inbox.arrived"
+          },
+          {
             "$ref": "#/components/schemas/Event.task.created"
           },
           {
@@ -18445,24 +18319,6 @@
           },
           {
             "$ref": "#/components/schemas/Event.tui.instructions.loaded"
-          },
-          {
-            "$ref": "#/components/schemas/Event.actor.registered"
-          },
-          {
-            "$ref": "#/components/schemas/Event.actor.status"
-          },
-          {
-            "$ref": "#/components/schemas/Event.actor.stuck"
-          },
-          {
-            "$ref": "#/components/schemas/Event.actor.stalled"
-          },
-          {
-            "$ref": "#/components/schemas/Event.writer.cache_perf"
-          },
-          {
-            "$ref": "#/components/schemas/Event.inbox.arrived"
           },
           {
             "$ref": "#/components/schemas/Event.metrics.model_call"
@@ -18579,7 +18435,7 @@
             "$ref": "#/components/schemas/Event.session.idle"
           },
           {
-            "$ref": "#/components/schemas/Event.session.compacted"
+            "$ref": "#/components/schemas/Event.vcs.branch.updated"
           },
           {
             "$ref": "#/components/schemas/Event.mcp.tools.changed"
@@ -18591,12 +18447,6 @@
             "$ref": "#/components/schemas/Event.command.executed"
           },
           {
-            "$ref": "#/components/schemas/Event.session.goal"
-          },
-          {
-            "$ref": "#/components/schemas/Event.vcs.branch.updated"
-          },
-          {
             "$ref": "#/components/schemas/Event.worktree.ready"
           },
           {
@@ -18604,6 +18454,12 @@
           },
           {
             "$ref": "#/components/schemas/Event.todo.updated"
+          },
+          {
+            "$ref": "#/components/schemas/Event.session.goal"
+          },
+          {
+            "$ref": "#/components/schemas/Event.session.compacted"
           },
           {
             "$ref": "#/components/schemas/Event.pty.created"

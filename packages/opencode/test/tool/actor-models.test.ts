@@ -218,7 +218,7 @@ describe("actor tool — models action", () => {
 
         expect(result.output).toContain(`${textRef} [variants: low, high]`)
         expect(result.output).not.toContain(`${visionRef} (vision) [variants`)
-        expect(result.output).toContain("--variant")
+        expect(result.output).toContain("actor run/spawn JSON arguments")
       }),
     ),
   )
