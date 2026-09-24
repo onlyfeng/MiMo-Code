@@ -31,10 +31,6 @@ assert.ok(directory)
 assert.ok(resultFile)
 assert.ok(process.env.MIMOCODE_HOME?.startsWith(directory))
 
-const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null) })
-const redirectUri = `http://127.0.0.1:${reservation.port}/mcp/oauth/callback`
-await reservation.stop(true)
-
 const evidence = {
   origin: "",
   resourceMetadata: 0,
@@ -177,6 +173,12 @@ const http = Bun.serve({
     }
   },
 })
+// Keep the laboratory bound while selecting the callback port. Releasing the
+// callback reservation before starting the laboratory can hand it that port.
+const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null) })
+const redirectUri = `http://127.0.0.1:${reservation.port}/mcp/oauth/callback`
+assert.ok(bind !== "127.0.0.1" || reservation.port !== http.port)
+await reservation.stop(true)
 evidence.origin = `http://${bind}:${http.port}`
 process.env.MIMOCODE_CONFIG_CONTENT = JSON.stringify({
   mcp: {
