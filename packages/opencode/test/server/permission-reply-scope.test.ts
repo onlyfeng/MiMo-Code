@@ -12,7 +12,7 @@ afterEach(() => Instance.disposeAll())
 
 for (const scenario of [
   { reply: "reject", scope: "request", remaining: true },
-  { reply: "reject", scope: undefined, remaining: false },
+  { reply: "reject", scope: undefined, remaining: true },
   { reply: "once", scope: "request", remaining: true },
   { reply: "always", scope: "request", remaining: false },
 ] as const) {
