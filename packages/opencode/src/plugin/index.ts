@@ -331,12 +331,17 @@ export const layer = Layer.effect(
         if (Flag.MIMOCODE_PURE && cfg.plugin_origins?.length) {
           log.info("skipping external plugins in pure mode", { count: cfg.plugin_origins.length })
         }
-        if (plugins.length) yield* config.waitForDependencies()
-
+        // Dependency installation in a config directory cannot help a file plugin outside that directory.
+        const directories = (yield* config.directories()).map((dir) => `${pathToFileURL(dir).href.replace(/\/$/, "")}/`)
+        const needsDependencies = plugins.some((item) => {
+          const spec = Array.isArray(item.spec) ? item.spec[0] : item.spec
+          return directories.some((dir) => spec.startsWith(dir))
+        })
         const loaded = yield* Effect.promise(() =>
           PluginLoader.loadExternal({
             items: plugins,
             kind: "server",
+            wait: needsDependencies ? () => Effect.runPromise(config.waitForDependencies()) : undefined,
             report: {
               start(candidate) {
                 log.info("loading plugin", { path: candidate.plan.spec })
