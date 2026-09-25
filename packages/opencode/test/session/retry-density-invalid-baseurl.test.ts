@@ -45,9 +45,10 @@ const ref = {
   modelID: ModelID.make("test-model"),
 }
 
-const cfg = (baseURL: string): Partial<Config.Info> => ({
+const cfg = (baseURL: string, phase: "request" | "stream"): Partial<Config.Info> => ({
   // Scale the real backoff down; retry.test.ts covers the production 5s→60s ladder.
   retry: {
+    request: { maxRetries: phase === "request" ? 6 : 0, initialDelayMs: 20, maxDelayMs: 160, jitterRatio: 0 },
     network: { initialDelayMs: 20, maxDelayMs: 160, jitterRatio: 0 },
   },
   provider: {
@@ -261,7 +262,7 @@ describe("retry density instrumentation (upstream transport failure)", () => {
                 messageID: phase === "request" ? parent.id : msg.id,
                 attempt: i + 1,
                 phaseAttempt: i + 1,
-                maxAttempts: 0,
+                maxAttempts: phase === "request" ? 6 : 0,
                 phase,
                 scope: phase === "request" ? "request" : "live-step",
                 kind: "network",
@@ -286,7 +287,7 @@ describe("retry density instrumentation (upstream transport failure)", () => {
               if (i > 0) expect(upstream.hits[i]!.t).toBeGreaterThanOrEqual(states[i - 1]!.status.next - 2)
             }
           }),
-          { git: true, config: cfg(upstream.url) },
+          { git: true, config: cfg(upstream.url, phase) },
         )
       }),
       60_000,

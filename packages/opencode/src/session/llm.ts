@@ -948,6 +948,9 @@ const live: Layer.Layer<
                   if (prefillRepaired) return Stream.failCause(primaryCause)
                   return retryRequest(attempt(true, true), retryCount, startedAt, true)
                 }
+                // MaxMode owns the candidate/judge retry ladder and its status events.
+                // Retrying here would consume that scope's budget without notifying it.
+                if (input.retryScope) return Stream.failCause(primaryCause)
                 const decision = SessionRetry.decide(normalized, "request", input.retryScope)
                 if (!decision.retryable) return Stream.failCause(primaryCause)
                 const budget = SessionRetry.budgetFor(retryConfig, decision)
