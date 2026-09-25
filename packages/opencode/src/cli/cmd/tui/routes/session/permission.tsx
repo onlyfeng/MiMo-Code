@@ -252,6 +252,14 @@ export function permissionToolInput(
 }
 
 export function PermissionPrompt(props: { request: PermissionRequest }) {
+  return (
+    <Show when={props.request.id} keyed>
+      {(_requestID) => <PermissionRequestPrompt request={props.request} />}
+    </Show>
+  )
+}
+
+function PermissionRequestPrompt(props: { request: PermissionRequest }) {
   const sdk = useSDK()
   const sync = useSync()
   const [store, setStore] = createStore({
@@ -551,7 +559,7 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
           // click looks like durable trust but the next invocation still
           // prompts. Offer only "once" and "reject" for those.
           const options: Record<string, string> =
-            props.request.permission === "bash_delete"
+            props.request.permission === "bash_delete" || props.request.permission === "computer"
               ? { once: "Allow once", reject: "Reject" }
               : { once: "Allow once", always: "Allow always", reject: "Reject" }
 

@@ -12,7 +12,6 @@ import { ActorExecution, type Execution } from "@/actor/execution"
 import { createActorLifecycle, type ForkGenerationOwner, type WakeGenerationOwner, type TerminalStatus } from "@/actor/lifecycle"
 import { TaskRegistry } from "@/task/registry"
 import type { TaskID } from "@/task/schema"
-import { TaskGate, MAX_TASK_GATE_SUBAGENT_REACT } from "@/task/gate"
 import { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import type { Actor, SpawnMode, ContextMode, ToolWhitelist, Lifecycle } from "@/actor/schema"
@@ -138,15 +137,9 @@ export type AgentOutcome =
       // format, the validated object is surfaced here and takes precedence over
       // finalText (DW spec P3).
       structured?: unknown
-      // Subagent's self-reported header status (parsed from finalText), possibly
-      // overridden by the completion gate (DB truth wins — see onSuccess).
+      // Subagent's self-reported header status (parsed from finalText).
       reportedStatus?: ReturnStatus
       reportedSummary?: string
-      // Task IDs the subagent left non-terminal after the gate's cap. Present
-      // only when reportedStatus was downgraded to "partial"/"blocked".
-      incompleteTasks?: string[]
-      // Non-fatal hook/gate failures surfaced to the caller instead of being
-      // swallowed (upstream: "surface hook warnings").
       warnings?: string[]
     }
   | { status: "failure"; error: string; failure?: FailureInfo; finalText?: string; structured?: unknown }
@@ -494,10 +487,6 @@ export const layer = Layer.effect(
       generation: ForkGenerationOwner
       execution: Execution
       task_id?: string
-      // True for non-specialized subagents (those that received
-      // RETURN_FORMAT_INSTRUCTION). Only these are subject to the completion
-      // gate; specialized/system agents and peers create no user tasks.
-      gateEligible?: boolean
       format?: MessageV2.OutputFormat
       // When set, the child's work fiber runs under this InstanceContext (via
       // InstanceRef) instead of inheriting the spawner's. Used by peers placed
@@ -517,7 +506,7 @@ export const layer = Layer.effect(
         // Auto-start the bound task: spawning an actor for a task IS that task
         // beginning work. Status transition is a structural side-effect of spawn,
         // not a model action (the model maintains task status unreliably).
-        // `done` stays gate/model-driven. Uses parentSessionID because the task
+        // `done` stays model-driven. Uses parentSessionID because the task
         // lives in the parent/main session, not a peer's child session.
         // ignoreCause (not ignore): TaskRegistry.start raises a missing task_id as
         // a *defect* (Effect.die), which Effect.ignore does NOT swallow — only
@@ -772,59 +761,11 @@ export const layer = Layer.effect(
           Effect.matchCauseEffect({
             onSuccess: ({ finalText, structured }) =>
               Effect.gen(function* () {
-                // Set when a completion-gate re-entry turn failed; the gate then
-                // cannot vouch for a clean finish.
-                let gateFailed = false
-                // === COMPLETION GATE (B) + structured parse (A) ===
-                // Delegates the list/decide step to TaskGate.decide.
-                // We retain the runTurn re-entry + delivered-text update here
-                // because that is gate-policy, not list-policy.
-                let deliveredText = finalText
-                if (input.gateEligible) {
-                  let gateIter = 0
-                  while (true) {
-                    const decision = yield* TaskGate.decide({
-                      session_id: input.parentSessionID,
-                      owner: input.actorID,
-                      reactCount: gateIter,
-                      maxReact: MAX_TASK_GATE_SUBAGENT_REACT,
-                    }).pipe(Effect.provideService(TaskRegistry.Service, taskRegistry))
-                    if (!decision.needReentry) break
-                    gateIter++
-                    const gateTurn = yield* runManagedTurn(
-                      runAgentLoop({
-                        ...input,
-                        task: decision.reentryText,
-                        source: "hook",
-                        provenance: { hookPhase: "post", hookIteration: gateIter, pluginNames: [], hookIDs: [] },
-                      }),
-                    ).pipe(
-                      Effect.catch(() =>
-                        Effect.gen(function* () {
-                          log.error("actor.gate runTurn failed", { actorID: input.actorID })
-                          warnings.push("completion gate: re-entry turn failed")
-                          gateFailed = true
-                          return {
-                            finalText: undefined as string | undefined,
-                            structured: undefined as unknown,
-                            message: undefined as MessageV2.WithParts | undefined,
-                          }
-                        }),
-                      ),
-                      Effect.provideService(ActorRegistry.Service, actorReg),
-                    )
-                    // The gate re-run's re-emitted text updates the delivered body
-                    // (and structured, if it produced one) so the reconciliation +
-                    // delivery below see the latest turn.
-                    if (gateTurn.finalText !== undefined) deliveredText = gateTurn.finalText
-                    if (gateTurn.structured !== undefined) structured = gateTurn.structured
-                  }
-                }
-
-                // === postStop ReAct loop ===
-                // Preserve the main result while hooks finish before terminal publication.
+                // postStop ReAct loop — keep the execution running until hooks settle.
                 // NOTE: parallel structure to preStop loop above — pre runs turn THEN checks,
                 // post checks THEN runs turn. Both give 1 (delivery) + MAX_POST_REACT re-entries.
+                // Task completion is NOT gated here: no `task done` nudge, no re-emit.
+                const deliveredText = finalText
                 let postIter = 0
                 let lastFinalText = deliveredText
                 let postReentry:
@@ -915,39 +856,8 @@ export const layer = Layer.effect(
                   lastFinalText = newTurn.finalText
                 }
 
-                // Reconcile: DB truth wins over the model's self-reported header.
-                // A gate that could not complete cannot confirm a clean finish, so
-                // the turn may not stand as "success". It never overrides a more
-                // severe status the child reported itself.
-                const remaining = input.gateEligible
-                  ? yield* taskRegistry
-                      .list({ session_id: input.parentSessionID, owner: input.actorID, include_terminal: false })
-                      .pipe(Effect.orElseSucceed(() => []))
-                  : []
-                const stillActionable = remaining.filter((t) => t.status === "open" || t.status === "in_progress")
-                const downgrade: ReturnStatus | undefined =
-                  stillActionable.length > 0 ? "partial" : remaining.length > 0 ? "blocked" : undefined
                 const parsed = parseReturnHeader(deliveredText)
-                const severity = { failed: 3, blocked: 2, partial: 1, success: 0 } as const
-                const rank = (status: ReturnStatus | undefined) => (status ? severity[status] : -1)
-                const gateFloor: ReturnStatus | undefined = gateFailed ? "partial" : undefined
-                const reportedStatus = [downgrade ?? parsed.status, gateFloor].reduce<ReturnStatus | undefined>(
-                  (worst, candidate) => (rank(candidate) > rank(worst) ? candidate : worst),
-                  undefined,
-                )
-                const incompleteTasks = remaining.map((t) => t.id)
-                const reconciledText =
-                  downgrade && incompleteTasks.length > 0
-                    ? `${deliveredText ?? ""}\n\n**Incomplete tasks**: ${incompleteTasks.join(", ")}`
-                    : deliveredText
-
-                // === DELIVERY ===
-                // structured (json_schema result) takes precedence over text for the
-                // notification body (DW spec P3 §5.2); otherwise deliver the gate's
-                // reconciled text. The success outcome carries both the reconciled
-                // text + completion-gate fields AND structured when present.
-                const deliveryText =
-                  structured !== undefined ? JSON.stringify(structured) : (reconciledText ?? "(no output)")
+                const deliveryText = structured !== undefined ? JSON.stringify(structured) : (deliveredText ?? "(no output)")
                 yield* Effect.gen(function* () {
                   const claimed = yield* lifecycleState.claimTerminal(key, input.generation, "completed", "turn")
                   // Cancellation can reserve the claim after the last hook
@@ -966,7 +876,7 @@ export const layer = Layer.effect(
                           ? { status: "failure" as const, error: terminal.error ?? "unknown" }
                           : {
                               status: "success" as const,
-                              ...(reconciledText !== undefined ? { finalText: reconciledText } : {}),
+                              ...(deliveredText !== undefined ? { finalText: deliveredText } : {}),
                               ...(structured !== undefined ? { structured } : {}),
                               ...(warnings.length ? { warnings } : {}),
                             },
@@ -975,9 +885,9 @@ export const layer = Layer.effect(
                   }
                   yield* Effect.gen(function* () {
                     const resultMessageID = yield* persistDelivery({
-                      finalText: reconciledText,
+                      finalText: deliveredText,
                       structured,
-                      reportedStatus,
+                      reportedStatus: parsed.status,
                       reportedSummary: parsed.summary,
                     })
                     yield* actorReg
@@ -992,17 +902,16 @@ export const layer = Layer.effect(
                     yield* notify("completed", {
                       result: deliveryText,
                       ...(warnings.length ? { warnings } : {}),
-                      ...(reportedStatus ? { reportedStatus } : {}),
+                      ...(parsed.status ? { reportedStatus: parsed.status } : {}),
                       ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
                     })
                     yield* lifecycleState.settleTerminal(input.generation)
                     yield* Deferred.succeed(outcome, {
                       status: "success" as const,
-                      ...(reconciledText !== undefined ? { finalText: reconciledText } : {}),
+                      ...(deliveredText !== undefined ? { finalText: deliveredText } : {}),
                       ...(structured !== undefined ? { structured } : {}),
-                      ...(reportedStatus ? { reportedStatus } : {}),
+                      ...(parsed.status ? { reportedStatus: parsed.status } : {}),
                       ...(parsed.summary ? { reportedSummary: parsed.summary } : {}),
-                      ...(incompleteTasks.length > 0 ? { incompleteTasks } : {}),
                       ...(warnings.length ? { warnings } : {}),
                     })
                   }).pipe(Effect.ensuring(lifecycleState.settleTerminal(input.generation)))
@@ -1213,8 +1122,8 @@ export const layer = Layer.effect(
           if (input.forkContext) yield* retainForkContext(key, input.forkContext, input.parentSessionID ?? input.sessionID)
 
           // Auto-inject return-format instruction for lifecycle-managed subagents.
-          // Agents with an explicit completionGate keep this behavior even when
-          // they also provide a dedicated system prompt.
+          // Agents with an explicit completionGate keep the Status/Summary header
+          // instruction even when they provide a dedicated system prompt.
           const agentInfo = yield* agents.get(input.agentType)
           const gateEligible =
             agentInfo?.mode === "subagent" &&
@@ -1234,7 +1143,6 @@ export const layer = Layer.effect(
             generation,
             execution,
             task_id: input.task_id,
-            gateEligible,
             format: input.format,
           })
         }),
@@ -1287,7 +1195,7 @@ export const layer = Layer.effect(
 
     // Parent notification used by resumed persistent turns and by the
     // explicit cancel owner. Spawn-turn delivery remains in forkWork because it
-    // also resolves AgentOutcome and runs completion-gate reconciliation.
+    // also resolves AgentOutcome.
     const notifyTerminal = (
       sessionID: SessionID,
       actorID: string,

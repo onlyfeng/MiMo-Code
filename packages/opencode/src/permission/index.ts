@@ -135,14 +135,9 @@ export const AskInput = Schema.Struct({
   // (SYSTEM_SPAWNED_AGENT_TYPES) which have no attached human to reply. Default
   // (undefined/true) preserves all existing interactive behavior.
   interactive: Schema.optional(Schema.Boolean),
-  // Parent-grant inheritance for background peers and subagents with a real
-  // parent session edge (see decideAskRouting). When
-  // present, an ask that would block is NOT auto-denied outright: it is first
-  // checked against the PARENT session's approved ruleset (published process-
-  // wide via forwardRef.parentGrants). If the parent already holds a matching
-  // grant for every pattern, the child is auto-allowed with no human round-trip;
-  // otherwise it fails closed (DeniedError) — never hangs, never blocks on a
-  // human.
+  // Matching parent grants are a fast path, subject to deny and forced-ask
+  // precedence. A miss leaves the normal ask path intact: interactive:false
+  // fails closed; true/undefined waits for a reply.
   inherit: Schema.optional(Schema.Struct({ parentSessionID: Schema.String })),
 })
   .annotate({ identifier: "PermissionAskInput" })
@@ -230,8 +225,9 @@ export function evaluate(permission: string, pattern: string, ...rulesets: Rules
 // A wildcard rule like `permissions.allow: ["*"]` (or a stored `{permission:"*",
 // pattern:"*", action:"allow"}` approval) MUST NOT be able to pre-authorize
 // these. Explicit deny still wins; the instance's separate delete exemption
-// (including dangerous startup mode) is checked after those denies.
-const FORCED_ASK = new Set(["bash_delete"])
+// (including dangerous startup mode) is checked after those denies. Computer
+// control always requires an interactive approval.
+const FORCED_ASK = new Set(["bash_delete", "computer"])
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Permission") {}
 
@@ -306,6 +302,10 @@ export const layer = Layer.effect(
         needsAsk = true
       }
 
+      // Dangerous startup mode and the dedicated delete exemption may bypass
+      // the human confirmation, but only after every explicit bash_delete deny
+      // above has had a chance to reject the request.
+      // Delete exemption applies only to bash_delete — not other FORCED_ASK (computer).
       if (needsAsk && request.permission === "bash_delete" && s.autoApproveDelete) {
         log.info("auto-approve-delete active, auto-allowing", {
           permission: request.permission,
@@ -328,9 +328,10 @@ export const layer = Layer.effect(
       // published grant snapshot; auto-allow ONLY when the parent already grants
       // every requested pattern (same evaluate() the parent would run). Ordered
       // AFTER the deny loop (explicit deny still wins) and forced-ask still falls
-      // through to the fail-closed/human path below. A path the parent doesn't
-      // hold isn't matched → we do NOT return here → it fails closed at the
-      // non-interactive gate. No human wait, no hang.
+      // through to the ask/deny path below. A path the parent doesn't hold isn't
+      // matched → we do NOT return here → the ask continues for interactive
+      // callers, and the non-interactive gate below denies it. Never an
+      // unbounded human wait.
       if (needsAsk && input.inherit && !forced) {
         const parentSnapshot = forwardRef.getParentGrants(input.inherit.parentSessionID)
         if (parentSnapshot) {
@@ -358,7 +359,7 @@ export const layer = Layer.effect(
         }
       }
 
-      // Non-interactive caller (system-spawned background agent): no human is
+      // Non-interactive caller (system agent): no client is
       // attached to reply, so an ask that would block instead fails clean with
       // the same DeniedError an explicit "deny" rule produces. Emits no
       // Event.Asked and creates no Deferred → provably cannot hang.
@@ -485,9 +486,14 @@ export const layer = Layer.effect(
         )
 
         if (input.scope === "request") return
+        const src = existing.info.tool?.messageID
 
         for (const [id, item] of pending.entries()) {
           if (item.info.sessionID !== existing.info.sessionID) continue
+          // Strict: cascade only when both sides carry the same source id.
+          // Missing messageID must not inherit another actor's reject (R20).
+          const itemSrc = item.info.tool?.messageID
+          if (!(src && itemSrc && src === itemSrc)) continue
           pending.delete(id)
           yield* bus.publish(Event.Replied, {
             sessionID: item.info.sessionID,
