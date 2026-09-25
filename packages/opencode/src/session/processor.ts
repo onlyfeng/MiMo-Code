@@ -289,7 +289,7 @@ export const layer: Layer.Layer<
       const slog = log.clone().tag("session.id", input.sessionID).tag("messageID", input.assistantMessage.id)
 
       const parse = (e: unknown) =>
-        MessageV2.fromError(e, {
+        MessageV2.fromLiveError(e, {
           providerID: input.model.providerID,
           aborted,
           allow404Retry: ProviderError.allowsModelNotFoundRetry(input.model),
@@ -549,10 +549,6 @@ export const layer: Layer.Layer<
             }))
 
             const parts = MessageV2.parts(ctx.assistantMessage.id)
-            // Same-step exact repeats are already cancelled before execution by
-            // the duplicate guard. Doom_loop's 3-identical window is the same
-            // shape; asking here would confirm a call that will not run.
-            if (!Flag.MIMOCODE_DISABLE_TOOLCALL_DUPLICATE_DETECT) return
             const recentParts = parts.slice(-DOOM_LOOP_THRESHOLD)
 
             if (
@@ -947,6 +943,7 @@ export const layer: Layer.Layer<
                         next: info.next,
                         phase: info.phase,
                         scope: info.scope,
+                        hostCode: info.hostCode,
                       })
                     }
                     yield* bus
@@ -961,6 +958,7 @@ export const layer: Layer.Layer<
                         scope: info.scope,
                         reason: info.message,
                         nextDelayMs: Math.max(0, info.next - Date.now()),
+                        hostCode: info.hostCode,
                       })
                       .pipe(Effect.ignore)
                   }),
@@ -1011,6 +1009,7 @@ export const layer: Layer.Layer<
                           next: Date.now(),
                           phase: "stream",
                           scope: "live-step",
+                          hostCode: decision.hostCode,
                         })
                         .pipe(Effect.ignore)
                     }

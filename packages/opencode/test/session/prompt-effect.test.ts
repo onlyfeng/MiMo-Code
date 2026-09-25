@@ -5269,8 +5269,7 @@ it.live(
         expect(result.info.role).toBe("assistant")
         if (result.info.role === "assistant") {
           expect(result.info.finish).toBe("error")
-          expect(result.info.error?.name).toBe("ModelError")
-          expect(result.info.error?.data.message).toContain("fixed request prefix and active turn still do not fit")
+          expect(result.info.error).toMatchObject({ name: "ModelError", data: { message: expect.stringContaining("fixed request prefix and active turn still do not fit") } })
         }
         const messages = yield* sessions.messages({ sessionID: chat.id })
         const stored = messages.find((message) => message.info.id === external.info.id)
@@ -5330,8 +5329,7 @@ it.live(
         expect(result.info.role).toBe("assistant")
         if (result.info.role === "assistant") {
           expect(result.info.finish).toBe("error")
-          expect(result.info.error?.name).toBe("ModelError")
-          expect(result.info.error?.data.message).toContain("no sufficient progress")
+          expect(result.info.error).toMatchObject({ name: "ModelError", data: { message: expect.stringContaining("no sufficient progress") } })
         }
         const messages = yield* sessions.messages({ sessionID: chat.id })
         expect(
@@ -5367,8 +5365,7 @@ it.live(
         expect(result.info.role).toBe("assistant")
         if (result.info.role === "assistant") {
           expect(result.info.finish).toBe("error")
-          expect(result.info.error?.name).toBe("ModelError")
-          expect(result.info.error?.data.message).toContain("active turn")
+          expect(result.info.error).toMatchObject({ name: "ModelError", data: { message: expect.stringContaining("active turn") } })
         }
         const messages = yield* sessions.messages({ sessionID: chat.id })
         expect(messages.flatMap((message) => message.parts).some((part) => part.type === "compaction")).toBe(false)
@@ -7788,8 +7785,7 @@ it.live(
         expect(result.info.role).toBe("assistant")
         if (result.info.role === "assistant") {
           expect(result.info.finish).toBe("error")
-          expect(result.info.error?.name).toBe("ModelError")
-          expect(result.info.error?.data.message).toContain("no sufficient progress")
+          expect(result.info.error).toMatchObject({ name: "ModelError", data: { message: expect.stringContaining("no sufficient progress") } })
         }
         const messages = yield* sessions.messages({ sessionID: child.id, agentID: child.id })
         expect(

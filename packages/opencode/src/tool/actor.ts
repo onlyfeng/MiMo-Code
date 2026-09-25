@@ -799,7 +799,7 @@ export const ActorTool = Tool.define(
               }
 
               // Blocking run awaits the authoritative outcome after preStop,
-              // the completion gate, and postStop have settled. It preserves the
+              // and postStop have settled. It preserves the
               // main delivery while surfacing any postStop failures as warnings.
               const outcome = yield* Deferred.await(spawnResult.outcome).pipe(
                 Effect.timeout(op.timeout_ms ?? 600_000),

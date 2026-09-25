@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-24
-- Upstream: `2b993ac98283bb1283313982e699df706e9ad235`
-- Prior reviewed upstream: `a273d3450ee05ba5163320eae59d7716b778e480`
-- Main behavior (runtime/tests): `22f3ea5e1b597dd60709ed6e96256042a421414b`
-- Bundled guidance content: `22f3ea5e1b597dd60709ed6e96256042a421414b`
-- Prior fork `main` tip: `616fc5fa0a132d6899aaaafc3a7b0eacb12e20aa`
+- Last reviewed: 2026-09-26
+- Upstream: `849ca66cc8debbbcc08904039e05bd2e79be348d`
+- Prior reviewed upstream: `2b993ac98283bb1283313982e699df706e9ad235`
+- Main behavior (runtime/tests): `202de026e2eee4a728f0cd881e5417df45acdc4c`
+- Bundled guidance content: `202de026e2eee4a728f0cd881e5417df45acdc4c`
+- Prior fork `main` tip: `d1d42cfac9a9d530b86f4877c0e4433be02f569d`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,9 +29,11 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-09-24 full sync](upstream-sync-2026-09-24.md), three capabilities through `2b993ac9`. Retire Orchestrator and tool-specific shell invocation, preserve local image attachment paths, and keep the shared fork permission, Actor, frozen context and request-authority contracts. FC-018 retires with its parser; the remaining FD/FC owners stay active.
+Latest reviewed synchronization: [2026-09-26 full sync](upstream-sync-2026-09-26.md), six capabilities through `849ca66c`. Remove unpublished duplicate-call cancellation and TaskGate re-entry, adopt interactive subagent asks and host error classification, and retain shared fork approval, Actor lifecycle and scoped retry contracts.
 
-Previous synchronization: [2026-09-23 full sync](upstream-sync-2026-09-23.md), three capabilities through `a273d345`. It removed PascalCase model-facing projection and tool-call flooding middleware, and adopted same-step exact duplicate cancellation with coordinated `doom_loop` opt-out. Canonical tool IDs, FIFO and failure cascade, fork replay boundaries and hidden-MCP/native Actor snapshot identity remain active.
+Previous synchronization: [2026-09-24 full sync](upstream-sync-2026-09-24.md), three capabilities through `2b993ac9`. Retire Orchestrator and tool-specific shell invocation, preserve local image attachment paths, and keep the shared fork permission, Actor, frozen context and request-authority contracts. FC-018 retires with its parser; the remaining FD/FC owners stay active.
+
+Previous synchronization: [2026-09-23 full sync](upstream-sync-2026-09-23.md), three capabilities through `a273d345`. It removed PascalCase model-facing projection and tool-call flooding middleware, and introduced the now-retired same-step exact duplicate cancellation. Canonical tool IDs, FIFO and failure cascade, fork replay boundaries and hidden-MCP/native Actor snapshot identity remain active.
 
 Previous synchronization: [2026-09-22 full sync](upstream-sync-2026-09-22.md), ten capabilities through `1579e7d9`. It introduced the now-retired flooding and PascalCase projection alongside still-active failure cascade, runtime-local Actor status, inbox/TUI projections, automatic title tool choice, the 0.1.15 release, MCP confirmation elicitation and opt-in host model transport.
 

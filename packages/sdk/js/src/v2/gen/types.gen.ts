@@ -477,6 +477,11 @@ export type ProviderAuthError = {
   data: {
     providerID: string
     message: string
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
   }
 }
 
@@ -484,13 +489,22 @@ export type UnknownError = {
   name: "UnknownError"
   data: {
     message: string
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
   }
 }
 
 export type MessageOutputLengthError = {
   name: "MessageOutputLengthError"
   data: {
-    [key: string]: unknown
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
   }
 }
 
@@ -498,6 +512,11 @@ export type MessageAbortedError = {
   name: "MessageAbortedError"
   data: {
     message: string
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
   }
 }
 
@@ -506,6 +525,11 @@ export type StructuredOutputError = {
   data: {
     message: string
     retries: number
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
   }
 }
 
@@ -514,6 +538,11 @@ export type ContextOverflowError = {
   data: {
     message: string
     responseBody?: string
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
   }
 }
 
@@ -521,6 +550,11 @@ export type InvalidOutputError = {
   name: "InvalidOutputError"
   data: {
     message: string
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
   }
 }
 
@@ -528,6 +562,11 @@ export type TextToolCallError = {
   name: "TextToolCallError"
   data: {
     message: string
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
   }
 }
 
@@ -535,6 +574,11 @@ export type ContentFilterError = {
   name: "ContentFilterError"
   data: {
     message: string
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
   }
 }
 
@@ -542,6 +586,11 @@ export type ModelError = {
   name: "ModelError"
   data: {
     message: string
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
   }
 }
 
@@ -555,6 +604,8 @@ export type ApiError = {
       [key: string]: string
     }
     responseBody?: string
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
     metadata?: {
       [key: string]: string
     }
@@ -593,6 +644,7 @@ export type EventSessionRetryAttempt = {
     scope: "request" | "live-step" | "max-candidate" | "max-judge"
     reason: string
     nextDelayMs: number
+    hostCode?: string
   }
 }
 
@@ -780,6 +832,7 @@ export type SessionStatus =
       next: number
       phase?: "request" | "stream"
       scope?: "request" | "live-step" | "max-candidate" | "max-judge"
+      hostCode?: string
     }
   | {
       type: "notice"
@@ -1982,6 +2035,9 @@ export type ProviderConfig = {
       maxDelayMs?: number
       jitterRatio?: number
     }
+    /**
+     * Session network recovery is always persistent with no retry count or elapsed-time limit; only delay and jitter fields are configurable. Max-mode uses its own scope budgets.
+     */
     network?: {
       /**
        * bounded stops after maxRetries; persistent ignores the retry count and waits until cancellation or deadline
@@ -2469,6 +2525,9 @@ export type Config = {
       maxDelayMs?: number
       jitterRatio?: number
     }
+    /**
+     * Session network recovery is always persistent with no retry count or elapsed-time limit; only delay and jitter fields are configurable. Max-mode uses its own scope budgets.
+     */
     network?: {
       /**
        * bounded stops after maxRetries; persistent ignores the retry count and waits until cancellation or deadline

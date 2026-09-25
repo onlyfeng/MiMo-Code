@@ -100,7 +100,7 @@ function retryPolicy(input: MaxStepInput, scope: "max-candidate" | "max-judge", 
     scope,
     budget: (decision) => SessionRetry.budgetFor(retryConfig, decision),
     jitterRatio: retryConfig.jitterRatio,
-    parse: (error) => MessageV2.fromError(error, { providerID: input.model.providerID, aborted: aborted(), allow404Retry: ProviderError.allowsModelNotFoundRetry(input.model) }),
+    parse: (error) => MessageV2.fromLiveError(error, { providerID: input.model.providerID, aborted: aborted(), allow404Retry: ProviderError.allowsModelNotFoundRetry(input.model) }),
     set: (info) =>
       input.onRetry
         ? input.onRetry({ ...info, nextDelayMs: Math.max(0, info.next - Date.now()) })
@@ -173,6 +173,7 @@ export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<
       activeTools: input.activeTools,
       agentID: input.agentID,
       quietRetryDiagnostics: true,
+      retryScope: "max-candidate",
     })
 
     yield* Stream.runForEach(stream, (event: LLM.Event) => {
@@ -327,6 +328,7 @@ export const judge = (input: MaxStepInput, candidates: Candidate[]): Effect.Effe
       toolChoice: "none",
       agentID: input.agentID,
       quietRetryDiagnostics: true,
+      retryScope: "max-judge",
     })
 
     yield* Stream.runForEach(stream, (event: LLM.Event) => {
