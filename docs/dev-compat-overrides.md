@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-09-26, full upstream synchronization through `849ca66cc8debbbcc08904039e05bd2e79be348d`.
+- Prior upstream: `2b993ac98283bb1283313982e699df706e9ad235`.
+- Starting compat: `b4885f356caaf14e4601ef400887e07733c95f91`.
+- Integrated main: `9f6f827c1bd0cceb9e59e45a53762cc8c5f1cfaf`; compat source/tests: `96bc3179c8252634b5ff1d4f81cad3f2b9c3d9e5`.
+- Review: [six-capability synchronization](upstream-sync-2026-09-26.md), C01–C06.
+- Resolution: inherit duplicate-call rollback, fixture lifetime repair, interactive background subagent approvals with source-isolated rejection, TaskGate completion removal, host error catalog/retry rules, and disposed-stream cleanup. Retain frozen tool membership, bounded request preflight, full-context/variant Actors, per-agent MaxMode, request metadata and network/platform policies. The shared MaxMode retry owner, generated host-error fields and plugin dependency wait repair are included. The production overlay remains 38 paths; no DC owner retires or moves.
+- Validation: 399/399 across the core host/error/retry/LLM/bus/Actor/MaxMode/Task matrix, 50/50 across compat TUI/model/context/recovery overlays, 13/13 preflight and MaxMode cases, and 53/53 plugin/toolset/MaxMode checks after the accepted main repair. Package `bun typecheck` and SDK regeneration pass without generated diff; root lint passed with 4727 warnings and zero errors before the final shared repair. `bun.lock` matches main. Exact-tip CI remains the publication gate.
+- Shared ownership: FD/FC registries inherit main byte-for-byte. Exact-tip CI and remote ancestry are checked after this record; local results are not publication evidence.
+
+## Previous review record — 2026-09-24
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-09-24, full upstream synchronization through `2b993ac98283bb1283313982e699df706e9ad235`.
 - Prior upstream: `a273d3450ee05ba5163320eae59d7716b778e480`.
 - Starting compat: `6516e800e2bfc9bd2403ad90572c538c31339bf7`.
