@@ -317,12 +317,17 @@ test("a timed-out old disposer cannot invalidate replacement generation state", 
           const first = yield* Effect.promise(() => access(state, tmp.path))
           const dispose = Instance.disposeDirectory(tmp.path)
           yield* Effect.promise(() => disposing)
-          const replacement = access(state, tmp.path)
+          let replacementResolved = false
+          const replacement = access(state, tmp.path).then((value) => {
+            replacementResolved = true
+            return value
+          })
 
           yield* Effect.promise(() => dispose)
-          const second = yield* Effect.promise(() => replacement)
+          expect(replacementResolved).toBe(false)
           finish()
           yield* Effect.promise(() => oldInvalidated)
+          const second = yield* Effect.promise(() => replacement)
           const third = yield* Effect.promise(() => access(state, tmp.path))
 
           expect(first).not.toBe(second)

@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-09-27, full upstream synchronization through `454521a8527686a4132c6dda2d2ff62607dcb892`.
+- Prior upstream: `849ca66cc8debbbcc08904039e05bd2e79be348d`.
+- Starting compat: `5eebf4466133bbebfd368fed6ce13592a0c53bc3`.
+- Integrated main: `832e317712af9a7c135d11ed9c9811cffbe27017`; initial compat runtime merge: `b3fb3b82176a409aa1d32595b91e5691725ca98b`; the current merge inherits main's `41164111b0938de4e267c1b9cd2685e3ccd97c03` test/API correction and shared review record.
+- Review: [four-capability synchronization](upstream-sync-2026-09-27.md), C01–C04.
+- Resolution: inherit execution-aware config refresh, instance-directory cron storage, interactive Bash request ownership and UTC cron guidance. Keep full-context/variant Actors, bounded request preflight, per-agent MaxMode, authoritative TUI metadata, and network/platform policies. The production overlay remains 38 paths; no DC owner retires or moves. The generated SDK and OpenAPI retain compat model selection and checkpoint coverage alongside the shared config status endpoint.
+- Validation: 400/400 tests pass across instance, Actor, Question/worktree, Runner/approval/Bash/cron/OpenAPI, InstanceState, RunState/TUI, compat context/model/variant and deferred notification groups. Package `bun typecheck` passes; root lint reports 4744 warnings and zero errors. SDK regeneration produces no unexplained generated diff, and `bun.lock` matches main. Exact-tip CI remains the publication gate.
+- Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
+
+## Previous review record — 2026-09-26
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-09-26, full upstream synchronization through `849ca66cc8debbbcc08904039e05bd2e79be348d`.
 - Prior upstream: `2b993ac98283bb1283313982e699df706e9ad235`.
 - Starting compat: `b4885f356caaf14e4601ef400887e07733c95f91`.

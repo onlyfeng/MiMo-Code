@@ -412,16 +412,6 @@ let lateRunGate:
       followerAttached: Deferred.Deferred<void>
     }
   | undefined
-let disposalRetryGate:
-  | {
-      sessionID: SessionID
-      actorID: string
-      started: Deferred.Deferred<void>
-      entered: Deferred.Deferred<void>
-      release: Deferred.Deferred<void>
-      armed: boolean
-    }
-  | undefined
 let droppedStartGate:
   | {
       sessionID: SessionID
@@ -496,19 +486,6 @@ const run = Layer.effect(
         return Effect.succeed({ runId: 0, interruptOwned: Effect.void, completion: onInterrupt })
       },
       ensureRunning: (sessionID, actorID, onInterrupt, work, joinRunning) => {
-        const disposal = disposalRetryGate
-        if (disposal?.armed && disposal.sessionID === sessionID && disposal.actorID === actorID) {
-          disposal.armed = false
-          return state.ensureRunning(
-            sessionID,
-            actorID,
-            onInterrupt.pipe(
-              Effect.tap(() => Deferred.succeed(disposal.entered, undefined)),
-              Effect.tap(() => Deferred.await(disposal.release)),
-            ),
-            Deferred.succeed(disposal.started, undefined).pipe(Effect.andThen(Effect.never)),
-          )
-        }
         const gate = lateRunGate
         if (!gate || gate.sessionID !== sessionID || gate.actorID !== actorID) {
           return state.ensureRunning(sessionID, actorID, onInterrupt, work, joinRunning)
@@ -543,7 +520,6 @@ const run = Layer.effect(
 ).pipe(Layer.provide(baseRun))
 afterEach(() => {
   lateRunGate = undefined
-  disposalRetryGate = undefined
   droppedStartGate = undefined
   sessionPreGate = undefined
   userQueryPostGate = undefined
@@ -8383,65 +8359,6 @@ itActor.live(
           lateExists: false,
         })
         expect(yield* inbox.has("first-main-row")).toBe(false)
-      }),
-      { git: true, config: providerCfg },
-    ),
-  15_000,
-)
-
-itActor.live(
-  "a main inbox wake does not recreate its runner after instance disposal",
-  () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
-        const sessions = yield* Session.Service
-        const inbox = inboxServiceRef.current ?? (yield* Effect.die("inbox service ref was not initialized"))
-        const chat = yield* sessions.create({ title: "main-inbox-dispose-retry" })
-        yield* seed(chat.id)
-        const started = yield* Deferred.make<void>()
-        const entered = yield* Deferred.make<void>()
-        const release = yield* Deferred.make<void>()
-        disposalRetryGate = {
-          sessionID: chat.id,
-          actorID: "main",
-          started,
-          entered,
-          release,
-          armed: true,
-        }
-        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
-
-        const inboxID = "main-inbox-dispose-row"
-        yield* Effect.sync(() =>
-          Database.use((db) =>
-            db
-              .insert(InboxTable)
-              .values({
-                id: inboxID,
-                receiver_session_id: chat.id,
-                receiver_actor_id: "main",
-                sender_session_id: null,
-                sender_actor_id: null,
-                type: "text",
-                content: { text: "must remain queued during disposal" },
-                created_at: Date.now(),
-              })
-              .run(),
-          ),
-        )
-        yield* llm.text("unexpected retry")
-        const loop = yield* prompt.loop({ sessionID: chat.id, agentID: "main", inboxID }).pipe(Effect.forkChild)
-
-        yield* Deferred.await(started).pipe(Effect.timeout("5 seconds"))
-        const disposing = yield* Effect.promise(() => Instance.dispose()).pipe(Effect.forkChild)
-        yield* Deferred.await(entered).pipe(Effect.timeout("5 seconds"))
-        yield* Fiber.join(disposing).pipe(Effect.timeout("5 seconds"))
-        yield* Deferred.succeed(release, undefined)
-        yield* Fiber.await(loop).pipe(Effect.timeout("5 seconds"))
-
-        expect(yield* llm.calls).toBe(0)
-        expect(yield* inbox.has(inboxID)).toBe(true)
       }),
       { git: true, config: providerCfg },
     ),

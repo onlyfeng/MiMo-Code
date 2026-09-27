@@ -1,18 +1,13 @@
 import { afterEach, describe, expect } from "bun:test"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from "effect"
-import { Bus } from "../../src/bus"
-import { GlobalBus } from "../../src/bus/global"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { RunDisposal } from "../../src/session/run-disposal"
 import { SessionRunState } from "../../src/session/run-state"
-import { MessageID, PartID, SessionID } from "../../src/session/schema"
-import { MessageV2 } from "../../src/session/message-v2"
-import { SessionPrompt } from "../../src/session/prompt"
-import { ModelID, ProviderID } from "../../src/provider/schema"
+import { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
-import { provideInstance, provideTmpdirInstance } from "../fixture/fixture"
+import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 let statusRaceGate:
@@ -60,121 +55,71 @@ afterEach(() => {
   statusBusyGate = undefined
 })
 
-const it = testEffect(
-  Layer.mergeAll(
-    SessionRunState.layer.pipe(Layer.provide(status)),
-    CrossSpawnSpawner.defaultLayer,
-  ),
-)
-
-const realStatus = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
-const itWithStatus = testEffect(
-  Layer.mergeAll(
-    SessionRunState.layer.pipe(Layer.provide(realStatus)),
-    realStatus,
-    CrossSpawnSpawner.defaultLayer,
-  ),
-)
+const it = testEffect(Layer.mergeAll(SessionRunState.layer.pipe(Layer.provide(status)), CrossSpawnSpawner.defaultLayer))
 
 describe("SessionRunState instance disposal", () => {
   it.live(
-    "releases the instance before interrupted runner cleanup finishes",
+    "defers main runner disposal until its execution finishes",
     () =>
-      provideTmpdirInstance(() =>
+      provideTmpdirInstance((directory) =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
           const started = yield* Deferred.make<void>()
-          const cleanupStarted = yield* Deferred.make<void>()
-          const releaseCleanup = yield* Deferred.make<void>()
-          yield* Effect.addFinalizer(() => Deferred.succeed(releaseCleanup, undefined).pipe(Effect.ignore))
+          const finish = yield* Deferred.make<void>()
+          const finished = yield* Ref.make(false)
           const caller = yield* run
             .ensureRunning(
               SessionID.make("session-run-state-dispose"),
               "main",
               Effect.interrupt,
               Deferred.succeed(started, undefined).pipe(
-                Effect.andThen(Effect.never),
-                Effect.onInterrupt(() =>
-                  Deferred.succeed(cleanupStarted, undefined).pipe(
-                    Effect.andThen(Deferred.await(releaseCleanup)),
-                  ),
-                ),
+                Effect.andThen(Deferred.await(finish)),
+                Effect.andThen(Ref.set(finished, true)),
+                Effect.andThen(Effect.interrupt),
               ),
             )
             .pipe(Effect.forkChild)
 
           yield* Deferred.await(started)
-          const disposing = yield* Effect.promise(() => Instance.dispose()).pipe(
-            Effect.forkDetach({ startImmediately: true }),
-          )
-          yield* Deferred.await(cleanupStarted).pipe(Effect.timeout("1 second"))
-
-          const disposeExit = yield* Fiber.join(disposing).pipe(
-            Effect.timeout("1 second"),
-            Effect.exit,
-            Effect.ensuring(
-              Deferred.succeed(releaseCleanup, undefined).pipe(
-                Effect.andThen(
-                  Effect.all([Fiber.await(caller), Fiber.await(disposing)], {
-                    discard: true,
-                  }),
-                ),
-              ),
-            ),
-          )
-
-          expect(Exit.isSuccess(disposeExit)).toBe(true)
+          yield* Effect.promise(() => Instance.dispose())
+          expect(Instance.refreshStatus(directory).state).toBe("pending")
+          expect(yield* Ref.get(finished)).toBe(false)
+          yield* Deferred.succeed(finish, undefined)
+          yield* Fiber.await(caller)
+          expect(yield* Ref.get(finished)).toBe(true)
         }),
       ),
     5_000,
   )
 
   it.live(
-    "interrupts shell work without waiting for its cleanup",
+    "defers shell disposal until its execution finishes",
     () =>
-      provideTmpdirInstance(() =>
+      provideTmpdirInstance((directory) =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
           const started = yield* Deferred.make<void>()
-          const cleanupStarted = yield* Deferred.make<void>()
-          const releaseCleanup = yield* Deferred.make<void>()
-          yield* Effect.addFinalizer(() => Deferred.succeed(releaseCleanup, undefined).pipe(Effect.ignore))
+          const finish = yield* Deferred.make<void>()
+          const finished = yield* Ref.make(false)
           const caller = yield* run
             .startShell(
               SessionID.make("session-run-state-dispose-shell"),
               Effect.interrupt,
               Deferred.succeed(started, undefined).pipe(
-                Effect.andThen(Effect.never),
-                Effect.onInterrupt(() =>
-                  Deferred.succeed(cleanupStarted, undefined).pipe(
-                    Effect.andThen(Deferred.await(releaseCleanup)),
-                  ),
-                ),
+                Effect.andThen(Deferred.await(finish)),
+                Effect.andThen(Ref.set(finished, true)),
+                Effect.andThen(Effect.interrupt),
               ),
             )
             .pipe(Effect.forkChild)
 
           yield* Deferred.await(started)
-          const disposing = yield* Effect.promise(() => Instance.dispose()).pipe(
-            Effect.forkDetach({ startImmediately: true }),
-          )
-          yield* Deferred.await(cleanupStarted).pipe(Effect.timeout("1 second"))
-
-          const disposeExit = yield* Fiber.join(disposing).pipe(
-            Effect.timeout("1 second"),
-            Effect.exit,
-            Effect.ensuring(
-              Deferred.succeed(releaseCleanup, undefined).pipe(
-                Effect.andThen(
-                  Effect.all([Fiber.await(caller), Fiber.await(disposing)], {
-                    discard: true,
-                  }),
-                ),
-              ),
-            ),
-          )
-
-          expect(Exit.isSuccess(disposeExit)).toBe(true)
+          yield* Effect.promise(() => Instance.dispose())
+          expect(Instance.refreshStatus(directory).state).toBe("pending")
+          expect(yield* Ref.get(finished)).toBe(false)
+          yield* Deferred.succeed(finish, undefined)
+          yield* Fiber.await(caller)
+          expect(yield* Ref.get(finished)).toBe(true)
         }),
       ),
     5_000,
@@ -227,12 +172,7 @@ describe("SessionRunState instance disposal", () => {
             Deferred.await(release).pipe(Effect.andThen(Effect.die("exclusive test released"))),
           )
           const second = yield* run
-            .startRunning(
-              sessionID,
-              "main",
-              Effect.interrupt,
-              Effect.die("concurrent work must not run"),
-            )
+            .startRunning(sessionID, "main", Effect.interrupt, Effect.die("concurrent work must not run"))
             .pipe(Effect.exit)
 
           expect(Exit.isFailure(second) && Cause.squash(second.cause)).toBeInstanceOf(Session.BusyError)
@@ -255,10 +195,9 @@ describe("SessionRunState instance disposal", () => {
           const releaseCleanup = yield* Deferred.make<void>()
           const releaseThird = yield* Deferred.make<void>()
           yield* Effect.addFinalizer(() =>
-            Effect.all(
-              [Deferred.succeed(releaseCleanup, undefined), Deferred.succeed(releaseThird, undefined)],
-              { discard: true },
-            ),
+            Effect.all([Deferred.succeed(releaseCleanup, undefined), Deferred.succeed(releaseThird, undefined)], {
+              discard: true,
+            }),
           )
 
           yield* run
@@ -269,9 +208,7 @@ describe("SessionRunState instance disposal", () => {
               Deferred.succeed(firstStarted, undefined).pipe(
                 Effect.andThen(Effect.never),
                 Effect.onInterrupt(() =>
-                  Deferred.succeed(cleanupStarted, undefined).pipe(
-                    Effect.andThen(Deferred.await(releaseCleanup)),
-                  ),
+                  Deferred.succeed(cleanupStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseCleanup))),
                 ),
               ),
             )
@@ -281,12 +218,9 @@ describe("SessionRunState instance disposal", () => {
           const cancelling = yield* run.cancel(sessionID).pipe(Effect.forkChild)
           yield* Deferred.await(cleanupStarted)
 
-          const admittingSecond = yield* run.startRunning(
-            sessionID,
-            "main",
-            Effect.interrupt,
-            Effect.die("second run completed"),
-          ).pipe(Effect.forkChild)
+          const admittingSecond = yield* run
+            .startRunning(sessionID, "main", Effect.interrupt, Effect.die("second run completed"))
+            .pipe(Effect.forkChild)
           yield* Effect.yieldNow
           expect(admittingSecond.pollUnsafe()).toBeUndefined()
           yield* Deferred.succeed(releaseCleanup, undefined)
@@ -465,10 +399,9 @@ describe("SessionRunState instance disposal", () => {
           const seen: string[] = []
           statusRaceGate = { sessionID, idleEntered, releaseIdle, seen }
           yield* Effect.addFinalizer(() =>
-            Effect.all(
-              [Deferred.succeed(finishSecond, undefined), Deferred.succeed(releaseIdle, undefined)],
-              { discard: true },
-            ).pipe(Effect.ignore),
+            Effect.all([Deferred.succeed(finishSecond, undefined), Deferred.succeed(releaseIdle, undefined)], {
+              discard: true,
+            }).pipe(Effect.ignore),
           )
 
           const cancelling = yield* run.cancel(sessionID).pipe(Effect.forkChild)
@@ -573,9 +506,7 @@ describe("SessionRunState instance disposal", () => {
             Effect.interrupt,
             Effect.never.pipe(
               Effect.onInterrupt(() =>
-                Deferred.succeed(cleanupStarted, undefined).pipe(
-                  Effect.andThen(Deferred.await(releaseCleanup)),
-                ),
+                Deferred.succeed(cleanupStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseCleanup))),
               ),
             ),
           )
@@ -602,7 +533,7 @@ describe("SessionRunState instance disposal", () => {
           let entered = false
 
           yield* run.assertNotBusy(SessionID.make("session-run-state-stale-instance"))
-          yield* Effect.promise(() => Instance.dispose())
+          yield* Effect.promise(() => Instance.reload({ directory: Instance.directory }))
           const exit = yield* run
             .withRunDisposal(
               Effect.sync(() => {
@@ -680,7 +611,7 @@ describe("SessionRunState instance disposal", () => {
             .pipe(Effect.exit, Effect.forkChild)
 
           yield* Deferred.await(entered)
-          yield* Effect.promise(() => Instance.dispose())
+          yield* Effect.promise(() => Instance.reload({ directory: Instance.directory }))
           yield* Deferred.succeed(release, undefined)
           const exit = yield* Fiber.join(caller)
 
@@ -691,162 +622,4 @@ describe("SessionRunState instance disposal", () => {
       ),
     5_000,
   )
-
-  itWithStatus.live(
-    "does not publish idle after instance disposal begins",
-    () =>
-      provideTmpdirInstance(() =>
-        Effect.gen(function* () {
-          const sessionID = SessionID.make("session-run-state-dispose-status")
-          const idleEvents: string[] = []
-          const listener = (event: { payload: { type: string; properties?: { sessionID?: unknown } } }) => {
-            if (event.payload.type !== SessionStatus.Event.Idle.type) return
-            if (event.payload.properties?.sessionID !== sessionID) return
-            idleEvents.push(event.payload.type)
-          }
-          GlobalBus.on("event", listener)
-          yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
-
-          const run = yield* SessionRunState.Service
-          const sessionStatus = yield* SessionStatus.Service
-          const started = yield* Deferred.make<void>()
-          const cleanupStarted = yield* Deferred.make<void>()
-          const releaseCleanup = yield* Deferred.make<void>()
-          yield* Effect.addFinalizer(() => Deferred.succeed(releaseCleanup, undefined).pipe(Effect.ignore))
-          const caller = yield* run
-            .ensureRunning(
-              sessionID,
-              "main",
-              Effect.interrupt,
-              Deferred.succeed(started, undefined).pipe(
-                Effect.andThen(Effect.never),
-                Effect.onInterrupt(() =>
-                  Deferred.succeed(cleanupStarted, undefined).pipe(
-                    Effect.andThen(sessionStatus.set(sessionID, { type: "idle" })),
-                    Effect.andThen(Deferred.await(releaseCleanup)),
-                  ),
-                ),
-              ),
-            )
-            .pipe(Effect.forkChild)
-
-          yield* Deferred.await(started)
-          const disposing = yield* Effect.promise(() => Instance.dispose()).pipe(
-            Effect.forkDetach({ startImmediately: true }),
-          )
-          yield* Deferred.await(cleanupStarted).pipe(Effect.timeout("1 second"))
-          const disposeExit = yield* Fiber.join(disposing).pipe(Effect.timeout("1 second"), Effect.exit)
-          yield* Deferred.succeed(releaseCleanup, undefined)
-          yield* Fiber.await(caller)
-
-          expect(Exit.isSuccess(disposeExit)).toBe(true)
-          expect(idleEvents).toEqual([])
-        }),
-      ),
-    5_000,
-  )
 })
-
-const itWithOrphanSweep = testEffect(
-  Layer.mergeAll(
-    SessionPrompt.defaultLayer,
-    Session.defaultLayer,
-    SessionRunState.defaultLayer,
-    CrossSpawnSpawner.defaultLayer,
-  ),
-)
-
-itWithOrphanSweep.live(
-  "disposed instance cleanup cannot abort a replacement instance running tool",
-  () =>
-    provideTmpdirInstance((dir) =>
-      Effect.gen(function* () {
-        yield* SessionPrompt.Service
-        const sessions = yield* Session.Service
-        const run = yield* SessionRunState.Service
-        const session = yield* sessions.create({})
-        const cleanupStarted = yield* Deferred.make<void>()
-        const releaseCleanup = yield* Deferred.make<void>()
-        yield* Effect.addFinalizer(() => Deferred.succeed(releaseCleanup, undefined).pipe(Effect.asVoid))
-        const old = yield* run.startRunning(
-          session.id,
-          "main",
-          Effect.interrupt,
-          Effect.never.pipe(
-            Effect.onInterrupt(() =>
-              Deferred.succeed(cleanupStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseCleanup))),
-            ),
-          ),
-        )
-        const disposing = yield* Effect.promise(() => Instance.dispose()).pipe(
-          Effect.forkDetach({ startImmediately: true }),
-        )
-        yield* Deferred.await(cleanupStarted).pipe(Effect.timeout("2 seconds"))
-        yield* Fiber.join(disposing).pipe(Effect.timeout("2 seconds"))
-
-        yield* Effect.gen(function* () {
-          const replacement = yield* SessionRunState.Service
-          const part = yield* Deferred.make<MessageV2.ToolPart>()
-          const current = yield* replacement.startRunning(
-            session.id,
-            "main",
-            Effect.interrupt,
-            Effect.gen(function* () {
-              const user = yield* sessions.updateMessage({
-                id: MessageID.ascending(),
-                role: "user",
-                sessionID: session.id,
-                agent: "build",
-                model: { providerID: ProviderID.make("test"), modelID: ModelID.make("model") },
-                time: { created: Date.now() },
-              })
-              const assistant = yield* sessions.updateMessage({
-                id: MessageID.ascending(),
-                role: "assistant",
-                sessionID: session.id,
-                parentID: user.id,
-                mode: "build",
-                agent: "build",
-                path: { cwd: dir, root: dir },
-                cost: 0,
-                tokens: { output: 0, input: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-                modelID: ModelID.make("model"),
-                providerID: ProviderID.make("test"),
-                time: { created: Date.now() },
-              })
-              const running = yield* sessions.updatePart({
-                id: PartID.ascending(),
-                messageID: assistant.id,
-                sessionID: session.id,
-                type: "tool",
-                tool: "bash",
-                callID: "call-example",
-                state: { status: "running", input: { command: "example" }, time: { start: Date.now() } },
-              })
-              yield* Deferred.succeed(part, running)
-              return yield* Effect.never
-            }),
-          )
-          yield* Effect.gen(function* () {
-            const running = yield* Deferred.await(part).pipe(Effect.timeout("2 seconds"))
-            yield* Deferred.succeed(releaseCleanup, undefined)
-            yield* old.pipe(Effect.exit, Effect.timeout("2 seconds"))
-            const persisted = yield* sessions.getPart({
-              sessionID: session.id,
-              messageID: running.messageID,
-              partID: running.id,
-            })
-            expect(persisted?.type).toBe("tool")
-            if (persisted?.type !== "tool") throw new Error("Expected a tool part")
-            expect(persisted.state.status).toBe("running")
-            const admission = yield* replacement.assertNotBusy(session.id).pipe(Effect.exit)
-            expect(Exit.isFailure(admission) && Cause.squash(admission.cause)).toBeInstanceOf(Session.BusyError)
-          }).pipe(
-            Effect.ensuring(replacement.cancel(session.id)),
-            Effect.ensuring(current.pipe(Effect.exit, Effect.asVoid)),
-          )
-        }).pipe(provideInstance(dir))
-      }),
-    ),
-  15_000,
-)

@@ -795,7 +795,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
     ),
   )
 
-  it.live("instance disposal suppresses initial background completion notification", () =>
+  it.live("deferred instance disposal preserves initial background completion notification", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         const actor = yield* Actor.Service
@@ -831,11 +831,12 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
 
         yield* Deferred.await(successEntered).pipe(Effect.timeout("5 seconds"))
         yield* Effect.promise(() => Instance.dispose()).pipe(Effect.timeout("5 seconds"))
+        expect(Instance.refreshStatus(Instance.directory).state).toBe("pending")
         yield* Deferred.succeed(releaseSuccess, undefined)
         const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("5 seconds"))
 
         expect(outcome.status).toBe("success")
-        expect(yield* parentInboxRows(parent.id)).toHaveLength(0)
+        expect(yield* parentInboxRows(parent.id)).toHaveLength(1)
       }),
       { git: true, config: providerCfg },
     ),
