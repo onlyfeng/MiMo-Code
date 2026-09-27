@@ -72,6 +72,8 @@ export const make = <A, E = never, B = never>(
     busy?: () => B
     label?: string
     onReentryWarn?: (info: { label: string; existingRunId: number }) => Effect.Effect<void>
+    onRunStart?: Effect.Effect<() => void>
+    onShellStart?: Effect.Effect<() => void>
     /** @internal Deterministic scheduling seams for Runner race tests. */
     _testHooks?: {
       beforeRunPublish?: Effect.Effect<void>
@@ -121,6 +123,7 @@ export const make = <A, E = never, B = never>(
     id = next(),
   ): Effect.Effect<RunHandle<A, E>> =>
     Effect.gen(function* () {
+      const release = opts?.onRunStart ? yield* opts.onRunStart : () => {}
       const start = yield* Deferred.make<void>()
       const entered = yield* Deferred.make<void>()
       const fiber = yield* Deferred.await(start).pipe(
@@ -134,6 +137,7 @@ export const make = <A, E = never, B = never>(
             Effect.uninterruptible,
           ),
         ),
+        Effect.ensuring(Effect.sync(release)),
         // Install the finalizer even if cancellation precedes the first
         // instruction; the start wait and actual work remain interruptible.
         Effect.forkIn(scope, { uninterruptible: true }),
@@ -335,9 +339,11 @@ export const make = <A, E = never, B = never>(
             yield* idle(id)
             return [restore(Effect.interrupt), st] as const
           }
+          const release = opts?.onShellStart ? yield* opts.onShellStart : () => {}
           const fiber = yield* work.pipe(
             Effect.interruptible,
             Effect.ensuring(finishShell(id)),
+            Effect.ensuring(Effect.sync(release)),
             Effect.forkChild,
           )
           const shell = { id, fiber, onInterrupt } satisfies ShellHandle<A, E>

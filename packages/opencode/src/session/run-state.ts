@@ -1,4 +1,5 @@
 import { EffectLogger, InstanceState } from "@/effect"
+import { Instance } from "@/project/instance"
 import { Runner } from "@/effect"
 import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect"
 import * as Session from "./session"
@@ -156,6 +157,8 @@ export const layer = Layer.effect(
         never,
         Session.BusyError
       >(data.scope, {
+        onRunStart: Effect.sync(() => Instance.claim(data.instance.directory)),
+        onShellStart: Effect.sync(() => Instance.claim(data.instance.directory)),
         label: `${sessionID}:${agentID}`,
         onReentryWarn: (info) => elog.warn("runner-reentry", info),
         onStart: (id) => {

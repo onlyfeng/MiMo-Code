@@ -394,7 +394,7 @@ test("questions stay isolated by directory", async () => {
   await p2.catch(() => {})
 })
 
-test("pending question rejects on instance dispose", async () => {
+test("pending question survives deferred instance dispose", async () => {
   await using tmp = await tmpdir({ git: true })
 
   const pending = Instance.provide({
@@ -423,13 +423,16 @@ test("pending question rejects on instance dispose", async () => {
       const items = await list()
       expect(items).toHaveLength(1)
       await Instance.dispose()
+      expect(Instance.refreshStatus(tmp.path).state).toBe("pending")
+      expect(await list()).toHaveLength(1)
+      await reject(items[0]!.id)
     },
   })
 
   expect(await result).toBeInstanceOf(Question.RejectedError)
 })
 
-test("pending question rejects on instance reload", async () => {
+test("pending question prevents instance reload", async () => {
   await using tmp = await tmpdir({ git: true })
 
   const pending = Instance.provide({
@@ -457,7 +460,9 @@ test("pending question rejects on instance reload", async () => {
     fn: async () => {
       const items = await list()
       expect(items).toHaveLength(1)
-      await Instance.reload({ directory: tmp.path })
+      await expect(Instance.reload({ directory: tmp.path })).rejects.toThrow("Instance busy")
+      expect(await list()).toHaveLength(1)
+      await reject(items[0]!.id)
     },
   })
 
@@ -469,7 +474,7 @@ for (const action of ["dispose", "reload"] as const) {
     await using tmp = await tmpdir({ git: true })
     const events: string[] = []
     const wildcard: string[] = []
-    await Instance.provide({
+    const pending = await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         const off = await AppRuntime.runPromise(
@@ -488,17 +493,18 @@ for (const action of ["dispose", "reload"] as const) {
         )
         const promise = ask({ sessionID: SessionID.make("ses_old"), questions: [] }).catch((error) => error)
         const [old] = await list()
-        if (action === "dispose") await Instance.dispose()
-        else await Instance.reload({ directory: tmp.path })
-        expect(await promise).toBeInstanceOf(Question.RejectedError)
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        expect(events).toEqual([String(old.id)])
-        expect(wildcard).toEqual([String(old.id)])
-        offAll()
-        off()
-        if (action === "dispose") expect(await Instance.peek(tmp.path)).toBeUndefined()
+        return { promise, old, off, offAll }
       },
     })
+    if (action === "dispose") await Instance.disposeDirectory(tmp.path)
+    else await Instance.reload({ directory: tmp.path })
+    expect(await pending.promise).toBeInstanceOf(Question.RejectedError)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(events).toEqual([String(pending.old.id)])
+    expect(wildcard).toEqual([String(pending.old.id)])
+    pending.offAll()
+    pending.off()
+    if (action === "dispose") expect(await Instance.peek(tmp.path)).toBeUndefined()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {

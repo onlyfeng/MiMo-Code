@@ -8,6 +8,7 @@ import { Session } from "@/session"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRunState } from "@/session/run-state"
+import { Instance } from "@/project/instance"
 import { SessionRevert } from "@/session/revert"
 import { SessionShare } from "@/share"
 import { SessionStatus } from "@/session/status"
@@ -1389,6 +1390,7 @@ export const SessionRoutes = lazy(() =>
         // only then joins the in-flight run, preserving the queue record and
         // making it visible to an eligible loop boundary. Draining during the
         // runner's final transition is a separate run-loop invariant.
+        const releaseInstance = Instance.claim(Instance.directory)
         void runRequest(
           "SessionRoutes.prompt_async",
           c,
@@ -1399,7 +1401,7 @@ export const SessionRoutes = lazy(() =>
             sessionID,
             error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
           })
-        })
+        }).finally(releaseInstance)
 
         return c.body(null, 204)
       },

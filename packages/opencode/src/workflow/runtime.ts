@@ -8,6 +8,7 @@ import { Config } from "@/config"
 import { EffectBridge } from "@/effect"
 import { awaitWithHardTimeout } from "@/effect/hard-timeout"
 import { Bus } from "@/bus"
+import { GlobalBus, type GlobalEvent } from "@/bus/global"
 import { Inbox } from "@/inbox"
 import { isRunDisposing, RunDisposal } from "@/session/run-disposal"
 import { SessionRunState } from "@/session/run-state"
@@ -15,7 +16,7 @@ import { Worktree } from "@/worktree"
 import { Provider } from "@/provider"
 import { Permission } from "@/permission"
 import { InstanceRef } from "@/effect/instance-ref"
-import { Instance } from "@/project/instance"
+import { Instance, type InstanceContext } from "@/project/instance"
 import { Identifier } from "@/id/id"
 import type { SessionID } from "@/session/schema"
 import type { ProviderID, ModelID } from "@/provider/schema"
@@ -138,6 +139,7 @@ function summarizeAgentResult(result: unknown): string | undefined {
 interface RunEntry {
   runID: string
   sessionID: SessionID
+  instance: InstanceContext
   status: RunStatus
   deferred: Deferred.Deferred<RunOutcome>
   fiber: Fiber.Fiber<void> | undefined
@@ -443,14 +445,50 @@ export const layer = Layer.effect(
     // worktree the run still owns, then clear the set. NEVER throws — a reclaim
     // failure must not mask the original terminal cause. NOT called on success:
     // kept (success+changed) worktrees are the deliverable and must survive.
-    // Worktree removal is bounded by RECLAIM_WORKTREE_TIMEOUT_MS so a hung
-    // git worktree remove (e.g. processes using the worktree) cannot block
-    // cancel indefinitely. Actor cancel is bounded by RECLAIM_ACTOR_TIMEOUT_MS
+    // The caller waits briefly for worktree removal; a live instance defers
+    // removal until its disposal event. Actor cancel is bounded by RECLAIM_ACTOR_TIMEOUT_MS
     // so a hung child actor cannot block reclaim indefinitely. Actor.cancel is
     // intentionally uninterruptible, so its hard bound must limit Fiber.join
     // while the detached cleanup continues rather than timeout cancel directly.
-    const RECLAIM_WORKTREE_TIMEOUT_MS = 10_000
     const RECLAIM_ACTOR_TIMEOUT_MS = 5_000
+    const removals = new Map<string, Promise<void>>()
+    const removeAfterDispose = (directory: string, instance: InstanceContext) => {
+      const existing = removals.get(directory)
+      if (existing) return existing
+      const ready = new Promise<void>((resolve, reject) => {
+        const onDisposed = (event: GlobalEvent) => {
+          if (event.payload.type !== "server.instance.disposed" || event.directory !== directory) return
+          finish()
+          resolve()
+        }
+        const finish = () => {
+          GlobalBus.off("event", onDisposed)
+          clearTimeout(timeout)
+        }
+        const timeout = setTimeout(() => {
+          finish()
+          reject(new Error(`Instance disposal did not finish: ${directory}`))
+        }, 60 * 60 * 1000)
+        timeout.unref?.()
+        GlobalBus.on("event", onDisposed)
+        void Instance.disposeDirectory(directory).then(() => {
+          if (Instance.refreshStatus(directory).state !== "applied") return
+          finish()
+          resolve()
+        }, (error) => {
+          finish()
+          reject(error)
+        })
+      })
+      const task = ready.then(() => Instance.restore(instance, () =>
+        hostBridge.promise(worktree.remove({ directory }).pipe(Effect.provideService(InstanceRef, instance))),
+      )).then(() => undefined)
+      removals.set(directory, task)
+      void task.finally(() => removals.delete(directory)).catch((error) =>
+        log.warn("deferred worktree removal failed", { directory, error }),
+      )
+      return task
+    }
     const reclaim = (entry: RunEntry) =>
       Effect.gen(function* () {
         const actor = spawnRef.current
@@ -473,10 +511,10 @@ export const layer = Layer.effect(
         yield* Effect.forEach(
           [...entry.worktrees],
           (directory) =>
-            worktree.remove({ directory }).pipe(
-              Effect.timeout(RECLAIM_WORKTREE_TIMEOUT_MS),
+            Effect.promise(() => removeAfterDispose(directory, entry.instance)).pipe(
+              Effect.timeout(1_000),
               Effect.catchTag("TimeoutError", () =>
-                Effect.sync(() => log.warn("worktree remove timed out during reclaim", { directory })),
+                Effect.sync(() => log.warn("worktree removal deferred until instance disposal", { directory })),
               ),
               Effect.ignore,
               // Worktree removal reports filesystem/git failures as defects.
@@ -558,6 +596,7 @@ export const layer = Layer.effect(
       const entry: RunEntry = {
         runID,
         sessionID: input.sessionID,
+        instance: Instance.current,
         status: "running",
         deferred,
         fiber: undefined,
@@ -1031,7 +1070,7 @@ export const layer = Layer.effect(
         // disposition below owns it) rather than the returned deliverable: in the
         // isolated path a successful agent's work is its worktree, so a status
         // success is a success even when it returned no text.
-        if (spawned) await Instance.disposeDirectory(info.directory)
+        if (succeeded) await Instance.disposeDirectory(info.directory)
         entry.running--
         if (succeeded) entry.succeeded++
         else {
@@ -1053,7 +1092,7 @@ export const layer = Layer.effect(
           base !== "" && (await bridge.promise(worktree.isPristine(info.directory, base)).catch(() => false))
         const keep = succeeded && !pristine
         if (!keep) {
-          await bridge.promise(worktree.remove({ directory: info.directory })).catch(() => undefined)
+          await Promise.race([removeAfterDispose(info.directory, entry.instance), new Promise<void>((resolve) => setTimeout(resolve, 1_000))]).catch(() => undefined)
           entry.worktrees.delete(info.directory)
           return succeeded ? { value, reason: null } : { value: null, reason }
         }

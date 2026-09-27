@@ -2851,7 +2851,7 @@ for (const phase of ["owned continuation", "compaction CAS"] as const) {
 }
 
 // These integration fixtures include real provider startup and receiver disposal.
-for (const retirement of ["ephemeral", "cancelled", "disposed"] as const) {
+for (const retirement of ["ephemeral", "cancelled"] as const) {
   it.live(`resume rejects ${retirement} context without rewriting interrupted messages`, () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ dir }) {
@@ -2859,16 +2859,6 @@ for (const retirement of ["ephemeral", "cancelled", "disposed"] as const) {
         const sessions = yield* Session.Service
         const spawned = yield* interruptedActor(retirement === "ephemeral" ? "ephemeral" : "persistent")
         if (retirement === "cancelled") yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
-        if (retirement === "disposed") {
-          const old = yield* InstanceRef
-          yield* Effect.promise(() => Instance.provide({ directory: dir, fn: () => Instance.dispose() }))
-          const replacement = yield* Effect.promise(() =>
-            Instance.provide({ directory: dir, fn: () => Instance.current }),
-          )
-          expect(replacement).not.toBe(old)
-          expect(replacement.generation).not.toBe(old?.generation)
-          expect(old?.disposing).toBe(true)
-        }
         expect(actor.resume).toBeDefined()
         if (!actor.resume) return
         const result = yield* actor.resume(spawned).pipe(Effect.exit)
@@ -3042,12 +3032,12 @@ for (const hook of ["session.pre", "session.userQuery.pre"] as const) {
   15000)
 }
 
-for (const stop of ["cancel", "dispose"] as const) {
+for (const stop of ["cancel"] as const) {
   it.live(
     `resume completion waiter cancellation retains ownership until receiver ${stop}`,
     () =>
       provideTmpdirServer(
-        Effect.fnUntraced(function* ({ dir, llm }) {
+        Effect.fnUntraced(function* ({ llm }) {
           const actor = yield* Actor.Service
           const reg = yield* ActorRegistry.Service
           const spawned = yield* interruptedActor()
@@ -3066,8 +3056,7 @@ for (const stop of ["cancel", "dispose"] as const) {
           expect((yield* reg.get(spawned.sessionID, spawned.actorID))?.status).toBe("running")
           expect((yield* actor.resume(spawned).pipe(Effect.exit))._tag).toBe("Failure")
           expect(yield* llm.calls).toBe(2)
-          if (stop === "cancel") yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
-          else yield* Effect.promise(() => Instance.provide({ directory: dir, fn: () => Instance.dispose() }))
+          yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
           yield* completion.pipe(Effect.exit, Effect.timeout("3 seconds"))
           expect((yield* actor.resume(spawned).pipe(Effect.exit))._tag).toBe("Failure")
           yield* Effect.yieldNow
@@ -3328,7 +3317,7 @@ it.live(
 )
 
 it.live(
-  "resume isolated peer keeps its receiver lease across parent replacement",
+  "resume isolated peer keeps its receiver lease during deferred parent refresh",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ dir, llm }) {
@@ -3366,14 +3355,12 @@ it.live(
                 .pipe(Effect.provideService(InstanceRef, parentContext))
               expect((yield* Deferred.await(peer.outcome)).status).toBe("failure")
               yield* Effect.promise(() => Instance.provide({ directory: dir, fn: () => Instance.dispose() }))
-              const replacement = yield* Effect.promise(() =>
-                Instance.provide({ directory: dir, fn: () => Instance.current }),
-              )
-              expect(replacement.generation).not.toBe(parentContext.generation)
+              expect(Instance.refreshStatus(dir).state).toBe("pending")
+              expect(parentContext.disposing).toBe(false)
               expect(receiver.disposing).toBe(false)
               if (!actor.resume) return yield* Effect.die("resume missing")
               yield* llm.text("isolated resumed result")
-              const completion = yield* actor.resume(peer).pipe(Effect.provideService(InstanceRef, replacement))
+              const completion = yield* actor.resume(peer).pipe(Effect.provideService(InstanceRef, parentContext))
               const result = yield* completion
               expect(result.info.role === "assistant" && result.info.path.cwd).toBe(receiver.directory)
               expect(result.parts.some((part) => part.type === "text" && part.text === "isolated resumed result")).toBe(
@@ -3414,7 +3401,7 @@ it.live("resume committed handoff cancellation settles admission after the owned
   15_000,
 )
 
-it.live("resume receiver disposal does not notify a still-live isolated parent", () =>
+it.live("resume receiver refresh waits for a live isolated turn", () =>
   provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
     const actor = yield* Actor.Service
     const sessions = yield* Session.Service
@@ -3446,16 +3433,18 @@ it.live("resume receiver disposal does not notify a still-live isolated parent",
       resumeCompletionGate = { hit, release }
       yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
       yield* Effect.promise(() => Instance.provide({ directory: receiverDir, fn: () => Instance.dispose() }))
+      const cancel = yield* actor.cancel(peer.sessionID, peer.actorID, "forced").pipe(
+        Effect.provideService(InstanceRef, parentContext),
+        Effect.forkScoped,
+      )
       yield* Deferred.await(hit).pipe(Effect.timeout("3 seconds"))
-      const replacement = yield* Effect.promise(() => Instance.provide({ directory: receiverDir, fn: () => Instance.current }))
-      const reg = yield* ActorRegistry.Service
-      yield* reg.updateStatus(peer.sessionID, peer.actorID, { status: "pending", lastOutcome: "success" }).pipe(Effect.provideService(InstanceRef, replacement))
-      const current = yield* reg.get(peer.sessionID, peer.actorID)
+      expect(Instance.refreshStatus(receiverDir).state).toBe("pending")
+      expect((yield* Effect.promise(() => Instance.peek(receiverDir)))?.disposing).toBe(false)
       yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(cancel).pipe(Effect.timeout("3 seconds"))
       yield* completion.pipe(Effect.exit, Effect.timeout("3 seconds"))
-      expect(yield* reg.get(peer.sessionID, peer.actorID)).toEqual(current)
       expect(parentContext.disposing).toBe(false)
-      expect(notifications).toHaveLength(1)
+      expect(notifications).toHaveLength(2)
     }), { git: true, config: providerCfg(llm.url) })
   }), { git: true, config: providerCfg }),
   20_000,
@@ -3518,7 +3507,7 @@ for (const mode of ["graceful", "forced"] as const) {
 }
 
 for (const pause of ["cancel runner exit", "terminal status write"] as const) {
-  it.live(`resume receiver disposal after ${pause} prevents stale writes and notification`, () =>
+  it.live(`resume receiver refresh after ${pause} waits for the owned turn`, () =>
     provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
       const actor = yield* Actor.Service
       const sessions = yield* Session.Service
@@ -3556,15 +3545,15 @@ for (const pause of ["cancel runner exit", "terminal status write"] as const) {
             : undefined
           yield* Deferred.await(hit).pipe(Effect.timeout("3 seconds"))
           yield* Effect.promise(() => Instance.provide({ directory: receiverDir, fn: () => Instance.dispose() }))
-          const replacement = yield* Effect.promise(() => Instance.provide({ directory: receiverDir, fn: () => Instance.current }))
-          const reg = yield* ActorRegistry.Service
-          yield* reg.updateStatus(peer.sessionID, peer.actorID, { status: "pending", lastOutcome: "success" }).pipe(Effect.provideService(InstanceRef, replacement))
-          const current = yield* reg.get(peer.sessionID, peer.actorID)
+          expect(Instance.refreshStatus(receiverDir).state).toBe("pending")
+          expect((yield* Effect.promise(() => Instance.peek(receiverDir)))?.disposing).toBe(false)
+          yield* Effect.promise(() => Instance.reload({ directory: receiverDir }).then(() => "reloaded", () => "busy")).pipe(
+            Effect.map((result) => expect(result).toBe("busy")),
+          )
           yield* Deferred.succeed(release, undefined)
           if (cancel) yield* Fiber.join(cancel).pipe(Effect.timeout("3 seconds"))
           yield* completion.pipe(Effect.exit, Effect.timeout("3 seconds"))
-          expect(yield* reg.get(peer.sessionID, peer.actorID)).toEqual(current)
-          expect(notifications).toHaveLength(1)
+          expect(notifications).toHaveLength(2)
           expect(parentContext.disposing).toBe(false)
         }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
       }), { git: true, config: providerCfg(llm.url) })

@@ -10,6 +10,13 @@ import * as Project from "./project"
 import { WorkspaceContext } from "@/control-plane/workspace-context"
 import { parse as pathParse } from "path"
 
+export class InstanceBusyError extends Error {
+  constructor(directory: string) {
+    super(`Instance busy: ${directory}`)
+    this.name = "InstanceBusyError"
+  }
+}
+
 export interface InstanceContext {
   generation: number
   directory: string
@@ -20,17 +27,60 @@ export interface InstanceContext {
 
 const context = LocalContext.create<InstanceContext>("instance")
 const cache = new Map<string, Promise<InstanceContext>>()
-const directoryDisposals = new Map<string, Promise<void>>()
-const active = new Map<string, number>()
+const gates = new Map<string, { requests: number; executions: number; pending: boolean; closing?: Promise<void>; failed?: boolean; requested: number; applied: number }>()
+let revision = 0
 let nextGeneration = 0
 const project = makeRuntime(Project.Service, Project.defaultLayer)
 const DIRECTORY_DISPOSE_TIMEOUT = 2_000
 
-const FORBIDDEN_EXACT_PATHS = [
-  "/private",
-  "/var",
-  "/private/var",
-] as const
+const FORBIDDEN_EXACT_PATHS = ["/private", "/var", "/private/var"] as const
+
+function gate(directory: string) {
+  let value = gates.get(directory)
+  if (!value) {
+    value = { requests: 0, executions: 0, pending: false, requested: revision, applied: revision }
+    gates.set(directory, value)
+  }
+  return value
+}
+
+function schedule(directory: string) {
+  const state = gate(directory)
+  if (!state.pending || state.closing || state.requests || state.executions) return state.closing
+  state.pending = false
+  const current = cache.get(directory)
+  if (!current) {
+    state.applied = state.requested
+    return
+  }
+  const generation = state.requested
+  const closing = disposeCached(directory, current)
+  state.closing = closing
+  void closing.then(
+    () => {
+      state.applied = generation
+      state.closing = undefined
+      schedule(directory)
+    },
+    (error) => {
+      Log.Default.warn("instance dispose failed", { directory, error })
+      state.pending = true
+      state.failed = true
+    },
+  )
+  return closing
+}
+
+function requestDispose(directory: string, generation = ++revision) {
+  const state = gate(directory)
+  if (state.failed) {
+    state.closing = undefined
+    state.failed = false
+  }
+  state.requested = generation
+  state.pending = true
+  return schedule(directory)
+}
 
 const FORBIDDEN_PREFIXES = [
   "/etc",
@@ -58,10 +108,6 @@ function assertSafeDirectory(directory: string): void {
       }
     }
   }
-}
-
-const disposal = {
-  all: undefined as Promise<void> | undefined,
 }
 
 function boot(input: { directory: string; init?: () => Promise<any>; worktree?: string; project?: Project.Info }) {
@@ -101,33 +147,12 @@ function track(directory: string, next: Promise<InstanceContext>) {
 }
 
 function enter(directory: string) {
-  active.set(directory, (active.get(directory) ?? 0) + 1)
+  gate(directory).requests++
 }
 
 function leave(directory: string) {
-  const count = (active.get(directory) ?? 1) - 1
-  if (count > 0) {
-    active.set(directory, count)
-    return
-  }
-  active.delete(directory)
-}
-
-async function serializeDirectory<R>(directory: string, fn: () => Promise<R>) {
-  const previous = directoryDisposals.get(directory) ?? Promise.resolve()
-  let release!: () => void
-  const gate = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  const queued = previous.then(() => gate)
-  directoryDisposals.set(directory, queued)
-  await previous
-  try {
-    return await fn()
-  } finally {
-    release()
-    if (directoryDisposals.get(directory) === queued) directoryDisposals.delete(directory)
-  }
+  gate(directory).requests--
+  schedule(directory)
 }
 
 async function disposeCached(directory: string, current: Promise<InstanceContext>) {
@@ -135,12 +160,15 @@ async function disposeCached(directory: string, current: Promise<InstanceContext
   if (!ctx || cache.get(directory) !== current) return
 
   ctx.disposing = true
-  cache.delete(directory)
   Log.Default.info("disposing instance", { directory })
-  const hint = await import("@/session/prompt/uncommitted-hint")
-  const finishHintDispose = hint.beginHintStateDisposeForDirectory(directory)
-  await context.provide(ctx, () => disposeInstance(directory, ctx))
-  finishHintDispose()
+  const uh = await import("@/session/prompt/uncommitted-hint").catch(() => undefined)
+  const finishHintDispose = uh?.beginHintStateDisposeForDirectory(directory)
+  try {
+    await context.provide(ctx, () => disposeInstance(directory, ctx))
+  } finally {
+    finishHintDispose?.()
+  }
+  if (cache.get(directory) === current) cache.delete(directory)
 
   GlobalBus.emit("event", {
     directory,
@@ -159,21 +187,23 @@ export const Instance = {
   async provide<R>(input: { directory: string; init?: () => Promise<any>; fn: () => R }): Promise<R> {
     const directory = AppFileSystem.resolve(input.directory)
     assertSafeDirectory(directory)
-    await directoryDisposals.get(directory)
-    let existing = cache.get(directory)
-    if (!existing) {
-      Log.Default.info("creating instance", { directory })
-      existing = track(
-        directory,
-        boot({
-          directory,
-          init: input.init,
-        }),
-      )
+    for (;;) {
+      if (gate(directory).failed) throw new InstanceBusyError(directory)
+      const closing = gate(directory).closing
+      if (closing) {
+        await closing
+        continue
+      }
+      enter(directory)
+      break
     }
-    const ctx = await existing
-    enter(directory)
     try {
+      let existing = cache.get(directory)
+      if (!existing) {
+        Log.Default.info("creating instance", { directory })
+        existing = track(directory, boot({ directory, init: input.init }))
+      }
+      const ctx = await existing
       return await context.provide(ctx, async () => input.fn())
     } finally {
       leave(directory)
@@ -204,6 +234,36 @@ export const Instance = {
     const ctx = await current.catch(() => undefined)
     if (!ctx || cache.get(directory) !== current || ctx.disposing) return undefined
     return ctx
+  },
+  claim(input: string) {
+    const directory = AppFileSystem.resolve(input)
+    const state = gate(directory)
+    if (state.closing) throw new InstanceBusyError(directory)
+    state.executions++
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      state.executions--
+      schedule(directory)
+    }
+  },
+  refreshStatus(input?: string) {
+    if (!input) {
+      const states = [...gates.values()]
+      const pending = states.some((state) => state.pending || state.closing || state.applied < state.requested)
+      return {
+        state: pending ? "pending" as const : "applied" as const,
+        requested: revision,
+        applied: pending ? Math.min(...states.map((state) => state.applied)) : revision,
+      }
+    }
+    const state = gate(AppFileSystem.resolve(input))
+    return {
+      state: state.pending || state.closing || state.applied < state.requested ? "pending" as const : "applied" as const,
+      requested: state.requested,
+      applied: state.applied,
+    }
   },
 
   /**
@@ -238,93 +298,63 @@ export const Instance = {
   },
   async reload(input: { directory: string; init?: () => Promise<any>; project?: Project.Info; worktree?: string }) {
     const directory = AppFileSystem.resolve(input.directory)
-    return serializeDirectory(directory, async () => {
-      Log.Default.info("reloading instance", { directory })
-      const current = cache.get(directory)
-      const ctx = await current?.catch(() => undefined)
-      if (ctx && cache.get(directory) === current) ctx.disposing = true
-      const hint = await import("@/session/prompt/uncommitted-hint")
-      const finishHintDispose = hint.beginHintStateDisposeForDirectory(directory)
-      await disposeInstance(directory, ctx)
-      finishHintDispose()
-      if (cache.get(directory) === current) cache.delete(directory)
+    assertSafeDirectory(directory)
+    const state = gate(directory)
+    const ownRequest = (() => {
+      try {
+        return Instance.directory === directory ? 1 : 0
+      } catch (error) {
+        if (!(error instanceof LocalContext.NotFound)) throw error
+        return 0
+      }
+    })()
+    if (state.executions || state.closing || state.pending || state.requests > ownRequest) throw new InstanceBusyError(directory)
+    const generation = state.requested
+    const current = cache.get(directory)
+    const closing = current ? disposeCached(directory, current) : Promise.resolve()
+    state.closing = closing
+    try {
+      await closing
       const next = track(directory, boot({ ...input, directory }))
-
-      GlobalBus.emit("event", {
-        directory,
-        project: input.project?.id,
-        workspace: WorkspaceContext.workspaceID,
-        payload: {
-          type: "server.instance.disposed",
-          properties: {
-            directory,
-          },
-        },
-      })
-
-      return await next
-    })
+      const ctx = await next
+      state.applied = generation
+      return ctx
+    } catch (error) {
+      state.pending = true
+      state.failed = true
+      throw error
+    } finally {
+      if (!state.failed) state.closing = undefined
+      schedule(directory)
+    }
   },
   async disposeDirectory(input: string) {
     const directory = AppFileSystem.resolve(input)
     assertSafeDirectory(directory)
-    return serializeDirectory(directory, async () => {
-      const current = cache.get(directory)
-      if (!current) return
-
-      // NOTE: withTimeout only bounds the *wait*, not the underlying promise —
-      // a slow disposer may still complete after the timeout fires. The
-      // directory guard is therefore a soft happens-before, not a true barrier.
-      await withTimeout(disposeCached(directory, current), DIRECTORY_DISPOSE_TIMEOUT).catch((error) => {
-        Log.Default.warn("instance dispose did not complete", { directory, error })
-      })
+    const closing = requestDispose(directory)
+    if (!closing) return
+    await withTimeout(closing, DIRECTORY_DISPOSE_TIMEOUT).catch((error) => {
+      Log.Default.warn("instance dispose still running", { directory, error })
     })
   },
   async dispose() {
     const current = Instance.current
-    const directory = current.directory
-    return serializeDirectory(directory, async () => {
-      const cached = cache.get(directory)
-      const cachedContext = await cached?.catch(() => undefined)
-      if (!cached || cachedContext !== current || cache.get(directory) !== cached) {
-        current.disposing = true
-        return
-      }
-      await disposeCached(directory, cached)
-    })
+    const cached = cache.get(current.directory)
+    const ctx = await cached?.catch(() => undefined)
+    if (!cached || ctx !== current || cache.get(current.directory) !== cached) {
+      current.disposing = true
+      return
+    }
+    await Instance.disposeDirectory(current.directory)
   },
   async disposeAll() {
-    if (disposal.all) return disposal.all
-
-    disposal.all = iife(async () => {
-      Log.Default.info("disposing all instances")
-      const entries = [...cache.entries()]
-      for (const [key, value] of entries) {
-        if (cache.get(key) !== value) continue
-
-        const ctx = await value.catch((error) => {
-          Log.Default.warn("instance dispose failed", { key, error })
-          return undefined
-        })
-
-        if (!ctx) {
-          if (cache.get(key) === value) cache.delete(key)
-          continue
-        }
-
-        if (cache.get(key) !== value) continue
-
-        if (active.has(key)) continue
-        if (cache.get(key) !== value) continue
-
-        await context.provide(ctx, async () => {
-          await Instance.dispose()
-        })
-      }
-    }).finally(() => {
-      disposal.all = undefined
-    })
-
-    return disposal.all
+    const generation = ++revision
+    const directories = new Set([...cache.keys(), ...gates.keys()])
+    const closings = [...directories].map((directory) => requestDispose(directory, generation)).filter((value): value is Promise<void> => !!value)
+    await Promise.all(closings.map((closing) =>
+      withTimeout(closing, DIRECTORY_DISPOSE_TIMEOUT).catch((error) => {
+        Log.Default.warn("instance dispose still running", { error })
+      }),
+    ))
   },
 }
