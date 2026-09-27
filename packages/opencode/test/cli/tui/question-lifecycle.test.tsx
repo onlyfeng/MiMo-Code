@@ -24,7 +24,7 @@ async function wait(predicate: () => boolean) {
 }
 
 for (const end of ["abort", "dispose"] as const) {
-  test(`real question ${end} clears the TUI sync consumer pending list`, async () => {
+  test(end === "abort" ? "real question abort clears the TUI sync consumer pending list" : "deferred refresh retains a TUI question until abort clears it", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
       directory: tmp.path,
@@ -105,13 +105,15 @@ for (const end of ["abort", "dispose"] as const) {
           expect((await AppRuntime.runPromise(Question.Service.use((question) => question.list())))[0].sessionID).toBe(
             sessionID,
           )
-          if (end === "abort") controller.abort()
-          else await Instance.dispose()
+          if (end === "dispose") {
+            await Instance.dispose()
+            expect(Instance.refreshStatus(tmp.path).state).toBe("pending")
+            expect(sync?.data.question[sessionID]).toHaveLength(1)
+          }
+          controller.abort()
           expect(await result).toBeInstanceOf(Question.RejectedError)
           await wait(() => sync?.data.question[sessionID]?.length === 0)
-          if (end === "abort")
-            expect(await AppRuntime.runPromise(Question.Service.use((question) => question.list()))).toEqual([])
-          else expect(await Instance.peek(tmp.path)).toBeUndefined()
+          expect(await AppRuntime.runPromise(Question.Service.use((question) => question.list()))).toEqual([])
         } finally {
           controller.abort()
           app.renderer.destroy()
