@@ -66,6 +66,53 @@
         ]
       }
     },
+    "/global/config/status": {
+      "get": {
+        "operationId": "global.config.status",
+        "summary": "Get configuration application status",
+        "responses": {
+          "200": {
+            "description": "Directory configuration generation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": ["pending", "applied"]
+                    },
+                    "requested": {
+                      "type": "number"
+                    },
+                    "applied": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["state", "requested", "applied"]
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@mimo-ai/sdk/v2\"\n\nconst client = createOpencodeClient()\nawait client.global.config.status({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/global/config": {
       "get": {
         "operationId": "global.config.get",
@@ -11033,6 +11080,23 @@
               },
               "message": {
                 "type": "string"
+              },
+              "hostCode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "required": ["providerID", "message"]
@@ -11052,6 +11116,22 @@
             "properties": {
               "message": {
                 "type": "string"
+              },
+              "hostCode": {
+                "type": "string"
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "required": ["message"]
@@ -11068,7 +11148,25 @@
           },
           "data": {
             "type": "object",
-            "properties": {}
+            "properties": {
+              "hostCode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "required": ["name", "data"]
@@ -11085,6 +11183,23 @@
             "properties": {
               "message": {
                 "type": "string"
+              },
+              "hostCode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "required": ["message"]
@@ -11107,6 +11222,23 @@
               },
               "retries": {
                 "type": "number"
+              },
+              "hostCode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "required": ["message", "retries"]
@@ -11129,6 +11261,23 @@
               },
               "responseBody": {
                 "type": "string"
+              },
+              "hostCode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "required": ["message"]
@@ -11148,6 +11297,23 @@
             "properties": {
               "message": {
                 "type": "string"
+              },
+              "hostCode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "required": ["message"]
@@ -11167,6 +11333,23 @@
             "properties": {
               "message": {
                 "type": "string"
+              },
+              "hostCode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "required": ["message"]
@@ -11186,6 +11369,23 @@
             "properties": {
               "message": {
                 "type": "string"
+              },
+              "hostCode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "required": ["message"]
@@ -11205,6 +11405,23 @@
             "properties": {
               "message": {
                 "type": "string"
+              },
+              "hostCode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
+              },
+              "metadata": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "required": ["message"]
@@ -11242,6 +11459,14 @@
               },
               "responseBody": {
                 "type": "string"
+              },
+              "hostCode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hostRetryClass": {
+                "type": "string",
+                "enum": ["terminal", "persistent", "bounded"]
               },
               "metadata": {
                 "type": "object",
@@ -11365,6 +11590,9 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "hostCode": {
+                "type": "string"
               }
             },
             "required": [
@@ -11869,6 +12097,9 @@
               "scope": {
                 "type": "string",
                 "enum": ["request", "live-step", "max-candidate", "max-judge"]
+              },
+              "hostCode": {
+                "type": "string"
               }
             },
             "required": ["type", "attempt", "message", "next"]
@@ -15341,6 +15572,7 @@
                 }
               },
               "network": {
+                "description": "Session network recovery is always persistent with no retry count or elapsed-time limit; only delay and jitter fields are configurable. Max-mode uses its own scope budgets.",
                 "type": "object",
                 "properties": {
                   "mode": {
@@ -16258,6 +16490,7 @@
                 }
               },
               "network": {
+                "description": "Session network recovery is always persistent with no retry count or elapsed-time limit; only delay and jitter fields are configurable. Max-mode uses its own scope budgets.",
                 "type": "object",
                 "properties": {
                   "mode": {

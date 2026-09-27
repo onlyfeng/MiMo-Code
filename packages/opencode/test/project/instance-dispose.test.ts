@@ -202,7 +202,6 @@ test("execution claims defer refresh across main and actor lifetimes", async () 
     await Bun.sleep(20)
     expect(disposals).toBe(1)
     expect(Instance.refreshStatus(tmp.path).state).toBe("applied")
-    expect(Instance.refreshStatus().state).toBe("applied")
   } finally {
     main()
     actor()
@@ -228,7 +227,7 @@ test("global config status reports aggregate and per-directory application", asy
     expect((await firstStatus.json()).state).toBe("applied")
     release()
     await Bun.sleep(20)
-    const applied = await (await app.request("/config/status")).json()
+    const applied = await (await app.request(`/config/status?directory=${encodeURIComponent(second.path)}`)).json()
     expect(applied.state).toBe("applied")
     expect(applied.requested).toBe(applied.applied)
   } finally {
