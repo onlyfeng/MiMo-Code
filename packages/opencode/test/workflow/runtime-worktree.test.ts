@@ -107,6 +107,13 @@ describe("WorkflowRuntime cleanup defects", () => {
             expect(outcome).toEqual(expected)
             expect(yield* WorkflowPersistence.load(runID)).toMatchObject(expected)
             expect(yield* Deferred.await(finished).pipe(Effect.timeout(2000))).toMatchObject(expected)
+            // A live child keeps the worktree until its instance can retire.
+            if (Instance.refreshStatus(directory).state === "pending")
+              expect(yield* Effect.promise(() => fsp.stat(directory).then(() => true, () => false))).toBe(true)
+            yield* Deferred.succeed(released, undefined)
+            yield* Effect.gen(function* () {
+              while (!removed.has(directory)) yield* Effect.sleep(50)
+            }).pipe(Effect.timeout(15_000))
             expect(removed.has(directory)).toBe(true)
             expect(yield* Effect.promise(() => fsp.readdir(root))).toHaveLength(0)
             expect(disposed.has(directory)).toBe(true)
@@ -300,7 +307,9 @@ describe("WorkflowRuntime worktree isolation", () => {
           title: "wf reclaim on deadline",
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
-        yield* llm.hang // the isolated agent hangs → run will hit the deadline
+        const release = yield* Deferred.make<void>()
+        yield* llm.hangUntil(release) // the isolated agent hangs → run will hit the deadline
+        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
         yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
         const root = path.join(Global.Path.data, "worktree", Instance.project.id)
         const disposed = new Set<string>()
@@ -333,9 +342,12 @@ describe("WorkflowRuntime worktree isolation", () => {
         const directory = path.join(root, worktrees[0])
         expect(yield* Effect.promise(() => Instance.peek(directory))).toBeDefined()
         expect((yield* runtime.status({ runID })).status).toBe("running")
-        expect(disposed.has(directory)).toBe(false)
+        if (Instance.refreshStatus(directory).state === "pending")
+          expect(yield* Effect.promise(() => fsp.stat(directory).then(() => true, () => false))).toBe(true)
         const outcome = yield* runtime.wait({ runID })
         expect(outcome).toEqual({ status: "failed", error: "workflow script deadline exceeded" })
+        expect(disposed.has(directory)).toBe(false)
+        yield* Deferred.succeed(release, undefined)
         yield* Effect.gen(function* () {
           while ((yield* Effect.promise(() => fsp.readdir(root))).length) {
             yield* Effect.sleep(50)

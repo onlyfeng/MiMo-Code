@@ -986,6 +986,7 @@ export const layer = Layer.effect(
         fiber: Fiber.Fiber<unknown, unknown>
         outcome: Deferred.Deferred<AgentOutcome>
       }>,
+      directory?: string,
     ) => {
       const acquire = Effect.gen(function* () {
         const key = actorKey(sessionID, actorID)
@@ -993,7 +994,7 @@ export const layer = Layer.effect(
         // registers the actor; interruption cannot strand a pre-acquire token.
         // A cancellation barrier can reject reservation; do not create a
         // lifecycle generation until execution admission succeeds.
-        const execution = yield* executions.reserve(sessionID, actorID)
+        const execution = yield* executions.reserve(sessionID, actorID, directory)
         if (lifecycle === "persistent") yield* lifecycleState.retainPersistent(key)
         const generation = yield* lifecycleState.startFork(key)
         const work = yield* setup(generation, execution).pipe(
@@ -1103,6 +1104,7 @@ export const layer = Layer.effect(
             ...(instanceRef ? { instanceRef } : {}),
           })
         }),
+        instanceRef?.directory,
       )
     })
 

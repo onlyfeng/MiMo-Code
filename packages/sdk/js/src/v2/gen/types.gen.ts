@@ -802,6 +802,9 @@ export type EventBashInteractiveAsked = {
   type: "bash.interactive.asked"
   properties: {
     id: string
+    sessionID?: string
+    messageID?: string
+    callID?: string
     command: string
     cwd: string
     env?: {
@@ -3570,6 +3573,28 @@ export type GlobalEventResponses = {
 }
 
 export type GlobalEventResponse = GlobalEventResponses[keyof GlobalEventResponses]
+
+export type GlobalConfigStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+  }
+  url: "/global/config/status"
+}
+
+export type GlobalConfigStatusResponses = {
+  /**
+   * Directory configuration generation
+   */
+  200: {
+    state: "pending" | "applied"
+    requested: number
+    applied: number
+  }
+}
+
+export type GlobalConfigStatusResponse = GlobalConfigStatusResponses[keyof GlobalConfigStatusResponses]
 
 export type GlobalConfigGetData = {
   body?: never
@@ -6721,6 +6746,9 @@ export type BashInteractiveListResponses = {
    */
   200: Array<{
     id: string
+    sessionID?: string
+    messageID?: string
+    callID?: string
     command: string
     cwd: string
     description: string

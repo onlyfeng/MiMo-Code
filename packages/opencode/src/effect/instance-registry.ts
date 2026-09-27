@@ -25,6 +25,10 @@ export async function disposeInstance(directory: string, instance?: InstanceCont
     if (d.phase === "late") late.push(d)
     else normal.push(d)
   }
-  await Promise.allSettled(normal.map((d) => d.fn(directory, instance)))
-  await Promise.allSettled(late.map((d) => d.fn(directory, instance)))
+  const results = [
+    ...(await Promise.allSettled(normal.map((d) => d.fn(directory, instance)))),
+    ...(await Promise.allSettled(late.map((d) => d.fn(directory, instance)))),
+  ]
+  const errors = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+  if (errors.length) throw new AggregateError(errors.map((result) => result.reason), `Instance disposal failed: ${directory}`)
 }

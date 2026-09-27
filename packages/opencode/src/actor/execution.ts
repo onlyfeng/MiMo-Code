@@ -1,5 +1,7 @@
 import { Context, Deferred, Effect, Fiber, Layer, Scheduler, Scope } from "effect"
 import type { SessionID } from "@/session/schema"
+import { Instance } from "@/project/instance"
+import { InstanceState } from "@/effect"
 
 export interface Execution {
   readonly sessionID: SessionID
@@ -13,10 +15,11 @@ export interface Execution {
    * a later main turn or resume must not clear it for late terminal handlers.
    */
   groupAbort?: boolean
+  releaseInstance?: () => void
 }
 
 export interface Interface {
-  readonly reserve: (sessionID: SessionID, actorID: string) => Effect.Effect<Execution>
+  readonly reserve: (sessionID: SessionID, actorID: string, directory?: string) => Effect.Effect<Execution>
   readonly acquire: (sessionID: SessionID, actorID: string) => Effect.Effect<Execution>
   readonly withCancellation: <A, E, R>(
     sessionID: SessionID,
@@ -46,13 +49,15 @@ export const layer = Layer.effect(
     const closing = new Map<string, number>()
     const key = (sessionID: SessionID, actorID: string) => `${sessionID}:${actorID}`
     const current = (sessionID: SessionID, actorID: string) => Effect.sync(() => active.get(key(sessionID, actorID)))
-    const reserve = Effect.fn("ActorExecution.reserve")(function* (sessionID: SessionID, actorID: string) {
+    const reserve = Effect.fn("ActorExecution.reserve")(function* (sessionID: SessionID, actorID: string, directory?: string) {
       const done = yield* Deferred.make<void>()
+      const dir = directory ?? (yield* InstanceState.directory)
       const execution = yield* Effect.sync(() => {
         const id = key(sessionID, actorID)
         if (closing.has(id)) return undefined
         if (active.has(id)) throw new Error(`Actor execution already active: ${id}`)
-        const execution: Execution = { sessionID, actorID, done, cancelled: false }
+        const releaseInstance = Instance.claim(dir)
+        const execution: Execution = { sessionID, actorID, done, cancelled: false, releaseInstance }
         active.set(id, execution)
         return execution
       })
@@ -63,7 +68,10 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         yield* Effect.sync(() => {
           const id = key(execution.sessionID, execution.actorID)
-          if (active.get(id) === execution) active.delete(id)
+          if (active.get(id) === execution) {
+            active.delete(id)
+            execution.releaseInstance?.()
+          }
         })
         yield* Deferred.succeed(execution.done, undefined)
       }).pipe(Effect.asVoid, Effect.uninterruptible)
@@ -74,9 +82,11 @@ export const layer = Layer.effect(
       ),
       acquire: (sessionID, actorID) =>
         Effect.acquireUseRelease(
-          Effect.sync(() => {
+          Effect.gen(function* () {
+            const directory = yield* InstanceState.directory
+            const releaseInstance = yield* Effect.sync(() => Instance.claim(directory))
             const id = key(sessionID, actorID)
-            const ticket = { cancelled: closing.has(id) }
+            const ticket = { cancelled: closing.has(id), transferred: false, releaseInstance }
             const tickets = pending.get(id) ?? new Set<{ cancelled: boolean }>()
             tickets.add(ticket)
             pending.set(id, tickets)
@@ -94,8 +104,10 @@ export const layer = Layer.effect(
                     actorID,
                     done: Deferred.makeUnsafe<void>(),
                     cancelled: false,
+                    releaseInstance: ticket.releaseInstance,
                   }
                   active.set(id, execution)
+                  ticket.transferred = true
                   return { owned: true, execution }
                 })
                 if (!claim) return yield* Effect.interrupt
@@ -107,6 +119,7 @@ export const layer = Layer.effect(
             Effect.sync(() => {
               tickets.delete(ticket)
               if (tickets.size === 0) pending.delete(id)
+              if (!ticket.transferred) ticket.releaseInstance()
             }),
         ),
       // Close admission before cancel captures its execution. A queued ticket
