@@ -18,8 +18,7 @@
     "fix-node-pty": "bun run script/fix-node-pty.ts",
     "upgrade-opentui": "bun run script/upgrade-opentui.ts",
     "dev": "bun run --conditions=browser ./src/index.ts",
-    "dev:temporary": "bun run --conditions=browser ./src/temporary.ts",
-    "db": "bun drizzle-kit"
+    "dev:temporary": "bun run --conditions=browser ./src/temporary.ts"
   },
   "bin": {
     "mimo": "./bin/mimo"
@@ -53,7 +52,6 @@
     "@babel/core": "7.28.4",
     "@effect/language-service": "0.84.2",
     "@octokit/webhooks-types": "7.6.1",
-    "@mimo-ai/script": "workspace:*",
     "@mimo-ai/shared": "workspace:*",
     "@parcel/watcher-darwin-arm64": "2.5.1",
     "@parcel/watcher-darwin-x64": "2.5.1",
@@ -77,13 +75,12 @@
     "@types/turndown": "5.0.5",
     "@types/which": "3.0.4",
     "@types/yargs": "17.0.33",
-    "@typescript/native-preview": "catalog:",
-    "drizzle-kit": "catalog:",
     "drizzle-orm": "catalog:",
     "typescript": "catalog:",
     "vscode-languageserver-types": "3.17.5",
     "why-is-node-running": "3.2.2",
-    "zod-to-json-schema": "3.24.5"
+    "zod-to-json-schema": "3.24.5",
+    "@typescript/native-preview": "catalog:"
   },
   "dependencies": {
     "@actions/core": "1.11.1",
@@ -121,9 +118,7 @@
     "@jitl/quickjs-singlefile-mjs-release-sync": "0.32.0",
     "@lydell/node-pty": "catalog:",
     "@mimo-ai/plugin": "workspace:*",
-    "@mimo-ai/script": "workspace:*",
     "@mimo-ai/sdk": "workspace:*",
-    "@mimo-ai/ui": "workspace:*",
     "@modelcontextprotocol/sdk": "1.27.1",
     "@npmcli/arborist": "9.4.0",
     "@npmcli/config": "10.8.1",
