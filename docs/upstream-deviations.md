@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-27
-- Upstream: `454521a8527686a4132c6dda2d2ff62607dcb892`
-- Prior reviewed upstream: `849ca66cc8debbbcc08904039e05bd2e79be348d`
-- Main behavior (runtime/tests): `41164111b0938de4e267c1b9cd2685e3ccd97c03` (runtime merge `4703de4931bfd3b5fca43a5fb2fab2375f123e7e`)
-- Bundled guidance content: `4703de4931bfd3b5fca43a5fb2fab2375f123e7e`
-- Prior fork `main` tip: `9f6f827c1bd0cceb9e59e45a53762cc8c5f1cfaf`
+- Last reviewed: 2026-09-29
+- Upstream: `87a27da5247577644071e8e1f186553c32c73a6f`
+- Prior reviewed upstream: `454521a8527686a4132c6dda2d2ff62607dcb892`
+- Main behavior (runtime/tests): `7e0f1baefea33814107210131bf600a7d09bf11d` (runtime merge `dcc61410d522bce72a7bd18b331d47e445badd90`)
+- Bundled guidance content: `dcc61410d522bce72a7bd18b331d47e445badd90`
+- Prior fork `main` tip: `832e317712af9a7c135d11ed9c9811cffbe27017`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,7 +29,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-09-27 full sync](upstream-sync-2026-09-27.md), four capabilities through `454521a8`. Adopt deferred instance refresh, workspace-bound cron storage, interactive Bash request ownership and UTC cron guidance; retain shared approval, Actor and workflow lifetime contracts.
+Latest reviewed synchronization: [2026-09-29 full sync](upstream-sync-2026-09-29.md), seven capabilities through `87a27da5`. Adopt upstream's removal of the unmaintained web/desktop/cloud packages and the turbo-free typecheck toolchain; retire fork edits to the deleted files and FC-008's enterprise fixture; keep fork experiment scripts in the package typecheck project.
+
+Previous synchronization: [2026-09-27 full sync](upstream-sync-2026-09-27.md), four capabilities through `454521a8`. Adopt deferred instance refresh, workspace-bound cron storage, interactive Bash request ownership and UTC cron guidance; retain shared approval, Actor and workflow lifetime contracts.
 
 Previous synchronization: [2026-09-26 full sync](upstream-sync-2026-09-26.md), six capabilities through `849ca66c`. Remove unpublished duplicate-call cancellation and TaskGate re-entry, adopt interactive subagent asks and host error classification, and retain shared fork approval, Actor lifecycle and scoped retry contracts.
 
