@@ -25,3 +25,5 @@ Main at `7e0f1bae`: root `bun run typecheck` exits 0 (four workspaces plus the s
 Compat at `639fc10f`: root typecheck exits 0; lint exits 0 with 3,533 warnings and no errors; the same matrix plus `test/util/archive.test.ts` passes 196, with 4 existing skips and 0 fail across 11 files. No server API input changed, so the SDK/OpenAPI were not regenerated.
 
 Final completion requires successful lint, typecheck and test CI on the exact final branch-tip SHAs, both remote tips equal to the published commits, and ancestry from `87a27da5` through fork `main` to `dev/compat`. These are checked after publication; local results are not a substitute.
+
+Follow-up: the C03 recommendation was applied after publication. The fork upstream-sync skill now lives at `.agents/skills/upstream-sync/`, and its local `.gitignore` is removed because nothing under `.agents` ignores it; see FC-008.
