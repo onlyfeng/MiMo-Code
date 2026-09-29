@@ -17,6 +17,7 @@
 - Install deps with `bun ci` (= `bun install --frozen-lockfile`) — install per `bun.lock`, don't mutate the lockfile. ⛔ Do NOT use `bun install`/`npm install`.
 - Cloud Agents boot from [.cursor/environment.json](.cursor/environment.json) (owned by FC-014): Bun is preinstalled and a read-only `upstream` remote is preconfigured, so a sync can start with `git fetch upstream` immediately (`git push upstream` is intentionally disabled).
 - Comments, docs, shipped skill content and test assertions use synthetic values, never machine-specific ones — `/tmp/example` for paths, `test/model` for model refs, `feat/example` for branches.
+- Do not edit `packages/opencode/migration/*/migration.sql` that already shipped — engines have applied those journals; new schema changes get a **new** migration directory under `packages/opencode/migration/`.
 
 ## Core Focus
 
@@ -156,4 +157,4 @@ guard typechecks, reads correctly in review, and does nothing.
 
 ## Type Checking
 
-- Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
+- Always run `bun run typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
