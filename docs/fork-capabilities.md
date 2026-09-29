@@ -774,6 +774,14 @@ not change their implementation. The preceding review is retained in the
   regenerates an untracked copy that ignores `.gitignore` but not `references/`,
   so the upstream-sync skill's local re-include is now defensive only.
 
+- 2026-09-29 skill relocation: the fork-only upstream-sync skill follows
+  upstream's project-skill layout from `.mimocode/skills/upstream-sync/` to
+  `.agents/skills/upstream-sync/`, which skill discovery scans unless
+  `MIMOCODE_DISABLE_AGENTS_SKILLS` is set. Nothing ignores `references/` or
+  nested `.gitignore` files under `.agents`, so the local re-include file is
+  removed. Skill content is unchanged; this is a path move of shared process
+  guidance that propagates unchanged into compat.
+
 - 2026-09-27 synchronization: config refresh retains an instance while its
   main or Actor execution is live. Isolated workflow worktree removal now waits
   for `server.instance.disposed` from that owning instance before removing the
@@ -1043,9 +1051,8 @@ logged`, and the peer `success`/`failure` variants of
   `packages/opencode/test/server/{workflows-route,session-messages,session-task-route,session-select,title-authority,session-actions}.test.ts`,
   `packages/opencode/test/cli/tui/worker-listener.test.ts`,
   `packages/opencode/test/workflow/runtime-worktree.test.ts`,
-  `.mimocode/skills/upstream-sync/SKILL.md`,
-  `.mimocode/skills/upstream-sync/references/`,
-  `.mimocode/skills/upstream-sync/.gitignore`,
+  `.agents/skills/upstream-sync/SKILL.md`,
+  `.agents/skills/upstream-sync/references/`,
   `.github/workflows/test.yml`, `.github/scripts/verify-junit.py`,
   `.github/workflows/lint.yml`,
   `.github/workflows/typecheck.yml`, `tsconfig.scripts.json`,
