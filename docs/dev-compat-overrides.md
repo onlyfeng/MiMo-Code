@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-09-29, full upstream synchronization through `87a27da5247577644071e8e1f186553c32c73a6f`.
+- Prior upstream: `454521a8527686a4132c6dda2d2ff62607dcb892`.
+- Starting compat: `d56ee4607d0a25e6e44a904779430c84f927335c`.
+- Integrated main: `d287acdf91e57f623790da61b75a4efdbeeb24c8`; compat runtime merge: `fa0f2e538e6e2b21b0bc35fc2531c8ab9cb2d160`; compat toolchain adaptation: `639fc10f1f9facb5bb57f949d18ccf7ac0703ad6`.
+- Review: [seven-capability synchronization](upstream-sync-2026-09-29.md), C01–C07.
+- Resolution: inherit the removal of the unmaintained web/desktop/cloud packages, the English fallback for TUI locales without their own dictionary, the `.agents/skills` layout, the removed opencode tooling, the turbo-free typecheck, the WebSocket proxy buffer copy and the `bun run typecheck` prompt guidance. Compat had no files under the removed directories. `prompt.ts` and both READMEs merge without conflict. The production overlay remains 38 paths; no DC owner retires or moves. DC-PLATFORM-001 adds one tooling path, `tsconfig.scripts.json`, which keeps the compat Windows verifier out of the alias-free root scripts project.
+- Validation: root `bun run typecheck` exits 0 after the exclusion (before it, the verifier failed on `@/util/child-process-env`); root lint reports 3533 warnings and zero errors. The main affected matrix plus `test/util/archive.test.ts` passes 196, with 4 existing skips and 0 fail across 11 files. `bun.lock` and every package manifest match main. No API input changed, so the SDK/OpenAPI were not regenerated. Exact-tip CI remains the publication gate.
+- Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
+
+## Previous review record — 2026-09-27
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-09-27, full upstream synchronization through `454521a8527686a4132c6dda2d2ff62607dcb892`.
 - Prior upstream: `849ca66cc8debbbcc08904039e05bd2e79be348d`.
 - Starting compat: `5eebf4466133bbebfd368fed6ce13592a0c53bc3`.
@@ -1078,6 +1090,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-PLATFORM-001 — restricted-network and Windows ripgrep/archive fallback
 
+- 2026-09-29 full sync: upstream's root typecheck now also checks `tsconfig.scripts.json`, which includes `packages/opencode/script/**` without the package's `@/` path mapping. `script/verify-windows-runtime.ts` reaches `src/util/process.ts` through `test/fixture/windows-archive-runtime.ts`, so compat adds it to that project's `exclude` list; `packages/opencode/tsconfig.json` still checks it. The production overlay and the Windows job are unchanged.
+
 - 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
 
 - POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
@@ -1101,7 +1115,7 @@ files remain byte-identical to the accepted main correction.
   mutable session cwd or broaden which no-rg operations may proceed.
 - Source surfaces: `packages/opencode/src/file/ripgrep.ts` and
   `packages/opencode/src/util/archive.ts`.
-- Test surfaces: `packages/opencode/test/file/ripgrep.test.ts` 与 `packages/opencode/test/util/archive.test.ts` 保留；新增实际 Windows 入口 `packages/opencode/script/verify-windows-runtime.ts` 和 `packages/opencode/test/fixture/windows-archive-runtime.ts`。`.github/workflows/test.yml` 的调度和安装设施由共享 FC-008 维护；平台入口与 compat fallback 归本项。
+- Test surfaces: `packages/opencode/test/file/ripgrep.test.ts` 与 `packages/opencode/test/util/archive.test.ts` 保留；新增实际 Windows 入口 `packages/opencode/script/verify-windows-runtime.ts` 和 `packages/opencode/test/fixture/windows-archive-runtime.ts`。`.github/workflows/test.yml` 的调度和安装设施由共享 FC-008 维护；平台入口与 compat fallback 归本项。根 `tsconfig.scripts.json` 中对该入口的 `exclude` 也归本项。
 - 2026-09-05 synchronization: No archive/ripgrep fallback path changed;
   restricted-network and Windows behavior remains intact.
 - 2026-09-07 synchronization: No ripgrep/archive path or symbol overlap.
