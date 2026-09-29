@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-27
-- Upstream: `454521a8527686a4132c6dda2d2ff62607dcb892`
-- Prior reviewed upstream: `849ca66cc8debbbcc08904039e05bd2e79be348d`
-- Main behavior (runtime/tests): `41164111b0938de4e267c1b9cd2685e3ccd97c03` (runtime merge `4703de4931bfd3b5fca43a5fb2fab2375f123e7e`)
-- Bundled guidance content: `4703de4931bfd3b5fca43a5fb2fab2375f123e7e`
-- Prior fork `main` tip: `9f6f827c1bd0cceb9e59e45a53762cc8c5f1cfaf`
+- Last reviewed: 2026-09-29
+- Upstream: `87a27da5247577644071e8e1f186553c32c73a6f`
+- Prior reviewed upstream: `454521a8527686a4132c6dda2d2ff62607dcb892`
+- Main behavior (runtime/tests): `7e0f1baefea33814107210131bf600a7d09bf11d` (runtime merge `dcc61410d522bce72a7bd18b331d47e445badd90`)
+- Bundled guidance content: `dcc61410d522bce72a7bd18b331d47e445badd90`
+- Prior fork `main` tip: `832e317712af9a7c135d11ed9c9811cffbe27017`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-09-27 full sync](upstream-sync-2026-09-27.md), four capabilities through `454521a8`. Adopt deferred instance refresh, workspace-bound cron storage, interactive Bash request ownership and UTC cron guidance; retain shared Actor, workflow and approval contracts.
+Latest reviewed synchronization: [2026-09-29 full sync](upstream-sync-2026-09-29.md), seven capabilities through `87a27da5`. Adopt upstream's removal of the unmaintained web/desktop/cloud packages and the turbo-free typecheck toolchain; retire fork edits to the deleted files and FC-008's enterprise fixture; keep fork experiment scripts in the package typecheck project.
+
+Previous synchronization: [2026-09-27 full sync](upstream-sync-2026-09-27.md), four capabilities through `454521a8`. Adopt deferred instance refresh, workspace-bound cron storage, interactive Bash request ownership and UTC cron guidance; retain shared Actor, workflow and approval contracts.
 
 Previous synchronization: [2026-09-26 full sync](upstream-sync-2026-09-26.md), six capabilities through `849ca66c`. Remove unpublished duplicate-call cancellation and TaskGate re-entry, adopt interactive subagent asks and host error classification, and retain shared fork approval, Actor lifecycle and scoped retry contracts.
 
@@ -761,6 +763,17 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-09-29 synchronization: upstream removed `packages/enterprise`, so the
+  package-scoped enterprise S3 fixture clause below retires with it; the
+  opencode harness contracts are unchanged. Root typecheck now also checks
+  `tsconfig.scripts.json`, which has no `@/` path mapping. The fork-only
+  `script/experiments/**` carrier imports opencode source through that alias,
+  so the scripts project excludes it, as upstream excludes `generate.ts` and
+  `schema.ts`; `packages/opencode/tsconfig.json` keeps checking every experiment
+  file. Upstream also deleted the tracked `.mimocode/.gitignore`. The runtime
+  regenerates an untracked copy that ignores `.gitignore` but not `references/`,
+  so the upstream-sync skill's local re-include is now defensive only.
+
 - 2026-09-27 synchronization: config refresh retains an instance while its
   main or Actor execution is live. Isolated workflow worktree removal now waits
   for `server.instance.disposed` from that owning instance before removing the
@@ -929,12 +942,8 @@ not change their implementation. The preceding review is retained in the
   and report the full non-default environment. Default-off assertions for a
   preload-enabled feature run in an isolated non-test child process with its
   selector removed before flag-module import.
-  Enterprise tests launched from `packages/enterprise` preload fixed test S3
-  configuration and intercept the current storage adapter's HTTP origin with
-  an in-memory object fixture. The real adapter still performs key, JSON, and
-  list-bound construction. This package test setup does not configure product
-  execution; unrelated HTTP origins still use the original fetch, so it is not
-  a blanket network-isolation guarantee or evidence of live S3/R2 behavior.
+  The former `packages/enterprise` S3 test fixture retired with that package
+  on 2026-09-29.
   CI triggers on `main`, `dev`, and `dev/compat`, retains `.test.tsx`
   discovery, assigns all ordinary inputs by a stable path hash, runs enabled
   worktree cases in normal shards, and runs the real stdio observer and HTTP
@@ -1020,8 +1029,8 @@ logged`, and the peer `success`/`failure` variants of
   upstream PR is opened. The peer `cancelled` variant and both subagent variants
   run normally.
 - Upstream relationship: stronger runtime cleanup plus a narrower quarantine
-  than the reviewed upstream workflow; adopts its package-scoped enterprise
-  storage fixture.
+  than the reviewed upstream workflow; the adopted package-scoped enterprise
+  storage fixture retired with upstream's package removal.
 - Watch surfaces: `packages/opencode/src/effect/hard-timeout.ts`,
   `packages/opencode/src/effect/bridge.ts`,
   `packages/opencode/src/flag/flag.ts`,
@@ -1034,16 +1043,13 @@ logged`, and the peer `success`/`failure` variants of
   `packages/opencode/test/server/{workflows-route,session-messages,session-task-route,session-select,title-authority,session-actions}.test.ts`,
   `packages/opencode/test/cli/tui/worker-listener.test.ts`,
   `packages/opencode/test/workflow/runtime-worktree.test.ts`,
-  `packages/enterprise/bunfig.toml`, `packages/enterprise/test/preload.ts`,
-  `packages/enterprise/src/core/storage.ts`,
-  `packages/enterprise/test/core/storage.test.ts`,
-  `packages/enterprise/test/core/share.test.ts`,
   `.mimocode/skills/upstream-sync/SKILL.md`,
   `.mimocode/skills/upstream-sync/references/`,
   `.mimocode/skills/upstream-sync/.gitignore`,
   `.github/workflows/test.yml`, `.github/scripts/verify-junit.py`,
   `.github/workflows/lint.yml`,
-  `.github/workflows/typecheck.yml`, `script/generate.ts`, and `AGENTS.md`.
+  `.github/workflows/typecheck.yml`, `tsconfig.scripts.json`,
+  `script/generate.ts`, and `AGENTS.md`.
 - Tests/evidence: hard-timeout, runner, workflow runtime/worktree suites, four
   complete local hash shards, positive/negative JUnit verifier fixtures, and
   exact-SHA CI for the reviewed behavior tree when published; local tests do not
