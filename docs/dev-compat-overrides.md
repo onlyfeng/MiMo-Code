@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-09-30, full upstream synchronization through `336aee0eb1a5a88efe637f60142303cc8e7555bf`.
+- Prior upstream: `87a27da5247577644071e8e1f186553c32c73a6f`.
+- Starting compat: `93967b9419d7bc3f503f670a4038dae53001bf09`.
+- Integrated main: `907a0bd8a4050bd4db8f45c30514d4497b72984d`; compat runtime merge: `850ef7018baf7d9601b1a00779ca2cb1c46f22e1` (of main runtime merge `a1ce1f58863d0972f723b09279386eacccfd5fc3`).
+- Review: [one-capability synchronization](upstream-sync-2026-09-30.md), C01.
+- Resolution: inherit preparation-phase cancellation settlement. The `prompt.ts` conflict is upstream's reindent of the step body against compat's own body; the same `acquireUseRelease` wrap around `sessions.createMessage` is applied, and compat's `prompt.ts` delta against main is byte-identical after normalizing leading whitespace, so per-agent MaxMode, bounded request preflight, overflow placeholders and full-context Actor step code are unchanged. DC-CONTEXT-001's overflow placeholder still needs `finish: "cancelled"` and the exact recovery message, so a settled preparation abort (`MessageAbortedError("Aborted")`, no finish) is never classified as one. `prompt-effect.test.ts` merges cleanly. The compat-different path set is unchanged and the production overlay remains 38 paths; no DC owner retires or moves.
+- Validation: package and root `bun run typecheck` exit 0; root lint reports 3533 warnings and zero errors. The two new cases pass. A 31-file shared-process matrix (the main affected set plus classify, MaxMode and overflow suites) passes 770 with 4 existing skips; its 8 failures are the `subagent-resume-negatives` process-global captor artifact that fails identically at main's baseline `dbd2343d`, and that file passes 8/8 alone. `bun.lock` and every package manifest match main. No API input changed, so the SDK/OpenAPI were not regenerated. Exact-tip CI remains the publication gate.
+- Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
+
+## Previous review record — 2026-09-29
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-09-29, full upstream synchronization through `87a27da5247577644071e8e1f186553c32c73a6f`.
 - Prior upstream: `454521a8527686a4132c6dda2d2ff62607dcb892`.
 - Starting compat: `d56ee4607d0a25e6e44a904779430c84f927335c`.
