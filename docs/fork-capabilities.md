@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-29
-- Upstream: `87a27da5247577644071e8e1f186553c32c73a6f`
-- Prior reviewed upstream: `454521a8527686a4132c6dda2d2ff62607dcb892`
-- Main behavior (runtime/tests): `7e0f1baefea33814107210131bf600a7d09bf11d` (runtime merge `dcc61410d522bce72a7bd18b331d47e445badd90`)
+- Last reviewed: 2026-09-30
+- Upstream: `336aee0eb1a5a88efe637f60142303cc8e7555bf`
+- Prior reviewed upstream: `87a27da5247577644071e8e1f186553c32c73a6f`
+- Main behavior (runtime/tests): `a1ce1f58863d0972f723b09279386eacccfd5fc3` (runtime merge)
 - Bundled guidance content: `dcc61410d522bce72a7bd18b331d47e445badd90`
-- Prior fork `main` tip: `832e317712af9a7c135d11ed9c9811cffbe27017`
+- Prior fork `main` tip: `dbd2343d0fa5f54ba2a9ffd508c4c880326624bb`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-09-29 full sync](upstream-sync-2026-09-29.md), seven capabilities through `87a27da5`. Adopt upstream's removal of the unmaintained web/desktop/cloud packages and the turbo-free typecheck toolchain; retire fork edits to the deleted files and FC-008's enterprise fixture; keep fork experiment scripts in the package typecheck project.
+Latest reviewed synchronization: [2026-09-30 full sync](upstream-sync-2026-09-30.md), one capability through `336aee0e`. Adapt upstream's preparation-phase cancellation: an interrupt before stream cleanup owns the assistant persists `MessageAbortedError` and publishes the error before idle, with the fork's transactional assistant creation as the acquire step; FC-001 recovery candidacy is unchanged.
+
+Previous synchronization: [2026-09-29 full sync](upstream-sync-2026-09-29.md), seven capabilities through `87a27da5`. Adopt upstream's removal of the unmaintained web/desktop/cloud packages and the turbo-free typecheck toolchain; retire fork edits to the deleted files and FC-008's enterprise fixture; keep fork experiment scripts in the package typecheck project.
 
 Previous synchronization: [2026-09-27 full sync](upstream-sync-2026-09-27.md), four capabilities through `454521a8`. Adopt deferred instance refresh, workspace-bound cron storage, interactive Bash request ownership and UTC cron guidance; retain shared Actor, workflow and approval contracts.
 
@@ -89,6 +91,8 @@ not change their implementation. The preceding review is retained in the
 | FC-017 | History SQLite projection and attachment preview formatting                                               | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds and original attachment locators                  |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-09-30 synchronization: an interrupt-only exit while a run-loop step is still preparing (after `sessions.createMessage` commits the assistant, before stream cleanup owns it — snapshot capture, language resolution, tool resolution) now persists `MessageAbortedError("Aborted")` and publishes `Session.Event.Error` before SessionRunState publishes idle. An assistant that the processor already errored or completed is untouched. The assistant still has no `time.completed`, so it stays a recovery candidate exactly as a stream-phase abort does; the next admitted user's orphan sweep keeps that error rather than writing the generic abandonment message. `test/session/prompt-effect.test.ts` covers both preparation boundaries and the following turn.
 
 - 2026-09-19 synchronization: Main resume captures a cancellation epoch before atomic admission, then cascades only eligible same-session subagents through Actor.recovery/resume. No registry-only or released-context takeover; child supervisors retain task/model/context ownership and terminal publication. Pending admission is bounded and withdrawn on Stop or timeout.
 
