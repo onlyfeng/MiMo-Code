@@ -5837,236 +5837,641 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           msgs = yield* insertReminders({ messages: msgs, agent, model, session })
 
-          const msg: MessageV2.Assistant = yield* sessions.createMessage({
-            id: MessageID.ascending(),
-            parentID: lastUser.id,
-            role: "assistant",
-            agentID: lastUser.agentID,
-            mode: agent.name,
-            agent: agent.name,
-            variant: lastUser.model.variant,
-            path: { cwd: ctx.directory, root: ctx.worktree },
-            cost: 0,
-            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-            modelID: model.id,
-            providerID: model.providerID,
-            time: { created: Date.now() },
-            sessionID,
-          })
-          const handle = yield* processor.create({
-            assistantMessage: msg,
-            sessionID,
-            model,
-            agentMetrics,
-          })
-
-          const outcome: "break" | "continue" = yield* Effect.gen(function* () {
-            const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
-            const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
-
-            const actorRecord = lastUser.agentID
-              ? yield* actorRegistry.get(sessionID, lastUser.agentID).pipe(Effect.orElseSucceed(() => undefined))
-              : undefined
-            const isForkAgent =
-              actorRecord?.contextMode === "full" && (actorRecord.mode === "subagent" || actorRecord.mode === "peer")
-            const forkCtxEffect = isForkAgent
-              ? (boundActor ?? spawnRef.current)?.getForkContext(sessionID, lastUser.agentID!)
-              : undefined
-            const forkCtx = forkCtxEffect ? yield* forkCtxEffect : undefined
-            if (isForkAgent && !forkCtx) {
-              yield* slog.warn("fork agent runLoop: missing forkContext, failing actor", {
-                sessionID,
+          const { handle, outcome } = yield* Effect.acquireUseRelease(
+            sessions.createMessage<MessageV2.Assistant>({
+                id: MessageID.ascending(),
+                parentID: lastUser.id,
+                role: "assistant",
                 agentID: lastUser.agentID,
+                mode: agent.name,
+                agent: agent.name,
+                variant: lastUser.model.variant,
+                path: { cwd: ctx.directory, root: ctx.worktree },
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                modelID: model.id,
+                providerID: model.providerID,
+                time: { created: Date.now() },
+                sessionID,
+            }),
+            (msg) => Effect.gen(function* () {
+              const handle = yield* processor.create({
+                assistantMessage: msg,
+                sessionID,
+                model,
+                agentMetrics,
               })
-              yield* writeModelError({ assistant: handle.message, reason: "missing fork context" })
-              return "break" as const
-            }
 
-            const resolvedTools = yield* resolveTools({
-              agent,
-              session,
-              model,
-              tools: lastUser.tools,
-              processor: handle,
-              bypassAgentCheck,
-              messages: msgs,
-              agentID: lastUser.agentID,
-              task_id: currentTaskID,
-              permission: forkCtx?.parentPermission,
-              preserveToolMembership: Boolean(forkCtx),
-              frozenToolMembership: forkCtx ? new Set(Object.keys(forkCtx.tools)) : undefined,
-              frozenTools: forkCtx?.tools,
-              frozenLoadedMcpTools: forkCtx?.loadedMcpTools ? new Set(forkCtx.loadedMcpTools) : undefined,
-              mcpContext,
-              harness: lastUser.harness,
-            })
-            const tools = resolvedTools.tools
-            const activeTools = resolvedTools.activeTools
+              const outcome: "break" | "continue" = yield* Effect.gen(function* () {
+                const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
+                const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
 
-            if (lastUser.format?.type === "json_schema") {
-              const outputTool = createStructuredOutputTool({
-                schema: lastUser.format.schema,
-                onSuccess(output) {
-                  structured = output
-                },
-              })
-              const run = yield* runner()
-              tools["StructuredOutput"] = {
-                ...outputTool,
-                execute(args, options) {
-                  return run.promise(
-                    handle.toolGate.run(
-                      "StructuredOutput",
-                      options.toolCallId,
-                      Effect.promise(async () => outputTool.execute!(args, options)),
-                      { signal: options.abortSignal },
-                    ),
-                  )
-                },
-              }
-              resolvedTools.snapshotTools.StructuredOutput = tools.StructuredOutput
-              activeTools.push("StructuredOutput")
-            }
-
-            if (step === 1)
-              yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
-
-            if (step > 1 && lastFinished) {
-              for (const m of msgs) {
-                if (m.info.role !== "user" || MessageV2.compareOrder(m.info, lastFinished) <= 0) continue
-                for (const p of m.parts) {
-                  if (p.type !== "text" || p.ignored || p.synthetic) continue
-                  if (!p.text.trim()) continue
-                  p.text = [
-                    "<system-reminder>",
-                    "The user sent the following message:",
-                    p.text,
-                    "",
-                    "Please address this message and continue with your tasks.",
-                    "</system-reminder>",
-                  ].join("\n")
-                }
-              }
-            }
-
-            yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-
-            const format = lastUser.format ?? { type: "text" as const }
-
-            // Full-context actors use the frozen parent request prefix resolved above.
-            // Main also has contextMode="full", but has no forkCtx and stays on the
-            // normal path because only spawned subagent/peer records qualify.
-            if (forkCtx) {
-              // The watermark identifies the parent snapshot, not child-session
-              // chronology. Caller-supplied child IDs can predate that watermark.
-              const ownNew = msgs.filter((m) => m.info.agentID === lastUser.agentID)
-              const ownNewModelMsgs = yield* MessageV2.toModelMessagesEffect(ownNew, model, {
-                languageProvider: (yield* provider.getLanguage(model)).provider,
-              })
-              const prebuiltSystem = forkCtx.system
-              lastSystemPrompt = prebuiltSystem
-              const modelMsgs: ModelMessage[] = [...forkCtx.inheritedMessages, ...ownNewModelMsgs]
-              // additions is empty for fork agents: system is taken verbatim from
-              // forkCtx.system. Passed as `system` to handle.process for logging/replay.
-              const additions: string[] = []
-              // Preserve the parent-visible order and schema bytes while rebinding each
-              // entry to the current runtime implementation. A missing live tool fails
-              // closed. StructuredOutput is request-local to this fork turn, so it is
-              // appended after the frozen prefix only when json_schema created it above.
-              const structuredOutput = format.type === "json_schema" ? tools.StructuredOutput : undefined
-              const forkTools = Object.fromEntries(
-                Object.entries(forkCtx.tools).flatMap(([id, frozen]): [string, AITool][] => {
-                  if (structuredOutput && id === "StructuredOutput") return []
-                  const live = tools[id]
-                  if (!live) return []
-                  return [
-                    [
-                      id,
-                      {
-                        ...live,
-                        description: frozen.description,
-                        inputSchema: frozen.inputSchema,
-                        nativeInputSchema: SessionPrefixSnapshot.nativeSchema(frozen),
-                      } as SessionPrefixSnapshot.NativeTool,
-                    ],
-                  ]
-                }),
-              )
-              if (structuredOutput) forkTools.StructuredOutput = structuredOutput
-              const queryParts = msgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
-              const query = userQueryText(queryParts)
-              const preQuery = {
-                cancel: undefined as boolean | undefined,
-                cancelReason: undefined as string | undefined,
-              }
-              yield* plugin.trigger(
-                "session.userQuery.pre",
-                { sessionID, agentID: resolvedAgentID, step, messageID: lastUser.id, query },
-                preQuery,
-              )
-              if (preQuery.cancel) {
-                cancelled = true
-                cancelReason = preQuery.cancelReason
-                handle.message.error = new MessageV2.AbortedError({
-                  message: preQuery.cancelReason ?? "Step cancelled by plugin",
-                }).toObject()
-                handle.message.finish = "cancelled"
-                yield* sessions.updateMessage(handle.message)
-                yield* plugin.trigger(
-                  "session.userQuery.post",
-                  {
+                const actorRecord = lastUser.agentID
+                  ? yield* actorRegistry.get(sessionID, lastUser.agentID).pipe(Effect.orElseSucceed(() => undefined))
+                  : undefined
+                const isForkAgent =
+                  actorRecord?.contextMode === "full" && (actorRecord.mode === "subagent" || actorRecord.mode === "peer")
+                const forkCtxEffect = isForkAgent
+                  ? (boundActor ?? spawnRef.current)?.getForkContext(sessionID, lastUser.agentID!)
+                  : undefined
+                const forkCtx = forkCtxEffect ? yield* forkCtxEffect : undefined
+                if (isForkAgent && !forkCtx) {
+                  yield* slog.warn("fork agent runLoop: missing forkContext, failing actor", {
                     sessionID,
-                    agentID: resolvedAgentID,
-                    step,
-                    messageID: lastUser.id,
-                    query,
-                    assistantMessageID: handle.message.id,
-                    finish: handle.message.finish,
-                    error: preQuery.cancelReason,
-                    trajectory: trajectoryForStep(msgs, handle.message),
-                    systemPrompt: lastSystemPrompt,
-                  },
-                  {},
-                )
-                return "break" as const
-              }
-              const result = yield* handle
-                .process({
+                    agentID: lastUser.agentID,
+                  })
+                  yield* writeModelError({ assistant: handle.message, reason: "missing fork context" })
+                  return "break" as const
+                }
+
+                const resolvedTools = yield* resolveTools({
+                  agent,
+                  session,
+                  model,
+                  tools: lastUser.tools,
+                  processor: handle,
+                  bypassAgentCheck,
+                  messages: msgs,
+                  agentID: lastUser.agentID,
+                  task_id: currentTaskID,
+                  permission: forkCtx?.parentPermission,
+                  preserveToolMembership: Boolean(forkCtx),
+                  frozenToolMembership: forkCtx ? new Set(Object.keys(forkCtx.tools)) : undefined,
+                  frozenTools: forkCtx?.tools,
+                  frozenLoadedMcpTools: forkCtx?.loadedMcpTools ? new Set(forkCtx.loadedMcpTools) : undefined,
+                  mcpContext,
+                  harness: lastUser.harness,
+                })
+                const tools = resolvedTools.tools
+                const activeTools = resolvedTools.activeTools
+
+                if (lastUser.format?.type === "json_schema") {
+                  const outputTool = createStructuredOutputTool({
+                    schema: lastUser.format.schema,
+                    onSuccess(output) {
+                      structured = output
+                    },
+                  })
+                  const run = yield* runner()
+                  tools["StructuredOutput"] = {
+                    ...outputTool,
+                    execute(args, options) {
+                      return run.promise(
+                        handle.toolGate.run(
+                          "StructuredOutput",
+                          options.toolCallId,
+                          Effect.promise(async () => outputTool.execute!(args, options)),
+                          { signal: options.abortSignal },
+                        ),
+                      )
+                    },
+                  }
+                  resolvedTools.snapshotTools.StructuredOutput = tools.StructuredOutput
+                  activeTools.push("StructuredOutput")
+                }
+
+                if (step === 1)
+                  yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
+
+                if (step > 1 && lastFinished) {
+                  for (const m of msgs) {
+                    if (m.info.role !== "user" || MessageV2.compareOrder(m.info, lastFinished) <= 0) continue
+                    for (const p of m.parts) {
+                      if (p.type !== "text" || p.ignored || p.synthetic) continue
+                      if (!p.text.trim()) continue
+                      p.text = [
+                        "<system-reminder>",
+                        "The user sent the following message:",
+                        p.text,
+                        "",
+                        "Please address this message and continue with your tasks.",
+                        "</system-reminder>",
+                      ].join("\n")
+                    }
+                  }
+                }
+
+                yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+
+                const format = lastUser.format ?? { type: "text" as const }
+
+                // Full-context actors use the frozen parent request prefix resolved above.
+                // Main also has contextMode="full", but has no forkCtx and stays on the
+                // normal path because only spawned subagent/peer records qualify.
+                if (forkCtx) {
+                  // The watermark identifies the parent snapshot, not child-session
+                  // chronology. Caller-supplied child IDs can predate that watermark.
+                  const ownNew = msgs.filter((m) => m.info.agentID === lastUser.agentID)
+                  const ownNewModelMsgs = yield* MessageV2.toModelMessagesEffect(ownNew, model, {
+                    languageProvider: (yield* provider.getLanguage(model)).provider,
+                  })
+                  const prebuiltSystem = forkCtx.system
+                  lastSystemPrompt = prebuiltSystem
+                  const modelMsgs: ModelMessage[] = [...forkCtx.inheritedMessages, ...ownNewModelMsgs]
+                  // additions is empty for fork agents: system is taken verbatim from
+                  // forkCtx.system. Passed as `system` to handle.process for logging/replay.
+                  const additions: string[] = []
+                  // Preserve the parent-visible order and schema bytes while rebinding each
+                  // entry to the current runtime implementation. A missing live tool fails
+                  // closed. StructuredOutput is request-local to this fork turn, so it is
+                  // appended after the frozen prefix only when json_schema created it above.
+                  const structuredOutput = format.type === "json_schema" ? tools.StructuredOutput : undefined
+                  const forkTools = Object.fromEntries(
+                    Object.entries(forkCtx.tools).flatMap(([id, frozen]): [string, AITool][] => {
+                      if (structuredOutput && id === "StructuredOutput") return []
+                      const live = tools[id]
+                      if (!live) return []
+                      return [
+                        [
+                          id,
+                          {
+                            ...live,
+                            description: frozen.description,
+                            inputSchema: frozen.inputSchema,
+                            nativeInputSchema: SessionPrefixSnapshot.nativeSchema(frozen),
+                          } as SessionPrefixSnapshot.NativeTool,
+                        ],
+                      ]
+                    }),
+                  )
+                  if (structuredOutput) forkTools.StructuredOutput = structuredOutput
+                  const queryParts = msgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
+                  const query = userQueryText(queryParts)
+                  const preQuery = {
+                    cancel: undefined as boolean | undefined,
+                    cancelReason: undefined as string | undefined,
+                  }
+                  yield* plugin.trigger(
+                    "session.userQuery.pre",
+                    { sessionID, agentID: resolvedAgentID, step, messageID: lastUser.id, query },
+                    preQuery,
+                  )
+                  if (preQuery.cancel) {
+                    cancelled = true
+                    cancelReason = preQuery.cancelReason
+                    handle.message.error = new MessageV2.AbortedError({
+                      message: preQuery.cancelReason ?? "Step cancelled by plugin",
+                    }).toObject()
+                    handle.message.finish = "cancelled"
+                    yield* sessions.updateMessage(handle.message)
+                    yield* plugin.trigger(
+                      "session.userQuery.post",
+                      {
+                        sessionID,
+                        agentID: resolvedAgentID,
+                        step,
+                        messageID: lastUser.id,
+                        query,
+                        assistantMessageID: handle.message.id,
+                        finish: handle.message.finish,
+                        error: preQuery.cancelReason,
+                        trajectory: trajectoryForStep(msgs, handle.message),
+                        systemPrompt: lastSystemPrompt,
+                      },
+                      {},
+                    )
+                    return "break" as const
+                  }
+                  const result = yield* handle
+                    .process({
+                      user: lastUser,
+                      // LLM.resolveTools must not apply the child allowlist a
+                      // second time: forkTools already carries the exact frozen
+                      // parent membership. Live closures still enforce that
+                      // allowlist before dispatch in resolveTools above.
+                      agent: { ...agent, toolAllowlist: undefined },
+                      // Fork inherits the parent's effective permission (agent + session +
+                      // hardPermission), captured at spawn into ForkContext. Together with
+                      // forkTools above, this keeps the frozen system, tool schemas, and live
+                      // execute closures aligned with the parent's visibility boundary. The
+                      // `?? session.permission` is defense-in-depth only:
+                      // parentPermission is a required field (empty `[]` on a missed capture,
+                      // which `??` does NOT override), so the fallback fires solely if a future
+                      // refactor makes the field optional.
+                      permission: forkCtx.parentPermission ?? session.permission,
+                      sessionID,
+                      parentSessionID: session.parentID,
+                      system: additions,
+                      prebuiltSystem,
+                      messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
+                      mergeTurnContextIntoLastUser: true,
+                      tools: forkTools,
+                      activeTools: activeTools.filter(
+                        (id) =>
+                          forkTools[id] &&
+                          (id === "StructuredOutput" ||
+                            !forkCtx.activeTools ||
+                            forkCtx.activeTools.includes(id) ||
+                            resolvedTools.loadedMcpTools.includes(id)),
+                      ),
+                      model,
+                      toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
+                      agentID: lastUser.agentID,
+                    })
+                    .pipe(
+                      Effect.onExit((exit) =>
+                        plugin
+                          .trigger(
+                            "session.userQuery.post",
+                            {
+                              sessionID,
+                              agentID: resolvedAgentID,
+                              step,
+                              messageID: lastUser.id,
+                              query,
+                              assistantMessageID: handle.message.id,
+                              finish: handle.message.finish,
+                              error: Exit.isFailure(exit)
+                                ? Cause.pretty(exit.cause)
+                                : sessionErrorText(handle.message.error),
+                              finalText: assistantFinalText(handle.message, MessageV2.parts(handle.message.id)),
+                              trajectory: trajectoryForStep(msgs, handle.message),
+                              systemPrompt: lastSystemPrompt,
+                            },
+                            {},
+                          )
+                          .pipe(Effect.ignore),
+                      ),
+                    )
+
+                  if (result === "continue" && (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))) {
+                    return "continue" as const
+                  }
+
+                  if (result === "text-repeat") {
+                    if (yield* handleTextRepeat({ lastUser })) return "continue" as const
+                    return "break" as const
+                  }
+                  if (result === "stop") return "break" as const
+
+                  if (structured !== undefined) {
+                    handle.message.structured = structured
+                    handle.message.finish = handle.message.finish ?? "stop"
+                    yield* sessions.updateMessage(handle.message)
+                    return "break" as const
+                  }
+
+                  const forkClassification = classifyAssistantStep({
+                    phase: "after-process",
+                    lastUser,
+                    assistant: handle.message,
+                    parts: MessageV2.parts(handle.message.id),
+                    processResult: result,
+                  })
+                  if (forkClassification.type === "filtered") {
+                    yield* writeContentFilterError({ assistant: handle.message })
+                    return "break" as const
+                  }
+                  if (forkClassification.type === "failed") {
+                    yield* writeModelError({ assistant: handle.message, reason: forkClassification.reason })
+                    return "break" as const
+                  }
+                  if (forkClassification.type === "text-tool-call") {
+                    if (yield* autoRetryTextToolCall({ lastUser, assistant: handle.message })) return "continue" as const
+                    return "break" as const
+                  }
+                  if (forkClassification.type !== "continue" && !handle.message.error && format.type === "json_schema") {
+                    if (yield* autoRetryStructuredOutput({ lastUser, assistant: handle.message }))
+                      return "continue" as const
+                    return "break" as const
+                  }
+
+                  if (
+                    (forkClassification.type === "think-only" || forkClassification.type === "invalid") &&
+                    format.type !== "json_schema"
+                  ) {
+                    const reason = forkClassification.type === "invalid" ? forkClassification.reason : "think-only"
+                    if (yield* autoContinueInvalidOutput({ lastUser, assistant: handle.message, reason }))
+                      return "continue" as const
+                    return "break" as const
+                  }
+
+                  if (forkClassification.type === "final" && forkClassification.degraded)
+                    yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
+                  // Fork agents are always subagents (lastUser.agentID is set); use
+                  // per-actor compaction on overflow (same as non-fork subagent path).
+                  if (!isBoundedComputation && result === "overflow") {
+                    const compacted = yield* compaction.createIfLatest({
+                      sessionID,
+                      agent: lastUser.agent,
+                      model: { providerID: model.providerID, modelID: model.id },
+                      auto: true,
+                      overflow: true,
+                      agentID: lastUser.agentID,
+                      task_id: lastUser.task_id,
+                      expectedUserID: lastUser.id,
+                      onUserCommitted: recoveryCommitted(lastUser.id),
+                    })
+                    if (compacted) skipOverflowCheck = true
+                  }
+                  return "continue" as const
+                }
+
+                const runtimePermission = Agent.runtimePermission(agent, session.permission)
+                const prefixProfileKey = SessionPrefixSnapshot.profileKey({
+                  providerID: model.providerID,
+                  modelID: model.id,
+                  modelAPIID: model.api.id ?? "",
+                  modelFamily: model.family ?? "",
+                  harnessModel: model.harness_model,
+                  agent: agent.name,
+                  agentID: lastUser.agentID ?? "main",
+                  harness: sessionPrompt.harness,
+                  systemMode: sessionPrompt.systemMode,
+                  system: sessionPrompt.system ?? "",
+                  permission: runtimePermission,
+                })
+                const frozen = yield* SessionPrefixSnapshot.get(sessionID, prefixProfileKey)
+                const selectedCatalog = yield* selectSkillCatalog({
+                  frozen,
                   user: lastUser,
-                  // LLM.resolveTools must not apply the child allowlist a
-                  // second time: forkTools already carries the exact frozen
-                  // parent membership. Live closures still enforce that
-                  // allowlist before dispatch in resolveTools above.
-                  agent: { ...agent, toolAllowlist: undefined },
-                  // Fork inherits the parent's effective permission (agent + session +
-                  // hardPermission), captured at spawn into ForkContext. Together with
-                  // forkTools above, this keeps the frozen system, tool schemas, and live
-                  // execute closures aligned with the parent's visibility boundary. The
-                  // `?? session.permission` is defense-in-depth only:
-                  // parentPermission is a required field (empty `[]` on a missed capture,
-                  // which `??` does NOT override), so the fallback fires solely if a future
-                  // refactor makes the field optional.
-                  permission: forkCtx.parentPermission ?? session.permission,
+                  parts: msgs.find((message) => message.info.id === lastUser.id)?.parts ?? [],
+                  agent,
+                  permission: runtimePermission,
+                })
+                const refreshed = frozen
+                  ? refreshFrozenSkillCatalog(frozen.system, frozen.skill_catalog ?? undefined, selectedCatalog, {
+                      formatPrefix: format.type === "json_schema" ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n" : "",
+                      legacyFormatPrefix: frozen.tools?.some((tool) => tool.name === "StructuredOutput")
+                        ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n"
+                        : undefined,
+                    })
+                  : undefined
+                if (refreshed?.reason)
+                  yield* slog.warn("skill catalog refresh retained frozen pair", { reason: refreshed.reason, sessionID })
+                const catalog = refreshed ? refreshed.catalog : selectedCatalog
+                const catalogSlot = !frozen && catalog ? newSkillCatalogSlot() : undefined
+                const catalogChanged = Boolean(
+                  catalog &&
+                    (catalog.version !== frozen?.skill_catalog?.version ||
+                      catalog.formatPrefix !== frozen?.skill_catalog?.formatPrefix),
+                )
+                const catalogTurnChanged = Boolean(catalog && catalog.turnID !== frozen?.skill_catalog?.turnID)
+                const currentAdditions = Effect.fnUntraced(function* () {
+                  const [env, instructions] = yield* Effect.all([
+                    Flag.MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT
+                      ? sys.environment(model, session.time.created, sessionPrompt.harness)
+                      : Effect.succeed([]),
+                    instruction.system().pipe(Effect.orDie),
+                  ])
+                  if (!Flag.MIMOCODE_DISABLE_INSTRUCTIONS && !session.parentID && !instructionsNotified.has(sessionID)) {
+                    instructionsNotified.add(sessionID)
+                    const worktree = (yield* InstanceState.context).worktree
+                    const files = Array.from(instructions.paths, (path) => Instruction.display(path, worktree))
+                    if (files.length > 0) {
+                      yield* bus.publish(TuiEvent.InstructionsLoaded, { files }).pipe(Effect.ignore)
+                    }
+                  }
+                  return [
+                    ...env,
+                    ...(catalogSlot ? [catalogSlot] : []),
+                    ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
+                  ]
+                })
+                // Note: `buildLLMRequestPrefix` also returns a `tools` field, but we
+                // intentionally don't use it here — the `tools` variable from `resolveTools`
+                // (set earlier via `handle.process({tools: ...})`) carries `execute` closures
+                // the AI SDK needs for runtime tool dispatch, while `buildLLMRequestPrefix`
+                // produces schema-only tools. Schema bytes match between both paths (both call
+                // registry.tools with identical args), so prefix cache parity holds.
+                // Main runLoop: no watermark — LLM must see the full msgs list,
+                // including this turn's intermediate assistant turns (tool reads,
+                // task creates, etc.) so each step doesn't replay from the bare
+                // user prompt. Snapshot watermarks are boundary metadata, never a
+                // reason to slice the main request history.
+                const builtPrefix = yield* buildLLMRequestPrefix({
+                  sessionID,
+                  agent,
+                  model,
+                  languageProvider: (yield* provider.getLanguage(model)).provider,
+                  msgs,
+                  permission: session.permission,
+                  additions: frozen ? [] : yield* currentAdditions(),
+                  prebuiltSystem: refreshed?.system,
+                  skillCatalogInSystem: Boolean(catalog),
+                  prompt: sessionPrompt,
+                  // Rebuild tails collapse into an activity log so hollow
+                  // tool_results never look like a live transcript (anti-hallucination).
+                  collapseCheckpointTail: true,
+                }).pipe(Effect.provideService(LLM.Service, llm), Effect.provideService(ToolRegistry.Service, registry))
+                const materialized =
+                  catalog && catalogSlot
+                    ? bindSkillCatalog(
+                        builtPrefix.system,
+                        catalog,
+                        catalogSlot,
+                        format.type === "json_schema" ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n" : "",
+                      )
+                    : { system: builtPrefix.system, catalog }
+                const initialPrefix = { ...builtPrefix, system: materialized.system }
+                const currentToolsHash = SessionPrefixSnapshot.toolsHash(resolvedTools.snapshotTools, activeTools)
+                const currentTools = yield* Effect.promise(() =>
+                  SessionPrefixSnapshot.snapshotTools(resolvedTools.snapshotTools, activeTools),
+                )
+                const resolvedPrefix = yield* Effect.gen(function* () {
+                  if (!frozen) {
+                    const pinned = yield* SessionPrefixSnapshot.pin({
+                      sessionID,
+                      profileKey: prefixProfileKey,
+                      system: initialPrefix.system,
+                      skillCatalog: materialized.catalog,
+                      toolsHash: currentToolsHash,
+                      tools: currentTools,
+                      loadedMcpTools: resolvedTools.loadedMcpTools,
+                      watermarkMessageID: lastUser.id,
+                    })
+                    // A concurrent cold capture may have pinned this profile first.
+                    // Keep its system/catalog pair while retaining the live executable
+                    // tool pool, just as an ordinary tools-only rotation does below.
+                    const winner = refreshFrozenSkillCatalog(
+                      pinned.system,
+                      pinned.skill_catalog ?? undefined,
+                      pinned.skill_catalog ?? undefined,
+                      {
+                        formatPrefix: format.type === "json_schema" ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n" : "",
+                        legacyFormatPrefix: pinned.tools?.some((tool) => tool.name === "StructuredOutput")
+                          ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n"
+                          : undefined,
+                      },
+                    )
+                    const snapshot =
+                      pinned.tools &&
+                      pinned.tools_hash === currentToolsHash &&
+                      isDeepStrictEqual(winner.system, pinned.system)
+                        ? pinned
+                        : yield* SessionPrefixSnapshot.rotate({
+                            sessionID,
+                            profileKey: prefixProfileKey,
+                            system: winner.system,
+                            skillCatalog: winner.catalog,
+                            toolsHash: currentToolsHash,
+                            tools: currentTools,
+                            loadedMcpTools: resolvedTools.loadedMcpTools,
+                            watermarkMessageID: lastUser.id,
+                          })
+                    return {
+                      snapshot,
+                      prefix: {
+                        ...initialPrefix,
+                        system: snapshot.system,
+                        inheritedMessages:
+                          Boolean(snapshot.skill_catalog) === Boolean(catalog)
+                            ? initialPrefix.inheritedMessages
+                            : yield* MessageV2.toModelMessagesEffect(msgs, model, {
+                                languageProvider: (yield* provider.getLanguage(model)).provider,
+                                collapseCheckpointTail: true,
+                                skillCatalogInSystem: Boolean(snapshot.skill_catalog),
+                              }),
+                      },
+                    }
+                  }
+                  if (frozen.tools && frozen.tools_hash === currentToolsHash && !catalogChanged && !catalogTurnChanged)
+                    return { prefix: initialPrefix, snapshot: frozen }
+                  const prefix =
+                    frozen.tools && frozen.tools_hash === currentToolsHash
+                      ? initialPrefix
+                      : yield* buildLLMRequestPrefix({
+                          sessionID,
+                          agent,
+                          model,
+                          languageProvider: (yield* provider.getLanguage(model)).provider,
+                          msgs,
+                          additions: [],
+                          prebuiltSystem: initialPrefix.system,
+                          skillCatalogInSystem: Boolean(catalog),
+                          permission: session.permission,
+                          prompt: sessionPrompt,
+                          collapseCheckpointTail: true,
+                        }).pipe(
+                          Effect.provideService(LLM.Service, llm),
+                          Effect.provideService(ToolRegistry.Service, registry),
+                        )
+                  const snapshot = yield* SessionPrefixSnapshot.rotate({
+                    sessionID,
+                    profileKey: prefixProfileKey,
+                    system: prefix.system,
+                    skillCatalog: materialized.catalog,
+                    toolsHash: currentToolsHash,
+                    tools: currentTools,
+                    loadedMcpTools: resolvedTools.loadedMcpTools,
+                    watermarkMessageID: lastUser.id,
+                  })
+                  return { prefix, snapshot }
+                })
+                const prebuiltSystem = resolvedPrefix.prefix.system
+                const modelMsgs = resolvedPrefix.prefix.inheritedMessages
+                lastSystemPrompt = prebuiltSystem
+                const cfg = yield* config.get()
+                const maxModeCfg = cfg.experimental?.maxMode
+                const useMaxMode =
+                  agent.name === MaxMode.MAX_MODE_AGENT && maxModeCfg !== undefined && format.type !== "json_schema"
+
+                const processArgs = {
+                  user: lastUser,
+                  agent,
+                  permission: session.permission,
                   sessionID,
                   parentSessionID: session.parentID,
-                  system: additions,
+                  system: [],
                   prebuiltSystem,
                   messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
                   mergeTurnContextIntoLastUser: true,
-                  tools: forkTools,
-                  activeTools: activeTools.filter(
-                    (id) =>
-                      forkTools[id] &&
-                      (id === "StructuredOutput" ||
-                        !forkCtx.activeTools ||
-                        forkCtx.activeTools.includes(id) ||
-                        resolvedTools.loadedMcpTools.includes(id)),
-                  ),
+                  tools,
+                  activeTools,
                   model,
-                  toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
+                  toolChoice: isLastStep
+                    ? ("none" as const)
+                    : format.type === "json_schema"
+                      ? ("required" as const)
+                      : undefined,
                   agentID: lastUser.agentID,
-                })
-                .pipe(
+                }
+
+                const queryParts = msgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
+                const query = userQueryText(queryParts)
+                const preQuery = {
+                  cancel: undefined as boolean | undefined,
+                  cancelReason: undefined as string | undefined,
+                }
+                yield* plugin.trigger(
+                  "session.userQuery.pre",
+                  { sessionID, agentID: resolvedAgentID, step, messageID: lastUser.id, query },
+                  preQuery,
+                )
+                if (preQuery.cancel) {
+                  cancelled = true
+                  cancelReason = preQuery.cancelReason
+                  handle.message.error = new MessageV2.AbortedError({
+                    message: preQuery.cancelReason ?? "Step cancelled by plugin",
+                  }).toObject()
+                  handle.message.finish = "cancelled"
+                  yield* sessions.updateMessage(handle.message)
+                  yield* plugin.trigger(
+                    "session.userQuery.post",
+                    {
+                      sessionID,
+                      agentID: resolvedAgentID,
+                      step,
+                      messageID: lastUser.id,
+                      query,
+                      assistantMessageID: handle.message.id,
+                      finish: handle.message.finish,
+                      error: preQuery.cancelReason,
+                      trajectory: trajectoryForStep(msgs, handle.message),
+                      systemPrompt: lastSystemPrompt,
+                    },
+                    {},
+                  )
+                  return "break" as const
+                }
+
+                // Skip maxMode on the final step: it must honor `toolChoice: "none"` to force
+                // a text-only response and end the loop. runMaxStep ignores toolChoice, so it
+                // would keep calling tools and bypass the step cap.
+                const stepEffect =
+                  useMaxMode && !isLastStep
+                    ? MaxMode.runMaxStep({
+                        // runMaxStep reuses the identical per-step args as handle.process,
+                        // plus the orchestration handles it needs.
+                        ...processArgs,
+                        handle,
+                        llm,
+                        candidates: maxModeCfg?.candidates,
+                        retryConfig: cfg,
+                        setStatus: (message) =>
+                          resolvedAgentID === "main"
+                            ? status.set(sessionID, message ? { type: "busy", message } : { type: "busy" })
+                            : Effect.void,
+                        onRetry: (info) => {
+                          if (resolvedAgentID !== "main") return Effect.void
+                          return Effect.gen(function* () {
+                            const attempt = yield* status.setRetry(sessionID, {
+                              type: "retry",
+                              attempt: info.attempt,
+                              phaseAttempt: info.attempt,
+                              message: info.message,
+                              next: info.next,
+                              phase: info.phase,
+                              scope: info.scope,
+                            })
+                            yield* bus.publish(Session.Event.RetryAttempt, {
+                              sessionID,
+                              messageID: handle.message.id,
+                              attempt,
+                              phaseAttempt: info.attempt,
+                              maxAttempts: info.maxAttempts,
+                              phase: info.phase,
+                              kind: info.kind,
+                              scope: info.scope,
+                              reason: info.message,
+                              nextDelayMs: info.nextDelayMs,
+                            })
+                          })
+                        },
+                      })
+                    : handle.process(processArgs)
+
+                const result = yield* stepEffect.pipe(
                   Effect.onExit((exit) =>
                     plugin
                       .trigger(
@@ -6079,9 +6484,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           query,
                           assistantMessageID: handle.message.id,
                           finish: handle.message.finish,
-                          error: Exit.isFailure(exit)
-                            ? Cause.pretty(exit.cause)
-                            : sessionErrorText(handle.message.error),
+                          error: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : sessionErrorText(handle.message.error),
                           finalText: assistantFinalText(handle.message, MessageV2.parts(handle.message.id)),
                           trajectory: trajectoryForStep(msgs, handle.message),
                           systemPrompt: lastSystemPrompt,
@@ -6092,541 +6495,152 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   ),
                 )
 
-              if (result === "continue" && (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))) {
-                return "continue" as const
-              }
-
-              if (result === "text-repeat") {
-                if (yield* handleTextRepeat({ lastUser })) return "continue" as const
-                return "break" as const
-              }
-              if (result === "stop") return "break" as const
-
-              if (structured !== undefined) {
-                handle.message.structured = structured
-                handle.message.finish = handle.message.finish ?? "stop"
-                yield* sessions.updateMessage(handle.message)
-                return "break" as const
-              }
-
-              const forkClassification = classifyAssistantStep({
-                phase: "after-process",
-                lastUser,
-                assistant: handle.message,
-                parts: MessageV2.parts(handle.message.id),
-                processResult: result,
-              })
-              if (forkClassification.type === "filtered") {
-                yield* writeContentFilterError({ assistant: handle.message })
-                return "break" as const
-              }
-              if (forkClassification.type === "failed") {
-                yield* writeModelError({ assistant: handle.message, reason: forkClassification.reason })
-                return "break" as const
-              }
-              if (forkClassification.type === "text-tool-call") {
-                if (yield* autoRetryTextToolCall({ lastUser, assistant: handle.message })) return "continue" as const
-                return "break" as const
-              }
-              if (forkClassification.type !== "continue" && !handle.message.error && format.type === "json_schema") {
-                if (yield* autoRetryStructuredOutput({ lastUser, assistant: handle.message }))
-                  return "continue" as const
-                return "break" as const
-              }
-
-              if (
-                (forkClassification.type === "think-only" || forkClassification.type === "invalid") &&
-                format.type !== "json_schema"
-              ) {
-                const reason = forkClassification.type === "invalid" ? forkClassification.reason : "think-only"
-                if (yield* autoContinueInvalidOutput({ lastUser, assistant: handle.message, reason }))
-                  return "continue" as const
-                return "break" as const
-              }
-
-              if (forkClassification.type === "final" && forkClassification.degraded)
-                yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
-              // Fork agents are always subagents (lastUser.agentID is set); use
-              // per-actor compaction on overflow (same as non-fork subagent path).
-              if (!isBoundedComputation && result === "overflow") {
-                const compacted = yield* compaction.createIfLatest({
-                  sessionID,
-                  agent: lastUser.agent,
-                  model: { providerID: model.providerID, modelID: model.id },
-                  auto: true,
-                  overflow: true,
-                  agentID: lastUser.agentID,
-                  task_id: lastUser.task_id,
-                  expectedUserID: lastUser.id,
-                  onUserCommitted: recoveryCommitted(lastUser.id),
-                })
-                if (compacted) skipOverflowCheck = true
-              }
-              return "continue" as const
-            }
-
-            const runtimePermission = Agent.runtimePermission(agent, session.permission)
-            const prefixProfileKey = SessionPrefixSnapshot.profileKey({
-              providerID: model.providerID,
-              modelID: model.id,
-              modelAPIID: model.api.id ?? "",
-              modelFamily: model.family ?? "",
-              harnessModel: model.harness_model,
-              agent: agent.name,
-              agentID: lastUser.agentID ?? "main",
-              harness: sessionPrompt.harness,
-              systemMode: sessionPrompt.systemMode,
-              system: sessionPrompt.system ?? "",
-              permission: runtimePermission,
-            })
-            const frozen = yield* SessionPrefixSnapshot.get(sessionID, prefixProfileKey)
-            const selectedCatalog = yield* selectSkillCatalog({
-              frozen,
-              user: lastUser,
-              parts: msgs.find((message) => message.info.id === lastUser.id)?.parts ?? [],
-              agent,
-              permission: runtimePermission,
-            })
-            const refreshed = frozen
-              ? refreshFrozenSkillCatalog(frozen.system, frozen.skill_catalog ?? undefined, selectedCatalog, {
-                  formatPrefix: format.type === "json_schema" ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n" : "",
-                  legacyFormatPrefix: frozen.tools?.some((tool) => tool.name === "StructuredOutput")
-                    ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n"
-                    : undefined,
-                })
-              : undefined
-            if (refreshed?.reason)
-              yield* slog.warn("skill catalog refresh retained frozen pair", { reason: refreshed.reason, sessionID })
-            const catalog = refreshed ? refreshed.catalog : selectedCatalog
-            const catalogSlot = !frozen && catalog ? newSkillCatalogSlot() : undefined
-            const catalogChanged = Boolean(
-              catalog &&
-                (catalog.version !== frozen?.skill_catalog?.version ||
-                  catalog.formatPrefix !== frozen?.skill_catalog?.formatPrefix),
-            )
-            const catalogTurnChanged = Boolean(catalog && catalog.turnID !== frozen?.skill_catalog?.turnID)
-            const currentAdditions = Effect.fnUntraced(function* () {
-              const [env, instructions] = yield* Effect.all([
-                Flag.MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT
-                  ? sys.environment(model, session.time.created, sessionPrompt.harness)
-                  : Effect.succeed([]),
-                instruction.system().pipe(Effect.orDie),
-              ])
-              if (!Flag.MIMOCODE_DISABLE_INSTRUCTIONS && !session.parentID && !instructionsNotified.has(sessionID)) {
-                instructionsNotified.add(sessionID)
-                const worktree = (yield* InstanceState.context).worktree
-                const files = Array.from(instructions.paths, (path) => Instruction.display(path, worktree))
-                if (files.length > 0) {
-                  yield* bus.publish(TuiEvent.InstructionsLoaded, { files }).pipe(Effect.ignore)
-                }
-              }
-              return [
-                ...env,
-                ...(catalogSlot ? [catalogSlot] : []),
-                ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
-              ]
-            })
-            // Note: `buildLLMRequestPrefix` also returns a `tools` field, but we
-            // intentionally don't use it here — the `tools` variable from `resolveTools`
-            // (set earlier via `handle.process({tools: ...})`) carries `execute` closures
-            // the AI SDK needs for runtime tool dispatch, while `buildLLMRequestPrefix`
-            // produces schema-only tools. Schema bytes match between both paths (both call
-            // registry.tools with identical args), so prefix cache parity holds.
-            // Main runLoop: no watermark — LLM must see the full msgs list,
-            // including this turn's intermediate assistant turns (tool reads,
-            // task creates, etc.) so each step doesn't replay from the bare
-            // user prompt. Snapshot watermarks are boundary metadata, never a
-            // reason to slice the main request history.
-            const builtPrefix = yield* buildLLMRequestPrefix({
-              sessionID,
-              agent,
-              model,
-              languageProvider: (yield* provider.getLanguage(model)).provider,
-              msgs,
-              permission: session.permission,
-              additions: frozen ? [] : yield* currentAdditions(),
-              prebuiltSystem: refreshed?.system,
-              skillCatalogInSystem: Boolean(catalog),
-              prompt: sessionPrompt,
-              // Rebuild tails collapse into an activity log so hollow
-              // tool_results never look like a live transcript (anti-hallucination).
-              collapseCheckpointTail: true,
-            }).pipe(Effect.provideService(LLM.Service, llm), Effect.provideService(ToolRegistry.Service, registry))
-            const materialized =
-              catalog && catalogSlot
-                ? bindSkillCatalog(
-                    builtPrefix.system,
-                    catalog,
-                    catalogSlot,
-                    format.type === "json_schema" ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n" : "",
-                  )
-                : { system: builtPrefix.system, catalog }
-            const initialPrefix = { ...builtPrefix, system: materialized.system }
-            const currentToolsHash = SessionPrefixSnapshot.toolsHash(resolvedTools.snapshotTools, activeTools)
-            const currentTools = yield* Effect.promise(() =>
-              SessionPrefixSnapshot.snapshotTools(resolvedTools.snapshotTools, activeTools),
-            )
-            const resolvedPrefix = yield* Effect.gen(function* () {
-              if (!frozen) {
-                const pinned = yield* SessionPrefixSnapshot.pin({
-                  sessionID,
-                  profileKey: prefixProfileKey,
-                  system: initialPrefix.system,
-                  skillCatalog: materialized.catalog,
-                  toolsHash: currentToolsHash,
-                  tools: currentTools,
-                  loadedMcpTools: resolvedTools.loadedMcpTools,
-                  watermarkMessageID: lastUser.id,
-                })
-                // A concurrent cold capture may have pinned this profile first.
-                // Keep its system/catalog pair while retaining the live executable
-                // tool pool, just as an ordinary tools-only rotation does below.
-                const winner = refreshFrozenSkillCatalog(
-                  pinned.system,
-                  pinned.skill_catalog ?? undefined,
-                  pinned.skill_catalog ?? undefined,
-                  {
-                    formatPrefix: format.type === "json_schema" ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n" : "",
-                    legacyFormatPrefix: pinned.tools?.some((tool) => tool.name === "StructuredOutput")
-                      ? STRUCTURED_OUTPUT_SYSTEM_PROMPT + "\n\n"
-                      : undefined,
-                  },
-                )
-                const snapshot =
-                  pinned.tools &&
-                  pinned.tools_hash === currentToolsHash &&
-                  isDeepStrictEqual(winner.system, pinned.system)
-                    ? pinned
-                    : yield* SessionPrefixSnapshot.rotate({
-                        sessionID,
-                        profileKey: prefixProfileKey,
-                        system: winner.system,
-                        skillCatalog: winner.catalog,
-                        toolsHash: currentToolsHash,
-                        tools: currentTools,
-                        loadedMcpTools: resolvedTools.loadedMcpTools,
-                        watermarkMessageID: lastUser.id,
-                      })
-                return {
-                  snapshot,
-                  prefix: {
-                    ...initialPrefix,
-                    system: snapshot.system,
-                    inheritedMessages:
-                      Boolean(snapshot.skill_catalog) === Boolean(catalog)
-                        ? initialPrefix.inheritedMessages
-                        : yield* MessageV2.toModelMessagesEffect(msgs, model, {
-                            languageProvider: (yield* provider.getLanguage(model)).provider,
-                            collapseCheckpointTail: true,
-                            skillCatalogInSystem: Boolean(snapshot.skill_catalog),
-                          }),
-                  },
-                }
-              }
-              if (frozen.tools && frozen.tools_hash === currentToolsHash && !catalogChanged && !catalogTurnChanged)
-                return { prefix: initialPrefix, snapshot: frozen }
-              const prefix =
-                frozen.tools && frozen.tools_hash === currentToolsHash
-                  ? initialPrefix
-                  : yield* buildLLMRequestPrefix({
-                      sessionID,
-                      agent,
-                      model,
-                      languageProvider: (yield* provider.getLanguage(model)).provider,
-                      msgs,
-                      additions: [],
-                      prebuiltSystem: initialPrefix.system,
-                      skillCatalogInSystem: Boolean(catalog),
-                      permission: session.permission,
-                      prompt: sessionPrompt,
-                      collapseCheckpointTail: true,
-                    }).pipe(
-                      Effect.provideService(LLM.Service, llm),
-                      Effect.provideService(ToolRegistry.Service, registry),
-                    )
-              const snapshot = yield* SessionPrefixSnapshot.rotate({
-                sessionID,
-                profileKey: prefixProfileKey,
-                system: prefix.system,
-                skillCatalog: materialized.catalog,
-                toolsHash: currentToolsHash,
-                tools: currentTools,
-                loadedMcpTools: resolvedTools.loadedMcpTools,
-                watermarkMessageID: lastUser.id,
-              })
-              return { prefix, snapshot }
-            })
-            const prebuiltSystem = resolvedPrefix.prefix.system
-            const modelMsgs = resolvedPrefix.prefix.inheritedMessages
-            lastSystemPrompt = prebuiltSystem
-            const cfg = yield* config.get()
-            const maxModeCfg = cfg.experimental?.maxMode
-            const useMaxMode =
-              agent.name === MaxMode.MAX_MODE_AGENT && maxModeCfg !== undefined && format.type !== "json_schema"
-
-            const processArgs = {
-              user: lastUser,
-              agent,
-              permission: session.permission,
-              sessionID,
-              parentSessionID: session.parentID,
-              system: [],
-              prebuiltSystem,
-              messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
-              mergeTurnContextIntoLastUser: true,
-              tools,
-              activeTools,
-              model,
-              toolChoice: isLastStep
-                ? ("none" as const)
-                : format.type === "json_schema"
-                  ? ("required" as const)
-                  : undefined,
-              agentID: lastUser.agentID,
-            }
-
-            const queryParts = msgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
-            const query = userQueryText(queryParts)
-            const preQuery = {
-              cancel: undefined as boolean | undefined,
-              cancelReason: undefined as string | undefined,
-            }
-            yield* plugin.trigger(
-              "session.userQuery.pre",
-              { sessionID, agentID: resolvedAgentID, step, messageID: lastUser.id, query },
-              preQuery,
-            )
-            if (preQuery.cancel) {
-              cancelled = true
-              cancelReason = preQuery.cancelReason
-              handle.message.error = new MessageV2.AbortedError({
-                message: preQuery.cancelReason ?? "Step cancelled by plugin",
-              }).toObject()
-              handle.message.finish = "cancelled"
-              yield* sessions.updateMessage(handle.message)
-              yield* plugin.trigger(
-                "session.userQuery.post",
-                {
-                  sessionID,
-                  agentID: resolvedAgentID,
-                  step,
-                  messageID: lastUser.id,
-                  query,
-                  assistantMessageID: handle.message.id,
-                  finish: handle.message.finish,
-                  error: preQuery.cancelReason,
-                  trajectory: trajectoryForStep(msgs, handle.message),
-                  systemPrompt: lastSystemPrompt,
-                },
-                {},
-              )
-              return "break" as const
-            }
-
-            // Skip maxMode on the final step: it must honor `toolChoice: "none"` to force
-            // a text-only response and end the loop. runMaxStep ignores toolChoice, so it
-            // would keep calling tools and bypass the step cap.
-            const stepEffect =
-              useMaxMode && !isLastStep
-                ? MaxMode.runMaxStep({
-                    // runMaxStep reuses the identical per-step args as handle.process,
-                    // plus the orchestration handles it needs.
-                    ...processArgs,
-                    handle,
-                    llm,
-                    candidates: maxModeCfg?.candidates,
-                    retryConfig: cfg,
-                    setStatus: (message) =>
-                      resolvedAgentID === "main"
-                        ? status.set(sessionID, message ? { type: "busy", message } : { type: "busy" })
-                        : Effect.void,
-                    onRetry: (info) => {
-                      if (resolvedAgentID !== "main") return Effect.void
-                      return Effect.gen(function* () {
-                        const attempt = yield* status.setRetry(sessionID, {
-                          type: "retry",
-                          attempt: info.attempt,
-                          phaseAttempt: info.attempt,
-                          message: info.message,
-                          next: info.next,
-                          phase: info.phase,
-                          scope: info.scope,
-                        })
-                        yield* bus.publish(Session.Event.RetryAttempt, {
-                          sessionID,
-                          messageID: handle.message.id,
-                          attempt,
-                          phaseAttempt: info.attempt,
-                          maxAttempts: info.maxAttempts,
-                          phase: info.phase,
-                          kind: info.kind,
-                          scope: info.scope,
-                          reason: info.message,
-                          nextDelayMs: info.nextDelayMs,
-                        })
-                      })
-                    },
+                if (handle.message.time.completed && !handle.message.error) {
+                  yield* SessionPrefixSnapshot.advance({
+                    sessionID,
+                    profileKey: prefixProfileKey,
+                    revision: resolvedPrefix.snapshot.revision,
+                    watermarkMessageID: handle.message.id,
                   })
-                : handle.process(processArgs)
+                }
 
-            const result = yield* stepEffect.pipe(
-              Effect.onExit((exit) =>
-                plugin
-                  .trigger(
-                    "session.userQuery.post",
-                    {
+                if (result === "continue" && (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))) {
+                  return "continue" as const
+                }
+
+                if (result === "text-repeat") {
+                  if (yield* handleTextRepeat({ lastUser })) return "continue" as const
+                  return "break" as const
+                }
+                if (result === "stop") return "break" as const
+
+                if (structured !== undefined) {
+                  handle.message.structured = structured
+                  handle.message.finish = handle.message.finish ?? "stop"
+                  yield* sessions.updateMessage(handle.message)
+                  return "break" as const
+                }
+
+                const classification = classifyAssistantStep({
+                  phase: "after-process",
+                  lastUser,
+                  assistant: handle.message,
+                  parts: MessageV2.parts(handle.message.id),
+                  processResult: result,
+                })
+                if (classification.type === "filtered") {
+                  yield* writeContentFilterError({ assistant: handle.message })
+                  return "break" as const
+                }
+                if (classification.type === "failed") {
+                  yield* writeModelError({ assistant: handle.message, reason: classification.reason })
+                  return "break" as const
+                }
+                if (classification.type === "text-tool-call") {
+                  if (yield* autoRetryTextToolCall({ lastUser, assistant: handle.message })) return "continue" as const
+                  return "break" as const
+                }
+                if (classification.type !== "continue" && !handle.message.error && format.type === "json_schema") {
+                  if (yield* autoRetryStructuredOutput({ lastUser, assistant: handle.message })) return "continue" as const
+                  return "break" as const
+                }
+
+                if (
+                  (classification.type === "think-only" || classification.type === "invalid") &&
+                  format.type !== "json_schema"
+                ) {
+                  const reason = classification.type === "invalid" ? classification.reason : "think-only"
+                  if (yield* autoContinueInvalidOutput({ lastUser, assistant: handle.message, reason }))
+                    return "continue" as const
+                  return "break" as const
+                }
+
+                if (classification.type === "final" && classification.degraded)
+                  yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
+                if (!isBoundedComputation && result === "overflow") {
+                  // Subagent overflow → per-actor compaction. Insert a boundary
+                  // tagged with the subagent's agent_id; the next runLoop iteration
+                  // will see a trimmed context (filterCompactedEffect stops at
+                  // the boundary).
+                  // Gate must exclude "main" — see comment at the matching gate
+                  // earlier in this file (~line 1716) and at checkpoint.ts:715.
+                  if (lastUser.agentID && lastUser.agentID !== "main") {
+                    const compacted = yield* compaction.createIfLatest({
                       sessionID,
-                      agentID: resolvedAgentID,
-                      step,
-                      messageID: lastUser.id,
-                      query,
-                      assistantMessageID: handle.message.id,
-                      finish: handle.message.finish,
-                      error: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : sessionErrorText(handle.message.error),
-                      finalText: assistantFinalText(handle.message, MessageV2.parts(handle.message.id)),
-                      trajectory: trajectoryForStep(msgs, handle.message),
-                      systemPrompt: lastSystemPrompt,
-                    },
-                    {},
-                  )
-                  .pipe(Effect.ignore),
-              ),
-            )
+                      agent: lastUser.agent,
+                      model: { providerID: model.providerID, modelID: model.id },
+                      auto: true,
+                      overflow: true,
+                      agentID: lastUser.agentID,
+                      task_id: lastUser.task_id,
+                      expectedUserID: lastUser.id,
+                      onUserCommitted: recoveryCommitted(lastUser.id),
+                    })
+                    if (compacted) skipOverflowCheck = true
+                    return "continue" as const
+                  }
 
-            if (handle.message.time.completed && !handle.message.error) {
-              yield* SessionPrefixSnapshot.advance({
-                sessionID,
-                profileKey: prefixProfileKey,
-                revision: resolvedPrefix.snapshot.revision,
-                watermarkMessageID: handle.message.id,
-              })
-            }
+                  // Main-agent provider-signalled overflow: prefer rebuild over
+                  // compaction, via the same shared rebuildEnsuringCheckpoint helper
+                  // the token-threshold path and manual /rebuild use — so the
+                  // compaction fallback stays ONE condition, not three lookalikes.
+                  const attempt2: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
+                    sessionID,
+                    agentID: lastUser.agentID,
+                    agent: lastUser.agent,
+                    model: { providerID: model.providerID, id: model.id },
+                    task_id: lastUser.task_id,
+                    writerWaitMs: AUTO_WRITER_WAIT_MS,
+                    // F55: only main owns session status — subagent onIdle never clears it.
+                    onWaitingForWriter: (!agentID || agentID === "main")
+                      ? status
+                          .set(sessionID, { type: "busy", message: "Writing checkpoint\u2026" })
+                          .pipe(Effect.catch(() => Effect.void))
+                      : Effect.void,
+                  })
+                  if (attempt2 === "rebuilt") {
+                    skipOverflowCheck = true
+                    return "continue" as const
+                  }
 
-            if (result === "continue" && (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))) {
-              return "continue" as const
-            }
-
-            if (result === "text-repeat") {
-              if (yield* handleTextRepeat({ lastUser })) return "continue" as const
-              return "break" as const
-            }
-            if (result === "stop") return "break" as const
-
-            if (structured !== undefined) {
-              handle.message.structured = structured
-              handle.message.finish = handle.message.finish ?? "stop"
-              yield* sessions.updateMessage(handle.message)
-              return "break" as const
-            }
-
-            const classification = classifyAssistantStep({
-              phase: "after-process",
-              lastUser,
-              assistant: handle.message,
-              parts: MessageV2.parts(handle.message.id),
-              processResult: result,
-            })
-            if (classification.type === "filtered") {
-              yield* writeContentFilterError({ assistant: handle.message })
-              return "break" as const
-            }
-            if (classification.type === "failed") {
-              yield* writeModelError({ assistant: handle.message, reason: classification.reason })
-              return "break" as const
-            }
-            if (classification.type === "text-tool-call") {
-              if (yield* autoRetryTextToolCall({ lastUser, assistant: handle.message })) return "continue" as const
-              return "break" as const
-            }
-            if (classification.type !== "continue" && !handle.message.error && format.type === "json_schema") {
-              if (yield* autoRetryStructuredOutput({ lastUser, assistant: handle.message })) return "continue" as const
-              return "break" as const
-            }
-
-            if (
-              (classification.type === "think-only" || classification.type === "invalid") &&
-              format.type !== "json_schema"
-            ) {
-              const reason = classification.type === "invalid" ? classification.reason : "think-only"
-              if (yield* autoContinueInvalidOutput({ lastUser, assistant: handle.message, reason }))
+                  // Same as above: the writer ran and failed — not "no checkpoint" —
+                  // or memory writing is off and nothing was attempted.
+                  if (attempt2 === "writer-failed" || attempt2 === "memory-write-off" || attempt2 === "checkpoint-off") {
+                    // THE single compaction fallback (see the token-threshold site).
+                    const compacted = yield* compaction.createIfLatest({
+                      sessionID,
+                      agent: lastUser.agent,
+                      model: { providerID: model.providerID, modelID: model.id },
+                      auto: true,
+                      overflow: true,
+                      agentID: lastUser.agentID,
+                      task_id: lastUser.task_id,
+                      expectedUserID: lastUser.id,
+                      onUserCommitted: recoveryCommitted(lastUser.id),
+                    })
+                    // Same reason-split as the token-threshold site.
+                    if (compacted && attempt2 === "memory-write-off")
+                      yield* noticeMemoryWriteOffFallback(sessionID).pipe(Effect.ignore)
+                    if (compacted && attempt2 === "checkpoint-off")
+                      yield* noticeCheckpointOffFallback(sessionID).pipe(Effect.ignore)
+                    if (compacted) skipOverflowCheck = true
+                  }
+                  // "insert-failed" → a checkpoint exists; must not compact.
+                }
                 return "continue" as const
-              return "break" as const
-            }
-
-            if (classification.type === "final" && classification.degraded)
-              yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
-            if (!isBoundedComputation && result === "overflow") {
-              // Subagent overflow → per-actor compaction. Insert a boundary
-              // tagged with the subagent's agent_id; the next runLoop iteration
-              // will see a trimmed context (filterCompactedEffect stops at
-              // the boundary).
-              // Gate must exclude "main" — see comment at the matching gate
-              // earlier in this file (~line 1716) and at checkpoint.ts:715.
-              if (lastUser.agentID && lastUser.agentID !== "main") {
-                const compacted = yield* compaction.createIfLatest({
-                  sessionID,
-                  agent: lastUser.agent,
-                  model: { providerID: model.providerID, modelID: model.id },
-                  auto: true,
-                  overflow: true,
-                  agentID: lastUser.agentID,
-                  task_id: lastUser.task_id,
-                  expectedUserID: lastUser.id,
-                  onUserCommitted: recoveryCommitted(lastUser.id),
-                })
-                if (compacted) skipOverflowCheck = true
-                return "continue" as const
-              }
-
-              // Main-agent provider-signalled overflow: prefer rebuild over
-              // compaction, via the same shared rebuildEnsuringCheckpoint helper
-              // the token-threshold path and manual /rebuild use — so the
-              // compaction fallback stays ONE condition, not three lookalikes.
-              const attempt2: RebuildAttempt = yield* rebuildEnsuringCheckpoint({
-                sessionID,
-                agentID: lastUser.agentID,
-                agent: lastUser.agent,
-                model: { providerID: model.providerID, id: model.id },
-                task_id: lastUser.task_id,
-                writerWaitMs: AUTO_WRITER_WAIT_MS,
-                // F55: only main owns session status — subagent onIdle never clears it.
-                onWaitingForWriter: (!agentID || agentID === "main")
-                  ? status
-                      .set(sessionID, { type: "busy", message: "Writing checkpoint\u2026" })
-                      .pipe(Effect.catch(() => Effect.void))
-                  : Effect.void,
-              })
-              if (attempt2 === "rebuilt") {
-                skipOverflowCheck = true
-                return "continue" as const
-              }
-
-              // Same as above: the writer ran and failed — not "no checkpoint" —
-              // or memory writing is off and nothing was attempted.
-              if (attempt2 === "writer-failed" || attempt2 === "memory-write-off" || attempt2 === "checkpoint-off") {
-                // THE single compaction fallback (see the token-threshold site).
-                const compacted = yield* compaction.createIfLatest({
-                  sessionID,
-                  agent: lastUser.agent,
-                  model: { providerID: model.providerID, modelID: model.id },
-                  auto: true,
-                  overflow: true,
-                  agentID: lastUser.agentID,
-                  task_id: lastUser.task_id,
-                  expectedUserID: lastUser.id,
-                  onUserCommitted: recoveryCommitted(lastUser.id),
-                })
-                // Same reason-split as the token-threshold site.
-                if (compacted && attempt2 === "memory-write-off")
-                  yield* noticeMemoryWriteOffFallback(sessionID).pipe(Effect.ignore)
-                if (compacted && attempt2 === "checkpoint-off")
-                  yield* noticeCheckpointOffFallback(sessionID).pipe(Effect.ignore)
-                if (compacted) skipOverflowCheck = true
-              }
-              // "insert-failed" → a checkpoint exists; must not compact.
-            }
-            return "continue" as const
-          }).pipe(Effect.ensuring(instruction.clear(handle.message.id)))
+              }).pipe(Effect.ensuring(instruction.clear(handle.message.id)))
+              return { handle, outcome }
+            }),
+            (message, exit) => Effect.gen(function* () {
+              if (!Exit.isFailure(exit) || !Cause.hasInterruptsOnly(exit.cause)) return
+              // Stream cleanup already owns its errors/results. Preparation must
+              // also persist cancellation before runner idle and the abort ACK.
+              if (message.error || message.time.completed) return
+              message.error = new MessageV2.AbortedError({ message: "Aborted" }).toObject()
+              yield* sessions.updateMessage(message)
+              yield* bus.publish(Session.Event.Error, { sessionID, error: message.error })
+            }),
+          )
 
           // --- Text Loop Detection (cross-step) ---
           const completedParts = MessageV2.parts(handle.message.id)

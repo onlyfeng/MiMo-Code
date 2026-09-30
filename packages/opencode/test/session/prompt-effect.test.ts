@@ -9,11 +9,12 @@ import { asSchema, dynamicTool, jsonSchema, type Tool as AITool } from "ai"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import * as Stream from "effect/Stream"
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, describe, expect, spyOn } from "bun:test"
 import { ResumeTestHooks } from "../../src/session/resume-test-hooks"
 import path from "path"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
+import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { TuiEvent } from "../../src/cli/cmd/tui/event"
 import { Command } from "../../src/command"
 import { Config } from "../../src/config"
@@ -9779,3 +9780,59 @@ describe("trailing-user resume integration", () => {
     ),
   )
 })
+
+// Desktop turn-execution [TP-RUN-R6-09], session-resume [TP-SR-R16-04].
+for (const boundary of ["snapshot", "language"] as const) {
+  it.live(`cancel during assistant ${boundary} preparation persists user abort before idle and permits the next turn`, () =>
+    provideTmpdirServer(({ llm }) => Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const provider = yield* ProviderSvc.Service
+      const snapshot = yield* Snapshot.Service
+      const status = yield* SessionStatus.Service
+      const chat = yield* sessions.create({ title: "Preparation cancellation" })
+      yield* user(chat.id, "First request")
+      const reached = yield* Deferred.make<void>()
+      let preparing = true
+      const pause = Effect.gen(function* () {
+        const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
+        if (preparing && messages.some(m => m.info.role === "assistant" && !m.info.time.completed)) {
+          yield* Deferred.succeed(reached, undefined)
+          yield* Effect.never
+        }
+      })
+      const getLanguage = provider.getLanguage
+      const track = snapshot.track
+      const delayed = boundary === "language"
+        ? spyOn(provider, "getLanguage").mockImplementation((...args) => pause.pipe(Effect.andThen(getLanguage(...args))))
+        : spyOn(snapshot, "track").mockImplementation((...args) => pause.pipe(Effect.andThen(track(...args))))
+      yield* Effect.addFinalizer(() => Effect.sync(() => { delayed.mockRestore() }))
+      const events: string[] = []
+      const observe = ({ payload: event }: GlobalEvent) => {
+        if (event.type === "message.updated" && event.properties.info.sessionID === chat.id && event.properties.info.error) events.push("abort-message")
+        if (event.type === "session.status" && event.properties.sessionID === chat.id && event.properties.status.type === "idle") events.push("idle")
+      }
+      GlobalBus.on("event", observe)
+      yield* Effect.addFinalizer(() => Effect.sync(() => { GlobalBus.off("event", observe) }))
+      const running = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* Deferred.await(reached).pipe(Effect.timeout("15 seconds"))
+      const before = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
+      const assistantID = before.findLast(m => m.info.role === "assistant")!.info.id
+      yield* prompt.cancel(chat.id)
+      yield* Fiber.await(running)
+      const stopped = MessageV2.get({ sessionID: chat.id, messageID: assistantID })
+      expect(yield* status.get(chat.id)).toEqual({ type: "idle" })
+      expect(stopped.info.role === "assistant" && stopped.info.error).toEqual({ name: "MessageAbortedError", data: { message: "Aborted" } })
+      expect(events.indexOf("abort-message")).toBeGreaterThanOrEqual(0)
+      expect(events.indexOf("abort-message")).toBeLessThan(events.indexOf("idle"))
+      preparing = false
+      yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref,
+        noReply: true, parts: [{ type: "text", text: "Second request" }] })
+      const swept = MessageV2.get({ sessionID: chat.id, messageID: assistantID })
+      expect(swept.info.role === "assistant" && swept.info.error).toEqual({ name: "MessageAbortedError", data: { message: "Aborted" } })
+      yield* llm.text("NEXT_TURN_OK")
+      const next = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.timeout("20 seconds"))
+      expect(next.info.role === "assistant" && next.info.error).toBeUndefined()
+      expect(next.parts.filter(p => p.type === "text").map(p => p.text)).toEqual(["NEXT_TURN_OK"])
+    }), { git: true, config: providerCfg }), 45000)
+}
