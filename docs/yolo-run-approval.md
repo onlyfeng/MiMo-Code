@@ -109,5 +109,5 @@ real SessionTool forwarding path, alongside `test/cli/run-approval.test.ts`,
 `test/session/run-approval.test.ts`, `test/session/prompt-effect.test.ts`,
 `test/permission/auto-approve-delete.test.ts`,
 `test/tool/bash-delete-permission.test.ts`, and
-`test/mcp/sampling-e2e.test.ts` under `packages/opencode`. Publication records
+`test/mcp/sampling-e2e.test.ts` under `packages/cli`. Publication records
 the final source SHA and verification evidence separately.

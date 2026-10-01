@@ -12,21 +12,21 @@ base: be5af909ae
 
 **What was built** — Added a top-level optional boolean `auto_worktree` to `Config.Info`. The default is off: omitting the key or setting `false` means the Auto-Worktree Notice is never injected. Setting `true` preserves the previous soft-hint behavior (once per primary root session after a main-worktree mutation). Conflict detection and `POST /experimental/worktree/auto` remain outside this flag. Bundled `mimocode-docs` config table and the generated JS SDK types list the new key.
 
-**Verification** — `bun typecheck` (packages/opencode) PASS; `bun test test/session/auto-worktree-notice.test.ts` PASS 10/10; `bun test test/tool/auto-worktree-scan.test.ts test/tool/auto-worktree-bash-write.test.ts` PASS 47/47; `bun test test/config` PASS 177 + new `test/config/auto-worktree.test.ts` 3/3; `./packages/sdk/js/script/build.ts` regenerated `packages/sdk/js/src/v2/gen/types.gen.ts` including `auto_worktree?: boolean`.
+**Verification** — `bun typecheck` (packages/cli) PASS; `bun test test/session/auto-worktree-notice.test.ts` PASS 10/10; `bun test test/tool/auto-worktree-scan.test.ts test/tool/auto-worktree-bash-write.test.ts` PASS 47/47; `bun test test/config` PASS 177 + new `test/config/auto-worktree.test.ts` 3/3; `./packages/sdk/script/build.ts` regenerated `packages/sdk/src/v2/gen/types.gen.ts` including `auto_worktree?: boolean`.
 
 **Journey log**
 
 - Product default flipped from always-on to off; existing notice suite now writes `auto_worktree: true` in `providerConfig` so it keeps testing the on path.
-- Reviewer flagged missing SDK regen: `./packages/sdk/js/script/build.ts` is required after any `Config.Info` schema change; the artifact that updates is `packages/sdk/js/src/v2/gen/types.gen.ts` (openapi.json is not the generated surface for this key).
+- Reviewer flagged missing SDK regen: `./packages/sdk/script/build.ts` is required after any `Config.Info` schema change; the artifact that updates is `packages/sdk/src/v2/gen/types.gen.ts` (openapi.json is not the generated surface for this key).
 - Unit `Config.Info.parse` tests (`test/config/checkpoint-fork.test.ts` pattern) are the local convention for new toggles; integration coverage alone is not enough for review consistency.
 
 ## [S1] Problem
 
-The Auto-Worktree Notice is injected unconditionally: every primary root session that mutates a git main worktree gets a once-per-session soft hint (`packages/opencode/src/session/prompt.ts` `insertReminders`). There is no config key, so users who always work on the main worktree — or who already open worktrees themselves — cannot turn the notice off. `mimocode.json` has no corresponding field.
+The Auto-Worktree Notice is injected unconditionally: every primary root session that mutates a git main worktree gets a once-per-session soft hint (`packages/cli/src/session/prompt.ts` `insertReminders`). There is no config key, so users who always work on the main worktree — or who already open worktrees themselves — cannot turn the notice off. `mimocode.json` has no corresponding field.
 
 ## [S2] Design
 
-Add one top-level optional boolean in `InfoSchema` (`packages/opencode/src/config/config.ts`):
+Add one top-level optional boolean in `InfoSchema` (`packages/cli/src/config/config.ts`):
 
 ```jsonc
 {
