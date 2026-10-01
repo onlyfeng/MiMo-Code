@@ -3,7 +3,7 @@
 ## Conventions
 
 - Use MiMoCode Compose skills when available, otherwise use superpowers skill if installed.
-- To regenerate the JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
+- To regenerate the JavaScript SDK, run `./packages/sdk/script/build.ts`.
 - ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE.
 - The default branch in this repo is `main`.
 - CI triggers on `main`, `dev`, and `dev/compat` branches.
@@ -17,11 +17,7 @@
 - Install deps with `bun ci` (= `bun install --frozen-lockfile`) — install per `bun.lock`, don't mutate the lockfile. ⛔ Do NOT use `bun install`/`npm install`.
 - Cloud Agents boot from [.cursor/environment.json](.cursor/environment.json) (owned by FC-014): Bun is preinstalled and a read-only `upstream` remote is preconfigured, so a sync can start with `git fetch upstream` immediately (`git push upstream` is intentionally disabled).
 - Comments, docs, shipped skill content and test assertions use synthetic values, never machine-specific ones — `/tmp/example` for paths, `test/model` for model refs, `feat/example` for branches.
-- Do not edit `packages/opencode/migration/*/migration.sql` that already shipped — engines have applied those journals; new schema changes get a **new** migration directory under `packages/opencode/migration/`.
-
-## Core Focus
-
-Development focuses on the **TUI** (`packages/opencode/src/cli/cmd/tui/`) and the **engine core** it runs on. The Web, App and Desktop surfaces are not currently maintained. In practice this means an operation should default to checking the TUI path first.
+- Do not edit `packages/cli/migration/*/migration.sql` that already shipped — engines have applied those journals; new schema changes get a **new** migration directory under `packages/cli/migration/`.
 
 ## Style Guide
 
@@ -140,7 +136,7 @@ guard typechecks, reads correctly in review, and does nothing.
 
 - Avoid mocks as much as possible
 - Test actual implementation, do not duplicate logic into tests
-- Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+- Run tests from the owning package directory, such as `packages/cli`, where its `bunfig.toml` loads the test preload. Root `bun run test` delegates there; a bare root `bun test` finds no tests (guard: `do-not-run-tests-from-root`, owned by FC-008).
 - `bun test -t <pattern>` matches test names as an unanchored regex, not a
   literal string. Many test names here contain `()`, so pasting a full name
   such as `candidate gives up (returns null) on a non-transient error part`
@@ -157,4 +153,4 @@ guard typechecks, reads correctly in review, and does nothing.
 
 ## Type Checking
 
-- Always run `bun run typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
+- Always run `bun run typecheck` from package directories (e.g., `packages/cli`), never `tsc` directly.

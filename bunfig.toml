@@ -1,6 +1,5 @@
-[install]
-exact = true
-
+# A bare `bun test` here would discover every package's tests without the
+# package preload (isolated HOME/XDG, fixture roots). Point the root at a
+# missing directory so it finds nothing; `bun run test` delegates to packages/cli.
 [test]
 root = "./do-not-run-tests-from-root"
-

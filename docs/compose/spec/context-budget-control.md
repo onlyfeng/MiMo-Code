@@ -31,8 +31,8 @@ Separately, the merged PR #1926 was corrected: it assigned `limit.context = 300_
 
 These results and live measurements were collected under the earlier reserve-based rule. They are retained unchanged as historical evidence, not rerun results for the 2026-09-08 ratio rule. Values such as 300K → 260K/280K and 372K → 352K below are superseded for current trigger calculations.
 
-- `bun typecheck` (packages/opencode) — PASS, post-rebase.
-- `bun typecheck` (packages/opencode) — PASS for the 2026-07-31 follow-up.
+- `bun typecheck` (packages/cli) — PASS, post-rebase.
+- `bun typecheck` (packages/cli) — PASS for the 2026-07-31 follow-up.
 - `bun test test/session/auto-overflow-writer-first.test.ts test/session/prune.test.ts test/session/prompt-rebuild-reset.test.ts test/session/overflow.test.ts test/session/checkpoint-thresholds.test.ts test/cli/tui/sidebar-context.test.tsx` — 94 pass / 0 fail for the 2026-07-31 follow-up.
 - `bun test test/session/overflow.test.ts test/plugin/codex.test.ts test/session/checkpoint-thresholds.test.ts test/session/prune.test.ts` — 96 pass / 0 fail.
 - `bun test test/config test/session/checkpoint-thresholds.test.ts` — 188 pass / 4 skip / 0 fail.
@@ -67,14 +67,14 @@ Because there is only one field, any attempt to express (1) or (2) corrupts the 
 
 ### S1.2 PR #1926 audit — the fix does not fire, and it over-raises other models
 
-`packages/opencode/src/plugin/codex.ts:379` (merged in `94a79289`):
+`packages/cli/src/plugin/codex.ts:379` (merged in `94a79289`):
 
 ```ts
 if (modelID.startsWith("gpt-")) model.limit.context = 300_000
 ```
 
 Defect 1 — **no effect on the auto-compact trigger for the targeted models.**
-`packages/opencode/src/session/overflow.ts:21-23` prefers `limit.input` whenever it is set:
+`packages/cli/src/session/overflow.ts:21-23` prefers `limit.input` whenever it is set:
 
 ```ts
 return input.model.limit.input
@@ -82,7 +82,7 @@ return input.model.limit.input
   : Math.max(0, context - outputReserve - reserved)
 ```
 
-models.dev catalog (bundled at build time as `packages/opencode/src/provider/models-snapshot.js`, cached at `~/.cache/mimocode/models.json`) for the openai provider:
+models.dev catalog (bundled at build time as `packages/cli/src/provider/models-snapshot.js`, cached at `~/.cache/mimocode/models.json`) for the openai provider:
 
 | model | context | input | usable() before #1926 | usable() after #1926 |
 | --- | --- | --- | --- | --- |
@@ -93,7 +93,7 @@ models.dev catalog (bundled at build time as `packages/opencode/src/provider/mod
 | `gpt-3.5-turbo` | 16,385 | – | 0 | **263,616** |
 | `gpt-image-1` | 0 | 0 | 0 (guarded) | **300,000 (guard defeated)** |
 
-(`reserved` = `min(20_000, maxOutputTokens)`; `outputReserve` = `min(maxOutputTokens, 20_000)`; `maxOutputTokens` = `min(limit.output, 32_000)`, `packages/opencode/src/provider/transform.ts:1550-1555`.)
+(`reserved` = `min(20_000, maxOutputTokens)`; `outputReserve` = `min(maxOutputTokens, 20_000)`; `maxOutputTokens` = `min(limit.output, 32_000)`, `packages/cli/src/provider/transform.ts:1550-1555`.)
 
 So for every 1M-class GPT model — the exact case the PR was filed for — compaction still triggers at ~900K. What *did* change is the display denominator (`prompt/index.tsx:480`, `sidebar/context.tsx:81`, `subagent-footer.tsx:55`) and the MCP tool-catalog budget (`prompt.ts:1359`). Net effect: the footer now reads `900,000 (300%)` while the engine keeps going. The user-visible symptom moved, the behaviour did not.
 
@@ -139,7 +139,7 @@ For a configured 372K budget with the default 20K reserve, the first trigger is 
 
 ### S2.2 Current `Overflow.contextWindow()` arithmetic
 
-`packages/opencode/src/session/overflow.ts` resolves the window and exports `usable()` as a thin wrapper:
+`packages/cli/src/session/overflow.ts` resolves the window and exports `usable()` as a thin wrapper:
 
 ```ts
 const hard = model.limit.context === 0 ? 0 : model.limit.input || model.limit.context
@@ -171,7 +171,7 @@ An explicit `compaction.max_context` scalar or keyed map takes precedence over `
 
 ### S2.4 Config schema
 
-`compaction.max_context` in `packages/opencode/src/config/config.ts` accepts a `TokenQuantity` (number or string), or a record of model patterns to token quantities. `Token.parseQuantity()` handles absolute counts, shorthand units and percentages; `%` is relative to the provider cap.
+`compaction.max_context` in `packages/cli/src/config/config.ts` accepts a `TokenQuantity` (number or string), or a record of model patterns to token quantities. `Token.parseQuantity()` handles absolute counts, shorthand units and percentages; `%` is relative to the provider cap.
 
 The resolver warns on first use of an invalid model-specific budget, and the TUI writer refuses it. A valid configured budget must strictly exceed the combined legacy buffer and output reserve and be below the provider cap. This validates the budget; the accepted budget's trigger still uses only the ratio.
 
@@ -181,7 +181,7 @@ The resolver warns on first use of an invalid model-specific budget, and the TUI
 > removed when the fork adopted upstream #2149 on 2026-08-22. The code and
 > evidence in this section document the superseded decision.
 
-`packages/opencode/src/plugin/codex.ts` becomes a clamp that also closes the `limit.input` hole and respects the sentinel:
+`packages/cli/src/plugin/codex.ts` becomes a clamp that also closes the `limit.input` hole and respects the sentinel:
 
 ```ts
 const CODEX_GPT_CONTEXT_CAP = 372_000

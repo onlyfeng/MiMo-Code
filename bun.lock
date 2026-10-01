@@ -18,14 +18,13 @@
         "@types/semver": "catalog:",
         "@typescript/native-preview": "catalog:",
         "glob": "13.0.5",
-        "husky": "9.1.7",
         "oxlint": "1.60.0",
         "oxlint-tsgolint": "0.21.0",
         "prettier": "3.6.2",
         "semver": "^7.6.0",
       },
     },
-    "packages/opencode": {
+    "packages/cli": {
       "name": "@mimo-ai/cli",
       "version": "0.1.15",
       "bin": {
@@ -201,7 +200,7 @@
         "@opentui/solid",
       ],
     },
-    "packages/sdk/js": {
+    "packages/sdk": {
       "name": "@mimo-ai/sdk",
       "version": "0.1.15",
       "dependencies": {
@@ -712,11 +711,11 @@
 
     "@lydell/node-pty-win32-x64": ["@lydell/node-pty-win32-x64@1.2.0-beta.10", "", { "os": "win32", "cpu": "x64" }, "sha512-ExFgWrzyldNAMi45U9PLIOu+g/RatP+f0c/dZxaooifME6yLW32BoHveH26/TtoAjZyJrc2iL0u48pgnR1fzmg=="],
 
-    "@mimo-ai/cli": ["@mimo-ai/cli@workspace:packages/opencode"],
+    "@mimo-ai/cli": ["@mimo-ai/cli@workspace:packages/cli"],
 
     "@mimo-ai/plugin": ["@mimo-ai/plugin@workspace:packages/plugin"],
 
-    "@mimo-ai/sdk": ["@mimo-ai/sdk@workspace:packages/sdk/js"],
+    "@mimo-ai/sdk": ["@mimo-ai/sdk@workspace:packages/sdk"],
 
     "@mimo-ai/shared": ["@mimo-ai/shared@workspace:packages/shared"],
 
@@ -1593,8 +1592,6 @@
     "https-proxy-agent": ["https-proxy-agent@7.0.6", "", { "dependencies": { "agent-base": "^7.1.2", "debug": "4" } }, "sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw=="],
 
     "human-signals": ["human-signals@5.0.0", "", {}, "sha512-AXcZb6vzzrFAUE61HnN4mpLqd/cSIwNQjtNWR0euPm6y0iqx3G4gOXaIDdtdDwZmhwe82LA6+zinmW4UBWVePQ=="],
-
-    "husky": ["husky@9.1.7", "", { "bin": { "husky": "bin.js" } }, "sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA=="],
 
     "iconv-lite": ["iconv-lite@0.7.2", "", { "dependencies": { "safer-buffer": ">= 2.1.2 < 3.0.0" } }, "sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw=="],
 
