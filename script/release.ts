@@ -13,7 +13,7 @@
 //
 // `.env` / CI secrets:
 //   GH_TOKEN or GITHUB_TOKEN     GitHub auth (gh CLI; GITHUB_TOKEN is the CI standard)
-//   GH_REPO                      default XiaomiMiMo/MiMo-Code
+//   GH_REPO                      required; no default, so a fork release never targets upstream
 //   MIMO_FDS_AK / MIMO_FDS_SK    FDS upload credentials (same names build/fds-upload read)
 //   MIMOCODE_VERSION             optional; must match packages/cli/package.json
 //   MIMOCODE_SKIP_VERSION_CHECK  set to 1 to force a mismatched version
@@ -31,13 +31,14 @@ const rootPkgDir = path.resolve(import.meta.dir, "..")
 // Bun already loaded `.env`. Standard CI names map onto the names the tools
 // read; our own credentials keep their canonical long names (no short aliases).
 process.env.GH_TOKEN ||= process.env.GITHUB_TOKEN
-process.env.GH_REPO ||= "XiaomiMiMo/MiMo-Code"
 process.env.MIMOCODE_RELEASE ||= "1"
 
 const targetVersion = process.argv[2] || process.env.MIMOCODE_VERSION
 if (targetVersion) process.env.MIMOCODE_VERSION = targetVersion
 
 if (!process.env.GH_TOKEN) throw new Error("Missing required env: GH_TOKEN or GITHUB_TOKEN")
+// Fork: the release target is always explicit; upstream is read-only (FC-012).
+if (!process.env.GH_REPO) throw new Error("Missing required env: GH_REPO")
 
 const pkgVersion = await Bun.file(path.join(rootPkgDir, "packages/cli/package.json"))
   .json()
