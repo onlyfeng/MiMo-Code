@@ -70,7 +70,7 @@ jobs:
       - name: Run unit tests (shard ${{ matrix.shard }})
         timeout-minutes: 12
         shell: bash
-        working-directory: packages/opencode
+        working-directory: packages/cli
         run: |
           set -euo pipefail
           shard='${{ matrix.shard }}'
@@ -175,7 +175,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: junit-shard-${{ strategy.job-index }}
-          path: packages/opencode/.artifacts/unit/junit.xml
+          path: packages/cli/.artifacts/unit/junit.xml
           if-no-files-found: error
 
   mcp-mock-suites:
@@ -190,7 +190,7 @@ jobs:
 
       - name: Run MCP SDK mock suites in independent processes
         shell: bash
-        working-directory: packages/opencode
+        working-directory: packages/cli
         run: |
           set -euo pipefail
           mkdir -p .artifacts/mcp-mocks
@@ -212,7 +212,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: junit-mcp-mocks
-          path: packages/opencode/.artifacts/mcp-mocks/*.xml
+          path: packages/cli/.artifacts/mcp-mocks/*.xml
           if-no-files-found: error
 
   stdio-exit-observe:
@@ -227,7 +227,7 @@ jobs:
 
       - name: Run stdio exit observer tests
         shell: bash
-        working-directory: packages/opencode
+        working-directory: packages/cli
         run: |
           set -euo pipefail
           mkdir -p .artifacts/unit
@@ -244,7 +244,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: junit-stdio-exit-observe
-          path: packages/opencode/.artifacts/unit/junit.xml
+          path: packages/cli/.artifacts/unit/junit.xml
           if-no-files-found: error
 
   session-actor-recovery:
@@ -259,7 +259,7 @@ jobs:
 
       - name: Run HTTP actor recovery tests with the real application runtime
         shell: bash
-        working-directory: packages/opencode
+        working-directory: packages/cli
         run: |
           set -euo pipefail
           mkdir -p .artifacts/unit
@@ -282,7 +282,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: junit-session-actor-recovery
-          path: packages/opencode/.artifacts/unit/junit.xml
+          path: packages/cli/.artifacts/unit/junit.xml
           if-no-files-found: error
 
   windows-runtime:
@@ -309,7 +309,7 @@ jobs:
           PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           $ErrorActionPreference = "Stop"
-          $artifacts = Join-Path $env:GITHUB_WORKSPACE "packages/opencode/.artifacts/windows-runtime"
+          $artifacts = Join-Path $env:GITHUB_WORKSPACE "packages/cli/.artifacts/windows-runtime"
           New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
           $bunVersion = bun --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -334,17 +334,17 @@ jobs:
           if ($environment.bun -ne $Matches[1]) {
             throw "Installed Bun does not match the packageManager declaration"
           }
-          if (-not (Test-Path -Path "packages/opencode/script/verify-windows-runtime.ts" -PathType Leaf)) {
+          if (-not (Test-Path -Path "packages/cli/script/verify-windows-runtime.ts" -PathType Leaf)) {
             throw "Missing compat Windows runtime acceptance entry"
           }
 
       - name: Install locked dependencies
         run: |
-          bun ci 2>&1 | Tee-Object -FilePath "packages/opencode/.artifacts/windows-runtime/workflow-install.log"
+          bun ci 2>&1 | Tee-Object -FilePath "packages/cli/.artifacts/windows-runtime/workflow-install.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify Windows runtime
-        working-directory: packages/opencode
+        working-directory: packages/cli
         run: |
           foreach ($selector in @(
             "MIMOCODE_EXPERIMENTAL",
@@ -366,5 +366,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: windows-runtime-${{ github.run_id }}-${{ github.run_attempt }}
-          path: packages/opencode/.artifacts/windows-runtime/
+          path: packages/cli/.artifacts/windows-runtime/
           if-no-files-found: error

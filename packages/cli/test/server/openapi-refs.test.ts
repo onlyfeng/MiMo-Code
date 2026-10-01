@@ -1,0 +1,148 @@
+import { test, expect } from "bun:test"
+import { createOpencodeClient } from "@mimo-ai/sdk/v2"
+import { codeSample } from "../../src/cli/cmd/generate"
+import { Server } from "../../src/server/server"
+
+const generatedOpenapi = Server.openapi()
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+
+function operation(doc: unknown, route: string, method: string) {
+  if (!isRecord(doc) || !isRecord(doc.paths) || !isRecord(doc.paths[route])) return undefined
+  const value = doc.paths[route][method]
+  return isRecord(value) ? value : undefined
+}
+
+function parameterNames(value: Record<string, unknown> | undefined) {
+  if (!Array.isArray(value?.parameters)) return []
+  return value.parameters.flatMap((parameter) =>
+    isRecord(parameter) && typeof parameter.name === "string" ? [parameter.name] : [],
+  )
+}
+
+function schema(doc: unknown, name: string) {
+  if (!isRecord(doc) || !isRecord(doc.components) || !isRecord(doc.components.schemas)) return undefined
+  const value = doc.components.schemas[name]
+  return isRecord(value) ? value : undefined
+}
+
+function property(value: Record<string, unknown> | undefined, name: string) {
+  if (!isRecord(value?.properties)) return undefined
+  const result = value.properties[name]
+  return isRecord(result) ? result : undefined
+}
+
+function documentOperations(doc: unknown) {
+  if (!isRecord(doc) || !isRecord(doc.paths)) return []
+  return Object.values(doc.paths).flatMap((path) => {
+    if (!isRecord(path)) return []
+    return ["get", "post", "put", "delete", "patch"].flatMap((method) => {
+      const value = path[method]
+      if (!isRecord(value) || typeof value.operationId !== "string") return []
+      return [{ id: value.operationId, value }]
+    })
+  })
+}
+
+function member(value: unknown, path: string) {
+  return path.split(".").reduce<unknown>((current, key) => (isRecord(current) ? current[key] : undefined), value)
+}
+
+// zod-openapi rewrites every local `#/$defs/<name>` reference to
+// `#/components/schemas/<name>` but only hoists the definitions it knows by
+// name, so a recursive zod schema — `z.json()`, `z.lazy()`, any self-reference —
+// emits a $ref to a component that was never written. Nothing in the running
+// server notices; the failure surfaces only when someone regenerates the SDK,
+// where openapi-ts dies with `Missing $ref pointer`. That is how the spec stayed
+// broken for four days after `fc74c539` shipped `providerOutput: z.json()`.
+// Resolving every pointer here turns that into a test failure instead.
+test("every $ref in the generated OpenAPI document resolves", async () => {
+  const doc = await generatedOpenapi
+
+  const refs = new Set<string>()
+  const collect = (node: unknown) => {
+    if (Array.isArray(node)) return node.forEach(collect)
+    if (!isRecord(node)) return
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "$ref" && typeof value === "string") refs.add(value)
+      collect(value)
+    }
+  }
+  collect(doc)
+  expect(refs.size).toBeGreaterThan(0)
+
+  // JSON Pointer walk, with RFC 6901 token unescaping.
+  const resolve = (node: unknown, tokens: string[]): unknown => {
+    if (tokens.length === 0) return node
+    if (!isRecord(node)) return undefined
+    return resolve(node[tokens[0].replaceAll("~1", "/").replaceAll("~0", "~")], tokens.slice(1))
+  }
+
+  const dangling = [...refs].filter(
+    (ref) => !ref.startsWith("#/") || resolve(doc, ref.slice(2).split("/")) === undefined,
+  )
+  expect(dangling).toEqual([])
+})
+
+test("OpenAPI exposes controlled actor recovery and validated task binding", async () => {
+  const doc = await generatedOpenapi
+
+  const recovery = operation(doc, "/session/{sessionID}/recovery", "get")
+  const resume = operation(doc, "/session/{sessionID}/turn/{assistantMessageID}/resume", "post")
+  expect(recovery).toBeDefined()
+  expect(resume).toBeDefined()
+  expect(parameterNames(recovery)).toContain("agentID")
+  expect(parameterNames(resume)).toContain("agentID")
+  expect(parameterNames(recovery)).not.toContain("task_id")
+  expect(parameterNames(resume)).toContain("task_id")
+  expect(resume?.responses).toHaveProperty("409")
+  expect(resume?.description).toContain("atomic task validation or binding")
+  expect(recovery?.description).toContain("trailing user for the main agent")
+  expect(resume?.description).toContain("main agent by default")
+  expect(recovery?.description).toContain("controllable persistent full-context actor")
+  expect(resume?.description).toContain("controllable persistent full-context actor")
+})
+
+test("OpenAPI includes the checkpoint coverage contract", async () => {
+  const doc = await generatedOpenapi
+
+  const coverage = operation(doc, "/session/{sessionID}/checkpoint-coverage", "get")
+  expect(coverage?.operationId).toBe("session.checkpointCoverage")
+  expect(parameterNames(coverage)).toContain("sessionID")
+  expect(schema(doc, "CheckpointCoverage")).toBeDefined()
+  expect(property(schema(doc, "CompactionPart"), "projection")).toBeDefined()
+})
+
+test("OpenAPI code samples target callable v2 SDK methods", async () => {
+  const operations = documentOperations(await generatedOpenapi)
+
+  const client = createOpencodeClient({ baseUrl: "http://127.0.0.1:1" })
+  const invalid = operations.flatMap((item) => {
+    const target = codeSample(item.id).match(/await client\.([^({]+)\(\{/u)?.[1]
+    if (!target || typeof member(client, target) !== "function") return [`${item.id}: ${target ?? "missing target"}`]
+    return []
+  })
+  expect(operations.length).toBeGreaterThan(0)
+  expect(invalid).toEqual([])
+})
+
+test("OpenAPI keeps the compaction projection contract", async () => {
+  const projection = schema(await generatedOpenapi, "CompactionPart")?.properties
+
+  expect(isRecord(projection) && projection.projection).toMatchObject({
+    type: "object",
+    properties: {
+      version: { type: "number", const: 1 },
+      summary_message_id: { type: "string" },
+      summary: { type: "string" },
+      trigger: { type: "string", enum: ["manual", "automatic", "provider-overflow"] },
+      compacted_tool_calls: { type: "array" },
+    },
+    required: ["version", "summary_message_id", "summary", "trigger"],
+  })
+})
+
+test("prompt_async publishes its accepted and validation responses", async () => {
+  const promptAsync = operation(await generatedOpenapi, "/session/{sessionID}/prompt_async", "post")
+  expect(Object.keys(isRecord(promptAsync?.responses) ? promptAsync.responses : {})).toEqual(["204", "400", "404"])
+})

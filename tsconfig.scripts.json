@@ -9,14 +9,14 @@
   },
   "include": [
     "script/**/*.ts",
-    "packages/opencode/script/**/*.ts",
+    "packages/cli/script/**/*.ts",
     "packages/plugin/script/**/*.ts",
-    "packages/sdk/js/script/**/*.ts"
+    "packages/sdk/script/**/*.ts"
   ],
   "exclude": [
-    "packages/opencode/script/generate.ts",
-    "packages/opencode/script/schema.ts",
-    "packages/opencode/script/experiments/**",
-    "packages/opencode/script/verify-windows-runtime.ts"
+    "packages/cli/script/generate.ts",
+    "packages/cli/script/schema.ts",
+    "packages/cli/script/experiments/**",
+    "packages/cli/script/verify-windows-runtime.ts"
   ]
 }
