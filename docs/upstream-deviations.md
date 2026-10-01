@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-09-30
-- Upstream: `336aee0eb1a5a88efe637f60142303cc8e7555bf`
-- Prior reviewed upstream: `87a27da5247577644071e8e1f186553c32c73a6f`
-- Main behavior (runtime/tests): `a1ce1f58863d0972f723b09279386eacccfd5fc3` (runtime merge)
-- Bundled guidance content: `dcc61410d522bce72a7bd18b331d47e445badd90`
-- Prior fork `main` tip: `dbd2343d0fa5f54ba2a9ffd508c4c880326624bb`
+- Last reviewed: 2026-10-02
+- Upstream: `698f0f29058848b154eabd73d3a7955d4f18eb00`
+- Prior reviewed upstream: `336aee0eb1a5a88efe637f60142303cc8e7555bf`
+- Main behavior (runtime/tests): `c1935943d080ea5ab4234135d95243717da52c01` (runtime merge `b71b019834750382837b1035d31133170660b820`)
+- Bundled guidance content: `b71b019834750382837b1035d31133170660b820`
+- Prior fork `main` tip: `907a0bd8a4050bd4db8f45c30514d4497b72984d`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,7 +29,11 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-09-30 full sync](upstream-sync-2026-09-30.md), one capability through `336aee0e`. Adapt upstream's preparation-phase cancellation: an interrupt before stream cleanup owns the assistant persists `MessageAbortedError` and publishes the error before idle, with the fork's transactional assistant creation as the acquire step; FC-001 recovery candidacy is unchanged.
+Latest reviewed synchronization: [2026-10-02 full sync](upstream-sync-2026-10-02.md), ten capabilities through `698f0f29`. Adopt upstream's `packages/cli` and flattened `packages/sdk` layout, the removal of the private overlay, free channel, committed OpenAPI snapshot, husky and non-spec docs, the first-launch agreement and the leftover `MIMOCODE_*` renames. Keep the root test guard (FC-008), the `CLAUDE.md` link and a required release `GH_REPO` (FC-012), and FC-013's retry reference document.
+
+Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from this synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+
+Previous synchronization: [2026-09-30 full sync](upstream-sync-2026-09-30.md), one capability through `336aee0e`. Adapt upstream's preparation-phase cancellation: an interrupt before stream cleanup owns the assistant persists `MessageAbortedError` and publishes the error before idle, with the fork's transactional assistant creation as the acquire step; FC-001 recovery candidacy is unchanged.
 
 Previous synchronization: [2026-09-29 full sync](upstream-sync-2026-09-29.md), seven capabilities through `87a27da5`. Adopt upstream's removal of the unmaintained web/desktop/cloud packages and the turbo-free typecheck toolchain; retire fork edits to the deleted files and FC-008's enterprise fixture; keep fork experiment scripts in the package typecheck project.
 
@@ -108,27 +112,27 @@ not change their implementation. The preceding review is retained in the
   Explicit environment and instance API delete controls remain supported;
   invoking `run --yolo` does not change those controls. See
   [Yolo and run approval](yolo-run-approval.md).
-- Watch surfaces: `packages/opencode/src/cli/cmd/run.ts`,
-  `packages/opencode/src/cli/cmd/tui/thread.ts`,
-  `packages/opencode/src/cli/cmd/run-approval.ts`,
-  `packages/opencode/src/session/run-approval.ts`,
-  `packages/opencode/src/session/prompt.ts`,
-  `packages/opencode/src/permission/index.ts`,
-  `packages/opencode/src/mcp/sampling.ts`,
-  `packages/opencode/src/server/routes/instance/session.ts`,
-  `packages/opencode/src/server/routes/instance/permission.ts`, and
-  `packages/opencode/src/tool/bash.ts`; related actor/tool bridges and generated
+- Watch surfaces: `packages/cli/src/cli/cmd/run.ts`,
+  `packages/cli/src/cli/cmd/tui/thread.ts`,
+  `packages/cli/src/cli/cmd/run-approval.ts`,
+  `packages/cli/src/session/run-approval.ts`,
+  `packages/cli/src/session/prompt.ts`,
+  `packages/cli/src/permission/index.ts`,
+  `packages/cli/src/mcp/sampling.ts`,
+  `packages/cli/src/server/routes/instance/session.ts`,
+  `packages/cli/src/server/routes/instance/permission.ts`, and
+  `packages/cli/src/tool/bash.ts`; related actor/tool bridges and generated
   SDK/OpenAPI run-correlation fields.
-- Tests/evidence: `packages/opencode/test/cli/yolo.test.ts`,
-  `packages/opencode/test/permission/auto-approve-delete.test.ts`,
-  `packages/opencode/test/permission/skip-all.test.ts`,
-  `packages/opencode/test/tool/bash.test.ts`, and
-  `packages/opencode/test/cli/tui/permission-bash-delete.test.tsx` exercise the
+- Tests/evidence: `packages/cli/test/cli/yolo.test.ts`,
+  `packages/cli/test/permission/auto-approve-delete.test.ts`,
+  `packages/cli/test/permission/skip-all.test.ts`,
+  `packages/cli/test/tool/bash.test.ts`, and
+  `packages/cli/test/cli/tui/permission-bash-delete.test.tsx` exercise the
   split controls and deletion boundary. Focused run-correlation carriers are
   `test/cli/run-approval.test.ts`, `test/session/run-approval.test.ts`,
   `test/session/prompt-effect.test.ts`, `test/tool/bash-delete-permission.test.ts`,
   `test/cli/run-yolo-attach.test.ts`, `test/server/permission-reply-scope.test.ts`,
-  and `test/mcp/sampling-e2e.test.ts` under `packages/opencode`.
+  and `test/mcp/sampling-e2e.test.ts` under `packages/cli`.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `c7014557445832a97248ed7b0af568e51bfd291d`.
 - Retirement condition: upstream supplies equivalent deny-first startup
@@ -170,19 +174,19 @@ not change their implementation. The preceding review is retained in the
   does not change instruction enablement, disable event/payload parity, or
   actor identity. The separate instruction-delivery policy is not advanced by
   this selection. See [skill catalog layout](skill-catalog-system-tail.md).
-- Watch surfaces: `packages/opencode/src/cli/cmd/tui/app.tsx`,
-  `packages/opencode/src/session/instruction.ts`,
-  `packages/opencode/src/session/llm-request-prefix.ts`,
-  `packages/opencode/src/session/llm.ts`,
-  `packages/opencode/src/session/max-mode.ts`,
-  `packages/opencode/src/session/prompt.ts`, and
-  `packages/opencode/src/session/system.ts`.
-- Tests/evidence: `packages/opencode/test/session/instruction.test.ts`,
-  `packages/opencode/test/session/llm-request-prefix.test.ts`,
-  `packages/opencode/test/session/llm-system-prompt.test.ts`,
-  `packages/opencode/test/session/replace-agent-subagent.test.ts`,
-  `packages/opencode/test/session/max-mode.test.ts`, and
-  `packages/opencode/test/session/prompt-effect.test.ts` prove default-on normal
+- Watch surfaces: `packages/cli/src/cli/cmd/tui/app.tsx`,
+  `packages/cli/src/session/instruction.ts`,
+  `packages/cli/src/session/llm-request-prefix.ts`,
+  `packages/cli/src/session/llm.ts`,
+  `packages/cli/src/session/max-mode.ts`,
+  `packages/cli/src/session/prompt.ts`, and
+  `packages/cli/src/session/system.ts`.
+- Tests/evidence: `packages/cli/test/session/instruction.test.ts`,
+  `packages/cli/test/session/llm-request-prefix.test.ts`,
+  `packages/cli/test/session/llm-system-prompt.test.ts`,
+  `packages/cli/test/session/replace-agent-subagent.test.ts`,
+  `packages/cli/test/session/max-mode.test.ts`, and
+  `packages/cli/test/session/prompt-effect.test.ts` prove default-on normal
   and MaxMode delivery, disable event/payload parity, unchanged resolved
   instruction bytes across request/live-step/MaxMode retries, and positive
   main/known-peer versus unknown/subagent/system/ephemeral replace-agent scope.
@@ -387,14 +391,14 @@ not change their implementation. The preceding review is retained in the
   redacting costs every legitimate caller the reason their request failed.
   Everything else above stays as recorded.
 
-- Watch surfaces: `packages/opencode/src/server/routes/instance/capability.ts`,
-  `packages/opencode/src/server/middleware.ts`,
-  `packages/opencode/src/server/routes/instance/middleware.ts`,
-  `packages/opencode/src/server/server.ts`,
-  `packages/opencode/src/cli/cmd/llm-server.ts`,
-  `packages/opencode/src/cli/cmd/tui/worker-listener.ts`,
-  `packages/opencode/src/flag/flag.ts`, `packages/opencode/src/llm-server/`,
-  `packages/opencode/src/config/llm-server.ts`, `packages/opencode/src/util/self.ts`.
+- Watch surfaces: `packages/cli/src/server/routes/instance/capability.ts`,
+  `packages/cli/src/server/middleware.ts`,
+  `packages/cli/src/server/routes/instance/middleware.ts`,
+  `packages/cli/src/server/server.ts`,
+  `packages/cli/src/cli/cmd/llm-server.ts`,
+  `packages/cli/src/cli/cmd/tui/worker-listener.ts`,
+  `packages/cli/src/flag/flag.ts`, `packages/cli/src/llm-server/`,
+  `packages/cli/src/config/llm-server.ts`, `packages/cli/src/util/self.ts`.
 - Fixture convention: this fork roots test fixtures outside `process.cwd()`
   (under `/var/tmp` on POSIX; FC-008 owns the location and its evidence) and
   asks cases that depend on the InstanceMiddleware containment check to opt in
@@ -411,6 +415,8 @@ not change their implementation. The preceding review is retained in the
 - Upstream relationship: the fork tracks upstream on this surface.
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
+
+- 2026-10-02 synchronization: upstream `50b505a3` drops the free `mimo-auto` alias from the MiMo npm pin and its image capability override, and the TUI's no-match default now prefers `xiaomi/mimo-v2.6-pro`. No fork classifier names `mimo-auto`, so harness, prompt, discovery, toolset and retry identity resolution is unchanged; like the 2026-09-02 default-model review, the starting-model choice precedes this boundary.
 
 - 2026-09-10 config integration: host defaults merge underneath explicit user
   values before the effective parsed configuration's trusted harness declarations
@@ -461,30 +467,30 @@ the complete resolved model identity` case. FD-005 keeps only identity
   `866a5b8a2eff3970a0becb0d27f8f055e4624e19` and merged by
   `b15b0971846861a4b25576d340ce1a4207f87712`; upstream's separate fallbacks are
   not authoritative for fork request behavior.
-- Watch surfaces: `packages/opencode/src/flag/flag.ts`,
-  `packages/opencode/src/config/config.ts`,
-  `packages/opencode/src/config/provider.ts`,
-  `packages/opencode/src/tool/gpt.ts`,
-  `packages/opencode/src/provider/provider.ts`,
-  `packages/opencode/src/session/system.ts`,
-  `packages/opencode/src/session/prompt.ts`,
-  `packages/opencode/src/session/llm-request-prefix.ts`,
-  `packages/opencode/src/session/compaction.ts`,
-  `packages/opencode/src/session/prefix-snapshot.ts`,
-  `packages/opencode/src/tool/registry.ts`,
-  `packages/opencode/src/tool/tool-script-ref.ts`,
-  `packages/opencode/src/tool/tool-script.ts`,
-  `packages/opencode/src/tool/websearch/index.ts`,
-  `packages/opencode/src/agent/agent.ts`, and
-  `packages/opencode/src/server/routes/instance/experimental.ts`.
-- Tests/evidence: `packages/opencode/test/flag/codex-mode-flag.test.ts`,
-  `packages/opencode/test/tool/harness-alias.test.ts`,
+- Watch surfaces: `packages/cli/src/flag/flag.ts`,
+  `packages/cli/src/config/config.ts`,
+  `packages/cli/src/config/provider.ts`,
+  `packages/cli/src/tool/gpt.ts`,
+  `packages/cli/src/provider/provider.ts`,
+  `packages/cli/src/session/system.ts`,
+  `packages/cli/src/session/prompt.ts`,
+  `packages/cli/src/session/llm-request-prefix.ts`,
+  `packages/cli/src/session/compaction.ts`,
+  `packages/cli/src/session/prefix-snapshot.ts`,
+  `packages/cli/src/tool/registry.ts`,
+  `packages/cli/src/tool/tool-script-ref.ts`,
+  `packages/cli/src/tool/tool-script.ts`,
+  `packages/cli/src/tool/websearch/index.ts`,
+  `packages/cli/src/agent/agent.ts`, and
+  `packages/cli/src/server/routes/instance/experimental.ts`.
+- Tests/evidence: `packages/cli/test/flag/codex-mode-flag.test.ts`,
+  `packages/cli/test/tool/harness-alias.test.ts`,
   system-prompt, GPT helper, request-prefix, tool-registry, agent-generation,
-  `packages/opencode/test/provider/provider.test.ts`, and
-  `packages/opencode/test/tool/tool-script.test.ts` regressions cover explicit
+  `packages/cli/test/provider/provider.test.ts`, and
+  `packages/cli/test/tool/tool-script.test.ts` regressions cover explicit
   unset/true/false behavior, direct GPT IDs, API/family aliases, MiMo conflicts,
   explicit session precedence, and retry reuse. The local-SSE
-  `packages/opencode/test/tool/websearch.test.ts` regression binds the Xiaomi
+  `packages/cli/test/tool/websearch.test.ts` regression binds the Xiaomi
   sidecar request to the resolved API model ID.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
@@ -617,25 +623,25 @@ the complete resolved model identity` case. FD-005 keeps only identity
   for this selected scope.
   Existing normalization, fixed cwd, deletion approval and code/unit limits
   remain; broader upstream source and selectors are not restored.
-- POLICY-01 watch additions: `packages/opencode/src/actor/spawn.ts`,
-  `packages/opencode/src/actor/lifecycle.ts`, `packages/opencode/src/tool/actor.ts`,
-  `packages/opencode/src/tool/tool.ts`, `packages/opencode/src/tool/plan.ts`,
-  `packages/opencode/src/tool/question.ts`, and
-  `packages/opencode/src/cli/cmd/tui/routes/session/plan-switch.ts`.
-- Watch surfaces: `packages/opencode/src/agent/prompt/generate-gpt.txt`,
-  `packages/opencode/src/session/prompt.ts`,
-  `packages/opencode/src/tool/registry.ts`,
-  `packages/opencode/src/tool/tool-script-ref.ts`,
-  `packages/opencode/src/tool/tool-script.ts`,
-  `packages/opencode/src/tool/tool-script.txt`,
-  `packages/opencode/src/workflow/sandbox.ts`,
-  `packages/opencode/src/session/llm-request-prefix.ts`,
-  `packages/opencode/src/session/prefix-snapshot.ts`,
-  `packages/opencode/src/session/observed-tool-parts.ts`,
-  `packages/opencode/src/cli/cmd/tui/routes/session/permission.tsx`,
-  `packages/opencode/script/experiments/tool-schema*.ts`,
-  `packages/opencode/src/cli/cmd/tui/routes/session/index.tsx`, and
-  `packages/opencode/src/cli/cmd/tui/routes/session/exec-expanded.tsx`.
+- POLICY-01 watch additions: `packages/cli/src/actor/spawn.ts`,
+  `packages/cli/src/actor/lifecycle.ts`, `packages/cli/src/tool/actor.ts`,
+  `packages/cli/src/tool/tool.ts`, `packages/cli/src/tool/plan.ts`,
+  `packages/cli/src/tool/question.ts`, and
+  `packages/cli/src/cli/cmd/tui/routes/session/plan-switch.ts`.
+- Watch surfaces: `packages/cli/src/agent/prompt/generate-gpt.txt`,
+  `packages/cli/src/session/prompt.ts`,
+  `packages/cli/src/tool/registry.ts`,
+  `packages/cli/src/tool/tool-script-ref.ts`,
+  `packages/cli/src/tool/tool-script.ts`,
+  `packages/cli/src/tool/tool-script.txt`,
+  `packages/cli/src/workflow/sandbox.ts`,
+  `packages/cli/src/session/llm-request-prefix.ts`,
+  `packages/cli/src/session/prefix-snapshot.ts`,
+  `packages/cli/src/session/observed-tool-parts.ts`,
+  `packages/cli/src/cli/cmd/tui/routes/session/permission.tsx`,
+  `packages/cli/script/experiments/tool-schema*.ts`,
+  `packages/cli/src/cli/cmd/tui/routes/session/index.tsx`, and
+  `packages/cli/src/cli/cmd/tui/routes/session/exec-expanded.tsx`.
 - Tests/evidence: `test/tool/tool-script.test.ts` covers request-pool pinning,
   strict alias validation, canonical Bash policy hooks, child ask receipts,
   permission/allowlist exclusions, media bounds and close-abort-join.
@@ -773,22 +779,22 @@ the complete resolved model identity` case. FD-005 keeps only identity
   `8e5cc8a84b91af38eefde2d2bf054216d880d82f`; fork behavior is anchored at
   `3a4a244c8af1cd455518e0226c4df12d50b9b5e9` and refined through
   `aed2e8c73478f3a22d8cbaa49a9fe107766c14d0`.
-- Watch surfaces: `packages/opencode/src/actor/spawn.ts`,
-  `packages/opencode/src/session/checkpoint.ts`,
-  `packages/opencode/src/session/compaction.ts`,
-  `packages/opencode/src/session/llm-request-prefix.ts`,
-  `packages/opencode/src/session/prefix-capture-ref.ts`,
-  `packages/opencode/src/session/prefix-snapshot.ts`,
-  `packages/opencode/src/session/prompt.ts`,
-  `packages/opencode/src/tool/actor.ts`, and
-  `packages/opencode/src/tool/session.ts`.
-- POLICY-01 watch additions: `packages/opencode/src/tool/tool.ts`,
-  `packages/opencode/src/tool/registry.ts`, `packages/opencode/src/tool/tool-script.ts`,
-  and `packages/opencode/src/session/session.sql.ts` (optional internal snapshot
+- Watch surfaces: `packages/cli/src/actor/spawn.ts`,
+  `packages/cli/src/session/checkpoint.ts`,
+  `packages/cli/src/session/compaction.ts`,
+  `packages/cli/src/session/llm-request-prefix.ts`,
+  `packages/cli/src/session/prefix-capture-ref.ts`,
+  `packages/cli/src/session/prefix-snapshot.ts`,
+  `packages/cli/src/session/prompt.ts`,
+  `packages/cli/src/tool/actor.ts`, and
+  `packages/cli/src/tool/session.ts`.
+- POLICY-01 watch additions: `packages/cli/src/tool/tool.ts`,
+  `packages/cli/src/tool/registry.ts`, `packages/cli/src/tool/tool-script.ts`,
+  and `packages/cli/src/session/session.sql.ts` (optional internal snapshot
   JSON metadata, not a new public API or database-column migration).
-- Tests/evidence: `packages/opencode/test/actor/spawn.test.ts`, checkpoint
+- Tests/evidence: `packages/cli/test/actor/spawn.test.ts`, checkpoint
   child-session/fork-mode/main-slice/prefix-capture/watermark tests, and
-  `packages/opencode/test/session/prompt-effect.test.ts` cover failure before
+  `packages/cli/test/session/prompt-effect.test.ts` cover failure before
   execution and preservation of frozen membership.
   The actor spawn suite also exercises owned compaction and invalid-output
   continuations, a same-source foreign hook user, and a lost compaction write.

@@ -57,7 +57,7 @@ scheduled producers. Hook labels and failed writes never grant those receipts.
 
 ## Manual refresh procedure
 
-Run the searches from `packages/opencode`, inspect every result on a changed
+Run the searches from `packages/cli`, inspect every result on a changed
 surface, and attach the commands, inventory diff, and focused lifecycle-test
 results to the implementing PR:
 
