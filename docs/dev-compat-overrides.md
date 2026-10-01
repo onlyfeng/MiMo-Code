@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-10-02, full upstream synchronization through `698f0f29058848b154eabd73d3a7955d4f18eb00`.
+- Prior upstream: `336aee0eb1a5a88efe637f60142303cc8e7555bf`.
+- Starting compat: `cde67e5a3ed539296589752e92ed73d735a21c99`.
+- Integrated main: `fb89f49417f9486d0a543971df01c887b696394d`; compat runtime merge: `6b6bd00628d0a8ad156ff34e4cbecf7ef079ad51` (of main runtime `c1935943d080ea5ab4234135d95243717da52c01`).
+- Review: [ten-capability synchronization](upstream-sync-2026-10-02.md), C01–C10.
+- Resolution: inherit the `packages/cli` and flattened `packages/sdk` layout, the private-overlay and free-channel removal, the first-launch agreement, the release flow with a required `GH_REPO`, the root test guard, the docs pruning, the `MIMOCODE_*` renames and the retained `CLAUDE.md` link. Twenty of the 21 compat-only files moved with the directory rename; the `20260901000001_session_prefix_active_tools` migration was moved by hand, and the Windows verifier exclusion in `tsconfig.scripts.json` now names `packages/cli/script/`. The Prompt footer conflict is upstream removing its `mimo-auto` provider-label guard; compat keeps `ModelMetadata` (DC-TUI-001). The committed OpenAPI snapshot is deleted with main, so compat's `openapi-refs.test.ts` checks the checkpoint-coverage operation and schema, recovery, compaction projection and `prompt_async` contracts on the runtime document, and resolves every runtime operation's `codeSample()` on the v2 client. The compat-different production overlay remains the same 38 paths after renaming; the whole compat-different set drops from 116 to 115 paths with the snapshot. No DC owner retires or moves.
+- Validation: package and root `bun run typecheck` exit 0 at `e15ad3a7` and root typecheck again at `6b6bd006`; root lint reports 3525 warnings and zero errors at both. The complete package suite at `6b6bd006` (620 files in CI's shard and isolation layout) passes 6702 with 29 existing skips; its one failure, `MCP exception throw direct is bounded [TP-RUN-R12-36]`, occurred only while all four shards ran concurrently, and the case alone, its whole file and shard 1 rerun alone in the same order all pass. SDK regeneration from compat sources leaves `packages/sdk/src` unchanged. `bun.lock` and every package manifest match main. Exact-tip CI remains the publication gate.
+- Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
+
+## Previous review record — 2026-09-30
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-09-30, full upstream synchronization through `336aee0eb1a5a88efe637f60142303cc8e7555bf`.
 - Prior upstream: `87a27da5247577644071e8e1f186553c32c73a6f`.
 - Starting compat: `93967b9419d7bc3f503f670a4038dae53001bf09`.
@@ -987,11 +999,11 @@ files remain byte-identical to the accepted main correction.
   acquisition/redirects; the 5 MiB check rejects a declared oversized body or a
   fully buffered oversized response. It is not a streaming memory or complete
   body-read deadline guarantee.
-- Source surfaces: `packages/opencode/src/tool/webfetch.ts`. The inherited
-  `packages/opencode/src/util/ssrf.ts` is a synchronization surface but is not
+- Source surfaces: `packages/cli/src/tool/webfetch.ts`. The inherited
+  `packages/cli/src/util/ssrf.ts` is a synchronization surface but is not
   forked by this entry.
-- Test surfaces: `packages/opencode/test/tool/webfetch.test.ts`; inherited
-  `packages/opencode/test/util/ssrf.test.ts` continues to validate the
+- Test surfaces: `packages/cli/test/tool/webfetch.test.ts`; inherited
+  `packages/cli/test/util/ssrf.test.ts` continues to validate the
   classifier itself, not its use by compat WebFetch.
 - 2026-09-05 synchronization: No WebFetch/SSRF path changed; private-network
   policy and inherited bounds remain intact.
@@ -1056,9 +1068,9 @@ files remain byte-identical to the accepted main correction.
   characterization test. There is no MCP production-source fork.
 - Delta: RFC1918 HTTP(S) MCP 地址不会仅因私网属性被拒绝，保留 compat 的客户端准入保证。现有 lifecycle sentinel 使用 mock client 且 `oauth: false`，其证明仍限定为准入政策；本轮新增真实协议和本机接口证据来自继承的隔离 MCP/OAuth 夹具。该实验不将 compat 产品保证扩展为 main 的契约，也不构成企业服务器互操作保证。
 - Source surfaces: inherited
-  `packages/opencode/src/mcp/index.ts`, which must remain byte-identical to
+  `packages/cli/src/mcp/index.ts`, which must remain byte-identical to
   `main` until a real compat override is required.
-- Test surfaces: `packages/opencode/test/mcp/lifecycle.test.ts` 中的 `compat permits an RFC1918 remote MCP endpoint` 是 compat 准入 sentinel；共享实际协议入口为 `packages/opencode/test/mcp/real-transport-oauth.test.ts` 和 `packages/opencode/test/fixture/mcp-real-transport-child.ts`。后者由实际 MCP.Service/SDK、隔离 issuer 与生产 callback 完成验证，默认 loopback，私网模式要求 bind 地址属于本机。
+- Test surfaces: `packages/cli/test/mcp/lifecycle.test.ts` 中的 `compat permits an RFC1918 remote MCP endpoint` 是 compat 准入 sentinel；共享实际协议入口为 `packages/cli/test/mcp/real-transport-oauth.test.ts` 和 `packages/cli/test/fixture/mcp-real-transport-child.ts`。后者由实际 MCP.Service/SDK、隔离 issuer 与生产 callback 完成验证，默认 loopback，私网模式要求 bind 地址属于本机。
 - 2026-09-05 synchronization: No remote MCP URL or connection path changed;
   RFC1918 client behavior remains intact.
 - 2026-09-07 synchronization: No MCP path or symbol overlap. Production MCP
@@ -1102,7 +1114,9 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-PLATFORM-001 — restricted-network and Windows ripgrep/archive fallback
 
-- 2026-09-29 full sync: upstream's root typecheck now also checks `tsconfig.scripts.json`, which includes `packages/opencode/script/**` without the package's `@/` path mapping. `script/verify-windows-runtime.ts` reaches `src/util/process.ts` through `test/fixture/windows-archive-runtime.ts`, so compat adds it to that project's `exclude` list; `packages/opencode/tsconfig.json` still checks it. The production overlay and the Windows job are unchanged.
+- 2026-10-02 full sync: the Windows runtime entry is now `packages/cli/script/verify-windows-runtime.ts`; the shared `test.yml` `windows-runtime` job and the `tsconfig.scripts.json` exclusion follow the rename. The ripgrep/archive overlay is unchanged.
+
+- 2026-09-29 full sync: upstream's root typecheck now also checks `tsconfig.scripts.json`, which includes `packages/cli/script/**` without the package's `@/` path mapping. `script/verify-windows-runtime.ts` reaches `src/util/process.ts` through `test/fixture/windows-archive-runtime.ts`, so compat adds it to that project's `exclude` list; `packages/cli/tsconfig.json` still checks it. The production overlay and the Windows job are unchanged.
 
 - 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
 
@@ -1125,9 +1139,9 @@ files remain byte-identical to the accepted main correction.
   Windows ZIP extraction uses the platform fallback with overwrite and
   zip-slip boundaries. The inherited relative-path capability does not restore
   mutable session cwd or broaden which no-rg operations may proceed.
-- Source surfaces: `packages/opencode/src/file/ripgrep.ts` and
-  `packages/opencode/src/util/archive.ts`.
-- Test surfaces: `packages/opencode/test/file/ripgrep.test.ts` 与 `packages/opencode/test/util/archive.test.ts` 保留；新增实际 Windows 入口 `packages/opencode/script/verify-windows-runtime.ts` 和 `packages/opencode/test/fixture/windows-archive-runtime.ts`。`.github/workflows/test.yml` 的调度和安装设施由共享 FC-008 维护；平台入口与 compat fallback 归本项。根 `tsconfig.scripts.json` 中对该入口的 `exclude` 也归本项。
+- Source surfaces: `packages/cli/src/file/ripgrep.ts` and
+  `packages/cli/src/util/archive.ts`.
+- Test surfaces: `packages/cli/test/file/ripgrep.test.ts` 与 `packages/cli/test/util/archive.test.ts` 保留；新增实际 Windows 入口 `packages/cli/script/verify-windows-runtime.ts` 和 `packages/cli/test/fixture/windows-archive-runtime.ts`。`.github/workflows/test.yml` 的调度和安装设施由共享 FC-008 维护；平台入口与 compat fallback 归本项。根 `tsconfig.scripts.json` 中对该入口的 `exclude` 也归本项。
 - 2026-09-05 synchronization: No archive/ripgrep fallback path changed;
   restricted-network and Windows behavior remains intact.
 - 2026-09-07 synchronization: No ripgrep/archive path or symbol overlap.
@@ -1167,6 +1181,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-MODEL-001 — per-agent MaxMode
 
+- 2026-10-02 full sync: upstream deletes the committed `packages/sdk/openapi.json`; the per-agent `maxMode` schema is now carried by the generated v2 SDK types, regenerated from compat sources without a diff, and the snapshot leaves this entry's surfaces.
+
 - 2026-09-18 retry defaults: inherit persistent server/rate-limit live-step
   recovery. Per-agent MaxMode candidate/judge budgets, final-step enforcement
   and subagent retry-status isolation remain unchanged.
@@ -1198,15 +1214,14 @@ files remain byte-identical to the accepted main correction.
   The source-generated title API and
   `titleLocale` path stay shared; this override neither routes the ephemeral
   title call through per-agent MaxMode nor gives it session-global status.
-- Source surfaces: `packages/opencode/src/agent/agent.ts`,
-  `packages/opencode/src/config/agent.ts`,
-  `packages/opencode/src/session/max-mode.ts`,
-  `packages/opencode/src/session/prompt.ts`,
-  `packages/sdk/js/src/v2/gen/types.gen.ts`, and
-  `packages/sdk/openapi.json`.
-- Test surfaces: `packages/opencode/test/session/max-mode.test.ts`,
-  `packages/opencode/test/session/max-mode-econnreset.test.ts`, and MaxMode
-  routing cases in `packages/opencode/test/session/prompt-effect.test.ts`.
+- Source surfaces: `packages/cli/src/agent/agent.ts`,
+  `packages/cli/src/config/agent.ts`,
+  `packages/cli/src/session/max-mode.ts`,
+  `packages/cli/src/session/prompt.ts`,
+  and `packages/sdk/src/v2/gen/types.gen.ts`.
+- Test surfaces: `packages/cli/test/session/max-mode.test.ts`,
+  `packages/cli/test/session/max-mode-econnreset.test.ts`, and MaxMode
+  routing cases in `packages/cli/test/session/prompt-effect.test.ts`.
 - 2026-09-05 synchronization: Inherited title mention cleanup and subtask
   terminal-state guards without changing per-agent MaxMode, lite/ephemeral
   title isolation, or retry status ownership.
@@ -1273,6 +1288,8 @@ files remain byte-identical to the accepted main correction.
   exists.
 
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
+
+- 2026-10-02 full sync: with the committed OpenAPI snapshot deleted upstream, the checkpoint-coverage operation and `CheckpointCoverage` schema are asserted on the runtime OpenAPI document and carried by the generated v2 SDK; every runtime operation's code sample must resolve to a callable client method.
 
 - 2026-09-15 prior validated implementation snapshot: compat
   `05724a5c433a547d9177ebd8bc8e9184962f128e` inherits main
@@ -1453,43 +1470,42 @@ files remain byte-identical to the accepted main correction.
   must stay equivalent; it is not an additional compat API field. Every published code sample imports
   `@mimo-ai/sdk/v2`, camelizes underscore operation-ID segments, and targets an
   actual callable v2 client method.
-- POLICY-04 additional surfaces: `packages/opencode/src/session/skill-catalog.ts`,
-  `packages/opencode/test/session/skill-catalog-capture.test.ts`,
-  `packages/opencode/test/session/skill-catalog-compat-capture.test.ts`, and
-  `packages/opencode/test/session/skill-catalog-compat-projection.test.ts`.
+- POLICY-04 additional surfaces: `packages/cli/src/session/skill-catalog.ts`,
+  `packages/cli/test/session/skill-catalog-capture.test.ts`,
+  `packages/cli/test/session/skill-catalog-compat-capture.test.ts`, and
+  `packages/cli/test/session/skill-catalog-compat-projection.test.ts`.
 - Source and synchronization surfaces:
-  `packages/opencode/src/cli/cmd/tui/context/sync.tsx`,
-  `packages/opencode/src/cli/cmd/tui/routes/session/index.tsx`,
-  `packages/opencode/src/cli/cmd/tui/util/model.ts`,
-  `packages/opencode/src/inbox/render.ts`,
-  `packages/opencode/src/server/routes/instance/session.ts`,
-  `packages/opencode/src/session/checkpoint.ts`,
-  `packages/opencode/src/session/classify.ts`,
-  `packages/opencode/src/session/compaction.ts`,
-  `packages/opencode/src/session/instruction.ts`,
-  `packages/opencode/src/session/llm.ts`,
-  `packages/opencode/src/session/max-mode.ts`,
-  `packages/opencode/src/session/message-v2.ts`,
-  `packages/opencode/src/session/overflow.ts`,
-  `packages/opencode/src/session/prefix-snapshot.ts`,
-  `packages/opencode/src/session/prompt.ts`,
-  `packages/opencode/src/session/revert.ts`,
-  `packages/opencode/src/session/session.ts`,
-  `packages/opencode/src/session/system.ts`,
-  `packages/opencode/src/session/tail-digest.ts`,
-  `packages/opencode/src/tool/actor.ts`,
+  `packages/cli/src/cli/cmd/tui/context/sync.tsx`,
+  `packages/cli/src/cli/cmd/tui/routes/session/index.tsx`,
+  `packages/cli/src/cli/cmd/tui/util/model.ts`,
+  `packages/cli/src/inbox/render.ts`,
+  `packages/cli/src/server/routes/instance/session.ts`,
+  `packages/cli/src/session/checkpoint.ts`,
+  `packages/cli/src/session/classify.ts`,
+  `packages/cli/src/session/compaction.ts`,
+  `packages/cli/src/session/instruction.ts`,
+  `packages/cli/src/session/llm.ts`,
+  `packages/cli/src/session/max-mode.ts`,
+  `packages/cli/src/session/message-v2.ts`,
+  `packages/cli/src/session/overflow.ts`,
+  `packages/cli/src/session/prefix-snapshot.ts`,
+  `packages/cli/src/session/prompt.ts`,
+  `packages/cli/src/session/revert.ts`,
+  `packages/cli/src/session/session.ts`,
+  `packages/cli/src/session/system.ts`,
+  `packages/cli/src/session/tail-digest.ts`,
+  `packages/cli/src/tool/actor.ts`,
   `packages/shared/src/util/encode.ts`,
-  `packages/opencode/src/util/safe-stringify.ts`,
-  `packages/opencode/src/util/text-truncate.ts`,
-  `packages/opencode/src/cli/cmd/generate.ts`,
-  `packages/sdk/js/src/v2/gen/sdk.gen.ts`,
-  `packages/sdk/js/src/v2/gen/types.gen.ts`, and
-  `packages/sdk/openapi.json`.
-- Additional actual carriers: `packages/opencode/src/cli/cmd/debug/agent.ts`,
-  `packages/opencode/src/inbox/inbox.ts`,
-  `packages/opencode/src/session/llm-request-prefix.ts`,
-  `packages/opencode/src/session/session.sql.ts`, and
-  `packages/opencode/migration/20260901000001_session_prefix_active_tools/migration.sql`.
+  `packages/cli/src/util/safe-stringify.ts`,
+  `packages/cli/src/util/text-truncate.ts`,
+  `packages/cli/src/cli/cmd/generate.ts`,
+  `packages/sdk/src/v2/gen/sdk.gen.ts`, and
+  `packages/sdk/src/v2/gen/types.gen.ts`.
+- Additional actual carriers: `packages/cli/src/cli/cmd/debug/agent.ts`,
+  `packages/cli/src/inbox/inbox.ts`,
+  `packages/cli/src/session/llm-request-prefix.ts`,
+  `packages/cli/src/session/session.sql.ts`, and
+  `packages/cli/migration/20260901000001_session_prefix_active_tools/migration.sql`.
   New pin/rotate writes encode per-tool `active` only in shared JSON. The
   separate nullable legacy column and migration remain for old/mixed rows,
   including an explicit empty mask. Complete JSON flags take precedence over
@@ -1499,14 +1515,14 @@ files remain byte-identical to the accepted main correction.
 - Test surfaces: inbox rendering, request classification, instruction, MaxMode,
   message replay, overflow, prompt-effect, actor, checkpoint coverage,
   checkpoint tail, context usage, select-messages, revert, safe-stringify, and
-  text-truncation suites under `packages/opencode/test/`, including
-  `packages/opencode/test/cli/tui/checkpoint-coverage-sync.test.tsx`,
-  `packages/opencode/test/server/checkpoint-coverage.test.ts`,
-  `packages/opencode/test/server/openapi-refs.test.ts`,
-  `packages/opencode/test/session/checkpoint-rebuild-unify.test.ts`,
-  `packages/opencode/test/session/messages-pagination.test.ts`,
-  `packages/opencode/test/session/prompt-rebuild-loop.test.ts`, and
-  `packages/opencode/test/lib/llm-server.ts` supporting request-boundary
+  text-truncation suites under `packages/cli/test/`, including
+  `packages/cli/test/cli/tui/checkpoint-coverage-sync.test.tsx`,
+  `packages/cli/test/server/checkpoint-coverage.test.ts`,
+  `packages/cli/test/server/openapi-refs.test.ts`,
+  `packages/cli/test/session/checkpoint-rebuild-unify.test.ts`,
+  `packages/cli/test/session/messages-pagination.test.ts`,
+  `packages/cli/test/session/prompt-rebuild-loop.test.ts`, and
+  `packages/cli/test/lib/llm-server.ts` supporting request-boundary
   assertions.
 - 2026-09-17 test hygiene: `checkpoint-coverage.test.ts` follows the inherited
   FC-008 convention. Its fixtures are `root: "cwd"`, and it names the fixture
@@ -1668,30 +1684,30 @@ files remain byte-identical to the accepted main correction.
   Request preflight uses the inherited effective compaction window and
   distinguishes history that recovery can reduce from a system/tool/current-
   turn prefix that cannot be repaired by compaction, preventing a futile loop.
-- Source surfaces: `packages/opencode/src/actor/spawn.ts`,
-  `packages/opencode/src/session/checkpoint.ts`,
-  `packages/opencode/src/session/compaction.ts`,
-  `packages/opencode/src/session/overflow.ts`,
-  `packages/opencode/src/session/prefix-capture-ref.ts`,
-  `packages/opencode/src/session/prefix-snapshot.ts`,
-  `packages/opencode/src/session/prompt.ts`,
-  `packages/opencode/src/tool/actor.ts`,
-  `packages/opencode/src/tool/session.ts`, and
-  `packages/opencode/src/util/text-truncate.ts`.
-- Test surfaces: `packages/opencode/test/tool/actor.test.ts`,
-  `packages/opencode/test/actor/cancel-notification.test.ts`,
-  `packages/opencode/test/actor/spawn-notification.test.ts`,
-  `packages/opencode/test/actor/spawn.test.ts`,
-  `packages/opencode/test/inbox/fork-agent-compat.test.ts`,
-  `packages/opencode/test/session/auto-overflow-writer-first.test.ts`,
-  `packages/opencode/test/session/checkpoint-fork-mode.test.ts`,
-  `packages/opencode/test/session/checkpoint-main-slice.test.ts`,
-  `packages/opencode/test/session/checkpoint-prefix-capture-fixture.ts`,
-  `packages/opencode/test/session/classify-integration.test.ts`,
-  `packages/opencode/test/session/recall-reminder.test.ts`,
-  `packages/opencode/test/session/overflow.test.ts`,
-  `packages/opencode/test/session/prompt-effect.test.ts`, and actor-state cases
-  in `packages/opencode/test/util/text-truncate.test.ts`.
+- Source surfaces: `packages/cli/src/actor/spawn.ts`,
+  `packages/cli/src/session/checkpoint.ts`,
+  `packages/cli/src/session/compaction.ts`,
+  `packages/cli/src/session/overflow.ts`,
+  `packages/cli/src/session/prefix-capture-ref.ts`,
+  `packages/cli/src/session/prefix-snapshot.ts`,
+  `packages/cli/src/session/prompt.ts`,
+  `packages/cli/src/tool/actor.ts`,
+  `packages/cli/src/tool/session.ts`, and
+  `packages/cli/src/util/text-truncate.ts`.
+- Test surfaces: `packages/cli/test/tool/actor.test.ts`,
+  `packages/cli/test/actor/cancel-notification.test.ts`,
+  `packages/cli/test/actor/spawn-notification.test.ts`,
+  `packages/cli/test/actor/spawn.test.ts`,
+  `packages/cli/test/inbox/fork-agent-compat.test.ts`,
+  `packages/cli/test/session/auto-overflow-writer-first.test.ts`,
+  `packages/cli/test/session/checkpoint-fork-mode.test.ts`,
+  `packages/cli/test/session/checkpoint-main-slice.test.ts`,
+  `packages/cli/test/session/checkpoint-prefix-capture-fixture.ts`,
+  `packages/cli/test/session/classify-integration.test.ts`,
+  `packages/cli/test/session/recall-reminder.test.ts`,
+  `packages/cli/test/session/overflow.test.ts`,
+  `packages/cli/test/session/prompt-effect.test.ts`, and actor-state cases
+  in `packages/cli/test/util/text-truncate.test.ts`.
 - 2026-09-05 synchronization: Inherited the subtask running-only metadata
   guard and terminal assignments while retaining full-context
   membership/system/cwd, known-actor replacement, and static-prefix overflow
@@ -1811,14 +1827,14 @@ files remain byte-identical to the accepted main correction.
   provider context for every other caller; the actor path no longer depends on
   it, because it adopts the agent's configured variant itself after resolving
   that group provider-aware.
-- Source surfaces: `packages/opencode/src/tool/actor.ts`,
-  `packages/opencode/src/tool/actor.txt`, and
-  `packages/opencode/src/actor/spawn.ts`.
-- Test surfaces: `packages/opencode/test/tool/actor.test.ts`,
-  `packages/opencode/test/tool/actor-models.test.ts`,
-  `packages/opencode/test/tool/actor-variant-guidance.test.ts`,
-  `packages/opencode/test/actor/spawn.test.ts`, and
-  `packages/opencode/test/inbox/drain-seed-variant.test.ts`.
+- Source surfaces: `packages/cli/src/tool/actor.ts`,
+  `packages/cli/src/tool/actor.txt`, and
+  `packages/cli/src/actor/spawn.ts`.
+- Test surfaces: `packages/cli/test/tool/actor.test.ts`,
+  `packages/cli/test/tool/actor-models.test.ts`,
+  `packages/cli/test/tool/actor-variant-guidance.test.ts`,
+  `packages/cli/test/actor/spawn.test.ts`, and
+  `packages/cli/test/inbox/drain-seed-variant.test.ts`.
 - Evidence: JSON schema and runtime tests cover the remaining entry points.
   Actor tool tests prove forwarding against an overridden model, rejection of
   unknown and disabled variants and of models without variants before any
@@ -1836,6 +1852,8 @@ files remain byte-identical to the accepted main correction.
   to `main`, move its contract to the shared registry instead of duplicating it.
 
 ## DC-TUI-001 — request provider/model/variant display
+
+- 2026-10-02 full sync: upstream removes the free `mimo-auto` channel, including the Prompt footer guard that hid the provider label for it. Compat keeps `ModelMetadata` as the authoritative footer display, so the upstream-only `currentProviderLabel` row stays absent; provider/model/variant truth and `titleLocale` submission are unchanged.
 
 - 2026-09-18 model-selection correction: ordinary prompt metadata is resolved
   by `POST /experimental/model-selection`, using the same server resolver as
@@ -1873,20 +1891,20 @@ files remain byte-identical to the accepted main correction.
   submits `language.intl()` as `titleLocale`; presentation metadata does not
   guess or alter that locale.
 - Source surfaces:
-  `packages/opencode/src/cli/cmd/tui/component/model-metadata.tsx`,
-  `packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx`,
-  `packages/opencode/src/cli/cmd/tui/routes/session/subagent-footer.tsx`, and
-  `packages/opencode/src/cli/cmd/tui/util/model.ts`,
-  `packages/opencode/src/cli/cmd/tui/util/model-preview.ts`,
-  `packages/opencode/src/session/model-selection.ts`,
-  `packages/opencode/src/session/prompt.ts`,
-  `packages/opencode/src/server/routes/instance/experimental.ts`, and the
+  `packages/cli/src/cli/cmd/tui/component/model-metadata.tsx`,
+  `packages/cli/src/cli/cmd/tui/component/prompt/index.tsx`,
+  `packages/cli/src/cli/cmd/tui/routes/session/subagent-footer.tsx`, and
+  `packages/cli/src/cli/cmd/tui/util/model.ts`,
+  `packages/cli/src/cli/cmd/tui/util/model-preview.ts`,
+  `packages/cli/src/session/model-selection.ts`,
+  `packages/cli/src/session/prompt.ts`,
+  `packages/cli/src/server/routes/instance/experimental.ts`, and the
   generated SDK/OpenAPI model-selection operation.
 - Test surfaces:
-  `packages/opencode/test/cli/tui/model-metadata.test.tsx` and
-  `packages/opencode/test/cli/tui/model.test.ts`,
-  `packages/opencode/test/cli/tui/model-preview.test.tsx`, and
-  `packages/opencode/test/server/model-selection.test.ts`.
+  `packages/cli/test/cli/tui/model-metadata.test.tsx` and
+  `packages/cli/test/cli/tui/model.test.ts`,
+  `packages/cli/test/cli/tui/model-preview.test.tsx`, and
+  `packages/cli/test/server/model-selection.test.ts`.
 - 2026-09-05 synchronization: No TUI component or locale submission path
   changed. Title context now strips leading mentions while
   provider/model/variant metadata remains authoritative.
