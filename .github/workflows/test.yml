@@ -49,6 +49,9 @@ jobs:
       # HTTP recovery and subagent-resume tests also need a dedicated process: they
       # exercises the real AppRuntime prefix captor, while focused prompt
       # layers in unit tests replace and dispose that process-wide reference.
+      # Provider refresh suites check process-wide instance idleness, so each runs
+      # in its own process away from session fixtures that leave detached
+      # notification/wake work alive.
       #
       # Sharding is path-hash, NOT list position: `NR % n` on the sorted file
       # list reassigns every later file when one is added/removed, which
@@ -91,6 +94,7 @@ jobs:
           has_stdio=0
           has_actor_recovery=0
           has_mcp_mocks=0
+          has_provider_refresh=0
           files=()
           reported_files=()
 
@@ -131,6 +135,12 @@ jobs:
                 has_actor_recovery=$((has_actor_recovery + 1))
                 continue
                 ;;
+              test/provider/refresh.test.ts | \
+              test/provider/refresh-boundaries.test.ts | \
+              test/provider/refresh-harness.test.ts)
+                has_provider_refresh=$((has_provider_refresh + 1))
+                continue
+                ;;
             esac
 
             h="$(printf '%s' "$f" | cksum | awk '{print $1}')"
@@ -145,8 +155,8 @@ jobs:
             fi
           done
 
-          if (( !has_tsx || !has_runtime || !has_stdio || has_actor_recovery != 4 || has_mcp_mocks != 4 )); then
-            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio actor_recovery=$has_actor_recovery mcp_mocks=$has_mcp_mocks"
+          if (( !has_tsx || !has_runtime || !has_stdio || has_actor_recovery != 4 || has_mcp_mocks != 4 || has_provider_refresh != 3 )); then
+            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio actor_recovery=$has_actor_recovery mcp_mocks=$has_mcp_mocks provider_refresh=$has_provider_refresh"
             exit 1
           fi
 
@@ -213,6 +223,42 @@ jobs:
         with:
           name: junit-mcp-mocks
           path: packages/cli/.artifacts/mcp-mocks/*.xml
+          if-no-files-found: error
+
+  provider-refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Run provider refresh suites in independent processes
+        shell: bash
+        working-directory: packages/cli
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/provider-refresh
+          for file in \
+            test/provider/refresh.test.ts \
+            test/provider/refresh-boundaries.test.ts \
+            test/provider/refresh-harness.test.ts; do
+            report=".artifacts/provider-refresh/$(basename "$file").xml"
+            rm -f -- "$report"
+            bun test "$file" --timeout 120000 \
+              --reporter=junit --reporter-outfile="$report"
+            test -s "$report"
+            python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" "$report" "$file"
+          done
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-provider-refresh
+          path: packages/cli/.artifacts/provider-refresh/*.xml
           if-no-files-found: error
 
   stdio-exit-observe:

@@ -65,6 +65,7 @@ import type {
   GlobalImportRunErrors,
   GlobalImportRunResponses,
   GlobalImportScanResponses,
+  GlobalRefreshProvidersResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeResponses,
@@ -415,6 +416,16 @@ export class Global extends HeyApiClient {
   public event<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).sse.get<GlobalEventResponses, unknown, ThrowOnError>({
       url: "/global/event",
+      ...options,
+    })
+  }
+
+  /**
+   * Refresh model configuration and provider caches without rebuilding instances
+   */
+  public refreshProviders<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<GlobalRefreshProvidersResponses, unknown, ThrowOnError>({
+      url: "/global/provider/refresh",
       ...options,
     })
   }
