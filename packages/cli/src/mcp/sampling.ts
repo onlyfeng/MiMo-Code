@@ -1,3 +1,5 @@
+import { Instance } from "@/project/instance"
+import { InstanceState } from "@/effect"
 import { Effect, Cause, Exit, Fiber } from "effect"
 import { streamText, type ModelMessage } from "ai"
 import { CreateMessageRequestSchema, ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js"
@@ -1007,15 +1009,26 @@ export function serve(
       progressToken !== undefined && typeof send === "function"
         ? { progressToken, send: send as Liveness["send"], intervalMs: livenessIntervalMs }
         : undefined
-    const effect = handle({
-      server,
-      params,
-      sessionID: activeSessions.get(client),
-      signal: extra?.signal,
-      chunkTimeoutMs,
-      liveness,
-      samplingPolicy,
-    }).pipe(
+    const effect = Effect.acquireUseRelease(
+      Effect.gen(function* () {
+        const owner = yield* InstanceState.context
+        return yield* Effect.promise(() => Instance.provide({
+          directory: owner.directory,
+          expected: owner,
+          fn: () => Instance.claim(owner.directory),
+        }))
+      }),
+      () => handle({
+        server,
+        params,
+        sessionID: activeSessions.get(client),
+        signal: extra?.signal,
+        chunkTimeoutMs,
+        liveness,
+        samplingPolicy,
+      }),
+      (release) => Effect.sync(release),
+    ).pipe(
       // The connection bridge can outlive the CLI run that created it.
       // A last-seen session is not proof that this server-initiated request
       // belongs to that run; retain sampling's own approval and abort signal.
