@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-10-04, full upstream synchronization through `6babeb0b98f9b4818bddf04a4331edfee04dbf85`.
+- Prior upstream: `698f0f29058848b154eabd73d3a7955d4f18eb00`.
+- Starting compat: `9ab1ab6cc38b525d46f8f26e98614b25a1ddd9c1`.
+- Integrated main: `f15b68709eab8dedfbdd936c62e595e463a5ea81`; compat runtime merge: `ab5e60e69d01c95e0153c0227164d47a865c45c5` (of main runtime merge `fcd946d60fe89105d899ce5f41eac7a7c02e3a18`).
+- Review: [seven-capability synchronization](upstream-sync-2026-10-04.md), C01–C07.
+- Resolution: inherit upstream's instance-preserving provider refresh with main's FD-005 harness-trust, FD-001 sampling-approval and FC-008 isolated-job adaptations. The merge is conflict-free: compat's overlay touches none of the changed runtime files, and its difference from main is byte-identical before and after the merge apart from hunk offsets in the generated SDK, which keeps compat's model-selection and checkpoint-coverage operations beside the new `global.refreshProviders()`. DC-MODEL-001, DC-ACTOR-002 and DC-TUI-001 read models through the Provider service, so after an applied refresh their next read sees the new view; per-agent `maxMode` and agent `model` are not refreshed model keys. The compat-different set stays at 115 paths with the same 38 production overlay paths; no DC owner retires or moves.
+- Validation: package and root `bun run typecheck` exit 0 at `ab5e60e6`; root lint reports 3532 warnings and zero errors. A focused matrix of 92 affected and compat Provider-consumer files, grouped by CI hash shard, passes 1562 with 7 existing skips; provider refresh suites pass 6+7+2 in separate processes and actor recovery passes 24. Two `prompt-effect` shell cases timed out on their own 5 s/10 s budgets under unrelated host load and time out identically with the changed runtime files restored to `9ab1ab6c`; their bodies are identical on main, where they passed. SDK regeneration from compat sources leaves `packages/sdk/src` unchanged. `bun.lock` and every package manifest match main. Exact-tip CI remains the publication gate.
+- Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
+
+## Previous review record — 2026-10-02
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-10-02, full upstream synchronization through `698f0f29058848b154eabd73d3a7955d4f18eb00`.
 - Prior upstream: `336aee0eb1a5a88efe637f60142303cc8e7555bf`.
 - Starting compat: `cde67e5a3ed539296589752e92ed73d735a21c99`.
