@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-02
-- Upstream: `698f0f29058848b154eabd73d3a7955d4f18eb00`
-- Prior reviewed upstream: `336aee0eb1a5a88efe637f60142303cc8e7555bf`
-- Main behavior (runtime/tests): `c1935943d080ea5ab4234135d95243717da52c01` (runtime merge `b71b019834750382837b1035d31133170660b820`)
+- Last reviewed: 2026-10-04
+- Upstream: `6babeb0b98f9b4818bddf04a4331edfee04dbf85`
+- Prior reviewed upstream: `698f0f29058848b154eabd73d3a7955d4f18eb00`
+- Main behavior (runtime/tests): `fcd946d60fe89105d899ce5f41eac7a7c02e3a18` (runtime merge)
 - Bundled guidance content: `b71b019834750382837b1035d31133170660b820`
-- Prior fork `main` tip: `907a0bd8a4050bd4db8f45c30514d4497b72984d`
+- Prior fork `main` tip: `fb89f49417f9486d0a543971df01c887b696394d`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,9 +30,11 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-02 full sync](upstream-sync-2026-10-02.md), ten capabilities through `698f0f29`. Adopt upstream's `packages/cli` and flattened `packages/sdk` layout, the removal of the private overlay, free channel, committed OpenAPI snapshot, husky and non-spec docs, the first-launch agreement and the leftover `MIMOCODE_*` renames. Keep the root test guard (FC-008), the `CLAUDE.md` link and a required release `GH_REPO` (FC-012), and FC-013's retry reference document.
+Latest reviewed synchronization: [2026-10-04 full sync](upstream-sync-2026-10-04.md), seven capabilities through `6babeb0b`. Adopt upstream's instance-preserving provider refresh: the `POST /global/provider/refresh` endpoint and v2 SDK method, the `Instance.updateIdle` admission barrier, models-only Config reload, execution claims for HTTP API operations and MCP sampling, and stale sampling-owner rejection. Adapt the refresh to keep FD-005 harness alias trust, keep FD-001's sampling approval isolation, and run the refresh suites in an FC-008 isolated job.
 
-Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from this synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+
+Previous synchronization: [2026-10-02 full sync](upstream-sync-2026-10-02.md), ten capabilities through `698f0f29`. Adopt upstream's `packages/cli` and flattened `packages/sdk` layout, the removal of the private overlay, free channel, committed OpenAPI snapshot, husky and non-spec docs, the first-launch agreement and the leftover `MIMOCODE_*` renames. Keep the root test guard (FC-008), the `CLAUDE.md` link and a required release `GH_REPO` (FC-012), and FC-013's retry reference document.
 
 Previous synchronization: [2026-09-30 full sync](upstream-sync-2026-09-30.md), one capability through `336aee0e`. Adapt upstream's preparation-phase cancellation: an interrupt before stream cleanup owns the assistant persists `MessageAbortedError` and publishes the error before idle, with the fork's transactional assistant creation as the acquire step; FC-001 recovery candidacy is unchanged.
 
@@ -95,6 +97,8 @@ not change their implementation. The preceding review is retained in the
 | FC-017 | History SQLite projection and attachment preview formatting                                               | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds and original attachment locators                  |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-10-04 synchronization: upstream `6babeb0b` adds an `Instance.updateIdle` barrier for explicit provider refreshes. A refresh returns `pending` while any request, execution claim, disposal or failed cleanup exists, so live Actor and session executions defer it. While a refresh is applying, new requests wait and `Instance.claim` throws `InstanceBusyError` exactly as upstream; only the explicit refresh endpoint opens that window and no TUI path calls it. Actor generation ownership and terminal claims are unchanged.
 
 - 2026-10-02 synchronization: upstream `698f0f29` deletes the committed `packages/sdk/openapi.json`; the SDK build now writes a scratch copy at that path and removes it. The published actor-recovery contract is asserted on the runtime OpenAPI document and carried by the generated v2 SDK, so the snapshot leaves this entry's surfaces.
 
@@ -499,6 +503,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-004 — MCP configuration and connection lifecycle
 
+- 2026-10-04 synchronization: the models-only Config reload behind upstream's provider refresh skips Claude MCP import, plugin origins, command/agent scans and dependency installation, and publishes only the model keys. The ordinary path keeps the fork's native-override argument to `mergeClaudeMcp`, so pending imports and explicit `auto_connect` are unchanged; MCP configuration changes still require a restart.
+
 - Status: active
 - Canonical owner: fork `main` MCP runtime
 - Observable contract: remote MCP URLs must parse as HTTP(S); malformed or
@@ -627,6 +633,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-006 — instance-local plugin memory-write decision
 
+- 2026-10-04 synchronization: `Plugin.list({ initialize: false })` lets provider refresh reuse initialized hooks without loading plugins. The `actor.postStop` `memoryWriteEnabled` injection reads the live configuration; memory keys are not refreshed, so the decision is unchanged.
+
 - 2026-10-02 synchronization: upstream `50b505a3` removes the private `src/ext` overlay loader from `plugin/index.ts` and its `url` import. The fork's 2026-09-26 file-plugin dependency-wait check still calls `pathToFileURL`, so the merge restores that import. The `actor.postStop` `memoryWriteEnabled` injection is unchanged.
 
 - Status: active
@@ -668,6 +676,8 @@ not change their implementation. The preceding review is retained in the
   coupling.
 
 ## FC-007 — protected roots, fixed instance cwd, inert SDK event, deletion boundaries, and optional context
+
+- 2026-10-04 synchronization: upstream `6babeb0b` adds `Instance.updateIdle`, the `updating` admission barrier and an `expected` owner for `Instance.provide`. Protected-root and filesystem-root rejection, instance generations, `peek` and the stale-context `dispose()` path are unchanged; an `expected` owner that is closing, absent or not the cached context is rejected by identity.
 
 - 2026-09-17 synchronization: Upstream removed automatic isolation and its notice. Retain this owner's explicit opt-in post-success notice, config and mutation metadata; reject the intermediate hard write gate. Adopt removal of the unused conflict-detection auto-create route and regenerate its SDK/OpenAPI removal. Ordinary explicit worktree operations remain. The notice is independent of auto-creation.
 
@@ -774,6 +784,8 @@ not change their implementation. The preceding review is retained in the
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
+
+- 2026-10-04 synchronization: upstream `6babeb0b` runs its two provider refresh suites in separate processes on shard 4/4, because the refresh needs process-wide instance idleness that other session fixtures' detached work can hold. The fork's discovery-checked layout instead adds a `provider-refresh` job that runs `refresh`, `refresh-boundaries` and the fork's `refresh-harness` suite each in its own process with JUnit verification; discovery requires all three, and every other file keeps its hash shard.
 
 - 2026-10-02 synchronization: upstream `f40c76ac` deletes the root `bunfig.toml` with its `[test] root` guard and makes root `bun run test` delegate to `packages/cli`. The fork adopts the delegation but keeps a root `bunfig.toml` with only the guard: Bun reads `bunfig.toml` from the working directory, so a bare root `bun test` would otherwise discover every package test without `packages/cli/bunfig.toml`'s preload and lose the isolated HOME/XDG and fixture roots. Husky and its pre-push typecheck are removed with upstream; CI remains the gate. The isolation `test.yml` keeps its jobs on `packages/cli`. With the committed OpenAPI snapshot deleted by upstream `698f0f29`, root `script/generate.ts` only rebuilds the SDK, and the OpenAPI tests check the runtime and generated documents.
 

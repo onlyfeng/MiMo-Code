@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-02
-- Upstream: `698f0f29058848b154eabd73d3a7955d4f18eb00`
-- Prior reviewed upstream: `336aee0eb1a5a88efe637f60142303cc8e7555bf`
-- Main behavior (runtime/tests): `c1935943d080ea5ab4234135d95243717da52c01` (runtime merge `b71b019834750382837b1035d31133170660b820`)
+- Last reviewed: 2026-10-04
+- Upstream: `6babeb0b98f9b4818bddf04a4331edfee04dbf85`
+- Prior reviewed upstream: `698f0f29058848b154eabd73d3a7955d4f18eb00`
+- Main behavior (runtime/tests): `fcd946d60fe89105d899ce5f41eac7a7c02e3a18` (runtime merge)
 - Bundled guidance content: `b71b019834750382837b1035d31133170660b820`
-- Prior fork `main` tip: `907a0bd8a4050bd4db8f45c30514d4497b72984d`
+- Prior fork `main` tip: `fb89f49417f9486d0a543971df01c887b696394d`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,9 +29,11 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-02 full sync](upstream-sync-2026-10-02.md), ten capabilities through `698f0f29`. Adopt upstream's `packages/cli` and flattened `packages/sdk` layout, the removal of the private overlay, free channel, committed OpenAPI snapshot, husky and non-spec docs, the first-launch agreement and the leftover `MIMOCODE_*` renames. Keep the root test guard (FC-008), the `CLAUDE.md` link and a required release `GH_REPO` (FC-012), and FC-013's retry reference document.
+Latest reviewed synchronization: [2026-10-04 full sync](upstream-sync-2026-10-04.md), seven capabilities through `6babeb0b`. Adopt upstream's instance-preserving provider refresh: the `POST /global/provider/refresh` endpoint and v2 SDK method, the `Instance.updateIdle` admission barrier, models-only Config reload, execution claims for HTTP API operations and MCP sampling, and stale sampling-owner rejection. Adapt the refresh to keep FD-005 harness alias trust, keep FD-001's sampling approval isolation, and run the refresh suites in an FC-008 isolated job.
 
-Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from this synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+
+Previous synchronization: [2026-10-02 full sync](upstream-sync-2026-10-02.md), ten capabilities through `698f0f29`. Adopt upstream's `packages/cli` and flattened `packages/sdk` layout, the removal of the private overlay, free channel, committed OpenAPI snapshot, husky and non-spec docs, the first-launch agreement and the leftover `MIMOCODE_*` renames. Keep the root test guard (FC-008), the `CLAUDE.md` link and a required release `GH_REPO` (FC-012), and FC-013's retry reference document.
 
 Previous synchronization: [2026-09-30 full sync](upstream-sync-2026-09-30.md), one capability through `336aee0e`. Adapt upstream's preparation-phase cancellation: an interrupt before stream cleanup owns the assistant persists `MessageAbortedError` and publishes the error before idle, with the fork's transactional assistant creation as the acquire step; FC-001 recovery candidacy is unchanged.
 
@@ -87,6 +89,8 @@ not change their implementation. The preceding review is retained in the
 | FD-012 | compaction retry on an empty step                                                     | Extends upstream: retries a genuinely empty step, once by default                                                                               | Preserve the configurable non-negative limit (default 1, 0 disables) and empty-step scope                                                                                 |
 
 ## FD-001 — run approval must not toggle shared delete state
+
+- 2026-10-04 synchronization: upstream `6babeb0b` makes server-initiated MCP sampling hold an execution claim on its owning instance and rejects a callback whose owner is closing, absent or replaced. The fork keeps `RunApproval.provide(undefined)` around the whole claimed request, so a long-lived connection bridge still cannot lend a CLI run's approval scope to sampling. `test/mcp/sampling.test.ts`, `test/mcp/sampling-e2e.test.ts` and upstream's `test/provider/refresh-boundaries.test.ts` pass.
 
 - Status: active
 - Canonical owner: fork `main` permission and Bash authorization boundary
@@ -214,6 +218,8 @@ not change their implementation. The preceding review is retained in the
 <a id="fd-004--ordinary-instances-expose-no-implicit-openai-compatible-listener"></a>
 
 ## FD-004 — upstream's capability route, adopted whole
+
+- 2026-10-04 synchronization: upstream `6babeb0b` keeps each Effect HTTP API operation inside an instance execution claim until it completes, fails or is interrupted. `routes/instance/httpapi/server.ts` stays byte-for-byte upstream; that router is mounted only under the opt-in `MIMOCODE_EXPERIMENTAL_HTTPAPI`, so the default Hono instance routes are unaffected.
 
 - Status: active (reduced to near-nothing 2026-09-14)
 - Canonical owner: fork `main` instance-server boundary
@@ -415,6 +421,8 @@ not change their implementation. The preceding review is retained in the
 - Upstream relationship: the fork tracks upstream on this surface.
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
+
+- 2026-10-04 synchronization: upstream `6babeb0b` adds an instance-preserving model refresh (`POST /global/provider/refresh`). Its Config candidate and committed configuration are new objects, while harness alias trust is keyed by the parsed configuration object, so the unadapted merge deleted every declared `harness_model` on the first refresh, and also on a Provider's first read after a refresh that found it cold. `Config.prepareModelRefresh` now attaches the fresh models-only parse's declarations to both objects: a refresh keeps a still-declared alias and drops a removed one, and plugin `config` hooks, which still run on the candidate, cannot grant trust. Evidence: `test/provider/refresh-harness.test.ts` fails both cases on the unadapted merge and passes both with the adaptation.
 
 - 2026-10-02 synchronization: upstream `50b505a3` drops the free `mimo-auto` alias from the MiMo npm pin and its image capability override, and the TUI's no-match default now prefers `xiaomi/mimo-v2.6-pro`. No fork classifier names `mimo-auto`, so harness, prompt, discovery, toolset and retry identity resolution is unchanged; like the 2026-09-02 default-model review, the starting-model choice precedes this boundary.
 
