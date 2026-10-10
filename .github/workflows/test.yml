@@ -1,10 +1,15 @@
 name: test
 
+# GitHub disabled this fork's workflows for Actions usage, most of it from
+# pull_request test runs on every PR push. Tests run on pushes to the
+# integration branches and on manual dispatch; dispatch on a PR branch
+# (`gh workflow run test.yml --ref <branch>`) when pre-merge evidence is needed.
+# Docs-only pushes start no run: no test, lint or typecheck input lives in docs/.
 on:
   push:
     branches: [main, dev, dev/compat]
-  pull_request:
-    branches: [main, dev, dev/compat]
+    paths-ignore:
+      - "docs/**"
   workflow_dispatch:
     inputs:
       windows_runtime:
@@ -14,7 +19,7 @@ on:
         default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -334,7 +339,6 @@ jobs:
   windows-runtime:
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/dev/compat') ||
-      (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev/compat') ||
       (github.event_name == 'workflow_dispatch' && inputs.windows_runtime)
     runs-on: windows-latest
     timeout-minutes: 15
@@ -351,8 +355,6 @@ jobs:
           bun-version-file: package.json
 
       - name: Record and validate Windows runtime
-        env:
-          PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           $ErrorActionPreference = "Stop"
           $artifacts = Join-Path $env:GITHUB_WORKSPACE "packages/cli/.artifacts/windows-runtime"
@@ -370,7 +372,6 @@ jobs:
             powershell = $PSVersionTable.PSVersion.ToString()
             github_sha = $env:GITHUB_SHA
             checkout_sha = $checkoutSha.Trim()
-            pull_request_head_sha = $env:PULL_REQUEST_HEAD_SHA
           }
           $environment | ConvertTo-Json | Tee-Object -FilePath (Join-Path $artifacts "workflow-environment.json")
           if (-not $IsWindows) { throw "Windows runtime acceptance requires Windows" }
