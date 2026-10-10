@@ -6,7 +6,7 @@
 
 - GitHub 操作显式指向 `onlyfeng/MiMo-Code`。创建 PR 后核对 base repository；禁止向 upstream 推送或提 PR。
 - 普通功能/修复从目标分支建分支并向目标分支提 PR；compat 自有工作走 feature → `dev/compat`。已授权同步的直接 main → compat 继承合并是例外。完整同步的 fork 推送属于同步请求；只请求输出技能或审计，不自动包含发布。
-- 合并前读取实时 PR head/base、mergeability、所需 CI、reviewThreads、评论和后续提交。历史 `reviewDecision` 或“已解决”标签不是技术验证。
+- 合并前读取实时 PR head/base、mergeability、所需 CI、reviewThreads、评论和后续提交。历史 `reviewDecision` 或“已解决”标签不是技术验证。PR 自动运行 lint 和 typecheck；`test` 只对来自其他仓库的 PR 自动运行。本仓库分支的 PR 需要合并前测试证据时，对该分支 dispatch `test.yml`，并核对该运行的 headSha 等于所审查的 head。
 - 每条仍有关联的讨论核对当前代码：问题是否仍成立、由哪个提交修复、证据是否覆盖该路径。过时评论不自动失效；技术上已修但 UI 未解决，分别报告技术结论和流程状态。没有回复/解决讨论的授权时，不代发评论或更改讨论状态；满足已授权合并和仓库规则即可继续。
 - 合并时使用刚审查的完整 head 作为并发保护。例如，仓库采用 merge 方式且已授权合并时：
 
@@ -15,7 +15,7 @@ gh pr merge "$pr_number" -R onlyfeng/MiMo-Code --merge --match-head-commit "$rev
 ```
 
 - head 从 H 变为 H2 时重读增量、讨论和 H2 的 CI，再作决定；不要仅重试合并命令。合并方式遵循仓库及用户约定，不强制套用示例的 `--merge`。
-- 合并后记录实际 merge SHA，并验证落地分支该 SHA 的 CI；按授权范围传播 compat。刷新允许刷新的 refs，检查远端 tip 和祖先/排除关系。文档/注册表更改同样使最终 SHA 改变，必须放在最终 CI 证明之前。
+- 合并后记录实际 merge SHA，并验证落地分支该 SHA 的 CI；按授权范围传播 compat。刷新允许刷新的 refs，检查远端 tip 和祖先/排除关系。文档/注册表更改同样使最终 SHA 改变，必须放在最终 CI 证明之前；推送只改 `docs/` 时不会启动 workflow，按 [验证与 CI](validation-and-ci.md) 的 docs-only 例外取证。
 - 共享 FD/FC 记录由 main 维护，compat 继承相同内容；compat 专属登记保留在自己的注册表。源码/测试、共享指导内容、纯记录提交分别指向其真实快照。
 
 ## 两种清理入口

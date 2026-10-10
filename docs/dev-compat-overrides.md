@@ -1138,6 +1138,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-PLATFORM-001 — restricted-network and Windows ripgrep/archive fallback
 
+- 2026-10-10 FC-008 Actions usage reduction (main PR #153): the shared `windows-runtime` job no longer runs for any pull request, including one into `dev/compat`. It runs on each push to `dev/compat` that changes more than `docs/`, and on dispatch with `windows_runtime: true`; a compat branch that changes `ripgrep.ts`, `archive.ts` or the Windows entry dispatches `test.yml` on that branch with the input when it needs pre-merge platform evidence. The environment record no longer carries a pull-request head SHA. The platform entry and both fallbacks are unchanged.
+
 - 2026-10-02 full sync: the Windows runtime entry is now `packages/cli/script/verify-windows-runtime.ts`; the shared `test.yml` `windows-runtime` job and the `tsconfig.scripts.json` exclusion follow the rename. The ripgrep/archive overlay is unchanged.
 
 - 2026-09-29 full sync: upstream's root typecheck now also checks `tsconfig.scripts.json`, which includes `packages/cli/script/**` without the package's `@/` path mapping. `script/verify-windows-runtime.ts` reaches `src/util/process.ts` through `test/fixture/windows-archive-runtime.ts`, so compat adds it to that project's `exclude` list; `packages/cli/tsconfig.json` still checks it. The production overlay and the Windows job are unchanged.
