@@ -787,7 +787,7 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
-- 2026-10-10 Actions usage reduction: GitHub disabled this fork's workflows for Actions usage. Between 2026-06-22 and 2026-10-04 the fork ran 758 `test` workflows; recent ones averaged about 27 runner-minutes (four shards, four isolated jobs, and a Windows job for `dev/compat`). In September 233 of 415 were `pull_request` runs, repeated on every PR push. `test.yml` drops its `pull_request` trigger, so pre-merge test evidence comes from an explicit dispatch on the PR branch, and its concurrency group keys on the ref alone. All three workflows ignore pushes and pull requests confined to `docs/`; no test, lint or typecheck input lives there. The Windows job runs on pushes to `dev/compat` and on dispatch with `windows_runtime`, and its environment record drops the pull-request head SHA that no remaining trigger supplies. `AGENTS.md` and the upstream-sync skill let a tip without runs because its push changed only `docs/` cite an ancestor's exact-SHA runs after proving the tree outside `docs/` identical. Shard layout, isolation jobs, JUnit verification and step budgets are unchanged.
+- 2026-10-10 Actions usage reduction: GitHub disabled this fork's workflows for Actions usage. Between 2026-06-22 and 2026-10-04 the fork ran 758 `test` workflows; recent ones averaged about 27 runner-minutes (four shards, four isolated jobs, and a Windows job for `dev/compat`). In September 233 of 415 were `pull_request` runs, repeated on every PR push. `test.yml` skips every job of a pull request whose head is a branch of this repository; such a branch dispatches `test` when it needs pre-merge evidence. A pull request from another repository cannot be dispatched by ref, so its Linux jobs still run, under GitHub's read-only fork-PR token; dispatching an untrusted head from a base-repository ref would instead run its workflow with this repository's permissions. All three workflows ignore pushes and pull requests confined to `docs/`; no test, lint or typecheck input lives there. The Windows job runs only on pushes to `dev/compat` and on dispatch with `windows_runtime`, never for a pull request, so its environment record drops the pull-request head SHA. `AGENTS.md` and the upstream-sync skill let a tip without runs because its push changed only `docs/` cite an ancestor's exact-SHA runs after proving the tree outside `docs/` identical. Shard layout, isolation jobs, JUnit verification and step budgets are unchanged.
 
 - 2026-10-04 synchronization: upstream `6babeb0b` runs its two provider refresh suites in separate processes on shard 4/4, because the refresh needs process-wide instance idleness that other session fixtures' detached work can hold. The fork's discovery-checked layout instead adds a `provider-refresh` job that runs `refresh`, `refresh-boundaries` and the fork's `refresh-harness` suite each in its own process with JUnit verification; discovery requires all three, and every other file keeps its hash shard.
 
@@ -984,7 +984,9 @@ not change their implementation. The preceding review is retained in the
   on 2026-09-29.
   CI triggers on pushes to `main`, `dev`, and `dev/compat` and on manual
   dispatch; `lint` and `typecheck` also run on pull requests to those
-  branches, while `test` runs for a pull request branch only when dispatched.
+  branches. `test` runs its Linux jobs for a pull request only when the head
+  comes from another repository, which cannot be dispatched by ref; a branch of
+  this repository dispatches `test` when it needs pre-merge evidence.
   A push or pull request that changes only `docs/` starts no workflow, since no
   test, lint or typecheck input lives there; a tip without runs for that reason
   cites the successful exact-SHA runs of an ancestor whose tree outside `docs/`

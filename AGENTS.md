@@ -6,7 +6,7 @@
 - To regenerate the JavaScript SDK, run `./packages/sdk/script/build.ts`.
 - ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE.
 - The default branch in this repo is `main`.
-- CI triggers on `main`, `dev`, and `dev/compat` branches. `lint` and `typecheck` also run on pull requests; `test` runs on pull requests only when dispatched (`gh workflow run test.yml -R onlyfeng/MiMo-Code --ref <branch>`). Changes confined to `docs/` start no workflow.
+- CI triggers on `main`, `dev`, and `dev/compat` branches. `lint` and `typecheck` also run on pull requests. `test` runs its jobs automatically only for pull requests from another repository; for a branch of this repository, dispatch it (`gh workflow run test.yml -R onlyfeng/MiMo-Code --ref <branch>`). Changes confined to `docs/` start no workflow.
 - Before every upstream sync, review active entries in [docs/upstream-deviations.md](docs/upstream-deviations.md) and [docs/fork-capabilities.md](docs/fork-capabilities.md) for incoming changes to their listed surfaces, including changes that merge cleanly.
 - When work targets or propagates into `dev/compat`, additionally review active entries in [docs/dev-compat-overrides.md](docs/dev-compat-overrides.md) against the inherited `main` behavior.
 - Treat `upstream` as read-only. Push and open PRs only against `onlyfeng/MiMo-Code`, and propagate accepted upstream changes through `upstream/main` → fork `main` → fork `dev/compat`.

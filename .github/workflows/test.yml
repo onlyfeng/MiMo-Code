@@ -2,11 +2,18 @@ name: test
 
 # GitHub disabled this fork's workflows for Actions usage, most of it from
 # pull_request test runs on every PR push. Tests run on pushes to the
-# integration branches and on manual dispatch; dispatch on a PR branch
+# integration branches and on manual dispatch. A pull request from a branch of
+# this repository runs no job; dispatch on its branch
 # (`gh workflow run test.yml --ref <branch>`) when pre-merge evidence is needed.
-# Docs-only pushes start no run: no test, lint or typecheck input lives in docs/.
+# A pull request from another repository cannot be dispatched by ref, so its
+# jobs still run (`if: ...head.repo.full_name != github.repository`).
+# Docs-only changes start no run: no test, lint or typecheck input lives in docs/.
 on:
   push:
+    branches: [main, dev, dev/compat]
+    paths-ignore:
+      - "docs/**"
+  pull_request:
     branches: [main, dev, dev/compat]
     paths-ignore:
       - "docs/**"
@@ -19,7 +26,7 @@ on:
         default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -27,6 +34,7 @@ permissions:
 
 jobs:
   unit:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -194,6 +202,7 @@ jobs:
           if-no-files-found: error
 
   mcp-mock-suites:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -231,6 +240,7 @@ jobs:
           if-no-files-found: error
 
   provider-refresh:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -267,6 +277,7 @@ jobs:
           if-no-files-found: error
 
   stdio-exit-observe:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -299,6 +310,7 @@ jobs:
           if-no-files-found: error
 
   session-actor-recovery:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
