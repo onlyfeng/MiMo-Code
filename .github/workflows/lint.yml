@@ -1,10 +1,15 @@
 name: lint
 
+# Docs-only changes start no run: no lint or typecheck input lives in docs/.
 on:
   push:
     branches: [main, dev, dev/compat]
+    paths-ignore:
+      - "docs/**"
   pull_request:
     branches: [main, dev, dev/compat]
+    paths-ignore:
+      - "docs/**"
   workflow_dispatch:
 
 jobs:
