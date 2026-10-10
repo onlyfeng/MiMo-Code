@@ -244,6 +244,8 @@ export const Flag = {
   // {project}/.claude/commands load as slash commands. Independent of the
   // mimo-only master switch. Set MIMOCODE_DISABLE_CLAUDE_CODE_COMMANDS=true to disable.
   MIMOCODE_DISABLE_CLAUDE_CODE_COMMANDS: truthy("MIMOCODE_DISABLE_CLAUDE_CODE_COMMANDS"),
+  // Defaults to false. Set to true or 1 to import Claude Code sessions on startup.
+  MIMOCODE_ENABLE_CLAUDE_IMPORT: truthy("MIMOCODE_ENABLE_CLAUDE_IMPORT"),
   // External skill-root switches. Read lazily so tests can flip env.
   get MIMOCODE_DISABLE_AGENTS_SKILLS() {
     return truthy("MIMOCODE_DISABLE_AGENTS_SKILLS")
