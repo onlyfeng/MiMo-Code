@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-10-10, full upstream synchronization through `f98dcd1cf7e70e7eb42f721fdf72bc4a6b87914f`.
+- Prior upstream: `6babeb0b98f9b4818bddf04a4331edfee04dbf85`.
+- Starting compat: `ced528534fe5af2e994b888493a5099e7ded2dde`.
+- Integrated main: `f04cfaf9622a3c8923908e1c780c4fc1567de81b`; compat runtime merge: `ae9c919b3d3f915aa326e27f96a7dc2e8ba0fab2` (of main runtime merge `2f13453afab188f9ae4bc21ed7daecf099b653de`).
+- Review: [two-capability synchronization](upstream-sync-2026-10-10.md), C01–C02.
+- Resolution: inherit upstream's opt-in startup import of Claude Code sessions (`MIMOCODE_ENABLE_CLAUDE_IMPORT`) and the bundled `mimocode-docs` and `xlsx-official` guidance unchanged. The merge is conflict-free: the four changed files are identical to main and compat's overlay touches none of them. No DC owner watches the CLI middleware, the flag module or bundled skill content, and compat's difference from main is byte-identical before and after the merge apart from hunk offsets. The compat-different set stays at 115 paths with the same 38 production overlay paths; no DC owner retires or moves.
+- Validation: package and root `bun run typecheck` exit 0 at `ae9c919b`; root lint reports 3532 warnings and zero errors. Isolated non-test CLI probes import no Claude Code session at startup by default and import it with `MIMOCODE_ENABLE_CLAUDE_IMPORT=1`. The focused matrix of 18 files (bundled-skill, flag, history import, CLI child-process, agent, glob, Actor spawn preference, memory path guard and `prompt-effect` suites), each in its own process, passes with no failure; `prompt-effect` passes 212 with 2 existing skips. `bun.lock` and every package manifest match main. Exact-tip CI remains the publication gate.
+- Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
+
+## Previous review record — 2026-10-04
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-10-04, full upstream synchronization through `6babeb0b98f9b4818bddf04a4331edfee04dbf85`.
 - Prior upstream: `698f0f29058848b154eabd73d3a7955d4f18eb00`.
 - Starting compat: `9ab1ab6cc38b525d46f8f26e98614b25a1ddd9c1`.
