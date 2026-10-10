@@ -37,7 +37,8 @@ Memory files live under `~/.local/share/mimocode/memory/`:
 - `MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY_HEURISTIC` — shape-based compaction of bash output to save tokens; off by default.
 - `MIMOCODE_MIMO_ONLY` — pure-MiMo mode: don't inherit Claude Code settings (CLAUDE.md, `~/.claude/CLAUDE.md`), don't read provider API keys from env, fall back to the mimo-auto model.
 - **External skill roots** — default load surface is `.mimocode` + open-standard `.agents`. Brand roots are opt-in: `MIMOCODE_ENABLE_CLAUDE_CODE_SKILLS`, `MIMOCODE_ENABLE_CODEX_SKILLS`, `MIMOCODE_ENABLE_OPENCODE_SKILLS`. Turn agents off with `MIMOCODE_DISABLE_AGENTS_SKILLS`. External scans skip dotted path segments under `skills/`.
-- `MIMOCODE_DISABLE_BUILTIN_SKILLS`, `_COMPOSE_SKILLS`, `_PROJECT_CONFIG`, `_CLAUDE_IMPORT` — feature toggles.
+- `MIMOCODE_ENABLE_CLAUDE_IMPORT` — automatically import Claude Code sessions on startup; off by default. Set to `true` or `1` to enable. Manual session imports remain available; Codex sessions are imported only on explicit request.
+- `MIMOCODE_DISABLE_BUILTIN_SKILLS`, `_COMPOSE_SKILLS`, `_PROJECT_CONFIG` — feature toggles.
 
 ## Top-level config keys
 
