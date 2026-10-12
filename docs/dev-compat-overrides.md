@@ -989,6 +989,7 @@ files remain byte-identical to the accepted main correction.
 | DC-ACTOR-001    | Actor context, default-fork checkpoint, replace-agent, static-prefix overflow                                                              | Full-context extension beyond shared capture and actor identity scope        | Preserve frozen membership/system/cwd and fail unrecoverable prefixes                                                     |
 | DC-ACTOR-002    | Actor run/spawn JSON `variant`, `actor models` listing, spawn-to-prompt propagation                       | Model-facing extension over inherited actor model selection                  | Preserve pre-admission validation, explicit precedence, non-inheritance, and actor-lifetime persistence                   |
 | DC-TUI-001      | Prompt/footer model metadata and title locale                                                                                              | Request-metadata display override alongside shared locale propagation        | Preserve provider/model/variant truth, locale submission, and known-limit disclosure                                      |
+| DC-PROVIDER-001 | `Provider.getLanguage` loader fallback and `ProviderTransform` SDK-key mapping                                                             | Config-provider routing extension; built-in `xai` behavior unchanged         | Keep config providers on `@ai-sdk/xai` on Responses with options under the `xai` key                                     |
 
 ## DC-NET-001 — approved private-network WebFetch
 
@@ -1994,3 +1995,54 @@ files remain byte-identical to the accepted main correction.
 - Exit condition: the client inference portion is removed by the server
   resolver correction. Retire the remaining compat presentation/API overlay
   when shared `main` exposes the equivalent preview and metadata display.
+
+## DC-PROVIDER-001 — config providers on `@ai-sdk/xai` use Responses
+
+- Status: active
+- Canonical owner: `dev/compat` provider model loading
+- Added: 2026-10-12. Adds a ninth DC owner after the 2026-10-10 review record,
+  which counts eight.
+- Base: inherited main behavior
+  `c2ca53fdcb5a96032ac2a40148712574fc7c7b43` keys custom model loaders by
+  provider ID. Only the built-in `xai` provider calls `sdk.responses()`. A
+  provider defined in config with `npm: "@ai-sdk/xai"` has no loader, so
+  `getLanguage` falls back to `sdk.languageModel()`, which `@ai-sdk/xai` maps to
+  Chat. `sdkKey()` has no `@ai-sdk/xai` entry either, so `providerOptions()`
+  files that provider's options (`reasoningEffort`, `store: false`,
+  `promptCacheKey`) under its own provider ID. The SDK reads only `xai` and
+  silently drops them.
+- Overrides: a model without a provider-ID loader whose `api.npm` is
+  `@ai-sdk/xai` gets `sdk.responses()`. `sdkKey("@ai-sdk/xai")` returns `xai`,
+  which also remaps stored message `providerOptions` from the provider ID to
+  `xai`, so replayed reasoning items keep their `itemId` and encrypted content.
+- Delta: for the built-in `xai` provider the key already equals its ID and its
+  loader already selects Responses, so nothing changes. Every other provider
+  ID on `@ai-sdk/xai` moves from Chat to Responses. Its configured options now
+  reach the SDK, including `store: false` and the implied
+  `include: ["reasoning.encrypted_content"]`. The xAI Responses option schema
+  accepts only `none`/`low`/`medium`/`high` for `reasoningEffort`, so an
+  `xhigh` variant on such a provider now fails SDK validation instead of being
+  dropped.
+- Boundaries: no change for providers with their own loader, other SDKs, or
+  strict-tool defaults. `@ai-sdk/xai` stays out of
+  `EXPLICIT_NON_STRICT_TOOL_SDKS` for the reason recorded beside that list.
+- Source surfaces: `packages/cli/src/provider/provider.ts` (`getLanguage`)
+  and `packages/cli/src/provider/transform.ts` (`sdkKey`).
+- Test surfaces: `packages/cli/test/provider/provider.test.ts`
+  (`config provider on @ai-sdk/xai sends Responses requests with its provider
+  options`) and `packages/cli/test/provider/transform.test.ts` (`uses xai key
+  for a config provider on @ai-sdk/xai`).
+- Evidence: the wire test captures the actual request a config provider sends:
+  one POST to `<baseURL>/responses`, with `reasoning.effort`, `store: false`
+  and the encrypted-reasoning include. Restoring either source file alone
+  fails it, with `xai.chat` for the first and missing options for the second.
+  Package typecheck passes. `provider.test.ts` (96), `transform.test.ts`
+  (264), `strict-schema-wire.test.ts` and `empty-content-wire.test.ts` pass.
+  A real `mimo run` against an xAI-compatible gateway completed a read-tool
+  round trip with `low` and `high` variants. The stored reasoning parts carry
+  `xai.itemId` (`rs_…`) and `reasoningEncryptedContent`, and the second step
+  reused them with `store: false`.
+- Exit condition: retire when shared `main` routes config providers by SDK
+  package, either through an equivalent fallback or a declared per-provider
+  API choice. If this is propagated to `main`, move the contract to the shared
+  registry.

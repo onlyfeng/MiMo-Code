@@ -12,6 +12,7 @@ import { Hash } from "@mimo-ai/shared/util/hash"
 import { Plugin } from "../plugin"
 import { NamedError } from "@mimo-ai/shared/util/error"
 import { type LanguageModelV3 } from "@ai-sdk/provider"
+import type { XaiProvider } from "@ai-sdk/xai"
 import * as ModelsDev from "./models"
 import { Auth } from "../auth"
 import { Env } from "../env"
@@ -1821,12 +1822,17 @@ const layer: Layer.Layer<
         const sdk = await resolveSDK(model, s, envs)
 
         try {
+          // A config-defined provider on `@ai-sdk/xai` has no loader of its own, and
+          // `languageModel()` there is Chat. Route it to Responses like the built-in
+          // `xai` loader, so a gateway re-exposing xAI behaves the same.
           const language = s.modelLoaders[model.providerID]
             ? await s.modelLoaders[model.providerID](sdk, model.api.id, {
                 ...provider.options,
                 ...model.options,
               })
-            : sdk.languageModel(model.api.id)
+            : model.api.npm === "@ai-sdk/xai"
+              ? (sdk as XaiProvider).responses(model.api.id)
+              : sdk.languageModel(model.api.id)
           s.models.set(key, language)
           return language
         } catch (e) {

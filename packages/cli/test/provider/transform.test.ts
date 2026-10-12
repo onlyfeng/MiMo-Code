@@ -537,6 +537,21 @@ describe("ProviderTransform.providerOptions", () => {
     })
   })
 
+  test("uses xai key for a config provider on @ai-sdk/xai", () => {
+    const model = createModel({
+      providerID: "example-gateway",
+      api: {
+        id: "grok-4",
+        url: "https://example.test/v1",
+        npm: "@ai-sdk/xai",
+      },
+    })
+
+    expect(ProviderTransform.providerOptions(model, { reasoningEffort: "high", store: false })).toEqual({
+      xai: { reasoningEffort: "high", store: false },
+    })
+  })
+
   test("uses gateway model provider slug for gateway models", () => {
     const model = createModel({
       providerID: "vercel",
