@@ -237,6 +237,15 @@ describe("Sandbox isolation + determinism", () => {
 })
 
 describe("Sandbox resource guards + hygiene", () => {
+  test("exports a large JSON value after async resumption without leaking its runtime", async () => {
+    const result = await evalScript(`await Promise.resolve(); return JSON.stringify("x".repeat(10_000_000))`, {})
+    if (typeof result !== "string") throw new Error("expected a serialized string")
+    expect(result.length).toBe(10_000_002)
+    expect(result.startsWith('"xxx')).toBe(true)
+    expect(result.endsWith('xxx"')).toBe(true)
+    expect(await evalScript("return 42", {})).toBe(42)
+  }, 10_000)
+
   test("infinite loop is interrupted by the deadline", async () => {
     await expect(evalScript(`while (true) {}`, {}, { deadlineMs: 300 })).rejects.toThrow()
   })
