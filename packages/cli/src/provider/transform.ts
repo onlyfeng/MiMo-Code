@@ -1886,6 +1886,12 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
   if (model.api.npm === "@ai-sdk/azure") {
     return { openai: options, azure: options }
   }
+  // OpenAI's SDK infers reasoning from OpenAI model names. Compatible endpoints
+  // also expose reasoning models such as Grok; honor their declared capability
+  // on both ordinary and small-model requests, unless explicitly overridden.
+  if (model.api.npm === "@ai-sdk/openai" && model.capabilities.reasoning) {
+    return { [key]: { forceReasoning: true, ...options } }
+  }
   return { [key]: options }
 }
 

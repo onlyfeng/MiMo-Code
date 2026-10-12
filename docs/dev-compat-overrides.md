@@ -989,7 +989,7 @@ files remain byte-identical to the accepted main correction.
 | DC-ACTOR-001    | Actor context, default-fork checkpoint, replace-agent, static-prefix overflow                                                              | Full-context extension beyond shared capture and actor identity scope        | Preserve frozen membership/system/cwd and fail unrecoverable prefixes                                                     |
 | DC-ACTOR-002    | Actor run/spawn JSON `variant`, `actor models` listing, spawn-to-prompt propagation                       | Model-facing extension over inherited actor model selection                  | Preserve pre-admission validation, explicit precedence, non-inheritance, and actor-lifetime persistence                   |
 | DC-TUI-001      | Prompt/footer model metadata and title locale                                                                                              | Request-metadata display override alongside shared locale propagation        | Preserve provider/model/variant truth, locale submission, and known-limit disclosure                                      |
-| DC-PROVIDER-001 | `Provider.getLanguage` loader fallback and `ProviderTransform` SDK-key mapping                                                             | Config-provider routing extension; built-in `xai` behavior unchanged         | Keep config providers on `@ai-sdk/xai` on Responses with options under the `xai` key                                     |
+| DC-PROVIDER-001 | `Provider.getLanguage` loader fallback and `ProviderTransform` SDK-key/options mapping                                                     | Config-provider routing and declared reasoning capability                    | Preserve xAI Responses routing and declared reasoning for OpenAI-compatible models                                      |
 
 ## DC-NET-001 — approved private-network WebFetch
 
@@ -1996,12 +1996,26 @@ files remain byte-identical to the accepted main correction.
   resolver correction. Retire the remaining compat presentation/API overlay
   when shared `main` exposes the equivalent preview and metadata display.
 
-## DC-PROVIDER-001 — config providers on `@ai-sdk/xai` use Responses
+## DC-PROVIDER-001 — Responses routing and declared reasoning capability
 
 - Status: active
 - Canonical owner: `dev/compat` provider model loading
 - Added: 2026-10-12. Adds a ninth DC owner after the 2026-10-10 review record,
   which counts eight.
+- 2026-10-13 correction: Responses is an OpenAI-defined protocol also
+  implemented by xAI. Grok 4.7 and 4.6 support `xhigh`, as documented at
+  <https://docs.x.ai/developers/model-capabilities/text/reasoning>. The bundled
+  `@ai-sdk/xai` version's narrower effort enum is an adapter limitation, not a
+  model capability limit. An OpenAI-compatible gateway can instead use
+  `@ai-sdk/openai`, whose `languageModel()` already selects Responses.
+  However, that SDK infers reasoning from OpenAI model names and drops Grok's
+  effort/summary unless `forceReasoning` is set. `providerOptions()` now
+  defaults it to `true` for `@ai-sdk/openai` models declaring
+  `capabilities.reasoning`. Explicit options override this default. This
+  common mapping covers both main-model and small-model calls, enabling the
+  SDK's encrypted-reasoning include with `store: false`. Non-reasoning models
+  and other SDKs retain their previous options. No model-name heuristic or
+  gateway-specific rule is added; the original xAI routing remains supported.
 - Base: inherited main behavior
   `c2ca53fdcb5a96032ac2a40148712574fc7c7b43` keys custom model loaders by
   provider ID. Only the built-in `xai` provider calls `sdk.responses()`. A
@@ -2023,16 +2037,19 @@ files remain byte-identical to the accepted main correction.
   accepts only `none`/`low`/`medium`/`high` for `reasoningEffort`, so an
   `xhigh` variant on such a provider now fails SDK validation instead of being
   dropped.
-- Boundaries: no change for providers with their own loader, other SDKs, or
-  strict-tool defaults. `@ai-sdk/xai` stays out of
+- Boundaries: the original loader fallback does not change providers with their
+  own loader. The reasoning-option default is scoped to `@ai-sdk/openai` and
+  reasoning-capable models; `forceReasoning: false` remains an explicit opt-out.
+  Strict-tool defaults are unchanged. `@ai-sdk/xai` stays out of
   `EXPLICIT_NON_STRICT_TOOL_SDKS` for the reason recorded beside that list.
 - Source surfaces: `packages/cli/src/provider/provider.ts` (`getLanguage`)
-  and `packages/cli/src/provider/transform.ts` (`sdkKey`).
+  and `packages/cli/src/provider/transform.ts` (`sdkKey`, `providerOptions`).
 - Test surfaces: `packages/cli/test/provider/provider.test.ts`
   (`config provider on @ai-sdk/xai sends Responses requests with its provider
   options`) and `packages/cli/test/provider/transform.test.ts` (`uses xai key
-  for a config provider on @ai-sdk/xai`).
-- Evidence: the wire test captures the actual request a config provider sends:
+  for a config provider on @ai-sdk/xai`), plus
+  `packages/cli/test/provider/openai-responses-reasoning.test.ts`.
+- Original evidence: the wire test captures the actual request a config provider sends:
   one POST to `<baseURL>/responses`, with `reasoning.effort`, `store: false`
   and the encrypted-reasoning include. Restoring either source file alone
   fails it, with `xai.chat` for the first and missing options for the second.
@@ -2042,7 +2059,24 @@ files remain byte-identical to the accepted main correction.
   round trip with `low` and `high` variants. The stored reasoning parts carry
   `xai.itemId` (`rs_…`) and `reasoningEncryptedContent`, and the second step
   reused them with `store: false`.
+- Correction evidence: eight real-SDK serialization tests cover six Grok IDs
+  (including `xhigh` for 4.7/4.6), ordinary and small-model requests, explicit
+  opt-out and SDK scoping. Removing the reasoning default fails the five
+  reasoning-model cases. Provider/strict-schema/empty-content suites pass,
+  and the transform suite passes with a 15-second test timeout; its unrelated
+  image recompression case exceeds the default five seconds on this host.
+  Package typecheck and root lint pass. Eight isolated CLI runs across all six
+  configured Grok IDs through a local capture proxy verify streamed
+  `/v1/responses`, unchanged effort values, session cache
+  keys, `store: false`, and exact encrypted-reasoning replay on tool loops.
+  Grok 4.7 is exercised with `low`, `medium` and `xhigh`, and 4.6 with `xhigh`.
+  Each primary session completes a read-tool round trip and answers the file's
+  secret. Auxiliary title/checkpoint requests are identified separately by
+  session cache key; they do not inherit the primary variant. These checks
+  prove transport and replay, not a statistical effect of effort
+  on reasoning-token volume.
 - Exit condition: retire when shared `main` routes config providers by SDK
   package, either through an equivalent fallback or a declared per-provider
-  API choice. If this is propagated to `main`, move the contract to the shared
-  registry.
+  API choice, and honors declared reasoning capabilities for compatible
+  models without relying solely on model names. If propagated to `main`, move
+  the contract to the shared registry.
