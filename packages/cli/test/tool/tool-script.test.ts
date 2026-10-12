@@ -919,6 +919,47 @@ describe("exec", () => {
     expect(sideEffects).toEqual([])
   })
 
+  for (const selection of ["full result", "output"] as const) {
+    test(`large nested tool metadata preserves success when returning ${selection}`, async () => {
+      const target = path.join(tmp, `large-metadata-${selection.replaceAll(" ", "-")}.txt`)
+      const result = await runToolScript(
+        selection === "full result"
+          ? "return await tools.apply_patch({})"
+          : "return (await tools.apply_patch({})).output",
+        [
+          {
+            id: "apply_patch",
+            description: "write a fixture and return diagnostics",
+            parameters: z.object({}),
+            execute: () =>
+              Effect.promise(async () => {
+                await fs.writeFile(target, "success")
+                return {
+                  title: "synthetic",
+                  output: "success",
+                  metadata: {
+                    diagnostics: Array.from({ length: 12_000 }, (_, i) => ({
+                      range: { start: { line: i, character: 0 }, end: { line: i, character: 1 } },
+                      severity: 1,
+                      message: `synthetic diagnostic ${i}`,
+                      source: "test",
+                    })),
+                  },
+                }
+              }),
+          },
+        ],
+      )
+      expect(await fs.readFile(target, "utf8")).toBe("success")
+      expect(result.metadata.status).toBe(selection === "full result" ? "budget_exceeded" : "completed")
+      expect(result.metadata.toolCalls).toBe(1)
+      expect(result.metadata.sub_parts).toMatchObject([{ tool: "apply_patch", state: { status: "completed" } }])
+      expect(result.output).not.toContain("JS_FreeRuntime")
+      expect(result.output).toContain("apply_patch → success")
+      expect(result.output).toContain(selection === "full result" ? "returned value is" : "<return_value>\nsuccess\n")
+    }, 15_000)
+  }
+
   test("caps the final serialized sub_parts snapshot at 256 KiB", async () => {
     const payload = "x".repeat(4096)
     const result = await runToolScript(
