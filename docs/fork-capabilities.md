@@ -97,6 +97,7 @@ not change their implementation. The preceding review is retained in the
 | FC-015 | compaction context budget, projection, frozen prefix, and trigger ratio                                   | Upstream trigger plus bounded fork projection                    | Preserve ratio parity, no-tool summaries, and config precedence                          |
 | FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets                                               | Upstream voice protocol plus fork lifecycle/editor hardening     | Preserve owner identity, drain-before-idle, and grapheme boundaries                      |
 | FC-017 | History SQLite projection and attachment preview formatting                                               | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds and original attachment locators                  |
+| FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -1732,3 +1733,72 @@ logged`, and the peer `success`/`failure` variants of
 - Retirement condition: upstream rejects empty values in both flag forms, or the
   flag mappings stop depending on truthiness so an empty value reaches schema
   validation with an equivalent error.
+
+## FC-019 — QuickJS heap views survive WASM memory growth
+
+- Status: active
+- Canonical owner: fork `main` dependency patch for the workflow and `exec`
+  sandbox runtime
+- Observable contract: root `patchedDependencies` patches
+  `quickjs-emscripten-core@0.32.0` so `ModuleMemory.newTypedArray()` returns a
+  `typedArray` getter that builds a view over the current
+  `module.HEAPU8.buffer`, from the original pointer and length, on every access.
+  Allocation, zero initialization, the pointer and the `Lifetime` free path are
+  unchanged. Both published entries carry the change: `dist/index.js`
+  (CommonJS) and `dist/chunk-V2S4ZYJR.mjs` (ESM, which Bun and the compiled
+  binary load). A guest value built in an asynchronous continuation may grow
+  the WASM heap and the runtime still disposes cleanly, so `exec` reports the
+  ordinary result status: `budget_exceeded` for a return value over the 256 KiB
+  cap, `completed` for a small selection of the same data, with completed
+  nested tool calls and their side effects kept. The sandbox memory limit,
+  deadlines and the return cap are unchanged.
+- Root cause: the unpatched factory stores one view made at allocation time,
+  and `memory.grow` detaches its buffer, so later reads return `undefined`.
+  `executePendingJobs()` allocates `ctxPtrOut`, runs guest jobs, then reads
+  `ctxPtrOut.value.typedArray[0]`. After growth that `undefined` misses
+  `contextMap`, and `newContext({ contextPointer: undefined })` registers a
+  second context. `rt.dispose()` then aborts with
+  `Assertion failed: list_empty(&rt->gc_obj_list) ... JS_FreeRuntime`, which
+  `exec` reports as `code_error` after nested tools have already succeeded; the
+  CLI process still exits 0. The per-context `uint32Out` view read by
+  `getLength()` and `getOwnPropertyNames()` goes stale the same way and is fixed
+  by the same getter. Raising or removing the sandbox memory limit does not
+  avoid the abort.
+- Upstream relationship: upstream ships the same unpatched 0.32.0, the latest
+  published release on 2026-10-12, with the same sandbox. This is fork hardening
+  of a shared dependency, not a rejected upstream decision; no upstream PR is
+  opened.
+- Watch surfaces: root `package.json` `patchedDependencies`, the
+  `patchedDependencies` block of `bun.lock`,
+  `patches/quickjs-emscripten-core@0.32.0.patch`, the `quickjs-emscripten-core`
+  and `@jitl/quickjs-singlefile-mjs-release-sync` versions in
+  `packages/cli/package.json`, and `packages/cli/src/workflow/sandbox.ts`. The
+  patch is keyed to the exact version and to minified bundle text, so any bump
+  of either package needs the regression cases run again without it.
+- Tests/evidence: `test/workflow/sandbox.test.ts`, "exports a large JSON value
+  after async resumption without leaking its runtime", returns a
+  10,000,000-character string serialized after `await` and then evaluates a
+  second script. `test/tool/tool-script.test.ts`, "large nested tool metadata
+  preserves success when returning full result", runs a synthetic tool that
+  writes a file and returns 12,000 diagnostics: `budget_exceeded`, the file
+  written and one `completed` sub-part. Its "output" sibling is the control and
+  stays `completed` with or without the patch. On 2026-10-12 on macOS x64 both
+  files pass 133/133 with the patch under Bun 1.3.14 and 1.4.3. Mutation-checked
+  under Bun 1.4.3: without the patch exactly the two non-control cases fail and
+  the other 131 pass. Direct runtime probes of each entry register one context
+  with the patch, and two followed by the abort without it. `build:local`
+  binaries built under Bun 1.3.14 and driven through `mimo run --format json` by
+  a scripted local model returned `code_error` with the assertion for a
+  3,770,766-byte return value without the patch and `budget_exceeded` with it;
+  small-value, output-only, `--version` and help runs passed in both builds. The
+  investigation recorded the same binary result on Windows x64.
+- Mutation-check note: `bun ci` does not reinstall a package when its
+  `patchedDependencies` entry is removed. An already patched
+  `node_modules/.bun/quickjs-emscripten-core@0.32.0` stays patched and the
+  regression cases still pass, so delete that directory, or install fresh,
+  before running them unpatched. Restoring the entry does reinstall it.
+- Retirement condition: a published `quickjs-emscripten-core` release reads
+  heap views from the current buffer after memory growth, and both regression
+  cases pass on a fresh install without the patch; or upstream adopts an
+  equivalent patch, which the fork then takes in place of its own. The
+  regression cases stay in either case.
