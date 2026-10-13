@@ -13,8 +13,11 @@ import type { JSONObject } from "@ai-sdk/provider"
 import {
   createMcpToolSearchCatalog,
   MCP_TOOL_SEARCH_ID,
+  mcpToolSearchHistory,
   restoreMcpToolSearchMatches,
+  shouldDeferMcpTools,
   type McpToolSearchEntry,
+  type McpToolSearchMode,
 } from "../tool/mcp-tool-search"
 import type { PromptConfig } from "./session"
 import { resolveHarnessMode } from "../tool/gpt"
@@ -55,7 +58,8 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   msgs: MessageV2.WithParts[]
   permission?: Permission.Ruleset
   mcpTools?: Record<string, AITool>
-  useMcpToolSearch?: boolean
+  /** Resolved deferral mode; absent never defers. Deferral itself is decided here, as in the live path. */
+  mcpToolSearch?: McpToolSearchMode
   /**
    * Caller-built system-tail parts. Currently environment/format, skill reminder,
    * then instruction files. Caller is responsible for the ordering and content.
@@ -157,14 +161,21 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
       parameters: transformed as JSONObject,
     })
   }
-  const resolved = LLM.resolveTools({
-    tools: rawTools,
-    activeTools: input.useMcpToolSearch ? [MCP_TOOL_SEARCH_ID] : undefined,
-    agent: input.agent,
-    permission: input.permission,
-    user: lastUser,
-  })
-  if (!input.useMcpToolSearch) {
+  const resolve = (activeTools?: string[]) =>
+    LLM.resolveTools({
+      tools: rawTools,
+      activeTools,
+      agent: input.agent,
+      permission: input.permission,
+      user: lastUser,
+    })
+  const mode = input.mcpToolSearch ?? { type: "never" }
+  const candidates = resolve(mode.type === "never" ? undefined : [MCP_TOOL_SEARCH_ID])
+  const catalog = createMcpToolSearchCatalog(
+    mcpSearchEntries.filter((entry) => candidates[entry.name]).toSorted((a, b) => a.name.localeCompare(b.name)),
+  )
+  if (!shouldDeferMcpTools(mode, catalog.entries, input.model.limit.context)) {
+    const resolved = resolve()
     return {
       system,
       tools: resolved,
@@ -176,23 +187,12 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     }
   }
 
-  const catalog = createMcpToolSearchCatalog(
-    mcpSearchEntries.filter((entry) => resolved[entry.name]).toSorted((a, b) => a.name.localeCompare(b.name)),
-  )
   const loadedMcpTools = restoreMcpToolSearchMatches(
-    catalog,
-    input.msgs.flatMap((message) => {
-      if (message.info.role !== "assistant" || message.info.parentID !== lastUser.id) return []
-      return message.parts.flatMap((part) =>
-        part.type === "tool" && part.tool === MCP_TOOL_SEARCH_ID && part.state.status === "completed"
-          ? [part.state.metadata]
-          : [],
-      )
-    }),
+    new Set(catalog.entries.map((entry) => entry.name)),
+    mcpToolSearchHistory(input.msgs),
   )
-  const searchActive =
-    input.model.capabilities.toolcall && catalog.entries.length > 0 && resolved[MCP_TOOL_SEARCH_ID] !== undefined
-  const tools = Object.fromEntries(Object.entries(resolved).filter(([id]) => id !== MCP_TOOL_SEARCH_ID || searchActive))
+  const searchActive = input.model.capabilities.toolcall && candidates[MCP_TOOL_SEARCH_ID] !== undefined
+  const tools = Object.fromEntries(Object.entries(candidates).filter(([id]) => id !== MCP_TOOL_SEARCH_ID || searchActive))
 
   return {
     system,

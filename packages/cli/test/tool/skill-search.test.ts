@@ -337,7 +337,7 @@ description: Exact skill for direct execution boundary tests.
   )
 
   // Compose Next is available to the model; its description and body carry the
-  // semantic explicit-request boundary. Legacy compose:* remains filtered.
+  // semantic explicit-request boundary.
   it.live("surfaces compose-next to primary agents", () =>
     provideTmpdirInstance(
       () =>
@@ -357,7 +357,7 @@ description: Exact skill for direct execution boundary tests.
           const query =
             "use compose-next for end to end feature orchestration grill spec implement verify review finish"
 
-          for (const agentName of ["build", "plan", "compose"] as const) {
+          for (const agentName of ["build", "plan"] as const) {
             const agent = yield* agents.get(agentName)
             if (!agent) throw new Error(`Agent not found: ${agentName}`)
 

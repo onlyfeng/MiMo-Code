@@ -109,7 +109,7 @@ test("two non-test processes preserve the same user frozen catalog and refresh o
         MIMOCODE_DISABLE_COMPOSE_SKILLS: "true",
         MIMOCODE_DISABLE_INSTRUCTIONS: "true",
         MIMOCODE_EXPERIMENTAL: undefined,
-        MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH: undefined,
+        MIMOCODE_MCP_TOOL_SEARCH: undefined,
         MIMOCODE_CODEX_MODE: undefined,
         MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL: undefined,
         MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS: undefined,

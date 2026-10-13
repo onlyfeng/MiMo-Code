@@ -39,7 +39,7 @@ test.each([
     })
     const env = { ...process.env }
     delete env.MIMOCODE_EXPERIMENTAL
-    delete env.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH
+    delete env.MIMOCODE_MCP_TOOL_SEARCH
     delete env.MIMOCODE_CODEX_MODE
     delete env.MIMOCODE_CONFIG
     delete env.MIMOCODE_CONFIG_CONTENT

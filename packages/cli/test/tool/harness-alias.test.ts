@@ -12,7 +12,7 @@ import { SystemPrompt } from "../../src/session/system"
 import { SessionPrefixSnapshot } from "../../src/session/prefix-snapshot"
 import { Agent } from "../../src/agent/agent"
 import { ToolRegistry } from "../../src/tool"
-import { isMcpToolSearchEnabled, resolveHarnessMode, usesGPTToolset } from "../../src/tool/gpt"
+import { mcpToolSearchMode, resolveHarnessMode, usesGPTToolset } from "../../src/tool/gpt"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { ProviderTest } from "../fake/provider"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -72,8 +72,15 @@ describe("explicit GPT harness aliases", () => {
     expect(resolveHarnessMode(input)).toBe("codex")
     expect(usesGPTToolset(input.modelID, undefined, input.modelAPIID, input.modelFamily, input.harnessModel)).toBe(true)
     expect(
-      isMcpToolSearchEnabled(false, undefined, input.modelID, input.modelAPIID, input.modelFamily, input.harnessModel),
-    ).toBe(true)
+      mcpToolSearchMode(
+        { type: "never" },
+        undefined,
+        input.modelID,
+        input.modelAPIID,
+        input.modelFamily,
+        input.harnessModel,
+      ),
+    ).toEqual({ type: "always" })
     const model = ProviderTest.model({
       id: ModelID.make(input.modelID),
       api: { id: input.modelAPIID } as never,
@@ -96,7 +103,12 @@ describe("explicit GPT harness aliases", () => {
     process.env.MIMOCODE_CODEX_MODE = "true"
     expect(resolveHarnessMode({ ...input, harness: "default" })).toBe("default")
     expect(resolveHarnessMode({ modelID: "mimo-v2.6", harnessModel: "gpt-5" })).toBe("codex")
-    expect(isMcpToolSearchEnabled(true, "default", "opaque", undefined, undefined, input.harnessModel)).toBe(true)
+    expect(
+      mcpToolSearchMode({ type: "always" }, "default", "opaque", undefined, undefined, input.harnessModel),
+    ).toEqual({ type: "always" })
+    expect(
+      mcpToolSearchMode({ type: "never" }, "default", "opaque", undefined, undefined, input.harnessModel),
+    ).toEqual({ type: "never" })
   })
 
   test("any resolved MiMo, GPT4 or OSS identity vetoes automatic inference", () => {

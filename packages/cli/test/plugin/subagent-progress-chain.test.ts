@@ -8,7 +8,7 @@ for (const scenario of ["disabled", "enabled", "read-only"] as const) {
     const env: NodeJS.ProcessEnv = { ...process.env, MIMOCODE_TEST_PROGRESS_CHAIN_CASE: scenario }
     for (const selector of [
       "MIMOCODE_EXPERIMENTAL",
-      "MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH",
+      "MIMOCODE_MCP_TOOL_SEARCH",
       "MIMOCODE_CODEX_MODE",
       "MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL",
       "MIMOCODE_EXPERIMENTAL_WORKSPACES",

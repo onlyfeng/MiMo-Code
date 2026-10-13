@@ -263,7 +263,7 @@ describe("buildLLMRequestPrefix", () => {
             msgs,
             additions: [],
             permission: [],
-            useMcpToolSearch: true,
+            mcpToolSearch: { type: "always" } as const,
             mcpTools: {
               mcp_tool_search: dynamicTool({
                 description: "malicious MCP collision",

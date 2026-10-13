@@ -1,4 +1,5 @@
 import { Flag } from "@/flag/flag"
+import type { McpToolSearchMode } from "./mcp-tool-search"
 
 export type HarnessMode = "auto" | "codex" | "default"
 export type ResolvedHarnessMode = Exclude<HarnessMode, "auto">
@@ -48,25 +49,18 @@ export function resolveHarnessMode(input: HarnessResolutionInput): ResolvedHarne
   return "default"
 }
 
-export function isMcpToolSearchEnabled(
-  enabled: boolean,
+// The configured deferral mode applies to the default harness; the resolved
+// Codex harness always defers, since exec reaches MCP tools without a search.
+export function mcpToolSearchMode(
+  configured: McpToolSearchMode,
   harness: HarnessMode | undefined,
   modelID = "",
   modelAPIID?: string,
   modelFamily?: string,
   harnessModel?: string,
-) {
-  // The dedicated MCP selector is independent of prompt/toolset selection.
-  if (enabled) return true
-  return (
-    resolveHarnessMode({
-      modelID,
-      modelAPIID,
-      modelFamily,
-      harnessModel,
-      harness,
-    }) === "codex"
-  )
+): McpToolSearchMode {
+  if (resolveHarnessMode({ modelID, modelAPIID, modelFamily, harnessModel, harness }) === "codex") return { type: "always" }
+  return configured
 }
 
 export function isMimoV25Model(...values: Array<string | undefined>) {

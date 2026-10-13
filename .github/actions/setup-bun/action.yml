@@ -1,5 +1,5 @@
 name: "Setup Bun"
-description: "Setup Bun, cache dependencies, and install"
+description: "Setup the pinned Bun, cache dependencies, and install from bun.lock"
 runs:
   using: "composite"
   steps:
