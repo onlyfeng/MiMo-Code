@@ -1855,11 +1855,7 @@ export function Prompt(props: PromptProps) {
                   {(agent) => (
                     <>
                       <text fg={fadeColor(highlight(), agentMetaAlpha())} flexShrink={0}>
-                        {store.mode === "shell"
-                          ? "Shell"
-                          : agent().name === "compose"
-                            ? `${Locale.titlecase(agent().name)} (legacy)`
-                            : Locale.titlecase(agent().name)}
+                        {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
                       </text>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1} flexShrink={1}>

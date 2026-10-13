@@ -379,11 +379,12 @@ export const Flag = {
   // Defaults to OFF: exec (tool_script orchestration) is registered only for
   // GPT-toolset models. Opt in here to expose it to every model.
   MIMOCODE_ENABLE_EXEC_TOOL: truthy("MIMOCODE_ENABLE_EXEC_TOOL"),
-  // Independent MCP-search selector. When enabled it applies to every
-  // function-calling model regardless of harness; when disabled, only the
-  // resolved Codex harness enables MCP Tool Search automatically.
-  MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH:
-    MIMOCODE_EXPERIMENTAL || truthy("MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH"),
+  // MCP tool lazy-loading: `true` (default) always defers MCP tool schemas
+  // behind mcp_tool_search, `auto` defers once they exceed 10% of the context
+  // window, `auto:N` uses N%, `false` never defers. Codex-mode models always defer.
+  get MIMOCODE_MCP_TOOL_SEARCH() {
+    return process.env["MIMOCODE_MCP_TOOL_SEARCH"]
+  },
   // Defaults to OFF (opt-in): dynamic workflows and built-in workflows.
   // Enable with MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL=true (or the umbrella
   // MIMOCODE_EXPERIMENTAL flag).
@@ -427,15 +428,8 @@ export const Flag = {
   // Evaluated at access time (not module load) because tests, the CLI, and
   // external tooling set these env vars at runtime.
 
-  // Disables compose-agent-internal skills (e.g. compose:plan, compose:review,
-  // compose:tdd). These are hidden workflow-orchestration skills only visible
-  // to the compose agent and are NOT part of builtin skills.
-  get MIMOCODE_DISABLE_COMPOSE_SKILLS() {
-    return truthy("MIMOCODE_DISABLE_COMPOSE_SKILLS")
-  },
   // Disables user-facing builtin skills shipped with the binary (e.g.
-  // mimocode-docs). Does not affect compose skills — the two sets are
-  // independent and non-overlapping.
+  // mimocode-docs).
   get MIMOCODE_DISABLE_BUILTIN_SKILLS() {
     return truthy("MIMOCODE_DISABLE_BUILTIN_SKILLS")
   },
@@ -460,6 +454,12 @@ export const Flag = {
   },
   get MIMOCODE_PURE() {
     return truthy("MIMOCODE_PURE")
+  },
+  // Loads only external plugins, file hooks and TUI plugins provided by
+  // MIMOCODE_CONFIG_DIR. Always on for the Node build, which cannot serve the
+  // plugin SDK to user code.
+  get MIMOCODE_ONLY_CONFIG_DIR_PLUGINS() {
+    return truthy("MIMOCODE_ONLY_CONFIG_DIR_PLUGINS")
   },
   get MIMOCODE_PLUGIN_META_FILE() {
     return process.env["MIMOCODE_PLUGIN_META_FILE"]

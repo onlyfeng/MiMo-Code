@@ -7,7 +7,7 @@ if (!process.env.MIMOCODE_TEST_CLAUDE_MCP_CHILD) {
   test("Claude MCP startup controls use real isolated transports", async () => {
     const env: NodeJS.ProcessEnv = { ...process.env, MIMOCODE_TEST_CLAUDE_MCP_CHILD: "1" }
     delete env.MIMOCODE_EXPERIMENTAL
-    delete env.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH
+    delete env.MIMOCODE_MCP_TOOL_SEARCH
     delete env.MIMOCODE_CODEX_MODE
     const child = Bun.spawn([process.execPath, "test", import.meta.path, "--timeout", "30000"], {
       cwd: import.meta.dir + "/../..",

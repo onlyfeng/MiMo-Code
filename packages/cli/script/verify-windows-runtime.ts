@@ -13,7 +13,7 @@ const artifacts = path.join(directory, ".artifacts", "windows-runtime")
 await fs.mkdir(artifacts, { recursive: true })
 const selectors = [
   "MIMOCODE_EXPERIMENTAL",
-  "MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH",
+  "MIMOCODE_MCP_TOOL_SEARCH",
   "MIMOCODE_CODEX_MODE",
   "MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL",
   "MIMOCODE_COMPACTION_MAX_CONTEXT",

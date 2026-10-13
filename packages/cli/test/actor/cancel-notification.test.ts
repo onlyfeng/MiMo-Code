@@ -2044,7 +2044,13 @@ for (const mode of ["graceful", "forced"] as const) {
           Object.assign(executions, { acquire: originalAcquire, interrupt: originalInterrupt })
           // An explicit later generation can still run; cancellation is not a
           // permanent execution tombstone (including for main-session callers).
-          yield* llm.text("new valid generation")
+          // The parent may take its own notification turn meanwhile: its stored
+          // "main" agent now resolves to the default agent instead of failing, so
+          // bind this reply to the child's request and count only child requests.
+          yield* llm.pushMatch(
+            (hit) => JSON.stringify(hit.body).includes("explicit new generation"),
+            reply().text("new valid generation").stop(),
+          )
           yield* prompt.prompt({
             sessionID: child.sessionID,
             agentID: child.actorID,
@@ -2054,7 +2060,11 @@ for (const mode of ["graceful", "forced"] as const) {
             parts: [{ type: "text", text: "explicit new generation" }],
           })
           yield* prompt.loop({ sessionID: child.sessionID, agentID: child.actorID, notifyParentOnComplete: true })
-          expect(yield* llm.calls).toBe(calls + 1)
+          expect(
+            (yield* llm.inputs)
+              .slice(calls)
+              .filter((input) => JSON.stringify(input).includes("explicit new generation")),
+          ).toHaveLength(1)
           expect(notices.some((text) => text.includes("new valid generation"))).toBe(true)
         }),
         { git: true, config: providerCfg },

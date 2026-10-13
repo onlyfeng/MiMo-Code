@@ -461,16 +461,17 @@ describe("Tool whitelist (Task 14)", () => {
         const reg = yield* ActorRegistry.Service
         const previousSpawnRef = spawnRef.current
         const previousExecFlag = Flag.MIMOCODE_ENABLE_EXEC_TOOL
-        const previousSearchFlag = Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH
+        const previousSearchFlag = process.env.MIMOCODE_MCP_TOOL_SEARCH
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
             spawnRef.current = previousSpawnRef
             Flag.MIMOCODE_ENABLE_EXEC_TOOL = previousExecFlag
-            Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH = previousSearchFlag
+            if (previousSearchFlag === undefined) delete process.env.MIMOCODE_MCP_TOOL_SEARCH
+            else process.env.MIMOCODE_MCP_TOOL_SEARCH = previousSearchFlag
           }),
         )
         Flag.MIMOCODE_ENABLE_EXEC_TOOL = true
-        Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH = true
+        process.env.MIMOCODE_MCP_TOOL_SEARCH = "true"
 
         const session = yield* sessions.create({
           title: "frozen nested MCP membership",

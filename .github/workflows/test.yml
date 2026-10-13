@@ -24,6 +24,7 @@ on:
         type: boolean
         required: false
         default: false
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -407,7 +408,7 @@ jobs:
         run: |
           foreach ($selector in @(
             "MIMOCODE_EXPERIMENTAL",
-            "MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH",
+            "MIMOCODE_MCP_TOOL_SEARCH",
             "MIMOCODE_CODEX_MODE",
             "MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL",
             "MIMOCODE_EXPERIMENTAL_WORKSPACES",
@@ -426,4 +427,38 @@ jobs:
         with:
           name: windows-runtime-${{ github.run_id }}-${{ github.run_attempt }}
           path: packages/cli/.artifacts/windows-runtime/
+          if-no-files-found: error
+
+  release-script:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      # Root-level script tests run from the repository root, whose bunfig.toml
+      # scopes discovery to script/ and refuses packages/** test paths.
+      - name: Run release script tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/release-script
+          report=.artifacts/release-script/junit.xml
+          rm -f -- "$report"
+          bun test script/release.test.ts --timeout 120000 \
+            --reporter=junit --reporter-outfile="$report"
+          test -s "$report"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" \
+            "$report" script/release.test.ts
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-release-script
+          path: .artifacts/release-script/junit.xml
           if-no-files-found: error

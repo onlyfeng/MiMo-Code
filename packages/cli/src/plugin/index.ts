@@ -36,13 +36,13 @@ import { EffectBridge } from "@/effect"
 import { InstanceState } from "@/effect"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
+import { PluginHost } from "./host"
 import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
 import { registerAdaptor } from "@/control-plane/adaptors"
 import type { WorkspaceAdaptor } from "@/control-plane/types"
 import { Glob } from "@mimo-ai/shared/util/glob"
 import fs from "fs"
 import path from "path"
-import { pathToFileURL } from "url"
 
 const log = Log.create({ service: "plugin" })
 
@@ -290,17 +290,10 @@ export const layer = Layer.effect(
         if (Flag.MIMOCODE_PURE && cfg.plugin_origins?.length) {
           log.info("skipping external plugins in pure mode", { count: cfg.plugin_origins.length })
         }
-        // Dependency installation in a config directory cannot help a file plugin outside that directory.
-        const directories = (yield* config.directories()).map((dir) => `${pathToFileURL(dir).href.replace(/\/$/, "")}/`)
-        const needsDependencies = plugins.some((item) => {
-          const spec = Array.isArray(item.spec) ? item.spec[0] : item.spec
-          return directories.some((dir) => spec.startsWith(dir))
-        })
         const loaded = yield* Effect.promise(() =>
           PluginLoader.loadExternal({
             items: plugins,
             kind: "server",
-            wait: needsDependencies ? () => Effect.runPromise(config.waitForDependencies()) : undefined,
             report: {
               start(candidate) {
                 log.info("loading plugin", { path: candidate.plan.spec })
@@ -398,9 +391,14 @@ export const layer = Layer.effect(
         const files: Record<string, number> = {}
         yield* config.get()
         // Exclude home-level file hooks from both initial discovery and reloads.
-        const dirs = (yield* config.directories()).filter(
+        const candidates = (yield* config.directories()).filter(
           (dir) => path.resolve(dir) !== path.resolve(Global.Path.home, ".mimocode"),
         )
+        const dirs = PluginHost.filterDirectories(candidates)
+        if (dirs.length < candidates.length) {
+          log.info("skipping file hook directories outside MIMOCODE_CONFIG_DIR", { count: candidates.length - dirs.length })
+        }
+        PluginHost.provideSdk()
 
         for (const dir of dirs) {
           const matches = Glob.scanSync(FILE_HOOK_GLOB, { cwd: dir, absolute: true, dot: true, symlink: true })
@@ -421,6 +419,7 @@ export const layer = Layer.effect(
                   entrypoints: [match],
                   target: "bun",
                   format: "esm",
+                  external: PluginHost.SDK_SPECIFIERS,
                 })
                 if (!result.success) throw new Error(result.logs.map(String).join("\n"))
                 const blob = result.outputs[0]

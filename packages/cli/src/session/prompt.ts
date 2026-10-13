@@ -5,7 +5,7 @@ import path from "path"
 import os from "os"
 import z from "zod"
 import { SessionID, MessageID, PartID } from "./schema"
-import { MessageV2, COMPOSE_REMINDER_MARKER, promoteComposeProtocolFirst } from "./message-v2"
+import { MessageV2, COMPOSE_REMINDER_MARKER } from "./message-v2"
 export { COMPOSE_REMINDER_MARKER }
 import {
   base64ByteSize,
@@ -19,10 +19,10 @@ import {
 } from "@/util/media"
 import { shrinkAttachment } from "@/provider/image"
 import { classifyAssistantStep, REQUEST_OVERFLOW_RECOVERY_MESSAGE } from "./classify"
-import { Log, Token } from "../util"
+import { Log } from "../util"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
-import { Agent } from "../agent/agent"
+import { Agent, resolveStoredAgent } from "../agent/agent"
 import { decideAskRouting, hasActorTool, resolveInvalidOutputPolicy } from "@/agent/config"
 import { Provider } from "../provider"
 import { ModelID, ProviderID } from "../provider/schema"
@@ -43,7 +43,7 @@ import { SessionCheckpoint } from "./checkpoint"
 import { SessionCompaction } from "./compaction"
 import { SessionModelSelection } from "./model-selection"
 import { computeLastMessageInfo } from "./last-message-info"
-import { classifyRequestOverflow, contextPressureLevel, usable, isOverflow as overflowCheck } from "./overflow"
+import { classifyRequestOverflow, usable, isOverflow as overflowCheck } from "./overflow"
 import { Config } from "@/config"
 import { isMemoryWriteEnabled } from "@/memory/write-gate"
 import { Global } from "@/global"
@@ -57,7 +57,6 @@ import { TuiEvent } from "@/cli/cmd/tui/event"
 import { Plugin } from "../plugin"
 import BUILD_SWITCH from "../session/prompt/build-switch.txt"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
-import PROMPT_COMPOSE from "../session/prompt/compose.txt"
 import {
   RECOVERY_PROMPT_MILD,
   RECOVERY_PROMPT_STRONG,
@@ -117,7 +116,7 @@ import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import * as Stream from "effect/Stream"
 import { Command } from "../command"
 import { pathToFileURL, fileURLToPath } from "url"
-import { ConfigMarkdown, ConfigCompose } from "../config"
+import { ConfigMarkdown } from "../config"
 import { SessionSummary } from "./summary"
 import { NamedError } from "@mimo-ai/shared/util/error"
 import { SessionProcessor } from "./processor"
@@ -183,15 +182,22 @@ import {
 } from "./auto-dream"
 import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "../util/text-truncate"
 import {
+  announcedDeferredMcpTools,
   createMcpToolSearchCatalog,
+  deferredMcpToolsDelta,
   mcpToolCatalogBudget,
+  MCP_DEFERRED_TOOLS_METADATA_KEY,
   MCP_TOOL_SEARCH_ID,
   MCP_TOOL_SEARCH_MAX_LOADED,
-  mcpToolSearchDescription,
+  mcpToolSearchHistory,
+  neutralizeHarnessTags,
+  parseMcpToolSearchMode,
+  renderDeferredMcpToolsReminder,
   restoreMcpToolSearchMatches,
+  shouldDeferMcpTools,
   type McpToolSearchEntry,
 } from "@/tool/mcp-tool-search"
-import { isMcpToolSearchEnabled, resolveHarnessMode } from "@/tool/gpt"
+import { mcpToolSearchMode, resolveHarnessMode } from "@/tool/gpt"
 import { GPT_TOP_LEVEL_TOOLS, TOOL_SCRIPT_EXCLUDED } from "@/tool/tool-script-ref"
 import { captureSkillCatalog, newSkillCatalogSlot, bindSkillCatalog, refreshFrozenSkillCatalog } from "./skill-catalog"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
@@ -916,7 +922,11 @@ export const layer = Layer.effect(
           currentTurnMessages: [] as ModelMessage[],
           parentPermission: [] as Permission.Ruleset,
         }
-        const ag = yield* agents.get(input.agentName).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        // The watermark message stores the agent name; resolve it as the run loop
+        // does, so a retired name captures the same default agent that runs.
+        const ag = yield* resolveStoredAgent(agents, input.agentName).pipe(
+          Effect.catch(() => Effect.succeed(undefined)),
+        )
         if (!ag) return empty
         const model = yield* provider
           .getModel(input.providerID as ProviderID, input.modelID as ModelID)
@@ -994,8 +1004,8 @@ export const layer = Layer.effect(
           additions,
           permission: capturePermission,
           mcpTools,
-          useMcpToolSearch: isMcpToolSearchEnabled(
-            Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
+          mcpToolSearch: mcpToolSearchMode(
+            parseMcpToolSearchMode(Flag.MIMOCODE_MCP_TOOL_SEARCH),
             capturePrompt.harness,
             model.id,
             model.api.id,
@@ -1829,21 +1839,11 @@ export const layer = Layer.effect(
       message: MessageV2.WithParts
       marker: string
       text: string
-      /**
-       * `head` promotes the compose protocol to parts[0] for this request.
-       * Durable load-order lives in MessageV2.promoteComposeProtocolFirst
-       * (hydrate/parts); this flag only aligns the in-memory slice before
-       * the first DB reload after inject.
-       */
-      position?: "append" | "head"
     }) {
       const existingIdx = input.message.parts.findIndex(
         (p) => p.type === "text" && p.synthetic === true && !p.ignored && p.text.includes(input.marker),
       )
-      if (existingIdx >= 0) {
-        if (input.position === "head") promoteComposeProtocolFirst(input.message.parts as MessageV2.Part[])
-        return
-      }
+      if (existingIdx >= 0) return
       const part = yield* sessions.updatePart({
         id: PartID.ascending(),
         messageID: input.message.info.id,
@@ -1853,7 +1853,6 @@ export const layer = Layer.effect(
         text: input.text,
       })
       input.message.parts.push(part)
-      if (input.position === "head") promoteComposeProtocolFirst(input.message.parts as MessageV2.Part[])
     })
 
     const insertReminders = Effect.fn("SessionPrompt.insertReminders")(function* (input: {
@@ -1869,24 +1868,7 @@ export const layer = Layer.effect(
         ...input.agent,
         permission: Agent.runtimePermission(input.agent, input.session.permission),
       }
-      const composeModeMsg = input.messages.find((msg) => msg.info.role === "user" && msg.info.agent === "compose")
       const cfg = yield* config.get()
-      if (composeModeMsg) {
-        const ctx = yield* InstanceState.context
-        const composeCfg = cfg.compose
-        const docsDir = ConfigCompose.resolveDocsDir(ctx.worktree, composeCfg)
-        const text = PROMPT_COMPOSE.replace(
-          "{{compose_docs_dir}}",
-          `Save compose skill outputs: specs in \`${path.join(docsDir, "specs")}\`, plans in \`${path.join(docsDir, "plans")}\`, reports in \`${path.join(docsDir, "reports")}\`.`,
-        )
-        yield* ensurePersistedUserSynthetic({
-          message: composeModeMsg,
-          marker: COMPOSE_REMINDER_MARKER,
-          text,
-          position: "head",
-        })
-      }
-
       // Auto-worktree notice: once per session, after a completed write or git
       // mutation landed in some git MAIN worktree. Names that path and carries a
       // standing rule for any later repo. Path-based on purpose — a session bound
@@ -2217,14 +2199,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           harnessModel: input.model.harness_model,
           harness: input.harness,
         }) === "codex"
-      const useMcpToolSearch = isMcpToolSearchEnabled(
-        Flag.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH,
+      const searchMode = mcpToolSearchMode(
+        parseMcpToolSearchMode(Flag.MIMOCODE_MCP_TOOL_SEARCH),
         input.harness,
         input.model.id,
         input.model.api.id,
         input.model.family,
         input.model.harness_model,
       )
+      // Decided once every request-authorized MCP schema is known (auto mode
+      // compares their size to the context window); read lazily by the MCP
+      // execute wrappers below, which only run after this pass finishes.
+      let deferMcpTools = false
       const run = yield* runner()
       const runApproval = yield* RunApproval.current
       const promptOps = yield* ops()
@@ -2587,14 +2573,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           !disabledMcpTools.has(key) &&
           (!agentToolAllowlist || agentToolAllowlist.has(key))
         const searchable = available && (!whitelist || whitelist.has(key))
-        if (searchable && useMcpToolSearch) {
+        if (searchable) {
           mcpSearchEntries.push({
             name: key,
             description: item.description ?? "",
             parameters: transformed as unknown as JSONObject,
           })
         }
-        if (searchable && !useMcpToolSearch && !useGPTTools && input.model.capabilities.toolcall) activeTools.add(key)
         const executeMcp = (
           args: Parameters<typeof execute>[0],
           opts: Parameters<typeof execute>[1],
@@ -2615,7 +2600,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   new RecoverableError(`The MCP tool "${key}" is unavailable for this request.`),
                 )
               }
-              if (modelFacing && useMcpToolSearch && !useGPTTools && !loadedMcpTools.has(key)) {
+              if (modelFacing && deferMcpTools && !useGPTTools && !loadedMcpTools.has(key)) {
                 return yield* Effect.fail(
                   new RecoverableError(
                     `The MCP tool "${key}" is not loaded for this request. Call ${MCP_TOOL_SEARCH_ID} first, then retry on the next step.`,
@@ -2716,7 +2701,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               })
 
               const truncated = yield* truncate.output(
-                normalized.output,
+                neutralizeHarnessTags(normalized.output),
                 { outcome: normalized.isError ? "error" : "success" },
                 input.agent,
               )
@@ -2783,71 +2768,29 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
       }
       mcpCatalog.current = createMcpToolSearchCatalog(mcpSearchEntries.toSorted((a, b) => a.name.localeCompare(b.name)))
-      if (useMcpToolSearch && tools[MCP_TOOL_SEARCH_ID]) {
-        const cfg = yield* config.get()
-        const usableTokens = usable({ cfg, model: input.model })
-        const lastFinished = input.messages.findLast(
-          (message): message is MessageV2.WithParts & { info: MessageV2.Assistant } =>
-            message.info.role === "assistant" && !!message.info.finish,
-        )
-        const lastFinishedIndex = lastFinished
-          ? input.messages.findIndex((message) => message.info.id === lastFinished.info.id)
-          : -1
-        tools[MCP_TOOL_SEARCH_ID] = {
-          ...tools[MCP_TOOL_SEARCH_ID],
-          description: mcpToolSearchDescription(mcpCatalog.current.entries, {
-            rich:
-              contextPressureLevel({
-                cfg,
-                tokens: lastFinished?.info.tokens ?? {
-                  input: 0,
-                  output: 0,
-                  reasoning: 0,
-                  cache: { read: 0, write: 0 },
-                },
-                model: input.model,
-                additionalTokens: Token.estimate(JSON.stringify(input.messages.slice(lastFinishedIndex + 1))),
-              }) < 2,
-            budget: mcpToolCatalogBudget({ usable: usableTokens, context: input.model.limit.context }),
-          }),
-        }
-      }
-      if (useMcpToolSearch && input.frozenLoadedMcpTools) {
-        const searchable = new Set(mcpCatalog.current.entries.map((entry) => entry.name))
+      deferMcpTools = shouldDeferMcpTools(searchMode, mcpCatalog.current.entries, input.model.limit.context)
+      const searchExposed =
+        deferMcpTools && !useGPTTools && input.model.capabilities.toolcall && !!tools[MCP_TOOL_SEARCH_ID]
+      const searchable = new Set(mcpCatalog.current.entries.map((entry) => entry.name))
+      // A frozen capture's loaded tools come first so the inherited prefix keeps
+      // its tool membership.
+      if (deferMcpTools && input.frozenLoadedMcpTools) {
         for (const name of input.frozenLoadedMcpTools) {
           if (!searchable.has(name) || !input.frozenToolMembership?.has(name)) continue
           loadedMcpTools.add(name)
           if (loadedMcpTools.size >= MCP_TOOL_SEARCH_MAX_LOADED) break
         }
       }
-      const currentUser = input.messages.findLast((message) => message.info.role === "user")
-      if (currentUser && useMcpToolSearch) {
-        for (const name of restoreMcpToolSearchMatches(
-          mcpCatalog.current,
-          input.messages.flatMap((message) => {
-            if (message.info.role !== "assistant" || message.info.parentID !== currentUser.info.id) return []
-            return message.parts.flatMap((part) =>
-              part.type === "tool" && part.tool === MCP_TOOL_SEARCH_ID && part.state.status === "completed"
-                ? [part.state.metadata]
-                : [],
-            )
-          }),
-        )) {
-          loadedMcpTools.add(name)
-          if (loadedMcpTools.size >= MCP_TOOL_SEARCH_MAX_LOADED) break
-        }
-      }
+      // A tool fetched by mcp_tool_search stays loaded for the rest of the
+      // conversation (newest searches win the cap) as long as it is still
+      // request-authorized; compaction drops older searches with their messages.
+      if (deferMcpTools) restoreMcpToolSearchMatches(searchable, mcpToolSearchHistory(input.messages), loadedMcpTools)
 
-      if (
-        useMcpToolSearch &&
-        !useGPTTools &&
-        input.model.capabilities.toolcall &&
-        mcpCatalog.current.entries.length > 0 &&
-        tools[MCP_TOOL_SEARCH_ID]
-      ) {
-        activeTools.add(MCP_TOOL_SEARCH_ID)
+      if (!useGPTTools && input.model.capabilities.toolcall) {
+        if (searchExposed) activeTools.add(MCP_TOOL_SEARCH_ID)
+        const direct = deferMcpTools ? loadedMcpTools : searchable
+        direct.forEach((name) => activeTools.add(name))
       }
-      if (!useGPTTools) loadedMcpTools.forEach((name) => activeTools.add(name))
 
       // MCP Tool Search keeps full schemas out of the outer model tool list;
       // it is a context-budget optimization, not an authorization boundary.
@@ -2881,7 +2824,49 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         snapshotTools,
         activeTools: [...activeTools].filter((name) => tools[name]),
         loadedMcpTools: [...loadedMcpTools],
+        // What the model must be told is reachable through mcp_tool_search;
+        // empty when search is not exposed, so earlier announcements get retracted.
+        deferredMcpTools: searchExposed ? mcpCatalog.current.entries : [],
       }
+    })
+
+    // Announces deferred MCP tools as a persisted <system-reminder> on the last
+    // user message: tool definitions stay byte-stable (prefix cache) while the
+    // model still learns what exists. The first announcement lists everything;
+    // later ones carry only the delta against what earlier reminders announced
+    // (compaction drops those, so the full list is re-announced afterwards).
+    const announceDeferredMcpTools = Effect.fn("SessionPrompt.announceDeferredMcpTools")(function* (input: {
+      messages: MessageV2.WithParts[]
+      entries: McpToolSearchEntry[]
+      model: Provider.Model
+    }) {
+      const userMessage = input.messages.findLast((message) => message.info.role === "user")
+      if (!userMessage) return
+      const announced = announcedDeferredMcpTools(
+        input.messages.flatMap((message) =>
+          message.info.role !== "user"
+            ? []
+            : message.parts.flatMap((part) =>
+                part.type === "text" && part.synthetic && part.metadata
+                  ? [part.metadata[MCP_DEFERRED_TOOLS_METADATA_KEY]]
+                  : [],
+              ),
+        ),
+      )
+      const delta = deferredMcpToolsDelta(announced, input.entries)
+      if (!delta) return
+      const cfg = yield* config.get()
+      const budget = mcpToolCatalogBudget({ usable: usable({ cfg, model: input.model }), context: input.model.limit.context })
+      const part = yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: userMessage.info.id,
+        sessionID: userMessage.info.sessionID,
+        type: "text" as const,
+        synthetic: true,
+        text: renderDeferredMcpToolsReminder(delta, input.entries, budget),
+        metadata: { [MCP_DEFERRED_TOOLS_METADATA_KEY]: delta },
+      })
+      userMessage.parts.push(part)
     })
 
     const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
@@ -5470,7 +5455,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               .pipe(Effect.catch(() => Effect.succeed(false)))
             if (hasRecallTarget) {
               const sessMemDir = path.join(Global.Path.data, "memory", "sessions", sessionID)
-              const hints = recallHintLines(hasActorTool(yield* agents.get(lastUser.agent)))
+              const hints = recallHintLines(hasActorTool(yield* resolveStoredAgent(agents, lastUser.agent)))
               yield* ensurePersistedUserSynthetic({
                 message: lastUserMsgForRecall,
                 marker: RECALL_REMINDER_MARKER,
@@ -5504,7 +5489,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           // Resolve the agent for this iteration once. Both bounded overflow
           // placeholder recovery and the management hooks below reuse it.
-          const agent = yield* agents.get(lastUser.agent)
+          const agent = yield* resolveStoredAgent(agents, lastUser.agent)
           const isBoundedComputation = agent?.native === true && agent?.hidden === true
 
           if (!skipExistingClassify && lastAssistant && lastAssistant.id !== resumeFrom) {
@@ -5817,8 +5802,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
           skipOverflowCheck = false
 
-          // `agent` resolved at iteration start; reuse here for the
-          // agent-not-found user-visible error.
+          // `agent` resolved at iteration start via resolveStoredAgent (historical
+          // names fall back to the default agent), so this branch only fires if
+          // the default agent itself is missing.
           if (!agent) {
             const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
             const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
@@ -5980,6 +5966,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 })
                 const tools = resolvedTools.tools
                 const activeTools = resolvedTools.activeTools
+                yield* announceDeferredMcpTools({ messages: msgs, entries: resolvedTools.deferredMcpTools, model })
 
                 if (lastUser.format?.type === "json_schema") {
                   const outputTool = createStructuredOutputTool({

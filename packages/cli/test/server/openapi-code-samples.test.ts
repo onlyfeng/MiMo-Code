@@ -10,7 +10,7 @@ type Document = {
 test("generated code samples use callable v2 SDK methods", async () => {
   const env = { ...process.env }
   delete env.MIMOCODE_EXPERIMENTAL
-  delete env.MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH
+  delete env.MIMOCODE_MCP_TOOL_SEARCH
   delete env.MIMOCODE_CODEX_MODE
   // Match the SDK build script's redirected stdout and retain its full document.
   const directory = await mkdtemp(path.join(os.tmpdir(), "mimocode-sdk-generate-"))

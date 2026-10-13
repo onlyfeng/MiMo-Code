@@ -25,7 +25,7 @@ test("real MCP HTTP transport completes isolated OAuth discovery, PKCE, refresh 
         MIMOCODE_SKIP_MIGRATIONS: undefined,
         MIMOCODE_DISABLE_DEFAULT_PLUGINS: "true",
         MIMOCODE_EXPERIMENTAL: undefined,
-        MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH: undefined,
+        MIMOCODE_MCP_TOOL_SEARCH: undefined,
         MIMOCODE_CODEX_MODE: undefined,
         MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL: undefined,
         MIMOCODE_COMPACTION_MAX_CONTEXT: undefined,
