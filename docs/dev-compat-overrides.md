@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
+- Last reviewed: 2026-10-13, full upstream synchronization through the user-frozen baseline `b258d28f436446bb1c9768fe0134693219be7cdc`.
+- Prior upstream: `f98dcd1cf7e70e7eb42f721fdf72bc4a6b87914f`.
+- Starting compat: `dfcd150320267d6b8d50d9b4ff7a690f5ceac1e8`.
+- Integrated main: `d3497f88670e7a9fe349a9dd298de9be3dc2e2b4`; compat runtime merge: `93fdf62de50d791623386d7d092103646f9830a7` (of main runtime merge `848c635c1eb57d326f0d135f1c20caafc9c5f17f`), reached through `3a4c6506` and `90aa24ff` as the baseline advanced.
+- Review: [fourteen-capability synchronization](upstream-sync-2026-10-13.md), C01–C14.
+- Resolution: inherit main's adaptations unchanged. Compat-specific work: the run loop's early agent resolution uses `resolveStoredAgent` like main (C05); the TUI agent label drops the retired compose suffix and keeps DC-TUI-001's `flexShrink`; DC-CONTEXT-001's active and auto-disabled large-schema preflight cases opt out of the new default MCP deferral so they still measure a directly exposed schema; compat-only MCP search assertions read the `<system-reminder>` catalog; the Windows verifier clears `MIMOCODE_MCP_TOOL_SEARCH`. `packages/cli/src/mcp/index.ts` stays byte-identical to main (DC-NET-002). The compat-different set stays at 120 paths, 42 under `packages/cli/src` and `packages/sdk/src`, before and after; no DC owner retires or moves.
+- Validation: package and root `bun run typecheck` exit 0 at `93fdf62d`; root lint reports 3571 warnings and zero errors. The four local hash shards pass 6596 with only the three baseline groups failing that also fail on unmodified `origin/main` locally (`collapse`, `worker-model-api`, combined-process `account/repo`), plus one concurrent-load exec stdout miss that passes on rerun; every `test/mcp/` file passes alone (lifecycle 34 including the RFC1918 sentinel), provider refresh 6+7+2, actor recovery 24, `prompt-effect` 212 with 2 existing skips. SDK regeneration leaves `packages/sdk/src` unchanged; `bun.lock` and every manifest match main. Exact-tip CI remains the publication gate.
+- Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
+
+## Previous review record — 2026-10-10
+
+- Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-10-10, full upstream synchronization through `f98dcd1cf7e70e7eb42f721fdf72bc4a6b87914f`.
 - Prior upstream: `6babeb0b98f9b4818bddf04a4331edfee04dbf85`.
 - Starting compat: `ced528534fe5af2e994b888493a5099e7ded2dde`.
@@ -1077,6 +1089,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-NET-002 — RFC1918 remote HTTP(S) MCP reachability
 
+- 2026-10-13 full sync: upstream `2f373289` moves startup MCP connections into a background fiber. Compat's `mcp/index.ts` takes main's FC-004 adaptation byte-for-byte; remote URL validation and client creation are unchanged, and the RFC1918 sentinel passes in `test/mcp/lifecycle.test.ts` (34 pass).
+
 - 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
 
 - POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
@@ -1315,6 +1329,8 @@ files remain byte-identical to the accepted main correction.
   exists.
 
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
+
+- 2026-10-13 full sync: upstream `463cbb28` defers MCP schemas behind `mcp_tool_search` by default and drops the pressure-degraded catalog in the search description. The active and auto-disabled `request preflight handles a large ... MCP schema` cases now opt out of deferral so their preflight still sees the directly exposed 1 MiB schema; the inactive case keeps search on. `contextPressureLevel` stays in `overflow.ts` for compat's own callers; the compat-only catalog-pressure test retires with the description catalog. Run-loop agent resolution uses `resolveStoredAgent`, so a retired stored agent name keeps preflight and bounded-computation policy on the default agent.
 
 - 2026-10-02 full sync: with the committed OpenAPI snapshot deleted upstream, the checkpoint-coverage operation and `CheckpointCoverage` schema are asserted on the runtime OpenAPI document and carried by the generated v2 SDK; every runtime operation's code sample must resolve to a callable client method.
 
@@ -1880,6 +1896,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-TUI-001 — request provider/model/variant display
 
+- 2026-10-13 full sync: upstream `3c6e6bb0` removes the compose agent and its "(legacy)" label from the Prompt footer. Compat keeps its `flexShrink={0}` agent label and `ModelMetadata` display; only the retired suffix branch is dropped.
+
 - 2026-10-02 full sync: upstream removes the free `mimo-auto` channel, including the Prompt footer guard that hid the provider label for it. Compat keeps `ModelMetadata` as the authoritative footer display, so the upstream-only `currentProviderLabel` row stays absent; provider/model/variant truth and `titleLocale` submission are unchanged.
 
 - 2026-09-18 model-selection correction: ordinary prompt metadata is resolved
@@ -1997,6 +2015,8 @@ files remain byte-identical to the accepted main correction.
   when shared `main` exposes the equivalent preview and metadata display.
 
 ## DC-PROVIDER-001 — Responses routing and declared reasoning capability
+
+- 2026-10-13 full sync: upstream `597e7103` adds `Provider.effectiveBaseURL` and an OpenCode Go session header in `session/llm.ts`. Compat's loader fallback and reasoning mapping are untouched; `test/provider/provider.test.ts` passes 95.
 
 - Status: active
 - Canonical owner: `dev/compat` provider model loading
