@@ -203,9 +203,7 @@ export const ApplyPatchTool = Tool.define(
       // memory writes — the askEditUnlessMemory deferral used by write.ts/edit.ts
       // is structurally already satisfied here. Left as a direct ctx.ask.
       if (permissionChanges.length > 0) {
-        const relativePaths = permissionChanges.map((c) =>
-          path.relative(Instance.worktree, c.filePath).replaceAll("\\", "/"),
-        )
+        const relativePaths = permissionChanges.map((c) => path.relative(Instance.worktree, c.filePath).replaceAll("\\", "/"))
         yield* ctx.ask({
           permission: "edit",
           patterns: relativePaths,

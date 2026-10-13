@@ -741,6 +741,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
 
 ## FD-009 — frozen-context capture fails closed before actor execution
 
+- 2026-10-13 upstream PR record: `XiaomiMiMo/MiMo-Code#1870` (scope `forkContext` by session, opened 2026-07-23) is closed as superseded; upstream `actor/spawn.ts` now keys the map through `forkContextKey(sessionID, actorID)`, which is the isolation the PR asked for. Its head branch `fix/forkctx-session-scope` is deleted from the fork.
+
 - 2026-09-19 synchronization: Automatic subagent resume uses the same retained current-instance full-context admission as explicit Actor recovery. Upstream registry-only ephemeral recovery is not adopted; missing context remains unavailable and guidance states that limit.
 
 - Status: active

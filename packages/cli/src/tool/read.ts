@@ -293,13 +293,7 @@ export const ReadTool = Tool.define(
 
       if (!inMedia && looksLikeMediaMime(mime) && isBinaryFile(filepath, sample)) {
         const allowlist = readMimeAllowlist(mime)
-        const kind = mime.startsWith("audio/")
-          ? "audio"
-          : mime.startsWith("video/")
-            ? "video"
-            : mime === "application/pdf"
-              ? "PDF"
-              : "image"
+        const kind = mime.startsWith("audio/") ? "audio" : mime.startsWith("video/") ? "video" : mime === "application/pdf" ? "PDF" : "image"
         const accepted = allowlist ? [...allowlist].join(", ") : ""
         const hintExt = kind === "audio" ? "wav" : kind === "video" ? "mp4" : kind === "PDF" ? "pdf" : "png"
         const warning = [
