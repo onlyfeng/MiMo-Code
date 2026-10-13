@@ -804,6 +804,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-10-13 `.gitignore` alignment: the root `.gitignore` is upstream's bytes again, including its inert `.mimocde` entry and missing final newline. Fork PR #51 removed that entry to avoid a blanket `.mimocode/` rule while the repository still tracked assets there; nothing under `.mimocode/` is tracked on either side now and the runtime regenerates its own nested ignore file, so the entry ignores nothing and the two-line difference bought only a conflict surface.
+
 - 2026-10-13 format alignment: 53 fork hunks across 13 `packages/cli/src` files differed from upstream `b258d28f` only by Prettier output (line wrapping, `0.50` → `0.5`, double spaces); upstream does not run Prettier (184 of its 709 `ts/tsx` files fail the repository config) and `bun lint` is oxlint, so those hunks were pure merge-conflict surface. They are reverted to upstream's bytes; `session/overflow.ts` is byte-identical to upstream again. Every touched file is Prettier-equivalent before and after, so runtime behavior is unchanged and the `Main behavior` reference does not advance. `packages/cli/src/cli/cmd/generate.ts` also joins the watch surfaces: it carries the `codeSample` producer recorded under the 2026-09-15 tooling convergence but was not listed.
 
 - 2026-10-13 synchronization: upstream `c68463f2`/`ca056a8e` restore a root `bunfig.toml` that scopes bare root `bun test` to `script/`, isolates HOME/XDG and the database, and refuses `packages/**` test paths. It replaces the fork's `do-not-run-tests-from-root` guard with the same protection. Upstream `4a5e2140` adds `workflow_call` triggers and an unverified shard-4 `script/release.test.ts` step; the fork keeps its `windows_runtime` dispatch input beside `workflow_call` and runs the release script tests in a dedicated `release-script` job with JUnit verification. Default-path validation now clears `MIMOCODE_MCP_TOOL_SEARCH`, which replaced `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`.
@@ -1316,6 +1318,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
 
+- 2026-10-13 MiniMax reminder removal: the shipped `session/prompt/minimax.txt` no longer carries "The default branch in this repo is `main`. CI triggers on …". Upstream `25b7bac3` pasted that repository-specific sentence into a prompt every MiniMax user receives, twice; fork PR #43 kept it and updated the branch list to `dev/compat`, which made it current for this repository and still a fabricated fact for every other project. The sentence is deleted, so the file differs from upstream by two removed lines and nothing added, and this repository's branch guidance reaches the model through `AGENTS.md` like every other instruction. `test/session/system.test.ts` now asserts the absence of any repository-specific CI reminder (mutation-checked against upstream's text). The TUI skill i18n keys stay corrected: `skill/localized-alias.ts` reads `tui.skill.<name>.slash`, so upstream's `tui.skill.mimocode.*` keys have been dead since `5bf07b7e` renamed the bundle to `mimocode-docs`.
+
 - 2026-10-13 synchronization: upstream `3c6e6bb0` retires the compose agent and `compose:*` skills from bundled `mimocode-docs` content, the TUI tips and `gpt.txt`; upstream `463cbb28` documents harness-injected `<system-reminder>` content in the provider prompts. Both are adopted unchanged; the fork's harness, compaction and `auto_worktree` additions to `config.md` are untouched, and `test/skill/` suites pass.
 
 - 2026-10-10 synchronization: upstream `a4b06963` replaces the `_CLAUDE_IMPORT` disable toggle in bundled `mimocode-docs/reference/config.md` with an `MIMOCODE_ENABLE_CLAUDE_IMPORT` entry: startup import of Claude Code sessions is off by default, manual session imports remain, and Codex sessions are imported only on request. Upstream `f98dcd1c` gives the `xlsx-official/create.md` library-choice table's combined row its own Library cell. Both are adopted unchanged; the fork's harness, compaction and `auto_worktree` additions to `config.md` are untouched, and `test/skill/mimocode-docs.test.ts` and `test/skill/builtin.test.ts` pass.
@@ -1331,8 +1335,8 @@ logged`, and the peer `success`/`failure` variants of
   while retaining direct entries. Successful plan approval ends the current
   guest before the next build turn. Ordinary subagent restrictions and the
   current request pool still constrain these calls; guidance grants no tools
-  outside that pool. Model-visible CI reminders
-  include `dev/compat`; built-in skill keys match `mimocode-docs`; actor heredoc
+  outside that pool. Built-in skill keys match `mimocode-docs`; no shipped prompt
+  carries repository-specific branch or CI reminders; actor heredoc
   errors explain flag placement; PDF CJK guidance uses project-controlled
   fonts, explicit TTC face indexes, and language-matched runtime-supported CID
   fallbacks. Model and
