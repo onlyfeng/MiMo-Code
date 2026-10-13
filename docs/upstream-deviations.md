@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-10
-- Upstream: `f98dcd1cf7e70e7eb42f721fdf72bc4a6b87914f`
-- Prior reviewed upstream: `6babeb0b98f9b4818bddf04a4331edfee04dbf85`
-- Main behavior (runtime/tests): `2f13453afab188f9ae4bc21ed7daecf099b653de` (runtime merge)
-- Bundled guidance content: `2f13453afab188f9ae4bc21ed7daecf099b653de`
-- Prior fork `main` tip: `f15b68709eab8dedfbdd936c62e595e463a5ea81`
+- Last reviewed: 2026-10-13
+- Upstream: `b258d28f436446bb1c9768fe0134693219be7cdc` (frozen by the user)
+- Prior reviewed upstream: `f98dcd1cf7e70e7eb42f721fdf72bc4a6b87914f`
+- Main behavior (runtime/tests): `848c635c1eb57d326f0d135f1c20caafc9c5f17f` (runtime merge)
+- Bundled guidance content: `848c635c1eb57d326f0d135f1c20caafc9c5f17f`
+- Prior fork `main` tip: `4a6b619b46544d9eed7c90107d7dca779f9c0d41`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,9 +29,11 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-10 full sync](upstream-sync-2026-10-10.md), two capabilities through `f98dcd1c`. Adopt upstream's opt-in startup import of Claude Code sessions: `MIMOCODE_ENABLE_CLAUDE_IMPORT` replaces `MIMOCODE_DISABLE_CLAUDE_IMPORT`, startup import is off by default and manual `session import-claude` is unchanged. Adopt the matching bundled `mimocode-docs` configuration entry and the closed `xlsx-official` library-choice table row. No fork owner adapts or moves.
+Latest reviewed synchronization: [2026-10-13 full sync](upstream-sync-2026-10-13.md), fourteen capabilities through the user-frozen baseline `b258d28f`. Adopt MCP tool lazy loading (`MIMOCODE_MCP_TOOL_SEARCH`, deferral on by default) with FD-005's resolved harness identity and prefix-capture parity, background MCP startup with FC-004's pending imports preserved, retirement of the legacy compose agent and skills, the host-served plugin SDK (FC-006's dependency wait retires), CI tag releases with a required `GH_REPO` (FC-012), the npm FDS launcher, cron session affinity, cross-drive containment, the root script-test guard (FC-008), OpenCode Go session headers and the `history_fts.kind` index.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+
+Previous synchronization: [2026-10-10 full sync](upstream-sync-2026-10-10.md), two capabilities through `f98dcd1c`. Adopt upstream's opt-in startup import of Claude Code sessions: `MIMOCODE_ENABLE_CLAUDE_IMPORT` replaces `MIMOCODE_DISABLE_CLAUDE_IMPORT`, startup import is off by default and manual `session import-claude` is unchanged. Adopt the matching bundled `mimocode-docs` configuration entry and the closed `xlsx-official` library-choice table row. No fork owner adapts or moves.
 
 Previous synchronization: [2026-10-04 full sync](upstream-sync-2026-10-04.md), seven capabilities through `6babeb0b`. Adopt upstream's instance-preserving provider refresh: the `POST /global/provider/refresh` endpoint and v2 SDK method, the `Instance.updateIdle` admission barrier, models-only Config reload, execution claims for HTTP API operations and MCP sampling, and stale sampling-owner rejection. Adapt the refresh to keep FD-005 harness alias trust, keep FD-001's sampling approval isolation, and run the refresh suites in an FC-008 isolated job.
 
@@ -424,6 +426,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
 
+- 2026-10-13 synchronization: upstream `463cbb28` replaces `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH` with `MIMOCODE_MCP_TOOL_SEARCH` deferral modes and forces deferral through `mcpToolSearchMode` when its own GPT-name shortcut sees a GPT identity. The fork's `mcpToolSearchMode` instead asks `resolveHarnessMode`, so explicit session modes, the process selector, trusted `harness_model` aliases and the MiMo/GPT-4/OSS vetoes decide Codex deferral exactly as they decide prompt and toolset. Prefix capture passes the same resolved mode to `buildLLMRequestPrefix`, which now applies the same deferral threshold and conversation-scoped loading as the live request. Evidence: `test/tool/gpt.test.ts`, `test/tool/harness-alias.test.ts`, `test/session/llm-request-prefix.test.ts` and the GPT default-harness cases in `test/session/prompt-effect.test.ts`.
+
 - 2026-10-04 synchronization: upstream `6babeb0b` adds an instance-preserving model refresh (`POST /global/provider/refresh`). Its Config candidate and committed configuration are new objects, while harness alias trust is keyed by the parsed configuration object, so the unadapted merge deleted every declared `harness_model` on the first refresh, and also on a Provider's first read after a refresh that found it cold. `Config.prepareModelRefresh` now attaches the fresh models-only parse's declarations to both objects: a refresh keeps a still-declared alias and drops a removed one, and plugin `config` hooks, which still run on the candidate, cannot grant trust. Evidence: `test/provider/refresh-harness.test.ts` fails both cases on the unadapted merge and passes both with the adaptation.
 
 - 2026-10-02 synchronization: upstream `50b505a3` drops the free `mimo-auto` alias from the MiMo npm pin and its image capability override, and the TUI's no-match default now prefers `xiaomi/mimo-v2.6-pro`. No fork classifier names `mimo-auto`, so harness, prompt, discovery, toolset and retry identity resolution is unchanged; like the 2026-09-02 default-model review, the starting-model choice precedes this boundary.
@@ -443,8 +447,9 @@ not change their implementation. The preceding review is retained in the
   or the resolved default harness respectively; an unset process value preserves
   model inference. The default harness selects the model's native non-Codex
   prompt/toolset, which is not necessarily one literal prompt family.
-  `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH=true` remains an independent discovery
-  opt-in and may enable MCP Tool Search regardless of the resolved harness.
+  `MIMOCODE_MCP_TOOL_SEARCH` (`true` default, `auto`, `auto:N`, `false`) is the
+  configured MCP deferral mode for the default harness; the resolved Codex
+  harness always defers, and that decision uses this same resolved identity.
   Process environment selectors are startup configuration; mutating them during
   an active session is outside this contract.
   An explicitly configured `provider.<id>.models.<id>.harness_model` may name

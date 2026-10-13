@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-10
-- Upstream: `f98dcd1cf7e70e7eb42f721fdf72bc4a6b87914f`
-- Prior reviewed upstream: `6babeb0b98f9b4818bddf04a4331edfee04dbf85`
-- Main behavior (runtime/tests): `2f13453afab188f9ae4bc21ed7daecf099b653de` (runtime merge)
-- Bundled guidance content: `2f13453afab188f9ae4bc21ed7daecf099b653de`
-- Prior fork `main` tip: `f15b68709eab8dedfbdd936c62e595e463a5ea81`
+- Last reviewed: 2026-10-13
+- Upstream: `b258d28f436446bb1c9768fe0134693219be7cdc` (frozen by the user)
+- Prior reviewed upstream: `f98dcd1cf7e70e7eb42f721fdf72bc4a6b87914f`
+- Main behavior (runtime/tests): `848c635c1eb57d326f0d135f1c20caafc9c5f17f` (runtime merge)
+- Bundled guidance content: `848c635c1eb57d326f0d135f1c20caafc9c5f17f`
+- Prior fork `main` tip: `4a6b619b46544d9eed7c90107d7dca779f9c0d41`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,9 +30,11 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-10 full sync](upstream-sync-2026-10-10.md), two capabilities through `f98dcd1c`. Adopt upstream's opt-in startup import of Claude Code sessions: `MIMOCODE_ENABLE_CLAUDE_IMPORT` replaces `MIMOCODE_DISABLE_CLAUDE_IMPORT`, startup import is off by default and manual `session import-claude` is unchanged. Adopt the matching bundled `mimocode-docs` configuration entry and the closed `xlsx-official` library-choice table row. No fork owner adapts or moves.
+Latest reviewed synchronization: [2026-10-13 full sync](upstream-sync-2026-10-13.md), fourteen capabilities through the user-frozen baseline `b258d28f`. Adopt MCP tool lazy loading (`MIMOCODE_MCP_TOOL_SEARCH`, deferral on by default) with FD-005's resolved harness identity and prefix-capture parity, background MCP startup with FC-004's pending imports preserved, retirement of the legacy compose agent and skills, the host-served plugin SDK (FC-006's dependency wait retires), CI tag releases with a required `GH_REPO` (FC-012), the npm FDS launcher, cron session affinity, cross-drive containment, the root script-test guard (FC-008), OpenCode Go session headers and the `history_fts.kind` index.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+
+Previous synchronization: [2026-10-10 full sync](upstream-sync-2026-10-10.md), two capabilities through `f98dcd1c`. Adopt upstream's opt-in startup import of Claude Code sessions: `MIMOCODE_ENABLE_CLAUDE_IMPORT` replaces `MIMOCODE_DISABLE_CLAUDE_IMPORT`, startup import is off by default and manual `session import-claude` is unchanged. Adopt the matching bundled `mimocode-docs` configuration entry and the closed `xlsx-official` library-choice table row. No fork owner adapts or moves.
 
 Previous synchronization: [2026-10-04 full sync](upstream-sync-2026-10-04.md), seven capabilities through `6babeb0b`. Adopt upstream's instance-preserving provider refresh: the `POST /global/provider/refresh` endpoint and v2 SDK method, the `Instance.updateIdle` admission barrier, models-only Config reload, execution claims for HTTP API operations and MCP sampling, and stale sampling-owner rejection. Adapt the refresh to keep FD-005 harness alias trust, keep FD-001's sampling approval isolation, and run the refresh suites in an FC-008 isolated job.
 
@@ -506,6 +508,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-004 — MCP configuration and connection lifecycle
 
+- 2026-10-13 synchronization: upstream `2f373289` connects startup MCP servers in a background fiber; `MCP.tools()` waits at most three seconds and every other accessor awaits the settled state. Claude imports without explicit `auto_connect: true`, and entries with `auto_connect: false`, are still never attempted at startup. Upstream's new cleanup deletes a `pending` placeholder that an attempt left behind; it now skips those entries, so their pending status survives settlement. Removing the guard fails `test/mcp/lifecycle.test.ts` ("Claude Code local MCP server is pending until explicitly connected") and `test/mcp/claude-auto-connect.test.ts`. Upstream `463cbb28` makes MCP deferral the default for every function-calling model; request-local loaded membership and frozen seeding are unchanged (FD-005 note).
+
 - 2026-10-04 synchronization: the models-only Config reload behind upstream's provider refresh skips Claude MCP import, plugin origins, command/agent scans and dependency installation, and publishes only the model keys. The ordinary path keeps the fork's native-override argument to `mergeClaudeMcp`, so pending imports and explicit `auto_connect` are unchanged; MCP configuration changes still require a restart.
 
 - Status: active
@@ -635,6 +639,8 @@ not change their implementation. The preceding review is retained in the
   history; FD-006 remains the tool-authority owner.
 
 ## FC-006 — instance-local plugin memory-write decision
+
+- 2026-10-13 synchronization: upstream `4fcfe1b7` serves the plugin SDK from the host and removes per-directory dependency installs with `Config.waitForDependencies`. The fork's 2026-09-26 file-plugin dependency wait therefore has nothing to wait for and retires with its `pathToFileURL` import; `plugin/index.ts` now differs from upstream only by the `actor.postStop` `memoryWriteEnabled` injection, which is unchanged.
 
 - 2026-10-04 synchronization: `Plugin.list({ initialize: false })` lets provider refresh reuse initialized hooks without loading plugins. The `actor.postStop` `memoryWriteEnabled` injection reads the live configuration; memory keys are not refreshed, so the decision is unchanged.
 
@@ -787,6 +793,8 @@ not change their implementation. The preceding review is retained in the
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
+
+- 2026-10-13 synchronization: upstream `c68463f2`/`ca056a8e` restore a root `bunfig.toml` that scopes bare root `bun test` to `script/`, isolates HOME/XDG and the database, and refuses `packages/**` test paths. It replaces the fork's `do-not-run-tests-from-root` guard with the same protection. Upstream `4a5e2140` adds `workflow_call` triggers and an unverified shard-4 `script/release.test.ts` step; the fork keeps its `windows_runtime` dispatch input beside `workflow_call` and runs the release script tests in a dedicated `release-script` job with JUnit verification. Default-path validation now clears `MIMOCODE_MCP_TOOL_SEARCH`, which replaced `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`.
 
 - 2026-10-10 Actions usage reduction: GitHub disabled this fork's workflows for Actions usage. Between 2026-06-22 and 2026-10-04 the fork ran 758 `test` workflows; recent ones averaged about 27 runner-minutes (four shards, four isolated jobs, and a Windows job for `dev/compat`). In September 233 of 415 were `pull_request` runs, repeated on every PR push. `test.yml` skips every job of a pull request whose head is a branch of this repository; such a branch dispatches `test` when it needs pre-merge evidence. A pull request from another repository cannot be dispatched by ref, so its Linux jobs still run, under GitHub's read-only fork-PR token; dispatching an untrusted head from a base-repository ref would instead run its workflow with this repository's permissions. All three workflows ignore pushes and pull requests confined to `docs/`; no test, lint or typecheck input lives there. The Windows job runs only on pushes to `dev/compat` and on dispatch with `windows_runtime`, never for a pull request, so its environment record drops the pull-request head SHA. `AGENTS.md` and the upstream-sync skill let a tip without runs because its push changed only `docs/` cite an ancestor's exact-SHA runs after proving the tree outside `docs/` identical. Shard layout, isolation jobs, JUnit verification and step budgets are unchanged.
 
@@ -1294,6 +1302,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
 
+- 2026-10-13 synchronization: upstream `3c6e6bb0` retires the compose agent and `compose:*` skills from bundled `mimocode-docs` content, the TUI tips and `gpt.txt`; upstream `463cbb28` documents harness-injected `<system-reminder>` content in the provider prompts. Both are adopted unchanged; the fork's harness, compaction and `auto_worktree` additions to `config.md` are untouched, and `test/skill/` suites pass.
+
 - 2026-10-10 synchronization: upstream `a4b06963` replaces the `_CLAUDE_IMPORT` disable toggle in bundled `mimocode-docs/reference/config.md` with an `MIMOCODE_ENABLE_CLAUDE_IMPORT` entry: startup import of Claude Code sessions is off by default, manual session imports remain, and Codex sessions are imported only on request. Upstream `f98dcd1c` gives the `xlsx-official/create.md` library-choice table's combined row its own Library cell. Both are adopted unchanged; the fork's harness, compaction and `auto_worktree` additions to `config.md` are untouched, and `test/skill/mimocode-docs.test.ts` and `test/skill/builtin.test.ts` pass.
 
 - Status: active process/content contract
@@ -1399,6 +1409,8 @@ logged`, and the peer `success`/`failure` variants of
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-012 — fork publication, contribution, and security routing
+
+- 2026-10-13 synchronization: upstream `4a5e2140` replaces the maintainer release scripts with CI stages in `script/release.ts` run by `release.yml` on a pushed tag. The fork adopts the stages and keeps `GH_REPO` required: the `github` stage throws before any `gh` call when it is unset, so a fork release can never fall back to the `upstream` remote. `release.yml` itself sets `GH_REPO` from `github.repository`. The npm trusted-publisher setup still names upstream's repository and applies only to upstream's packages.
 
 - 2026-10-02 synchronization: upstream `327f5b63` makes `script/release.ts` default `GH_REPO` to `XiaomiMiMo/MiMo-Code`, which would aim an unconfigured fork release at the read-only upstream. The fork keeps `GH_REPO` required, with no default, and adopts the rest of the `.env` release flow. Upstream `698f0f29` removes the `CLAUDE.md` → `AGENTS.md` symlink; the fork keeps it so Claude Code sessions load the same routing conventions as other agents.
 
@@ -1690,6 +1702,8 @@ logged`, and the peer `success`/`failure` variants of
   regressions.
 
 ## FC-017 — faithful and bounded history previews
+
+- 2026-10-13 synchronization: upstream `5f55525c` restores `history_fts.kind` with a dual-column body/body_idx index, two new migrations and a background re-extract. The merge is clean and touches neither `projection.ts` nor `media.ts`; NUL, preview-budget and attachment-locator tests in `test/history/` pass.
 
 - 2026-09-17 synchronization: Adopt shared tool-result previews and resumable migration version 6, including legacy chunk deduplication and Node SQLite query planning. Projection/media retain the registered SQL NUL, field/list budget and attachment-locator rules. This index preview is separate from raw history retrieval.
 
