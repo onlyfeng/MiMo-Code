@@ -334,7 +334,11 @@ export const layer = Layer.effect(
         if (tool.id === ToolScriptTool.id) return useGPTTools || Flag.MIMOCODE_ENABLE_EXEC_TOOL
         if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
           if (tool.id === WebSearchTool.id) {
-            return input.providerID === ProviderID.opencode || input.providerID === "xiaomi" || Flag.MIMOCODE_ENABLE_EXA
+            return (
+              input.providerID === ProviderID.opencode ||
+              input.providerID === "xiaomi" ||
+              Flag.MIMOCODE_ENABLE_EXA
+            )
           }
           return input.providerID === ProviderID.opencode || Flag.MIMOCODE_ENABLE_EXA
         }
@@ -437,8 +441,7 @@ export const layer = Layer.effect(
         Effect.fnUntraced(function* (tool: Tool.Def) {
           using _ = log.time(tool.id)
           const output = {
-            description:
-              tool.id === BashTool.id && availableTools.useGPTTools ? bashDescription(true) : tool.description,
+            description: tool.id === BashTool.id && availableTools.useGPTTools ? bashDescription(true) : tool.description,
             parameters: tool.parameters,
           }
           yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)

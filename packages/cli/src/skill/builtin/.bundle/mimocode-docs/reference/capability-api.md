@@ -89,9 +89,9 @@ are accepted too. These routes **always** authenticate with a minted token, inde
 
 Model ids are always `providerID/modelID` — pass them through verbatim, never split.
 
-| Endpoint                    | Shape                                                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------------- |
-| `GET /v1/models`            | Lists the models this token can reach                                                       |
+| Endpoint | Shape |
+| --- | --- |
+| `GET /v1/models` | Lists the models this token can reach |
 | `POST /v1/chat/completions` | OpenAI chat, incl. `input_audio` content parts; `stream:true` yields SSE ending in `[DONE]` |
 
 Fields that cannot be honoured are **refused with 400 rather than ignored**, so a caller never
@@ -102,10 +102,10 @@ so a stock OpenAI client works by changing `base_url` alone. Provider-native kno
 
 ## Error codes a consumer must distinguish
 
-| Status | `error.code`      | Meaning                                      |
-| ------ | ----------------- | -------------------------------------------- |
-| 401    | `expired_api_key` | Reissue and retry against the same base URL  |
-| 401    | `invalid_api_key` | Missing, invalid, or revoked — stop retrying |
-| 400    | —                 | The request asked for something unsupported  |
-| 404    | `model_not_found` | No such model in this instance               |
-| 502    | —                 | The upstream provider failed, not MiMoCode   |
+| Status | `error.code` | Meaning |
+| --- | --- | --- |
+| 401 | `expired_api_key` | Reissue and retry against the same base URL |
+| 401 | `invalid_api_key` | Missing, invalid, or revoked — stop retrying |
+| 400 | — | The request asked for something unsupported |
+| 404 | `model_not_found` | No such model in this instance |
+| 502 | — | The upstream provider failed, not MiMoCode |

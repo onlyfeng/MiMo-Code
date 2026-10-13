@@ -242,8 +242,7 @@ export function turnContextMessages(user: MessageV2.User): ModelMessage[] {
   if (user.systemMode === "replace-agent") return []
   const context = user.system?.trim()
   if (!context) return []
-  return [
-    {
+  return [{
       role: "user",
       content: `<system-reminder>\n${context}\n</system-reminder>`,
     },

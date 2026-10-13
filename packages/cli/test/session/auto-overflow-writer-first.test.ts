@@ -353,7 +353,9 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
                     message.parts.some((part) => part.type === "text" && part.text === "context that must survive"),
                   ),
                 ).toBe(true)
-                expect(MessageV2.filterCompacted(after).some((message) => message.info.id === first.id)).toBe(true)
+                expect(
+                  MessageV2.filterCompacted(after).some((message) => message.info.id === first.id),
+                ).toBe(true)
               }),
             ),
         })

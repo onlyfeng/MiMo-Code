@@ -37,9 +37,7 @@ function wrap(message: unknown): ReturnType<NamedError["toObject"]> {
 describe("session.retry.delay", () => {
   test("caps delay at 30 seconds when headers missing", () => {
     const error = apiError()
-    const delays = Array.from({ length: 10 }, (_, index) =>
-      SessionRetry.retryDelay(index + 1, decide(error), 0, 2000, 30_000),
-    )
+    const delays = Array.from({ length: 10 }, (_, index) => SessionRetry.retryDelay(index + 1, decide(error), 0, 2000, 30_000))
     expect(delays).toStrictEqual([2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000, 30000, 30000])
   })
 
@@ -87,9 +85,7 @@ describe("session.retry.delay", () => {
 
   test("caps oversized header delays to the runtime timer limit", () => {
     const error = apiError({ "retry-after-ms": "999999999999" })
-    expect(SessionRetry.retryDelay(1, decide(error), 0, 2000, SessionRetry.RETRY_MAX_DELAY)).toBe(
-      SessionRetry.RETRY_MAX_DELAY,
-    )
+    expect(SessionRetry.retryDelay(1, decide(error), 0, 2000, SessionRetry.RETRY_MAX_DELAY)).toBe(SessionRetry.RETRY_MAX_DELAY)
   })
 
   test("policy updates retry status and increments attempts", async () => {
@@ -176,9 +172,7 @@ describe("session.retry.delay", () => {
   test("requires explicit noDeadline instead of deadlineMs zero", () => {
     const decode = Schema.decodeUnknownSync(ConfigRetry.Budget)
     expect(() => decode({ deadlineMs: 0 })).toThrow()
-    expect(() => decode({ deadlineMs: 1000, noDeadline: true })).toThrow(
-      "deadlineMs and noDeadline cannot be configured together",
-    )
+    expect(() => decode({ deadlineMs: 1000, noDeadline: true })).toThrow("deadlineMs and noDeadline cannot be configured together")
     expect(decode({ mode: "persistent", noDeadline: true })).toMatchObject({ noDeadline: true })
     expect(SessionRetry.resolve({ retry: { server: { maxRetries: 2, noDeadline: true } } }).server.maxElapsedMs).toBe(0)
     expect(
@@ -361,11 +355,7 @@ describe("session.retry.retryable", () => {
     expect(ProviderError.isTransportErrnoCode("EINVAL")).toBe(false)
     expect(ProviderError.isRetryableNetworkError(Object.assign(new Error("missing"), { code: "ENOENT" }))).toBe(false)
     // User abort is never network
-    expect(
-      ProviderError.isRetryableNetworkError(
-        Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" }),
-      ),
-    ).toBe(false)
+    expect(ProviderError.isRetryableNetworkError(Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" }))).toBe(false)
     // Nested cause chain: outer message clean, inner code is transport
     const nested = new Error("request failed", { cause: Object.assign(new Error("boom"), { code: "ECONNRESET" }) })
     expect(ProviderError.isRetryableNetworkError(nested)).toBe(true)
@@ -418,57 +408,22 @@ describe("session.retry.retryable", () => {
   })
 
   test("caps retry-after by the selected budget", () => {
-    const decision = {
-      retryable: true,
-      phase: "stream" as const,
-      scope: "live-step" as const,
-      kind: "rate_limit" as const,
-      message: "429",
-      retryAfterMs: 120000,
-    }
+    const decision = { retryable: true, phase: "stream" as const, scope: "live-step" as const, kind: "rate_limit" as const, message: "429", retryAfterMs: 120000 }
     expect(SessionRetry.retryDelay(1, decision, 0, 100, 5000)).toBe(5000)
   })
 
   test("parses retry hints with the declared units", () => {
-    const error = new MessageV2.APIError({
-      message: "Please retry in 1 millisecond",
-      statusCode: 429,
-      isRetryable: false,
-    }).toObject()
+    const error = new MessageV2.APIError({ message: "Please retry in 1 millisecond", statusCode: 429, isRetryable: false }).toObject()
     expect(decide(error).retryAfterMs).toBe(100)
-    expect(
-      decide(new MessageV2.APIError({ message: "Please retry in 5s", statusCode: 429, isRetryable: false }).toObject())
-        .retryAfterMs,
-    ).toBe(5000)
-    expect(
-      decide(new MessageV2.APIError({ message: "Please retry in 5m", statusCode: 429, isRetryable: false }).toObject())
-        .retryAfterMs,
-    ).toBe(5 * 60_000)
-    expect(
-      decide(new MessageV2.APIError({ message: "Please retry in 1h", statusCode: 429, isRetryable: false }).toObject())
-        .retryAfterMs,
-    ).toBe(5 * 60_000)
+    expect(decide(new MessageV2.APIError({ message: "Please retry in 5s", statusCode: 429, isRetryable: false }).toObject()).retryAfterMs).toBe(5000)
+    expect(decide(new MessageV2.APIError({ message: "Please retry in 5m", statusCode: 429, isRetryable: false }).toObject()).retryAfterMs).toBe(5 * 60_000)
+    expect(decide(new MessageV2.APIError({ message: "Please retry in 1h", statusCode: 429, isRetryable: false }).toObject()).retryAfterMs).toBe(5 * 60_000)
   })
 
   test("rejects malformed retry-after-ms and floors zero delay", () => {
-    const zero = new MessageV2.APIError({
-      message: "429",
-      statusCode: 429,
-      isRetryable: false,
-      responseHeaders: { "retry-after-ms": "0" },
-    }).toObject()
-    const garbage = new MessageV2.APIError({
-      message: "429",
-      statusCode: 429,
-      isRetryable: false,
-      responseHeaders: { "retry-after-ms": "10oops" },
-    }).toObject()
-    const negative = new MessageV2.APIError({
-      message: "429",
-      statusCode: 429,
-      isRetryable: false,
-      responseHeaders: { "retry-after-ms": "-10" },
-    }).toObject()
+    const zero = new MessageV2.APIError({ message: "429", statusCode: 429, isRetryable: false, responseHeaders: { "retry-after-ms": "0" } }).toObject()
+    const garbage = new MessageV2.APIError({ message: "429", statusCode: 429, isRetryable: false, responseHeaders: { "retry-after-ms": "10oops" } }).toObject()
+    const negative = new MessageV2.APIError({ message: "429", statusCode: 429, isRetryable: false, responseHeaders: { "retry-after-ms": "-10" } }).toObject()
     expect(decide(zero).retryAfterMs).toBe(SessionRetry.RETRY_MIN_DELAY)
     expect(decide(garbage).retryAfterMs).toBeUndefined()
     expect(decide(negative).retryAfterMs).toBeUndefined()
@@ -507,12 +462,7 @@ describe("session.retry.retryable", () => {
 
   test("only retries provider-specific compatible 404 responses", () => {
     const generic = new MessageV2.APIError({ message: "missing", statusCode: 404, isRetryable: true }).toObject()
-    const compatible = new MessageV2.APIError({
-      message: "missing",
-      statusCode: 404,
-      isRetryable: true,
-      metadata: { allow404Retry: "true" },
-    }).toObject()
+    const compatible = new MessageV2.APIError({ message: "missing", statusCode: 404, isRetryable: true, metadata: { allow404Retry: "true" } }).toObject()
     expect(decide(generic)).toMatchObject({ retryable: false, kind: "terminal" })
     expect(decide(compatible)).toMatchObject({ retryable: true, kind: "unknown" })
     expect(allowsModelNotFoundRetry({ api: { npm: "@ai-sdk/openai-compatible" } })).toBe(true)
@@ -521,31 +471,15 @@ describe("session.retry.retryable", () => {
   })
 
   test("jitter never exceeds the configured delay ceiling", () => {
-    const decision = {
-      retryable: true,
-      phase: "stream" as const,
-      scope: "live-step" as const,
-      kind: "server" as const,
-      message: "503",
-    }
+    const decision = { retryable: true, phase: "stream" as const, scope: "live-step" as const, kind: "server" as const, message: "503" }
     for (let i = 0; i < 100; i++) expect(SessionRetry.retryDelay(1, decision, 1, 100, 100)).toBeLessThanOrEqual(100)
   })
 
   test("uses the 5-to-60-second network backoff without jitter", () => {
-    const decision = {
-      retryable: true,
-      phase: "stream" as const,
-      scope: "live-step" as const,
-      kind: "network" as const,
-      message: "connection failed",
-    }
+    const decision = { retryable: true, phase: "stream" as const, scope: "live-step" as const, kind: "network" as const, message: "connection failed" }
     const resolved = SessionRetry.resolve(undefined, "test")
     const budget = SessionRetry.budgetFor(resolved, decision)
-    expect(
-      [1, 2, 3, 4, 5].map((attempt) =>
-        SessionRetry.retryDelay(attempt, decision, budget.jitterRatio, budget.initialDelayMs, budget.maxDelayMs),
-      ),
-    ).toStrictEqual([5000, 10000, 20000, 40000, 60000])
+    expect([1, 2, 3, 4, 5].map((attempt) => SessionRetry.retryDelay(attempt, decision, budget.jitterRatio, budget.initialDelayMs, budget.maxDelayMs))).toStrictEqual([5000, 10000, 20000, 40000, 60000])
   })
 
   test("recognizes GPT models by configured or API model ID", () => {
@@ -905,10 +839,7 @@ describe("session.message-v2.fromError", () => {
       responseBody: '{"error":"boom"}',
       isRetryable: false,
     })
-    const result = MessageV2.fromError(error, {
-      providerID: ProviderID.make("openai"),
-      allow404Retry: true,
-    }) as MessageV2.APIError
+    const result = MessageV2.fromError(error, { providerID: ProviderID.make("openai"), allow404Retry: true }) as MessageV2.APIError
     expect(result.data.isRetryable).toBe(true)
   })
 })
@@ -1343,10 +1274,7 @@ describe("retry decision and coordinator budget", () => {
   })
 
   test("treats an Undici transport abort as network-transient, not user abort", () => {
-    const error = Object.assign(new Error("request aborted by transport"), {
-      name: "AbortError",
-      code: "UND_ERR_ABORTED",
-    })
+    const error = Object.assign(new Error("request aborted by transport"), { name: "AbortError", code: "UND_ERR_ABORTED" })
     expect(decide(error)).toMatchObject({ retryable: true, kind: "network" })
   })
 
@@ -1357,11 +1285,7 @@ describe("retry decision and coordinator budget", () => {
       isRetryable: false,
       responseBody: JSON.stringify({ type: "FreeUsageLimitError" }),
     }).toObject()
-    expect(decide(error)).toMatchObject({
-      retryable: false,
-      kind: "terminal",
-      uiMessage: SessionRetry.GO_UPSELL_MESSAGE,
-    })
+    expect(decide(error)).toMatchObject({ retryable: false, kind: "terminal", uiMessage: SessionRetry.GO_UPSELL_MESSAGE })
   })
 
   test("terminal UI notice is emitted without scheduling a retry", async () => {
@@ -1374,17 +1298,12 @@ describe("retry decision and coordinator budget", () => {
     let attempts = 0
     let notices = 0
     const schedule = SessionRetry.policy({
-      onTerminal: (decision) => (decision.uiMessage ? Effect.sync(() => notices++) : Effect.void),
+      onTerminal: (decision) => decision.uiMessage ? Effect.sync(() => notices++) : Effect.void,
       parse: (input) => input as ReturnType<NamedError["toObject"]>,
       set: () => Effect.void,
     })
     await expect(
-      Effect.runPromise(
-        Effect.suspend(() => {
-          attempts++
-          return Effect.fail(error)
-        }).pipe(Effect.retry(schedule)),
-      ),
+      Effect.runPromise(Effect.suspend(() => { attempts++; return Effect.fail(error) }).pipe(Effect.retry(schedule))),
     ).rejects.toBe(error)
     expect(attempts).toBe(1)
     expect(notices).toBe(1)
@@ -1410,18 +1329,11 @@ describe("retry decision and coordinator budget", () => {
       parse: (input) => input as ReturnType<NamedError["toObject"]>,
       set: () => Effect.void,
     })
-    const result = await Effect.runPromise(
-      Effect.suspend(() =>
-        Effect.gen(function* () {
-          attempts++
-          if (attempts === 1) {
-            yield* Effect.sleep("20 millis")
-            return yield* Effect.fail(error)
-          }
-          return "ok"
-        }),
-      ).pipe(Effect.retry(schedule)),
-    )
+    const result = await Effect.runPromise(Effect.suspend(() => Effect.gen(function* () {
+      attempts++
+      if (attempts === 1) { yield* Effect.sleep("20 millis"); return yield* Effect.fail(error) }
+      return "ok"
+    })).pipe(Effect.retry(schedule)))
     expect(result).toBe("ok")
     expect(attempts).toBe(2)
   })

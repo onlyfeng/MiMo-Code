@@ -2509,16 +2509,8 @@ it.live("does not pin an empty parent while creating a child", () =>
         parts: [{ type: "text", text: "child first query" }],
       })
 
-      expect((yield* sessions.get(parent.id)).prompt).toEqual({
-        system: "parent system",
-        systemMode: "append",
-        harness: "default",
-      })
-      expect((yield* sessions.get(child.id)).prompt).toEqual({
-        system: "child system",
-        systemMode: "append",
-        harness: "codex",
-      })
+      expect((yield* sessions.get(parent.id)).prompt).toEqual({ system: "parent system", systemMode: "append", harness: "default" })
+      expect((yield* sessions.get(child.id)).prompt).toEqual({ system: "child system", systemMode: "append", harness: "codex" })
     }),
     { git: true, config: providerCfg },
   ),
@@ -3964,9 +3956,7 @@ it.live("resume continues an incomplete assistant without creating or rewriting 
       yield* llm.text("world")
 
       const candidate = yield* prompt.recovery({ sessionID: chat.id })
-      expect(candidate).toEqual([
-        { kind: "assistant", assistantMessageID: seeded.assistant.id, parentMessageID: seeded.user.id, created: expect.any(Number) },
-      ])
+      expect(candidate).toEqual([{ kind: "assistant", assistantMessageID: seeded.assistant.id, parentMessageID: seeded.user.id, created: expect.any(Number) }])
       const result = yield* prompt.resume({
         sessionID: chat.id,
         assistantMessageID: seeded.assistant.id,

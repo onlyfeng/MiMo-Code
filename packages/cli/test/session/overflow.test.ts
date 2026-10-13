@@ -113,7 +113,8 @@ describe("pressureLevel", () => {
     const model = createModel({ context: 200_000 })
     const cfg = mockCfg({ auto: false })
     const limit = usable({ cfg, model })
-    const tokens = (ratio: number) => ({ input: limit * ratio, output: 0, cache: { read: 0, write: 0 } }) as any
+    const tokens = (ratio: number) =>
+      ({ input: limit * ratio, output: 0, cache: { read: 0, write: 0 } }) as any
 
     expect(contextPressureLevel({ cfg, tokens: tokens(0.5), model })).toBe(1)
     expect(contextPressureLevel({ cfg, tokens: tokens(0.7), model })).toBe(2)
