@@ -91,7 +91,8 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
 
   // Find the last user message; required for system "user.system" pass-through
   const lastUserMsg = input.msgs.findLast((m) => m.info.role === "user")
-  if (!lastUserMsg) return yield* Effect.die(new Error("buildLLMRequestPrefix: no user message in msgs"))
+  if (!lastUserMsg)
+    return yield* Effect.die(new Error("buildLLMRequestPrefix: no user message in msgs"))
   const lastUser = input.prompt
     ? {
         ...(lastUserMsg.info as MessageV2.User),

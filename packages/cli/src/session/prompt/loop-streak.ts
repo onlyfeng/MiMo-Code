@@ -113,7 +113,9 @@ export type StreakCrop = {
 export function estimateBlocks(messages: readonly StreakMessage[]): number {
   return messages.reduce((sum, message) => {
     const tools = message.parts.filter((part) => part.type === "tool").length
-    const others = message.parts.filter((part) => part.type === "reasoning" || part.type === "text").length
+    const others = message.parts.filter(
+      (part) => part.type === "reasoning" || part.type === "text",
+    ).length
     return sum + tools * 2 + others
   }, 0)
 }

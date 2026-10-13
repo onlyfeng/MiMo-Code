@@ -9,7 +9,9 @@ import { testEffect } from "../lib/effect"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 
-const it = testEffect(Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer))
+const it = testEffect(
+  Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer),
+)
 
 afterEach(async () => {
   await Instance.disposeAll()

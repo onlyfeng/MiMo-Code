@@ -146,7 +146,9 @@ function boundaryUser(
   activityLines?: string[],
   coveredUpTo = "msg_01",
 ): MessageV2.WithParts {
-  const activity = activityLines?.length ? `\n# Recent activity\n\n${activityLines.join("\n")}\n` : ""
+  const activity = activityLines?.length
+    ? `\n# Recent activity\n\n${activityLines.join("\n")}\n`
+    : ""
   return {
     info: userInfo(id),
     parts: [
@@ -213,7 +215,7 @@ describe("renderTailDigest", () => {
     ])
     expect(text).toContain('read(path="new.ts")')
     expect(text).not.toContain("prior summary")
-    expect(text).not.toContain('read(path="old.ts")')
+    expect(text).not.toContain("read(path=\"old.ts\")")
   })
 })
 

@@ -98,7 +98,9 @@ describe("selectMessages", () => {
 
   test("an explicit agentID still reaches an actor bucket (subagent dialog is unaffected)", () => {
     const buckets = bucketMessages([msg("m1", "checkpoint-writer-1")])
-    expect(selectMessages(buckets, "checkpoint-writer-1", "ses_actorhost")).toEqual([msg("m1", "checkpoint-writer-1")])
+    expect(selectMessages(buckets, "checkpoint-writer-1", "ses_actorhost")).toEqual([
+      msg("m1", "checkpoint-writer-1"),
+    ])
   })
 
   test("stays empty when the session genuinely has no messages", () => {
