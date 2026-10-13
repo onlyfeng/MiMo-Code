@@ -20,6 +20,12 @@ registry/history commit does not advance either behavior reference below.
 - Validation: package and root `bun run typecheck` exit 0 at `93fdf62d`; root lint reports 3571 warnings and zero errors. The four local hash shards pass 6596 with only the three baseline groups failing that also fail on unmodified `origin/main` locally (`collapse`, `worker-model-api`, combined-process `account/repo`), plus one concurrent-load exec stdout miss that passes on rerun; every `test/mcp/` file passes alone (lifecycle 34 including the RFC1918 sentinel), provider refresh 6+7+2, actor recovery 24, `prompt-effect` 212 with 2 existing skips. SDK regeneration leaves `packages/sdk/src` unchanged; `bun.lock` and every manifest match main. Exact-tip CI remains the publication gate.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-10-13 format-alignment propagation
+
+Direct inherit of main `2a2c815c` (PR #157), no compat override, no owner added or retired. Main reverted 53 Prettier-only hunks in 13 `packages/cli/src` files to upstream `b258d28f` bytes and completed FC-001/FC-008 watch surfaces; FC-003, FC-004, FC-013 and FD-009 record the closed upstream PRs #1282, #1870, #1871 and #1269. The compat merge is `9abe6484`.
+
+Two `src/session/prompt.ts` conflicts, both where a reverted formatting hunk met a compat overlay, resolve to the compat side: the early `resolveStoredAgent`/`isBoundedComputation` placement from the 2026-10-13 synchronization (C05), and DC-CONTEXT-001's `capSyntheticText` cap on skill command content. Verified rather than assumed: every merged `src` file is Prettier-equivalent to the pre-merge compat file under the repository config, so the merge changes no compat behavior; DC-CONTEXT-001, DC-ACTOR-001, DC-MODEL-001 and DC-TUI-001, whose overlays share these files, keep their contracts unchanged. Both shared registries are byte-identical to main after the merge. The compat-different set stays at 120 paths, 42 under `packages/cli/src` and `packages/sdk/src`. Package `bun run typecheck` exits 0 at `9abe6484`; exact-tip CI remains the publication gate.
+
 ## Previous review record — 2026-10-10
 
 - Status: active; all eight DC owners remain compat-owned.
