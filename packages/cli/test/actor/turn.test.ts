@@ -15,9 +15,7 @@ afterEach(async () => {
 
 async function withTurn(
   directory: string,
-  fn: (
-    rt: ManagedRuntime.ManagedRuntime<ActorRegistry.Service | Bus.Service | Session.Service, never>,
-  ) => Promise<void>,
+  fn: (rt: ManagedRuntime.ManagedRuntime<ActorRegistry.Service | Bus.Service | Session.Service, never>) => Promise<void>,
 ) {
   return Instance.provide({
     directory,

@@ -8,12 +8,7 @@ import { evalScript } from "../../src/workflow/sandbox"
 import { MessageID } from "../../src/session/schema"
 import { Agent } from "../../src/agent/agent"
 import { Truncate, Tool } from "../../src/tool"
-import {
-  ToolScriptTool,
-  renderToolScriptDeclarations,
-  viewExecSubtools,
-  type ExecSubPartSnapshot,
-} from "../../src/tool/tool-script"
+import { ToolScriptTool, renderToolScriptDeclarations, viewExecSubtools, type ExecSubPartSnapshot } from "../../src/tool/tool-script"
 import { RecoverableError } from "../../src/tool/recoverable"
 import { toolScriptRegistry, TOOL_SCRIPT_EXCLUDED } from "../../src/tool/tool-script-ref"
 import { Instance } from "../../src/project/instance"
@@ -144,7 +139,9 @@ function fakeDef(id: string, execute: (args: any) => Promise<string>): Tool.Def 
     description: `fake ${id}`,
     parameters: z.object({ value: z.string().optional() }),
     execute: (args: any) =>
-      Effect.promise(() => execute(args)).pipe(Effect.map((output) => ({ title: id, output, metadata: {} }))),
+      Effect.promise(() => execute(args)).pipe(
+        Effect.map((output) => ({ title: id, output, metadata: {} })),
+      ),
   }
 }
 
@@ -858,10 +855,10 @@ describe("exec", () => {
     const boom = fakeDef("boom", async () => {
       throw new Error("kapow")
     })
-    const result = await runToolScript(`await Promise.all([tools.slow({}), tools.boom({})]); return "unreachable"`, [
-      slow,
-      boom,
-    ])
+    const result = await runToolScript(
+      `await Promise.all([tools.slow({}), tools.boom({})]); return "unreachable"`,
+      [slow, boom],
+    )
     const parts = viewExecSubtools(result.metadata)
     expect(result.metadata.status).toBe("code_error")
     expect(parts).toHaveLength(2)
@@ -1077,7 +1074,10 @@ describe("exec", () => {
         throw new Error("kapow")
       }),
     ]
-    const result = await runToolScript(`try { await tools.boom({}) } catch (e) { return e.message }`, defs)
+    const result = await runToolScript(
+      `try { await tools.boom({}) } catch (e) { return e.message }`,
+      defs,
+    )
     expect(result.metadata.status).toBe("completed")
     expect(result.output).toContain("boom: kapow")
     expect(result.output).toContain("→ error")
@@ -1407,7 +1407,10 @@ return r.output;`,
   })
 
   test("files.readText rejects paths outside jail (catchable)", async () => {
-    const result = await runToolScript(`try { await files.readText("/etc/passwd") } catch (e) { return e.message }`, [])
+    const result = await runToolScript(
+      `try { await files.readText("/etc/passwd") } catch (e) { return e.message }`,
+      [],
+    )
     expect(result.metadata.status).toBe("completed")
     expect(result.output).toContain("outside allowed roots")
   })
@@ -1583,7 +1586,10 @@ return r.output;`,
         return Effect.succeed({ title: "probe", output: "ok", metadata: {} })
       },
     }
-    const result = await runToolScript(`return await tools.probe({})`, [probeDef])
+    const result = await runToolScript(
+      `return await tools.probe({})`,
+      [probeDef],
+    )
     expect(result.metadata.status).toBe("completed")
     expect(capturedExtra).toBeDefined()
     expect(capturedExtra!.fromExec).toBe(true)
@@ -1629,6 +1635,7 @@ describe("renderToolScriptDeclarations", () => {
     expect(text).toContain("bash(input:")
     expect(text).toContain("exec_command(input: { cmd: string;")
   })
+
 })
 
 describe("exec MCP dispatch", () => {
@@ -1769,7 +1776,12 @@ describe("exec MCP dispatch", () => {
         attachments: [{ type: "file", mime: "image/png", url: "data:image/png;base64,xxxx" }],
       })),
     }
-    const result = await runToolScript(`const r = await tools.srv_img({}); return r.output`, [], undefined, { mcp })
+    const result = await runToolScript(
+      `const r = await tools.srv_img({}); return r.output`,
+      [],
+      undefined,
+      { mcp },
+    )
     expect(result.output).toContain("here is your chart")
     expect(result.output).not.toContain("attachment(s) dropped")
     expect(result).toMatchObject({

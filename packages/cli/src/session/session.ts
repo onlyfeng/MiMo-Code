@@ -642,21 +642,19 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       }
       yield* Effect.sync(() => SyncEvent.run(Event.Created, { sessionID: result.id, info: result }))
 
-      yield* actorReg
-        .register({
-          sessionID: result.id,
-          actorID: "main",
-          mode: "main",
-          parentActorID: undefined,
-          agent: "main",
-          description: "main agent",
-          contextMode: "full",
-          contextWatermark: undefined,
-          background: false,
-          lifecycle: "persistent",
-          tools: "INHERIT",
-        })
-        .pipe(Effect.ignore)
+      yield* actorReg.register({
+        sessionID: result.id,
+        actorID: "main",
+        mode: "main",
+        parentActorID: undefined,
+        agent: "main",
+        description: "main agent",
+        contextMode: "full",
+        contextWatermark: undefined,
+        background: false,
+        lifecycle: "persistent",
+        tools: "INHERIT",
+      }).pipe(Effect.ignore)
 
       if (!Flag.MIMOCODE_EXPERIMENTAL_WORKSPACES) {
         // This only exist for backwards compatibility. We should not be

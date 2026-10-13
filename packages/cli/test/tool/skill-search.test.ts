@@ -354,8 +354,7 @@ description: Exact skill for direct execution boundary tests.
             "compose-next must be present in Skill.all() as a builtin; otherwise the discovery test below is vacuous",
           ).toBe(true)
 
-          const query =
-            "use compose-next for end to end feature orchestration grill spec implement verify review finish"
+          const query = "use compose-next for end to end feature orchestration grill spec implement verify review finish"
 
           for (const agentName of ["build", "plan"] as const) {
             const agent = yield* agents.get(agentName)

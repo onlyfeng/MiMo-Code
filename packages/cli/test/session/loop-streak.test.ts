@@ -130,7 +130,10 @@ describe("detectStreak", () => {
   })
 
   test("span walks back through identical keys and keeps predecessor as anchor", () => {
-    const span = detectStreak([entry("m0", "prev"), entry("m1", "k"), entry("m2", "k"), entry("m3", "k")], 3)
+    const span = detectStreak(
+      [entry("m0", "prev"), entry("m1", "k"), entry("m2", "k"), entry("m3", "k")],
+      3,
+    )
     expect(span).toEqual({
       fromId: "m1",
       toId: "m3",
@@ -244,7 +247,11 @@ describe("cropMessagesForStreak", () => {
         text("改 AssistantRow"),
         tool("edit", { file_path: "AssistantRow.tsx", new_string: "B" }),
       ]),
-      msg("a3", "assistant", [reasoning(thinking), text("跑测试"), tool("bash", { command: "bun test" })]),
+      msg("a3", "assistant", [
+        reasoning(thinking),
+        text("跑测试"),
+        tool("bash", { command: "bun test" }),
+      ]),
     ]
     const span = detectStreak(
       [
@@ -444,7 +451,12 @@ describe("persisted crop span", () => {
     const withNewStep = [...base, msg("a3", "assistant", [reasoning("fresh plan")])]
     const crop = { fromId: "a1", toId: "a2", key: SAME_KEY, truncated: false }
     expect(applyPersistedCrops(base, [crop]).kept.map((m) => m.info.id)).toEqual(["u0", "a0", "u1"])
-    expect(applyPersistedCrops(withNewStep, [crop]).kept.map((m) => m.info.id)).toEqual(["u0", "a0", "u1", "a3"])
+    expect(applyPersistedCrops(withNewStep, [crop]).kept.map((m) => m.info.id)).toEqual([
+      "u0",
+      "a0",
+      "u1",
+      "a3",
+    ])
   })
 
   test("text-only assistant inside the message span is not cropped", () => {
@@ -480,7 +492,9 @@ describe("persisted crop span", () => {
       msg("a3", "assistant", shared),
       userWithSpan("u1", "a1", "a3", key),
     ]
-    const applied = applyPersistedCrops(messages, [{ fromId: "a1", toId: "a3", key, truncated: false }])
+    const applied = applyPersistedCrops(messages, [
+      { fromId: "a1", toId: "a3", key, truncated: false },
+    ])
     expect(applied.omitted).toEqual(["a1", "a2", "a3"])
     expect(applied.kept.map((m) => m.info.id)).toEqual(["u0", "a1narr", "u1"])
   })

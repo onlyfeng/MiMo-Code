@@ -171,14 +171,7 @@ import { Metrics } from "@/metrics"
 import { ToolResultError } from "../tool/result-error"
 import { errorMessage } from "../util/error"
 import { RecoverableError } from "../tool/recoverable"
-import {
-  shouldAutoDream,
-  shouldAutoDistill,
-  DREAM_TASK,
-  DISTILL_TASK,
-  AUTO_DREAM_TITLE,
-  AUTO_DISTILL_TITLE,
-} from "./auto-dream"
+import { shouldAutoDream, shouldAutoDistill, DREAM_TASK, DISTILL_TASK, AUTO_DREAM_TITLE, AUTO_DISTILL_TITLE } from "./auto-dream"
 import {
   announcedDeferredMcpTools,
   createMcpToolSearchCatalog,
@@ -638,14 +631,7 @@ export interface Interface {
   readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
   readonly startCommand: (input: CommandInput) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, Session.BusyError>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
-  readonly genTitle: (input: {
-    text?: string
-    parts?: GenTitlePart[]
-    locale?: string
-    sessionID?: SessionID
-    providerID?: ProviderID
-    model?: { providerID: ProviderID; modelID: ModelID }
-  }) => Effect.Effect<{ title: string; status: "generated" | "fallback" | "untitled" }>
+  readonly genTitle: (input: { text?: string; parts?: GenTitlePart[]; locale?: string; sessionID?: SessionID; providerID?: ProviderID; model?: { providerID: ProviderID; modelID: ModelID } }) => Effect.Effect<{ title: string; status: "generated" | "fallback" | "untitled" }>
   readonly sweepOrphanAssistants: (sessionID: SessionID, immediate?: boolean) => Effect.Effect<void>
   readonly sweepOrphanToolParts: (
     sessionID: SessionID,
@@ -1067,7 +1053,9 @@ export const layer = Layer.effect(
       model: { providerID: string; id: string }
       task_id?: string
     }) {
-      const hasCP = yield* checkpoint.hasCheckpoint(input.sessionID).pipe(Effect.catch(() => Effect.succeed(false)))
+      const hasCP = yield* checkpoint
+        .hasCheckpoint(input.sessionID)
+        .pipe(Effect.catch(() => Effect.succeed(false)))
       if (!hasCP) return false
 
       const boundary = yield* checkpoint
@@ -2562,7 +2550,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
         }
       }
-      mcpCatalog.current = createMcpToolSearchCatalog(mcpSearchEntries.toSorted((a, b) => a.name.localeCompare(b.name)))
+      mcpCatalog.current = createMcpToolSearchCatalog(
+        mcpSearchEntries.toSorted((a, b) => a.name.localeCompare(b.name)),
+      )
       deferMcpTools = shouldDeferMcpTools(searchMode, mcpCatalog.current.entries, input.model.limit.context)
       const searchExposed =
         deferMcpTools && !useGPTTools && input.model.capabilities.toolcall && !!tools[MCP_TOOL_SEARCH_ID]
@@ -3106,9 +3096,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     })
 
     const lastModel = Effect.fnUntraced(function* (sessionID: SessionID) {
-      const match = yield* sessions.findMessage(sessionID, (m) => m.info.role === "user" && !!m.info.model, {
-        agentID: "*",
-      })
+      const match = yield* sessions.findMessage(
+        sessionID,
+        (m) => m.info.role === "user" && !!m.info.model,
+        { agentID: "*" },
+      )
       if (Option.isSome(match) && match.value.info.role === "user") return match.value.info.model
       return yield* provider.defaultModel()
     })
@@ -4117,8 +4109,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         if (msg.info.finish === "stop" && !msg.info.error) continue
         const assistant = msg.info
         if (!msgs.some((parent) => parent.info.role === "user" && parent.info.id === assistant.parentID)) continue
-        if (msgs.slice(index + 1).some((later) => later.info.role === "user" || later.info.role === "assistant"))
-          continue
+        if (msgs.slice(index + 1).some((later) => later.info.role === "user" || later.info.role === "assistant")) continue
         candidates.push({
           kind: "assistant",
           assistantMessageID: assistant.id,
@@ -4545,7 +4536,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return yield* Effect.gen(function* () {
         const agentMetrics = { tokens_in: 0, tokens_out: 0, files_changed: 0 }
         const trajectoryForStep = (currentMsgs: MessageV2.WithParts[], assistant: MessageV2.Assistant) =>
-          serializeTrajectoryMessages(withAssistantParts(currentMsgs, assistant, MessageV2.parts(assistant.id)))
+          serializeTrajectoryMessages(
+            withAssistantParts(currentMsgs, assistant, MessageV2.parts(assistant.id)),
+          )
 
         const publishAgentRequest = (phase: string, taskType: string) =>
           bus
@@ -4660,6 +4653,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           yield* slog.info("auto-continuing output length", { attempt: outputLengthContinuations })
           return true
         })
+
 
         // Goal stop-condition gate (main agent only). Before honoring a stop,
         // an independent judge model reads the transcript and decides whether
@@ -5341,9 +5335,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               if (Flag.MIMOCODE_EXPERIMENTAL_CRON) {
                 const workspaceRoot = (yield* InstanceState.context).worktree
                 const { CronBridge } = yield* Effect.promise(() => import("@/session/cron-bridge"))
-                AppRuntime.runPromise(CronBridge.use((b) => b.start(sessionID, workspaceRoot))).catch((err) =>
-                  log.error("cron-bridge start failed", { sessionID, error: String(err) }),
-                )
+                AppRuntime.runPromise(
+                  CronBridge.use((b) => b.start(sessionID, workspaceRoot)),
+                ).catch((err) => log.error("cron-bridge start failed", { sessionID, error: String(err) }))
               }
             }
           }
@@ -5515,7 +5509,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // A writer was started and awaited above (AUTO_WRITER_WAIT_MS) and
             // still produced nothing — or memory writing is off, so nothing was
             // attempted at all. Either way this is the ONE state that may compact.
-            if (attempt === "writer-failed" || attempt === "memory-write-off" || attempt === "checkpoint-off") {
+            if (
+              attempt === "writer-failed" ||
+              attempt === "memory-write-off" ||
+              attempt === "checkpoint-off"
+            ) {
               // THE single compaction fallback: no checkpoint existed AND the
               // writer failed / never ran / the bound expired / was never
               // allowed to run at all. Note this is a bare boundary insert, not
@@ -6300,7 +6298,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           query,
                           assistantMessageID: handle.message.id,
                           finish: handle.message.finish,
-                          error: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : sessionErrorText(handle.message.error),
+                          error: Exit.isFailure(exit)
+                            ? Cause.pretty(exit.cause)
+                            : sessionErrorText(handle.message.error),
                           finalText: assistantFinalText(handle.message, MessageV2.parts(handle.message.id)),
                           trajectory: trajectoryForStep(msgs, handle.message),
                           systemPrompt: lastSystemPrompt,
@@ -6424,7 +6424,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
                   // Same as above: the writer ran and failed — not "no checkpoint" —
                   // or memory writing is off and nothing was attempted.
-                  if (attempt2 === "writer-failed" || attempt2 === "memory-write-off" || attempt2 === "checkpoint-off") {
+                  if (
+                    attempt2 === "writer-failed" ||
+                    attempt2 === "memory-write-off" ||
+                    attempt2 === "checkpoint-off"
+                  ) {
                     // THE single compaction fallback (see the token-threshold site).
                     const compacted = yield* compaction.createIfLatest({
                       sessionID,
@@ -6494,7 +6498,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   })
                   break
                 }
-                const recoveryText = textLoopRecoveryAttempts === 0 ? RECOVERY_PROMPT_MILD : RECOVERY_PROMPT_STRONG
+                const recoveryText =
+                  textLoopRecoveryAttempts === 0 ? RECOVERY_PROMPT_MILD : RECOVERY_PROMPT_STRONG
                 // Create a NEW user message at the end of conversation (not append to original)
                 const reentry: MessageV2.User = {
                   id: MessageID.ascending(),
@@ -6553,9 +6558,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
         const final = yield* lastAssistant(sessionID, agentID)
         const finalIsError = final.info.role === "assistant" && !!final.info.error
-        const lastUserForMetrics = yield* sessions.findMessage(sessionID, (m) => m.info.role === "user", {
-          agentID: "*",
-        })
+        const lastUserForMetrics = yield* sessions.findMessage(
+          sessionID,
+          (m) => m.info.role === "user",
+          { agentID: "*" },
+        )
         yield* publishAgentRequest(
           finalIsError ? "error" : "completed",
           Option.isSome(lastUserForMetrics) ? lastUserForMetrics.value.info.agent : final.info.agent,
@@ -6752,11 +6759,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return attempt.exit.value
     })
 
-    const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError> = Effect.fn(
-      "SessionPrompt.shell",
-    )(function* (input: ShellInput) {
-      return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input))
-    })
+    const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError> = Effect.fn("SessionPrompt.shell")(
+      function* (input: ShellInput) {
+        return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input))
+      },
+    )
 
     const commandWork = Effect.fnUntraced(function* (
       input: CommandInput,
@@ -7072,15 +7079,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const session = yield* sessions.get(input.sessionID)
       if (!session.parentID && session.titleSource === "fallback" && session.titleRevision === 0) {
         const history = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
-        yield* title({
-          session,
-          agent: userAgent,
-          history,
-          arguments: input.arguments,
-          files: input.parts?.filter((part) => part.type === "file"),
-          model: userModel,
-          titleLocale: input.titleLocale,
-        })
+        yield* title({ session, agent: userAgent, history, arguments: input.arguments, files: input.parts?.filter(part => part.type === "file"), model: userModel, titleLocale: input.titleLocale })
       }
 
       const result = yield* send({

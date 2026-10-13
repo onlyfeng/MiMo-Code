@@ -530,7 +530,10 @@ export const layer: Layer.Layer<
         { context: [], prompt: undefined },
       )
       const prompt =
-        compacting.prompt ?? [agent.prompt, ...compacting.context].filter((item): item is string => !!item).join("\n\n")
+        compacting.prompt ??
+        [agent.prompt, ...compacting.context]
+          .filter((item): item is string => !!item)
+          .join("\n\n")
       const msgs = structuredClone(history)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
       const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {
