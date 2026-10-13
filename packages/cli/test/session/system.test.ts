@@ -27,13 +27,12 @@ afterEach(() => {
 })
 
 describe("session.system", () => {
-  test("keeps MiniMax CI branch guidance current and singular", () => {
-    const current = "The default branch in this repo is `main`. CI triggers on `main`, `dev`, and `dev/compat`."
-    const legacy = "The default branch in this repo is `main`. CI triggers on `main` and `dev`."
-
-    expect(PROMPT_MINIMAX).toContain(current)
-    expect(PROMPT_MINIMAX).not.toContain(legacy)
-    expect(PROMPT_MINIMAX.split(current)).toHaveLength(2)
+  test("MiniMax prompt carries no repository-specific CI reminder", () => {
+    // The shipped prompt applies to every project a user opens; a sentence about
+    // this repository's branches is a hallucinated fact everywhere else. The
+    // repository's own guidance lives in AGENTS.md, which instruction files deliver.
+    expect(PROMPT_MINIMAX).not.toContain("CI triggers on")
+    expect(PROMPT_MINIMAX).not.toContain("The default branch in this repo")
   })
 
   test("Anthropic template does not contain machine-specific snapshots", () => {
