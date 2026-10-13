@@ -266,7 +266,11 @@ function appendTurnContextBeforeLastMessage(messages: ModelMessage[], user: Mess
   const head = messages.slice(0, -1)
   const userIndex = head.findLastIndex((message) => message.role === "user")
   if (userIndex < 0) return appendTurnContext(messages, user, true)
-  return [...appendTurnContext(head.slice(0, userIndex + 1), user, true), ...head.slice(userIndex + 1), tail]
+  return [
+    ...appendTurnContext(head.slice(0, userIndex + 1), user, true),
+    ...head.slice(userIndex + 1),
+    tail,
+  ]
 }
 
 export interface Interface {
@@ -458,8 +462,7 @@ const live: Layer.Layer<
       const isWorkflow = language instanceof GitLabWorkflowLanguageModel
       // Workflow connectors mutate shared session/tool-executor state and may
       // ask permissions. They have no safe isolated title adapter.
-      if (input.ephemeral && isWorkflow)
-        return yield* Effect.fail(new Error("Ephemeral workflow generation is unsupported"))
+      if (input.ephemeral && isWorkflow) return yield* Effect.fail(new Error("Ephemeral workflow generation is unsupported"))
       const providerSystem =
         input.user.systemMode !== "replace-agent" && (isOpenaiOauth || isWorkflow) && input.user.system?.trim()
           ? [...system, input.user.system]
@@ -496,51 +499,45 @@ const live: Layer.Layer<
             ]
 
       const defaults = {
-        temperature: input.model.capabilities.temperature
-          ? (input.agent.temperature ?? ProviderTransform.temperature(input.model))
-          : undefined,
+        temperature: input.model.capabilities.temperature ? (input.agent.temperature ?? ProviderTransform.temperature(input.model)) : undefined,
         topP: input.agent.topP ?? ProviderTransform.topP(input.model),
         topK: ProviderTransform.topK(input.model),
         maxOutputTokens: ProviderTransform.maxOutputTokens(input.model),
         options,
       }
-      const params = input.ephemeral
-        ? defaults
-        : yield* plugin.trigger(
-            "chat.params",
-            {
-              sessionID: input.sessionID,
-              agent: input.agent.name,
-              model: input.model,
-              provider: item,
-              message: input.user,
-            },
-            {
-              temperature: input.model.capabilities.temperature
-                ? (input.agent.temperature ?? ProviderTransform.temperature(input.model))
-                : undefined,
-              topP: input.agent.topP ?? ProviderTransform.topP(input.model),
-              topK: ProviderTransform.topK(input.model),
-              maxOutputTokens: ProviderTransform.maxOutputTokens(input.model),
-              options,
-            },
-          )
+      const params = input.ephemeral ? defaults : yield* plugin.trigger(
+        "chat.params",
+        {
+          sessionID: input.sessionID,
+          agent: input.agent.name,
+          model: input.model,
+          provider: item,
+          message: input.user,
+        },
+        {
+          temperature: input.model.capabilities.temperature
+            ? (input.agent.temperature ?? ProviderTransform.temperature(input.model))
+            : undefined,
+          topP: input.agent.topP ?? ProviderTransform.topP(input.model),
+          topK: ProviderTransform.topK(input.model),
+          maxOutputTokens: ProviderTransform.maxOutputTokens(input.model),
+          options,
+        },
+      )
 
-      const { headers } = input.ephemeral
-        ? { headers: {} }
-        : yield* plugin.trigger(
-            "chat.headers",
-            {
-              sessionID: input.sessionID,
-              agent: input.agent.name,
-              model: input.model,
-              provider: item,
-              message: input.user,
-            },
-            {
-              headers: {},
-            },
-          )
+      const { headers } = input.ephemeral ? { headers: {} } : yield* plugin.trigger(
+        "chat.headers",
+        {
+          sessionID: input.sessionID,
+          agent: input.agent.name,
+          model: input.model,
+          provider: item,
+          message: input.user,
+        },
+        {
+          headers: {},
+        },
+      )
 
       const tools = resolveTools(input)
       const requestedActiveTools = new Set(input.activeTools ?? Object.keys(input.tools))

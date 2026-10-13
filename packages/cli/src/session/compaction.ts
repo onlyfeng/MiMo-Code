@@ -212,13 +212,9 @@ export const buildTail = Effect.fn("SessionCompaction.buildTail")(function* (inp
   for (let i = rounds.length - 1; i >= 0; i--) {
     const round = shrinkLargeToolResults(rounds[i])
     const cost = Token.estimate(
-      JSON.stringify(
-        yield* Effect.promise(() =>
-          MessageV2.toModelMessages(round, input.model, {
-            languageProvider: input.languageProvider,
-          }),
-        ),
-      ),
+      JSON.stringify(yield* Effect.promise(() => MessageV2.toModelMessages(round, input.model, {
+        languageProvider: input.languageProvider,
+      }))),
     )
     if (used + cost > (input.budget ?? COMPACTION_TAIL_BUDGET)) break
     kept.unshift(round)
@@ -368,7 +364,10 @@ export const layer: Layer.Layer<
     // calls, then erases output of older tool calls to free context space.
     // Scoped to (sessionID, agentID): only inspects messages belonging to the
     // given actor — main-agent messages stay untouched when agentID is set.
-    const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID; agentID?: string }) {
+    const prune = Effect.fn("SessionCompaction.prune")(function* (input: {
+      sessionID: SessionID
+      agentID?: string
+    }) {
       const cfg = yield* config.get()
       if (!cfg.compaction?.prune) return
       log.info("pruning", { agentID: input.agentID ?? "main" })

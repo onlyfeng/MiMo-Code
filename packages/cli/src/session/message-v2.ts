@@ -137,13 +137,7 @@ function isAuthenticationFailure(error: APIError): boolean {
   const body = error.data.responseBody?.toLowerCase() ?? ""
   const message = error.data.message.toLowerCase()
   const text = `${message} ${body}`
-  return (
-    /(?:invalid|expired|missing|malformed)\s*(?:api[ _-]?key|token|credential)|(?:api[ _-]?key|token|credential)\s*(?:invalid|expired|missing|malformed)|\b(?:authentication|authorization)\s+(?:failed|required|invalid|missing)|\binvalid credentials?\b|\baccess denied\b/.test(
-      text,
-    ) ||
-    message.trim() === "unauthorized" ||
-    body.trim() === "unauthorized"
-  )
+  return /(?:invalid|expired|missing|malformed)\s*(?:api[ _-]?key|token|credential)|(?:api[ _-]?key|token|credential)\s*(?:invalid|expired|missing|malformed)|\b(?:authentication|authorization)\s+(?:failed|required|invalid|missing)|\binvalid credentials?\b|\baccess denied\b/.test(text) || message.trim() === "unauthorized" || body.trim() === "unauthorized"
 }
 
 export function isAuthError(error: unknown): boolean {
@@ -658,15 +652,13 @@ export const Assistant = Base.extend({
     }),
   }),
   structured: z.any().optional(),
-  actorResult: z
-    .object({
-      finalText: z.string().optional(),
-      structured: z.unknown().optional(),
-      reportedStatus: z.enum(["success", "partial", "failed", "blocked"]).optional(),
-      reportedSummary: z.string().optional(),
-      warnings: z.array(z.string()).optional(),
-    })
-    .optional(),
+  actorResult: z.object({
+    finalText: z.string().optional(),
+    structured: z.unknown().optional(),
+    reportedStatus: z.enum(["success", "partial", "failed", "blocked"]).optional(),
+    reportedSummary: z.string().optional(),
+    warnings: z.array(z.string()).optional(),
+  }).optional(),
   variant: z.string().optional(),
   finish: z.string().optional(),
 }).meta({
@@ -1119,11 +1111,7 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
         }
         // text/plain and directory files are converted into text parts, ignore them
         if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
-          if (
-            part.url.startsWith("file:") &&
-            part.mime !== "application/pdf" &&
-            !/^(?:image|audio|video)\//.test(part.mime)
-          ) {
+          if (part.url.startsWith("file:") && part.mime !== "application/pdf" && !/^(?:image|audio|video)\//.test(part.mime)) {
             userMessage.parts.push({ type: "text", text: `[Attached local file: ${fileURLToPath(part.url)}]` })
           } else if (options?.stripMedia && isMedia(part.mime)) {
             userMessage.parts.push({

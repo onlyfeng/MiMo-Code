@@ -189,8 +189,8 @@ export function contextPressureLevel(input: {
   if (limit === 0) return 0
 
   const ratio = count / limit
-  if (ratio < 0.5) return 0
-  if (ratio < 0.7) return 1
+  if (ratio < 0.50) return 0
+  if (ratio < 0.70) return 1
   if (ratio < 0.85) return 2
   return 3
 }

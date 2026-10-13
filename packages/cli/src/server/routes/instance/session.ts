@@ -780,10 +780,13 @@ export const SessionRoutes = lazy(() =>
                 },
                 { message: "Invalid cursor" },
               ),
-            agent_id: z.string().optional().meta({
-              description:
-                "Filter by message slice. Omitted = main-agent slice only (default). Pass a subagent's actor id to fetch its slice. Pass `*` to return every message regardless of slice.",
-            }),
+            agent_id: z
+              .string()
+              .optional()
+              .meta({
+                description:
+                  "Filter by message slice. Omitted = main-agent slice only (default). Pass a subagent's actor id to fetch its slice. Pass `*` to return every message regardless of slice.",
+              }),
           })
           .refine((value) => !value.before || value.limit !== undefined, {
             message: "before requires limit",

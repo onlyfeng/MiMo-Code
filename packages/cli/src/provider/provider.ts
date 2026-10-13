@@ -1715,7 +1715,7 @@ const layer: Layer.Layer<
         const headerTimeout = options["headerTimeout"]
         const chunkTimeout =
           typeof userChunkTimeout === "number"
-            ? userChunkTimeout // user-set value (incl. 0 / negative to disable)
+            ? userChunkTimeout  // user-set value (incl. 0 / negative to disable)
             : DEFAULT_CHUNK_TIMEOUT
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
@@ -2006,18 +2006,7 @@ const layer: Layer.Layer<
       throw new Error("no models found")
     })
 
-    return Service.of({
-      prepareRefresh,
-      list,
-      getProvider,
-      getModel,
-      getLanguage,
-      closest,
-      getSmallModel,
-      getVisionModel,
-      defaultModel,
-      resolveModelRef,
-    })
+    return Service.of({ prepareRefresh, list, getProvider, getModel, getLanguage, closest, getSmallModel, getVisionModel, defaultModel, resolveModelRef })
   }),
 )
 
