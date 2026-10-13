@@ -221,11 +221,7 @@ export const GlobalInfo = Info.extend({
 })
 export type GlobalInfo = z.output<typeof GlobalInfo>
 
-export const ManualTitle = z
-  .string()
-  .trim()
-  .min(1)
-  .transform((value) => Array.from(value).slice(0, 80).join(""))
+export const ManualTitle = z.string().trim().min(1).transform(value => Array.from(value).slice(0, 80).join(""))
 
 export const CreateInput = z
   .object({
@@ -239,42 +235,25 @@ export const CreateInput = z
   .optional()
 export type CreateInput = z.output<typeof CreateInput>
 
-export const ForkInput = z.object({
-  sessionID: SessionID.zod,
-  messageID: MessageID.zod.optional(),
-  title: ManualTitle.optional(),
-})
+export const ForkInput = z.object({ sessionID: SessionID.zod, messageID: MessageID.zod.optional(), title: ManualTitle.optional() })
 export const GetInput = SessionID.zod
 export const ChildrenInput = SessionID.zod
 export const RemoveInput = SessionID.zod
-export const TitleSnapshot = z
-  .object({
-    sessionID: SessionID.zod,
-    title: z.string(),
-    titleSource: Info.shape.titleSource,
-    titleRevision: Info.shape.titleRevision,
-  })
-  .meta({ ref: "TitleSnapshot" })
+export const TitleSnapshot = z.object({
+  sessionID: SessionID.zod,
+  title: z.string(),
+  titleSource: Info.shape.titleSource,
+  titleRevision: Info.shape.titleRevision,
+}).meta({ ref: "TitleSnapshot" })
 export type TitleSnapshot = z.infer<typeof TitleSnapshot>
-export const TitleConflict = z.object({
-  name: z.literal("TitleConflictError"),
-  data: z.object({ current: TitleSnapshot }),
-})
-export class TitleRevisionError extends Error {
-  override readonly name = "TitleRevisionError"
-}
+export const TitleConflict = z.object({ name: z.literal("TitleConflictError"), data: z.object({ current: TitleSnapshot }) })
+export class TitleRevisionError extends Error { override readonly name = "TitleRevisionError" }
 export class TitleConflictError extends Error {
   override readonly name = "TitleConflictError"
-  constructor(readonly current: TitleSnapshot) {
-    super("Title changed by another writer")
-  }
-  toObject() {
-    return { name: this.name, data: { current: this.current } }
-  }
+  constructor(readonly current: TitleSnapshot) { super("Title changed by another writer") }
+  toObject() { return { name: this.name, data: { current: this.current } } }
 }
-export const SetTitleInput = z
-  .object({ sessionID: SessionID.zod, title: ManualTitle, expectedRevision: Info.shape.titleRevision })
-  .strict()
+export const SetTitleInput = z.object({ sessionID: SessionID.zod, title: ManualTitle, expectedRevision: Info.shape.titleRevision }).strict()
 export type SetTitleInput = z.infer<typeof SetTitleInput>
 export type AutoTitleInput = SetTitleInput & { source?: "fallback" | "generated" }
 
@@ -284,45 +263,27 @@ export function titleSnapshot(info: Info): TitleSnapshot {
 
 // The read, arbitration, projection and optional event log share this immediate
 // transaction. No process-local mutex can arbitrate a second SQLite connection.
-export function writeTitle(
-  input: SetTitleInput,
-  source: "user" | "fallback" | "generated",
-  mode: "initial" | "machine" = "initial",
-): TitleSnapshot | false {
+export function writeTitle(input: SetTitleInput, source: "user" | "fallback" | "generated", mode: "initial" | "machine" = "initial"): TitleSnapshot | false {
   const parsed = SetTitleInput.parse(input)
-  return Database.transaction(
-    (db) => {
-      const row = db.select().from(SessionTable).where(eq(SessionTable.id, parsed.sessionID)).get()
-      if (!row) throw new NotFoundError({ message: `Session not found: ${parsed.sessionID}` })
-      const current = titleSnapshot(fromRow(row))
-      if (source === "user") {
-        if (parsed.expectedRevision > current.titleRevision)
-          throw new TitleRevisionError("expectedRevision is in the future")
-        if (parsed.expectedRevision < current.titleRevision && current.titleSource === "user")
-          throw new TitleConflictError(current)
-      } else if (
-        current.titleSource === "user" ||
-        (mode === "initial" && current.titleSource !== "fallback") ||
-        parsed.expectedRevision !== current.titleRevision
-      )
-        return false
-      // Revision zero is uninitialized; the first fallback commit records completion even for identical text.
-      if (
-        ((source === "fallback" && current.titleRevision > 0) || mode === "machine") &&
-        current.title === parsed.title
-      )
-        return false
-      if (current.titleRevision === Number.MAX_SAFE_INTEGER) throw new RangeError("Title revision exhausted")
-      const next = { ...current, title: parsed.title, titleSource: source, titleRevision: current.titleRevision + 1 }
-      SyncEvent.run(Event.Updated, {
-        sessionID: parsed.sessionID,
-        previousRevision: current.titleRevision,
-        info: { title: next.title, titleSource: next.titleSource, titleRevision: next.titleRevision },
-      })
-      return next
-    },
-    { behavior: "immediate" },
-  )
+  return Database.transaction((db) => {
+    const row = db.select().from(SessionTable).where(eq(SessionTable.id, parsed.sessionID)).get()
+    if (!row) throw new NotFoundError({ message: `Session not found: ${parsed.sessionID}` })
+    const current = titleSnapshot(fromRow(row))
+    if (source === "user") {
+      if (parsed.expectedRevision > current.titleRevision) throw new TitleRevisionError("expectedRevision is in the future")
+      if (parsed.expectedRevision < current.titleRevision && current.titleSource === "user") throw new TitleConflictError(current)
+    } else if (current.titleSource === "user" || (mode === "initial" && current.titleSource !== "fallback") || parsed.expectedRevision !== current.titleRevision) return false
+    // Revision zero is uninitialized; the first fallback commit records completion even for identical text.
+    if (((source === "fallback" && current.titleRevision > 0) || mode === "machine") && current.title === parsed.title) return false
+    if (current.titleRevision === Number.MAX_SAFE_INTEGER) throw new RangeError("Title revision exhausted")
+    const next = { ...current, title: parsed.title, titleSource: source, titleRevision: current.titleRevision + 1 }
+    SyncEvent.run(Event.Updated, {
+      sessionID: parsed.sessionID,
+      previousRevision: current.titleRevision,
+      info: { title: next.title, titleSource: next.titleSource, titleRevision: next.titleRevision },
+    })
+    return next
+  }, { behavior: "immediate" })
 }
 export const SetArchivedInput = z.object({ sessionID: SessionID.zod, time: z.number().optional() })
 export const SetPermissionInput = z.object({ sessionID: SessionID.zod, permission: Permission.Ruleset.zod })
@@ -336,16 +297,8 @@ export const MessagesInput = z.object({ sessionID: SessionID.zod, limit: z.numbe
 // v1 is replay-only. Its already accepted but provenance-less titles are
 // conservatively protected. New commands may only emit the revisioned v2 event.
 export const LegacyUpdated = SyncEvent.define({
-  type: "session.updated",
-  version: 1,
-  aggregate: "sessionID",
-  schema: z.object({
-    sessionID: SessionID.zod,
-    info: updateSchema(Info.omit({ titleSource: true, titleRevision: true })).extend({
-      share: updateSchema(Info.shape.share.unwrap()).optional(),
-      time: updateSchema(Info.shape.time).optional(),
-    }),
-  }),
+  type: "session.updated", version: 1, aggregate: "sessionID",
+  schema: z.object({ sessionID: SessionID.zod, info: updateSchema(Info.omit({ titleSource: true, titleRevision: true })).extend({ share: updateSchema(Info.shape.share.unwrap()).optional(), time: updateSchema(Info.shape.time).optional() }) }),
 })
 
 export const Event = {
@@ -770,15 +723,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         d
           .select({ session_id: ActorRegistryTable.session_id })
           .from(ActorRegistryTable)
-          .where(
-            and(
-              inArray(
-                ActorRegistryTable.session_id,
-                rows.map((r) => r.id),
-              ),
-              eq(ActorRegistryTable.mode, "peer"),
-            ),
-          )
+          .where(and(inArray(ActorRegistryTable.session_id, rows.map((r) => r.id)), eq(ActorRegistryTable.mode, "peer")))
           .all(),
       )
       const peers = new Set(peerRows.map((r) => r.session_id))
@@ -1341,11 +1286,10 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
 
     const setGeneratedTitle = (input: SetTitleInput) => Effect.sync(() => writeTitle(input, "generated", "machine"))
 
-    const setTitleIfDefault = (input: AutoTitleInput) =>
-      Effect.sync(() => {
-        const { source = "generated", ...command } = input
-        return writeTitle(command, source) !== false
-      })
+    const setTitleIfDefault = (input: AutoTitleInput) => Effect.sync(() => {
+      const { source = "generated", ...command } = input
+      return writeTitle(command, source) !== false
+    })
 
     const setArchived = Effect.fn("Session.setArchived")(function* (input: { sessionID: SessionID; time?: number }) {
       yield* patch(input.sessionID, { time: { archived: input.time } })
@@ -1368,7 +1312,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           if (session.prompt) return session.prompt
           const firstUser = (yield* messages({ sessionID: input.sessionID })).find(
             (message) =>
-              message.info.role === "user" && message.parts.some((part) => !("synthetic" in part) || !part.synthetic),
+              message.info.role === "user" &&
+              message.parts.some((part) => !("synthetic" in part) || !part.synthetic),
           )
           if (firstUser?.info.role === "user") {
             const prompt: PromptConfig = {
