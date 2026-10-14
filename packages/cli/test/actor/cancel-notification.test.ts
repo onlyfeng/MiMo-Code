@@ -720,7 +720,13 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         yield* prompt.prompt({ sessionID: child.sessionID, agentID: child.actorID, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "continue" }] })
         const running = yield* prompt.loop({ sessionID: child.sessionID, agentID: child.actorID, notifyParentOnComplete: true }).pipe(Effect.forkChild)
         yield* Deferred.await(published).pipe(Effect.timeout("5 seconds"))
-        const calls = yield* llm.calls
+        // The published notice wakes the parent's own notification turn, which
+        // may reach the model at any point; count only the child's requests.
+        const childCalls = llm.hits.pipe(Effect.map((hits) => hits.filter((hit) => {
+          const body = JSON.stringify(hit.body)
+          return body.includes('"content":"first"') && !body.includes("You are a title generator")
+        }).length))
+        const calls = yield* childCalls
         const pending = queued ? yield* inbox.send({
           receiverSessionID: child.sessionID,
           receiverActorID: child.actorID,
@@ -741,7 +747,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         }
         yield* Fiber.await(running)
         yield* Fiber.join(cancelling).pipe(Effect.timeout("5 seconds"))
-        expect(yield* llm.calls).toBe(calls)
+        expect(yield* childCalls).toBe(calls)
         if (pending) expect(yield* inbox.has(pending.inboxID)).toBe(false)
         expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
         // Queued work is a new settlement: cancelling it must not be hidden by
