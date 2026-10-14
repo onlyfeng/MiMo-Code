@@ -21,6 +21,7 @@ import { Storage } from "@/storage"
 import { Log } from "../util"
 import { updateSchema } from "../util/update-schema"
 import { MessageV2 } from "./message-v2"
+import { SessionRunState } from "./run-state"
 import { Instance } from "../project/instance"
 import { EffectBridge, InstanceState } from "@/effect"
 import { claimRecoveryTask } from "../task/registry"
@@ -569,6 +570,10 @@ export interface Interface {
     partID: PartID
   }) => Effect.Effect<MessageV2.Part | undefined>
   readonly updatePart: <T extends MessageV2.Part>(part: T) => Effect.Effect<T>
+  readonly mutateToolPart: (
+    input: { sessionID: SessionID; messageID: MessageID; partID: PartID },
+    update: (part: MessageV2.ToolPart | undefined) => MessageV2.ToolPart | undefined,
+  ) => Effect.Effect<MessageV2.ToolPart | undefined>
   readonly updatePartDelta: (input: {
     sessionID: SessionID
     messageID: MessageID
@@ -595,12 +600,13 @@ type Patch = Omit<z.infer<typeof Event.Updated.schema>["info"], "title" | "title
 const db = <T>(fn: (d: Parameters<typeof Database.use>[0] extends (trx: infer D) => any ? D : never) => T) =>
   Effect.sync(() => Database.use(fn))
 
-export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | ActorRegistry.Service> = Layer.effect(
+export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | ActorRegistry.Service | SessionRunState.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const storage = yield* Storage.Service
     const actorReg = yield* ActorRegistry.Service
+    const runs = yield* SessionRunState.Service
 
     const createNext = Effect.fn("Session.createNext")(function* (input: {
       id?: SessionID
@@ -1052,16 +1058,26 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                   sessionID: parent.session_id,
                   agentID: parent.agent_id,
                 } as MessageV2.Info
+                const useful = assistant.role === "assistant" && MessageV2.hasUsefulAssistantParts(MessageV2.parts(assistant.id))
+                // A provider stop that delivered nothing stays resumable after completion
+                // was persisted, until an abandonment settles it.
+                const emptyStop =
+                  assistant.role === "assistant" &&
+                  assistant.finish === "stop" &&
+                  assistant.structured === undefined &&
+                  !assistant.summary &&
+                  !useful &&
+                  !("completed" in assistant.time && MessageV2.AbortedError.isInstance(assistant.error))
                 if (
                   original.role !== "user" ||
                   (input.assistantMessageID
                     ? assistant.role !== "assistant" ||
-                      ("completed" in assistant.time && assistant.finish !== "tool-calls" && assistant.finish !== "length") ||
+                      ("completed" in assistant.time && assistant.finish !== "tool-calls" && assistant.finish !== "length" && !emptyStop) ||
                       assistant.parentID !== input.parentMessageID
                     : assistant.role !== "user")
                 )
                   throw new NotFoundError({ message: "Recovery candidate changed before settlement" })
-                const redispatch = !input.assistantMessageID || !MessageV2.hasUsefulAssistantParts(MessageV2.parts(assistant.id))
+                const redispatch = !input.assistantMessageID || !useful
                 // Register ownership transfer before any postcommit event publisher.
                 Database.effect(() => input.onCommitted?.({ redispatch }))
                 if (input.taskID !== undefined && original.task_id !== undefined && input.taskID !== original.task_id)
@@ -1106,6 +1122,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                   const sibling = { ...row.data, id: row.id, sessionID: row.session_id } as MessageV2.Info
                   if (sibling.role !== "assistant" || sibling.parentID !== input.parentMessageID) continue
                   if (!redispatch && sibling.error) continue
+                  // Summary and structured-output assistants are delivered results, not residue.
+                  if (sibling.structured !== undefined || sibling.summary) continue
                   if (MessageV2.hasUsefulAssistantParts(MessageV2.parts(row.id))) continue
                   SyncEvent.run(MessageV2.Event.Removed, { sessionID: input.sessionID, messageID: row.id })
                 }
@@ -1169,8 +1187,41 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       )
     })
 
+    const mutateToolPart: Interface["mutateToolPart"] = (input, update) => Effect.sync(() =>
+      Database.transaction((db) => {
+        const row = db.select().from(PartTable).where(eq(PartTable.id, input.partID)).get()
+        if (row && (row.session_id !== input.sessionID || row.message_id !== input.messageID || row.data.type !== "tool")) {
+          throw new Error("Tool part identity mismatch")
+        }
+        const current = row ? MessageV2.ToolPart.parse({ ...row.data, id: row.id, messageID: row.message_id, sessionID: row.session_id }) : undefined
+        const next = update(current)
+        if (!next) return
+        if (next.id !== input.partID || next.sessionID !== input.sessionID || next.messageID !== input.messageID ||
+          (current && current.callID !== next.callID)) throw new Error("Tool part identity changed")
+        if (current?.execution === "started") next.execution = "started"
+        if (current?.metadata?.providerExecuted) next.metadata = { ...next.metadata, providerExecuted: true }
+        if (current && (current.state.status === "completed" || current.state.status === "error") &&
+          next.state.status !== current.state.status) next.state = current.state
+        SyncEvent.run(MessageV2.Event.PartUpdated, { sessionID: input.sessionID, part: structuredClone(next), time: Date.now() })
+        const committed = db.select().from(PartTable).where(eq(PartTable.id, input.partID)).get()
+        if (!committed || committed.session_id !== input.sessionID || committed.message_id !== input.messageID) {
+          throw new Error("Tool part was not persisted")
+        }
+        const saved = MessageV2.ToolPart.parse({ ...committed.data, id: committed.id, messageID: committed.message_id, sessionID: committed.session_id })
+        if (saved.execution !== next.execution || saved.callID !== next.callID) throw new Error("Tool execution boundary was not persisted")
+        return saved
+      }, { behavior: "immediate" }),
+    )
+
     const updatePart = <T extends MessageV2.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
+        if (part.type === "tool") {
+          const saved = yield* mutateToolPart({ sessionID: part.sessionID, messageID: part.messageID, partID: part.id }, (current) => ({
+            ...part,
+            execution: current?.execution === "started" ? "started" : undefined,
+          }))
+          return saved as T
+        }
         yield* Effect.sync(() =>
           SyncEvent.run(MessageV2.Event.PartUpdated, {
             sessionID: part.sessionID,
@@ -1261,13 +1312,25 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           ...(parentID && { parentID }),
         })
 
+        const idle = yield* runs.assertNotBusy(input.sessionID, msg.info.agentID ?? "main").pipe(
+          Effect.match({ onFailure: () => false, onSuccess: () => true }),
+        )
         for (const part of msg.parts) {
-          yield* updatePart({
-            ...part,
-            id: PartID.ascending(),
-            messageID: cloned.id,
-            sessionID: session.id,
-          })
+          const copy = { ...part, id: PartID.ascending(), messageID: cloned.id, sessionID: session.id }
+          if (copy.type === "tool") {
+            yield* mutateToolPart({ partID: copy.id, messageID: copy.messageID, sessionID: copy.sessionID }, () => {
+              const source = Database.use((db) => db.select().from(PartTable).where(eq(PartTable.id, part.id)).get())
+              if (!source) return
+              const latest = MessageV2.ToolPart.parse({ ...source.data, id: source.id, sessionID: source.session_id, messageID: source.message_id })
+              if (latest.sessionID !== part.sessionID || latest.messageID !== part.messageID || latest.callID !== copy.callID) {
+                throw new Error("Fork source tool identity changed")
+              }
+              return { ...latest, id: copy.id, sessionID: copy.sessionID, messageID: copy.messageID,
+                execution: latest.execution === "started" || idle ? latest.execution : undefined }
+            })
+          } else {
+            yield* updatePart(copy)
+          }
         }
       }
       return session
@@ -1475,6 +1538,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       removeMessage,
       removePart,
       updatePart,
+      mutateToolPart,
       getPart,
       updatePartDelta,
       findMessage,
@@ -1484,6 +1548,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
 )
 
 export const defaultLayer = layer.pipe(
+  Layer.provide(SessionRunState.defaultLayer),
   Layer.provide(ActorRegistry.defaultLayer),
   Layer.provide(Bus.layer),
   Layer.provide(Storage.defaultLayer),

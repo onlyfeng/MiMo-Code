@@ -9,7 +9,7 @@ export interface Runner<A, E = never, B = never> {
     onInterrupt?: Effect.Effect<A, E>,
   ) => Effect.Effect<Effect.Effect<A, E>, B>
   readonly ensureExclusive: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<A, E | B>
-  readonly startOwned: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<{ readonly runId: number; readonly interruptOwned: Effect.Effect<void>; readonly completion: Effect.Effect<A, E> }, B>
+  readonly startOwned: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<{ readonly runId: number; readonly interruptOwned: Effect.Effect<void>; readonly awaitExit: Effect.Effect<void>; readonly completion: Effect.Effect<A, E> }, B>
   readonly start: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>) => Effect.Effect<void, B>
   readonly startShell: (
     work: Effect.Effect<A, E>,
@@ -263,7 +263,7 @@ export const make = <A, E = never, B = never>(
   const startRunning = (
     work: Effect.Effect<A, E>,
     onInterrupt = defaultOnInterrupt,
-    onReserved?: (id: number) => void,
+    onReserved?: (run: RunHandle<A, E>) => void,
     exclusive = false,
   ): Effect.Effect<Effect.Effect<A, E>, B> =>
     Effect.uninterruptibleMask((restore) =>
@@ -289,7 +289,7 @@ export const make = <A, E = never, B = never>(
             return [idle(id).pipe(Effect.andThen(Effect.interrupt)), st] as const
           const done = yield* Deferred.make<A, E | Cancelled>()
           const run = yield* startRun(work, done, onInterrupt, id)
-          onReserved?.(id)
+          onReserved?.(run)
           return [
             (opts?._testHooks?.beforeRunStart ?? Effect.void).pipe(
               Effect.andThen(Effect.sync(() => Deferred.doneUnsafe(run.start, Effect.void))),
@@ -435,9 +435,11 @@ export const make = <A, E = never, B = never>(
 
   const startOwned = (work: Effect.Effect<A, E>, onInterrupt = defaultOnInterrupt) =>
     Effect.gen(function* () {
-      let runId = 0
-      const completion = yield* startRunning(work, onInterrupt, (id) => { runId = id }, true)
-      return { runId, interruptOwned: makeCancel(false, runId), completion }
+      let reserved: RunHandle<A, E> | undefined
+      const completion = yield* startRunning(work, onInterrupt, (run) => { reserved = run }, true)
+      const run = reserved!
+      // Fiber exit includes the run's finalizers, without depending on an admission waiter.
+      return { runId: run.id, interruptOwned: makeCancel(false, run.id), awaitExit: Fiber.await(run.fiber).pipe(Effect.asVoid), completion }
     })
 
   const cancel = makeCancel(false)

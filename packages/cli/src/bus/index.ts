@@ -1,5 +1,5 @@
 import z from "zod"
-import { Effect, Exit, Layer, PubSub, Scope, Context, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, PubSub, Scope, Context, Stream } from "effect"
 import { EffectBridge } from "@/effect"
 import { Log } from "../util"
 import { BusEvent } from "./bus-event"
@@ -184,7 +184,13 @@ const { runPromise, runSync } = makeRuntime(Service, layer)
 // runSync is safe here because the subscribe chain (InstanceState.get, PubSub.subscribe,
 // Scope.make, Effect.forkScoped) is entirely synchronous. If any step becomes async, this will throw.
 export async function publish<D extends BusEvent.Definition>(def: D, properties: z.output<D["properties"]>) {
-  return runPromise((svc) => svc.publish(def, properties))
+  // Detached publishes can outlive their instance: disposal interrupts a Bus
+  // state that is still initializing, and the event has no subscribers left.
+  return runPromise((svc) =>
+    svc.publish(def, properties).pipe(
+      Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.failCause(cause))),
+    ),
+  )
 }
 
 export function subscribe<D extends BusEvent.Definition>(

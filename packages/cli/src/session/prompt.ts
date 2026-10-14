@@ -49,6 +49,7 @@ import { Global } from "@/global"
 import { NotFoundError, Database, eq } from "@/storage"
 import { SessionTable } from "./session.sql"
 import { Bus } from "../bus"
+import { Question } from "../question"
 import { ProviderTransform } from "../provider"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
@@ -154,6 +155,7 @@ import { Cause, Deferred, Effect, Exit, Layer, Option, Scope, Context } from "ef
 import { EffectLogger } from "@/effect"
 import { InstanceState } from "@/effect"
 import { PARALLEL_READONLY_TOOLS } from "@/tool/gate"
+import * as ToolSettlement from "@/tool/settlement"
 import { ActorTool, type ActorPromptOps } from "@/tool/actor"
 import { SessionRunState } from "./run-state"
 import { ResumeTestHooks } from "./resume-test-hooks"
@@ -658,6 +660,7 @@ export type RecoveryCandidate =
 export interface ResumeTurnInput {
   signal?: AbortSignal
   sessionID: SessionID
+  attempt?: HostModelTransport.ExecutionAttempt
   /** tool/user-resume of an incomplete assistant (existing). */
   assistantMessageID?: MessageID
   /** trailing-user resume: start a new run from this user (no new user message). */
@@ -695,6 +698,7 @@ export const layer = Layer.effect(
     const plugin = yield* Plugin.Service
     const commands = yield* Command.Service
     const permission = yield* Permission.Service
+    const question = yield* Question.Service
     const fsys = yield* AppFileSystem.Service
     const mcp = yield* MCP.Service
     const lsp = yield* LSP.Service
@@ -1031,7 +1035,7 @@ export const layer = Layer.effect(
       // R14 terminal inline: quiet abort still persists cancelled notifications
       // (wake:false skips auto-fork only). Drain parent main inbox NOW so those
       // rows become synthetic <actor-notification> message parts on the parent
-      // session — desktop live/history both read that part for the terminal pill.
+      // session — client live and history both read that part for the terminal pill.
       // drain does NOT start an LLM turn.
       yield* inbox.drain(sessionID, "main").pipe(Effect.ignore)
     })
@@ -1944,7 +1948,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       model: Provider.Model
       session: Session.Info
       tools?: Record<string, boolean>
-      processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall" | "toolGate">
+      processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall" | "toolGate" | "executeTool" | "registerTool">
       bypassAgentCheck: boolean
       messages: MessageV2.WithParts[]
       agentID?: string
@@ -2195,6 +2199,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           Object.keys(execMcp.current).some((id) => !whitelist || whitelist.has(id)))
       for (const item of definitions) {
         const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
+        input.processor.registerTool(item.id)
         tools[item.id] = tool({
           description: item.description,
           inputSchema: jsonSchema(schema),
@@ -2272,6 +2277,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     messageID: input.processor.message.id,
                   })),
                 }
+                yield* ToolSettlement.record(ctx.callID, Effect.succeed(output))
                 yield* plugin.trigger(
                   "tool.execute.after",
                   { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args: beforeOutput.args },
@@ -2306,11 +2312,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 }
                 return output
               }).pipe((body) =>
-                gate.run(
-                  gateTool,
-                  options?.toolCallId ?? "?",
+                input.processor.executeTool(
+                  item.id,
+                  options.toolCallId,
                   body,
-                  { signal: options.abortSignal },
+                  { signal: options.abortSignal, gateTool },
                 ),
               ),
             )
@@ -2432,9 +2438,42 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
               const presentation: Record<string, unknown> = {}
               const progress = toolPresentationProgress(opts.experimental_context)
-              const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.tryPromise({
-                try: () => execute(mcpBeforeOutput.args, {
+              const normalizeResult = (result: Awaited<ReturnType<NonNullable<typeof execute>>>) => Effect.gen(function* () {
+                const normalized = normalizeToolResult(result)
+                const truncated = yield* truncate.output(
+                  neutralizeHarnessTags(normalized.output),
+                  { outcome: normalized.isError ? "error" : "success" },
+                  input.agent,
+                )
+                const metadata = {
+                  ...normalized.metadata,
+                  ...(Object.keys(presentation).length
+                    ? { mcp: { ...normalized.metadata.mcp, _meta: { ...presentation, ...normalized.metadata.mcp._meta } } }
+                    : {}),
+                  truncated: truncated.truncated,
+                  ...(truncated.truncated && { outputPath: truncated.outputPath }),
+                }
+                const attachments = normalized.attachments.map((attachment) => ({
+                  type: "file" as const,
+                  ...attachment,
+                  id: PartID.ascending(),
+                  sessionID: ctx.sessionID,
+                  messageID: input.processor.message.id,
+                }))
+                if (normalized.isError) {
+                  return yield* Effect.fail(new ToolResultError(
+                    truncated.content.trim() || "MCP tool execution failed", metadata, attachments,
+                  ))
+                }
+                return {
+                  normalized,
+                  output: { title: "", metadata, output: truncated.content, attachments },
+                }
+              })
+              const result = yield* ToolSettlement.promise(
+                (signal) => Promise.resolve(execute(mcpBeforeOutput.args, {
                   ...opts,
+                  abortSignal: opts.abortSignal ? AbortSignal.any([opts.abortSignal, signal]) : signal,
                   experimental_context: {
                     onMcpToolProgress: async (meta: Record<string, unknown>) => {
                       Object.assign(presentation, meta)
@@ -2452,9 +2491,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       ])
                     },
                   },
+                })),
+                (exit) => Effect.gen(function* () {
+                  const result = Exit.isSuccess(exit) ? exit.value : yield* Effect.failCause(exit.cause)
+                  yield* ToolSettlement.record(opts.toolCallId, normalizeResult(result).pipe(Effect.map(({ output }) => output)))
+                  return result
                 }),
-                catch: (error) => error,
-              }).pipe(Effect.catch((error) => Effect.gen(function* () {
+              ).pipe(Effect.catch((error) => Effect.gen(function* () {
                 // Catch SDK execution failures here, before direct/exec paths persist
                 // or forward them. Successful results (including diffs) never enter.
                 if (opts.abortSignal?.aborted) return yield* Effect.fail(error)
@@ -2471,44 +2514,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 result,
               )
 
-              const normalized = normalizeToolResult(result)
+              const { normalized, output } = yield* normalizeResult(result)
               log.debug("tool execute done (mcp)", {
                 tool: key,
                 callID,
                 durationMs: Date.now() - startTs,
                 ok: !normalized.isError,
               })
-
-              const truncated = yield* truncate.output(
-                neutralizeHarnessTags(normalized.output),
-                { outcome: normalized.isError ? "error" : "success" },
-                input.agent,
-              )
-              const metadata = {
-                ...normalized.metadata,
-                ...(Object.keys(presentation).length
-                  ? { mcp: { ...normalized.metadata.mcp, _meta: { ...presentation, ...normalized.metadata.mcp._meta } } }
-                  : {}),
-                truncated: truncated.truncated,
-                ...(truncated.truncated && { outputPath: truncated.outputPath }),
-              }
-              const attachments = normalized.attachments.map((attachment) => ({
-                type: "file" as const,
-                ...attachment,
-                id: PartID.ascending(),
-                sessionID: ctx.sessionID,
-                messageID: input.processor.message.id,
-              }))
-
-              if (normalized.isError) {
-                return yield* Effect.fail(
-                  new ToolResultError(
-                    truncated.content.trim() || "MCP tool execution failed",
-                    metadata,
-                    attachments,
-                  ),
-                )
-              }
 
               yield* bus
                 .publish(Metrics.ToolCall, {
@@ -2524,12 +2536,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 })
                 .pipe(Effect.ignore)
 
-              const output = {
-                title: "",
-                metadata,
-                output: truncated.content,
-                attachments,
-              }
               if (opts.abortSignal?.aborted) {
                 yield* input.processor.completeToolCall(opts.toolCallId, output)
               }
@@ -2537,10 +2543,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }).pipe((body) =>
               // Only model-facing calls join this batch. Exec guest calls keep
               // the same execution pipeline with script-controlled concurrency.
-              modelFacing ? gate.run(key, opts?.toolCallId ?? "?", body, { signal: opts.abortSignal }) : body,
+              modelFacing ? input.processor.executeTool(key, opts.toolCallId, body, { signal: opts.abortSignal }) : body,
             ),
           )
         }
+        input.processor.registerTool(key)
         item.execute = (args, opts) => executeMcp(args, opts, true)
         tools[key] = item
         if (searchable && input.model.capabilities.toolcall) {
@@ -3586,7 +3593,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       )
 
       // User-provided images: provenance envelope (synthetic, not tool fiction).
-      // Insert immediately before the first non-synthetic, non-ignored user content so Desktop
+      // Insert immediately before the first non-synthetic, non-ignored user content so client
       // system-reminders / ignored text cannot sit between "## My request:" and the user's text.
       // Predicate excludes MCP resource sources and synthetic parts (isUserAttachmentImagePart).
       const userImages = parts.filter((part): part is Extract<MessageV2.Part, { type: "file" }> =>
@@ -3790,7 +3797,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           const started = part.state.status === "running" ? part.state.time.start : undefined
           if (opts?.before !== undefined && started !== undefined && started > opts.before) continue
           yield* sessions
-            .updatePart({ ...part, state: MessageV2.abortedToolState(part.state) })
+            .mutateToolPart({ sessionID: part.sessionID, messageID: part.messageID, partID: part.id }, (current) => {
+              if (!current || (current.state.status !== "pending" && current.state.status !== "running")) return current
+              return { ...current, state: MessageV2.abortedToolState(current.state) }
+            })
             .pipe(
               Effect.catchCause((cause) =>
                 elog.warn("orphan-tool-part-update-failed", { sessionID, partID: part.id, cause }),
@@ -3809,7 +3819,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     // Sweep orphan tool parts on the busy→idle edge, not only at the next prompt
     // entry. A tool whose abort finalizer was skipped (crash / process kill /
     // registration race) stays `running` in the DB after a natural turn end; the
-    // Desktop UI settles that step as `completed` so the user sees nothing, then
+    // The client UI settles that step as `completed` so the user sees nothing, then
     // the next prompt's entry sweep emits `Tool execution aborted` into the NEW
     // turn's stream. Cleaning on idle closes that window.
     // Wired via module ref: SessionRunState main-work ensuring invokes the
@@ -3930,7 +3940,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           sessionID: input.sessionID,
           agentID: input.agentID ?? "main",
           titleLocale: input.titleLocale,
-          // Trusted user-facing protocol: Desktop/TUI/HTTP/command omit source → user.
+          // Trusted user-facing protocol: client, TUI, HTTP, or command omitting source → user.
           // Internal callers must pass explicit non-user source (spawn/hook).
           source: input.source ?? "user",
           deferInbox: (input.source ?? "user") === "hook" && input.agentID !== undefined && input.agentID !== "main",
@@ -4015,7 +4025,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     /** empty residue = no usable model site: not an assistant prefill target and not a continue target. */
     const isEmptyAssistantResidue = (assistant: MessageV2.Assistant, parts: readonly MessageV2.Part[]) =>
-      assistant.role === "assistant" && !MessageV2.hasUsefulAssistantParts(parts)
+      assistant.structured === undefined && !assistant.summary && !MessageV2.hasUsefulAssistantParts(parts)
+
+    /**
+     * Provider stop alone is not a delivery: an empty stop stays a recovery
+     * candidate, even when completion or a later error was persisted, until
+     * resume or a newer admission abandons it.
+     */
+    const isEmptyStopAssistant = (assistant: MessageV2.Assistant, parts: readonly MessageV2.Part[]) =>
+      assistant.finish === "stop" &&
+      isEmptyAssistantResidue(assistant, parts) &&
+      !("completed" in assistant.time && MessageV2.AbortedError.isInstance(assistant.error))
 
     /**
      * Delete empty-residue assistants under one parent user.
@@ -4104,9 +4124,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // instead keeps every errored message a candidate even after that
         // settlement; FC-001 is authoritative here, so settlement removes the
         // choice. An unsettled turn with `finish === "stop"` and no error
-        // completed normally and is not a candidate either.
-        if ("completed" in msg.info.time && msg.info.finish !== "tool-calls" && msg.info.finish !== "length") continue
-        if (msg.info.finish === "stop" && !msg.info.error) continue
+        // completed normally and is not a candidate either — unless it is empty:
+        // a provider stop alone is not a delivery, so an empty stop stays
+        // resumable from its parent until an abandonment settles it.
+        if (!isEmptyStopAssistant(msg.info, msg.parts)) {
+          if ("completed" in msg.info.time && msg.info.finish !== "tool-calls" && msg.info.finish !== "length") continue
+          if (msg.info.finish === "stop" && !msg.info.error) continue
+        }
         const assistant = msg.info
         if (!msgs.some((parent) => parent.info.role === "user" && parent.info.id === assistant.parentID)) continue
         if (msgs.slice(index + 1).some((later) => later.info.role === "user" || later.info.role === "assistant")) continue
@@ -5082,8 +5106,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           loopStreakCropped = false
           // F55: only main agent sets session status to busy; subagent runners
           // must not touch session-level status (Runner.onBusy is Effect.void
-          // for non-main actors per F47).
-          if (!agentID || agentID === "main") yield* status.set(sessionID, { type: "busy" })
+          // for non-main actors per F47). Do not clobber an in-flight retry row.
+          if (!agentID || agentID === "main") {
+            const current = yield* status.get(sessionID)
+            if (current.type !== "retry") yield* status.set(sessionID, { type: "busy" })
+          }
           // Every recovery owns its original user, including main without an Actor model identity.
           if (!recovery && !deferInbox) yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
           yield* slog.info("loop", { step })
@@ -5726,11 +5753,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     },
                   })
                   const run = yield* runner()
+                  handle.registerTool("StructuredOutput")
                   tools["StructuredOutput"] = {
                     ...outputTool,
                     execute(args, options) {
                       return run.promise(
-                        handle.toolGate.run(
+                        handle.executeTool(
                           "StructuredOutput",
                           options.toolCallId,
                           Effect.promise(async () => outputTool.execute!(args, options)),
@@ -7157,9 +7185,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       )
     })
 
+    // A pending permission or question still belongs to the interrupted turn.
+    const resumeInputPending = Effect.fn("SessionPrompt.resumeInputPending")(function* (sessionID: SessionID) {
+      return (yield* permission.list()).some((item) => item.sessionID === sessionID) ||
+        (yield* question.list()).some((item) => item.sessionID === sessionID)
+    })
+
     const startResumeTurn = Effect.fn("SessionPrompt.startResumeTurn")(function* (input: {
       sessionID: SessionID
       actorID: string
+      attempt?: HostModelTransport.ExecutionAttempt
       assistantMessageID?: MessageID
       userMessageID?: MessageID
       exclusiveHook?: boolean
@@ -7185,13 +7220,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const assistantMessageID = candidate.kind === "assistant" ? candidate.assistantMessageID : undefined
       const parentMessageID = candidate.kind === "assistant" ? candidate.parentMessageID : candidate.userMessageID
       const strictTail = candidate.kind === "parent-user"
+      if (yield* resumeInputPending(input.sessionID)) return yield* Effect.fail(new Session.BusyError(input.sessionID))
       ResumeTestHooks.onPlanResolved?.({
         action: strictTail || !MessageV2.hasUsefulAssistantParts(MessageV2.parts(assistantMessageID!)) ? "user-resume" : "tool-resume",
         assistantMessageID,
         parentMessageID,
       })
       if (input.exclusiveHook && ResumeTestHooks.beforeExclusiveOccupy) yield* ResumeTestHooks.beforeExclusiveOccupy()
-      const admitted = yield* Deferred.make<void, InstanceType<typeof NotFoundError> | Session.RecoveryConflictError>()
+      // An embedding host admits the exact reviewed target and owns the attempt until the run exits.
+      const execution = input.attempt
+        ? {
+            attempt: input.attempt,
+            directory: (yield* InstanceState.context).directory,
+            sessionID: input.sessionID,
+            userMessageID: parentMessageID,
+          }
+        : undefined
+      const hostInput = execution
+        ? { ...execution, target: assistantMessageID ? { assistantMessageID } : { userMessageID: parentMessageID } }
+        : undefined
+      let activation: HostModelTransport.ExecutionActivation | void = undefined
+      const admitted = yield* Deferred.make<
+        void,
+        InstanceType<typeof NotFoundError> | Session.RecoveryConflictError | Session.BusyError
+      >()
       const recovered: { id?: MessageID; parentID?: MessageID; redispatch?: boolean } = {}
       const abandon = Effect.suspend(() =>
         !strictTail && recovered.redispatch && recovered.parentID
@@ -7212,6 +7264,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       )
       const validate = Effect.gen(function* () {
         if (ResumeTestHooks.beforeAdmissionRecheck) yield* ResumeTestHooks.beforeAdmissionRecheck()
+        if (yield* resumeInputPending(input.sessionID)) return yield* Effect.fail(new Session.BusyError(input.sessionID))
         // A model override is resolved before the candidate is settled: a model
         // that cannot be resolved must not leave the turn abandoned with no
         // successor, which is what settling first would do.
@@ -7233,9 +7286,32 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               new NotFoundError({ message: "Actor recovery candidate changed during validation" }),
             )
         }
+        if (hostInput) {
+          yield* Effect.tryPromise({
+            try: () => Promise.resolve(HostModelTransport.prepareExecution(hostInput)),
+            catch: () => new NotFoundError({ message: "Resume admission did not complete" }),
+          })
+          // Host preparation is asynchronous: recheck the reviewed target before the host admits it.
+          if (yield* resumeInputPending(input.sessionID)) return yield* Effect.fail(new Session.BusyError(input.sessionID))
+          const current = yield* recoveryCandidates(input.sessionID, input.actorID)
+          if (
+            !current.some((item) =>
+              item.kind === "assistant"
+                ? item.assistantMessageID === assistantMessageID && item.parentMessageID === parentMessageID
+                : !assistantMessageID && item.userMessageID === parentMessageID,
+            )
+          )
+            return yield* Effect.fail(new NotFoundError({ message: "Recovery candidate changed during host preparation" }))
+        }
         // Runner owns the actor before the synchronous commit. Validation,
         // optional task binding, settlement and ownership handoff cannot yield.
-        yield* sessions.commitRecoveryCandidate({
+        // The host admits the attempt before history changes; the commit rechecks the candidate.
+        yield* Effect.uninterruptible(Effect.try({
+          try: () => {
+            if (hostInput) activation = HostModelTransport.admitExecution(hostInput)
+          },
+          catch: () => new NotFoundError({ message: "Resume admission did not complete" }),
+        }).pipe(Effect.andThen(sessions.commitRecoveryCandidate({
           sessionID: input.sessionID,
           actorID: input.actorID,
           assistantMessageID,
@@ -7249,57 +7325,67 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             recovered.parentID = parentMessageID
             input.onCommitted?.()
           },
-        })
+        }))))
         if (input.onAdmitted) yield* input.onAdmitted
       })
-      const owned = yield* state.startOwned(
-        input.sessionID,
-        input.actorID,
-        lastAssistant(input.sessionID, input.actorID),
-        validate.pipe(
-          Effect.onExit((exit) => Deferred.done(admitted, Exit.isSuccess(exit) ? Exit.void : exit).pipe(Effect.ignore)),
-          Effect.orDie,
-          Effect.andThen(Effect.suspend(() => ResumeTestHooks.afterAdmissionBeforeCleanup?.() ?? Effect.void)),
-          Effect.andThen(
-            Effect.suspend(() =>
-              runLoop(
-                input.sessionID,
-                input.actorID,
-                input.titleLocale,
-                input.resumeIdentity,
-                recovered.parentID,
-                // The settled candidate, not the caller's argument: an actor
-                // resume selects the latest candidate itself.
-                recovered.redispatch ? undefined : recovered.id,
-                input.model,
-                undefined,
-                recovered.redispatch,
-                recovered.redispatch ? "user" : "hook",
-                recovered.redispatch ? recovered.parentID : undefined,
-                strictTail,
-              ),
-            ).pipe(
-              Effect.ensuring(
-                abandon.pipe(
-                  Effect.catchCause((cause) =>
-                    elog.warn("recovered-assistant-abandon-failed", {
-                      sessionID: input.sessionID,
-                      messageID: recovered.id,
-                      cause,
-                    }),
-                  ),
+      const admit = validate.pipe(
+        Effect.onExit((exit) => Deferred.done(admitted, Exit.isSuccess(exit) ? Exit.void : exit).pipe(Effect.ignore)),
+        Effect.orDie,
+      )
+      const work = Effect.suspend(() => (activation ? Effect.promise(activation.beforeWork) : Effect.void)).pipe(
+        Effect.andThen(Effect.suspend(() => ResumeTestHooks.afterAdmissionBeforeCleanup?.() ?? Effect.void)),
+        Effect.andThen(
+          Effect.suspend(() =>
+            runLoop(
+              input.sessionID,
+              input.actorID,
+              input.titleLocale,
+              input.resumeIdentity,
+              recovered.parentID,
+              // The settled candidate, not the caller's argument: an actor
+              // resume selects the latest candidate itself.
+              recovered.redispatch ? undefined : recovered.id,
+              input.model,
+              undefined,
+              recovered.redispatch,
+              recovered.redispatch ? "user" : "hook",
+              recovered.redispatch ? recovered.parentID : undefined,
+              strictTail,
+            ),
+          ).pipe(
+            Effect.provideService(HostModelTransport.ExecutionScope, execution),
+            Effect.ensuring(
+              abandon.pipe(
+                Effect.catchCause((cause) =>
+                  elog.warn("recovered-assistant-abandon-failed", {
+                    sessionID: input.sessionID,
+                    messageID: recovered.id,
+                    cause,
+                  }),
                 ),
               ),
-              // Durable rows may outlive their original wake fiber. Join this
-              // runner through the normal inbox lifecycle and drain after it settles.
-              Effect.onExit((exit) =>
-                isTurnCancelled(exit)
-                  ? Effect.void
-                  : inbox.wakePending(input.sessionID, input.actorID).pipe(Effect.ignoreCause),
-              ),
+            ),
+            // Durable rows may outlive their original wake fiber. Join this
+            // runner through the normal inbox lifecycle and drain after it settles.
+            Effect.onExit((exit) =>
+              isTurnCancelled(exit)
+                ? Effect.void
+                : inbox.wakePending(input.sessionID, input.actorID).pipe(Effect.ignoreCause),
             ),
           ),
         ),
+      )
+      const owned = yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const owned = yield* state.startOwned(input.sessionID, input.actorID, lastAssistant(input.sessionID, input.actorID), work, admit)
+          // The attempt ends with the run fiber, including an attempt that was never admitted.
+          if (execution)
+            yield* owned.awaitExit.pipe(
+              Effect.andThen(Effect.sync(() => HostModelTransport.finishExecution(execution.attempt))),
+              Effect.forkIn(scope),
+            )
+          return owned
+        }),
       )
       const completion = owned.completion
       const admission = yield* Effect.raceFirst(
@@ -7310,7 +7396,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       yield* owned.interruptOwned
       if (Cause.hasInterruptsOnly(admission.cause)) return yield* Effect.failCause(admission.cause)
       const error = Cause.squash(admission.cause)
-      if (error instanceof NotFoundError || error instanceof Session.RecoveryConflictError) return yield* Effect.fail(error)
+      if (error instanceof NotFoundError || error instanceof Session.RecoveryConflictError || error instanceof Session.BusyError)
+        return yield* Effect.fail(error)
       return yield* Effect.fail(new NotFoundError({ message: "Resume admission did not complete" }))
     })
 
@@ -7449,6 +7536,7 @@ export const appLayer = Layer.suspend(() =>
     Layer.provide(SessionProcessor.defaultLayer),
     Layer.provide(Command.appLayer),
     Layer.provide(Permission.defaultLayer),
+    Layer.provide(Question.defaultLayer),
     Layer.provide(LSP.defaultLayer),
     Layer.provide(ToolRegistry.defaultLayer),
     Layer.provide(Truncate.defaultLayer),

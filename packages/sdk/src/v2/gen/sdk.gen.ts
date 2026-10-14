@@ -2723,9 +2723,9 @@ export class Session2 extends HeyApiClient {
   }
 
   /**
-   * Resume from a trailing user
+   * Resume an exact recovery target
    *
-   * Start the next turn from a trailing user message without creating another user message.
+   * Admit a user or assistant recovery target without creating another user message. Omit the target to select the latest candidate.
    */
   public resumeUser<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2738,6 +2738,11 @@ export class Session2 extends HeyApiClient {
       modelProviderID?: string
       modelID?: string
       userMessageID?: string
+      assistantMessageID?: string
+      attempt?: {
+        requestId: string
+        attemptId: string
+      }
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2755,6 +2760,8 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "modelProviderID" },
             { in: "query", key: "modelID" },
             { in: "body", key: "userMessageID" },
+            { in: "body", key: "assistantMessageID" },
+            { in: "body", key: "attempt" },
           ],
         },
       ],

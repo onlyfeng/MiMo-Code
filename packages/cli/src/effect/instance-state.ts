@@ -1,4 +1,4 @@
-import { Effect, Fiber, ScopedCache, Scope, Context } from "effect"
+import { Deferred, Effect, Fiber, ScopedCache, Scope, Context } from "effect"
 import * as EffectLogger from "./logger"
 import { Instance, type InstanceContext } from "@/project/instance"
 import { LocalContext } from "@/util"
@@ -10,7 +10,7 @@ const TypeId = "~opencode/InstanceState"
 
 export interface InstanceState<A, E = never, R = never> {
   readonly [TypeId]: typeof TypeId
-  readonly cache: ScopedCache.ScopedCache<number, A, E, R>
+  readonly cache: ScopedCache.ScopedCache<number, Deferred.Deferred<A, E>, never, R>
   readonly contexts: Map<string, Set<InstanceContext>>
   readonly generations: Map<number, InstanceContext>
   readonly disposed: WeakSet<InstanceContext>
@@ -45,9 +45,27 @@ export const make = <A, E = never, R = never>(
 ): Effect.Effect<InstanceState<A, E, Exclude<R, Scope.Scope>>, never, R | Scope.Scope> =>
   Effect.gen(function* () {
     const generations = new Map<number, InstanceContext>()
-    const cache = yield* ScopedCache.make<number, A, E, R>({
+    const cache = yield* ScopedCache.make<number, Deferred.Deferred<A, E>, never, R>({
       capacity: Number.POSITIVE_INFINITY,
-      lookup: (generation) => init(generations.get(generation)!),
+      lookup: (generation) =>
+        Effect.gen(function* () {
+          const ctx = generations.get(generation)!
+          const workspace = yield* workspaceID
+          const entry = yield* Effect.scope
+          // Register resources first so entry closure stops their users before releasing them.
+          const resources = yield* Scope.fork(entry)
+          const result = yield* Deferred.make<A, E>()
+          yield* Effect.suspend(() => init(ctx)).pipe(
+            Scope.provide(resources),
+            Effect.provideService(InstanceRef, ctx),
+            Effect.provideService(WorkspaceRef, workspace),
+            Effect.interruptible,
+            Deferred.into(result),
+            // Enter Deferred.into even if invalidation precedes the fiber's first scheduled step.
+            Effect.forkIn(entry, { uninterruptible: true }),
+          )
+          return result
+        }).pipe(Effect.uninterruptible),
     })
     const contexts = new Map<string, Set<InstanceContext>>()
     const disposed = new WeakSet<InstanceContext>()
@@ -93,7 +111,8 @@ export const get = <A, E, R>(self: InstanceState<A, E, R>) =>
     if (existing) existing.add(instance)
     else self.contexts.set(instance.directory, new Set([instance]))
     self.generations.set(instance.generation, instance)
-    const value = yield* ScopedCache.get(self.cache, instance.generation)
+    const result = yield* ScopedCache.get(self.cache, instance.generation).pipe(Effect.uninterruptible)
+    const value = yield* Deferred.await(result)
     if (!instance.disposing && !self.disposed.has(instance)) return value
     yield* ScopedCache.invalidate(self.cache, instance.generation)
     return yield* Effect.interrupt

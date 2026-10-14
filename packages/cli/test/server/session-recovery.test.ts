@@ -6,12 +6,19 @@ import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
 import { Session } from "../../src/session"
 import { SessionPrompt } from "../../src/session/prompt"
+import { HostModelTransport } from "../../src/provider/host-transport"
+import { SessionStatus } from "../../src/session/status"
+import { SessionRunState } from "../../src/session/run-state"
+import { ActorRegistry } from "../../src/actor/registry"
+import { Question } from "../../src/question"
+import { Permission } from "../../src/permission"
 import { ResumeTestHooks } from "../../src/session/resume-test-hooks"
 import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Log } from "../../src/util"
 import { Bus } from "../../src/bus"
 import { tmpdir } from "../fixture/fixture"
+import { startScriptedLLMServer, textStopResponse } from "../lib/scripted-llm-server"
 
 void Log.init({ print: false })
 
@@ -312,11 +319,136 @@ test("SDK serializes resume titleLocale in the query string", async () => {
   expect(captured!.body).toBeNull()
 })
 
-// [TP-SR-R21-07] Recovery predicate: completed+tool-calls / completed+length / no completed are candidates;
-// completed+stop / completed+other are not.
+// [TP-SR-R21-26] [TP-SR-R21-30] [TP-SR-R21-31] [TP-R8-25] [TP-RUN-R4-08]
+for (const mode of ["success", "host-reject", "commit-reject", "changed-during-host", "cancel-during-host", "cancel-during-work"] as const) {
+  test(`resume host attempt lifecycle ${mode}`, async () => {
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
+    const stub = startScriptedLLMServer([{ lines: textStopResponse("host-bound recovery") }])
+    const attempt = { requestId: "resume-request", attemptId: "resume-attempt" }
+    const prepared: HostModelTransport.ExecutionAdmission[] = []
+    const admitted: HostModelTransport.ExecutionAdmission[] = []
+    const finished: HostModelTransport.ExecutionAttempt[] = []
+    const scopes: HostModelTransport.ModelCallScope[] = []
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    HostModelTransport.set({
+      userMessage() {},
+      async prepareExecution(input) {
+        prepared.push(input)
+        if (mode !== "cancel-during-work") entered.resolve()
+        if (mode === "host-reject") throw new Error("host refused preparation")
+        if (mode === "changed-during-host" || mode === "cancel-during-host") await release.promise
+      },
+      admitExecution(input) {
+        if (mode === "commit-reject") throw new Error("host refused commit")
+        admitted.push(input)
+        return { beforeWork: async () => {
+          if (mode === "cancel-during-work") { entered.resolve(); await release.promise }
+        } }
+      },
+      finishExecution(input) { finished.push(input) },
+      modelCall(input, call) { scopes.push(input); return call() },
+    })
+    try {
+      await Bun.write(`${tmp.path}/mimocode.json`, JSON.stringify({
+        enabled_providers: ["alibaba"],
+        provider: { alibaba: { options: { apiKey: "test-key", baseURL: `${stub.origin}/v1` } } },
+        agent: { build: { model: "alibaba/qwen-plus" } },
+      }))
+      await Instance.provide({ directory: tmp.path, fn: () => AppRuntime.runPromise(Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const prompt = yield* SessionPrompt.Service
+        const session = yield* sessions.create({ title: "host attempt resume" })
+        const user = yield* sessions.updateMessage({ id: MessageID.ascending(), role: "user", sessionID: session.id,
+          agent: "build", model: { providerID: ProviderID.make("alibaba"), modelID: ModelID.make("qwen-plus") }, time: { created: Date.now() } })
+        yield* sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID: user.id, type: "text", text: "Original host input" })
+        const target = yield* sessions.updateMessage({ id: MessageID.ascending(), role: "assistant", sessionID: session.id,
+          parentID: user.id, agent: "build", mode: "build", modelID: ModelID.make("qwen-plus"), providerID: ProviderID.make("alibaba"),
+          path: { cwd: tmp.path, root: tmp.path }, time: { created: Date.now() }, cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        })
+        yield* sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID: target.id, type: "text", text: "old half answer" })
+        const before = yield* sessions.messages({ sessionID: session.id })
+        const activity: string[] = []
+        const offStatus = Bus.subscribe(SessionStatus.Event.Status, (event) => {
+          if (event.properties.sessionID === session.id) activity.push(event.properties.status.type)
+        })
+        const app = Server.Default().app
+        const request = Promise.resolve(app.request(`/session/${session.id}/resume?directory=${encodeURIComponent(tmp.path)}`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assistantMessageID: target.id, attempt }),
+        }))
+        yield* Effect.promise(() => entered.promise).pipe(Effect.timeout("5 seconds"))
+        expect(prepared).toEqual([{ attempt, directory: tmp.path, sessionID: session.id, userMessageID: user.id, target: { assistantMessageID: target.id } }])
+        expect(finished).toEqual([])
+        if (mode === "changed-during-host") {
+          yield* sessions.updateMessage({ ...user, id: MessageID.ascending(), time: { created: Date.now() + 1 } })
+          release.resolve()
+        }
+        if (mode === "cancel-during-work") {
+          expect((yield* Effect.promise(() => request)).status).toBe(202)
+          const snapshot = yield* Effect.promise(() => Promise.resolve(app.request(`/session/status?directory=${encodeURIComponent(tmp.path)}`)).then(response => response.json()))
+          expect(snapshot[session.id]).toEqual({ type: "busy" })
+          expect(activity).toEqual(["busy"])
+          expect(scopes).toEqual([])
+          expect(stub.captures).toHaveLength(0)
+        }
+        if (mode === "cancel-during-host" || mode === "cancel-during-work") {
+          yield* prompt.cancel(session.id)
+          release.resolve()
+        }
+        const response = yield* Effect.promise(() => request)
+        for (let i = 0; i < 100 && finished.length === 0; i++) yield* Effect.sleep("20 millis")
+        expect(finished).toEqual([attempt])
+        offStatus()
+        if (mode === "cancel-during-work") {
+          expect(activity.at(-1)).toBe("idle")
+          expect(yield* SessionStatus.Service.use(status => status.get(session.id))).toEqual({ type: "idle" })
+        }
+        const after = yield* sessions.messages({ sessionID: session.id })
+        expect(admitted).toEqual(mode === "success" || mode === "cancel-during-work" ? prepared : [])
+        if (mode === "success") {
+          expect(response.status).toBe(202)
+          expect(stub.captures).toHaveLength(1)
+          expect(scopes).toEqual([expect.objectContaining({ executionAttempt: attempt, directory: tmp.path, sessionID: session.id, userMessageID: user.id, assistantMessageID: expect.any(String) })])
+          expect(scopes[0].assistantMessageID).not.toBe(target.id)
+          // FC-001: admission settles the reviewed assistant instead of trimming it.
+          expect(after.find((message) => message.info.id === target.id)?.info).toMatchObject({ error: { name: "MessageAbortedError" } })
+        } else {
+          expect(response.status).toBe(mode === "cancel-during-work" ? 202 : 404)
+          expect(scopes).toEqual([])
+          expect(stub.captures).toHaveLength(0)
+          const kept = after.filter((message) => before.some((old) => old.info.id === message.info.id))
+          if (mode === "cancel-during-work") {
+            // Cancellation after admission belongs to the accepted generation (FC-001).
+            expect(kept.map((message) => message.info.id)).toEqual(before.map((message) => message.info.id))
+            expect(kept.find((message) => message.info.id === target.id)?.info).toMatchObject({ error: { name: "MessageAbortedError" } })
+          } else expect(kept).toEqual(before)
+        }
+      })) })
+    } finally {
+      release.resolve()
+      await Instance.disposeAll()
+      HostModelTransport.set(undefined)
+      await stub.stop()
+    }
+  }, 30_000)
+}
+
+const finalDeliveries = [
+  { structured: { answer: 4 } },
+  { structured: false },
+  { structured: 0 },
+  { structured: "" },
+  { structured: null },
+  { summary: true },
+]
+
+// [TP-SR-R21-07]
 describe("recovery candidate predicate", () => {
-  async function setupAssistant(overrides: Partial<{ finish: string; completed: boolean; error: boolean }>) {
-    await using tmp = await tmpdir({ git: true })
+  async function setupAssistant(overrides: Partial<{
+    finish: string; completed: boolean; error: boolean; text: string; structured: unknown; summary: boolean
+  }>) {
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     // Await so `await using` disposal (rm -rf tmpdir) cannot race provide's setup writes.
     return await Instance.provide({
       directory: tmp.path,
@@ -348,11 +480,23 @@ describe("recovery candidate predicate", () => {
             : { created: Date.now() },
           ...(overrides.finish ? { finish: overrides.finish as "stop" | "length" | "tool-calls" | "other" } : {}),
           ...(overrides.error ? { error: { name: "APIError", data: { message: "model unavailable", statusCode: 503, isRetryable: true } } } : {}),
+          ...(overrides.structured !== undefined ? { structured: overrides.structured } : {}),
+          ...(overrides.summary ? { summary: overrides.summary } : {}),
         } as Parameters<typeof sessions.updateMessage>[0])
+        if (overrides.text) yield* sessions.updatePart({
+          id: PartID.ascending(), sessionID: session.id, messageID: assistant.id,
+          type: "text", text: overrides.text,
+        })
         const candidates = yield* SessionPrompt.Service.use((svc) =>
           svc.recovery({ sessionID: session.id, agentID: "main" }),
         )
-        return { candidates, assistantId: assistant.id }
+        const rejected = candidates.length === 0
+          ? yield* Effect.promise(() => Promise.resolve(Server.Default().app.request(
+              `/session/${session.id}/resume?directory=${encodeURIComponent(tmp.path)}`,
+              { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+            )))
+          : undefined
+        return { candidates, assistantId: assistant.id, resumeStatus: rejected?.status }
       })),
     })
   }
@@ -375,9 +519,25 @@ describe("recovery candidate predicate", () => {
     expect(result.candidates.length).toBe(1)
   })
 
-  test("completed + stop → NOT candidate", async () => {
-    const result = await setupAssistant({ completed: true, finish: "stop" })
+  test("completed + stop with final text → NOT candidate", async () => {
+    const result = await setupAssistant({ completed: true, finish: "stop", text: "final answer" })
     expect(result.candidates.length).toBe(0)
+  })
+
+  for (const completed of [false, true]) {
+    for (const delivery of finalDeliveries) {
+      test(`stop + ${JSON.stringify(delivery)} completed=${completed} is not resumed`, async () => {
+        const result = await setupAssistant({ finish: "stop", completed, ...delivery })
+        expect(result.candidates).toEqual([])
+        expect(result.resumeStatus).toBe(404)
+      })
+    }
+  }
+
+  test("completed + content-filter with no output → NOT candidate", async () => {
+    const result = await setupAssistant({ completed: true, finish: "content-filter" })
+    expect(result.candidates).toEqual([])
+    expect(result.resumeStatus).toBe(404)
   })
 
   test("completed + other → NOT candidate", async () => {
@@ -396,6 +556,139 @@ describe("recovery candidate predicate", () => {
     const result = await setupAssistant({ completed: false, error: true })
     expect(result.candidates.length).toBe(1)
   })
+})
+
+// [TP-SR-R21-07]
+describe("empty stop recovery matrix", () => {
+  for (const output of ["empty", "placeholders", "text"] as const) {
+    const content = output === "text"
+    for (const completed of [false, true]) {
+      for (const error of [false, true]) {
+        const label = `content=${content} completed=${completed} error=${error}${output === "placeholders" ? " placeholders" : ""}`
+        test(label, async () => {
+          await using tmp = await tmpdir({ git: true, root: "cwd" })
+          const stub = startScriptedLLMServer([{ lines: textStopResponse("recovered answer") }])
+          try {
+            await Bun.write(`${tmp.path}/mimocode.json`, JSON.stringify({
+              enabled_providers: ["alibaba"],
+              provider: { alibaba: { options: { apiKey: "test-key", baseURL: `${stub.origin}/v1` } } },
+              agent: { build: { model: "alibaba/qwen-plus" } },
+            }))
+            const result = await Instance.provide({
+              directory: tmp.path,
+              fn: () => AppRuntime.runPromise(Effect.gen(function* () {
+                const sessions = yield* Session.Service
+                const session = yield* sessions.create({ title: "empty-stop-matrix" })
+                const user = yield* sessions.updateMessage({
+                  id: MessageID.ascending(), role: "user", sessionID: session.id, agent: "build",
+                  model: { providerID: ProviderID.make("alibaba"), modelID: ModelID.make("qwen-plus") },
+                  time: { created: Date.now() },
+                })
+                yield* sessions.updatePart({
+                  id: PartID.ascending(), sessionID: session.id, messageID: user.id,
+                  type: "text", text: "Answer my question.",
+                })
+                const assistantInfo = {
+                  role: "assistant" as const, parentID: user.id, sessionID: session.id,
+                  mode: "build", agent: "build", path: { cwd: tmp.path, root: tmp.path }, cost: 0,
+                  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                  modelID: ModelID.make("qwen-plus"), providerID: ProviderID.make("alibaba"),
+                  time: { created: Date.now(), ...(completed ? { completed: Date.now() } : {}) },
+                  finish: "stop",
+                  ...(error ? { error: { name: "APIError" as const, data: { message: "model unavailable", statusCode: 503, isRetryable: true } } } : {}),
+                }
+                for (const delivery of finalDeliveries) yield* sessions.updateMessage({
+                  ...assistantInfo, id: MessageID.ascending(), error: undefined,
+                  time: { created: Date.now(), completed: Date.now() }, ...delivery,
+                })
+                const reasoning = yield* sessions.updateMessage({
+                  ...assistantInfo, id: MessageID.ascending(), error: undefined,
+                  modelID: ModelID.make("gpt-5.5"), time: { created: Date.now(), completed: Date.now() },
+                })
+                yield* sessions.updatePart({
+                  id: PartID.ascending(), sessionID: session.id, messageID: reasoning.id,
+                  type: "reasoning", text: "reasoned answer", time: { start: Date.now(), end: Date.now() },
+                })
+                const beforeDeliveries = (yield* sessions.messages({ sessionID: session.id, agentID: "main" }))
+                  .filter((message) => message.info.role === "assistant")
+                const currentUser = yield* sessions.updateMessage({ ...user, id: MessageID.ascending(), time: { created: Date.now() } })
+                yield* sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID: currentUser.id,
+                  type: "text", text: "Answer the next question." })
+                const created = Date.now() + 1
+                const assistant = yield* sessions.updateMessage({
+                  ...assistantInfo, id: MessageID.ascending(), parentID: currentUser.id,
+                  time: { created, ...(completed ? { completed: created } : {}) },
+                })
+                if (content) yield* sessions.updatePart({
+                  id: PartID.ascending(), sessionID: session.id, messageID: assistant.id,
+                  type: "text", text: "ordinary answer",
+                })
+                if (output === "placeholders") {
+                  for (const placeholder of [
+                    { text: " \n\t" },
+                    { text: "synthetic placeholder", synthetic: true },
+                    { text: "ignored placeholder", ignored: true },
+                  ]) yield* sessions.updatePart({
+                    id: PartID.ascending(), sessionID: session.id, messageID: assistant.id,
+                    type: "text", ...placeholder,
+                  })
+                }
+                let plan: { action: string; assistantMessageID?: string; parentMessageID?: string } | undefined
+                ResumeTestHooks.onPlanResolved = (value) => { plan = value }
+                const app = Server.Default().app
+                const query = `?directory=${encodeURIComponent(tmp.path)}`
+                const listed = yield* Effect.promise(() => Promise.resolve(app.request(`/session/${session.id}/recovery${query}`)))
+                const candidates = yield* Effect.promise(() => listed.json())
+                const resumed = yield* Effect.promise(() => Promise.resolve(app.request(`/session/${session.id}/resume${query}`, {
+                  method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+                })))
+                for (let attempt = 0; resumed.status === 202 && attempt < 100; attempt++) {
+                  const messages = yield* sessions.messages({ sessionID: session.id, agentID: "main" })
+                  if (messages.some((message) => message.info.role === "assistant" && message.info.time.completed && !message.info.error && message.parts.some((part) => part.type === "text" && part.text === "recovered answer"))) break
+                  yield* Effect.sleep("50 millis")
+                }
+                const after = yield* sessions.messages({ sessionID: session.id, agentID: "main" })
+                return {
+                  recoveryStatus: listed.status, candidates, resumeStatus: resumed.status,
+                  plan, providerCalls: stub.captures.length,
+                  shellRemoved: !after.some((message) => message.info.id === assistant.id),
+                  recovered: after.find((message) => message.info.role === "assistant" && message.info.time.completed && !message.info.error && message.parts.some((part) => part.type === "text" && part.text === "recovered answer")),
+                  beforeDeliveries,
+                  afterDeliveries: after.filter((message) => beforeDeliveries.some((before) => before.info.id === message.info.id)),
+                  users: after.filter((message) => message.info.role === "user").map((message) => message.info.id),
+                  userID: currentUser.id,
+                  previousUserID: user.id,
+                }
+              })),
+            })
+            // FC-001: completion plus an error is settlement for delivered output, so
+            // only an empty stop stays recoverable after completion.
+            const shouldRecover = !content || (error && !completed)
+            expect(result.users).toEqual([result.previousUserID, result.userID])
+            expect(result.afterDeliveries).toEqual(result.beforeDeliveries)
+            expect(result.recoveryStatus).toBe(200)
+            expect(result.candidates.length).toBe(shouldRecover ? 1 : 0)
+            expect(result.resumeStatus).toBe(shouldRecover ? 202 : 404)
+            if (shouldRecover) {
+              expect(result.plan?.action).toBe(content ? "tool-resume" : "user-resume")
+              expect(result.recovered?.info).toMatchObject({ role: "assistant", parentID: result.userID })
+              expect(result.providerCalls).toBe(1)
+              // User-resume removes residue shells in its admission transaction; a
+              // tool-resume target is settled and kept.
+              expect(result.shellRemoved).toBe(!content)
+            } else {
+              expect(result.shellRemoved).toBe(false)
+              expect(result.providerCalls).toBe(0)
+            }
+          } finally {
+            ResumeTestHooks.onPlanResolved = undefined
+            await Instance.disposeAll()
+            await stub.stop()
+          }
+        }, 30_000)
+      }
+    }
+  }
 })
 
 // [TP-SR-R21-08] model 参数校验:modelProviderID / modelID 必须同时提供。
@@ -789,6 +1082,15 @@ test("SDK recovery response is union and resumeUser posts body userMessageID", a
   expect(resumeCall!.method).toBe("POST")
   expect(resumeCall!.body).toEqual({ userMessageID: "msg_u2" })
   expect(resumeCall!.url).toContain("titleLocale=fr-FR")
+  // [TP-SR-R21-26]
+  await client.session.resumeUser({ sessionID: "ses_test", assistantMessageID: "msg_a" })
+  expect(calls.at(-1)?.body).toEqual({ assistantMessageID: "msg_a" })
+  // [TP-SR-R21-30] Generated SDK must retain the host execution identity.
+  const attempt = { requestId: "reviewed-resume", attemptId: "attempt-one" }
+  await client.session.resumeUser({ sessionID: "ses_test", assistantMessageID: "msg_a", attempt })
+  expect(calls.at(-1)?.body).toEqual({ assistantMessageID: "msg_a", attempt })
+  await client.session.resumeUser({ sessionID: "ses_test", userMessageID: "msg_u2", attempt })
+  expect(calls.at(-1)?.body).toEqual({ userMessageID: "msg_u2", attempt })
 })
 
 test("resumeUser rejects explicit actor trailing-user targeting without writing messages", async () => {
@@ -809,3 +1111,190 @@ test("resumeUser rejects explicit actor trailing-user targeting without writing 
     expect(yield* sessions.messages({ sessionID: session.id, agentID: "*" })).toEqual(before)
   })) })
 })
+
+// [TP-SR-R21-26] FC-001 admits HTTP resume through Runner ownership: the
+// HTTP path has no pre-occupy seam and the session status map is not an
+// admission authority, so the before-occupy, busy and occupied cases do not apply.
+for (const shape of ["parent-user", "empty-assistant", "tool-assistant"] as const) {
+  for (const window of ["before-http", "after-occupy"] as const) {
+    for (const change of ["user", "assistant", "busy-idle"] as const) {
+      test(`exact resume rejects ${shape} ${window} ${change} without history or cascade effects [TP-SR-R21-26]`, () =>
+        exactResumeCase(shape, window, change), 15000)
+    }
+  }
+  test(`exact resume admits unchanged ${shape} only after final check [TP-SR-R21-26]`, () =>
+    exactResumeCase(shape, "after-occupy", "unchanged"), 15000)
+  test(`exact resume cancellation preserves unadmitted ${shape} [TP-SR-R21-26]`, () =>
+    exactResumeCase(shape, "after-occupy", "cancel"), 15000)
+  test(`exact resume rejects both target fields for ${shape} [TP-SR-R21-26]`, () =>
+    exactResumeCase(shape, "before-http", "both"), 15000)
+  for (const window of ["before-http", "after-occupy"] as const) {
+    for (const change of ["question", "permission"] as const) {
+      test(`exact resume preserves pending ${change} for ${shape} ${window} [TP-SR-R21-26]`, () =>
+        exactResumeCase(shape, window, change), 15000)
+    }
+  }
+  if (shape !== "parent-user") {
+    for (const change of ["qualified", "parent"] as const) {
+      test(`exact resume rejects changed ${change} for ${shape} at admission [TP-SR-R21-26]`, () =>
+        exactResumeCase(shape, "after-occupy", change), 15000)
+    }
+  }
+}
+
+async function exactResumeCase(
+  shape: "parent-user" | "empty-assistant" | "tool-assistant",
+  window: "before-http" | "before-occupy" | "after-occupy",
+  change: "user" | "assistant" | "busy-idle" | "unchanged" | "cancel" | "busy" | "both" | "question" | "permission" | "qualified" | "parent" | "occupied",
+) {
+  await using tmp = await tmpdir({ git: true, root: "cwd" })
+  const stub = startScriptedLLMServer([{ lines: textStopResponse("EXACT_A_RESUMED") }])
+  const reached = Promise.withResolvers<void>()
+  const released = Promise.withResolvers<void>()
+  try {
+    await Bun.write(`${tmp.path}/mimocode.json`, JSON.stringify({
+      enabled_providers: ["alibaba"],
+      provider: { alibaba: { options: { apiKey: "test-key", baseURL: `${stub.origin}/v1` } } },
+      agent: { build: { model: "alibaba/qwen-plus" } },
+    }))
+    await Instance.provide({
+      directory: tmp.path,
+      fn: () => AppRuntime.runPromise(Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const prompt = yield* SessionPrompt.Service
+        const status = yield* SessionStatus.Service
+        const runs = yield* SessionRunState.Service
+        const actors = yield* ActorRegistry.Service
+        const questions = yield* Question.Service
+        const permissions = yield* Permission.Service
+        const session = yield* sessions.create({ title: "exact resume" })
+        const model = { providerID: ProviderID.make("alibaba"), modelID: ModelID.make("qwen-plus") }
+        const created = Date.now() - 100
+        const user = (text: string, time: number, agentID = "main") => Effect.gen(function* () {
+          const info = yield* sessions.updateMessage({
+            id: MessageID.ascending(), role: "user", sessionID: session.id, agent: "build", agentID,
+            model, time: { created: time },
+          })
+          yield* sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID: info.id, type: "text", text })
+          return info
+        })
+        const assistant = (parentID: MessageID, time: number, agentID = "main") => sessions.updateMessage({
+          id: MessageID.ascending(), role: "assistant", parentID, sessionID: session.id, agentID,
+          mode: "build", agent: "build", path: { cwd: tmp.path, root: tmp.path }, cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          ...model, time: { created: time }, finish: "tool-calls",
+        })
+        const oldUser = yield* user("older task", created)
+        const orphan = yield* assistant(oldUser.id, created + 1)
+        yield* sessions.updatePart({
+          id: PartID.ascending(), sessionID: session.id, messageID: orphan.id,
+          type: "tool", tool: "bash", callID: "untouched-orphan",
+          state: { status: "running", input: { command: "true" }, time: { start: created } },
+        })
+        const a = yield* user("APPROVED_A", created + 2)
+        const target = shape === "parent-user" ? undefined : yield* assistant(a.id, created + 3)
+        if (target && shape === "tool-assistant") yield* sessions.updatePart({
+          id: PartID.ascending(), sessionID: session.id, messageID: target.id,
+          type: "tool", tool: "bash", callID: "completed-once",
+          state: { status: "completed", input: { command: "true" }, output: "COMPLETED_OBSERVATION_A",
+            title: "completed", metadata: {}, time: { start: created, end: created + 1 } },
+        })
+        if (change !== "unchanged") {
+          yield* actors.register({
+            sessionID: session.id, actorID: "child-1", mode: "subagent", agent: "build",
+            description: "untouched child", contextMode: "none", background: true, lifecycle: "ephemeral",
+          })
+          yield* actors.updateStatus(session.id, "child-1", { status: "idle", lastOutcome: "failure", lastError: "interrupted" })
+          const child = yield* user("CHILD_MUST_NOT_RESUME", created + 4, "child-1")
+          yield* assistant(child.id, created + 5, "child-1")
+        }
+        const beforeChild = yield* actors.get(session.id, "child-1")
+        const mutate = Effect.gen(function* () {
+          if (change === "occupied") yield* runs.startOwned(session.id, "main", Effect.interrupt, Effect.never)
+          if (change === "busy-idle" && window !== "after-occupy") {
+            yield* runs.ensureExclusive(session.id, "main", Effect.interrupt,
+              user("UNAPPROVED_B", created + 10).pipe(Effect.as({ info: orphan, parts: [] })))
+            expect((yield* status.get(session.id)).type).toBe("idle")
+            return
+          }
+          if (change === "busy" || change === "busy-idle") yield* status.set(session.id, { type: "busy" })
+          if (change === "user" || change === "busy-idle") yield* user("UNAPPROVED_B", created + 10)
+          if (change === "assistant") {
+            const b = yield* assistant(a.id, created + 10)
+            yield* sessions.updatePart({
+              id: PartID.ascending(), sessionID: session.id, messageID: b.id,
+              type: "tool", tool: "bash", callID: "unapproved-b-tool",
+              state: { status: "running", input: { command: "true" }, time: { start: created } },
+            })
+          }
+          if (change === "busy-idle") yield* status.set(session.id, { type: "idle" })
+          if (target && change === "parent") yield* sessions.updateMessage({ ...target, parentID: oldUser.id })
+          if (target && change === "qualified") yield* sessions.updateMessage({
+            ...target, finish: "stop", structured: { answer: "delivered" }, time: { ...target.time, completed: Date.now() },
+          })
+          if (change === "question") {
+            yield* questions.ask({ sessionID: session.id, questions: [{ question: "Pending?", header: "Pending", options: [] }] }).pipe(Effect.forkChild)
+            while ((yield* questions.list()).length === 0) yield* Effect.sleep("1 millis")
+          }
+          if (change === "permission") {
+            yield* permissions.ask({ sessionID: session.id, permission: "bash", patterns: ["*"], always: [], metadata: {}, ruleset: [] }).pipe(Effect.forkChild)
+            while ((yield* permissions.list()).length === 0) yield* Effect.sleep("1 millis")
+          }
+        })
+        if (window === "before-http") yield* mutate
+        if (window !== "before-http") {
+          const hook = () => Effect.sync(() => reached.resolve()).pipe(Effect.andThen(Effect.promise(() => released.promise)))
+          if (window === "before-occupy") ResumeTestHooks.beforeExclusiveOccupy = hook
+          if (window === "after-occupy") ResumeTestHooks.beforeAdmissionRecheck = hook
+        }
+        const payload = change === "both"
+          ? { userMessageID: a.id, assistantMessageID: target?.id ?? MessageID.ascending() }
+          : target ? { assistantMessageID: target.id } : { userMessageID: a.id }
+        const app = Server.Default().app
+        const request = Promise.resolve(app.request(`/session/${session.id}/resume?directory=${encodeURIComponent(tmp.path)}`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+        }))
+        if (window !== "before-http") {
+          const first = yield* Effect.promise(() => Promise.race([
+            reached.promise.then(() => "barrier" as const), request.then(() => "response" as const),
+          ]))
+          expect(first).toBe("barrier")
+          yield* mutate
+        }
+        const before = yield* sessions.messages({ sessionID: session.id, agentID: "*" })
+        if (change === "cancel") yield* prompt.cancel(session.id)
+        released.resolve()
+        const response = yield* Effect.promise(() => request)
+        expect(response.status).toBe(change === "unchanged" ? 202 : change === "busy" || change === "occupied" || change === "question" || change === "permission" ? 409 : change === "both" ? 400 : 404)
+        if (change === "unchanged") {
+          for (let attempt = 0; attempt < 100; attempt++) {
+            const messages = yield* sessions.messages({ sessionID: session.id })
+            if (messages.some((message) => message.parts.some((part) => part.type === "text" && part.text === "EXACT_A_RESUMED"))) break
+            yield* Effect.sleep("25 millis")
+          }
+          const after = yield* sessions.messages({ sessionID: session.id })
+          const answer = after.find((message) => message.parts.some((part) => part.type === "text" && part.text === "EXACT_A_RESUMED"))
+          expect(answer?.info).toMatchObject({ parentID: a.id })
+          expect(after.filter((message) => message.info.role === "user").map((message) => message.info.id)).toEqual([oldUser.id, a.id])
+          expect(stub.captures).toHaveLength(1)
+          if (shape === "tool-assistant") {
+            expect(JSON.stringify(stub.captures[0].messages)).toContain("COMPLETED_OBSERVATION_A")
+            expect(after.flatMap((message) => message.parts).find((part) => part.type === "tool" && part.callID === "completed-once"))
+              .toEqual(before.flatMap((message) => message.parts).find((part) => part.type === "tool" && part.callID === "completed-once"))
+          }
+        } else {
+          expect(yield* sessions.messages({ sessionID: session.id, agentID: "*" })).toEqual(before)
+          expect(yield* actors.get(session.id, "child-1")).toEqual(beforeChild)
+          expect(stub.captures).toHaveLength(0)
+          if (change === "question") expect(yield* questions.list()).toHaveLength(1)
+          if (change === "permission") expect(yield* permissions.list()).toHaveLength(1)
+        }
+        yield* prompt.cancel(session.id)
+      }).pipe(Effect.timeout("12 seconds"))),
+    })
+  } finally {
+    released.resolve()
+    ResumeTestHooks.reset()
+    await stub.stop()
+  }
+}

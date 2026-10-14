@@ -209,6 +209,15 @@ export type StreamInput = {
   ephemeral?: boolean
   requestID?: string
   assistantMessageID?: string
+  /** Request-ladder visible wait. Processor owns SessionStatus (shared with GET /session/status). */
+  onRetryStatus?: (info: {
+    attempt: number
+    message: string
+    next: number
+    phase?: "request" | "stream"
+    scope?: "request" | "live-step" | "max-candidate" | "max-judge"
+    hostCode?: string
+  }) => Effect.Effect<void>
 }
 
 export type StreamRequest = StreamInput & {
@@ -327,7 +336,7 @@ const live: Layer.Layer<
         !input.ephemeral && (yield* actorReg.servesCheckpoint(SessionID.make(input.sessionID), input.agentID))
 
       // replace-agent replaces the PRIMARY line's base prompt with a session-level
-      // system (desktop execution-profile base). It is a main/known-peer concern:
+      // system (host execution-profile base). It is a main/known-peer concern:
       // subagents share the sessionID and inherit `systemMode`, but must keep their
       // own `agent.prompt`. Unknown actors also fail closed here because identity
       // replacement requires positive ownership evidence; ephemeral and
@@ -705,6 +714,10 @@ const live: Layer.Layer<
           )
           .pipe(Effect.ignore)
 
+      const execution = yield* HostModelTransport.ExecutionScope
+      const executionScope = !input.ephemeral && (!input.agentID || input.agentID === "main")
+        && execution?.sessionID === input.sessionID && execution.userMessageID === input.user.id
+        ? { executionAttempt: execution.attempt, directory: execution.directory } : {}
       const result = streamText({
         onError(error) {
           l.debug("streamText error", {
@@ -779,6 +792,7 @@ const live: Layer.Layer<
             {
               specificationVersion: "v3" as const,
               wrapStream: ({ doStream, params }) => HostModelTransport.modelCall({
+                ...executionScope,
                 sessionID: input.sessionID, userMessageID: input.user.id,
                 assistantMessageID: input.assistantMessageID,
                 providerID: input.model.providerID, modelID: input.model.id, sdk: input.model.api.npm,
@@ -975,13 +989,27 @@ const live: Layer.Layer<
                   return Stream.failCause(primaryCause)
                 return Stream.unwrap(
                   Effect.gen(function* () {
-                    // Request-phase ladders nest inside processor stream retries. Publishing
-                    // session.status{retry} here restarts a 200ms×4 burst on every outer
-                    // cycle; measured with unreachable baseURL: 4 request + 1 stream per
-                    // cycle ≈ 20 UI frames in 32s (looks nothing like exponential backoff).
-                    // Session status is owned by processor (user-visible wait); request
-                    // attempts stay on Session.Event.RetryAttempt for diagnostics only —
+                    // Recoverable kinds (network / rate_limit / server) use persistent
+                    // budgets and the request-phase ladder is often the only waiter the
+                    // user can observe — processor stream retries never see the failure.
+                    // Publish session.status{retry} here so Desktop can show the
+                    // reconnect row instead of a dead spinner. Attempts stay on
+                    // Session.Event.RetryAttempt as well for diagnostics, main-only (FC-013)
                     // unless the caller is propose-only ensemble (quietRetryDiagnostics).
+                    // The Promise bridge would reattach ambient ALS instead of this fiber's InstanceRef.
+                    const ownsMainStatus = !input.ephemeral && (!input.agentID || input.agentID === "main")
+                    if (ownsMainStatus && input.onRetryStatus) {
+                      // Processor-owned SessionStatus (same map GET /session/status serves),
+                      // so reload/hydrate still shows the reconnect row.
+                      yield* input.onRetryStatus({
+                        attempt: nextAttempt,
+                        message: decision.message,
+                        next: Date.now() + wait,
+                        phase: decision.phase,
+                        scope: decision.scope,
+                        hostCode: decision.hostCode,
+                      }).pipe(Effect.ignore)
+                    }
                     if (!input.ephemeral && !input.quietRetryDiagnostics && (input.agentID ?? "main") === "main")
                       yield* bus.publish(Session.Event.RetryAttempt, {
                           sessionID: SessionID.make(input.sessionID),

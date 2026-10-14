@@ -50,7 +50,7 @@ export interface Interface {
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
   ) => Effect.Effect<Effect.Effect<MessageV2.WithParts>, Session.BusyError>
-  readonly startOwned: (sessionID: SessionID, agentID: string, onInterrupt: Effect.Effect<MessageV2.WithParts>, work: Effect.Effect<MessageV2.WithParts>) => Effect.Effect<{ readonly runId: number; readonly interruptOwned: Effect.Effect<void>; readonly completion: Effect.Effect<MessageV2.WithParts> }, Session.BusyError>
+  readonly startOwned: (sessionID: SessionID, agentID: string, onInterrupt: Effect.Effect<MessageV2.WithParts>, work: Effect.Effect<MessageV2.WithParts>, admit?: Effect.Effect<void>) => Effect.Effect<{ readonly runId: number; readonly interruptOwned: Effect.Effect<void>; readonly awaitExit: Effect.Effect<void>; readonly completion: Effect.Effect<MessageV2.WithParts> }, Session.BusyError>
   readonly ensureExclusive: (sessionID: SessionID, agentID: string, onInterrupt: Effect.Effect<MessageV2.WithParts>, work: Effect.Effect<MessageV2.WithParts>) => Effect.Effect<MessageV2.WithParts, Session.BusyError>
   readonly startShell: (
     sessionID: SessionID,
@@ -174,7 +174,16 @@ export const layer = Layer.effect(
               cleanup()
             }),
           ),
-        onBusy: isMain ? control.statusLock.withPermits(1)(status.set(sessionID, { type: "busy" })) : Effect.void,
+        // Do not clobber session.status{retry} with busy: request-ladder retries
+        // re-enter the runner and would wipe the reconnect row mid-wait.
+        onBusy: isMain
+          ? control.statusLock.withPermits(1)(
+              Effect.gen(function* () {
+                const current = yield* status.get(sessionID)
+                if (current.type !== "retry") yield* status.set(sessionID, { type: "busy" })
+              }),
+            )
+          : Effect.void,
         canStart: () => !data.disposing,
         busy: () => new Session.BusyError(sessionID),
       })
@@ -334,9 +343,11 @@ export const layer = Layer.effect(
       return completion.pipe(Effect.provideService(RunDisposal, current.data))
     })
 
-    const startOwned: Interface["startOwned"] = Effect.fn("SessionRunState.startOwned")(function* (sessionID, agentID, onInterrupt, work) {
+    const startOwned: Interface["startOwned"] = Effect.fn("SessionRunState.startOwned")(function* (sessionID, agentID, onInterrupt, work, admit) {
       const current = yield* runner(sessionID, agentID)
-      return yield* current.entry.runner.startOwned(withOrphanSweep(sessionID, agentID, work), interruptFor(agentID, onInterrupt)).pipe(
+      // An unadmitted run owns no history to settle, even on cancellation.
+      const admitted = (admit ?? Effect.void).pipe(Effect.andThen(withOrphanSweep(sessionID, agentID, work)))
+      return yield* current.entry.runner.startOwned(admitted, interruptFor(agentID, onInterrupt)).pipe(
         Effect.provideService(RunDisposal, current.data),
         Effect.ensuring(release(current.entry)),
       )

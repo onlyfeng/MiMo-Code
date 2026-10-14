@@ -9,6 +9,7 @@ import { SessionRunState } from "@/session/run-state"
 import { isRunDisposing, RunDisposal, type RunDisposalState } from "@/session/run-disposal"
 import { ActorRegistry } from "@/actor/registry"
 import { ActorExecution, type Execution } from "@/actor/execution"
+import * as ToolSettlement from "@/tool/settlement"
 import { createActorLifecycle, type ForkGenerationOwner, type WakeGenerationOwner, type TerminalStatus } from "@/actor/lifecycle"
 import { TaskRegistry } from "@/task/registry"
 import type { TaskID } from "@/task/schema"
@@ -1527,7 +1528,10 @@ export const layer = Layer.effect(
 
     const coordinateCancellation = (work: Effect.Effect<void>) =>
       Effect.gen(function* () {
-        if (!(yield* executions.ownsCurrentFiber)) return yield* work
+        // A model tool runs in its processor's tool scope, which the execution
+        // closes and joins during cleanup, so it is a dependent caller too.
+        const inTool = Boolean(yield* ToolSettlement.ResultRef)
+        if (!inTool && !(yield* executions.ownsCurrentFiber)) return yield* work
         // A direct Effect hook cannot join its own execution, including when
         // cancelling an ancestor that cascades back to it. The service owns the
         // complete cleanup; the dependent caller can leave even from a finalizer.

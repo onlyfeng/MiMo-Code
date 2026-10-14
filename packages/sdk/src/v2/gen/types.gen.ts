@@ -423,6 +423,44 @@ export type EventMessagePartDelta = {
   }
 }
 
+export type SessionStatus =
+  | {
+      type: "idle"
+    }
+  | {
+      type: "retry"
+      attempt: number
+      phaseAttempt?: number
+      message: string
+      next: number
+      phase?: "request" | "stream"
+      scope?: "request" | "live-step" | "max-candidate" | "max-judge"
+      hostCode?: string
+    }
+  | {
+      type: "notice"
+      message: string
+    }
+  | {
+      type: "busy"
+      message?: string
+    }
+
+export type EventSessionStatus = {
+  type: "session.status"
+  properties: {
+    sessionID: string
+    status: SessionStatus
+  }
+}
+
+export type EventSessionIdle = {
+  type: "session.idle"
+  properties: {
+    sessionID: string
+  }
+}
+
 export type PermissionRequest = {
   id: string
   sessionID: string
@@ -820,44 +858,6 @@ export type EventBashInteractiveReplied = {
     id: string
     output: string
     exitCode: number
-  }
-}
-
-export type SessionStatus =
-  | {
-      type: "idle"
-    }
-  | {
-      type: "retry"
-      attempt: number
-      phaseAttempt?: number
-      message: string
-      next: number
-      phase?: "request" | "stream"
-      scope?: "request" | "live-step" | "max-candidate" | "max-judge"
-      hostCode?: string
-    }
-  | {
-      type: "notice"
-      message: string
-    }
-  | {
-      type: "busy"
-      message?: string
-    }
-
-export type EventSessionStatus = {
-  type: "session.status"
-  properties: {
-    sessionID: string
-    status: SessionStatus
-  }
-}
-
-export type EventSessionIdle = {
-  type: "session.idle"
-  properties: {
-    sessionID: string
   }
 }
 
@@ -1304,6 +1304,7 @@ export type ToolStateError = {
   input: {
     [key: string]: unknown
   }
+  inputComplete?: boolean
   error: string
   metadata?: {
     [key: string]: unknown
@@ -1322,6 +1323,7 @@ export type ToolPart = {
   sessionID: string
   messageID: string
   type: "tool"
+  execution?: "not-started" | "started"
   callID: string
   tool: string
   state: ToolState
@@ -1711,6 +1713,8 @@ export type GlobalEvent = {
     | EventInstallationUpdated
     | EventInstallationUpdateAvailable
     | EventMessagePartDelta
+    | EventSessionStatus
+    | EventSessionIdle
     | EventPermissionAsked
     | EventPermissionReplied
     | EventSessionDiff
@@ -1726,8 +1730,6 @@ export type GlobalEvent = {
     | EventSessionCwd
     | EventBashInteractiveAsked
     | EventBashInteractiveReplied
-    | EventSessionStatus
-    | EventSessionIdle
     | EventVcsBranchUpdated
     | EventMcpToolsChanged
     | EventMcpBrowserOpenFailed
@@ -3345,6 +3347,8 @@ export type Event =
   | EventInstallationUpdated
   | EventInstallationUpdateAvailable
   | EventMessagePartDelta
+  | EventSessionStatus
+  | EventSessionIdle
   | EventPermissionAsked
   | EventPermissionReplied
   | EventSessionDiff
@@ -3360,8 +3364,6 @@ export type Event =
   | EventSessionCwd
   | EventBashInteractiveAsked
   | EventBashInteractiveReplied
-  | EventSessionStatus
-  | EventSessionIdle
   | EventVcsBranchUpdated
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
@@ -5727,6 +5729,11 @@ export type SessionResumeResponses = {
 export type SessionResumeUserData = {
   body?: {
     userMessageID?: string
+    assistantMessageID?: string
+    attempt?: {
+      requestId: string
+      attemptId: string
+    }
   }
   path: {
     sessionID: string
