@@ -15,9 +15,9 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-10-14
-- Upstream: `002cb4c97bd1346829dbb08d98242913df4575d0`
+- Upstream: `e27e87de81a74db5475bd93540f8889dfbc70ec6`
 - Prior reviewed upstream: `b258d28f436446bb1c9768fe0134693219be7cdc`
-- Main behavior (runtime/tests): `41096cc80973360b2ae9c37d1288a2210a74f61b` (runtime merge `772adc245b9337eb1ec9776934cf5549c84dd753` plus a test-only CI fix)
+- Main behavior (runtime/tests): `f8737765ef37cb59b0b69fa216a6525c6f82a65b` (runtime merges `772adc245b9337eb1ec9776934cf5549c84dd753` and `f8737765ef37cb59b0b69fa216a6525c6f82a65b`, with the test-only CI fix `41096cc8` between them)
 - Bundled guidance content: `848c635c1eb57d326f0d135f1c20caafc9c5f17f` (unchanged by this range)
 - Prior fork `main` tip: `4158021fd0a18f1781a3de0077dfd87b7fe388b0`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
@@ -29,7 +29,7 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-14 full sync](upstream-sync-2026-10-14.md), eleven capabilities from one upstream commit through `002cb4c9`. Adopt the settled tool execution boundary (`ToolPart.execution`, `inputComplete`, transactional tool-part writes, `ToolSettlement` for plugin, registry, MCP and exec results), request-phase `session.status{retry}`, Deferred-backed `InstanceState` initialization and owned-run `awaitExit`. Adapt exact-target resume, pending-input refusal, the host execution attempt and empty-stop recovery into FC-001's settlement and continuation model without upstream's history trim; keep FD-006's exec close-abort-join and MCP harness-tag escaping (FD-005).
+Latest reviewed synchronization: [2026-10-14 full sync](upstream-sync-2026-10-14.md), twelve capabilities from two upstream commits through `e27e87de`. Adopt native Windows memory path parsing unchanged. Adopt the settled tool execution boundary (`ToolPart.execution`, `inputComplete`, transactional tool-part writes, `ToolSettlement` for plugin, registry, MCP and exec results), request-phase `session.status{retry}`, Deferred-backed `InstanceState` initialization and owned-run `awaitExit`. Adapt exact-target resume, pending-input refusal, the host execution attempt and empty-stop recovery into FC-001's settlement and continuation model without upstream's history trim; keep FD-006's exec close-abort-join and MCP harness-tag escaping (FD-005).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
