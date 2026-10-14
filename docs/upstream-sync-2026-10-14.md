@@ -41,6 +41,10 @@ Compat's shard 1 ran on `9469c099`, before the compat test adaptation: 18 of its
 
 Remaining local failures are environmental: `test/cli/tui/collapse.test.ts` (one display-width case), `test/cli/tui/worker-model-api.test.ts` (a 15 s RPC startup budget) and `test/account/repo.test.ts` (ten `SQLITE_BUSY` cases only inside shard 4's combined process) are the baselines recorded on 2026-10-13. Two timeouts under a load average above 30 — `subagent-progress-chain` read-only (25 s) and `tool-schema-runner` cleanup (15 s) — pass alone on the final tree (3/3 and 11/11). Exact-tip CI on the pinned Bun is the publication gate.
 
+## Publication follow-up
+
+Exact-SHA CI on the first published tips (main `4bcda42c`, compat `a30df816`) passed lint and typecheck; `test` failed only shard 4's `cancel-notification` case "cancel joins a continuation between terminal publication and its receipt" in both variants (4 model calls where 3 were expected). The child's published notice wakes the parent's own notification turn, which reached the model before the cancel join returned; locally the child made 2 of the 3 counted calls. `41096cc8` counts only requests carrying the child's task, so a queued child run after cancellation still fails it; the file passes 34/34 three consecutive times. No runtime source changes.
+
 ## Publication gates
 
 Completion requires successful lint, typecheck and test CI on the exact final branch-tip SHAs (or, for a docs-only tip, the cited ancestor with an identical tree outside `docs/`), both remote tips equal to the published commits, and ancestry from `002cb4c9` through fork `main` to `dev/compat`. These are checked after publication.
