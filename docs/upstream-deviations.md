@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-13
-- Upstream: `b258d28f436446bb1c9768fe0134693219be7cdc` (frozen by the user)
-- Prior reviewed upstream: `f98dcd1cf7e70e7eb42f721fdf72bc4a6b87914f`
-- Main behavior (runtime/tests): `848c635c1eb57d326f0d135f1c20caafc9c5f17f` (runtime merge)
-- Bundled guidance content: `848c635c1eb57d326f0d135f1c20caafc9c5f17f`
-- Prior fork `main` tip: `4a6b619b46544d9eed7c90107d7dca779f9c0d41`
+- Last reviewed: 2026-10-14
+- Upstream: `002cb4c97bd1346829dbb08d98242913df4575d0`
+- Prior reviewed upstream: `b258d28f436446bb1c9768fe0134693219be7cdc`
+- Main behavior (runtime/tests): `772adc245b9337eb1ec9776934cf5549c84dd753` (runtime merge)
+- Bundled guidance content: `848c635c1eb57d326f0d135f1c20caafc9c5f17f` (unchanged by this range)
+- Prior fork `main` tip: `4158021fd0a18f1781a3de0077dfd87b7fe388b0`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,9 +29,11 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-13 full sync](upstream-sync-2026-10-13.md), fourteen capabilities through the user-frozen baseline `b258d28f`. Adopt MCP tool lazy loading (`MIMOCODE_MCP_TOOL_SEARCH`, deferral on by default) with FD-005's resolved harness identity and prefix-capture parity, background MCP startup with FC-004's pending imports preserved, retirement of the legacy compose agent and skills, the host-served plugin SDK (FC-006's dependency wait retires), CI tag releases with a required `GH_REPO` (FC-012), the npm FDS launcher, cron session affinity, cross-drive containment, the root script-test guard (FC-008), OpenCode Go session headers and the `history_fts.kind` index.
+Latest reviewed synchronization: [2026-10-14 full sync](upstream-sync-2026-10-14.md), eleven capabilities from one upstream commit through `002cb4c9`. Adopt the settled tool execution boundary (`ToolPart.execution`, `inputComplete`, transactional tool-part writes, `ToolSettlement` for plugin, registry, MCP and exec results), request-phase `session.status{retry}`, Deferred-backed `InstanceState` initialization and owned-run `awaitExit`. Adapt exact-target resume, pending-input refusal, the host execution attempt and empty-stop recovery into FC-001's settlement and continuation model without upstream's history trim; keep FD-006's exec close-abort-join and MCP harness-tag escaping (FD-005).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+
+Previous synchronization: [2026-10-13 full sync](upstream-sync-2026-10-13.md), fourteen capabilities through the user-frozen baseline `b258d28f`. Adopt MCP tool lazy loading (`MIMOCODE_MCP_TOOL_SEARCH`, deferral on by default) with FD-005's resolved harness identity and prefix-capture parity, background MCP startup with FC-004's pending imports preserved, retirement of the legacy compose agent and skills, the host-served plugin SDK (FC-006's dependency wait retires), CI tag releases with a required `GH_REPO` (FC-012), the npm FDS launcher, cron session affinity, cross-drive containment, the root script-test guard (FC-008), OpenCode Go session headers and the `history_fts.kind` index.
 
 Previous synchronization: [2026-10-10 full sync](upstream-sync-2026-10-10.md), two capabilities through `f98dcd1c`. Adopt upstream's opt-in startup import of Claude Code sessions: `MIMOCODE_ENABLE_CLAUDE_IMPORT` replaces `MIMOCODE_DISABLE_CLAUDE_IMPORT`, startup import is off by default and manual `session import-claude` is unchanged. Adopt the matching bundled `mimocode-docs` configuration entry and the closed `xlsx-official` library-choice table row. No fork owner adapts or moves.
 
@@ -428,6 +430,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
 
+- 2026-10-14 synchronization: upstream `002cb4c9` moves MCP result normalization into a settlement-aware `normalizeResult` and drops its `neutralizeHarnessTags` call, while `prompt.ts` still imports the helper and no upstream test covers MCP output escaping. The fork keeps escaping MCP text output inside the same `normalizeResult`, as adopted with lazy loading on 2026-10-13, so a server cannot forge `<system-reminder>`-style harness tags through a tool result. Retire this difference when upstream restores the call.
+
 - 2026-10-13 synchronization: upstream `463cbb28` replaces `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH` with `MIMOCODE_MCP_TOOL_SEARCH` deferral modes and forces deferral through `mcpToolSearchMode` when its own GPT-name shortcut sees a GPT identity. The fork's `mcpToolSearchMode` instead asks `resolveHarnessMode`, so explicit session modes, the process selector, trusted `harness_model` aliases and the MiMo/GPT-4/OSS vetoes decide Codex deferral exactly as they decide prompt and toolset. Prefix capture passes the same resolved mode to `buildLLMRequestPrefix`, which now applies the same deferral threshold and conversation-scoped loading as the live request. Evidence: `test/tool/gpt.test.ts`, `test/tool/harness-alias.test.ts`, `test/session/llm-request-prefix.test.ts` and the GPT default-harness cases in `test/session/prompt-effect.test.ts`.
 
 - 2026-10-04 synchronization: upstream `6babeb0b` adds an instance-preserving model refresh (`POST /global/provider/refresh`). Its Config candidate and committed configuration are new objects, while harness alias trust is keyed by the parsed configuration object, so the unadapted merge deleted every declared `harness_model` on the first refresh, and also on a Provider's first read after a refresh that found it cold. `Config.prepareModelRefresh` now attaches the fresh models-only parse's declarations to both objects: a refresh keeps a still-declared alias and drops a removed one, and plugin `config` hooks, which still run on the candidate, cannot grant trust. Evidence: `test/provider/refresh-harness.test.ts` fails both cases on the unadapted merge and passes both with the adaptation.
@@ -568,6 +572,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
   table has no reader of that argument and preserves its three used arguments.
 
 ## FD-006 — `exec` is a composition tool, not an authority gateway
+
+- 2026-10-14 synchronization: upstream `002cb4c9` settles exec through `ToolSettlement`, tracks host calls and passes an abort signal to `evalScript`. The fork's nested lifecycle (closed intake, abort, `withSlot.close`, joined admitted calls and VM disposal) stays authoritative; the script now settles through `ToolSettlement`, records a `cancelled` exec result for the processor, and a nested guest interrupted by Stop that had already settled reports its real result through its own settlement reference instead of an interruption error. `workflow/sandbox.ts` returns to upstream bytes because its signal abort is equivalent to the fork's earlier implementation. Evidence: `test/tool/tool-script.test.ts`, `test/workflow/sandbox.test.ts` and the exec cases of `test/session/tool-gate-cancel.test.ts`.
 
 - Status: active
 - Canonical owner: fork `main` direct-tool and nested-execution authority boundary
