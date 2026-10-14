@@ -15,11 +15,11 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-10-14
-- Upstream: `e27e87de81a74db5475bd93540f8889dfbc70ec6`
-- Prior reviewed upstream: `b258d28f436446bb1c9768fe0134693219be7cdc`
-- Main behavior (runtime/tests): `f8737765ef37cb59b0b69fa216a6525c6f82a65b` (runtime merges `772adc245b9337eb1ec9776934cf5549c84dd753` and `f8737765ef37cb59b0b69fa216a6525c6f82a65b`, with the test-only CI fix `41096cc8` between them)
+- Upstream: `6ba6a6254a6d040bb81ec9453962a52fc46c9c6d`
+- Prior reviewed upstream: `e27e87de81a74db5475bd93540f8889dfbc70ec6`
+- Main behavior (runtime/tests): `22874d87c9b0134d0e7540880c9050e4ae94d274` (runtime merge)
 - Bundled guidance content: `848c635c1eb57d326f0d135f1c20caafc9c5f17f` (unchanged by this range)
-- Prior fork `main` tip: `4158021fd0a18f1781a3de0077dfd87b7fe388b0`
+- Prior fork `main` tip: `f0571cd9eac31c8c9cc10e3793370ba89fe1b2b2`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,9 +29,11 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-14 full sync](upstream-sync-2026-10-14.md), twelve capabilities from two upstream commits through `e27e87de`. Adopt native Windows memory path parsing unchanged. Adopt the settled tool execution boundary (`ToolPart.execution`, `inputComplete`, transactional tool-part writes, `ToolSettlement` for plugin, registry, MCP and exec results), request-phase `session.status{retry}`, Deferred-backed `InstanceState` initialization and owned-run `awaitExit`. Adapt exact-target resume, pending-input refusal, the host execution attempt and empty-stop recovery into FC-001's settlement and continuation model without upstream's history trim; keep FD-006's exec close-abort-join and MCP harness-tag escaping (FD-005).
+Latest reviewed synchronization: [2026-10-14 sync through `6ba6a625`](upstream-sync-2026-10-14-6ba6a625.md), one capability. Adopt replay-safe history migrations and the replay-safe `migrate()` wrapper unchanged; the two edited shipped migrations are upstream-owned and journal-name selection keeps applied databases from rerunning them.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+
+Previous synchronization: [2026-10-14 full sync](upstream-sync-2026-10-14.md), twelve capabilities from two upstream commits through `e27e87de`. Adopt native Windows memory path parsing unchanged. Adopt the settled tool execution boundary (`ToolPart.execution`, `inputComplete`, transactional tool-part writes, `ToolSettlement` for plugin, registry, MCP and exec results), request-phase `session.status{retry}`, Deferred-backed `InstanceState` initialization and owned-run `awaitExit`. Adapt exact-target resume, pending-input refusal, the host execution attempt and empty-stop recovery into FC-001's settlement and continuation model without upstream's history trim; keep FD-006's exec close-abort-join and MCP harness-tag escaping (FD-005).
 
 Previous synchronization: [2026-10-13 full sync](upstream-sync-2026-10-13.md), fourteen capabilities through the user-frozen baseline `b258d28f`. Adopt MCP tool lazy loading (`MIMOCODE_MCP_TOOL_SEARCH`, deferral on by default) with FD-005's resolved harness identity and prefix-capture parity, background MCP startup with FC-004's pending imports preserved, retirement of the legacy compose agent and skills, the host-served plugin SDK (FC-006's dependency wait retires), CI tag releases with a required `GH_REPO` (FC-012), the npm FDS launcher, cron session affinity, cross-drive containment, the root script-test guard (FC-008), OpenCode Go session headers and the `history_fts.kind` index.
 
