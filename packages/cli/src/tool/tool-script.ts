@@ -3,7 +3,7 @@ import os from "os"
 import fs from "fs"
 import path from "path"
 import ts from "typescript"
-import { Effect } from "effect"
+import { Cause, Effect, Exit } from "effect"
 import type { Tool as AiTool } from "ai"
 import { EffectBridge, InstanceState } from "@/effect"
 import { Log, Filesystem, ToolCompat } from "@/util"
@@ -19,6 +19,7 @@ import { toolScriptRegistry, TOOL_SCRIPT_ALIASES, TOOL_SCRIPT_EXCLUDED } from ".
 import type { HarnessMode } from "./gpt"
 import DESCRIPTION from "./tool-script.txt"
 import * as Tool from "./tool"
+import * as ToolSettlement from "./settlement"
 import { getToolResultAttachments, getToolResultMetadata } from "./result-error"
 import { isRecoverableError } from "./recoverable"
 import * as Truncate from "./truncate"
@@ -1276,12 +1277,29 @@ export const ToolScriptTool = Tool.define(
                   ),
                 )
               : executeMcp(mcpDef!)
+            // Termination still interrupts the guest; one that settled meanwhile reports its real result.
+            const settled: { callID: string; result?: Effect.Effect<unknown, unknown> } = { callID }
+            const settledResult = (value: unknown): ExecNestedResult => {
+              const r = value as { title?: unknown; output?: unknown; metadata?: Record<string, unknown>; attachments?: unknown[] }
+              return {
+                title: typeof r?.title === "string" && r.title ? r.title : id,
+                output: String(r?.output ?? ""),
+                metadata: r?.metadata ?? {},
+                attachments: normalizeAttachments(r?.attachments),
+              }
+            }
             return trackCall(
               withSlot.run(() =>
                 bridge
                   .promise(
                     Effect.suspend(() => (nestedAbort.aborted ? Effect.interrupt : executeBuiltin)).pipe(
+                      Effect.provideService(ToolSettlement.ResultRef, settled),
                       Effect.raceFirst(interrupted),
+                      Effect.catchCause((cause) =>
+                        Cause.hasInterruptsOnly(cause) && settled.result
+                          ? settled.result.pipe(Effect.map(settledResult))
+                          : Effect.failCause(cause),
+                      ),
                     ),
                   )
                   .then(
@@ -1412,8 +1430,9 @@ export const ToolScriptTool = Tool.define(
             return undefined
           })
 
-          const outcome = yield* Effect.tryPromise({
-            try: () =>
+          const outcome = yield* ToolSettlement.promise(
+            (signal) => {
+              signal.addEventListener("abort", () => nestedController.abort(new Error("exec terminated")), { once: true })
               // The return value is serialized IN THE GUEST via __serialize (strict):
               // unserializable values (circular refs, BigInt, throwing getters) throw
               // with a $.path instead of silently degrading to "[object Object]",
@@ -1440,9 +1459,22 @@ return { __undef: __out.value === undefined, json: __out.value === undefined ? "
                   signal: AbortSignal.any([nestedAbort, guestController.signal]),
                   interrupt: () => nestedAbort.aborted || Boolean(plan.receipt),
                 },
-              ),
-            catch: (err) => (err instanceof Error ? err : new Error(String(err))),
-          }).pipe(Effect.result)
+              )
+              return evaluation
+            },
+            (exit) => Effect.gen(function* () {
+              const interrupted = nestedAbort.aborted
+              yield* flushProgress()
+              if (interrupted) {
+                yield* ToolSettlement.record(ctx.callID, Effect.succeed({
+                  title: "cancelled",
+                  metadata: terminalMetadata("cancelled"),
+                  output: '<exec status="cancelled">\n<error_message>Execution cancelled</error_message>\n</exec>',
+                }))
+              }
+              return Exit.isSuccess(exit) ? exit.value : yield* Effect.failCause(exit.cause)
+            }),
+          ).pipe(Effect.result)
 
           const traceLines = trace.map(
             (t) => `- ${t.name} → ${t.status}${t.error ? ` (${t.error.slice(0, 200)})` : ""} [${t.durationMs}ms]`,

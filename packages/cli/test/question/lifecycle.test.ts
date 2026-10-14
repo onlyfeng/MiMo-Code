@@ -33,7 +33,7 @@ for (const end of ["reply", "reject", "interrupt", "abort"] as const) {
           })
           yield* Effect.addFinalizer(() => Effect.sync(off))
           const controller = new AbortController()
-          const fiber = yield* question.ask(input, controller.signal).pipe(Effect.forkScoped)
+          const fiber = yield* question.ask({ ...input, abortSignal: controller.signal }).pipe(Effect.forkScoped)
           const item = yield* Deferred.await(asked)
           expect(yield* question.list()).toHaveLength(1)
           if (end === "reply") yield* question.reply({ requestID: item.id, answers: [["Yes"]] })
@@ -89,7 +89,7 @@ for (const end of ["interrupt", "abort", "defect"] as const) {
           }
           yield* Effect.gen(function* () {
             const question = yield* Question.Service
-            const fiber = yield* question.ask(input, controller.signal).pipe(Effect.forkScoped)
+            const fiber = yield* question.ask({ ...input, abortSignal: controller.signal }).pipe(Effect.forkScoped)
             yield* Deferred.await(published)
             if (end === "interrupt") yield* Fiber.interrupt(fiber)
             if (end === "abort") controller.abort()
@@ -114,7 +114,7 @@ it.live("already aborted questions never publish or register", () =>
         events.push(event.type)
       })
       yield* Effect.addFinalizer(() => Effect.sync(off))
-      const result = yield* question.ask(input, AbortSignal.abort()).pipe(Effect.exit)
+      const result = yield* question.ask({ ...input, abortSignal: AbortSignal.abort() }).pipe(Effect.exit)
       expect(result._tag).toBe("Failure")
       expect(yield* question.list()).toEqual([])
       yield* Effect.yieldNow

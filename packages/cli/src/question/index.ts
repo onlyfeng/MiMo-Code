@@ -129,14 +129,12 @@ interface State {
 // Service
 
 export interface Interface {
-  readonly ask: (
-    input: {
-      sessionID: SessionID
-      questions: ReadonlyArray<Info>
-      tool?: Tool
-    },
-    signal?: AbortSignal,
-  ) => Effect.Effect<ReadonlyArray<Answer>, RejectedError>
+  readonly ask: (input: {
+    sessionID: SessionID
+    questions: ReadonlyArray<Info>
+    tool?: Tool
+    abortSignal?: AbortSignal
+  }) => Effect.Effect<ReadonlyArray<Answer>, RejectedError>
   readonly reply: (input: { requestID: QuestionID; answers: ReadonlyArray<Answer> }) => Effect.Effect<void>
   readonly reject: (requestID: QuestionID) => Effect.Effect<void>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
@@ -187,14 +185,13 @@ export const layer = Layer.effect(
         .pipe(Effect.ensuring(Deferred.fail(existing.deferred, new RejectedError())))
     })
 
-    const ask = Effect.fn("Question.ask")(function* (
-      input: {
-        sessionID: SessionID
-        questions: ReadonlyArray<Info>
-        tool?: Tool
-      },
-      signal?: AbortSignal,
-    ) {
+    const ask = Effect.fn("Question.ask")(function* (input: {
+      sessionID: SessionID
+      questions: ReadonlyArray<Info>
+      tool?: Tool
+      abortSignal?: AbortSignal
+    }) {
+      const signal = input.abortSignal
       if (signal?.aborted) return yield* Effect.fail(new RejectedError())
       const current = yield* InstanceState.get(state)
       const id = QuestionID.ascending()
@@ -219,8 +216,9 @@ export const layer = Layer.effect(
           if (!signal) return waiting
           return Effect.raceFirst(
             waiting,
-            Effect.callback<never, RejectedError>((resume) => {
-              const abort = () => resume(Effect.fail(new RejectedError()))
+            Effect.callback<ReadonlyArray<Answer>, RejectedError>((resume) => {
+              // Reuse request ownership: a reply already in flight must win over a late abort.
+              const abort = () => resume(dismiss(current, id).pipe(Effect.andThen(Deferred.await(deferred))))
               if (signal.aborted) return abort()
               signal.addEventListener("abort", abort, { once: true })
               return Effect.sync(() => signal.removeEventListener("abort", abort))

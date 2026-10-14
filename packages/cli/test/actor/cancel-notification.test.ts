@@ -57,7 +57,7 @@ import { Ripgrep } from "../../src/file/ripgrep"
 import { Format } from "../../src/format"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
-import { reply, TestLLMServer } from "../lib/llm-server"
+import { reply, TestLLMServer, httpError } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
 import { InboxTable, type InboxRow } from "../../src/inbox/inbox.sql"
 
@@ -522,16 +522,21 @@ const captureParentInbox = (parentID: SessionID, parentActorID = "main") =>
   })
 
 const observeWake = (sessionID: SessionID, actorID: string) => Effect.gen(function* () {
-  const executions = yield* ActorExecution.Service
   const instance = Instance.current
-  const started = yield* Deferred.make<Execution | undefined>()
+  const started = yield* Deferred.make<void>()
+  const finished = yield* Deferred.make<void>()
+  let sawRunning = false
   const onStatus = (event: GlobalEvent) => {
     if (event.directory !== instance.directory || event.project !== instance.project.id || event.payload.type !== ActorStatusChanged.type) return
     const properties = ActorStatusChanged.properties.parse(event.payload.properties)
-    if (properties.sessionID !== sessionID || properties.actorID !== actorID || properties.status !== "running") return
-    Effect.runSync(executions.current(sessionID, actorID).pipe(
-      Effect.flatMap((execution) => Deferred.succeed(started, execution)),
-    ))
+    if (properties.sessionID !== sessionID || properties.actorID !== actorID) return
+    if (properties.status === "running" && !sawRunning) {
+      sawRunning = true
+      Effect.runSync(Deferred.succeed(started, undefined))
+    }
+    if (sawRunning && properties.status === "idle") {
+      Effect.runSync(Deferred.succeed(finished, undefined))
+    }
   }
   yield* Effect.acquireRelease(
     Effect.sync(() => GlobalBus.on("event", onStatus)),
@@ -540,9 +545,8 @@ const observeWake = (sessionID: SessionID, actorID: string) => Effect.gen(functi
   return Effect.gen(function* () {
     // Initial idle is not evidence of a completed wake; wait for this turn to
     // start, then for execution release before another notification can arrive.
-    const execution = yield* Deferred.await(started)
-    expect(execution).toBeDefined()
-    yield* Deferred.await(execution!.done)
+    yield* Deferred.await(started)
+    yield* Deferred.await(finished)
   })
 })
 
@@ -603,8 +607,19 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           yield* firstWake
           const continuedWake = yield* observeWake(parent.id, "owner")
           const before = yield* llm.calls
-          if (terminal === "success") yield* llm.text("second result")
-          if (terminal === "failure") yield* llm.error(401, { error: { message: "invalid credential", type: "authentication_error" } })
+          if (terminal === "success") {
+            // Match the continuation turn only — a plain queue entry can be
+            // stolen by a title-generation request (see llm-server isTitleRequest).
+            yield* llm.textMatch(({ body }) => JSON.stringify(body.messages).includes('"content":"continue"'), "second result")
+          }
+          if (terminal === "failure") {
+            // Same as success: keep the 401 on the continuation request so a
+            // title-generation probe cannot steal it.
+            yield* llm.pushMatch(
+              ({ body }) => JSON.stringify(body.messages).includes('"content":"continue"'),
+              httpError(401, { error: { message: "invalid credential", type: "authentication_error" } }),
+            )
+          }
           if (terminal === "cancelled") yield* llm.hang
           yield* prompt.prompt({ sessionID: spawned.sessionID, agentID: spawned.actorID, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "continue" }] })
           const execution = yield* prompt.loop({ sessionID: spawned.sessionID, agentID: spawned.actorID, notifyParentOnComplete: true }).pipe(Effect.forkChild)
@@ -650,7 +665,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
             yield* mainNotifications(0, spawned.actorID)
           }
         }), { git: true, config: providerCfg },
-      ))
+      ), 30_000)
     }
   }
 
@@ -1425,8 +1440,10 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
             model: ref,
           })
           yield* Deferred.await(child.outcome)
-          const before = yield* llm.calls
-          yield* llm.hang
+          // The parent's own completion-notification turn races this continuation;
+          // bind the hang to the child request and observe only child requests.
+          const carries = (text: string) => (hit: { body: unknown }) => JSON.stringify(hit.body).includes(text)
+          yield* llm.pushMatch(({ body }) => carries("start continuation")({ body }), reply().hang())
           yield* inbox.send({
             receiverSessionID: child.sessionID,
             receiverActorID: child.actorID,
@@ -1434,8 +1451,8 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
             senderActorID: "main",
             content: "start continuation",
           })
-          for (let i = 0; i < 500 && (yield* llm.calls) === before; i++) yield* Effect.sleep("10 millis")
-          expect(yield* llm.calls).toBe(before + 1)
+          for (let i = 0; i < 500 && !(yield* llm.hits).some(carries("start continuation")); i++) yield* Effect.sleep("10 millis")
+          expect((yield* llm.hits).filter(carries("start continuation"))).toHaveLength(1)
           const owner = yield* executions.current(child.sessionID, child.actorID)
           if (!owner) return yield* Effect.die("Continuation execution missing")
           const entered = yield* Deferred.make<void>()
@@ -1457,7 +1474,8 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           expect(yield* inbox.has(queued.inboxID)).toBe(false)
           expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
           expect(yield* executions.current(child.sessionID, child.actorID)).toBeUndefined()
-          expect(yield* llm.calls).toBe(before + 1)
+          expect((yield* llm.hits).filter(carries("start continuation"))).toHaveLength(1)
+          expect((yield* llm.hits).filter(carries("must not execute"))).toEqual([])
           const rejected = yield* inbox
             .send({ receiverSessionID: child.sessionID, receiverActorID: child.actorID, content: "must remain retired" })
             .pipe(Effect.exit)

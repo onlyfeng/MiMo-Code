@@ -39,8 +39,6 @@ export type SandboxOptions = {
   /** Optional cooperative cancel: polled from the interrupt handler (guest
    * bytecode) so an aborted caller can stop a busy guest promptly. */
   interrupt?: () => boolean
-  /** Active cancellation also stops a guest parked on an unresolved promise.
-   * Host operations remain owned and joined by the caller. */
   signal?: AbortSignal
 }
 
@@ -260,12 +258,15 @@ export async function evalScript(body: string, hooks: Record<string, HostFn>, op
         opts.deadlineMs ?? DEFAULT_DEADLINE_MS,
       )
     })
-    const cancellation = Promise.withResolvers<never>()
-    const abort = () => cancellation.reject(opts.signal?.reason ?? new Error("workflow script aborted"))
+    let onAbort: (() => void) | undefined
+    const aborted = new Promise<never>((_, reject) => {
+      if (!opts.signal) return
+      onAbort = () => reject(opts.signal!.reason)
+      if (opts.signal.aborted) onAbort()
+      else opts.signal.addEventListener("abort", onAbort, { once: true })
+    })
     try {
-      opts.signal?.addEventListener("abort", abort, { once: true })
-      if (opts.signal?.aborted) abort()
-      const resolved = await Promise.race([vm.resolvePromise(promiseHandle), deadline, cancellation.promise])
+      const resolved = await Promise.race([vm.resolvePromise(promiseHandle), deadline, aborted])
       if (resolved.error) {
         const err = vm.dump(resolved.error)
         resolved.error.dispose()
@@ -274,9 +275,9 @@ export async function evalScript(body: string, hooks: Record<string, HostFn>, op
       const valueHandle = track(resolved.value)
       return vm.dump(valueHandle)
     } finally {
-      opts.signal?.removeEventListener("abort", abort)
       clearTimeout(pumpTimer)
       clearTimeout(deadlineTimer)
+      if (onAbort) opts.signal?.removeEventListener("abort", onAbort)
     }
   } finally {
     // Dispose deferreds BEFORE the arena/context: an unsettled deferred still

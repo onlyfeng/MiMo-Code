@@ -15,7 +15,7 @@ import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { SessionCheckpoint } from "@/session/checkpoint"
 import { Todo } from "@/session/todo"
-import { Effect } from "effect"
+import { Cause, Effect } from "effect"
 import { Snapshot } from "@/snapshot"
 import { Command } from "@/command"
 import { Log } from "@/util"
@@ -1178,8 +1178,8 @@ export const SessionRoutes = lazy(() =>
     .post(
       "/:sessionID/resume",
       describeRoute({
-        summary: "Resume from a trailing user",
-        description: "Start the next turn from a trailing user message without creating another user message.",
+        summary: "Resume an exact recovery target",
+        description: "Admit a user or assistant recovery target without creating another user message. Omit the target to select the latest candidate.",
         operationId: "session.resumeUser",
         responses: {
           202: { description: "Resume accepted" },
@@ -1199,9 +1199,12 @@ export const SessionRoutes = lazy(() =>
         modelID: z.string().optional(),
       })),
       // Body is optional: empty/{} = resume latest recovery candidate.
-      // userMessageID still accepted for explicit trailing-user targeting (TUI / cascade).
       validator("json", z.object({
         userMessageID: MessageID.zod.optional(),
+        assistantMessageID: MessageID.zod.optional(),
+        attempt: z.object({ requestId: z.string().min(1), attemptId: z.string().min(1) }).optional(),
+      }).refine((body) => !(body.userMessageID && body.assistantMessageID), {
+        message: "userMessageID and assistantMessageID are mutually exclusive",
       }).optional()),
       async (c) => {
         const params = c.req.valid("param")
@@ -1211,13 +1214,14 @@ export const SessionRoutes = lazy(() =>
           return c.json({ data: { name: "InvalidRequest", data: { message: "modelProviderID and modelID must be provided together" } } }, 400)
         }
         if (query.agentID && query.agentID !== "main") {
-          if (query.modelProviderID || body?.userMessageID)
-            return c.json(new NamedError.Unknown({ message: "Trailing-user and model override recovery are available for main-agent resume only" }).toObject(), 400)
+          // Host execution attempts scope only main-agent model calls.
+          if (query.modelProviderID || body?.userMessageID || body?.attempt)
+            return c.json(new NamedError.Unknown({ message: "Trailing-user, execution attempt and model override recovery are available for main-agent resume only" }).toObject(), 400)
           await runRequest("SessionRoutes.actorResume.start", c, Effect.gen(function* () {
             const target = yield* ActorRecoveryTarget.resolve({ sessionID: params.sessionID, actorID: query.agentID! })
             const actor = yield* Actor.Service
             if (!actor.resume) return yield* Effect.fail(new NotFoundError({ message: "Actor recovery is unavailable" }))
-            yield* actor.resume({ ...target, task_id: query.task_id, signal: c.req.raw.signal })
+            yield* actor.resume({ ...target, assistantMessageID: body?.assistantMessageID, task_id: query.task_id, signal: c.req.raw.signal })
           }))
           return c.body(null, 202)
         }
@@ -1226,29 +1230,6 @@ export const SessionRoutes = lazy(() =>
           c,
           SessionRunState.Service.use((svc) => svc.assertNotBusy(params.sessionID, query.agentID)),
         )
-        // Explicit userMessageID → validate it is still the trailing user.
-        // Omitted → the engine resolves the latest recovery candidate (404 if none).
-        if (body?.userMessageID) {
-          await runRequest(
-            "SessionRoutes.resumeUser.validate",
-            c,
-            SessionPrompt.Service.use((svc) =>
-              svc.recovery({ sessionID: params.sessionID, agentID: query.agentID }).pipe(
-                Effect.flatMap((candidates) =>
-                  candidates.some(
-                    (candidate) => candidate.kind === "parent-user" && candidate.userMessageID === body.userMessageID,
-                  )
-                    ? Effect.void
-                    : Effect.fail(
-                        new NotFoundError({
-                          message: "No resumable trailing user found for message " + body.userMessageID,
-                        }),
-                      ),
-                ),
-              ),
-            ),
-          )
-        }
         // [TP-SR-R21-10] 202 = admission complete (plan + exclusive start), not fire-and-forget.
         // Main agent also cascades subagent recovery (same as /turn/:id/resume).
         const admitted = await runRequest(
@@ -1259,7 +1240,7 @@ export const SessionRoutes = lazy(() =>
               ? svc.resumeMainCascading({
                   sessionID: params.sessionID,
                   signal: c.req.raw.signal,
-                  ...(body?.userMessageID ? { userMessageID: body.userMessageID } : {}),
+                  ...body,
                   agentID: query.agentID,
                   task_id: query.task_id,
                   titleLocale: query.titleLocale,
@@ -1268,12 +1249,19 @@ export const SessionRoutes = lazy(() =>
               : svc.resumeBackground({
                   sessionID: params.sessionID,
                   signal: c.req.raw.signal,
-                  ...(body?.userMessageID ? { userMessageID: body.userMessageID } : {}),
+                  ...body,
                   agentID: query.agentID,
                   task_id: query.task_id,
                   titleLocale: query.titleLocale,
                   ...(query.modelProviderID && query.modelID ? { model: { providerID: query.modelProviderID, modelID: query.modelID } } : {}),
                 }),
+          ).pipe(
+            // A Stop before admission withdraws the request like any other unadmitted target.
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause) && !c.req.raw.signal.aborted
+                ? Effect.fail(new NotFoundError({ message: "Resume admission did not complete" }))
+                : Effect.failCause(cause),
+            ),
           ),
         ).then(() => ({ ok: true as const }))
           .catch((error: unknown) => ({ ok: false as const, error }))

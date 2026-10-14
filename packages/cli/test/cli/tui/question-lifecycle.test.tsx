@@ -95,10 +95,11 @@ for (const end of ["abort", "dispose"] as const) {
           const sessionID = SessionID.make("ses_tui_question")
           const result = AppRuntime.runPromise(
             Question.Service.use((question) =>
-              question.ask(
-                { sessionID, questions: [{ question: "Continue?", header: "Continue", options: [] }] },
-                controller.signal,
-              ),
+              question.ask({
+                sessionID,
+                questions: [{ question: "Continue?", header: "Continue", options: [] }],
+                abortSignal: controller.signal,
+              }),
             ),
           ).catch((error) => error)
           await wait(() => sync?.data.question[sessionID]?.length === 1)

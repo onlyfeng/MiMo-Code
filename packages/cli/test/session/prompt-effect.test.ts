@@ -496,12 +496,12 @@ const run = Layer.effect(
     const state = yield* SessionRunState.Service
     return SessionRunState.Service.of({
       ...state,
-      startOwned: (sessionID, actorID, onInterrupt, work) => {
+      startOwned: (sessionID, actorID, onInterrupt, work, admit) => {
         const gate = droppedStartGate
         if (!gate?.armed || gate.sessionID !== sessionID || gate.actorID !== actorID)
-          return state.startOwned(sessionID, actorID, onInterrupt, work)
+          return state.startOwned(sessionID, actorID, onInterrupt, work, admit)
         gate.armed = false
-        return Effect.succeed({ runId: 0, interruptOwned: Effect.void, completion: onInterrupt })
+        return Effect.succeed({ runId: 0, interruptOwned: Effect.void, awaitExit: Effect.void, completion: onInterrupt })
       },
       ensureRunning: (sessionID, actorID, onInterrupt, work, joinRunning) => {
         const gate = lateRunGate
@@ -1648,7 +1648,7 @@ it.live("[TP-R4-01][TP-R7-01] uncommitted-hint enabled + hook-source turn does n
 )
 
 // R003: root-session machine contract — hook + provenance accepts machine payloads.
-const machineProvenance = { machine: "desktop-automation" } as const
+const machineProvenance = { machine: "host-automation" } as const
 
 it.live("[TP-R4-01] machine hook text-only with provenance is accepted and not force-synthetic", () =>
   provideTmpdirServer(
@@ -2232,7 +2232,7 @@ it.live("[TP-R4-01] uncommitted-hint delete during wait produces no late hint me
   15_000,
 )
 
-it.live("[TP-R7-01] uncommitted-hint decision logs land in Desktop WARN-level sink", () =>
+it.live("[TP-R7-01] uncommitted-hint decision logs land in a WARN-level sink", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm, dir }) {
       const prompt = yield* SessionPrompt.Service
@@ -2250,7 +2250,7 @@ it.live("[TP-R7-01] uncommitted-hint decision logs land in Desktop WARN-level si
       const prevLogPath = Global.Path.log
       let warnLogDir = ""
       try {
-        // Mirror Desktop engine bootstrap: Log.init({ print: false, level: "WARN" }).
+        // Mirror host engine bootstrap: Log.init({ print: false, level: "WARN" }).
         yield* Effect.promise(async () => {
           const { mkdtempSync } = await import("node:fs")
           const { tmpdir } = await import("node:os")
@@ -5970,7 +5970,7 @@ for (const isError of [false, true]) {
   )
 }
 
-// [TP-RUN-R12-36] Desktop turn-execution: exercise the engine execution boundary,
+// [TP-RUN-R12-36] turn-execution: exercise the engine execution boundary,
 // persistence and model continuation, not a renderer-injected error string.
 for (const mode of ["throw", "reject", "short"] as const) {
   const text = mode === "short" ? "short MCP exception" : "MCP exception\n" + "诊断😀 line\n".repeat(30_000)
@@ -11261,6 +11261,7 @@ describe("trailing-user resume integration", () => {
             .resume({ sessionID: chat.id, userMessageID: user2.id, agentID: "main", model: ref })
             .pipe(Effect.exit, Effect.forkChild)
           yield* Effect.promise(() => beforeOccupy.reached)
+          ResumeTestHooks.beforeExclusiveOccupy = undefined
           // Second start-mode resume occupies the runner while first is still pre-occupy.
           const second = yield* prompt
             .resumeBackground({ sessionID: chat.id, userMessageID: user2.id, agentID: "main", model: ref })
@@ -11694,7 +11695,7 @@ describe("trailing-user resume integration", () => {
   )
 })
 
-// Desktop turn-execution [TP-RUN-R6-09], session-resume [TP-SR-R16-04].
+// turn-execution [TP-RUN-R6-09], session-resume [TP-SR-R16-04].
 for (const boundary of ["snapshot", "language"] as const) {
   it.live(`cancel during assistant ${boundary} preparation persists user abort before idle and permits the next turn`, () =>
     provideTmpdirServer(({ llm }) => Effect.gen(function* () {

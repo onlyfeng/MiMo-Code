@@ -54,6 +54,7 @@ export const PlanExitTool = Tool.define(
           const plan = path.relative(Instance.worktree, Session.plan(info))
           const answers = yield* question.ask({
             sessionID: ctx.sessionID,
+            abortSignal: ctx.abort,
             questions: [
               {
                 key: "plan_exit",
@@ -67,7 +68,7 @@ export const PlanExitTool = Tool.define(
               },
             ],
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
-          }, ctx.abort)
+          })
 
           const answer = answers[0]?.[0]
           if (answer === "No") {
