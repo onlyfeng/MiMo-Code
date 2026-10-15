@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-14
-- Upstream: `6ba6a6254a6d040bb81ec9453962a52fc46c9c6d`
-- Prior reviewed upstream: `e27e87de81a74db5475bd93540f8889dfbc70ec6`
-- Main behavior (runtime/tests): `22874d87c9b0134d0e7540880c9050e4ae94d274` (runtime merge)
+- Last reviewed: 2026-10-15
+- Upstream: `496bb8cbe614aecea27623457d143600cc12c275`
+- Prior reviewed upstream: `6ba6a6254a6d040bb81ec9453962a52fc46c9c6d`
+- Main behavior (runtime/tests): `076db1db726b7d0d7eaaaae4c29ea830be73d027` (runtime merge)
 - Bundled guidance content: `848c635c1eb57d326f0d135f1c20caafc9c5f17f` (unchanged by this range)
-- Prior fork `main` tip: `f0571cd9eac31c8c9cc10e3793370ba89fe1b2b2`
+- Prior fork `main` tip: `a7d242df8c0651038827ac99e434ef0e815f3885`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,9 +30,11 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-14 sync through `6ba6a625`](upstream-sync-2026-10-14-6ba6a625.md), one capability. Adopt replay-safe history migrations and the replay-safe `migrate()` wrapper unchanged; the two edited shipped migrations are upstream-owned and journal-name selection keeps applied databases from rerunning them.
+Latest reviewed synchronization: [2026-10-15 sync through `496bb8cb`](upstream-sync-2026-10-15.md), one capability. Adapt upstream's inbox wake ownership into FC-001's single `Inbox.wake`: an `Instance.claim` taken before receiver preparation lasts until the wake fiber exits, so ordinary disposal cannot close the scope holding a scheduled wake. Upstream's abort-immediately-after-send case is not adopted; FC-001 records the pre-existing asynchronous-admission gap it exposes.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+
+Previous synchronization: [2026-10-14 sync through `6ba6a625`](upstream-sync-2026-10-14-6ba6a625.md), one capability. Adopt replay-safe history migrations and the replay-safe `migrate()` wrapper unchanged; the two edited shipped migrations are upstream-owned and journal-name selection keeps applied databases from rerunning them.
 
 Previous synchronization: [2026-10-14 full sync](upstream-sync-2026-10-14.md), twelve capabilities from two upstream commits through `e27e87de`. Adopt native Windows memory path parsing unchanged. Adopt the settled tool execution boundary (`ToolPart.execution`, `inputComplete`, transactional tool-part writes, `ToolSettlement` for plugin, registry, MCP and exec results), request-phase `session.status{retry}`, Deferred-backed `InstanceState` initialization and owned-run `awaitExit`. Adapt exact-target resume, pending-input refusal, the host execution attempt and empty-stop recovery into FC-001's settlement and continuation model without upstream's history trim; keep FD-006's exec close-abort-join and MCP harness-tag escaping (FD-005).
 
@@ -106,6 +108,8 @@ not change their implementation. The preceding review is retained in the
 | FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-10-15 synchronization: upstream `f82fa60a` makes a scheduled inbox wake hold an `Instance.claim` until its fiber exits. Adapted into `Inbox.wake`, the single entry for `send` and `wakePending`: the claim is taken on the current service instance before receiver lookup and instance preparation, and claim, preparation, `EffectBridge` fork and exit-observer registration form one uninterruptible handoff; the outer wake fiber starts immediately and the bridged receiver loop keeps its own instance and run-disposal marker. Known gap, not adopted from upstream: a cancel issued after `send` returns but before the bridged loop reaches Runner admission does not stop that wake, because the bridge (`Effect.runFork`) and the `InstanceState` lookup in `SessionRunState.runner` suspend before admission, so `SessionRunState.cancel` finds no busy runner. The gap predates this range (reproduced on `a7d242df` without disposal: the receiver issues a second model request); upstream closes it by synchronous admission and asserts it in `wake-instance-handoff.test.ts` ("abort immediately after send cannot let a queued wake restart the receiver"), which the fork does not carry until a pre-admission cancellation path exists. Evidence: `test/inbox/wake-instance-handoff.test.ts` (five adopted cases), `test/inbox/` and `test/actor/cancel-notification.test.ts`.
 
 - 2026-10-14 synchronization: upstream `002cb4c9` rebuilds resume around an exact reviewed target and a history trim that restarts from the parent user. The trim and parent restart are not adopted: resume still settles the selected assistant in its admission transaction and continues from it, so `MessageV2.planResumeTrim` and `assertResumeModelBoundary` ship unused. Adopted into `startResumeTurn`: `POST /session/:id/resume` accepts an exact `assistantMessageID` (exclusive with `userMessageID`, also forwarded to actor resume); a pending question or permission in the session refuses resume with 409 before occupation and again at admission; admission runs before `SessionRunState`'s orphan sweep through the new `startOwned` `admit` argument, so a rejected or cancelled admission writes nothing; a Stop before admission reports 404 from `POST /session/:id/resume` while `startResume` keeps reporting the interruption; and an optional host execution `attempt` is prepared, rechecked, admitted before the settlement commit, gated on `beforeWork` and finished when the run fiber exits (`Runner.startOwned` now exposes `awaitExit`), with `ExecutionScope` on main model calls. Actor resume refuses `attempt`. An empty provider stop is a candidate even after completion or a later error, until an abandonment settles it with `MessageAbortedError`; a completed errored assistant with delivered output stays settled as before. Residue cleanup skips summary and structured-output assistants. Model tools now run in the processor's tool scope, which execution cleanup closes and joins, so `Actor.cancel` called from a tool delegates to the service scope and waits interruptibly exactly as a direct execution hook does; without that, a peer cancelling its own spawn through the `actor` tool deadlocked (`test/actor/self-cancel.test.ts`). Evidence: `test/server/session-recovery.test.ts` (exact-target matrix, host attempt lifecycle, empty-stop matrix), `test/effect/runner.test.ts`, `test/session/invalid-output-continuation.test.ts`.
 
