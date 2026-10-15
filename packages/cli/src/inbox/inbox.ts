@@ -19,6 +19,7 @@ import { Instance } from "@/project/instance"
 import { InstanceRef } from "@/effect/instance-ref"
 import { EffectBridge } from "@/effect"
 import { isRunDisposing, RunDisposal } from "@/session/run-disposal"
+import * as CancelEpoch from "@/session/cancel-epoch"
 
 const log = Log.create({ service: "inbox" })
 
@@ -188,6 +189,9 @@ export const layer: Layer.Layer<
       // not affect delivery.
       const promptRef = boundPrompt ?? sessionPromptRef.current
       if (promptRef) {
+        // Recorded before any suspension, so it predates a cancel issued once
+        // send returns; Runner admission refuses the wake if it has moved.
+        const cancelEpoch = CancelEpoch.current(sessionID)
         // The scheduled wake holds an execution claim on the current service
         // instance from before its preparation until the wake fiber exits, so
         // pending disposal cannot close the scope that owns it. Claim, fork and
@@ -228,6 +232,7 @@ export const layer: Layer.Layer<
                   // the sole notifier for turn 1 — no double-notify.
                   notifyParentOnComplete: true,
                   inboxID,
+                  cancelEpoch,
                   source: "spawn",
                 }))),
                 Fiber.await,

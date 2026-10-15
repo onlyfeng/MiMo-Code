@@ -230,3 +230,37 @@ it.live(
     }),
   15_000,
 )
+
+it.live(
+  "abort immediately after send cannot let a queued wake restart the receiver",
+  () =>
+    Effect.gen(function* () {
+      const fixture = yield* receiver()
+      yield* Effect.gen(function* () {
+        const inbox = inboxServiceRef.current
+        if (!inbox) throw new Error("Inbox service was not initialized")
+        const state = yield* SessionRunState.Service
+        const sessions = yield* Session.Service
+        const releaseSender = Instance.claim(fixture.dir)
+        yield* Effect.promise(() => Instance.disposeDirectory(fixture.dir))
+        yield* inbox.send({
+          receiverSessionID: fixture.session.id,
+          receiverActorID: "main",
+          content: "IMMEDIATE_ABORT_DELIVERY",
+        })
+        yield* state.cancel(fixture.session.id)
+        const requestsAtAbort = fixture.server.captures.length
+        releaseSender()
+        fixture.finish.resolve()
+        yield* eventually(
+          () => Instance.refreshStatus(fixture.dir).state === "applied",
+          "immediate abort retained the instance",
+        )
+        yield* Effect.sleep("30 millis")
+        expect(fixture.server.captures).toHaveLength(requestsAtAbort)
+        const messages = yield* sessions.messages({ sessionID: fixture.session.id, agentID: "main" })
+        expect(messages.some(message => message.parts.some(part => part.type === "text" && part.text === "WAKE_DONE"))).toBe(false)
+      }).pipe(restoreInstance(fixture.context))
+    }),
+  15_000,
+)

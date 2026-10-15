@@ -3,7 +3,12 @@ import { Cause, Deferred, Effect, Exit, Fiber, Schema, Scope, SynchronizedRef } 
 export interface Runner<A, E = never, B = never> {
   readonly state: State<A, E>
   readonly busy: boolean
-  readonly ensureRunning: (work: Effect.Effect<A, E>, onInterrupt?: Effect.Effect<A, E>, joinRunning?: boolean) => Effect.Effect<A, E>
+  readonly ensureRunning: (
+    work: Effect.Effect<A, E>,
+    onInterrupt?: Effect.Effect<A, E>,
+    joinRunning?: boolean,
+    admit?: () => boolean,
+  ) => Effect.Effect<A, E>
   readonly startRunning: (
     work: Effect.Effect<A, E>,
     onInterrupt?: Effect.Effect<A, E>,
@@ -186,12 +191,15 @@ export const make = <A, E = never, B = never>(
     work: Effect.Effect<A, E>,
     onInterrupt = defaultOnInterrupt,
     joinRunning = false,
+    admit?: () => boolean,
   ): Effect.Effect<A, E> =>
     Effect.uninterruptibleMask((restore) =>
       SynchronizedRef.modifyEffect(
         ref,
         Effect.fnUntraced(function* (st) {
-          if (opts?.canStart?.() === false) return [Effect.interrupt, st] as const
+          // `admit` is decided inside the same atomic transition as `canStart`,
+          // so a caller's guard cannot pass and then lose a race to admission.
+          if (opts?.canStart?.() === false || admit?.() === false) return [Effect.interrupt, st] as const
           switch (st._tag) {
             case "Running": {
               const exit = st.run.fiber.pollUnsafe()
@@ -234,7 +242,7 @@ export const make = <A, E = never, B = never>(
               return [
                 restore(
                   Deferred.await(st.cancellation.committed).pipe(
-                    Effect.andThen(ensureRunning(work, onInterrupt, joinRunning)),
+                    Effect.andThen(ensureRunning(work, onInterrupt, joinRunning, admit)),
                   ),
                 ),
                 st,
@@ -242,7 +250,7 @@ export const make = <A, E = never, B = never>(
             case "Idle": {
               const id = next()
               yield* busy
-              if (opts?.canStart?.() === false)
+              if (opts?.canStart?.() === false || admit?.() === false)
                 return [idle(id).pipe(Effect.andThen(restore(Effect.interrupt))), st] as const
               const done = yield* Deferred.make<A, E | Cancelled>()
               const run = yield* startRun(work, done, onInterrupt, id)
