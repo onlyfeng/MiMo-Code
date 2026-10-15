@@ -4,7 +4,7 @@ import type { SessionID } from "./schema"
 // value when it is scheduled and Runner admission refuses it once the value has
 // moved, so a cancel issued after delivery but before the receiver's Runner
 // admits the wake still stops it. Session IDs are unique per process, so one
-// counter per cancelled session is the whole footprint.
+// counter per cancelled session is the whole footprint; Session.remove releases it.
 const epochs = new Map<SessionID, number>()
 
 export function current(sessionID: SessionID) {
@@ -13,4 +13,8 @@ export function current(sessionID: SessionID) {
 
 export function advance(sessionID: SessionID) {
   epochs.set(sessionID, current(sessionID) + 1)
+}
+
+export function release(sessionID: SessionID) {
+  epochs.delete(sessionID)
 }
