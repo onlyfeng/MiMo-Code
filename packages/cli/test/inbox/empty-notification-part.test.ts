@@ -137,6 +137,9 @@ describe("Inbox.drain never persists an empty user text part", () => {
             receiverActorID: "actor-empty",
             content: "",
             type: "actor_notification",
+            // Drain is under test; a wake scheduled through a prompt loop left
+            // bound by an earlier file could otherwise drain the row first.
+            wake: false,
           }),
         ),
       )
@@ -187,6 +190,7 @@ describe("Inbox.drain never persists an empty user text part", () => {
               receiverActorID: "actor-mixed",
               content: body,
               type: "actor_notification",
+              wake: false,
             }),
           ),
         )

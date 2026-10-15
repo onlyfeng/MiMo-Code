@@ -1640,11 +1640,13 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
               cancelListDefectGate = { sessionID: result.sessionID, actorID: childID, armed: true }
             }
 
+            const notifications = yield* captureParentInbox(parent.id)
             yield* actor.cancel(result.sessionID, result.actorID, "forced").pipe(Effect.timeout("5 seconds"))
             expect((yield* actorReg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("cancelled")
-            const rows = yield* parentInboxRows(parent.id)
-            expect(rows).toHaveLength(1)
-            expect((rows[0]?.content as { text?: string }).text).toContain("cancelled")
+            // The parent's auto-wake may already have drained the row; capture it
+            // at InboxArrived, before send schedules that wake.
+            const [row] = yield* notifications(1, result.actorID)
+            expect((row.content as { text?: string }).text).toContain("cancelled")
           })
 
           yield* runScenario("list")
