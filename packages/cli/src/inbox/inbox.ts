@@ -10,6 +10,7 @@ import { MessageID, PartID } from "@/session/schema"
 import { InboxArrived } from "@/actor/events"
 import type { SessionID } from "@/session/schema"
 import { Log } from "@/util"
+import * as InstanceState from "@/effect/instance-state"
 import { InboxTable } from "./inbox.sql"
 import { renderInboxRow } from "./render"
 import { sessionPromptRef, inboxServiceRef, defaultModelRef } from "./inbox-ref"
@@ -187,40 +188,56 @@ export const layer: Layer.Layer<
       // not affect delivery.
       const promptRef = boundPrompt ?? sessionPromptRef.current
       if (promptRef) {
-        const wakeSource = yield* RunDisposal
-        const receiver = yield* sessions.get(sessionID)
-        const currentInstance = yield* InstanceRef
-        // Reusing the active context avoids a second Instance.provide, but keep
-        // its former async handoff so InboxArrived subscribers run promptly.
-        if (currentInstance?.directory === receiver.directory) yield* Effect.yieldNow
-        const receiverInstance =
-          currentInstance?.directory === receiver.directory
-            ? currentInstance
-            : yield* Effect.promise(() =>
-                Instance.provide({ directory: receiver.directory, fn: () => Instance.current }),
-              )
-        const receiverDisposal =
-          wakeSource.instance?.directory === receiver.directory ? wakeSource : { disposing: false as const }
-        const bridge = yield* EffectBridge.make().pipe(
-          Effect.provideService(InstanceRef, receiverInstance),
-          // The receiver owns its run lifetime. Same-directory delivery keeps
-          // the shared marker so disposal cannot re-arm the receiver generation.
-          Effect.provideService(RunDisposal, receiverDisposal),
-        )
+        // The scheduled wake holds an execution claim on the current service
+        // instance from before its preparation until the wake fiber exits, so
+        // pending disposal cannot close the scope that owns it. Claim, fork and
+        // observer registration form one uninterruptible handoff; the observer
+        // also releases a wake interrupted before its body starts.
+        const directory = yield* InstanceState.directory
+        let transferred = false
         yield* Effect.acquireUseRelease(
-          Effect.sync(() => bridge.fork(promptRef.loop({
-            sessionID,
-            agentID: actorID,
-            // Woken turns notify their parent on completion. The spawn turn goes
-            // through SessionPrompt.prompt (no flag) so forkWork.notify remains
-            // the sole notifier for turn 1 — no double-notify.
-            notifyParentOnComplete: true,
-            inboxID,
-            source: "spawn",
-          }))),
-          Fiber.await,
-          Fiber.interrupt,
-        ).pipe(Effect.ignore, Effect.forkIn(scope))
+          Effect.sync(() => Instance.claim(directory)),
+          (release) =>
+            Effect.gen(function* () {
+              const wakeSource = yield* RunDisposal
+              const receiver = yield* sessions.get(sessionID)
+              const currentInstance = yield* InstanceRef
+              // Reusing the active context avoids a second Instance.provide, but keep
+              // its former async handoff so InboxArrived subscribers run promptly.
+              if (currentInstance?.directory === receiver.directory) yield* Effect.yieldNow
+              const receiverInstance =
+                currentInstance?.directory === receiver.directory
+                  ? currentInstance
+                  : yield* Effect.promise(() =>
+                      Instance.provide({ directory: receiver.directory, fn: () => Instance.current }),
+                    )
+              const receiverDisposal =
+                wakeSource.instance?.directory === receiver.directory ? wakeSource : { disposing: false as const }
+              const bridge = yield* EffectBridge.make().pipe(
+                Effect.provideService(InstanceRef, receiverInstance),
+                // The receiver owns its run lifetime. Same-directory delivery keeps
+                // the shared marker so disposal cannot re-arm the receiver generation.
+                Effect.provideService(RunDisposal, receiverDisposal),
+              )
+              const fiber = yield* Effect.acquireUseRelease(
+                Effect.sync(() => bridge.fork(promptRef.loop({
+                  sessionID,
+                  agentID: actorID,
+                  // Woken turns notify their parent on completion. The spawn turn goes
+                  // through SessionPrompt.prompt (no flag) so forkWork.notify remains
+                  // the sole notifier for turn 1 — no double-notify.
+                  notifyParentOnComplete: true,
+                  inboxID,
+                  source: "spawn",
+                }))),
+                Fiber.await,
+                Fiber.interrupt,
+              ).pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true, uninterruptible: false }))
+              fiber.addObserver(() => release())
+              transferred = true
+            }),
+          (release) => (transferred ? Effect.void : Effect.sync(release)),
+        ).pipe(Effect.uninterruptible)
       } else {
         // Test fixtures / renderer-only paths can run without SessionPrompt.
         // Row is durable; will be drained on next runLoop iteration.
