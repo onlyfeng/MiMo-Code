@@ -349,6 +349,7 @@ describe("Fork-agent inbox compat (Plan 4 / Task 5)", () => {
           receiverSessionID: parent.id,
           receiverActorID: forkActorID,
           content: "inbox-message-for-fork",
+          wake: false,
         })
 
         // Tier 3 — slice routing: drain it manually.

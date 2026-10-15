@@ -42,7 +42,7 @@ const seed = Effect.fn(function* (readers = 1) {
   })
   const sent = yield* Effect.all(
     ["first notification", "second notification"].map((content) =>
-      inbox.send({ receiverSessionID: session.id, receiverActorID: "receiver", type: "actor_notification", content }),
+      inbox.send({ receiverSessionID: session.id, receiverActorID: "receiver", type: "actor_notification", content, wake: false }),
     ),
   )
   // Keep real send admission, but give the fixture a deterministic queue order

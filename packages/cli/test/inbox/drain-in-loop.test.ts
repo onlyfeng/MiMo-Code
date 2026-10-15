@@ -112,6 +112,7 @@ describe("Inbox.drain in loop (Plan 2 / Task 7)", () => {
             receiverSessionID: session.id,
             receiverActorID: "actor-2",
             content: "hello",
+            wake: false,
           }),
         ),
       )
@@ -149,9 +150,9 @@ describe("Inbox.drain in loop (Plan 2 / Task 7)", () => {
       await rt.runPromise(
         Inbox.Service.use((inbox) =>
           Effect.all([
-            inbox.send({ receiverSessionID: session.id, receiverActorID: "actor-3", content: "msg-1" }),
-            inbox.send({ receiverSessionID: session.id, receiverActorID: "actor-3", content: "msg-2" }),
-            inbox.send({ receiverSessionID: session.id, receiverActorID: "actor-3", content: "msg-3" }),
+            inbox.send({ receiverSessionID: session.id, receiverActorID: "actor-3", content: "msg-1", wake: false }),
+            inbox.send({ receiverSessionID: session.id, receiverActorID: "actor-3", content: "msg-2", wake: false }),
+            inbox.send({ receiverSessionID: session.id, receiverActorID: "actor-3", content: "msg-3", wake: false }),
           ]),
         ),
       )
@@ -205,7 +206,7 @@ describe("Inbox.drain in loop (Plan 2 / Task 7)", () => {
 
       await rt.runPromise(
         Inbox.Service.use((inbox) =>
-          inbox.send({ receiverSessionID: session.id, receiverActorID: "peer-idle", content: "relayed task" }),
+          inbox.send({ receiverSessionID: session.id, receiverActorID: "peer-idle", content: "relayed task", wake: false }),
         ),
       )
 
@@ -251,7 +252,7 @@ describe("Inbox.drain in loop (Plan 2 / Task 7)", () => {
       )
       await rt.runPromise(
         Inbox.Service.use((inbox) =>
-          inbox.send({ receiverSessionID: session.id, receiverActorID: "peer-t0", content: "queued" }),
+          inbox.send({ receiverSessionID: session.id, receiverActorID: "peer-t0", content: "queued", wake: false }),
         ),
       )
 
@@ -303,7 +304,7 @@ describe("Inbox.drain in loop (Plan 2 / Task 7)", () => {
       )
       await rt.runPromise(
         Inbox.Service.use((inbox) =>
-          inbox.send({ receiverSessionID: session.id, receiverActorID: "peer-fresh", content: "queued" }),
+          inbox.send({ receiverSessionID: session.id, receiverActorID: "peer-fresh", content: "queued", wake: false }),
         ),
       )
 
@@ -356,6 +357,7 @@ describe("Inbox.drain in loop (Plan 2 / Task 7)", () => {
                 receiverSessionID: session.id,
                 receiverActorID: "actor-cap",
                 content: `msg-${i}`,
+                wake: false,
               }),
             ),
           ),
