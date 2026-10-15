@@ -82,7 +82,7 @@ export async function safeFetch(
 // assertions environment-dependent.
 export async function assertSafeUrl(
   url: string,
-  lookupImpl: (hostname: string) => Promise<{ address: string; family: number }> = lookup,
+  lookupImpl: (hostname: string, options: { all: true }) => Promise<{ address: string; family: number }[]> = lookup,
 ): Promise<void> {
   const parsed = new URL(url)
   const hostname = parsed.hostname.replace(/^\[|\]$/g, "")
@@ -107,14 +107,23 @@ export async function assertSafeUrl(
     return
   }
 
-  // DNS resolution check to prevent DNS rebinding
+  // DNS resolution check to prevent DNS rebinding. Every answer is checked:
+  // a hostname that returns a public and a private address together fails
+  // closed instead of trusting the first answer. The check still races the
+  // fetch's own resolution (TOCTOU), so this is defense-in-depth, not a
+  // guarantee about which address the request finally reaches.
   try {
-    const { address, family } = await lookupImpl(hostname)
-    if (family === 4 && isBlockedIPv4(address)) {
-      throw new Error(`SSRF protection: hostname "${hostname}" resolves to blocked IP "${address}"`)
+    const resolved = await lookupImpl(hostname, { all: true })
+    if (resolved.length === 0) {
+      throw new Error(`SSRF protection: DNS resolution failed for "${hostname}"`)
     }
-    if (family === 6 && isBlockedIPv6(address)) {
-      throw new Error(`SSRF protection: hostname "${hostname}" resolves to blocked IPv6 "${address}"`)
+    for (const { address, family } of resolved) {
+      if (family === 4 && isBlockedIPv4(address)) {
+        throw new Error(`SSRF protection: hostname "${hostname}" resolves to blocked IP "${address}"`)
+      }
+      if (family === 6 && isBlockedIPv6(address)) {
+        throw new Error(`SSRF protection: hostname "${hostname}" resolves to blocked IPv6 "${address}"`)
+      }
     }
   } catch (e: any) {
     if (e.message?.startsWith("SSRF protection:")) throw e
