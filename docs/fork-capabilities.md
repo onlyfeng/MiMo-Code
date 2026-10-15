@@ -1298,11 +1298,14 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-010 — WebFetch and SSRF destination classification, authorization, and resource bounds
 
+- 2026-10-15 fork hardening (prompted by the dropped June stash review): DNS classification resolves every record (`lookup` with `all: true`) instead of trusting the first answer — a hostname returning a public and a private address together fails closed, and an empty answer list fails closed as a resolution failure. The upstream base still checks the first answer only. The check still races the request's own resolution (TOCTOU), so it remains defense-in-depth. The injected-resolver API now passes `{ all: true }` and expects the record list. Evidence: `test/util/ssrf.test.ts` adds the mixed-answer fail-closed and empty-answer cases (29/29 with `test/tool/webfetch.test.ts` 5/5).
+
 - Status: active
 - Canonical owner: shared `main` WebFetch and SSRF destination-classification boundary
 - Observable contract: WebFetch accepts only HTTP(S). Destination classification
   runs before permission for the initial URL and every manual redirect target,
-  blocking classified private/internal numeric targets and hostname results,
+  blocking classified private/internal numeric targets and every hostname's
+  DNS answers,
   including the complete IPv6 link-local `fe80::/10` range. Each target that passes
   classification triggers the effective `webfetch` permission before its
   request; a rejected target stops before its permission ask and request.
@@ -1329,7 +1332,8 @@ logged`, and the peer `success`/`failure` variants of
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
 - Retirement condition: upstream preserves equivalent numeric and DNS-resolved
-  destination classification, including IPv6 `fe80::/10`, with the same HTTP(S),
+  destination classification that checks every DNS answer, including IPv6
+  `fe80::/10`, with the same HTTP(S),
   per-hop permission, manual-redirect, timeout, and response-size contract and
   behavior-focused tests.
 

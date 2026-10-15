@@ -88,16 +88,31 @@ describe("assertSafeUrl", () => {
     })
 
     test("rejects a hostname that resolves to a blocked IP (rebinding)", async () => {
-      const rebinding = async () => ({ address: "169.254.169.254", family: 4 })
+      const rebinding = async () => [{ address: "169.254.169.254", family: 4 }]
       await expect(assertSafeUrl("http://rebind.example.com/", rebinding)).rejects.toThrow(
         "SSRF protection: hostname",
       )
     })
 
     test("rejects a hostname that resolves to a link-local IPv6 address", async () => {
-      const rebinding = async () => ({ address: "febf::1", family: 6 })
+      const rebinding = async () => [{ address: "febf::1", family: 6 }]
       await expect(assertSafeUrl("http://rebind.example.com/", rebinding)).rejects.toThrow(
         "SSRF protection: hostname",
+      )
+    })
+
+    test("rejects a hostname when any answer is blocked even if the first is public", async () => {
+      const mixed = async () => [
+        { address: "93.184.216.34", family: 4 },
+        { address: "10.0.0.5", family: 4 },
+      ]
+      await expect(assertSafeUrl("http://mixed.example.com/", mixed)).rejects.toThrow("SSRF protection: hostname")
+    })
+
+    test("rejects a hostname whose resolution returns no addresses", async () => {
+      const empty = async () => []
+      await expect(assertSafeUrl("http://empty.example.com/", empty)).rejects.toThrow(
+        "SSRF protection: DNS resolution failed",
       )
     })
   })
