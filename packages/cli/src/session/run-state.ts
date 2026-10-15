@@ -7,6 +7,7 @@ import { MessageV2 } from "./message-v2"
 import { isRunDisposing, RunDisposal } from "./run-disposal"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
+import * as CancelEpoch from "./cancel-epoch"
 import { orphanToolIdleSweepRef, assistantMessageIdsSnapshotRef } from "./orphan-tool-idle-hook"
 
 type RunnerEntry = {
@@ -43,6 +44,7 @@ export interface Interface {
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
     joinRunning?: boolean,
+    cancelEpoch?: number,
   ) => Effect.Effect<MessageV2.WithParts>
   readonly startRunning: (
     sessionID: SessionID,
@@ -252,6 +254,7 @@ export const layer = Layer.effect(
     // Cancel a snapshot of this session's runners; leases and generation-aware
     // cleanup keep a replacement admitted during interruption reachable.
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
+      CancelEpoch.advance(sessionID)
       const main = yield* runner(sessionID, "main")
       const targets = [...(main.data.runners.get(sessionID)?.values() ?? [])]
       targets.forEach((entry) => entry.control.leases++)
@@ -303,10 +306,16 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
       joinRunning = false,
+      cancelEpoch?: number,
     ) {
       const current = yield* runner(sessionID, agentID)
       return yield* current.entry.runner
-        .ensureRunning(withOrphanSweep(sessionID, agentID, work), interruptFor(agentID, onInterrupt), joinRunning)
+        .ensureRunning(
+          withOrphanSweep(sessionID, agentID, work),
+          interruptFor(agentID, onInterrupt),
+          joinRunning,
+          cancelEpoch == null ? undefined : () => CancelEpoch.current(sessionID) === cancelEpoch,
+        )
         .pipe(
           Effect.provideService(RunDisposal, current.data),
           Effect.ensuring(release(current.entry)),

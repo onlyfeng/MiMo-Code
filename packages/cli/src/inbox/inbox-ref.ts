@@ -26,6 +26,8 @@ export interface SessionPromptLoopRef {
     // boolean `inboxWake`: a present id means the same thing and also says which
     // row, which the fork's drain/settle path needs.
     inboxID?: string
+    // CancelEpoch at scheduling; admission refuses the wake once it moved.
+    cancelEpoch?: number
     source?: "user" | "spawn" | "hook"
   }) => Effect.Effect<MessageV2.WithParts>
 }

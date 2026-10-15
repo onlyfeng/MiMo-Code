@@ -34,6 +34,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 import type { Provider } from "@/provider"
 import { Permission } from "@/permission"
 import { forwardRef } from "@/permission/permission-forward-ref"
+import * as CancelEpoch from "./cancel-epoch"
 import { Global } from "@/global"
 import { ActorRegistry } from "@/actor/registry"
 import { Effect, Layer, Option, Context, Semaphore } from "effect"
@@ -761,6 +762,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           // can no longer have background children that need to inherit from it.
           forwardRef.clearParentGrants(sessionID)
           promptLocks.delete(sessionID)
+          CancelEpoch.release(sessionID)
         })
         yield* clearWorktreeOwnership(sessionID).pipe(Effect.ignore)
         // uncommitted-hint episode state is process-local; drop it when the session dies.

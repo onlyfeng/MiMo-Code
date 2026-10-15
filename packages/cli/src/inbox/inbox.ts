@@ -19,6 +19,7 @@ import { Instance } from "@/project/instance"
 import { InstanceRef } from "@/effect/instance-ref"
 import { EffectBridge } from "@/effect"
 import { isRunDisposing, RunDisposal } from "@/session/run-disposal"
+import * as CancelEpoch from "@/session/cancel-epoch"
 
 const log = Log.create({ service: "inbox" })
 
@@ -196,8 +197,22 @@ export const layer: Layer.Layer<
         const directory = yield* InstanceState.directory
         let transferred = false
         yield* Effect.acquireUseRelease(
-          Effect.sync(() => Instance.claim(directory)),
-          (release) =>
+          Effect.sync(() => {
+            const releaseClaim = Instance.claim(directory)
+            // Recorded before send returns, so Runner admission sees a later
+            // cancel; the hold keeps the epoch until this wake exits even if the
+            // session is removed meanwhile.
+            const epoch = CancelEpoch.current(sessionID)
+            const releaseHold = CancelEpoch.hold(sessionID)
+            return {
+              epoch,
+              release: () => {
+                releaseHold()
+                releaseClaim()
+              },
+            }
+          }),
+          (held) =>
             Effect.gen(function* () {
               const wakeSource = yield* RunDisposal
               const receiver = yield* sessions.get(sessionID)
@@ -228,15 +243,16 @@ export const layer: Layer.Layer<
                   // the sole notifier for turn 1 — no double-notify.
                   notifyParentOnComplete: true,
                   inboxID,
+                  cancelEpoch: held.epoch,
                   source: "spawn",
                 }))),
                 Fiber.await,
                 Fiber.interrupt,
               ).pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true, uninterruptible: false }))
-              fiber.addObserver(() => release())
+              fiber.addObserver(() => held.release())
               transferred = true
             }),
-          (release) => (transferred ? Effect.void : Effect.sync(release)),
+          (held) => (transferred ? Effect.void : Effect.sync(held.release)),
         ).pipe(Effect.uninterruptible)
       } else {
         // Test fixtures / renderer-only paths can run without SessionPrompt.
