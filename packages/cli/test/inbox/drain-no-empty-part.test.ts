@@ -149,6 +149,7 @@ describe("Inbox.drain never persists an empty user text part", () => {
             receiverActorID: "actor-empty",
             type: "actor_notification",
             content: "",
+            wake: false,
           }),
         ),
       )
@@ -188,6 +189,7 @@ describe("Inbox.drain never persists an empty user text part", () => {
             receiverActorID: "actor-mixed",
             type: "actor_notification",
             content: "",
+            wake: false,
           }),
         ),
       )
@@ -198,6 +200,7 @@ describe("Inbox.drain never persists an empty user text part", () => {
             receiverActorID: "actor-mixed",
             type: "actor_notification",
             content: "<actor-notification>\nreal body\n</actor-notification>",
+            wake: false,
           }),
         ),
       )
@@ -236,6 +239,7 @@ describe("Inbox.drain leaves rows durable when cancelled before commit", () => {
             receiverActorID: "actor-cancel",
             type: "actor_notification",
             content: "<actor-notification>\nkeep me\n</actor-notification>",
+            wake: false,
           }),
         ),
       )
@@ -281,6 +285,7 @@ describe("Inbox.drain leaves rows durable when cancelled before commit", () => {
             receiverActorID: "actor-ok",
             type: "actor_notification",
             content: "<actor-notification>\nok\n</actor-notification>",
+            wake: false,
           }),
         ),
       )
@@ -308,6 +313,7 @@ describe("Inbox.drain leaves rows durable when cancelled before commit", () => {
             receiverActorID: "actor-mid",
             type: "actor_notification",
             content: "<actor-notification>\nmid-commit\n</actor-notification>",
+            wake: false,
           }),
         ),
       )
