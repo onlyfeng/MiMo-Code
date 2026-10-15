@@ -6768,7 +6768,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               while (true) {
                 const head = input.inboxID ? yield* inbox.head(input.sessionID, agentID) : undefined
                 const result = yield* state
-                  .ensureRunning(input.sessionID, agentID, lastAssistant(input.sessionID, agentID), work, joinRunning || !!input.inboxID)
+                  .ensureRunning(
+                    input.sessionID,
+                    agentID,
+                    lastAssistant(input.sessionID, agentID),
+                    work,
+                    joinRunning || !!input.inboxID,
+                    input.cancelEpoch,
+                  )
                   .pipe(Effect.exit)
                 const stalled = Exit.isFailure(result) && (!head || (yield* inbox.has(head)))
                 if (input.inboxID && !isTurnCancelled(result) && !stalled && (yield* inbox.has(input.inboxID))) continue
@@ -7689,6 +7696,9 @@ export const LoopInput = z.object({
   // double-notifying the spawn turn that forkWork already covers.
   notifyParentOnComplete: z.boolean().optional(),
   inboxID: z.string().optional(),
+  // CancelEpoch value recorded when the inbox scheduled this wake; admission
+  // refuses the wake if SessionRunState.cancel advanced it since.
+  cancelEpoch: z.number().optional(),
   // Hook-sourced non-main turns let the wake path own the drain, so the shared
   // loop must not consume inbox rows for them.
   deferInbox: z.boolean().optional(),
