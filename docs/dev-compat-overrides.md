@@ -11,7 +11,7 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eight DC owners remain compat-owned.
-- Last reviewed: 2026-10-14, full upstream synchronization through `6ba6a6254a6d040bb81ec9453962a52fc46c9c6d`. 2026-10-15: main `ebb8b62b` SSRF all-answers classification propagated (fork-owned hardening, DC-NET-001 note); integrated main `ebb8b62b97976dd29b90911af5c8fc3056404632` with compat merge `3ea3588b66954a37e47e79c012b9aa7f0f8d5e36`.
+- Last reviewed: 2026-10-14, full upstream synchronization through `6ba6a6254a6d040bb81ec9453962a52fc46c9c6d`. 2026-10-15: main SSRF all-answers classification propagated (fork-owned hardening, DC-NET-001 note); integrated main `a7d242df8c0651038827ac99e434ef0e815f3885` with compat merge `8f583cc1` (content first carried by `3ea3588b66954a37e47e79c012b9aa7f0f8d5e36`). 2026-10-15 main repair: `ebb8b62b` had been committed on compat `308b32a8` and pushed to main, fast-forwarding main onto the compat line and exposing every DC-owned surface there; main was force-reset to `973653dc` plus the same SSRF change (`a7d242df`). `ebb8b62b` remains only in compat history and is no longer a main commit.
 - Prior upstream: `e27e87de81a74db5475bd93540f8889dfbc70ec6`.
 - Starting compat: `51ad5319ff141103f116c6445a009db20d8fce6a`.
 - Integrated main: `973653dcdd37835745e579621943e13951e89167`; compat runtime merge: `d2326702f9fc7d45257c924f250109d3220ba76e` (of main runtime merge `22874d87c9b0134d0e7540880c9050e4ae94d274`).
@@ -1043,7 +1043,7 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-NET-001 — approved private-network WebFetch
 
-- 2026-10-15 propagation: main `ebb8b62b` makes the inherited classifier check
+- 2026-10-15 propagation: main `a7d242df` (first pushed as `ebb8b62b`) makes the inherited classifier check
   every DNS answer (`lookup` with `all: true`) instead of trusting the first,
   failing closed on mixed public/private answers and empty results, and
   resolves empty-answer lookups as failures. The merge inherits
