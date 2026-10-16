@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-15
-- Upstream: `496bb8cbe614aecea27623457d143600cc12c275`
-- Prior reviewed upstream: `6ba6a6254a6d040bb81ec9453962a52fc46c9c6d`
-- Main behavior (runtime/tests): `78d175203bc660dc5977bd761a61e0b0f9fc424a` (runtime merge `076db1db726b7d0d7eaaaae4c29ea830be73d027`, then the test-only CI fix `78d17520`)
+- Last reviewed: 2026-10-16
+- Upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
+- Prior reviewed upstream: `496bb8cbe614aecea27623457d143600cc12c275`
+- Main behavior (runtime/tests): `92f5f6a5adeade500f0def7555dd43e14b083545`
 - Bundled guidance content: `848c635c1eb57d326f0d135f1c20caafc9c5f17f` (unchanged by this range)
-- Prior fork `main` tip: `a7d242df8c0651038827ac99e434ef0e815f3885`
+- Prior fork `main` tip: `40f69640279b27ce94d9bbadfa1dd750222710e2`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,9 +30,11 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-15 sync through `496bb8cb`](upstream-sync-2026-10-15.md), one capability. Adapt upstream's inbox wake ownership into FC-001's single `Inbox.wake`: an `Instance.claim` taken before receiver preparation lasts until the wake fiber exits, so ordinary disposal cannot close the scope holding a scheduled wake. Upstream's abort-immediately-after-send case is not adopted; FC-001 records the pre-existing asynchronous-admission gap it exposes.
+Latest reviewed synchronization: [2026-10-16 sync through `bf0563dd`](upstream-sync-2026-10-16.md), one capability. Adopt verbatim media replay after overflow compaction into FC-001's atomic replay commit, extend FC-009's attachment envelope with file-URL local paths and stable `[Image: <name>]`/`[PDF: <name>]` marker identity, keep the caller `system` on attachment-only messages, and adopt unique `mimo-paste-*` paste names.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
+
+Previous synchronization: [2026-10-15 sync through `496bb8cb`](upstream-sync-2026-10-15.md), one capability. Adapt upstream's inbox wake ownership into FC-001's single `Inbox.wake`: an `Instance.claim` taken before receiver preparation lasts until the wake fiber exits, so ordinary disposal cannot close the scope holding a scheduled wake. Upstream's abort-immediately-after-send case is not adopted; FC-001 records the pre-existing asynchronous-admission gap it exposes.
 
 Previous synchronization: [2026-10-14 sync through `6ba6a625`](upstream-sync-2026-10-14-6ba6a625.md), one capability. Adopt replay-safe history migrations and the replay-safe `migrate()` wrapper unchanged; the two edited shipped migrations are upstream-owned and journal-name selection keeps applied databases from rerunning them.
 
@@ -1244,6 +1246,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
 
+- 2026-10-16 synchronization: upstream `bf0563dd` extends the user image attachment envelope and replay provenance. The envelope's local path now derives from an absolute `source.path` or, when absent, a `file:` URL; a new sentence names `[Image: <file name>]` / `[PDF: <file name>]` markers as session-stable attachment identity, matched by the same file name. An attachment-only all-synthetic prompt keeps the caller `system` on the persisted user message (`prompt.system ?? input.system`) while still skipping the `resolvePrompt` fallback, so `session.prompt` is not pinned. The overflow replay copies media `file` parts verbatim (the `[Attached <mime>: <filename>]` substitution is gone) under FC-001's atomic `commitUserMessageIfLatest`, retaining `source: "hook"` and `task_id`. The fork's `userImageAttachment` metadata and hook/spawn provenance rules are unchanged. Evidence: `test/session/prompt.test.ts` envelope and attachment-only-system cases, `test/session/prompt-effect.test.ts` keeps-replayed-media case.
+
 - 2026-10-14 synchronization: upstream `002cb4c9` records a tool's execution boundary (`ToolPart.execution`, `ToolStateError.inputComplete`) through transactional `Session.mutateToolPart`, closes a per-attempt tool scope on cleanup instead of waiting 250 ms for unsettled calls, and lets `ToolSettlement` persist a tool's real result after an interruption; projectors and imports refuse tool identity changes and never downgrade `started`. Adopted with the side-effect replay boundary unchanged; completed tools still merge running metadata and failed tools keep the record guard. Evidence: `test/session/processor-effect.test.ts`, `test/session/tool-gate-cancel.test.ts`, `test/history/import.test.ts`.
 
 - 2026-09-19 synchronization: Machine provenance joins hook provenance as an explicit union. Internal GitHub/command/inbox source labels remain non-user. Optional uncommitted hints persist source=hook with inherited task/model variant and atomic latest-user/token checks; their worker owns no prior run-approval scope.
@@ -1588,6 +1592,8 @@ logged`, and the peer `success`/`failure` variants of
   `package.json`.
 
 ## FC-015 — bounded compaction context and upstream ratio trigger
+
+- 2026-10-16 synchronization: upstream `bf0563dd` copies every non-`compaction` part verbatim in the overflow replay, including media `file` parts, so the replayed user message and the next model turn keep the image; the summarization request still strips media under overflow. Adopted into the fork's atomic replay commit without touching the bounded projection, ratio trigger, frozen prefix reuse or FD-011's `toolChoice: "none"`. Evidence: `test/session/prompt-effect.test.ts` (keeps replayed media), `test/session/compaction-projection.test.ts`, `test/session/compaction-reasoning-fallback.test.ts`, `test/session/compaction-tool-choice.test.ts`.
 
 - Status: active
 - Canonical owner: shared `main` overflow and compaction boundary
