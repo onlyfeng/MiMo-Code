@@ -1502,7 +1502,7 @@ export function Prompt(props: PromptProps) {
     if (content.mime.startsWith("image/")) {
       if (activeModelSupportsImage()) {
         await pasteAttachment({
-          filename: "clipboard",
+          filename: Clipboard.pasteFileName(content.mime),
           mime: content.mime,
           content: content.data,
         })
@@ -1520,12 +1520,8 @@ export function Prompt(props: PromptProps) {
     const currentOffset = input.visualCursor.offset
     const extmarkStart = currentOffset
     const pdf = file.mime === "application/pdf"
-    const count = store.prompt.parts.filter((x) => {
-      if (x.type !== "file") return false
-      if (pdf) return x.mime === "application/pdf"
-      return x.mime.startsWith("image/")
-    }).length
-    const virtualText = pdf ? `[PDF ${count + 1}]` : `[Image ${count + 1}]`
+    const name = file.filename || file.mime
+    const virtualText = pdf ? `[PDF: ${name}]` : `[Image: ${name}]`
     const extmarkEnd = extmarkStart + virtualText.length
     const textToInsert = virtualText + " "
 
@@ -1546,7 +1542,7 @@ export function Prompt(props: PromptProps) {
       url: `data:${file.mime};base64,${file.content}`,
       source: {
         type: "file",
-        path: file.filepath ?? file.filename ?? "",
+        path: file.filepath ?? "",
         text: {
           start: extmarkStart,
           end: extmarkEnd,
