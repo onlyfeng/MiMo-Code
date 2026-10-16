@@ -881,13 +881,9 @@ export const layer: Layer.Layer<
           }
           const parts = replay.parts.flatMap((part): MessageV2.Part[] => {
             if (part.type === "compaction") return []
-            const replayPart =
-              part.type === "file" && MessageV2.isMedia(part.mime)
-                ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
-                : part
             return [
               {
-                ...replayPart,
+                ...part,
                 id: PartID.ascending(),
                 messageID: replayMsg.id,
                 sessionID: input.sessionID,
