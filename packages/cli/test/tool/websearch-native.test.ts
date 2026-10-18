@@ -233,6 +233,29 @@ describe("websearch.native.runtime", () => {
     unchanged(baseApply(m, { sessionID: "ses_apply_marked" }))
   })
 
+  test("apply skips when a query-specific rule is not allow", () => {
+    const m = model()
+    for (const action of ["deny", "ask"] as const) {
+      const result = baseApply(m, {
+        sessionID: `ses_apply_scoped_${action}`,
+        ruleset: [...allow, { permission: "websearch", pattern: "internal*", action }],
+      })
+      expect(result.route).toBeUndefined()
+      expect(result.activeTools).toEqual(["websearch", "read"])
+    }
+  })
+
+  test("apply injects when a later universal allow overrides a scoped rule", () => {
+    const result = baseApply(model(), {
+      sessionID: "ses_apply_scoped_overridden",
+      ruleset: [
+        { permission: "websearch", pattern: "internal*", action: "deny" },
+        { permission: "websearch", pattern: "*", action: "allow" },
+      ],
+    })
+    expect(result.route).toEqual({ replay: "native" })
+  })
+
   test("apply keeps native after replay mark", () => {
     const m = model()
     NativeWebSearch.mark("ses_apply_replay", m, "replay", "rejected")

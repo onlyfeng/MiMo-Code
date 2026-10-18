@@ -4,9 +4,9 @@
 import { jsonSchema, type Tool } from "ai"
 import type { LanguageModelV3Prompt, LanguageModelV3ToolResultOutput } from "@ai-sdk/provider"
 import type { Config } from "@/config"
-import { Permission } from "@/permission"
+import type { Permission } from "@/permission"
 import type { Provider } from "@/provider"
-import { Log } from "@/util"
+import { Log, Wildcard } from "@/util"
 
 const log = Log.create({ service: "websearch.native" })
 
@@ -185,6 +185,19 @@ function providerTool(model: Provider.Model): Tool | undefined {
 }
 
 /**
+ * Server search runs the model's queries without the client tool's `ctx.ask`, so
+ * every possible query must be allowed: the last rule matching all queries allows,
+ * and no query-scoped rule after it (the only kind findLast could still pick)
+ * denies or asks.
+ */
+function allowsEveryQuery(ruleset: Permission.Ruleset) {
+  const applicable = ruleset.filter((rule) => Wildcard.match("websearch", rule.permission))
+  const universal = applicable.findLastIndex((rule) => Wildcard.match("*", rule.pattern))
+  if (universal === -1 || applicable[universal].action !== "allow") return false
+  return applicable.slice(universal + 1).every((rule) => rule.action === "allow")
+}
+
+/**
  * Injects the provider's server search tool for this request when native search
  * applies, hiding the client `websearch` declaration. Inputs are not mutated;
  * `websearch` stays in `tools` so a fallback retry can declare it again.
@@ -203,7 +216,7 @@ export function apply(input: {
   if (input.ephemeral || input.small || !input.tools.websearch) return skip
   const configured = route(input.settings, input.model)
   if (!configured) return skip
-  if (Permission.evaluate("websearch", "*", input.ruleset).action !== "allow") return skip
+  if (!allowsEveryQuery(input.ruleset)) return skip
   const failed = failures(input.sessionID, input.model)
   if (failed.search !== undefined) return skip
   const server = providerTool(input.model)
