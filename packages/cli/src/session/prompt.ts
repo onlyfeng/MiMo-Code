@@ -5955,7 +5955,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       // narrows the full executor map to the request-scoped wire subset.
                       // Counting inactive MCP schemas would false-trip preflight even
                       // though the provider never receives them.
-                      const wireTools = LLM.filterActiveTools(LLM.resolveTools(processArgs), processArgs.activeTools)
+                      const wireTools = LLM.wireTools(processArgs, cfg.websearch)
                       const messages = LLM.appendTurnContext(
                         processArgs.messages,
                         processArgs.user,
