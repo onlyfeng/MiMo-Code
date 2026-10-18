@@ -245,6 +245,24 @@ describe("websearch.native.runtime", () => {
     }
   })
 
+  test("apply treats only all-star patterns as covering every query", () => {
+    for (const pattern of ["?", "?*", "a*"]) {
+      const result = baseApply(model(), {
+        sessionID: `ses_apply_pattern_${pattern}`,
+        ruleset: [
+          { permission: "websearch", pattern: "*", action: "deny" },
+          { permission: "websearch", pattern, action: "allow" },
+        ],
+      })
+      expect(result.route).toBeUndefined()
+    }
+    const doubleStar = baseApply(model(), {
+      sessionID: "ses_apply_pattern_doublestar",
+      ruleset: [{ permission: "websearch", pattern: "**", action: "allow" }],
+    })
+    expect(doubleStar.route).toEqual({ replay: "native" })
+  })
+
   test("apply injects when a later universal allow overrides a scoped rule", () => {
     const result = baseApply(model(), {
       sessionID: "ses_apply_scoped_overridden",

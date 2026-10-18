@@ -192,7 +192,8 @@ function providerTool(model: Provider.Model): Tool | undefined {
  */
 function allowsEveryQuery(ruleset: Permission.Ruleset) {
   const applicable = ruleset.filter((rule) => Wildcard.match("websearch", rule.permission))
-  const universal = applicable.findLastIndex((rule) => Wildcard.match("*", rule.pattern))
+  // Only an all-star pattern (".*" in Wildcard) matches every query; "?" or "a*" merely match the literal "*".
+  const universal = applicable.findLastIndex((rule) => /^\*+$/.test(rule.pattern))
   if (universal === -1 || applicable[universal].action !== "allow") return false
   return applicable.slice(universal + 1).every((rule) => rule.action === "allow")
 }
