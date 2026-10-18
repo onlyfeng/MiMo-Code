@@ -1,9 +1,7 @@
 // Provider-native in-turn web search (DC-WEBSEARCH-001). The session model
 // searches through its provider's server tool when `websearch.native` opts the
 // route in; search-specific failures fall back to the client `websearch` tool.
-import type { Tool } from "ai"
-import { anthropic } from "@ai-sdk/anthropic"
-import { openai } from "@ai-sdk/openai"
+import { jsonSchema, type Tool } from "ai"
 import type { Config } from "@/config"
 import { Permission } from "@/permission"
 import type { Provider } from "@/provider"
@@ -170,10 +168,18 @@ export function classifyEvent(event: {
   return undefined
 }
 
+// Built here rather than via `openai.tools.webSearch()` / `anthropic.tools.webSearch_20250305()`:
+// those carry the provider package's own provider-utils schema type, which is not the
+// one `ai` checks against. The SDKs only read the id and args when preparing tools.
+const SERVER_TOOL_IDS: Record<string, `${string}.${string}`> = {
+  "@ai-sdk/openai": "openai.web_search",
+  "@ai-sdk/anthropic": "anthropic.web_search_20250305",
+}
+
 function providerTool(model: Provider.Model): Tool | undefined {
-  if (model.api.npm === "@ai-sdk/openai") return openai.tools.webSearch({})
-  if (model.api.npm === "@ai-sdk/anthropic") return anthropic.tools.webSearch_20250305({})
-  return undefined
+  const id = SERVER_TOOL_IDS[model.api.npm]
+  if (!id) return undefined
+  return { type: "provider", id, args: {}, inputSchema: jsonSchema({ type: "object" }) }
 }
 
 /**
