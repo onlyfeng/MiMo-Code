@@ -22,7 +22,7 @@ omo native（`@code-yeongyu/senpi` #3122）的做法是：会话模型支持就�
 `web_search` 工具；独立工具再走配置的 provider 链（含 Codex/Responses 搜索）
 和免费引擎。
 
-## 实测（2026-10-18，gz4399 网关）
+## 实测（2026-10-18，relay 网关）
 
 两层验证：原始 HTTP（看是否真的搜索、返回来源），以及 MiMo 实际依赖的
 `ai@6.0.168` + `@ai-sdk/openai@3.0.113` / `@ai-sdk/anthropic@3.0.82`
@@ -30,14 +30,14 @@ omo native（`@code-yeongyu/senpi` #3122）的做法是：会话模型支持就�
 
 | provider（协议） | 模型 | 结果 | 归类 |
 | --- | --- | --- | --- |
-| gz4399-codex（Responses `web_search`） | 10/10 | 两层通过，12–32 条来源；回放正常（`store:false` 时 SDK 不回放搜索项） | 原生 |
-| gz4399-grok（Responses `web_search`） | 6/6 | 两层通过；回放正常 | 原生 |
-| gz4399-claude（Messages `web_search_20250305`） | fable-5、fable-5-1 | 两层通过；但回放加密结果间歇被拒（见下方「端到端补充」） | 原生 + 文本回放 |
-| gz4399-claude | opus-5-5 | 首轮能搜；回放加密结果稳定 400 `Invalid encrypted_content in search_result block`（raw 2/2，SDK 1/1） | 原生 + 文本回放 |
-| gz4399-kimi | 5 个 | 带工具后 120–240s 零字节（流式/非流式），不带工具 5.8s 正常 | 兜底 |
-| gz4399-glm | 5 个可用 | 网关改用自有 `web_search_prime` 并返回非标准 `tool_result` 块；SDK `Type validation failed` | 兜底 |
-| gz4399-macaron | 2 个 | 网关把原始搜索结果当回答吐出；SDK 同样解析失败 | 兜底 |
-| gz4399-deepseek | deepseek-flash | 工具被网关静默丢弃（输入仅 58 token），模型不搜索直到 `max_tokens` | 兜底 |
+| relay-codex（Responses `web_search`） | 10/10 | 两层通过，12–32 条来源；回放正常（`store:false` 时 SDK 不回放搜索项） | 原生 |
+| relay-grok（Responses `web_search`） | 6/6 | 两层通过；回放正常 | 原生 |
+| relay-claude（Messages `web_search_20250305`） | fable-5、fable-5-1 | 两层通过；但回放加密结果间歇被拒（见下方「端到端补充」） | 原生 + 文本回放 |
+| relay-claude | opus-5-5 | 首轮能搜；回放加密结果稳定 400 `Invalid encrypted_content in search_result block`（raw 2/2，SDK 1/1） | 原生 + 文本回放 |
+| relay-kimi | 5 个 | 带工具后 120–240s 零字节（流式/非流式），不带工具 5.8s 正常 | 兜底 |
+| relay-glm | 5 个可用 | 网关改用自有 `web_search_prime` 并返回非标准 `tool_result` 块；SDK `Type validation failed` | 兜底 |
+| relay-macaron | 2 个 | 网关把原始搜索结果当回答吐出；SDK 同样解析失败 | 兜底 |
+| relay-deepseek | deepseek-flash | 工具被网关静默丢弃（输入仅 58 token），模型不搜索直到 `max_tokens` | 兜底 |
 
 另：`glm-5v-turbo` 返回 404 `model_not_found`（与搜索无关）；gpt-5.4 系仍被网关映射到
 5.6 系。
@@ -51,13 +51,13 @@ omo native（`@code-yeongyu/senpi` #3122）的做法是：会话模型支持就�
 | Codex 独立搜索（low effort） | 8.8s | 18.6K（4.0K） | 30 条来源 |
 | Exa 匿名 MCP（现状） | 0.3s | — | 返回 "You've hit Exa's free MCP rate limit" |
 
-结论：现状在 gz4399 会话里实际不可用（Exa 匿名被限流，且依赖实验开关）。原生搜索
+结论：现状在 relay 会话里实际不可用（Exa 匿名被限流，且依赖实验开关）。原生搜索
 在同一步内完成，省掉一次「工具调用 → 结果 → 再推理」的往返；代价是每次搜索约
 8–9K 输入 token 按会话模型价格计费。Codex 独立搜索把这部分成本放在便宜模型上，
 但多一次模型往返，结果文本还会进入会话上下文。
 
 与 omo native 的差异：同一原则，但以实测决定开关。按代码推断，omo 当前配置在
-gz4399 上有两处会出问题：kimi 开了原生搜索（现挂起）；opus 回放 400 的报错文本
+relay 上有两处会出问题：kimi 开了原生搜索（现挂起）；opus 回放 400 的报错文本
 不匹配 senpi 的失败识别正则，不会触发兜底。
 
 ### 端到端补充（实现后）
@@ -66,10 +66,10 @@ gz4399 上有两处会出问题：kimi 开了原生搜索（现挂起）；opus 
   tool_use 重排把服务端 `web_search` 调用也挪到了结果之后，网关以 400
   “`web_search_tool_result` block must have a corresponding `server_tool_use`”拒绝。
   已修复为只移动客户端调用。
-- 修复后抓包确认：MiMo 回放的搜索块与网关返回的逐字节一致，但 gz4399 仍间歇拒绝
+- 修复后抓包确认：MiMo 回放的搜索块与网关返回的逐字节一致，但 relay 仍间歇拒绝
   `encrypted_content`（原样重放 6/6 失败；新的 fable 两轮探测 6 次失败 2 次，与
   thinking/effort 参数无关），判断为网关侧（上游账号绑定）。运行期 `replay` 标记 + 文本
-  回放已在端到端中验证可用；配置上 gz4399-claude 整体使用 `replay: "text"`，省掉每个
+  回放已在端到端中验证可用；配置上 relay-claude 整体使用 `replay: "text"`，省掉每个
   会话一次失败请求。
 - kimi 在流式下也可能返回缺 id/input 的 `server_tool_use`（SDK 类型校验失败），同样走
   `search` 兜底。
@@ -100,13 +100,13 @@ gz4399 上有两处会出问题：kimi 开了原生搜索（现挂起）；opus 
   // 本轮原生搜索。key 为 provider 或 provider/model，后者优先。
   // true 开启；false 关闭；{ "replay": "text" } 开启且历史搜索按文本回放。
   "native": {
-    "gz4399-codex": true,
-    "gz4399-grok": true,
-    "gz4399-claude": { "replay": "text" }
+    "relay-codex": true,
+    "relay-grok": true,
+    "relay-claude": { "replay": "text" }
   },
   // websearch 工具的独立搜索模型，按顺序尝试。
   // 字符串为 provider/model；对象可指定该模型已配置的 variant。
-  "fallback": [{ "model": "gz4399-codex/gpt-6-luna", "variant": "low" }]
+  "fallback": [{ "model": "relay-codex/gpt-6-luna", "variant": "low" }]
 }
 ```
 
@@ -159,7 +159,7 @@ gz4399 上有两处会出问题：kimi 开了原生搜索（现挂起）；opus 
 - 单次重试与现有重试预算分开计；单次重试仍失败时，错误按原有梯级处理。
 - 单次重试放在 `stream` 重试梯级里 `input.retryScope` 提前返回之前（与 prefill 修复同位），
   MaxMode 候选/裁判请求也能兜底。（实现者决定）
-- 挂起依赖 provider 现有的首包超时，不新增专门时限。gz4399 当前未配 `headerTimeout`，
+- 挂起依赖 provider 现有的首包超时，不新增专门时限。relay 当前未配 `headerTimeout`，
   首包等待受 `timeout`（600000）约束；建议在开启原生搜索的 provider `options` 里配置
   `headerTimeout`（如 60000）。流式响应在服务端搜索开始前就会返回首个事件，60s 足够。
   （实现者决定）
@@ -193,7 +193,7 @@ Responses 路由在 `store:false` 下本就由 SDK 丢弃搜索项，降级只�
 3. Exa（现有逻辑）。
 
 任一层成功即返回；全部失败返回现有的 `WEBFETCH_FALLBACK` 提示。工具标题与
-`metadata` 记录实际服务的层，如 `gz4399-codex/gpt-6-luna`。
+`metadata` 记录实际服务的层，如 `relay-codex/gpt-6-luna`。
 
 ### 工具暴露
 
@@ -219,8 +219,8 @@ Responses 路由在 `store:false` 下本就由 SDK 丢弃搜索项，降级只�
 - 现有：`websearch`、`registry*`、`llm*`、`message-v2*`、`retry`、`processor-effect`、
   `transform` 测试保持通过（基线 `retry.test.ts` 的 "eight HTTP timeouts" 本机超时，
   CI 在 `9b974725` 通过，属既有）。
-- 端到端：`mimo run` 分别在 gz4399-codex、gz4399-grok、gz4399-claude（fable 与 opus）、
-  gz4399-kimi、gz4399-glm 上跑一个需要搜索且有后续步骤的任务，确认原生或兜底路径符合
+- 端到端：`mimo run` 分别在 relay-codex、relay-grok、relay-claude（fable 与 opus）、
+  relay-kimi、relay-glm 上跑一个需要搜索且有后续步骤的任务，确认原生或兜底路径符合
   上表。
 - `bun run typecheck`、lint；SDK 重新生成后只多出 `websearch` 配置类型。
 

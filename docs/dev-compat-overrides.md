@@ -2235,14 +2235,14 @@ files remain byte-identical to the accepted main correction.
   fall-through), `test/tool/registry.test.ts` (exposure),
   `test/session/processor-effect.test.ts` (stored display/raw output),
   `test/provider/transform.test.ts` (reorder).
-- Evidence (2026-10-18, gz4399 gateway): two-turn probes through the shipped
-  SDK versions — Responses `web_search` works on all 10 gz4399-codex and 6
-  gz4399-grok models; Anthropic `web_search_20250305` works on gz4399-claude
+- Evidence (2026-10-18, relay gateway): two-turn probes through the shipped
+  SDK versions — Responses `web_search` works on all 10 relay-codex and 6
+  relay-grok models; Anthropic `web_search_20250305` works on relay-claude
   but the gateway rejects replayed `encrypted_content` intermittently
   (byte-identical replays of a captured MiMo request fail 6/6; fresh fable
-  two-turn probes fail 2 of 6); gz4399-kimi hangs or streams a malformed
-  `server_tool_use`, gz4399-glm and gz4399-macaron stream non-standard
-  `tool_result` blocks, gz4399-deepseek silently drops the tool. `mimo run`
+  two-turn probes fail 2 of 6); relay-kimi hangs or streams a malformed
+  `server_tool_use`, relay-glm and relay-macaron stream non-standard
+  `tool_result` blocks, relay-deepseek silently drops the tool. `mimo run`
   end-to-end (search, then write a file) completes natively on gpt-6-luna,
   grok-4.7, claude-fable-5-1 and claude-opus-5-5, through the Codex layer on
   glm-5.3 and kimi-k3, and through in-turn fallback when native search is

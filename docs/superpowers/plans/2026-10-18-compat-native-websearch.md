@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Target `dev/compat` only; branch `feat/compat-native-websearch` from `9b9747259d0bff9a4407ea3ba5b3e1a5d17c22a0`. No change to `main`, upstream, FD/FC registries, or bundled `mimocode-docs`.
+- Target `dev/compat` only; branch `feat/example` from `9b9747259d0bff9a4407ea3ba5b3e1a5d17c22a0`. No change to `main`, upstream, FD/FC registries, or bundled `mimocode-docs`.
 - Without a `websearch` config block every request payload, tool list and websearch result is unchanged.
 - Native only for `@ai-sdk/openai` (Responses) and `@ai-sdk/anthropic`; provider-tool key is `web_search`.
 - Native requires: not `ephemeral`, not `small`, `websearch` present in the resolved tool set, `Permission.evaluate("websearch", "*", ruleset).action === "allow"`, no `search` mark for the session×model.
@@ -206,6 +206,6 @@ Error output renders `[web_search] failed: <errorCode>`. No `encryptedContent` e
 
 - [ ] **Step 1:** Write `DC-WEBSEARCH-001`: owner, contract (spec "行为"), surfaces (spec "注册与同步"), tests (Tasks 1–6 files), delta vs main (main has no native search, no `websearch` config), evidence from Step 3.
 - [ ] **Step 2:** Back up and update the user config; `bun run --cwd packages/cli dev -- debug config` (or equivalent) parses without error.
-- [ ] **Step 3: E2E** with `mimo run … < /dev/null` from a `/tmp/example`-style scratch dir, prompt requiring a search then a follow-up step (e.g. search Bun's latest version, then write it to a file): gz4399-codex/gpt-6-luna and gz4399-grok/grok-4.7 (native, `web_search` part present), gz4399-claude/claude-fable-5-1 (native), gz4399-claude/claude-opus-5-5 (native, second step succeeds via text replay), gz4399-glm/glm-5.3 and gz4399-kimi/kimi-k3 (not configured → `websearch` via Codex fallback, `servedBy` gz4399-codex/gpt-6-luna). Record each outcome.
+- [ ] **Step 3: E2E** with `mimo run … < /dev/null` from a `/tmp/example`-style scratch dir, prompt requiring a search then a follow-up step (e.g. search Bun's latest version, then write it to a file): relay-codex/gpt-6-luna and relay-grok/grok-4.7 (native, `web_search` part present), relay-claude/claude-fable-5-1 (native), relay-claude/claude-opus-5-5 (native, second step succeeds via text replay), relay-glm/glm-5.3 and relay-kimi/kimi-k3 (not configured → `websearch` via Codex fallback, `servedBy` relay-codex/gpt-6-luna). Record each outcome.
 - [ ] **Step 4: Validate** `bun run typecheck` (packages/cli) exit 0; root lint no new errors; targeted suites from Tasks 1–6 plus `test/tool/registry-toolset.test.ts test/session/message-v2.test.ts test/provider/transform.test.ts` pass except the documented baseline; default-off proof: with no `websearch` config, Task 4's `no websearch config leaves payload unchanged` passes.
 - [ ] **Step 5: Commit** `docs(compat): register DC-WEBSEARCH-001`; push branch; open PR to `dev/compat` on `onlyfeng/MiMo-Code`; dispatch `test.yml` on the branch; report CI per exact SHA.
