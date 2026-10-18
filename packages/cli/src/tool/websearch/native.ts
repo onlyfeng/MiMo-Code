@@ -167,6 +167,8 @@ export function classifyEvent(event: {
   if (event.type !== "tool-result" || !isRecord(event.output) || Array.isArray(event.output)) return undefined
   if (event.output.type === "web_search_tool_result_error" || typeof event.output.errorCode === "string")
     return `search result error: ${typeof event.output.errorCode === "string" ? event.output.errorCode : "web_search_tool_result_error"}`
+  // Responses reports a failed web_search_call by status; SDK 3.0.113 drops it, others may not.
+  if (event.output.status === "failed") return "search result failed"
   return undefined
 }
 

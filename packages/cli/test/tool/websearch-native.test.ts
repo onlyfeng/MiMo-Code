@@ -182,6 +182,14 @@ describe("websearch.native.runtime", () => {
       }),
     ).toBeUndefined()
     expect(NativeWebSearch.classifyEvent({ type: "tool-error", toolName: "read", error: "boom" })).toBeUndefined()
+    expect(
+      NativeWebSearch.classifyEvent({
+        type: "tool-result",
+        toolName: "web_search",
+        providerExecuted: true,
+        output: { status: "failed", action: { type: "search", query: "q" } },
+      }),
+    ).toContain("failed")
   })
 
   const baseApply = (m: ReturnType<typeof model>, overrides: Partial<Parameters<typeof NativeWebSearch.apply>[0]> = {}) =>
