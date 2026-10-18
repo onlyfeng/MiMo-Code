@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { APICallError, jsonSchema, tool } from "ai"
-import { TypeValidationError } from "@ai-sdk/provider"
+import { TypeValidationError, type LanguageModelV3Prompt, type LanguageModelV3ToolResultOutput } from "@ai-sdk/provider"
 import type { Permission } from "../../src/permission"
 import * as NativeWebSearch from "../../src/tool/websearch/native"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -239,5 +239,103 @@ describe("websearch.native.runtime", () => {
     const result = baseApply(m, { sessionID: "ses_apply_replay" })
     expect(result.route).toEqual({ replay: "text" })
     expect(result.activeTools).toContain("web_search")
+  })
+})
+
+describe("websearch.native.replay", () => {
+  const anthropicResults = [
+    { type: "web_search_result", url: "https://example.com/a", title: "Alpha", pageAge: null, encryptedContent: "ENC" },
+    { type: "web_search_result", url: "https://example.com/b", title: null, pageAge: null, encryptedContent: "ENC" },
+  ]
+  const conversation = (output: LanguageModelV3ToolResultOutput): LanguageModelV3Prompt => [
+    { role: "user", content: [{ type: "text", text: "search" }] },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "Looking." },
+        { type: "tool-call", toolCallId: "srv_1", toolName: "web_search", input: { query: "bun latest" }, providerExecuted: true },
+        { type: "tool-result", toolCallId: "srv_1", toolName: "web_search", output },
+        { type: "text", text: "Done." },
+      ],
+    },
+    { role: "user", content: [{ type: "text", text: "next" }] },
+  ]
+  const assistantText = (prompt: LanguageModelV3Prompt) => {
+    const message = prompt[1]
+    if (message.role !== "assistant") throw new Error("expected assistant")
+    return message.content
+  }
+
+  test("keeps native replay when allowed", () => {
+    const prompt = conversation({ type: "json", value: anthropicResults })
+    expect(NativeWebSearch.downgradeReplay(prompt, true)).toBe(prompt)
+  })
+
+  test("downgrades when native is off", () => {
+    const content = assistantText(NativeWebSearch.downgradeReplay(conversation({ type: "json", value: anthropicResults }), false))
+    expect(content.map((part) => part.type)).toEqual(["text", "text", "text"])
+    const text = content[1].type === "text" ? content[1].text : ""
+    expect(text.startsWith('[web_search] "bun latest"')).toBe(true)
+    expect(text).toContain("1. Alpha — https://example.com/a")
+    expect(text).toContain("2. https://example.com/b — https://example.com/b")
+    expect(text).not.toContain("ENC")
+  })
+
+  test("downgrades text output even when native is allowed", () => {
+    const content = assistantText(
+      NativeWebSearch.downgradeReplay(conversation({ type: "text", value: '[{"url":"https://example.com/a","encryptedContent":"ENC"}]' }), true),
+    )
+    expect(content.some((part) => part.type === "tool-call" || part.type === "tool-result")).toBe(false)
+    const text = content[1].type === "text" ? content[1].text : ""
+    expect(text).toContain("https://example.com/a")
+    expect(text).not.toContain("ENC")
+  })
+
+  test("openai action shape", () => {
+    const prompt: LanguageModelV3Prompt = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "ws_1", toolName: "web_search", input: {}, providerExecuted: true },
+          {
+            type: "tool-result",
+            toolCallId: "ws_1",
+            toolName: "web_search",
+            output: {
+              type: "json",
+              value: { action: { type: "search", query: "q" }, sources: [{ type: "url", url: "https://example.com/b" }] },
+            },
+          },
+        ],
+      },
+    ]
+    const message = NativeWebSearch.downgradeReplay(prompt, false)[0]
+    const text = message.role === "assistant" && message.content[0].type === "text" ? message.content[0].text : ""
+    expect(text).toContain('"q"')
+    expect(text).toContain("https://example.com/b")
+  })
+
+  test("error output and client tools", () => {
+    const prompt = conversation({ type: "json", value: { type: "web_search_tool_result_error", errorCode: "unavailable" } })
+    const content = assistantText(NativeWebSearch.downgradeReplay(prompt, false))
+    expect(content[1].type === "text" ? content[1].text : "").toBe('[web_search] "bun latest" failed: unavailable')
+    const client: LanguageModelV3Prompt = [
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "c1", toolName: "websearch", input: { query: "x" } }],
+      },
+    ]
+    expect(NativeWebSearch.downgradeReplay(client, false)).toBe(client)
+  })
+
+  test("display", () => {
+    expect(NativeWebSearch.display(anthropicResults, { query: "bun latest" })).toBe(
+      '[web_search] "bun latest"\n1. Alpha — https://example.com/a\n2. https://example.com/b — https://example.com/b',
+    )
+    expect(NativeWebSearch.display({ type: "web_search_tool_result_error", errorCode: "unavailable" })).toBe(
+      "[web_search] failed: unavailable",
+    )
+    expect(NativeWebSearch.display({ action: { type: "search", query: "q" }, sources: [] })).toBe('[web_search] "q"')
+    expect(NativeWebSearch.display("plain")).toBeUndefined()
   })
 })

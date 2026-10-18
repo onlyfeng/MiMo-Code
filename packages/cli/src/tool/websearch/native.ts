@@ -2,6 +2,7 @@
 // searches through its provider's server tool when `websearch.native` opts the
 // route in; search-specific failures fall back to the client `websearch` tool.
 import { jsonSchema, type Tool } from "ai"
+import type { LanguageModelV3Prompt, LanguageModelV3ToolResultOutput } from "@ai-sdk/provider"
 import type { Config } from "@/config"
 import { Permission } from "@/permission"
 import type { Provider } from "@/provider"
@@ -211,4 +212,100 @@ export function apply(input: {
     activeTools: [...input.activeTools.filter((name) => name !== "websearch" && name !== TOOL_NAME), TOOL_NAME],
     route: failed.replay !== undefined ? { replay: "text" } : configured,
   }
+}
+
+type Summary = { query?: string; results: { url: string; title?: string }[]; error?: string }
+
+function summarize(value: unknown, input?: unknown): Summary | undefined {
+  const query = isRecord(input) && typeof input.query === "string" ? input.query : undefined
+  const result = (item: unknown) =>
+    isRecord(item) && typeof item.url === "string"
+      ? [{ url: item.url, ...(typeof item.title === "string" && item.title ? { title: item.title } : {}) }]
+      : []
+  if (Array.isArray(value)) return { query, results: value.flatMap(result) }
+  if (!isRecord(value)) return undefined
+  if (value.type === "web_search_tool_result_error" || typeof value.errorCode === "string")
+    return { query, results: [], error: String(value.errorCode ?? "unknown") }
+  const action = isRecord(value.action) ? value.action : undefined
+  if (!action && !Array.isArray(value.sources)) return undefined
+  const sources = Array.isArray(value.sources) ? value.sources : Array.isArray(action?.sources) ? action.sources : []
+  return {
+    query: query ?? (typeof action?.query === "string" ? action.query : undefined),
+    results: sources.flatMap(result),
+  }
+}
+
+function format(summary: Summary) {
+  const header = summary.query ? `[web_search] "${summary.query}"` : "[web_search]"
+  if (summary.error) return `${header} failed: ${summary.error}`
+  return [header, ...summary.results.map((item, index) => `${index + 1}. ${item.title ?? item.url} — ${item.url}`)].join(
+    "\n",
+  )
+}
+
+/** Readable text for a provider web_search result, without encrypted page content. */
+export function display(output: unknown, input?: unknown): string | undefined {
+  const summary = summarize(output, input)
+  return summary ? format(summary) : undefined
+}
+
+function outputText(output: LanguageModelV3ToolResultOutput | undefined, input: unknown) {
+  if (!output) return format({ query: summarize(undefined, input)?.query, results: [] })
+  if (output.type === "json" || output.type === "error-json") return display(output.value, input) ?? display([], input)!
+  if (output.type === "text" || output.type === "error-text") {
+    if (output.value.startsWith("[web_search]")) return output.value
+    try {
+      return display(JSON.parse(output.value), input) ?? display([], input)!
+    } catch {
+      return display([], input)!
+    }
+  }
+  return display([], input)!
+}
+
+/**
+ * Rewrites provider-executed web_search call/result pairs as assistant text.
+ * Native replay is kept only when `keepNative` and the stored result is still
+ * the provider's structured output; anything else (native off, a rejected
+ * replay, another model's search, an over-cap result) must not reach the
+ * provider as a server tool block without its exact result.
+ */
+export function downgradeReplay(prompt: LanguageModelV3Prompt, keepNative: boolean): LanguageModelV3Prompt {
+  const calls = new Map<string, unknown>()
+  const results = new Map<string, LanguageModelV3ToolResultOutput>()
+  for (const message of prompt) {
+    if (message.role !== "assistant") continue
+    for (const part of message.content) {
+      if (part.type === "tool-call" && part.providerExecuted && part.toolName === TOOL_NAME)
+        calls.set(part.toolCallId, part.input)
+      if (part.type === "tool-result" && part.toolName === TOOL_NAME) results.set(part.toolCallId, part.output)
+    }
+  }
+  const keep = (id: string) => {
+    const output = results.get(id)
+    return keepNative && calls.has(id) && (output?.type === "json" || output?.type === "error-json")
+  }
+  const downgraded = new Set([...calls.keys(), ...results.keys()].filter((id) => !keep(id)))
+  if (downgraded.size === 0) return prompt
+  return prompt.flatMap((message): LanguageModelV3Prompt => {
+    if (message.role === "assistant") {
+      const content = message.content.flatMap((part) => {
+        if (part.type === "tool-call" && downgraded.has(part.toolCallId) && calls.has(part.toolCallId))
+          return [{ type: "text" as const, text: outputText(results.get(part.toolCallId), part.input) }]
+        if (part.type === "tool-result" && downgraded.has(part.toolCallId)) {
+          if (calls.has(part.toolCallId)) return []
+          return [{ type: "text" as const, text: outputText(part.output, undefined) }]
+        }
+        return [part]
+      })
+      return [{ ...message, content }]
+    }
+    if (message.role === "tool") {
+      const content = message.content.filter(
+        (part) => part.type !== "tool-result" || !downgraded.has(part.toolCallId),
+      )
+      return content.length === 0 ? [] : [{ ...message, content }]
+    }
+    return [message]
+  })
 }
