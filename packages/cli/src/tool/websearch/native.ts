@@ -214,7 +214,7 @@ export function apply(input: {
   }
 }
 
-type Summary = { query?: string; results: { url: string; title?: string }[]; error?: string }
+type Summary = { query?: string; results: { url: string; title?: string }[]; error?: string; action?: string }
 
 function summarize(value: unknown, input?: unknown): Summary | undefined {
   const query = isRecord(input) && typeof input.query === "string" ? input.query : undefined
@@ -229,18 +229,26 @@ function summarize(value: unknown, input?: unknown): Summary | undefined {
   const action = isRecord(value.action) ? value.action : undefined
   if (!action && !Array.isArray(value.sources)) return undefined
   const sources = Array.isArray(value.sources) ? value.sources : Array.isArray(action?.sources) ? action.sources : []
+  // OpenAI also reports page actions (openPage, findInPage) that name one URL and no query.
+  const page = typeof action?.url === "string" && typeof action.type === "string" ? action : undefined
   return {
     query: query ?? (typeof action?.query === "string" ? action.query : undefined),
-    results: sources.flatMap(result),
+    results: page ? [{ url: page.url as string }] : sources.flatMap(result),
+    ...(page && !query ? { action: page.type as string } : {}),
   }
 }
 
 function format(summary: Summary) {
-  const header = summary.query ? `[web_search] "${summary.query}"` : "[web_search]"
+  const header = summary.query
+    ? `[web_search] "${summary.query}"`
+    : summary.action
+      ? `[web_search] ${summary.action}`
+      : "[web_search]"
   if (summary.error) return `${header} failed: ${summary.error}`
-  return [header, ...summary.results.map((item, index) => `${index + 1}. ${item.title ?? item.url} — ${item.url}`)].join(
-    "\n",
+  const lines = summary.results.map(
+    (item, index) => `${index + 1}. ${item.title ? `${item.title} — ` : ""}${item.url}`,
   )
+  return [header, ...lines].join("\n")
 }
 
 /** Readable text for a provider web_search result, without encrypted page content. */

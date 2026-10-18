@@ -277,7 +277,8 @@ describe("websearch.native.replay", () => {
     const text = content[1].type === "text" ? content[1].text : ""
     expect(text.startsWith('[web_search] "bun latest"')).toBe(true)
     expect(text).toContain("1. Alpha — https://example.com/a")
-    expect(text).toContain("2. https://example.com/b — https://example.com/b")
+    expect(text).toContain("2. https://example.com/b")
+    expect(text).not.toContain("https://example.com/b — https://example.com/b")
     expect(text).not.toContain("ENC")
   })
 
@@ -330,12 +331,15 @@ describe("websearch.native.replay", () => {
 
   test("display", () => {
     expect(NativeWebSearch.display(anthropicResults, { query: "bun latest" })).toBe(
-      '[web_search] "bun latest"\n1. Alpha — https://example.com/a\n2. https://example.com/b — https://example.com/b',
+      '[web_search] "bun latest"\n1. Alpha — https://example.com/a\n2. https://example.com/b',
     )
     expect(NativeWebSearch.display({ type: "web_search_tool_result_error", errorCode: "unavailable" })).toBe(
       "[web_search] failed: unavailable",
     )
     expect(NativeWebSearch.display({ action: { type: "search", query: "q" }, sources: [] })).toBe('[web_search] "q"')
+    expect(NativeWebSearch.display({ action: { type: "openPage", url: "https://example.com/p" } })).toBe(
+      "[web_search] openPage\n1. https://example.com/p",
+    )
     expect(NativeWebSearch.display("plain")).toBeUndefined()
   })
 })
