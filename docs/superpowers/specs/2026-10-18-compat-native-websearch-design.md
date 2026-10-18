@@ -125,8 +125,9 @@ relay 上有两处会出问题：kimi 开了原生搜索（现挂起）；opus �
 
 - 非 `ephemeral`、非 `small` 请求（标题、摘要、压缩、结构化输出不带原生工具）；
 - 当前模型命中 `native` 且 SDK 受支持；
-- 已解析工具集（权限与 user/agent 过滤之后）含 `websearch`，且 `websearch` 权限对
-  该 agent 为 `allow`。`ask` / `deny` 时按原逻辑走客户端工具；
+- 已解析工具集（权限与 user/agent 过滤之后）含 `websearch`，且 `websearch` 规则对
+  任意查询都是 `allow`：最后一条全 `*` 规则为 allow，其后没有按查询限定的 deny/ask
+  （服务端搜索绕过客户端工具的 ask）。否则按原逻辑走客户端工具；
 - 当前「会话 × 模型」没有被标记为原生搜索失败。
 
 启用时向 `tools` 加入 provider 工具，key 为 `web_search`（Responses 用

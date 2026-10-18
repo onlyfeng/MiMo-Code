@@ -2189,7 +2189,9 @@ files remain byte-identical to the accepted main correction.
     or `anthropic.web_search_20250305` (`@ai-sdk/anthropic`) as provider tool
     `web_search` and removes `websearch` from the active declarations, only
     for non-ephemeral, non-small requests whose resolved tools include
-    `websearch`, whose `websearch` permission evaluates to `allow`, and whose
+    `websearch`, whose `websearch` rules allow every query (the last all-star rule
+    allows and no query-scoped rule after it denies or asks — server search
+    bypasses the client tool's ask), and whose
     session × model has no `search` failure. Preflight sizing uses the same
     `LLM.wireTools`.
   - Failure handling (in-process, per session × provider/model/api id):
