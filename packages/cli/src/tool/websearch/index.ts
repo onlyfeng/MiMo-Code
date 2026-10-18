@@ -132,7 +132,9 @@ export const WebSearchTool = Tool.define(
             if (output) served = { output, by: "xiaomi" }
           }
           for (const entry of served ? [] : NativeWebSearch.fallbackEntries((yield* config.get()).websearch)) {
-            const output = yield* fallbackSearch(entry, params.query, ctx, timeout ?? FALLBACK_TIMEOUT)
+            // A non-positive model-supplied timeout would make AbortSignal.timeout throw.
+            const fallbackTimeout = timeout !== undefined && timeout > 0 ? timeout : FALLBACK_TIMEOUT
+            const output = yield* fallbackSearch(entry, params.query, ctx, fallbackTimeout)
             if (output) {
               served = { output, by: `${entry.providerID}/${entry.modelID}` }
               break

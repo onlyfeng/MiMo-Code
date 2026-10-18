@@ -165,6 +165,7 @@ describe("tool.websearch", () => {
       fallback: unknown[]
       model?: ReturnType<typeof ProviderTest.model>
       exa?: (url: string) => Response | undefined
+      timeout?: number
     }) {
       const requests: Array<{ model: string; body: Record<string, unknown> }> = []
       using server = Bun.serve({
@@ -226,7 +227,7 @@ describe("tool.websearch", () => {
             Effect.flatMap((info) => info.init()),
             Effect.flatMap((tool) =>
               tool.execute(
-                { query: "bun latest" },
+                { query: "bun latest", ...(input.timeout === undefined ? {} : { timeout: input.timeout }) },
                 {
                   sessionID: SessionID.make("ses_fallback"),
                   messageID: MessageID.make("message"),
@@ -267,6 +268,15 @@ describe("tool.websearch", () => {
       const body = requests[0].body
       expect((body.tools as Array<{ type: string }>)[0].type).toBe("web_search")
       expect(body.store).toBe(false)
+    })
+
+    test("a non-positive timeout falls back to the default instead of failing", async () => {
+      const { result } = await run({
+        handlers: { "test-model": () => json(searched) },
+        fallback: ["test/test-model"],
+        timeout: -5,
+      })
+      expect(result.metadata).toMatchObject({ servedBy: "test/test-model" })
     })
 
     test("codex fallback without a search falls through", async () => {
