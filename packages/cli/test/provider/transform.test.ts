@@ -2261,6 +2261,54 @@ describe("ProviderTransform.message - anthropic empty content filtering", () => 
     })
   })
 
+  // DC-WEBSEARCH-001: a server tool block must stay ahead of its own result block.
+  test("keeps provider-executed tool calls beside their results", () => {
+    const msgs = [
+      { role: "user", content: [{ type: "text", text: "search" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "srvtoolu_1", toolName: "web_search", input: { query: "bun" }, providerExecuted: true },
+          { type: "tool-result", toolCallId: "srvtoolu_1", toolName: "web_search", output: { type: "json", value: [] } },
+          { type: "text", text: "Bun 1.4.3" },
+        ],
+      },
+      { role: "user", content: [{ type: "text", text: "next" }] },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, anthropicModel, {}) as any[]
+
+    expect(result).toHaveLength(3)
+    expect(result[1].content.map((part: { type: string }) => part.type)).toEqual(["tool-call", "tool-result", "text"])
+  })
+
+  test("moves only client tool calls when a server search precedes them", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "srvtoolu_1", toolName: "web_search", input: { query: "bun" }, providerExecuted: true },
+          { type: "tool-result", toolCallId: "srvtoolu_1", toolName: "web_search", output: { type: "json", value: [] } },
+          { type: "tool-call", toolCallId: "toolu_1", toolName: "read", input: { filePath: "/tmp/example" } },
+          { type: "text", text: "Reading." },
+        ],
+      },
+      {
+        role: "tool",
+        content: [{ type: "tool-result", toolCallId: "toolu_1", toolName: "read", output: { type: "text", value: "ok" } }],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, anthropicModel, {}) as any[]
+
+    expect(result[0].content.map((part: { toolCallId?: string; type: string }) => part.toolCallId ?? part.type)).toEqual([
+      "srvtoolu_1",
+      "srvtoolu_1",
+      "text",
+    ])
+    expect(result[1].content.map((part: { toolCallId: string }) => part.toolCallId)).toEqual(["toolu_1"])
+  })
+
   test("leaves valid anthropic assistant tool ordering unchanged", () => {
     const msgs = [
       {

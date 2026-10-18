@@ -248,6 +248,17 @@ describe("session.llm native web search", () => {
     })
   })
 
+  test("native replay keeps server_tool_use ahead of its result", async () => {
+    await withProvider("@ai-sdk/anthropic", { native: { test: true } }, async (model) => {
+      state.handlers.push(anthropicOk)
+      await drain(input(model, "ses_native_order", { messages: searchedHistory({ type: "json", value: results }) }))
+      const assistant = (state.bodies[0].messages as Array<{ role: string; content: Array<{ type: string }> }>).find(
+        (message) => message.role === "assistant",
+      )
+      expect(assistant?.content.map((block) => block.type)).toEqual(["server_tool_use", "web_search_tool_result", "text"])
+    })
+  })
+
   test("nonstandard stream block marks native failed", async () => {
     await withProvider("@ai-sdk/anthropic", { native: { test: true } }, async (model) => {
       state.handlers.push(
