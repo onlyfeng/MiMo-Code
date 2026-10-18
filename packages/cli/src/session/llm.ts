@@ -39,6 +39,7 @@ import { Memory } from "@/memory"
 import { isRetryableTransientError } from "./retry"
 import * as SessionRetry from "./retry"
 import { MCP_TOOL_SEARCH_ID } from "@/tool/mcp-tool-search"
+import * as NativeWebSearch from "@/tool/websearch/native"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 import { Flag } from "@/flag/flag"
 import { CURRENT_SESSION_ID_PLACEHOLDER } from "./memory-path-template"
@@ -547,9 +548,22 @@ const live: Layer.Layer<
         },
       )
 
-      const tools = resolveTools(input)
+      const resolvedTools = resolveTools(input)
       const requestedActiveTools = new Set(input.activeTools ?? Object.keys(input.tools))
-      const activeTools = Object.keys(tools).filter((name) => name !== "invalid" && requestedActiveTools.has(name))
+      // DC-WEBSEARCH-001: provider-native search replaces the client websearch
+      // declaration for this attempt; a recorded failure turns it back off.
+      const native = NativeWebSearch.apply({
+        settings: cfg.websearch,
+        model: input.model,
+        sessionID: input.sessionID,
+        ruleset: Agent.runtimePermission(input.agent, input.permission),
+        ephemeral: input.ephemeral,
+        small: input.small,
+        tools: resolvedTools,
+        activeTools: Object.keys(resolvedTools).filter((name) => name !== "invalid" && requestedActiveTools.has(name)),
+      })
+      const tools = native.tools
+      const activeTools = native.activeTools
 
       // LiteLLM and some Anthropic proxies require the tools parameter to be present
       // when message history contains tool calls, even if no tools are being used.
@@ -869,8 +883,13 @@ const live: Layer.Layer<
                 // the whole transform, including the empty-content invariant, the
                 // moment a non-streaming call is added here.
                 if (args.type === "generate" || args.type === "stream") {
+                  // Native search blocks the provider cannot accept back become text first (DC-WEBSEARCH-001).
                   // @ts-expect-error
-                  args.params.prompt = ProviderTransform.message(args.params.prompt, input.model, options)
+                  args.params.prompt = ProviderTransform.message(
+                    NativeWebSearch.downgradeReplay(args.params.prompt, native.route?.replay === "native"),
+                    input.model,
+                    options,
+                  )
                 }
                 return args.params
               },
@@ -887,10 +906,14 @@ const live: Layer.Layer<
           },
         },
       })
-      return { result }
+      return { result, nativeActive: native.route !== undefined }
     })
 
     const stream: Interface["stream"] = (input) => {
+      // DC-WEBSEARCH-001: whether the latest attempt carried native search, whether
+      // it produced output, and whether this call already spent its one-shot
+      // native fallback resend.
+      const nativeState = { active: false, output: false, retried: false }
       // Build the scoped stream for one attempt. `dropAssistantPrefill` forces
       // run() to hard-prune the trailing assistant prefill before send — used only
       // by the reactive one-shot retry below.
@@ -902,7 +925,10 @@ const live: Layer.Layer<
                 Effect.sync(() => new AbortController()),
                 (ctrl) => Effect.sync(() => ctrl.abort()),
               )
+              nativeState.active = false
+              nativeState.output = false
               const result = yield* run({ ...input, abort: ctrl.signal, dropAssistantPrefill })
+              nativeState.active = result.nativeActive
 
               // Request retry is valid only before provider output. Once output
               // starts, turn a raw stream fault into the ordinary in-band error
@@ -917,6 +943,21 @@ const live: Layer.Layer<
                   Stream.mapEffect((event) =>
                     Effect.gen(function* () {
                       if (event.type === "error") inheritHostError(event.error, { providerID: input.model.providerID })
+                      if (nativeState.active) {
+                        const inBand = NativeWebSearch.classifyEvent(event)
+                        if (inBand) NativeWebSearch.mark(input.sessionID, input.model, "search", inBand)
+                        if (event.type === "error") {
+                          const failure = NativeWebSearch.classifyError(event.error, {
+                            beforeOutput: !hasProviderOutput,
+                            nativeActive: true,
+                          })
+                          if (failure) {
+                            NativeWebSearch.mark(input.sessionID, input.model, failure.kind, failure.reason)
+                            // Before output the request is resent at once without the failed part.
+                            if (!hasProviderOutput && !nativeState.retried) return yield* Effect.fail(event.error)
+                          }
+                        }
+                      }
                       if (event.type === "error" && !hasProviderOutput && allowRequestRetry) {
                         if (ProviderTransform.isAssistantPrefillRejection(event.error))
                           return yield* Effect.fail(event.error)
@@ -928,6 +969,7 @@ const live: Layer.Layer<
                         if (SessionRetry.decide(normalized, "request", input.retryScope).retryable) return yield* Effect.fail(event.error)
                       }
                       if (event.type !== "start" && event.type !== "error") hasProviderOutput = true
+                      nativeState.output = hasProviderOutput
                       return event
                     }),
                   ),
@@ -963,6 +1005,32 @@ const live: Layer.Layer<
                 if (!normalized.data.hostCode && ProviderTransform.isAssistantPrefillRejection(primaryError)) {
                   if (prefillRepaired) return Stream.failCause(primaryCause)
                   return retryRequest(attempt(true, true), retryCount, startedAt, true)
+                }
+                // DC-WEBSEARCH-001: a native-search failure before any output is
+                // resent once at once; the recorded failure removes native search or
+                // replays earlier searches as text. Outside the retry budget, and
+                // ahead of MaxMode's own ladder, like the prefill backstop above.
+                if (nativeState.active && !nativeState.output && !nativeState.retried) {
+                  const failure = NativeWebSearch.classifyError(primaryError, { beforeOutput: true, nativeActive: true })
+                  if (failure) {
+                    nativeState.retried = true
+                    NativeWebSearch.mark(input.sessionID, input.model, failure.kind, failure.reason)
+                    return Stream.unwrap(
+                      Effect.gen(function* () {
+                        if (!input.ephemeral && (!input.agentID || input.agentID === "main") && input.onRetryStatus)
+                          yield* input
+                            .onRetryStatus({
+                              attempt: retryCount + 1,
+                              message: `Native web search unavailable (${failure.reason}); retrying with fallback search`,
+                              next: Date.now(),
+                              phase: "request",
+                              scope: "request",
+                            })
+                            .pipe(Effect.ignore)
+                        return retryRequest(attempt(false, true), retryCount, startedAt, prefillRepaired)
+                      }),
+                    )
+                  }
                 }
                 // MaxMode owns the candidate/judge retry ladder and its status events.
                 // Retrying here would consume that scope's budget without notifying it.
@@ -1067,6 +1135,25 @@ export function resolveTools(
       (key !== "skill_search" ||
         canSearchSkills({ permission, toolAllowlist: input.agent.toolAllowlist, tools: input.user.tools })),
   )
+}
+
+/**
+ * The tool set a request will put on the wire, including the provider-native web
+ * search that `run` injects (DC-WEBSEARCH-001), so preflight sizing matches the send.
+ */
+export function wireTools(input: StreamInput, settings: Config.Info["websearch"]) {
+  const tools = resolveTools(input)
+  const native = NativeWebSearch.apply({
+    settings,
+    model: input.model,
+    sessionID: input.sessionID,
+    ruleset: Agent.runtimePermission(input.agent, input.permission),
+    ephemeral: input.ephemeral,
+    small: input.small,
+    tools,
+    activeTools: input.activeTools ?? Object.keys(tools),
+  })
+  return filterActiveTools(native.tools, native.activeTools)
 }
 
 export function filterActiveTools(tools: Record<string, Tool>, activeTools?: string[]) {

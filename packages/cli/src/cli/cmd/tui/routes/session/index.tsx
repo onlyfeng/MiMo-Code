@@ -2310,6 +2310,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "websearch"}>
           <WebSearch {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "web_search"}>
+          <NativeWebSearch {...toolprops} />
+        </Match>
         <Match when={props.part.tool === "write"}>
           <Write {...toolprops} />
         </Match>
@@ -3404,6 +3407,19 @@ function WebSearch(props: ToolProps<typeof WebSearchTool>) {
   return (
     <InlineTool icon="◈" pending="Searching web..." complete={props.input.query} part={props.part}>
       Web Search "{props.input.query}" <Show when={metadata.numResults}>({metadata.numResults} results)</Show>
+    </InlineTool>
+  )
+}
+
+// Provider-executed search (DC-WEBSEARCH-001). OpenAI reports the query only in
+// the result, so the stored readable output supplies it and the result count.
+function NativeWebSearch(props: ToolProps<typeof WebSearchTool>) {
+  const query = createMemo(() => props.input.query ?? props.output?.match(/^\[web_search\] "(.*)"/)?.[1])
+  const results = createMemo(() => (props.output ?? "").split("\n").filter((line) => /^\d+\. /.test(line)).length)
+  const done = createMemo(() => props.part.state.status === "completed" || props.part.state.status === "error")
+  return (
+    <InlineTool icon="◈" pending="Searching web..." complete={query() ?? done()} part={props.part}>
+      Native Web Search <Show when={query()}>"{query()}" </Show><Show when={results()}>({results()} results)</Show>
     </InlineTool>
   )
 }

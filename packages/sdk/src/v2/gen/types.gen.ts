@@ -2825,6 +2825,34 @@ export type Config = {
      */
     control_model?: string
   }
+  /**
+   * Web search: provider-native search and the websearch tool's fallback models.
+   */
+  websearch?: {
+    /**
+     * Provider-native in-turn web search, keyed by provider or provider/model (provider/model wins). Only @ai-sdk/openai (Responses) and @ai-sdk/anthropic models are supported.
+     */
+    native?: {
+      [key: string]:
+        | boolean
+        | {
+            /**
+             * How earlier native searches are replayed to this model. 'text' sends them as plain text instead of provider search blocks.
+             */
+            replay?: "native" | "text"
+          }
+    }
+    /**
+     * Models (provider/model, @ai-sdk/openai Responses) the websearch tool asks for a standalone web search, in order, before the built-in routes.
+     */
+    fallback?: Array<
+      | string
+      | {
+          model: string
+          variant?: string
+        }
+    >
+  }
   experimental?: {
     disable_paste_summary?: boolean
     /**

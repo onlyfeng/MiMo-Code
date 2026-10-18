@@ -385,6 +385,43 @@ const InfoSchema = Schema.Struct({
       }),
     }),
   ).annotate({ description: "Voice input provider and model configuration." }),
+  websearch: Schema.optional(
+    Schema.Struct({
+      native: Schema.optional(
+        Schema.Record(
+          Schema.String,
+          Schema.Union([
+            Schema.Boolean,
+            Schema.Struct({
+              replay: Schema.optional(Schema.Literals(["native", "text"])).annotate({
+                description:
+                  "How earlier native searches are replayed to this model. 'text' sends them as plain text instead of provider search blocks.",
+              }),
+            }),
+          ]),
+        ),
+      ).annotate({
+        description:
+          "Provider-native in-turn web search, keyed by provider or provider/model (provider/model wins). Only @ai-sdk/openai (Responses) and @ai-sdk/anthropic models are supported.",
+      }),
+      fallback: Schema.optional(
+        Schema.mutable(
+          Schema.Array(
+            Schema.Union([
+              Schema.String,
+              Schema.Struct({
+                model: Schema.String,
+                variant: Schema.optional(Schema.String),
+              }),
+            ]),
+          ),
+        ),
+      ).annotate({
+        description:
+          "Models (provider/model, @ai-sdk/openai Responses) the websearch tool asks for a standalone web search, in order, before the built-in routes.",
+      }),
+    }),
+  ).annotate({ description: "Web search: provider-native search and the websearch tool's fallback models." }),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),

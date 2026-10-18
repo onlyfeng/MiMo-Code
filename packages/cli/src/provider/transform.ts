@@ -165,16 +165,22 @@ function normalizeMessages(
     // The root cause appears to be somewhere upstream where the stream is originally
     // processed. We were unable to locate an exact narrower reproduction elsewhere,
     // so we keep this transform in place for the time being.
+    //
+    // DC-WEBSEARCH-001: only client tool calls move. A provider-executed call (server
+    // web search) is answered inside the same assistant turn and must stay ahead of
+    // its own result block, or the provider rejects the result as orphaned.
+    const clientCall = (part: (typeof msgs)[number]["content"][number]) =>
+      typeof part !== "string" && part.type === "tool-call" && !part.providerExecuted
     msgs = msgs.flatMap((msg) => {
       if (msg.role !== "assistant" || !Array.isArray(msg.content)) return [msg]
 
       const parts = msg.content
-      const first = parts.findIndex((part) => part.type === "tool-call")
+      const first = parts.findIndex(clientCall)
       if (first === -1) return [msg]
-      if (!parts.slice(first).some((part) => part.type !== "tool-call")) return [msg]
+      if (!parts.slice(first).some((part) => !clientCall(part))) return [msg]
       return [
-        { ...msg, content: parts.filter((part) => part.type !== "tool-call") },
-        { ...msg, content: parts.filter((part) => part.type === "tool-call") },
+        { ...msg, content: parts.filter((part) => !clientCall(part)) },
+        { ...msg, content: parts.filter(clientCall) },
       ]
     })
   }

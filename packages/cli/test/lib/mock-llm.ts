@@ -27,8 +27,15 @@ type MockEvent =
   | { type: "reasoning-end"; id: string; providerMetadata?: unknown }
   | { type: "tool-input-start"; id: string; toolName: string; providerExecuted?: boolean }
   | { type: "tool-input-end" }
-  | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown; providerMetadata?: unknown }
-  | { type: "tool-result"; toolCallId: string; output: unknown }
+  | {
+      type: "tool-call"
+      toolCallId: string
+      toolName: string
+      input: unknown
+      providerMetadata?: unknown
+      providerExecuted?: boolean
+    }
+  | { type: "tool-result"; toolCallId: string; output: unknown; toolName?: string; input?: unknown; providerExecuted?: boolean }
   | { type: "finish-step"; finishReason: string; usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number }; providerMetadata?: unknown }
 
 type MockReply = {
