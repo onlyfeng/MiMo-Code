@@ -30,6 +30,7 @@ import { isRecord } from "@/util/record"
 import { createTextNgramMonitor, type TextNgramMonitor } from "./prompt/text-ngram-detection"
 import { Flag } from "@/flag/flag"
 import { monitor as tryBestMonitor, type TryBestIncident } from "./try-best-detector"
+import * as NativeWebSearch from "@/tool/websearch/native"
 
 const DOOM_LOOP_THRESHOLD = 3
 const log = Log.create({ service: "session.processor" })
@@ -395,7 +396,13 @@ export const layer: Layer.Layer<
             state: {
               status: "completed",
               input: current.state.input,
-              output: result?.output ?? displayToolOutput(output),
+              output:
+                result?.output ??
+                // DC-WEBSEARCH-001: show native search results as titles/URLs, not encrypted page JSON.
+                (structured && current.tool === NativeWebSearch.TOOL_NAME
+                  ? NativeWebSearch.display(output, current.state.input)
+                  : undefined) ??
+                displayToolOutput(output),
               ...(structured ? { providerOutput: jsonToolOutput(output) } : {}),
               ...(providerMetadata ? { providerMetadata } : {}),
               metadata: { ...current.state.metadata, ...result?.metadata },

@@ -1532,3 +1532,33 @@ it.live.skip("session.processor preserves try-best blocking when denied tools ma
     },
   ),
 )
+
+// DC-WEBSEARCH-001
+scripted.live("provider-executed web_search stores readable output and raw providerOutput", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        const results = [
+          { type: "web_search_result", url: "https://example.com/a", title: "Alpha", pageAge: null, encryptedContent: "ENC" },
+        ]
+        processorLLM.enqueue([
+          { type: "start-step" },
+          { type: "tool-input-start", id: "srv_1", toolName: "web_search", providerExecuted: true },
+          { type: "tool-call", toolCallId: "srv_1", toolName: "web_search", input: { query: "bun latest" }, providerExecuted: true },
+          { type: "tool-result", toolCallId: "srv_1", toolName: "web_search", input: { query: "bun latest" }, output: results, providerExecuted: true },
+          { type: "text-start" },
+          { type: "text-delta", text: "Bun 1.4.3" },
+          { type: "text-end" },
+          { type: "finish-step", finishReason: "stop", usage: { inputTokens: 10, outputTokens: 5 } },
+        ])
+        const parts = yield* processTextStream(dir, "search")
+        const search = parts.find((part): part is MessageV2.ToolPart => part.type === "tool" && part.tool === "web_search")
+        expect(search?.state.status).toBe("completed")
+        if (search?.state.status !== "completed") return
+        expect(search.state.output).toBe('[web_search] "bun latest"\n1. Alpha — https://example.com/a')
+        expect(search.state.output).not.toContain("ENC")
+        expect(search.state.providerOutput).toEqual(results)
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
