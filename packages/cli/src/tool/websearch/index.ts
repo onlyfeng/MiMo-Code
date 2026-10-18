@@ -21,6 +21,14 @@ const WEBFETCH_FALLBACK =
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
 const FALLBACK_TIMEOUT = 60 * 1000
 
+/**
+ * Delay for a fallback search's AbortSignal.timeout: Node requires a non-negative
+ * integer, and a non-positive model-supplied timeout means "use the default".
+ */
+export function fallbackTimeout(ms: number | undefined) {
+  return ms !== undefined && ms > 0 ? Math.ceil(ms) : FALLBACK_TIMEOUT
+}
+
 const Parameters = z.object({
   query: z.string().describe("Websearch query"),
   numResults: z.number().optional().describe("Number of search results to return (default: 8)"),
@@ -132,9 +140,7 @@ export const WebSearchTool = Tool.define(
             if (output) served = { output, by: "xiaomi" }
           }
           for (const entry of served ? [] : NativeWebSearch.fallbackEntries((yield* config.get()).websearch)) {
-            // A non-positive model-supplied timeout would make AbortSignal.timeout throw.
-            const fallbackTimeout = timeout !== undefined && timeout > 0 ? timeout : FALLBACK_TIMEOUT
-            const output = yield* fallbackSearch(entry, params.query, ctx, fallbackTimeout)
+            const output = yield* fallbackSearch(entry, params.query, ctx, fallbackTimeout(timeout))
             if (output) {
               served = { output, by: `${entry.providerID}/${entry.modelID}` }
               break

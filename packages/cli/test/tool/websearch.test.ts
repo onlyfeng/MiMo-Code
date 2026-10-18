@@ -8,7 +8,7 @@ import { Config } from "../../src/config"
 import { Provider } from "../../src/provider"
 import { Truncate } from "../../src/tool"
 import { Instance } from "../../src/project/instance"
-import { WebSearchTool } from "../../src/tool/websearch"
+import { WebSearchTool, fallbackTimeout } from "../../src/tool/websearch"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { ProviderTest } from "../fake/provider"
@@ -268,6 +268,15 @@ describe("tool.websearch", () => {
       const body = requests[0].body
       expect((body.tools as Array<{ type: string }>)[0].type).toBe("web_search")
       expect(body.store).toBe(false)
+    })
+
+    test("fallbackTimeout yields a positive integer delay for AbortSignal.timeout", () => {
+      expect(fallbackTimeout(0.5)).toBe(1)
+      expect(fallbackTimeout(1500.2)).toBe(1501)
+      expect(fallbackTimeout(-5000)).toBe(60_000)
+      expect(fallbackTimeout(0)).toBe(60_000)
+      expect(fallbackTimeout(undefined)).toBe(60_000)
+      expect(fallbackTimeout(30_000)).toBe(30_000)
     })
 
     test("a non-positive timeout falls back to the default instead of failing", async () => {
