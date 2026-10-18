@@ -101,9 +101,10 @@ function texts(error: unknown, depth = 0): string[] {
   if (depth > 4 || error === undefined || error === null) return []
   if (typeof error === "string") return [error]
   if (!isRecord(error)) return []
-  const own = ["message", "responseBody"].flatMap((key) =>
-    typeof error[key] === "string" ? [error[key] as string] : [],
-  )
+  const own = ["message", "responseBody"].flatMap((key) => {
+    const value = error[key]
+    return typeof value === "string" ? [value] : []
+  })
   const value = "value" in error && error.value !== undefined ? [JSON.stringify(error.value) ?? ""] : []
   return [...own, ...value, ...texts(error.data, depth + 1), ...texts(error.cause, depth + 1)]
 }
@@ -165,7 +166,7 @@ export function classifyEvent(event: {
   if (event.type === "tool-error") return `search error: ${texts(event.error)[0] ?? "unknown"}`.slice(0, 200)
   if (event.type !== "tool-result" || !isRecord(event.output) || Array.isArray(event.output)) return undefined
   if (event.output.type === "web_search_tool_result_error" || typeof event.output.errorCode === "string")
-    return `search result error: ${String(event.output.errorCode ?? event.output.type)}`
+    return `search result error: ${typeof event.output.errorCode === "string" ? event.output.errorCode : "web_search_tool_result_error"}`
   return undefined
 }
 
@@ -225,16 +226,17 @@ function summarize(value: unknown, input?: unknown): Summary | undefined {
   if (Array.isArray(value)) return { query, results: value.flatMap(result) }
   if (!isRecord(value)) return undefined
   if (value.type === "web_search_tool_result_error" || typeof value.errorCode === "string")
-    return { query, results: [], error: String(value.errorCode ?? "unknown") }
+    return { query, results: [], error: typeof value.errorCode === "string" ? value.errorCode : "unknown" }
   const action = isRecord(value.action) ? value.action : undefined
   if (!action && !Array.isArray(value.sources)) return undefined
   const sources = Array.isArray(value.sources) ? value.sources : Array.isArray(action?.sources) ? action.sources : []
   // OpenAI also reports page actions (openPage, findInPage) that name one URL and no query.
-  const page = typeof action?.url === "string" && typeof action.type === "string" ? action : undefined
+  const pageUrl = typeof action?.url === "string" ? action.url : undefined
+  const pageAction = typeof action?.type === "string" ? action.type : undefined
   return {
     query: query ?? (typeof action?.query === "string" ? action.query : undefined),
-    results: page ? [{ url: page.url as string }] : sources.flatMap(result),
-    ...(page && !query ? { action: page.type as string } : {}),
+    results: pageUrl ? [{ url: pageUrl }] : sources.flatMap(result),
+    ...(pageUrl && pageAction && !query ? { action: pageAction } : {}),
   }
 }
 
