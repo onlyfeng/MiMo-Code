@@ -32,7 +32,7 @@ omo native（`@code-yeongyu/senpi` #3122）的做法是：会话模型支持就�
 | --- | --- | --- | --- |
 | gz4399-codex（Responses `web_search`） | 10/10 | 两层通过，12–32 条来源；回放正常（`store:false` 时 SDK 不回放搜索项） | 原生 |
 | gz4399-grok（Responses `web_search`） | 6/6 | 两层通过；回放正常 | 原生 |
-| gz4399-claude（Messages `web_search_20250305`） | fable-5、fable-5-1 | 两层通过；原样回放加密结果正常 | 原生 |
+| gz4399-claude（Messages `web_search_20250305`） | fable-5、fable-5-1 | 两层通过；但回放加密结果间歇被拒（见下方「端到端补充」） | 原生 + 文本回放 |
 | gz4399-claude | opus-5-5 | 首轮能搜；回放加密结果稳定 400 `Invalid encrypted_content in search_result block`（raw 2/2，SDK 1/1） | 原生 + 文本回放 |
 | gz4399-kimi | 5 个 | 带工具后 120–240s 零字节（流式/非流式），不带工具 5.8s 正常 | 兜底 |
 | gz4399-glm | 5 个可用 | 网关改用自有 `web_search_prime` 并返回非标准 `tool_result` 块；SDK `Type validation failed` | 兜底 |
@@ -59,6 +59,20 @@ omo native（`@code-yeongyu/senpi` #3122）的做法是：会话模型支持就�
 与 omo native 的差异：同一原则，但以实测决定开关。按代码推断，omo 当前配置在
 gz4399 上有两处会出问题：kimi 开了原生搜索（现挂起）；opus 回放 400 的报错文本
 不匹配 senpi 的失败识别正则，不会触发兜底。
+
+### 端到端补充（实现后）
+
+- 首轮 `mimo run` 暴露了一个既有 bug：`ProviderTransform.message` 的 Anthropic
+  tool_use 重排把服务端 `web_search` 调用也挪到了结果之后，网关以 400
+  “`web_search_tool_result` block must have a corresponding `server_tool_use`”拒绝。
+  已修复为只移动客户端调用。
+- 修复后抓包确认：MiMo 回放的搜索块与网关返回的逐字节一致，但 gz4399 仍间歇拒绝
+  `encrypted_content`（原样重放 6/6 失败；新的 fable 两轮探测 6 次失败 2 次，与
+  thinking/effort 参数无关），判断为网关侧（上游账号绑定）。运行期 `replay` 标记 + 文本
+  回放已在端到端中验证可用；配置上 gz4399-claude 整体使用 `replay: "text"`，省掉每个
+  会话一次失败请求。
+- kimi 在流式下也可能返回缺 id/input 的 `server_tool_use`（SDK 类型校验失败），同样走
+  `search` 兜底。
 
 ## 目标
 
@@ -88,8 +102,7 @@ gz4399 上有两处会出问题：kimi 开了原生搜索（现挂起）；opus 
   "native": {
     "gz4399-codex": true,
     "gz4399-grok": true,
-    "gz4399-claude": true,
-    "gz4399-claude/claude-opus-5-5": { "replay": "text" }
+    "gz4399-claude": { "replay": "text" }
   },
   // websearch 工具的独立搜索模型，按顺序尝试。
   // 字符串为 provider/model；对象可指定该模型已配置的 variant。

@@ -20,6 +20,10 @@ registry/history commit does not advance either behavior reference below.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-10-18 DC-WEBSEARCH-001 added
+
+New compat owner, no inherited change: provider-native web search with in-turn fallback and a configurable Codex search layer for the `websearch` tool (design `docs/superpowers/specs/2026-10-18-compat-native-websearch-design.md`). It adds the tenth owner to the sync index (the current review record above still counts eight; DC-ACTOR-002 and DC-PROVIDER-001 were added after it). The compat-different set grows from 120 paths (42 under `packages/cli/src` and `packages/sdk/src`) to 135 (49): two new source files, `tool/websearch/native.ts` and `tool/websearch/codex.ts`, and overlays on `config/config.ts`, `session/llm.ts`, `session/prompt.ts`, `session/processor.ts`, `provider/transform.ts`, `tool/registry.ts`, `tool/websearch/index.ts`, the TUI session route, the generated SDK `types.gen.ts`, tests and the design/plan documents. `session/llm.ts`, `session/prompt.ts`, `provider/transform.ts` and the SDK types were already compat-different. Without a `websearch` config block, request payloads, tool lists and websearch results are unchanged.
+
 ## 2026-10-15 pre-admission inbox wake cancellation propagation
 
 Direct inherit of main `40f69640` (PRs #160, #161, #162), no compat override, no owner added or retired. Main's FC-001 follow-up advances a per-session `CancelEpoch` in `SessionRunState.cancel`, records it with a hold when `Inbox.wake` schedules, and refuses the wake inside `Runner.ensureRunning`'s atomic admission once it moved; `Session.remove` releases the entry after the last hold. Compat merge `8cdd8ea8` is conflict-free. `session/run-state.ts`, `effect/runner.ts`, `inbox/inbox.ts`, `inbox/inbox-ref.ts`, `session/cancel-epoch.ts` and `session/session.ts` are byte-identical to main; the compat `session/prompt.ts` overlay auto-merges and carries both `cancelEpoch` hunks (the `LoopInput` field and the main-agent inbox loop's `ensureRunning` argument), so DC-CONTEXT-001, DC-ACTOR-001, DC-MODEL-001 and DC-TUI-001 keep their contracts. Both shared registries are byte-identical to main after the merge. The compat-different set stays at 120 paths, 42 under `packages/cli/src` and `packages/sdk/src`. Validation at `8cdd8ea8` with ambient `MIMOCODE_EXPERIMENTAL` and `MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL` unset: package typecheck exits 0; root lint 3599 warnings, zero errors; `test/inbox/` 83/83 (including upstream's abort-immediately-after-send case); `test/effect/runner*` 63/63; 23 session/server/run-state files including `test/session/cancel-epoch.test.ts` 570 pass, 7 skip; `test/actor/` 274 pass with only the eight `subagent-resume-negatives` cascade cases failing, as on main on this host. Exact-tip CI remains the publication gate.
@@ -1056,6 +1060,7 @@ files remain byte-identical to the accepted main correction.
 | DC-ACTOR-002    | Actor run/spawn JSON `variant`, `actor models` listing, spawn-to-prompt propagation                       | Model-facing extension over inherited actor model selection                  | Preserve pre-admission validation, explicit precedence, non-inheritance, and actor-lifetime persistence                   |
 | DC-TUI-001      | Prompt/footer model metadata and title locale                                                                                              | Request-metadata display override alongside shared locale propagation        | Preserve provider/model/variant truth, locale submission, and known-limit disclosure                                      |
 | DC-PROVIDER-001 | `Provider.getLanguage` loader fallback and `ProviderTransform` SDK-key/options mapping                                                     | Config-provider routing and declared reasoning capability                    | Preserve xAI Responses routing and declared reasoning for OpenAI-compatible models                                      |
+| DC-WEBSEARCH-001 | `websearch` config, `LLM.stream` tool injection/retry/replay, preflight `LLM.wireTools`, Anthropic tool-call reorder, websearch tool chain, registry exposure | Compat-only extension; main has no native search and no `websearch` config | Preserve opt-in native search, search-specific in-turn fallback, text replay downgrade, and the fallback chain order |
 
 ## DC-NET-001 — approved private-network WebFetch
 
@@ -2163,3 +2168,89 @@ files remain byte-identical to the accepted main correction.
   API choice, and honors declared reasoning capabilities for compatible
   models without relying solely on model names. If propagated to `main`, move
   the contract to the shared registry.
+
+## DC-WEBSEARCH-001 — provider-native web search and layered fallback
+
+- Status: active
+- Canonical owner: `dev/compat` web search
+- Added: 2026-10-18 (tenth owner; see the dated record near the top).
+- Base: inherited main exposes the client `websearch` tool only to opencode
+  and xiaomi providers or under `MIMOCODE_ENABLE_EXA` (also set by
+  `MIMOCODE_EXPERIMENTAL`). It routes xiaomi sessions to the Xiaomi
+  `web_search` chat request and everything else to Exa's anonymous MCP. No
+  request ever declares a provider-native search tool, although `processor.ts`
+  and `message-v2.ts` already persist and replay provider-executed tool parts.
+- Contract:
+  - Config: top-level `websearch.native` (keys `provider` or
+    `provider/model`, the latter wins; `true`, `false` or
+    `{ "replay": "native" | "text" }`) and `websearch.fallback` (ordered
+    `provider/model` strings or `{ model, variant }`).
+  - Native search: `LLM.stream` injects `openai.web_search` (`@ai-sdk/openai`)
+    or `anthropic.web_search_20250305` (`@ai-sdk/anthropic`) as provider tool
+    `web_search` and removes `websearch` from the active declarations, only
+    for non-ephemeral, non-small requests whose resolved tools include
+    `websearch`, whose `websearch` permission evaluates to `allow`, and whose
+    session × model has no `search` failure. Preflight sizing uses the same
+    `LLM.wireTools`.
+  - Failure handling (in-process, per session × provider/model/api id):
+    4xx naming the search tool type, SDK type-validation errors on server tool
+    blocks and pre-output timeouts mark `search`; 4xx naming
+    `encrypted_content`/`search_result` mark `replay`; in-band
+    `web_search_tool_result_error`/`tool-error` mark `search`. 401/402/429,
+    quota and auth errors never mark. A pre-output failure is resent once at
+    once (outside the retry budget, ahead of MaxMode's early return); later
+    failures reach the processor's existing retry with native already off.
+  - Replay: provider-executed `web_search` call/result pairs are rewritten as
+    assistant text (query, titles, URLs, no encrypted content) unless the
+    request carries native search, the route replays natively and is not
+    marked, and the stored result is the provider's JSON. The Anthropic
+    tool-call reorder in `ProviderTransform.message` moves only client tool
+    calls, keeping a server call ahead of its own result.
+  - `websearch` tool chain: xiaomi sidecar (xiaomi sessions, unchanged) →
+    each resolvable `fallback` entry (`@ai-sdk/openai` model, existing
+    variant) as one standalone Responses search returning the answer plus only
+    search-returned sources → Exa (non-xiaomi sessions, unchanged) →
+    `WEBFETCH_FALLBACK`. `metadata.servedBy` names the layer. The tool is also
+    exposed whenever `websearch` config enables native search or lists a
+    fallback.
+  - Display: stored output of a provider `web_search` part is a readable list;
+    `providerOutput` keeps the raw result for replay. The TUI renders it as
+    `Native Web Search "<query>" (N results)`.
+- Delta: without a `websearch` block nothing changes. With it, configured
+  routes search in-turn on the session model (billed at that model's price),
+  and every provider gets the `websearch` tool.
+- Source surfaces: `packages/cli/src/tool/websearch/native.ts`,
+  `packages/cli/src/tool/websearch/codex.ts`,
+  `packages/cli/src/tool/websearch/index.ts`, `packages/cli/src/tool/registry.ts`,
+  `packages/cli/src/session/llm.ts` (`run`, `attempt`, `stream` retry ladder,
+  `transformParams`, `wireTools`), `packages/cli/src/session/prompt.ts`
+  (preflight), `packages/cli/src/session/processor.ts` (`completeToolCall`),
+  `packages/cli/src/provider/transform.ts` (Anthropic reorder),
+  `packages/cli/src/config/config.ts`, the TUI session route, and
+  `packages/sdk/src/v2/gen/types.gen.ts`.
+- Test surfaces: `test/tool/websearch-native.test.ts` (config, classification,
+  injection, replay, display), `test/session/llm-native-websearch.test.ts`
+  (wire payloads, one-shot fallback, MaxMode, replay downgrade, server-call
+  order, preflight), `test/tool/websearch.test.ts` (fallback chain, Exa
+  fall-through), `test/tool/registry.test.ts` (exposure),
+  `test/session/processor-effect.test.ts` (stored display/raw output),
+  `test/provider/transform.test.ts` (reorder).
+- Evidence (2026-10-18, gz4399 gateway): two-turn probes through the shipped
+  SDK versions — Responses `web_search` works on all 10 gz4399-codex and 6
+  gz4399-grok models; Anthropic `web_search_20250305` works on gz4399-claude
+  but the gateway rejects replayed `encrypted_content` intermittently
+  (byte-identical replays of a captured MiMo request fail 6/6; fresh fable
+  two-turn probes fail 2 of 6); gz4399-kimi hangs or streams a malformed
+  `server_tool_use`, gz4399-glm and gz4399-macaron stream non-standard
+  `tool_result` blocks, gz4399-deepseek silently drops the tool. `mimo run`
+  end-to-end (search, then write a file) completes natively on gpt-6-luna,
+  grok-4.7, claude-fable-5-1 and claude-opus-5-5, through the Codex layer on
+  glm-5.3 and kimi-k3, and through in-turn fallback when native search is
+  forced on glm-5.3 (type validation), kimi-k3 (malformed block) and claude
+  without `replay: "text"` (replay rejection). The first end-to-end round
+  exposed the Anthropic reorder bug (server call moved after its result,
+  rejected 400); its fix is covered by the transform and wire-order tests.
+- Exit condition: retire when shared `main` offers provider-native search with
+  an equivalent opt-in, failure fallback and replay safety, or when the user
+  drops the `websearch` config. If propagated to `main`, move the contract to
+  the shared registry.
