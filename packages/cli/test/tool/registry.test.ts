@@ -9,6 +9,8 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { ToolRegistry } from "../../src/tool"
 import { prepareConfigDependencies, provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { ModelID, ProviderID } from "../../src/provider/schema"
+import type { Agent } from "../../src/agent/agent"
 
 const node = CrossSpawnSpawner.defaultLayer
 
@@ -59,6 +61,41 @@ describe("tool.registry", () => {
       )
     }
   }
+
+  // DC-WEBSEARCH-001
+  const searchAgent = {
+    name: "build",
+    mode: "primary",
+    options: {},
+    permission: [{ permission: "*", pattern: "*", action: "allow" }],
+  } satisfies Agent.Info
+  const toolIds = Effect.fn("test.toolIds")(function* () {
+    const registry = yield* ToolRegistry.Service
+    const tools = yield* registry.tools({
+      providerID: ProviderID.make("test"),
+      modelID: ModelID.make("test-model"),
+      agent: searchAgent,
+    })
+    return tools.map((item) => item.id)
+  })
+
+  it.live("websearch exposed when websearch config is set", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          expect(yield* toolIds()).toContain("websearch")
+        }),
+      { config: { websearch: { fallback: ["test/test-model"] } } },
+    ),
+  )
+
+  it.live("websearch stays hidden for other providers without websearch config", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        expect(yield* toolIds()).not.toContain("websearch")
+      }),
+    ),
+  )
 
   it.live("todowrite tool is not registered; task is", () =>
     provideTmpdirInstance(() =>

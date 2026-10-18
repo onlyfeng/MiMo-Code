@@ -1,16 +1,25 @@
 import z from "zod"
-import { Effect } from "effect"
+import { Effect, Exit } from "effect"
 import { HttpClient } from "effect/unstable/http"
+import { mergeDeep, pipe } from "remeda"
 import * as Tool from "../tool"
 import * as McpExa from "../mcp-exa"
 import * as MimoWebsearch from "./mimo"
+import * as NativeWebSearch from "./native"
+import * as WebSearchCodex from "./codex"
 import { Auth } from "@/auth"
-import { Provider } from "@/provider"
+import { Config } from "@/config"
+import { Provider, ProviderTransform } from "@/provider"
+import { ModelID, ProviderID } from "@/provider/schema"
+import { Log } from "@/util"
 import DESCRIPTION from "./websearch.txt"
+
+const log = Log.create({ service: "websearch" })
 
 const WEBFETCH_FALLBACK =
   "Web search unavailable. Use `webfetch` with a relevant URL instead, or enable the Web Search plugin at https://platform.xiaomimimo.com/console/plugin."
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
+const FALLBACK_TIMEOUT = 60 * 1000
 
 const Parameters = z.object({
   query: z.string().describe("Websearch query"),
@@ -37,6 +46,46 @@ export const WebSearchTool = Tool.define(
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
     const auth = yield* Auth.Service
+    const config = yield* Config.Service
+    const provider = yield* Provider.Service
+
+    // One configured `websearch.fallback` model (DC-WEBSEARCH-001). Any entry that
+    // does not resolve to a Responses model or a declared variant is skipped.
+    const fallbackSearch = Effect.fn("WebSearchTool.fallbackSearch")(function* (
+      entry: NativeWebSearch.FallbackEntry,
+      query: string,
+      ctx: Tool.Context,
+      timeout: number,
+    ) {
+      const ref = `${entry.providerID}/${entry.modelID}`
+      const resolved = yield* Effect.exit(
+        Effect.gen(function* () {
+          const model = yield* provider.getModel(ProviderID.make(entry.providerID), ModelID.make(entry.modelID))
+          const variant = entry.variant ? model.variants?.[entry.variant] : {}
+          if (model.api.npm !== "@ai-sdk/openai" || !variant) return undefined
+          const info = yield* provider.getProvider(model.providerID)
+          const language = yield* provider.getLanguage(model)
+          const options = pipe(
+            ProviderTransform.options({ model, sessionID: ctx.sessionID, providerOptions: info.options }),
+            mergeDeep(model.options),
+            mergeDeep(variant),
+          )
+          return { model, language, providerOptions: ProviderTransform.providerOptions(model, options) }
+        }),
+      )
+      if (Exit.isFailure(resolved) || !resolved.value) {
+        log.warn("skipping websearch fallback entry", { ref, variant: entry.variant })
+        return undefined
+      }
+      const { model, language, providerOptions } = resolved.value
+      return yield* WebSearchCodex.search({
+        language,
+        providerOptions,
+        headers: model.headers,
+        query,
+        abort: AbortSignal.any([ctx.abort, AbortSignal.timeout(timeout)]),
+      })
+    })
 
     return {
       get description() {
@@ -62,41 +111,54 @@ export const WebSearchTool = Tool.define(
           const model = (ctx.extra as { model?: Provider.Model })?.model
           const timeout = params.timeout === undefined ? undefined : Math.min(params.timeout * 1000, MAX_TIMEOUT)
 
-          const result =
-            model?.providerID === "xiaomi"
-              ? yield* Effect.catchCause(
-                  Effect.gen(function* () {
-                    const info = yield* auth.get("xiaomi")
-                    if (!info || info.type !== "api") return undefined
-                    return yield* MimoWebsearch.call(
-                      http,
-                      model.api.url,
-                      info.key,
-                      params.query,
-                      model.api.id,
-                      timeout ?? "30 seconds",
-                    )
-                  }),
-                  () => Effect.succeed(undefined),
-                )
-              : yield* McpExa.call(
+          const xiaomi = model?.providerID === "xiaomi"
+          let served: { output: string; by: string } | undefined
+          if (xiaomi) {
+            const output = yield* Effect.catchCause(
+              Effect.gen(function* () {
+                const info = yield* auth.get("xiaomi")
+                if (!info || info.type !== "api") return undefined
+                return yield* MimoWebsearch.call(
                   http,
-                  "web_search_exa",
-                  McpExa.SearchArgs,
-                  {
-                    query: params.query,
-                    type: params.type || "auto",
-                    numResults: params.numResults || 8,
-                    livecrawl: params.livecrawl || "fallback",
-                    contextMaxCharacters: params.contextMaxCharacters,
-                  },
-                  timeout ?? "25 seconds",
+                  model.api.url,
+                  info.key,
+                  params.query,
+                  model.api.id,
+                  timeout ?? "30 seconds",
                 )
+              }),
+              () => Effect.succeed(undefined),
+            )
+            if (output) served = { output, by: "xiaomi" }
+          }
+          for (const entry of served ? [] : NativeWebSearch.fallbackEntries((yield* config.get()).websearch)) {
+            const output = yield* fallbackSearch(entry, params.query, ctx, timeout ?? FALLBACK_TIMEOUT)
+            if (output) {
+              served = { output, by: `${entry.providerID}/${entry.modelID}` }
+              break
+            }
+          }
+          if (!served && !xiaomi) {
+            const output = yield* McpExa.call(
+              http,
+              "web_search_exa",
+              McpExa.SearchArgs,
+              {
+                query: params.query,
+                type: params.type || "auto",
+                numResults: params.numResults || 8,
+                livecrawl: params.livecrawl || "fallback",
+                contextMaxCharacters: params.contextMaxCharacters,
+              },
+              timeout ?? "25 seconds",
+            )
+            if (output) served = { output, by: "exa" }
+          }
 
           return {
-            output: result ?? WEBFETCH_FALLBACK,
+            output: served?.output ?? WEBFETCH_FALLBACK,
             title: `Web search: ${params.query}`,
-            metadata: {},
+            metadata: served ? { servedBy: served.by } : {},
           }
         }).pipe(Effect.orDie),
     }

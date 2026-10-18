@@ -32,6 +32,7 @@ import { Worktree } from "../worktree"
 import { Git } from "../git"
 import { ProviderID, type ModelID } from "../provider/schema"
 import { WebSearchTool } from "./websearch"
+import * as NativeWebSearch from "./websearch/native"
 import { CodeSearchTool } from "./codesearch"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util"
@@ -333,6 +334,7 @@ export const layer = Layer.effect(
     })
 
     const available = Effect.fn("ToolRegistry.available")(function* (input: Parameters<Interface["tools"]>[0]) {
+      const websearchSettings = (yield* config.get()).websearch
       const useGPTTools =
         resolveHarnessMode({
           modelID: input.modelID,
@@ -348,7 +350,9 @@ export const layer = Layer.effect(
             return (
               input.providerID === ProviderID.opencode ||
               input.providerID === "xiaomi" ||
-              Flag.MIMOCODE_ENABLE_EXA
+              Flag.MIMOCODE_ENABLE_EXA ||
+              // DC-WEBSEARCH-001: native search or a fallback model gives it a route.
+              NativeWebSearch.exposed(websearchSettings)
             )
           }
           return input.providerID === ProviderID.opencode || Flag.MIMOCODE_ENABLE_EXA
