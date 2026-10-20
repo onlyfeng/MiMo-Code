@@ -5,8 +5,8 @@ import { Deferred, Effect, Fiber, Layer } from "effect"
 import path from "path"
 import { Bus } from "../../src/bus"
 import { ActorRegistry } from "../../src/actor/registry"
-import { InboxArrived } from "../../src/actor/events"
-import { GlobalBus } from "../../src/bus/global"
+import { acceptedInboxEvent } from "../fixture/accepted-inbox"
+import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import { permissionToolInput } from "../../src/cli/cmd/tui/routes/session/permission"
 import type { Config } from "../../src/config"
@@ -18,7 +18,7 @@ import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionPrefixSnapshotTable } from "../../src/session/session.sql"
-import { Database, eq } from "../../src/storage"
+import { Database, and, eq } from "../../src/storage"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
@@ -119,11 +119,9 @@ for (const restriction of ["none", "tool", "permission"] as const) {
           ],
         })
         const arrived: Array<{ inboxID: string; senderActorID?: string }> = []
-        const onEvent = (event: { payload: { type: string; properties?: unknown } }) => {
-          if (event.payload.type !== InboxArrived.type) return
-          const parsed = InboxArrived.properties.safeParse(event.payload.properties)
-          if (parsed.success && parsed.data.receiverSessionID === session.id && parsed.data.receiverActorID === "general-1")
-            arrived.push(parsed.data)
+        const onEvent = (event: GlobalEvent) => {
+          const parsed = acceptedInboxEvent(event)
+          if (parsed?.receiverSessionID === session.id && parsed.receiverActorID === "general-1") arrived.push(parsed)
         }
         GlobalBus.on("event", onEvent)
         yield* Effect.addFinalizer(() => Effect.sync(() => { GlobalBus.off("event", onEvent) }))
@@ -166,7 +164,7 @@ return await tools.actor({ operation: { action: "status", actor_id: "general-1" 
           if (denied) expect(arrived).toHaveLength(0)
         }
         const rows = yield* Effect.sync(() =>
-          Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, session.id)).all()),
+          Database.use((db) => db.select().from(InboxTable).where(and(eq(InboxTable.receiver_session_id, session.id), eq(InboxTable.receiver_actor_id, "general-1"))).all()),
         )
         if (denied) expect(rows).toHaveLength(0)
         if (!denied) {

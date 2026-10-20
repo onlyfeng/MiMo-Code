@@ -9,6 +9,7 @@ import { ModelID, ProviderID } from "../../src/provider/schema"
 import { TaskRegistry } from "../../src/task/registry"
 import { Updated as TaskUpdated } from "../../src/task/events"
 import { TaskTable, TaskEventTable } from "../../src/task/task.sql"
+import { InboxTable } from "../../src/inbox/inbox.sql"
 import { MessageTable } from "../../src/session/session.sql"
 import { Database, eq, sql, NotFoundError } from "../../src/storage"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -453,3 +454,25 @@ for (const scenario of ["claim", "stale-user", "stale-assistant", "task-conflict
       expect(stored(f.user.id)?.data).toMatchObject({ model: f.user.model, task_id: task.id })
     })),
   )
+
+for (const state of ["accepted", "claimed", "settled", "cancelled", "rejected"] as const) {
+  it.live(`recovery queue visibility keeps ${state} input distinct from ordinary supersession`, () =>
+    provideTmpdirInstance(() => Effect.gen(function* () {
+      const f = yield* seed()
+      const queued = yield* f.sessions.commitUserMessage({
+        ...f.user, id: MessageID.ascending(), time: { created: Date.now() }, source: "spawn",
+      }, [])
+      Database.use((db) => db.insert(InboxTable).values({
+        id: crypto.randomUUID(), receiver_session_id: f.session.id, receiver_actor_id: "main",
+        input_message_id: queued.id, state, created_at: Date.now(), time_updated: Date.now(),
+      }).run())
+      const pending = state === "accepted" || state === "claimed"
+      const recovered = yield* f.sessions.commitRecoveryCandidate(f.input).pipe(Effect.exit)
+      expect(Exit.isSuccess(recovered)).toBe(pending)
+      const message = { ...f.user, id: MessageID.ascending(), time: { created: Date.now() }, source: "hook" as const }
+      const input = { expectedUserID: f.user.id, message, parts: [] }
+      expect(yield* f.sessions.commitUserMessageIfLatest(input)).toBe(false)
+      expect(yield* f.sessions.commitUserMessageIfLatest({ ...input, hideUnconsumedQueue: true })).toBe(pending)
+    })),
+  )
+}

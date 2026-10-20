@@ -883,6 +883,7 @@ export const layer: Layer.Layer<
             ]
           })
           const created = yield* session.commitUserMessageIfLatest({
+            hideUnconsumedQueue: input.onUserCommitted != null,
             expectedUserID: input.parentID,
             message: replayMsg,
             parts,
@@ -930,6 +931,7 @@ export const layer: Layer.Layer<
                 : "") +
               "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
             const created = yield* session.commitUserMessageIfLatest({
+            hideUnconsumedQueue: input.onUserCommitted != null,
               expectedUserID: input.parentID,
               message: continueMsg,
               parts: [
@@ -1020,6 +1022,7 @@ export const layer: Layer.Layer<
     ) {
       const next = boundary(input)
       const created = yield* session.commitUserMessageIfLatest({
+            hideUnconsumedQueue: input.onUserCommitted != null,
         expectedUserID: input.expectedUserID,
         message: next.message,
         parts: [next.part],

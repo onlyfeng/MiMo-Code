@@ -1,3 +1,5 @@
+import { inboxControllerRef, schedulerRef } from "../../src/inbox"
+import { observeAcceptedInbox, acceptedInboxEvent, receiptText } from "../fixture/accepted-inbox"
 import { ActorExecution } from "../../src/actor/execution"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import { NodeFileSystem } from "@effect/platform-node"
@@ -27,6 +29,7 @@ import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
+import { defaultLayer as CronBridgeDefaultLayer } from "../../src/session/cron-bridge"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
@@ -38,7 +41,7 @@ import { ToolRegistry } from "../../src/tool"
 import { Truncate } from "../../src/tool"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
-import { ActorStatusChanged, InboxArrived } from "../../src/actor/events"
+import { ActorStatusChanged } from "../../src/actor/events"
 import { Actor } from "../../src/actor/spawn"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import { Worktree } from "../../src/worktree"
@@ -262,6 +265,7 @@ function makeLayer(
   const proc = SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps))
   const prune = SessionPrune.layer.pipe(Layer.provide(checkpoint), Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
+    Layer.provide(CronBridgeDefaultLayer),
     Layer.provide(Goal.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(summary),
@@ -529,34 +533,36 @@ describe("Actor.spawn peer mode", () => {
         // Queue a stop response so the prompt loop can run to completion.
         yield* llm.text("done")
 
-        const result = yield* actor.spawn({
-          mode: "peer",
-          sessionID: parent.id,
-          agentType: "build",
-          task: "test task",
-          context: "none",
-          tools: ["read"],
-          background: true,
-          model: ref,
-        })
+        yield* Effect.acquireUseRelease(
+          actor.spawn({
+            mode: "peer",
+            sessionID: parent.id,
+            agentType: "build",
+            task: "test task",
+            context: "none",
+            tools: ["read"],
+            background: true,
+            model: ref,
+          }),
+          (result) => Effect.gen(function* () {
+            expect(result.actorID).not.toBe(parent.id)
+            expect(result.sessionID as string).toBe(result.actorID)
 
-        expect(result.actorID).not.toBe(parent.id)
-        expect(result.sessionID as string).toBe(result.actorID)
-
-        const row = yield* reg.get(result.sessionID, result.actorID)
-        expect(row?.mode).toBe("peer")
-        expect(row?.agent).toBe("build")
+            const row = yield* reg.get(result.sessionID, result.actorID)
+            expect(row?.mode).toBe("peer")
+            expect(row?.agent).toBe("build")
+          }),
+          (result) => Effect.gen(function* () {
+            yield* actor.cancel(result.sessionID, result.actorID, "forced")
+            yield* Deferred.await(result.outcome)
+          }),
+        )
       }),
       { git: true, config: providerCfg },
     ),
   )
 
-  // T42: a freshly-created peer is addressable the instant spawn returns —
-  // spawnPeer registers the receiver/actor-registry row (session_id === actor_id
-  // === child.id, mode "peer") SYNCHRONOUSLY before spawn resolves, so Inbox.send's
-  // ESRCH pre-check (reg.get) resolves even against a turnCount-0, never-run child.
-  // Guards the T43 --topic reuse prerequisite. LLM is hung so the child's first
-  // turn never runs: the row can ONLY come from spawn-time registration.
+  // 尚未首次执行的 peer 也应通过接收方存在性检查。
   it.live("send to a just-created, never-run peer (turnCount 0) does NOT ESRCH and enqueues", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -592,7 +598,7 @@ describe("Actor.spawn peer mode", () => {
 
         // Both addressing forms resolve without ESRCH and enqueue a durable row.
         const sent = yield* inbox
-          .send({
+          .accept({
             receiverSessionID: result.sessionID,
             receiverActorID: result.actorID,
             senderSessionID: parent.id,
@@ -869,10 +875,18 @@ describe("Actor.cancel", () => {
           background: true,
           model: ref,
         })
+        yield* llm.wait(1)
         yield* actor.cancel(result.sessionID, result.actorID, "forced")
         const row = yield* reg.get(result.sessionID, result.actorID)
         expect(row?.status).toBe("idle")
         expect(row?.lastOutcome).toBe("cancelled")
+        const receipts = Database.use((db) => db.select().from(InboxTable).where(and(
+          eq(InboxTable.receiver_session_id, result.sessionID), eq(InboxTable.receiver_actor_id, result.actorID),
+        )).all())
+        expect(receipts).toHaveLength(1)
+        expect(receipts[0].state).toBe("cancelled")
+        expect(receipts[0].outcome).toBe("interrupted")
+        expect(receipts[0].consumed).toBe(true)
       }),
       { git: true, config: providerCfg },
     ),
@@ -1100,8 +1114,11 @@ describe("SessionPrompt.cancel — process-group kill", () => {
           expect(rowB?.status).toBe("running")
           // All three model requests must have actually arrived (hang-queued).
           yield* llm.wait(3)
-
+          const controller = inboxControllerRef.current
+          if (!controller) throw new Error("Inbox controller missing")
+          const epoch = yield* controller.getEpoch(parent.id)
           yield* prompt.cancel(parent.id)
+          expect(yield* controller.getEpoch(parent.id)).toBe(epoch + 1)
 
           const afterA = yield* reg.get(a.sessionID, a.actorID)
           const afterB = yield* reg.get(b.sessionID, b.actorID)
@@ -1127,7 +1144,6 @@ describe("SessionPrompt.cancel — process-group kill", () => {
 
           // R14 terminal inline (TP-R14-14): quiet abort still materializes cancelled
           // notifications into parent session history (synthetic message parts).
-          // wake:false only skips auto-fork — the part must exist for chat UI.
           const parts = yield* Effect.sync(() =>
             Database.use((db) =>
               db
@@ -1144,26 +1160,35 @@ describe("SessionPrompt.cancel — process-group kill", () => {
             .filter((text) => text.includes("<actor-notification>"))
           expect(notes.length).toBeGreaterThanOrEqual(2)
           expect(notes.filter((text) => text.includes("was cancelled")).length).toBeGreaterThanOrEqual(2)
-          // Drain consumed the quiet inbox rows — no leftover durable wake backlog.
+          // inbox (d)：终止通知在停止收尾结算，消息保持可见。
           const inboxLeft = yield* Effect.sync(() =>
             Database.use((db) =>
               db
-                .select({ id: InboxTable.id })
+                .select()
                 .from(InboxTable)
-                .where(and(eq(InboxTable.receiver_session_id, parent.id), eq(InboxTable.receiver_actor_id, "main")))
+                .where(and(
+                  eq(InboxTable.receiver_session_id, parent.id),
+                  eq(InboxTable.receiver_actor_id, "main"),
+                  eq(InboxTable.type, "actor_notification"),
+                ))
                 .all(),
             ),
           )
-          expect(inboxLeft.length).toBe(0)
+          expect(inboxLeft).toHaveLength(2)
+          for (const receipt of inboxLeft) {
+            expect(receipt.state).toBe("cancelled")
+            expect(receipt.outcome).toBe("never_ran")
+            expect(receipt.content).toBeNull()
+            expect(receipt.input_message_id).toBeTruthy()
+          }
+          expect(yield* controller.listAccepted({ sessionID: parent.id, agentID: "main" })).toEqual([])
         }),
         { git: true, config: providerCfg },
       ),
   )
 
-  // R006: registry-only quiet cancel (pending row, no live ActorExecution) must
-  // still materialize a cancelled inbox notification — wake:false only skips auto-fork.
   it.live(
-    "registry-only quiet cancel materializes cancelled notification without wake",
+    "registry-only cancel materializes one durable cancelled notification",
     () =>
       provideTmpdirServer(
         Effect.fnUntraced(function* () {
@@ -1187,7 +1212,7 @@ describe("SessionPrompt.cancel — process-group kill", () => {
           })
           yield* reg.updateStatus(parent.id, "pending-1", { status: "pending" })
 
-          yield* actor.cancel(parent.id, "pending-1", "forced", { wake: false })
+          yield* actor.cancel(parent.id, "pending-1", "forced")
 
           const after = yield* reg.get(parent.id, "pending-1")
           expect(after?.status).toBe("idle")
@@ -1202,10 +1227,10 @@ describe("SessionPrompt.cancel — process-group kill", () => {
             ),
           )
           expect(rows.length).toBe(1)
-          const content = rows[0].content as { text?: string }
-          expect(content.text).toContain("cancelled")
+          const message = MessageV2.get({ sessionID: parent.id, messageID: rows[0].input_message_id! })
+          expect(message.parts.some((part) => part.type === "text" && part.synthetic && part.text.includes("cancelled"))).toBe(true)
           // Second cancel is a no-op — no duplicate notify.
-          yield* actor.cancel(parent.id, "pending-1", "forced", { wake: false })
+          yield* actor.cancel(parent.id, "pending-1", "forced")
           const again = yield* Effect.sync(() =>
             Database.use((db) =>
               db
@@ -1351,22 +1376,26 @@ describe("Actor.spawn description field (F2a)", () => {
 
         yield* llm.text("done")
 
-        const result = yield* actor.spawn({
-          mode: "subagent",
-          sessionID: parent.id,
-          agentType: "build",
-          task: "x".repeat(500),  // long, would be sliced to 200 chars under the bug
-          context: "none",
-          tools: ["read"],
-          background: true,
-          model: ref,
-        })
-
-        yield* llm.wait(1).pipe(Effect.timeout("5 seconds"))
-        expect((yield* Deferred.await(result.outcome).pipe(Effect.timeout("5 seconds"))).status).toBe("success")
-
-        const row = yield* reg.get(result.sessionID, result.actorID)
-        expect(row?.description).toBe("build")  // agentType, NOT first 200 chars of task
+        yield* Effect.acquireUseRelease(
+          actor.spawn({
+            mode: "subagent",
+            sessionID: parent.id,
+            agentType: "build",
+            task: "x".repeat(500),  // long, would be sliced to 200 chars under the bug
+            context: "none",
+            tools: ["read"],
+            background: true,
+            model: ref,
+          }),
+          (result) => Effect.gen(function* () {
+            const row = yield* reg.get(result.sessionID, result.actorID)
+            expect(row?.description).toBe("build")  // agentType, NOT first 200 chars of task
+          }),
+          (result) => Effect.gen(function* () {
+            yield* actor.cancel(result.sessionID, result.actorID, "forced")
+            yield* Deferred.await(result.outcome)
+          }),
+        )
       }),
       { git: true, config: providerCfg },
     ),
@@ -1386,23 +1415,27 @@ describe("Actor.spawn description field (F2a)", () => {
 
         yield* llm.text("done")
 
-        const result = yield* actor.spawn({
-          mode: "subagent",
-          sessionID: parent.id,
-          agentType: "build",
-          task: "long prompt body",
-          description: "explore: find lexer files",
-          context: "none",
-          tools: ["read"],
-          background: true,
-          model: ref,
-        })
-
-        yield* llm.wait(1).pipe(Effect.timeout("5 seconds"))
-        expect((yield* Deferred.await(result.outcome).pipe(Effect.timeout("5 seconds"))).status).toBe("success")
-
-        const row = yield* reg.get(result.sessionID, result.actorID)
-        expect(row?.description).toBe("explore: find lexer files")
+        yield* Effect.acquireUseRelease(
+          actor.spawn({
+            mode: "subagent",
+            sessionID: parent.id,
+            agentType: "build",
+            task: "long prompt body",
+            description: "explore: find lexer files",
+            context: "none",
+            tools: ["read"],
+            background: true,
+            model: ref,
+          }),
+          (result) => Effect.gen(function* () {
+            const row = yield* reg.get(result.sessionID, result.actorID)
+            expect(row?.description).toBe("explore: find lexer files")
+          }),
+          (result) => Effect.gen(function* () {
+            yield* actor.cancel(result.sessionID, result.actorID, "forced")
+            yield* Deferred.await(result.outcome)
+          }),
+        )
       }),
       { git: true, config: providerCfg },
     ),
@@ -1676,9 +1709,12 @@ describe("Actor forkContext lifecycle", () => {
           expect((yield* actor.getForkContext(result.sessionID, result.actorID))?.system).toEqual(["test-system"])
 
           const notices: string[] = []
-          const unsubscribe = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
-            if (event.properties.senderSessionID === result.sessionID && event.properties.senderActorID === result.actorID)
+          const noticed = yield* Deferred.make<void>()
+          const unsubscribe = yield* observeAcceptedInbox(yield* Bus.Service, (event) => {
+            if (event.properties.senderSessionID === result.sessionID && event.properties.senderActorID === result.actorID) {
               notices.push(event.properties.inboxID)
+              Deferred.doneUnsafe(noticed, Effect.void)
+            }
           })
           yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
           const cancelling = yield* actor.cancel(result.sessionID, result.actorID, mode).pipe(Effect.forkChild)
@@ -1692,6 +1728,7 @@ describe("Actor forkContext lifecycle", () => {
             yield* Deferred.succeed(cleanup.release, undefined)
             yield* Fiber.join(cancelling).pipe(Effect.timeout("2 seconds"))
           }
+          yield* Deferred.await(noticed).pipe(Effect.timeout("3 seconds"))
           expect(notices).toHaveLength(1)
           expect(yield* Deferred.isDone(release)).toBe(false)
           expect(yield* Deferred.isDone(result.outcome)).toBe(true)
@@ -2059,9 +2096,8 @@ describe("Actor.spawn structured output (P3)", () => {
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
 
-        yield* llm.push(
-          ...Array.from({ length: Flag.MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT + 1 }, () => reply().stop()),
-        )
+        // SessionRetry unknown budget: 1 retry after the initial attempt.
+        yield* llm.push(...Array.from({ length: 2 }, () => reply().stop()))
 
         const result = yield* actor.spawn({
           mode: "subagent",
@@ -2077,7 +2113,15 @@ describe("Actor.spawn structured output (P3)", () => {
         const outcome = yield* Deferred.await(result.outcome)
         expect(outcome.status).toBe("failure")
       }),
-      { git: true, config: providerCfg },
+      {
+        git: true,
+        config: (url: string) => ({
+          ...providerCfg(url),
+          retry: {
+            unknown: { maxRetries: 1, initialDelayMs: 1, maxDelayMs: 1, deadlineMs: 1000 },
+          },
+        }),
+      },
     ),
   )
 })
@@ -2973,7 +3017,7 @@ pauseIt.live(
         })
         yield* Effect.addFinalizer(() => Effect.sync(off))
         recoveryHookControl = { hook: "session.pre", mode: "defect", armed: true, outcomes: [] }
-        const first = yield* inbox.send({
+        const first = yield* inbox.accept({
           receiverSessionID: child.sessionID,
           receiverActorID: child.actorID,
           content: "fail once",
@@ -2982,17 +3026,17 @@ pauseIt.live(
         const active = yield* executions.current(child.sessionID, child.actorID)
         if (active) yield* Deferred.await(active.done)
         expect(recoveryHookControl.armed).toBe(false)
-        expect(yield* inbox.has(first.inboxID)).toBe(false)
+        expect(["accepted", "claimed"].includes((yield* inboxControllerRef.current!.getReceipt(first.inboxID)).state)).toBe(false)
         expect(yield* llm.calls).toBe(1)
         expect(outcomes).toEqual(["failure"])
         yield* llm.text("next inbox request completed")
-        const next = yield* inbox.send({
+        const next = yield* inbox.accept({
           receiverSessionID: child.sessionID,
           receiverActorID: child.actorID,
           content: "continue after failure",
         })
         yield* Deferred.await(succeeded).pipe(Effect.timeout("5 seconds"))
-        expect(yield* inbox.has(next.inboxID)).toBe(false)
+        expect(["accepted", "claimed"].includes((yield* inboxControllerRef.current!.getReceipt(next.inboxID)).state)).toBe(false)
         expect(yield* llm.calls).toBe(2)
         expect(outcomes).toEqual(["failure", "success"])
         const messages = yield* sessions.messages({ sessionID: child.sessionID, agentID: child.actorID })
@@ -3012,11 +3056,9 @@ for (const hook of ["session.pre", "session.userQuery.pre"] as const) {
     provideTmpdirServer(Effect.fnUntraced(function* ({ llm }) {
       const actor = yield* Actor.Service
       const spawned = yield* interruptedActor("persistent", true)
-      const id = crypto.randomUUID()
-      Database.use((db) => db.insert(InboxTable).values({
-        id, receiver_session_id: spawned.sessionID, receiver_actor_id: spawned.actorID,
-        content: { text: "must not wake after plugin cancellation" }, created_at: Date.now(),
-      }).run())
+      const queued = yield* inboxServiceRef.current!.accept({ receiverSessionID: spawned.sessionID,
+        receiverActorID: spawned.actorID, content: "must not wake after plugin cancellation" }, { deferKick: true })
+      const id = queued.inboxID
       recoveryHookControl = { hook, mode: "cancel", armed: true, outcomes: [] }
       yield* llm.text("must not execute the unrelated inbox")
       if (!actor.resume) return yield* Effect.die("resume missing")
@@ -3025,7 +3067,7 @@ for (const hook of ["session.pre", "session.userQuery.pre"] as const) {
       yield* Effect.sleep("50 millis")
       expect(recoveryHookControl.armed).toBe(false)
       expect(recoveryHookControl.outcomes).toEqual(["cancelled"])
-      expect(yield* inboxServiceRef.current!.has(id)).toBe(true)
+      expect((yield* inboxControllerRef.current!.getReceipt(id)).state).toBe("accepted")
       expect(yield* llm.calls).toBe(1)
       expect(yield* llm.pending).toBe(1)
     }), { git: true, config: providerCfg }),
@@ -3045,11 +3087,8 @@ for (const stop of ["cancel"] as const) {
           yield* llm.hang
           const completion = yield* actor.resume(spawned)
           yield* llm.wait(2)
-          Database.use((db) => db.insert(InboxTable).values({
-            id: crypto.randomUUID(), receiver_session_id: spawned.sessionID,
-            receiver_actor_id: spawned.actorID, content: { text: "must remain retired" },
-            created_at: Date.now(),
-          }).run())
+          yield* inboxServiceRef.current!.accept({ receiverSessionID: spawned.sessionID,
+            receiverActorID: spawned.actorID, content: "must remain retired" }, { deferKick: true })
           yield* llm.text("must not wake a cancelled or disposed recovery")
           const waiter = yield* completion.pipe(Effect.forkChild)
           yield* Fiber.interrupt(waiter)
@@ -3408,9 +3447,12 @@ it.live("resume receiver refresh waits for a live isolated turn", () =>
     const parentContext = (yield* InstanceRef)!
     const parent = yield* sessions.create({ title: "live parent disposed recovery receiver" })
     const notifications: string[] = []
-    const off = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
-      if (event.properties.receiverSessionID === parent.id && event.properties.type === "actor_notification")
+    const secondNotification = yield* Deferred.make<void>()
+    const off = yield* observeAcceptedInbox(yield* Bus.Service, (event) => {
+      if (event.properties.receiverSessionID === parent.id && event.properties.type === "actor_notification") {
         notifications.push(event.properties.inboxID)
+        if (notifications.length === 2) Deferred.doneUnsafe(secondNotification, Effect.void)
+      }
     })
     yield* Effect.addFinalizer(() => Effect.sync(off))
     const model = yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)
@@ -3444,6 +3486,7 @@ it.live("resume receiver refresh waits for a live isolated turn", () =>
       yield* Fiber.join(cancel).pipe(Effect.timeout("3 seconds"))
       yield* completion.pipe(Effect.exit, Effect.timeout("3 seconds"))
       expect(parentContext.disposing).toBe(false)
+      yield* Deferred.await(secondNotification).pipe(Effect.timeout("3 seconds"))
       expect(notifications).toHaveLength(2)
     }), { git: true, config: providerCfg(llm.url) })
   }), { git: true, config: providerCfg }),
@@ -3459,9 +3502,12 @@ for (const mode of ["graceful", "forced"] as const) {
       const parent = yield* sessions.create({ title: "parent cancels isolated recovery" })
       const model = yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)
       const notifications: string[] = []
-      const off = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
-        if (event.properties.receiverSessionID === parent.id && event.properties.type === "actor_notification")
+      const secondNotification = yield* Deferred.make<void>()
+      const off = yield* observeAcceptedInbox(yield* Bus.Service, (event) => {
+        if (event.properties.receiverSessionID === parent.id && event.properties.type === "actor_notification") {
           notifications.push(event.properties.inboxID)
+          if (notifications.length === 2) Deferred.doneUnsafe(secondNotification, Effect.void)
+        }
       })
       yield* Effect.addFinalizer(() => Effect.sync(off))
       yield* provideTmpdirInstance((receiverDir) => Effect.gen(function* () {
@@ -3495,9 +3541,11 @@ for (const mode of ["graceful", "forced"] as const) {
         }
         const settled = yield* completion.pipe(Effect.exit, Effect.timeoutOption("500 millis"))
         expect(settled._tag).toBe("Some")
+        yield* Deferred.await(secondNotification).pipe(Effect.timeout("3 seconds"))
         expect(notifications).toHaveLength(2)
         expect(yield* actor.getForkContext(peer.sessionID, peer.actorID)).toBeUndefined()
         yield* actor.cancel(peer.sessionID, peer.actorID, "forced").pipe(Effect.provideService(InstanceRef, parentContext), Effect.timeout("3 seconds"))
+        yield* Deferred.await(secondNotification).pipe(Effect.timeout("3 seconds"))
         expect(notifications).toHaveLength(2)
         expect((yield* actor.resume(peer).pipe(Effect.exit))._tag).toBe("Failure")
       }), { git: true, config: providerCfg(llm.url) })
@@ -3515,9 +3563,12 @@ for (const pause of ["cancel runner exit", "terminal status write"] as const) {
       const parent = yield* sessions.create({ title: "disposed receiver terminal continuation" })
       const model = yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)
       const notifications: string[] = []
-      const off = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
-        if (event.properties.receiverSessionID === parent.id && event.properties.type === "actor_notification")
+      const secondNotification = yield* Deferred.make<void>()
+      const off = yield* observeAcceptedInbox(yield* Bus.Service, (event) => {
+        if (event.properties.receiverSessionID === parent.id && event.properties.type === "actor_notification") {
           notifications.push(event.properties.inboxID)
+          if (notifications.length === 2) Deferred.doneUnsafe(secondNotification, Effect.void)
+        }
       })
       yield* Effect.addFinalizer(() => Effect.sync(off))
       yield* provideTmpdirInstance((receiverDir) => Effect.gen(function* () {
@@ -3553,6 +3604,7 @@ for (const pause of ["cancel runner exit", "terminal status write"] as const) {
           yield* Deferred.succeed(release, undefined)
           if (cancel) yield* Fiber.join(cancel).pipe(Effect.timeout("3 seconds"))
           yield* completion.pipe(Effect.exit, Effect.timeout("3 seconds"))
+          yield* Deferred.await(secondNotification).pipe(Effect.timeout("3 seconds"))
           expect(notifications).toHaveLength(2)
           expect(parentContext.disposing).toBe(false)
         }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))

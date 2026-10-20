@@ -91,6 +91,34 @@ describe("Runner", () => {
     yield* owned.awaitExit.pipe(Effect.timeout("1 second"))
     expect(runner.busy).toBe(false)
   }))
+
+  it.live("interrupt before work starts clears the busy ledger after fiber exit", Effect.gen(function* () {
+    const runner = Runner.make<string>(yield* Scope.Scope)
+    let started = false
+    const fiber = yield* Effect.gen(function* () {
+      yield* runner.start(Effect.sync(() => { started = true }).pipe(Effect.andThen(Effect.never)))
+      const current = runner.state
+      if (current._tag !== "Running") throw new Error("runner did not start")
+      current.run.fiber.interruptUnsafe()
+      return current.run.fiber
+    }).pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true))
+    expect(Exit.isFailure(yield* Fiber.await(fiber))).toBe(true)
+    expect(started).toBe(false)
+    expect(runner.busy).toBe(false)
+    expect(runner.state._tag).toBe("Idle")
+  }))
+
+  it.live("a closed execution scope never strands a busy ledger", Effect.gen(function* () {
+    const scope = yield* Scope.make()
+    yield* Scope.close(scope, Exit.void)
+    const runner = Runner.make<string>(scope)
+    let started = false
+    yield* runner.start(Effect.sync(() => { started = true }).pipe(Effect.andThen(Effect.never)))
+    expect(started).toBe(false)
+    expect(runner.busy).toBe(false)
+    expect(runner.state._tag).toBe("Idle")
+  }))
+
   it.live("start reports busy as a failure instead of a defect", Effect.gen(function* () {
     const s = yield* Scope.Scope
     const runner = Runner.make<string>(s)
@@ -98,6 +126,46 @@ describe("Runner", () => {
     const exit = yield* runner.start(Effect.succeed("later")).pipe(Effect.exit)
     expect(Exit.isFailure(exit)).toBe(true)
     yield* runner.cancel
+  }))
+
+  for (const mode of ["startOwned", "start", "startRunning", "ensureExclusive", "ensureRunning", "startShell"] as const) {
+    it.live(`${mode} clears busy when ownership changes during admission`, Effect.gen(function* () {
+      const events: string[] = []
+      let checks = 0
+      let leases = 0
+      const scope = yield* Scope.Scope
+      const lease = Effect.sync(() => { leases++; return () => { leases-- } })
+      const runner = Runner.make<void>(scope, {
+        onBusy: Effect.sync(() => { events.push("busy") }),
+        onIdle: () => Effect.sync(() => { events.push("idle") }),
+        onRunStart: lease,
+        onShellStart: lease,
+      })
+      const check = Effect.suspend(() => ++checks === 2 ? Effect.die("ownership moved") : Effect.void)
+      const admission = mode === "ensureRunning"
+        ? runner.ensureRunning(Effect.never, undefined, false, undefined, check).pipe(Effect.asVoid)
+        : runner[mode](Effect.never, undefined, check).pipe(Effect.asVoid)
+      const exit = yield* admission.pipe(Effect.exit)
+      expect(Exit.isFailure(exit) && Cause.pretty(exit.cause).includes("ownership moved")).toBe(true)
+      expect(events).toEqual(["busy", "idle"])
+      expect(runner.busy).toBe(false)
+      expect(leases).toBe(0)
+    }))
+  }
+
+  it.live("an obsolete owned cancel leaves replacement waiters admitted", Effect.gen(function* () {
+    const runner = Runner.make<string>(yield* Scope.Scope)
+    const old = yield* runner.startOwned(Effect.never)
+    yield* old.interruptOwned
+    const replacement = yield* runner.startOwned(Effect.never)
+    const waiting = yield* Deferred.make<void>()
+    const waiter = yield* runner.ensureRunning(Effect.succeed("next"), undefined, false, undefined,
+      Deferred.succeed(waiting, undefined).pipe(Effect.asVoid)).pipe(Effect.forkChild)
+    yield* Deferred.await(waiting)
+    yield* old.interruptOwned
+    expect(runner.busy).toBe(true)
+    yield* replacement.interruptOwned
+    expect(yield* Fiber.join(waiter)).toBe("next")
   }))
 
   // --- ensureRunning semantics ---
@@ -272,22 +340,59 @@ describe("Runner", () => {
   )
 
   it.live(
-    "concurrent callers all receive same error",
+    "concurrent independent work runs after a failed predecessor",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
       const runner = Runner.make<string, string>(s)
+      const calls = yield* Ref.make(0)
       const work = Effect.gen(function* () {
+        yield* Ref.update(calls, (n) => n + 1)
         yield* Effect.sleep("10 millis")
         return yield* Effect.fail("boom")
       })
 
       const [a, b] = yield* Effect.all(
-        [runner.ensureRunning(work).pipe(Effect.exit), runner.ensureRunning(work).pipe(Effect.exit)],
+        [runner.ensureRunning(work).pipe(Effect.exit), runner.ensureRunning(Effect.gen(function* () {
+          yield* Ref.update(calls, (n) => n + 1)
+          return "second-result"
+        })).pipe(Effect.exit)],
         { concurrency: "unbounded" },
       )
 
       expect(Exit.isFailure(a)).toBe(true)
-      expect(Exit.isFailure(b)).toBe(true)
+      expect(Exit.isFailure(a) && Cause.squash(a.cause)).toBe("boom")
+      expect(b).toEqual(Exit.succeed("second-result"))
+      expect(yield* Ref.get(calls)).toBe(2)
+    }),
+  )
+
+  it.live(
+    "independent work runs after a predecessor defect without inheriting it",
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const runner = Runner.make<string>(scope)
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const order: string[] = []
+      const first = yield* runner.ensureRunning(Effect.gen(function* () {
+        order.push("first")
+        yield* Deferred.succeed(entered, undefined)
+        yield* Deferred.await(release)
+        return yield* Effect.die(new Error("first-failed"))
+      })).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      const second = yield* runner.ensureRunning(Effect.sync(() => {
+        order.push("second")
+        return "second-success"
+      })).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      expect(order).toEqual(["first"])
+      yield* Deferred.succeed(release, undefined)
+      const firstExit = yield* Fiber.await(first)
+      expect(Exit.isFailure(firstExit)).toBe(true)
+      if (Exit.isFailure(firstExit)) expect(Cause.pretty(firstExit.cause)).toContain("first-failed")
+      expect(yield* Fiber.join(second)).toBe("second-success")
+      expect(order).toEqual(["first", "second"])
     }),
   )
 
@@ -452,23 +557,28 @@ describe("Runner", () => {
   )
 
   it.live(
-    "cancel with queued callers resolves all",
+    "cancel settles active work and interrupts unadmitted serializing callers",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
       const runner = Runner.make<string>(s, { onInterrupt: Effect.succeed("fallback") })
 
       const a = yield* runner.ensureRunning(Effect.never.pipe(Effect.as("x"))).pipe(Effect.forkChild)
       yield* Effect.sleep("10 millis")
-      const b = yield* runner.ensureRunning(Effect.succeed("y")).pipe(Effect.forkChild)
+      let queuedRuns = 0
+      const b = yield* runner.ensureRunning(Effect.sync(() => {
+        queuedRuns++
+        return "y"
+      })).pipe(Effect.forkChild)
       yield* Effect.sleep("10 millis")
 
       yield* runner.cancel
 
       const [exitA, exitB] = yield* Effect.all([Fiber.await(a), Fiber.await(b)])
       expect(Exit.isSuccess(exitA)).toBe(true)
-      expect(Exit.isSuccess(exitB)).toBe(true)
+      expect(Exit.isFailure(exitB) && Cause.hasInterruptsOnly(exitB.cause)).toBe(true)
       if (Exit.isSuccess(exitA)) expect(exitA.value).toBe("fallback")
-      if (Exit.isSuccess(exitB)) expect(exitB.value).toBe("fallback")
+      expect(queuedRuns).toBe(0)
+      expect(runner.busy).toBe(false)
     }),
   )
 
@@ -845,7 +955,8 @@ describe("Runner", () => {
 
       const run = yield* runner.ensureRunning(Effect.succeed("run-result")).pipe(Effect.forkChild)
       yield* Effect.sleep("10 millis")
-      expect(runner.state._tag).toBe("ShellThenRun")
+      // C-01: no ShellThenRun pending owner — state stays Shell while serializing.
+      expect(runner.state._tag).toBe("Shell")
 
       yield* Deferred.succeed(gate, undefined)
       yield* Fiber.await(sh)
@@ -862,13 +973,13 @@ describe("Runner", () => {
     Effect.gen(function* () {
       const s = yield* Scope.Scope
       const releaseShell = yield* Deferred.make<void>()
-      const reentered = yield* Deferred.make<void>()
+      const firstWaiting = yield* Deferred.make<void>()
+      const secondWaiting = yield* Deferred.make<void>()
       const started = yield* Ref.make(false)
       const starts = { enabled: true }
       const runner = Runner.make<string>(s, {
         canStart: () => starts.enabled,
         onInterrupt: Effect.interrupt,
-        onReentryWarn: () => Deferred.succeed(reentered, undefined).pipe(Effect.asVoid),
       })
       const state = () => runner.state
       const shell = yield* runner
@@ -877,13 +988,13 @@ describe("Runner", () => {
       while (state()._tag !== "Shell") yield* Effect.yieldNow
 
       const first = yield* runner
-        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")))
+        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")), undefined, false, undefined, Deferred.succeed(firstWaiting, undefined).pipe(Effect.asVoid))
         .pipe(Effect.forkChild)
-      while (state()._tag !== "ShellThenRun") yield* Effect.yieldNow
+      yield* Deferred.await(firstWaiting)
       const second = yield* runner
-        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")))
+        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")), undefined, false, undefined, Deferred.succeed(secondWaiting, undefined).pipe(Effect.asVoid))
         .pipe(Effect.forkChild)
-      yield* Deferred.await(reentered)
+      yield* Deferred.await(secondWaiting)
 
       starts.enabled = false
       yield* Deferred.succeed(releaseShell, undefined)
@@ -902,7 +1013,7 @@ describe("Runner", () => {
   )
 
   it.live(
-    "multiple ensureRunning callers share the queued run behind shell",
+    "multiple ensureRunning callers serialize behind shell (no shared pending)",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
       const runner = Runner.make<string>(s)
@@ -926,34 +1037,39 @@ describe("Runner", () => {
       const [exitA, exitB] = yield* Effect.all([Fiber.await(a), Fiber.await(b)])
       expect(Exit.isSuccess(exitA)).toBe(true)
       expect(Exit.isSuccess(exitB)).toBe(true)
-      expect(yield* Ref.get(calls)).toBe(1)
+      // C-01: no pending coalesce — each caller runs its own work after the shell.
+      expect(yield* Ref.get(calls)).toBe(2)
     }),
   )
 
   it.live(
-    "cancel during shell_then_run cancels both",
+    "cancel during shell serializing waiters cancels shell and settles them",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
-      const runner = Runner.make<string>(s)
+      const runner = Runner.make<string>(s, { onInterrupt: Effect.succeed("fallback") })
 
       const sh = yield* runner.startShell(Effect.never.pipe(Effect.as("aborted"))).pipe(Effect.forkChild)
       yield* Effect.sleep("10 millis")
 
-      const run = yield* runner.ensureRunning(Effect.succeed("y")).pipe(Effect.forkChild)
+      let queuedRuns = 0
+      const run = yield* runner.ensureRunning(Effect.sync(() => {
+        queuedRuns++
+        return "y"
+      })).pipe(Effect.forkChild)
       yield* Effect.sleep("10 millis")
-      expect(runner.state._tag).toBe("ShellThenRun")
+      expect(runner.state._tag).toBe("Shell")
 
       yield* runner.cancel
+      expect(yield* Fiber.join(sh)).toBe("fallback")
+      const runExit = yield* Fiber.await(run)
+      expect(Exit.isFailure(runExit) && Cause.hasInterruptsOnly(runExit.cause)).toBe(true)
+      expect(queuedRuns).toBe(0)
       expect(runner.busy).toBe(false)
-
-      yield* Fiber.await(sh)
-      const exit = yield* Fiber.await(run)
-      expect(Exit.isFailure(exit)).toBe(true)
     }),
   )
 
   it.live(
-    "shell and queued run keep their own interrupt fallbacks",
+    "shell uses its interrupt fallback while an unadmitted waiter is interrupted",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
       const runner = Runner.make<string>(s, { onInterrupt: Effect.succeed("default") })
@@ -963,16 +1079,17 @@ describe("Runner", () => {
         .startShell(Effect.never, Effect.succeed("shell interrupted"))
         .pipe(Effect.forkChild)
       while (state()._tag !== "Shell") yield* Effect.yieldNow
+      const waiting = yield* Deferred.make<void>()
       const queued = yield* runner
-        .ensureRunning(Effect.never, Effect.succeed("queued interrupted"))
+        .ensureRunning(Effect.never, Effect.succeed("queued interrupted"), false, undefined, Deferred.succeed(waiting, undefined).pipe(Effect.asVoid))
         .pipe(Effect.forkChild)
-      while (state()._tag !== "ShellThenRun") yield* Effect.yieldNow
+      yield* Deferred.await(waiting)
 
       yield* runner.cancel
       const [shellExit, queuedExit] = yield* Effect.all([Fiber.await(shell), Fiber.await(queued)])
 
       expect(Exit.isSuccess(shellExit) && shellExit.value).toBe("shell interrupted")
-      expect(Exit.isSuccess(queuedExit) && queuedExit.value).toBe("queued interrupted")
+      expect(Exit.isFailure(queuedExit) && Cause.hasInterruptsOnly(queuedExit.cause)).toBe(true)
     }),
   )
 
@@ -1221,25 +1338,26 @@ describe("Runner", () => {
     }),
   )
 
-  // [C001] interruptOwned must settle attached pending waiters (same as cancel).
+  // [C001] interruptOwned: a serializing waiter is not a second consumer —
+  // it starts only after the owned run is gone (no pending slot).
   it.live(
-    "interruptOwned settles pending waiter with Cancelled",
+    "interruptOwned lets a serializing waiter start after the owned run",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
       const runner = Runner.make<string, string, string>(s, { busy: () => "BUSY" })
       const owned = yield* runner.startOwned(Effect.never)
-      const pending = yield* runner
+      const waiter = yield* runner
         .ensureRunning(Effect.succeed("PENDING"))
         .pipe(Effect.exit, Effect.forkChild)
       yield* Effect.sleep("20 millis")
-      expect(runner.state._tag === "Running" && runner.state.run.pending !== undefined).toBe(true)
+      expect(runner.state._tag).toBe("Running")
       yield* owned.interruptOwned
-      const pendingExit = yield* Fiber.join(pending).pipe(Effect.timeout("2 seconds"), Effect.exit)
-      expect(Exit.isSuccess(pendingExit)).toBe(true)
-      if (Exit.isSuccess(pendingExit)) {
-        const inner = pendingExit.value
-        expect(Exit.isFailure(inner)).toBe(true)
-        if (Exit.isFailure(inner)) expect(Cause.squash(inner.cause)).toBeInstanceOf(Runner.Cancelled)
+      const waiterExit = yield* Fiber.join(waiter).pipe(Effect.timeout("2 seconds"), Effect.exit)
+      expect(Exit.isSuccess(waiterExit)).toBe(true)
+      if (Exit.isSuccess(waiterExit)) {
+        const inner = waiterExit.value
+        expect(Exit.isSuccess(inner)).toBe(true)
+        if (Exit.isSuccess(inner)) expect(inner.value).toBe("PENDING")
       }
     }),
   )

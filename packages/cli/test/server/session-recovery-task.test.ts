@@ -3,8 +3,11 @@ import { Effect, Layer, Schedule } from "effect"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { InboxTable } from "../../src/inbox"
+import { schedulerRef } from "../../src/inbox/scheduler"
+import { InboxLaneStateTable } from "../../src/inbox/inbox.sql"
+import { renderInboxRow } from "../../src/inbox/render"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
-import { AppLayer } from "../../src/effect/app-runtime"
+import { AppLayer, AppRuntime } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Session } from "../../src/session"
 import { SessionPrompt } from "../../src/session/prompt"
@@ -13,7 +16,7 @@ import { MessageV2 } from "../../src/session/message-v2"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Server } from "../../src/server/server"
 import { TaskRegistry } from "../../src/task/registry"
-import { Database, eq } from "../../src/storage"
+import { Database, eq, inArray } from "../../src/storage"
 import { TaskTable } from "../../src/task/task.sql"
 import type { Config } from "../../src/config"
 import { provideTmpdirServer, tmpdirScoped } from "../fixture/fixture"
@@ -26,7 +29,11 @@ withEnv({
   MIMOCODE_DISABLE_COMPOSE_SKILLS: "true",
   MIMOCODE_DISABLE_INSTRUCTIONS: "true",
 })
-const it = testEffect(Layer.mergeAll(AppLayer, CrossSpawnSpawner.defaultLayer, TestLLMServer.layer))
+// HTTP and direct setup must share the process graph that owns the queue refs.
+const app = Layer.effectContext(
+  Effect.promise(() => AppRuntime.runPromise(Effect.context<Layer.Success<typeof AppLayer>>())),
+)
+const it = testEffect(Layer.mergeAll(app, CrossSpawnSpawner.defaultLayer, TestLLMServer.layer))
 const model = { providerID: ProviderID.make("recovery-task"), modelID: ModelID.make("gpt-5-recovery-task") }
 const config = (url: string): Partial<Config.Info> => ({
   checkpoint: { thresholds: [] },
@@ -143,6 +150,10 @@ for (const scenario of [
                   parts: [{ type: "text", text: "ORIGINAL_RECOVERY_TASK_SOURCE" }],
                 })
                 .pipe(Effect.exit)
+              // Let the failed turn's completion wake leave the lane before
+              // seeding a queue that recovery, rather than that wake, will own.
+              yield* Effect.yieldNow
+              if (schedulerRef.current) yield* schedulerRef.current.kick({ sessionID: session.id, agentID: "main" })
               const candidates = yield* prompt.recovery({ sessionID: session.id })
               expect(candidates).toHaveLength(1)
               const candidate = candidates[0]
@@ -150,25 +161,88 @@ for (const scenario of [
               const before = yield* sessions.messages({ sessionID: session.id })
               const original = before.find((message) => message.info.id === candidate.parentMessageID)
               if (!original || original.info.role !== "user") throw new Error("Missing interrupted original user")
+              const originalUser = original.info
               const task = yield* tasks.create({ session_id: session.id, summary: "Bind the interrupted source" })
               // A notification can already be durable when an interrupted main turn is recovered.
-              const queued = crypto.randomUUID()
-              Database.use((db) =>
-                db
-                  .insert(InboxTable)
-                  .values(
-                    Array.from({ length: backlog }, (_, index) => ({
-                      id: `${queued}-${String(index).padStart(3, "0")}`,
-                      receiver_session_id: session.id,
-                      receiver_actor_id: "main",
-                      sender_session_id: session.id,
-                      sender_actor_id: "notification-sender",
-                      content: { text: `QUEUED_UNRELATED_NOTIFICATION-${index}` },
-                      created_at: Date.now(),
-                    })),
-                  )
-                  .run(),
+              const queued: string[] = []
+              // Seed an already-durable queue at rest, without a live wake fiber.
+              yield* Effect.sync(() =>
+                Database.transaction(
+                  (db) => {
+                    for (const index of Array.from({ length: backlog }, (_, index) => index)) {
+                      const id = MessageID.ascending()
+                      const now = Date.now()
+                      const text = renderInboxRow({
+                        type: "text",
+                        content: { text: `QUEUED_UNRELATED_NOTIFICATION-${index}` },
+                        sender_session_id: session.id,
+                        sender_actor_id: "notification-sender",
+                        created_at: now,
+                      })
+                      sessions.commitUserMessageSync(
+                        {
+                          id,
+                          role: "user",
+                          sessionID: session.id,
+                          agentID: "main",
+                          agent: originalUser.agent,
+                          model: originalUser.model,
+                          source: "spawn",
+                          time: { created: now },
+                          provenance: {
+                            source: "agent",
+                            senderSessionID: session.id,
+                            senderActorID: "notification-sender",
+                          },
+                        },
+                        [
+                          {
+                            id: PartID.ascending(),
+                            messageID: id,
+                            sessionID: session.id,
+                            type: "text",
+                            synthetic: true,
+                            text,
+                          },
+                        ],
+                      )
+                      const inboxID = crypto.randomUUID()
+                      queued.push(inboxID)
+                      db.insert(InboxTable)
+                        .values({
+                          id: inboxID,
+                          receiver_session_id: session.id,
+                          receiver_actor_id: "main",
+                          sender_session_id: session.id,
+                          sender_actor_id: "notification-sender",
+                          input_message_id: id,
+                          created_at: now,
+                          time_updated: now,
+                        })
+                        .run()
+                    }
+                    const lane = db
+                      .select()
+                      .from(InboxLaneStateTable)
+                      .where(eq(InboxLaneStateTable.session_id, session.id))
+                      .get()
+                    db.insert(InboxLaneStateTable)
+                      .values({
+                        session_id: session.id,
+                        agent_id: "main",
+                        input_revision: (lane?.input_revision ?? 0) + backlog,
+                        time_updated: Date.now(),
+                      })
+                      .onConflictDoUpdate({
+                        target: [InboxLaneStateTable.session_id, InboxLaneStateTable.agent_id],
+                        set: { input_revision: (lane?.input_revision ?? 0) + backlog, time_updated: Date.now() },
+                      })
+                      .run()
+                  },
+                  { behavior: "immediate" },
+                ),
               )
+              expect(yield* prompt.recovery({ sessionID: session.id })).toEqual([candidate])
               state.pre.length = 0
               state.params.length = 0
               state.post.length = 0
@@ -201,16 +275,15 @@ for (const scenario of [
                   : llm.error(400, { error: { message: "Queued first batch failed" } })
               }
               const response = yield* resume(dir, session.id, candidate.assistantMessageID, task.id)
-              expect(response.status).toBe(202)
+              const responseBody = yield* Effect.promise(() => response.clone().text())
+              expect(response.status, responseBody).toBe(202)
               if (scenario.cancelHook) {
                 yield* Effect.promise(() => state.cancelledDone.promise).pipe(Effect.timeout("10 seconds"))
                 yield* Effect.sleep("50 millis")
                 expect(state.armed).toBe(false)
                 expect(yield* llm.calls).toBe(1)
                 expect(
-                  Database.use((db) =>
-                    db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, session.id)).all(),
-                  ),
+                  Database.use((db) => db.select().from(InboxTable).where(inArray(InboxTable.id, queued)).all()),
                 ).toHaveLength(backlog)
                 return
               }
@@ -220,7 +293,7 @@ for (const scenario of [
                   db
                     .select()
                     .from(InboxTable)
-                    .where(eq(InboxTable.id, `${queued}-${String(backlog - 1).padStart(3, "0")}`))
+                    .where(eq(InboxTable.id, queued[backlog - 1]))
                     .get(),
                 ),
               ).toBeDefined()
@@ -232,7 +305,9 @@ for (const scenario of [
               expect(user?.parts.filter((part) => original.parts.some((original) => original.id === part.id))).toEqual(
                 original.parts,
               )
-              const reminders = user?.parts.filter((part) => !original.parts.some((original) => original.id === part.id))
+              const reminders = user?.parts.filter(
+                (part) => !original.parts.some((original) => original.id === part.id),
+              )
               expect(reminders).toHaveLength(1)
               expect(reminders?.[0]).toMatchObject({
                 type: "text",
@@ -262,17 +337,23 @@ for (const scenario of [
                 expect(JSON.stringify(request.messages)).not.toContain("QUEUED_UNRELATED_NOTIFICATION")
               }
               yield* Effect.promise(() => state.queuedDone.promise).pipe(Effect.timeout("10 seconds"))
-              expect(
-                Database.use((db) =>
-                  db
-                    .select()
-                    .from(InboxTable)
-                    .where(eq(InboxTable.id, `${queued}-${String(backlog - 1).padStart(3, "0")}`))
-                    .get(),
-                ),
-              ).toBeUndefined()
+              // Receipt IDs define claim order, so insertion order does not identify the final batch.
+              const settledRows = yield* Effect.sync(() =>
+                Database.use((db) => db.select().from(InboxTable).where(inArray(InboxTable.id, queued)).all()),
+              ).pipe(
+                Effect.repeat({
+                  until: (rows) => rows.every((row) => row.state === "settled" || row.state === "cancelled"),
+                  schedule: Schedule.spaced("10 millis"),
+                }),
+                Effect.timeout("10 seconds"),
+              )
+              expect(settledRows.filter((row) => row.state === "settled")).toHaveLength(
+                scenario.failure === "defect" ? 1 : backlog,
+              )
+              const settled = settledRows.find((row) => row.state === "settled")
+              expect(settled).toMatchObject({ state: "settled", consumed: true })
               const after = yield* sessions.messages({ sessionID: session.id })
-              const inboxUser = after.findLast((message) => message.info.role === "user")
+              const inboxUser = after.find((message) => message.info.id === settled?.input_message_id)
               expect(inboxUser?.info.id).not.toBe(original.info.id)
               expect(inboxUser?.info).not.toHaveProperty("task_id")
               expect(state.pre).toEqual([task.id, ...Array.from({ length: batches }, () => undefined)])

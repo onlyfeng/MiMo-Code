@@ -1,18 +1,26 @@
 import { expect } from "bun:test"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
+import { Session } from "../../src/session"
+import { SyncEvent } from "../../src/sync"
 import { SessionRunState } from "../../src/session/run-state"
 import { SessionID } from "../../src/session/schema"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
-const it = testEffect(Layer.mergeAll(SessionRunState.defaultLayer, CrossSpawnSpawner.defaultLayer))
+const it = testEffect(Layer.mergeAll(SessionRunState.defaultLayer, Session.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
 it.live("session cancel reaches all runners and isolates colon-containing session and actor IDs", () =>
   provideTmpdirInstance(() => Effect.gen(function* () {
     const run = yield* SessionRunState.Service
-    const sessionID = SessionID.make("ses_example")
-    const otherID = SessionID.make("ses_example:child")
+    const sessions = yield* Session.Service
+    const session = yield* sessions.create({ title: "cancel tuple ownership" })
+    const sessionID = session.id
+    const otherID = SessionID.make(`${sessionID}:child`)
+    yield* Effect.sync(() => SyncEvent.run(Session.Event.Created, {
+      sessionID: otherID,
+      info: { ...session, id: otherID, title: "colon-containing session" },
+    }))
     const start = (sid: SessionID, agentID: string) => Effect.gen(function* () {
       const ready = yield* Deferred.make<void>()
       const fiber = yield* run.ensureRunning(sid, agentID, Effect.interrupt,

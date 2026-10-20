@@ -1,46 +1,41 @@
-import { Cause, Context, Effect, Fiber, Layer, Scope, Schema, Option } from "effect"
-import { ulid } from "ulid"
-import { Database, eq, and, lte, inArray, desc } from "@/storage"
-import { Bus } from "@/bus"
+import { Context, Effect, Layer, Schema, Option } from "effect"
+import { Database, and, eq, lte, inArray, isNotNull, isNull } from "@/storage"
+import * as InboxSync from "./sync"
 import { ActorRegistry } from "@/actor/registry"
-import { ActorRegistryTable } from "@/actor/actor.sql"
 import type { Actor } from "@/actor/schema"
 import { Session } from "@/session"
 import { MessageID, PartID } from "@/session/schema"
-import { InboxArrived } from "@/actor/events"
 import type { SessionID } from "@/session/schema"
-import { Log } from "@/util"
-import * as InstanceState from "@/effect/instance-state"
 import { InboxTable } from "./inbox.sql"
 import { renderInboxRow } from "./render"
-import { sessionPromptRef, inboxServiceRef, defaultModelRef } from "./inbox-ref"
+import { inboxServiceRef, defaultModelRef } from "./inbox-ref"
+import * as Controller from "./controller"
+import type { AdmissionGuard } from "./controller"
 import type { ProviderID, ModelID } from "@/provider/schema"
 import { Instance } from "@/project/instance"
-import { InstanceRef } from "@/effect/instance-ref"
-import { EffectBridge } from "@/effect"
-import { isRunDisposing, RunDisposal } from "@/session/run-disposal"
-import * as CancelEpoch from "@/session/cancel-epoch"
-
-const log = Log.create({ service: "inbox" })
+import * as Project from "@/project/project"
+import { SessionTable } from "@/session/session.sql"
+import { InstanceRef, WorkspaceRef } from "@/effect/instance-ref"
+import { WorkspaceContext } from "@/control-plane/workspace-context"
+import { bindScopedRef } from "@/effect/scoped-ref"
+import { RunDisposal } from "@/session/run-disposal"
 
 const GC_TTL_MS = 7 * 24 * 60 * 60 * 1000
-export const MAX_DRAIN_PER_TURN = 100
 const isRetiredPersistent = (actor: Pick<Actor, "lifecycle" | "status" | "lastOutcome"> | undefined) =>
   actor?.lifecycle === "persistent" && actor.status === "idle" && actor.lastOutcome === "cancelled"
 
-/** Delete inbox rows whose created_at is at or before cutoffMs. Unit-testable without layer reset. */
 export function gcInboxRows(cutoffMs: number) {
   return Effect.sync(() =>
-    Database.use((db) => db.delete(InboxTable).where(lte(InboxTable.created_at, cutoffMs)).run()),
+    Database.use((db) => db.delete(InboxTable).where(and(
+      inArray(InboxTable.state, ["settled", "cancelled", "rejected"]),
+      lte(InboxTable.time_updated, cutoffMs),
+    )).run()),
   )
 }
 
 export class InboxReceiverNotFound extends Schema.TaggedErrorClass<InboxReceiverNotFound>()(
   "InboxReceiverNotFound",
-  {
-    receiverSessionID: Schema.String,
-    receiverActorID: Schema.String,
-  },
+  { receiverSessionID: Schema.String, receiverActorID: Schema.String },
 ) {}
 
 export interface DrainSeed {
@@ -48,29 +43,6 @@ export interface DrainSeed {
   model: { providerID: ProviderID; modelID: ModelID; variant?: string }
 }
 
-/**
- * Resolve the {agent, model} a drained synthetic user message should carry,
- * via a layered cheapest-first fallback. Exported for unit testing.
- *
- *  1. A prior real (non-system) model-bearing message. Inherits that message's
- *     agent+model. No Provider dependency. The SEARCH SCOPE depends on the
- *     receiver's mode: a standing `peer` (its actor id === its session id, runs
- *     its own child session) may have run a turn under a DIFFERENT slice then
- *     gone idle, so it searches cross-slice (agentID "*") — the idle-standing-
- *     peer relay case. Every other receiver (an ordinary subagent slice, or a
- *     session's host/"main" actor that merely COORDINATES other actors — e.g. a
- *     WorkflowRuntime parent whose subagents run under its session) searches
- *     ONLY its own slice, so a completion/notification delivered to the host
- *     never fabricates a turn off an unrelated subagent's message. Restoring the
- *     pre-relay slice scope for non-peers fixes the WorkflowRuntime regression
- *     where the parent "main" drained a child's actor_notification into a real
- *     LLM turn (stealing a queued response from the next agent()).
- *  2. A true turnCount-0 / empty-slice peer: agent from the actor-registry row
- *     (recorded at spawn), model from the project default resolver reachable via
- *     `defaultModelRef` (an already-wired value — no fresh provider layer). If
- *     the ref is unavailable (minimal fixtures), this tier is skipped.
- *  3. Neither → `undefined`; caller keeps the rows durable and logs.
- */
 export function resolveDrainSeed(
   sessions: Session.Interface,
   reg: ActorRegistry.Interface,
@@ -79,11 +51,7 @@ export function resolveDrainSeed(
   modelRef = defaultModelRef.current,
 ): Effect.Effect<DrainSeed | undefined> {
   return Effect.gen(function* () {
-    // Receiver's registry row decides the Tier 1 search scope + feeds Tier 2.
     const actor = yield* reg.get(sessionID, actorID)
-    // Tier 1: a prior real model-bearing message. Cross-slice ONLY for a standing
-    // peer; slice-scoped for every other receiver (subagent / coordinating host).
-    const crossSlice = actor?.mode === "peer"
     const match = yield* sessions.findMessage(
       sessionID,
       (m) =>
@@ -93,463 +61,159 @@ export function resolveDrainSeed(
         m.info.model.providerID !== "system" &&
         "agent" in m.info &&
         m.info.agent !== "system",
-      { agentID: crossSlice ? "*" : actorID },
+      { agentID: actor?.mode === "peer" ? "*" : actorID },
     )
     if (Option.isSome(match)) {
       const info = match.value.info
-      if ("model" in info && info.model && "agent" in info) {
-        return { agent: info.agent, model: info.model }
-      }
+      if ("model" in info && info.model && "agent" in info) return { agent: info.agent, model: info.model }
     }
 
     // Tier 2: turnCount-0 / empty slice. Agent from the registry row (recorded
     // at spawn); model from the already-wired default resolver.
-    if (actor && modelRef) {
+    if (actor?.mode === "peer" && modelRef) {
       const model = yield* modelRef.defaultModel()
       return { agent: actor.agent, model: { providerID: model.providerID, modelID: model.modelID } }
     }
-
-    // Tier 3: nothing to seed from.
     return undefined
   })
 }
 
-export interface SendInput {
+export interface AgentInput {
   receiverSessionID: SessionID
   receiverActorID: string
   senderSessionID?: SessionID
   senderActorID?: string
   content: string
   type?: string
-  /**
-   * Persist the row and publish InboxArrived, but do not fork an auto-wake loop.
-   * Used by session-level abort so cancel terminal notifications cannot restart
-   * the execution group that stop just killed. Default true.
-   */
-  wake?: boolean
-}
-
-export interface SendResult {
-  inboxID: string
+  legacyInboxID?: string
 }
 
 export interface Interface {
-  readonly send: (input: SendInput) => Effect.Effect<SendResult, InboxReceiverNotFound>
-  readonly drain: (
-    sessionID: SessionID,
-    actorID: string,
-    // Called just before committing (synthetic user message + inbox DELETE).
-    // When it returns true the drain aborts without consuming, so a cancel
-    // that lands mid-drain cannot drop queued wake content.
-    isCancelled?: () => boolean,
-  ) => Effect.Effect<number>
-  readonly has: (inboxID: string) => Effect.Effect<boolean>
-  readonly head: (sessionID: SessionID, actorID: string) => Effect.Effect<string | undefined>
-  readonly wakePending: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
-  /** Internal cycle-breaker: binds this inbox layer to its owning prompt layer. */
-  readonly bindPrompt?: (
-    prompt: NonNullable<typeof sessionPromptRef.current>,
-    model?: NonNullable<typeof defaultModelRef.current>,
-  ) => () => void
+  readonly accept: (input: AgentInput, guard?: AdmissionGuard) => Effect.Effect<{
+    inboxID: string
+    inputMessageID: MessageID
+  }, InboxReceiverNotFound>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Inbox") {}
 
-export const layer: Layer.Layer<
-  Service,
-  never,
-  Bus.Service | ActorRegistry.Service | Session.Service
-> = Layer.effect(
+export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const bus = yield* Bus.Service
     const reg = yield* ActorRegistry.Service
     const sessions = yield* Session.Service
-    const scope = yield* Scope.Scope
-    let boundPrompt: NonNullable<typeof sessionPromptRef.current> | undefined
-    let boundDefaultModel: NonNullable<typeof defaultModelRef.current> | undefined
-    const bindPrompt: NonNullable<Interface["bindPrompt"]> = (prompt, model) => {
-      const previousPrompt = boundPrompt
-      const previousModel = boundDefaultModel
-      boundPrompt = prompt
-      if (model) boundDefaultModel = model
-      return () => {
-        if (boundPrompt === prompt) boundPrompt = previousPrompt
-        if (model && boundDefaultModel === model) boundDefaultModel = previousModel
-      }
-    }
-
-    // 7-day GC at init. Idempotent: deletes any rows older than now-7d.
+    const controller = yield* Controller.Service
     yield* gcInboxRows(Date.now() - GC_TTL_MS)
-    log.info("inbox gc-on-init complete")
 
-    const wake = Effect.fn("Inbox.wake")(function* (sessionID: SessionID, actorID: string, inboxID: string) {
-      // Fork-and-forget wake (B2). Sender returns after fork is scheduled;
-      // wake fiber lives in the service scope, so sender lifecycle does
-      // not affect delivery.
-      const promptRef = boundPrompt ?? sessionPromptRef.current
-      if (promptRef) {
-        // The scheduled wake holds an execution claim on the current service
-        // instance from before its preparation until the wake fiber exits, so
-        // pending disposal cannot close the scope that owns it. Claim, fork and
-        // observer registration form one uninterruptible handoff; the observer
-        // also releases a wake interrupted before its body starts.
-        const directory = yield* InstanceState.directory
-        let transferred = false
-        yield* Effect.acquireUseRelease(
-          Effect.sync(() => {
-            const releaseClaim = Instance.claim(directory)
-            // Recorded before send returns, so Runner admission sees a later
-            // cancel; the hold keeps the epoch until this wake exits even if the
-            // session is removed meanwhile.
-            const epoch = CancelEpoch.current(sessionID)
-            const releaseHold = CancelEpoch.hold(sessionID)
-            return {
-              epoch,
-              release: () => {
-                releaseHold()
-                releaseClaim()
-              },
-            }
-          }),
-          (held) =>
-            Effect.gen(function* () {
-              const wakeSource = yield* RunDisposal
-              const receiver = yield* sessions.get(sessionID)
-              const currentInstance = yield* InstanceRef
-              // Reusing the active context avoids a second Instance.provide, but keep
-              // its former async handoff so InboxArrived subscribers run promptly.
-              if (currentInstance?.directory === receiver.directory) yield* Effect.yieldNow
-              const receiverInstance =
-                currentInstance?.directory === receiver.directory
-                  ? currentInstance
-                  : yield* Effect.promise(() =>
-                      Instance.provide({ directory: receiver.directory, fn: () => Instance.current }),
-                    )
-              const receiverDisposal =
-                wakeSource.instance?.directory === receiver.directory ? wakeSource : { disposing: false as const }
-              const bridge = yield* EffectBridge.make().pipe(
-                Effect.provideService(InstanceRef, receiverInstance),
-                // The receiver owns its run lifetime. Same-directory delivery keeps
-                // the shared marker so disposal cannot re-arm the receiver generation.
-                Effect.provideService(RunDisposal, receiverDisposal),
-              )
-              const fiber = yield* Effect.acquireUseRelease(
-                Effect.sync(() => bridge.fork(promptRef.loop({
-                  sessionID,
-                  agentID: actorID,
-                  // Woken turns notify their parent on completion. The spawn turn goes
-                  // through SessionPrompt.prompt (no flag) so forkWork.notify remains
-                  // the sole notifier for turn 1 — no double-notify.
-                  notifyParentOnComplete: true,
-                  inboxID,
-                  cancelEpoch: held.epoch,
-                  source: "spawn",
-                }))),
-                Fiber.await,
-                Fiber.interrupt,
-              ).pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true, uninterruptible: false }))
-              fiber.addObserver(() => held.release())
-              transferred = true
-            }),
-          (held) => (transferred ? Effect.void : Effect.sync(held.release)),
-        ).pipe(Effect.uninterruptible)
-      } else {
-        // Test fixtures / renderer-only paths can run without SessionPrompt.
-        // Row is durable; will be drained on next runLoop iteration.
-        log.warn("inbox.wake: sessionPromptRef.current undefined — wake skipped", {
-          receiverActorID: actorID,
-        })
-      }
-    })
-
-    const head = Effect.fn("Inbox.head")(function* (sessionID: SessionID, actorID: string) {
-      return Database.use((db) =>
-        db
-          .select({ id: InboxTable.id })
-          .from(InboxTable)
-          .where(and(eq(InboxTable.receiver_session_id, sessionID), eq(InboxTable.receiver_actor_id, actorID)))
-          .orderBy(InboxTable.id)
-          .limit(1)
-          .get()?.id,
-      )
-    })
-
-    const wakePending = Effect.fn("Inbox.wakePending")(function* (sessionID: SessionID, actorID: string) {
-      if (isRunDisposing(yield* RunDisposal)) return
-      const receiver = yield* reg.get(sessionID, actorID)
-      if (!receiver || isRetiredPersistent(receiver)) return
-      // Track the tail so a failed first batch cannot end this wake early.
-      const row = Database.use((db) =>
-        db.select({ id: InboxTable.id }).from(InboxTable)
-          .where(and(eq(InboxTable.receiver_session_id, sessionID), eq(InboxTable.receiver_actor_id, actorID)))
-          .orderBy(desc(InboxTable.id)).limit(1).get(),
-      )
-      if (row) yield* wake(sessionID, actorID, row.id)
-    })
-
-    const send = Effect.fn("Inbox.send")(function* (input: SendInput) {
-      // ESRCH check (B3). receiver row must exist.
+    const accept = Effect.fn("Inbox.acceptAgent")(function* (input: AgentInput, guard?: AdmissionGuard) {
       const receiver = yield* reg.get(input.receiverSessionID, input.receiverActorID)
-      if (!receiver || isRetiredPersistent(receiver)) {
-        return yield* Effect.fail(
-          new InboxReceiverNotFound({
-            receiverSessionID: input.receiverSessionID,
-            receiverActorID: input.receiverActorID,
-          }),
-        )
-      }
-
-      const row = {
-        id: ulid(),
-        receiver_session_id: input.receiverSessionID,
-        receiver_actor_id: input.receiverActorID,
-        sender_session_id: input.senderSessionID ?? null,
-        sender_actor_id: input.senderActorID ?? null,
-        type: input.type ?? "text",
-        content: { text: input.content },
-        created_at: Date.now(),
-      }
-      yield* Effect.sync(() => Database.use((db) => db.insert(InboxTable).values(row).run()))
-      // Close the get→insert retirement race. If cancel committed its tombstone
-      // after the first ESRCH check, remove this just-inserted row before publish.
-      if (isRetiredPersistent(yield* reg.get(input.receiverSessionID, input.receiverActorID))) {
-        yield* Effect.sync(() => Database.use((db) => db.delete(InboxTable).where(eq(InboxTable.id, row.id)).run()))
-        return yield* Effect.fail(
-          new InboxReceiverNotFound({
-            receiverSessionID: input.receiverSessionID,
-            receiverActorID: input.receiverActorID,
-          }),
-        )
-      }
-      yield* bus.publish(InboxArrived, {
+      if ((!receiver && !input.legacyInboxID) || isRetiredPersistent(receiver)) return yield* Effect.fail(new InboxReceiverNotFound({
         receiverSessionID: input.receiverSessionID,
         receiverActorID: input.receiverActorID,
-        ...(input.senderSessionID !== undefined ? { senderSessionID: input.senderSessionID } : {}),
-        ...(input.senderActorID !== undefined ? { senderActorID: input.senderActorID } : {}),
-        inboxID: row.id,
-        type: row.type,
+      }))
+      const target = yield* sessions.get(input.receiverSessionID)
+      const currentInstance = yield* InstanceRef
+      const receiverInstance = currentInstance?.directory === target.directory
+        ? currentInstance
+        : yield* Effect.promise(() => Instance.provide({ directory: target.directory, fn: () => Instance.current }))
+      const workspace = Database.use((db) => db.select({ id: SessionTable.workspace_id }).from(SessionTable)
+        .where(eq(SessionTable.id, target.id)).get())?.id ?? undefined
+      const source = yield* RunDisposal
+      const disposal = source.instance?.directory === target.directory ? source : { disposing: false }
+      const seed = yield* resolveDrainSeed(sessions, reg, input.receiverSessionID, input.receiverActorID)
+      const id = MessageID.ascending()
+      const now = Date.now()
+      const type = input.type ?? "text"
+      const text = renderInboxRow({
+        type,
+        content: { text: input.content },
+        sender_session_id: input.senderSessionID,
+        sender_actor_id: input.senderActorID,
+        created_at: now,
       })
-
-      if (input.wake !== false) yield* wake(input.receiverSessionID, input.receiverActorID, row.id)
-
-      return { inboxID: row.id }
+      if (!text.trim()) return yield* Effect.die(new Error("Inbox input rendered empty"))
+      const receipt = yield* controller.accept({
+        lane: { sessionID: input.receiverSessionID, agentID: input.receiverActorID },
+        message: {
+          id,
+          sessionID: input.receiverSessionID,
+          agentID: input.receiverActorID,
+          role: "user",
+          source: "spawn",
+          time: { created: now },
+          agent: seed?.agent ?? "system",
+          ...(input.senderSessionID || input.senderActorID ? { provenance: {
+            source: "agent" as const,
+            senderSessionID: input.senderSessionID, senderActorID: input.senderActorID,
+          } } : {}),
+          model: seed?.model ?? { providerID: "system" as ProviderID, modelID: "system" as ModelID },
+        },
+        parts: [{
+          id: PartID.ascending(),
+          messageID: id,
+          sessionID: input.receiverSessionID,
+          type: "text",
+          synthetic: true,
+          text,
+        }],
+        type,
+        legacyInboxID: input.legacyInboxID,
+        senderSessionID: input.senderSessionID,
+        senderActorID: input.senderActorID,
+      }, guard).pipe(
+        Effect.provideService(InstanceRef, receiverInstance),
+        Effect.provideService(WorkspaceRef, workspace),
+        Effect.provideService(RunDisposal, disposal),
+        Effect.catchCause((cause) => Effect.gen(function* () {
+        if (isRetiredPersistent(yield* reg.get(input.receiverSessionID, input.receiverActorID)))
+          return yield* Effect.fail(new InboxReceiverNotFound({
+            receiverSessionID: input.receiverSessionID, receiverActorID: input.receiverActorID,
+          }))
+        return yield* Effect.failCause(cause)
+      })))
+      return { inboxID: receipt.id, inputMessageID: receipt.inputMessageID }
     })
-
-    const has = Effect.fn("Inbox.has")(function* (inboxID: string) {
-      return yield* Effect.sync(() =>
-        Database.use((db) =>
-          db.select({ id: InboxTable.id }).from(InboxTable).where(eq(InboxTable.id, inboxID)).limit(1).get() !== undefined,
-        ),
-      )
-    })
-
-    const drain = Effect.fn("Inbox.drain")(function* (
-      sessionID: SessionID,
-      actorID: string,
-      isCancelled?: () => boolean,
-    ) {
-      // Cheap indexed SELECT first — if inbox is empty, bail immediately.
-      // Common case: every iteration discovers nothing to drain.
-      const rows = yield* Effect.sync(() =>
-        Database.use((db) =>
-          db
-            .select()
-            .from(InboxTable)
-            .where(
-              and(
-                eq(InboxTable.receiver_session_id, sessionID),
-                eq(InboxTable.receiver_actor_id, actorID),
-              ),
-            )
-            .orderBy(InboxTable.id)
-            .limit(MAX_DRAIN_PER_TURN)
-            .all(),
-        ),
-      )
-      if (rows.length === 0) return 0
-
-      // A cancelled persistent row is a durable tombstone, not a standing
-      // receiver. Drop any message that raced retirement instead of rendering
-      // it into a synthetic turn that could resurrect the actor.
-      if (isRetiredPersistent(yield* reg.get(sessionID, actorID))) {
-        yield* Effect.sync(() =>
-          Database.use((db) =>
-            db
-              .delete(InboxTable)
-              .where(
-                and(
-                  eq(InboxTable.receiver_session_id, sessionID),
-                  eq(InboxTable.receiver_actor_id, actorID),
-                ),
-              )
-              .run(),
-          ),
-        )
-        return 0
-      }
-
-      // Resolve the {agent, model} the synthetic user message will carry, via a
-      // LAYERED fallback (cheapest-first) so a woken idle/standing peer always
-      // drains instead of no-op'ing when it has no prior real turn:
-      //
-      //   1. Any prior real (non-system) message in the session — searched
-      //      cross-slice (agentID "*") so a peer that ran a turn under any slice,
-      //      then went idle, still inherits that turn's agent+model. No extra
-      //      dependency; this covers the common "idle standing peer" case.
-      //   2. A true turnCount-0 / empty-slice peer: seed the agent from the
-      //      actor-registry row (recorded at spawn) and the model from the
-      //      project default resolver (already-wired ref — no fresh provider
-      //      layer in the hot path). This reuses the same default the normal
-      //      loop uses; it does NOT invent a new provider call.
-      //   3. If BOTH yield nothing, do NOT drop the queued task: leave the rows
-      //      durable and log, so a later turn that does have a model consumes
-      //      them (no regression vs. the previous return-0 behavior).
-      const seed = yield* resolveDrainSeed(sessions, reg, sessionID, actorID, boundDefaultModel ?? defaultModelRef.current)
-      if (!seed) {
-        log.warn("inbox.drain: no model source (no prior model-bearing message, registry row, or default-model ref) — leaving rows durable", {
-          sessionID,
-          actorID,
-          pending: rows.length,
-        })
-        return 0
-      }
-
-      // Render BEFORE writing anything, and drop any row that renders blank.
-      // The drain is the one user-message producer that does NOT go through
-      // SessionPrompt.createUserMessage, so `hasSubstantiveContent` never sees
-      // it — a blank render would persist a user message whose only part is
-      // {type:"text",text:""}. The AI SDK's user branch filters empty text
-      // parts out with NO backfill, so that message reaches the provider as
-      // `content: []` and is rejected ("user messages must have non-empty
-      // content"). renderInboxRow already substitutes a placeholder for a
-      // blank body; this is the structural invariant that keeps the shape
-      // unreachable no matter what any future row type renders.
-      const rendered = rows.flatMap((row) => {
-        const text = renderInboxRow(row)
-        if (text.trim().length > 0) return [{ row, text }]
-        log.warn("inbox.drain: dropping row that rendered blank (would produce an empty user text part)", {
-          sessionID,
-          actorID,
-          rowID: row.id,
+    const legacy = yield* Effect.sync(() => Database.use((db) => db.select().from(InboxTable).where(and(
+      isNotNull(InboxTable.content), isNull(InboxTable.input_message_id), eq(InboxTable.state, "accepted"),
+    )).orderBy(InboxTable.id).all()))
+    for (const row of legacy) {
+      const session = yield* sessions.get(row.receiver_session_id)
+      const project = Project.get(session.projectID)
+      if (!project) return yield* Effect.die(new Error(`Inbox project missing: ${session.projectID}`))
+      const workspace = Database.use((db) => db.select().from(SessionTable)
+        .where(eq(SessionTable.id, session.id)).get())!.workspace_id ?? undefined
+      const instance = yield* Effect.promise(async () => await WorkspaceContext.provide({ workspaceID: workspace, fn: () =>
+        Instance.provide({ directory: session.directory, fn: () => Instance.current }),
+      }))
+      const convert = !row.content?.text?.trim() || !renderInboxRow(row).trim()
+        ? Effect.sync(() => Database.transaction((db) => {
+          const rejected = db.update(InboxTable).set({ state: "rejected", content: null, time_updated: Date.now() })
+            .where(and(eq(InboxTable.id, row.id), isNull(InboxTable.input_message_id), eq(InboxTable.state, "accepted")))
+            .returning().all()
+          InboxSync.record({ sessionID: row.receiver_session_id, receipts: rejected })
+        }))
+        : accept({
+          receiverSessionID: row.receiver_session_id,
+          receiverActorID: row.receiver_actor_id,
+          senderSessionID: row.sender_session_id ?? undefined,
+          senderActorID: row.sender_actor_id ?? undefined,
+          content: row.content!.text ?? "",
           type: row.type,
-        })
-        return []
-      })
-
-      // Abort before any mutation when the execution was cancelled mid-drain.
-      // Leaving rows durable means the next non-cancelled wake still consumes
-      // them; writing a synthetic user message and then interrupting the turn
-      // would strand the wake in the transcript with no assistant delivery.
-      if (isCancelled?.()) {
-        log.info("inbox.drain: cancelled before commit — leaving rows durable", {
-          sessionID,
-          actorID,
-          pending: rendered.length,
-        })
-        return 0
-      }
-
-      // Seed resolution can yield: another drain, GC or retirement may have
-      // changed this batch. Recheck it under the same write lock as the complete
-      // message/parts commit and queue deletion. No Effect fiber or async work
-      // may escape this synchronous transaction.
-      let committed: number | undefined
-      return yield* Effect.sync(() =>
-        Database.transaction(
-          (tx) => {
-            const actor = tx
-              .select({
-                lifecycle: ActorRegistryTable.lifecycle,
-                status: ActorRegistryTable.status,
-                lastOutcome: ActorRegistryTable.last_outcome,
-              })
-              .from(ActorRegistryTable)
-              .where(and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID)))
-              .get()
-            if (actor && isRetiredPersistent({ ...actor, lastOutcome: actor.lastOutcome ?? undefined })) {
-              tx.delete(InboxTable)
-                .where(and(eq(InboxTable.receiver_session_id, sessionID), eq(InboxTable.receiver_actor_id, actorID)))
-                .run()
-              return 0
-            }
-            if (isCancelled?.()) return 0
-            const pending = tx
-              .select({ id: InboxTable.id })
-              .from(InboxTable)
-              .where(
-                and(
-                  eq(InboxTable.receiver_session_id, sessionID),
-                  eq(InboxTable.receiver_actor_id, actorID),
-                  inArray(
-                    InboxTable.id,
-                    rows.map((row) => row.id),
-                  ),
-                ),
-              )
-              .all()
-            if (pending.length === 0) return 0
-            const ids = new Set(pending.map((row) => row.id))
-            const entries = rendered.filter((entry) => ids.has(entry.row.id))
-            // This no-throw witness must precede all publication callbacks. An
-            // observer can throw after SQLite committed; that cannot turn a real
-            // consumed batch into a failure/zero count and strand the resumed turn.
-            Database.effect(() => {
-              committed = entries.length
-            })
-            if (entries.length > 0) {
-              const messageID = MessageID.ascending()
-              sessions.commitUserMessageSync(
-                {
-                  id: messageID,
-                  role: "user",
-                  sessionID,
-                  agentID: actorID,
-                  time: { created: Date.now() },
-                  agent: seed.agent,
-                  model: seed.model,
-                  source: "spawn",
-                },
-                entries.map((entry) => ({
-                  id: PartID.ascending(),
-                  messageID,
-                  sessionID,
-                  type: "text",
-                  synthetic: true,
-                  text: entry.text,
-                })),
-              )
-            }
-            // Blank rows are consumed too, without creating an empty user message.
-            tx.delete(InboxTable)
-              .where(inArray(InboxTable.id, [...ids]))
-              .run()
-            return entries.length
-          },
-          { behavior: "immediate" },
-        ),
-      ).pipe(
-        Effect.catchCause((cause) => {
-          if (committed == null || Cause.hasInterrupts(cause)) return Effect.failCause(cause)
-          log.error("inbox.drain: notification failed after commit", { sessionID, actorID, cause: Cause.pretty(cause) })
-          return Effect.succeed(committed)
-        }),
-      )
-    })
-
-    const impl = Service.of({ send, drain, has, head, wakePending, bindPrompt })
-    inboxServiceRef.current = impl
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        if (inboxServiceRef.current === impl) inboxServiceRef.current = undefined
-      }),
-    )
+          legacyInboxID: row.id,
+        }).pipe(Effect.asVoid)
+      yield* Effect.promise(() => WorkspaceContext.provide({ workspaceID: workspace, fn: () =>
+        Instance.restore(instance, () => Effect.runPromise(convert.pipe(
+          Effect.provideService(InstanceRef, instance), Effect.provideService(WorkspaceRef, workspace),
+        ))),
+      }))
+    }
+    const impl = Service.of({ accept })
+    yield* bindScopedRef(inboxServiceRef, impl)
     return impl
   }),
-)
+).pipe(Layer.provide(Controller.defaultLayer))
 
 export const defaultLayer = layer.pipe(
-  Layer.provide(Bus.defaultLayer),
   Layer.provide(ActorRegistry.defaultLayer),
   Layer.provide(Session.defaultLayer),
 )

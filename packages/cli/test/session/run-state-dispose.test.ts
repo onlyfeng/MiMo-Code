@@ -55,7 +55,7 @@ afterEach(() => {
   statusBusyGate = undefined
 })
 
-const it = testEffect(Layer.mergeAll(SessionRunState.layer.pipe(Layer.provide(status)), CrossSpawnSpawner.defaultLayer))
+const it = testEffect(Layer.mergeAll(SessionRunState.layer.pipe(Layer.provide(status)), Session.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
 describe("SessionRunState instance disposal", () => {
   it.live(
@@ -69,7 +69,7 @@ describe("SessionRunState instance disposal", () => {
           const finished = yield* Ref.make(false)
           const caller = yield* run
             .ensureRunning(
-              SessionID.make("session-run-state-dispose"),
+              (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-dispose" }))).id,
               "main",
               Effect.interrupt,
               Deferred.succeed(started, undefined).pipe(
@@ -103,7 +103,7 @@ describe("SessionRunState instance disposal", () => {
           const finished = yield* Ref.make(false)
           const caller = yield* run
             .startShell(
-              SessionID.make("session-run-state-dispose-shell"),
+              (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-dispose-shell" }))).id,
               Effect.interrupt,
               Deferred.succeed(started, undefined).pipe(
                 Effect.andThen(Deferred.await(finish)),
@@ -131,7 +131,7 @@ describe("SessionRunState instance disposal", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
-          const sessionID = SessionID.make("session-run-state-dispose-restart")
+          const sessionID = (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-dispose-restart" }))).id
           const started: string[] = []
           const work = (label: string) =>
             Effect.sync(() => started.push(label)).pipe(
@@ -162,7 +162,7 @@ describe("SessionRunState instance disposal", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
-          const sessionID = SessionID.make("session-run-state-exclusive-start")
+          const sessionID = (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-exclusive-start" }))).id
           const release = yield* Deferred.make<void>()
 
           const first = yield* run.startRunning(
@@ -189,7 +189,7 @@ describe("SessionRunState instance disposal", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
-          const sessionID = SessionID.make("session-run-state-stale-cleanup")
+          const sessionID = (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-stale-cleanup" }))).id
           const firstStarted = yield* Deferred.make<void>()
           const cleanupStarted = yield* Deferred.make<void>()
           const releaseCleanup = yield* Deferred.make<void>()
@@ -253,7 +253,7 @@ describe("SessionRunState instance disposal", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
-          const sessionID = SessionID.make("session-run-state-stale-idle")
+          const sessionID = (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-stale-idle" }))).id
           const firstStarted = yield* Deferred.make<void>()
           const finishFirst = yield* Deferred.make<void>()
           const secondStarted = yield* Deferred.make<void>()
@@ -317,7 +317,7 @@ describe("SessionRunState instance disposal", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
-          const sessionID = SessionID.make("session-run-state-stale-idle-ensure")
+          const sessionID = (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-stale-idle-ensure" }))).id
           const firstStarted = yield* Deferred.make<void>()
           const finishFirst = yield* Deferred.make<void>()
           const secondStarted = yield* Deferred.make<void>()
@@ -380,7 +380,7 @@ describe("SessionRunState instance disposal", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
-          const sessionID = SessionID.make("session-run-state-idle-abort")
+          const sessionID = (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-idle-abort" }))).id
           const finishFirst = yield* Deferred.make<void>()
           const secondStarted = yield* Deferred.make<void>()
           const finishSecond = yield* Deferred.make<void>()
@@ -438,7 +438,7 @@ describe("SessionRunState instance disposal", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
-          const sessionID = SessionID.make("session-run-state-current-interrupt")
+          const sessionID = (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-current-interrupt" }))).id
           const interrupted: string[] = []
           const runOnce = (label: string) =>
             Effect.gen(function* () {
@@ -468,7 +468,7 @@ describe("SessionRunState instance disposal", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
-          const sessionID = SessionID.make("session-run-state-shell-admission-interrupt")
+          const sessionID = (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-shell-admission-interrupt" }))).id
           const entered = yield* Deferred.make<void>()
           const release = yield* Deferred.make<void>()
           statusBusyGate = { sessionID, entered, release }
@@ -495,7 +495,7 @@ describe("SessionRunState instance disposal", () => {
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
           const run = yield* SessionRunState.Service
-          const sessionID = SessionID.make("session-run-state-cancel-caller-interrupt")
+          const sessionID = (yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-cancel-caller-interrupt" }))).id
           const cleanupStarted = yield* Deferred.make<void>()
           const releaseCleanup = yield* Deferred.make<void>()
           yield* Effect.addFinalizer(() => Deferred.succeed(releaseCleanup, undefined).pipe(Effect.ignore))
@@ -532,7 +532,7 @@ describe("SessionRunState instance disposal", () => {
           const run = yield* SessionRunState.Service
           let entered = false
 
-          yield* run.assertNotBusy(SessionID.make("session-run-state-stale-instance"))
+          yield* run.assertNotBusy((yield* Session.Service.use((sessions) => sessions.create({ title: "session-run-state-stale-instance" }))).id)
           yield* Effect.promise(() => Instance.reload({ directory: Instance.directory }))
           const exit = yield* run
             .withRunDisposal(
@@ -591,6 +591,7 @@ describe("SessionRunState instance disposal", () => {
           const release = yield* Deferred.make<void>()
           const marker = yield* Ref.make(false)
           const restarted = yield* Ref.make(false)
+          const sessionID = (yield* Session.Service.use((sessions) => sessions.create({ title: "dispose continuation" }))).id
           yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
           const caller = yield* run
             .withRunDisposal(
@@ -600,7 +601,7 @@ describe("SessionRunState instance disposal", () => {
                   Effect.gen(function* () {
                     yield* Ref.set(marker, (yield* RunDisposal).disposing)
                     return yield* run.startShell(
-                      SessionID.make("session-run-state-dispose-continuation"),
+                      sessionID,
                       Effect.interrupt,
                       Ref.set(restarted, true).pipe(Effect.andThen(Effect.interrupt)),
                     )

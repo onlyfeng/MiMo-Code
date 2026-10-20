@@ -3,8 +3,9 @@ import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Actor } from "../../src/actor/spawn"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import { ActorRegistry } from "../../src/actor/registry"
-import { ActorRegistered, InboxArrived } from "../../src/actor/events"
+import { ActorRegistered } from "../../src/actor/events"
 import { Bus } from "../../src/bus"
+import { observeAcceptedInbox } from "../fixture/accepted-inbox"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { AppLayer } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -342,8 +343,7 @@ it.live(
           const actorID = yield* Deferred.await(ready)
           try {
             const result = yield* Fiber.join(fiber).pipe(Effect.timeout("2 seconds"))
-            expect(result.output).toContain('<actor_result status="timeout">')
-            expect(result.output).toContain(`actor_id: ${actorID}`)
+            expect(JSON.parse(result.output)).toMatchObject({ status: "timeout", executionActive: true, actor_id: actorID })
             expect((yield* fixture.registry.get(fixture.session.id, actorID))?.status).toBe("running")
           } finally {
             yield* fixture.actor.cancel(fixture.session.id, actorID, "forced")
@@ -383,11 +383,11 @@ it.live(
           )
           const actorID = String(result.metadata.actorId)
           // Observe the envelope on the bus, not the inbox row it lands in.
-          // InboxArrived is published after the row is committed and before
-          // wake(), so a drain cannot take it away. Subscribed before the child
+          // Accepted receipts are published after their input is committed.
+          // Subscribed before the child
           // is released, so no envelope can be missed.
           const envelopes: { receiverSessionID: string; receiverActorID: string }[] = []
-          const off = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
+          const off = yield* observeAcceptedInbox(yield* Bus.Service, (event) => {
             if (event.properties.senderSessionID !== fixture.session.id) return
             if (event.properties.senderActorID !== actorID) return
             envelopes.push({

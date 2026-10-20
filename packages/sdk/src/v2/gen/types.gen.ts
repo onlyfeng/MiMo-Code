@@ -119,15 +119,17 @@ export type EventWriterCachePerf = {
   }
 }
 
-export type EventInboxArrived = {
-  type: "inbox.arrived"
+export type EventSessionReceiptUpdated = {
+  type: "session.receipt.updated"
   properties: {
-    receiverSessionID: string
-    receiverActorID: string
-    senderSessionID?: string
-    senderActorID?: string
-    inboxID: string
-    type: string
+    sessionID: string
+    receiptId: string
+    agentID: string
+    state: "accepted" | "claimed" | "settled" | "cancelled" | "rejected"
+    outcome?: "success" | "assistant_error" | "interrupted" | "never_ran"
+    inputMessageID: string
+    deliveryMessageID?: string
+    epoch: number
   }
 }
 
@@ -444,6 +446,12 @@ export type SessionStatus =
   | {
       type: "busy"
       message?: string
+      wait?: {
+        kind: "subagents"
+        actorIDs: Array<string>
+        stalled: Array<string>
+        deadline: number
+      }
     }
 
 export type EventSessionStatus = {
@@ -1024,6 +1032,92 @@ export type EventWorkspaceStatus = {
   }
 }
 
+export type EventSessionInboxDelta = {
+  type: "session.inbox.delta"
+  properties: {
+    sessionID: string
+    receipts?: Array<{
+      id: string
+      receiver_session_id: string
+      receiver_actor_id: string
+      sender_session_id: string | null
+      sender_actor_id: string | null
+      type: string
+      content: {
+        text?: string
+      } | null
+      input_message_id: string | null
+      state: "accepted" | "claimed" | "settled" | "cancelled" | "rejected"
+      epoch: number
+      run_id: number | null
+      claim_frontier: string | null
+      consumed: boolean
+      outcome: "success" | "assistant_error" | "interrupted" | "never_ran" | null
+      delivery_message_id: string | null
+      error: string | null
+      idempotency_key: string
+      created_at: number
+      time_updated: number
+    }>
+    deletedReceiptIDs?: Array<string>
+    lanes?: Array<{
+      session_id: string
+      agent_id: string
+      consumed_frontier: string | null
+      input_revision: number
+      time_updated: number
+    }>
+    epoch?: {
+      session_id: string
+      epoch: number
+      time_updated: number
+    }
+  }
+}
+
+export type EventSessionInboxSnapshot = {
+  type: "session.inbox.snapshot"
+  properties: {
+    version: 1
+    sessionID: string
+    receipts: Array<{
+      id: string
+      receiver_session_id: string
+      receiver_actor_id: string
+      sender_session_id: string | null
+      sender_actor_id: string | null
+      type: string
+      content: {
+        text?: string
+      } | null
+      input_message_id: string | null
+      state: "accepted" | "claimed" | "settled" | "cancelled" | "rejected"
+      epoch: number
+      run_id: number | null
+      claim_frontier: string | null
+      consumed: boolean
+      outcome: "success" | "assistant_error" | "interrupted" | "never_ran" | null
+      delivery_message_id: string | null
+      error: string | null
+      idempotency_key: string
+      created_at: number
+      time_updated: number
+    }>
+    lanes: Array<{
+      session_id: string
+      agent_id: string
+      consumed_frontier: string | null
+      input_revision: number
+      time_updated: number
+    }>
+    epoch: {
+      session_id: string
+      epoch: number
+      time_updated: number
+    } | null
+  }
+}
+
 export type OutputFormatText = {
   type: "text"
 }
@@ -1051,7 +1145,13 @@ export type MachineProvenance = {
   machine: string
 }
 
-export type Provenance = HookProvenance | MachineProvenance
+export type AgentProvenance = {
+  source: "agent"
+  senderSessionID?: string
+  senderActorID?: string
+}
+
+export type Provenance = HookProvenance | MachineProvenance | AgentProvenance
 
 export type UserMessage = {
   id: string
@@ -1545,6 +1645,100 @@ export type EventSessionDeleted = {
   }
 }
 
+export type SyncEventSessionInboxDelta = {
+  type: "sync"
+  name: "session.inbox.delta.1"
+  id: string
+  seq: number
+  aggregateID: "sessionID"
+  data: {
+    sessionID: string
+    receipts?: Array<{
+      id: string
+      receiver_session_id: string
+      receiver_actor_id: string
+      sender_session_id: string | null
+      sender_actor_id: string | null
+      type: string
+      content: {
+        text?: string
+      } | null
+      input_message_id: string | null
+      state: "accepted" | "claimed" | "settled" | "cancelled" | "rejected"
+      epoch: number
+      run_id: number | null
+      claim_frontier: string | null
+      consumed: boolean
+      outcome: "success" | "assistant_error" | "interrupted" | "never_ran" | null
+      delivery_message_id: string | null
+      error: string | null
+      idempotency_key: string
+      created_at: number
+      time_updated: number
+    }>
+    deletedReceiptIDs?: Array<string>
+    lanes?: Array<{
+      session_id: string
+      agent_id: string
+      consumed_frontier: string | null
+      input_revision: number
+      time_updated: number
+    }>
+    epoch?: {
+      session_id: string
+      epoch: number
+      time_updated: number
+    }
+  }
+}
+
+export type SyncEventSessionInboxSnapshot = {
+  type: "sync"
+  name: "session.inbox.snapshot.1"
+  id: string
+  seq: number
+  aggregateID: "sessionID"
+  data: {
+    version: 1
+    sessionID: string
+    receipts: Array<{
+      id: string
+      receiver_session_id: string
+      receiver_actor_id: string
+      sender_session_id: string | null
+      sender_actor_id: string | null
+      type: string
+      content: {
+        text?: string
+      } | null
+      input_message_id: string | null
+      state: "accepted" | "claimed" | "settled" | "cancelled" | "rejected"
+      epoch: number
+      run_id: number | null
+      claim_frontier: string | null
+      consumed: boolean
+      outcome: "success" | "assistant_error" | "interrupted" | "never_ran" | null
+      delivery_message_id: string | null
+      error: string | null
+      idempotency_key: string
+      created_at: number
+      time_updated: number
+    }>
+    lanes: Array<{
+      session_id: string
+      agent_id: string
+      consumed_frontier: string | null
+      input_revision: number
+      time_updated: number
+    }>
+    epoch: {
+      session_id: string
+      epoch: number
+      time_updated: number
+    } | null
+  }
+}
+
 export type SyncEventMessageUpdated = {
   type: "sync"
   name: "message.updated.1"
@@ -1605,40 +1799,40 @@ export type SyncEventSessionUpdated = {
     sessionID: string
     previousRevision?: number
     info: {
-      id: string | null
-      slug: string | null
-      projectID: string | null
-      workspaceID: string | null
-      directory: string | null
-      parentID: string | null
-      contextFrom: string | null
-      contextWatermark: string | null
-      summary: {
+      id?: string | null
+      slug?: string | null
+      projectID?: string | null
+      workspaceID?: string | null
+      directory?: string | null
+      parentID?: string | null
+      contextFrom?: string | null
+      contextWatermark?: string | null
+      summary?: {
         additions: number
         deletions: number
         files: number
         diffs?: Array<SnapshotFileDiff>
       } | null
       share?: {
-        url: string | null
+        url?: string | null
       }
-      title: string | null
-      titleSource: "fallback" | "generated" | "user" | null
-      titleRevision: number | null
-      version: string | null
+      title?: string | null
+      titleSource?: "fallback" | "generated" | "user" | null
+      titleRevision?: number | null
+      version?: string | null
       time?: {
-        created: number | null
-        updated: number | null
-        compacting: number | null
-        archived: number | null
+        created?: number | null
+        updated?: number | null
+        compacting?: number | null
+        archived?: number | null
       }
-      permission: PermissionRuleset | null
-      prompt: {
+      permission?: PermissionRuleset | null
+      prompt?: {
         system?: string
         systemMode?: "append" | "replace-agent"
         harness: "auto" | "codex" | "default"
       } | null
-      revert: {
+      revert?: {
         messageID: string
         partID?: string
         snapshot?: string
@@ -1686,7 +1880,7 @@ export type GlobalEvent = {
     | EventActorStuck
     | EventActorStalled
     | EventWriterCachePerf
-    | EventInboxArrived
+    | EventSessionReceiptUpdated
     | EventTuiPromptAppend
     | EventTuiCommandExecute
     | EventTuiToastShow
@@ -1747,6 +1941,8 @@ export type GlobalEvent = {
     | EventWorkspaceFailed
     | EventWorkspaceRestore
     | EventWorkspaceStatus
+    | EventSessionInboxDelta
+    | EventSessionInboxSnapshot
     | EventMessageUpdated
     | EventMessageRemoved
     | EventMessagePartUpdated
@@ -1754,6 +1950,8 @@ export type GlobalEvent = {
     | EventSessionUpdated
     | EventSessionCreated
     | EventSessionDeleted
+    | SyncEventSessionInboxDelta
+    | SyncEventSessionInboxSnapshot
     | SyncEventMessageUpdated
     | SyncEventMessageRemoved
     | SyncEventMessagePartUpdated
@@ -3320,7 +3518,7 @@ export type Event =
   | EventActorStuck
   | EventActorStalled
   | EventWriterCachePerf
-  | EventInboxArrived
+  | EventSessionReceiptUpdated
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
@@ -3381,6 +3579,8 @@ export type Event =
   | EventWorkspaceFailed
   | EventWorkspaceRestore
   | EventWorkspaceStatus
+  | EventSessionInboxDelta
+  | EventSessionInboxSnapshot
   | EventMessageUpdated
   | EventMessageRemoved
   | EventMessagePartUpdated
@@ -5168,7 +5368,10 @@ export type SessionAbortResponses = {
   /**
    * Aborted session
    */
-  200: boolean
+  200: {
+    ok: boolean
+    epoch: number
+  }
 }
 
 export type SessionAbortResponse = SessionAbortResponses[keyof SessionAbortResponses]
@@ -5460,10 +5663,6 @@ export type SessionPromptErrors = {
    * Not found
    */
   404: NotFoundError
-  /**
-   * Conflict — session resource is busy
-   */
-  409: ConflictError
 }
 
 export type SessionPromptError = SessionPromptErrors[keyof SessionPromptErrors]
@@ -5476,6 +5675,18 @@ export type SessionPromptResponses = {
     info: AssistantMessage
     parts: Array<Part>
   }
+  /**
+   * Queued (busy) — durable receipt; poll GET /receipt/:id
+   */
+  202: {
+    info: UserMessage
+    parts: Array<Part>
+    receiptId: string
+  }
+  /**
+   * No user turn admitted
+   */
+  204: void
 }
 
 export type SessionPromptResponse = SessionPromptResponses[keyof SessionPromptResponses]
@@ -5845,12 +6056,69 @@ export type SessionPromptAsyncError = SessionPromptAsyncErrors[keyof SessionProm
 
 export type SessionPromptAsyncResponses = {
   /**
-   * Prompt accepted
+   * Accepted — durable receipt
+   */
+  202: {
+    receiptId: string
+  }
+  /**
+   * No user turn admitted
    */
   204: void
 }
 
 export type SessionPromptAsyncResponse = SessionPromptAsyncResponses[keyof SessionPromptAsyncResponses]
+
+export type SessionReceiptData = {
+  body?: never
+  path: {
+    sessionID: string
+    receiptId: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/receipt/{receiptId}"
+}
+
+export type SessionReceiptErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionReceiptError = SessionReceiptErrors[keyof SessionReceiptErrors]
+
+export type SessionReceiptResponses = {
+  /**
+   * Receipt
+   */
+  200: {
+    id: string
+    lane: {
+      sessionID: string
+      agentID: string
+    }
+    state: "accepted" | "claimed" | "settled" | "cancelled" | "rejected"
+    type: string
+    senderSessionID?: string
+    senderActorID?: string
+    epoch: number
+    consumed: boolean
+    outcome?: "success" | "assistant_error" | "interrupted" | "never_ran"
+    inputMessageID: string
+    deliveryMessageID?: string
+    error?: string
+  }
+}
+
+export type SessionReceiptResponse = SessionReceiptResponses[keyof SessionReceiptResponses]
 
 export type SessionCommandData = {
   body?: {
@@ -6867,6 +7135,47 @@ export type SyncReplayData = {
         [key: string]: unknown
       }
     }>
+    queueSnapshot?: {
+      version: 1
+      sessionID: string
+      receipts: Array<{
+        id: string
+        receiver_session_id: string
+        receiver_actor_id: string
+        sender_session_id: string | null
+        sender_actor_id: string | null
+        type: string
+        content: {
+          text?: string
+        } | null
+        input_message_id: string | null
+        state: "accepted" | "claimed" | "settled" | "cancelled" | "rejected"
+        epoch: number
+        run_id: number | null
+        claim_frontier: string | null
+        consumed: boolean
+        outcome: "success" | "assistant_error" | "interrupted" | "never_ran" | null
+        delivery_message_id: string | null
+        error: string | null
+        idempotency_key: string
+        created_at: number
+        time_updated: number
+      }>
+      lanes: Array<{
+        session_id: string
+        agent_id: string
+        consumed_frontier: string | null
+        input_revision: number
+        time_updated: number
+      }>
+      epoch: {
+        session_id: string
+        epoch: number
+        time_updated: number
+      } | null
+    }
+    finalSeq?: number
+    workspaceID?: string
   }
   path?: never
   query?: {
@@ -6881,6 +7190,10 @@ export type SyncReplayErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
 }
 
 export type SyncReplayError = SyncReplayErrors[keyof SyncReplayErrors]

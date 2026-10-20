@@ -33,6 +33,7 @@ import { NotFoundError } from "@/storage"
 import { Instance, type InstanceContext } from "@/project/instance"
 import { InstanceState } from "@/effect"
 import { InstanceRef } from "@/effect/instance-ref"
+import { inboxControllerRef } from "@/inbox"
 
 const log = Log.create({ service: "actor.spawn" })
 
@@ -251,6 +252,7 @@ export interface SpawnInput {
   // ActorTool owns foreground waiting and cancellation after admission. Other
   // callers retain the existing foreground join unless they explicitly opt out.
   awaitCompletion?: boolean
+  notifyOnCompletion?: Deferred.Deferred<boolean>
   // Synchronous ownership transfer before admission can return successfully.
   // Carries the exact generation's cleanup across the caller's yield boundary.
   onAdmitted?: (result: SpawnResult) => void
@@ -299,6 +301,7 @@ export interface SpawnResult {
   actorID: string
   sessionID: SessionID
   outcome: Deferred.Deferred<AgentOutcome>
+  awaitExit?: Effect.Effect<void>
   // Internal admission ownership: cancel only this generation and join its
   // complete work fiber, including hooks outside the session runner.
   cancel?: Effect.Effect<void>
@@ -424,7 +427,7 @@ export const layer = Layer.effect(
     // load-bearing piece this primitive exists for.
     //
     // Returns the assistant's final text (if any) so forkWork's onSuccess can
-    // pass it to inbox.send (notification body) and into the success Deferred.
+    // pass it to inbox.accept (notification body) and into the success Deferred.
     const runAgentLoop = Effect.fn("Actor.runAgentLoop")(function* (input: {
       sessionID: SessionID
       actorID: string
@@ -483,10 +486,13 @@ export const layer = Layer.effect(
       task: string
       description?: string
       background: boolean
+      notifyOnCompletion?: Deferred.Deferred<boolean>
+      expectedEpoch?: number
       model?: { providerID: ProviderID; modelID: ModelID }
       lifecycle: "ephemeral" | "persistent"
       generation: ForkGenerationOwner
       execution: Execution
+      actorMode: "peer" | "subagent"
       task_id?: string
       format?: MessageV2.OutputFormat
       // When set, the child's work fiber runs under this InstanceContext (via
@@ -526,42 +532,23 @@ export const layer = Layer.effect(
             const source = yield* RunDisposal
             if (isRunDisposing(source)) return
             if (!input.background || input.agentType === "checkpoint-writer") return
-            yield* withNotificationTarget(
-              notificationTarget,
-              Effect.all(
-                [
-                  inbox
-                    .send({
-                      receiverSessionID: input.parentSessionID,
-                      receiverActorID: input.parentActorID ?? "main",
-                      senderSessionID: input.sessionID,
-                      senderActorID: input.actorID,
-                      type: "actor_notification",
-                      ...(input.execution.groupAbort || input.generation.groupAbort ? { wake: false } : {}),
-                      content: renderActorNotification({
-                        actorID: input.actorID,
-                        description,
-                        status,
-                        ...extra,
-                      }),
-                    })
-                    .pipe(
-                      (effect) => withNotificationTarget(notificationTarget, effect, source),
-                      Effect.ignoreCause({ log: "Warn", message: "actor terminal notification failed" }),
-                    ),
-                  input.execution.groupAbort || input.generation.groupAbort ? Effect.void : bus
-                    .publish(TuiEvent.ToastShow, {
-                      message: `Child "${description}" ${status}`,
-                      variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
-                    })
-                    .pipe(
-                      (effect) => withNotificationTarget(notificationTarget, effect, source),
-                      Effect.ignoreCause({ log: "Warn", message: "actor toast notification failed" }),
-                    ),
-                ],
-                { concurrency: "unbounded", discard: true },
-              ),
-            )
+            if (input.notifyOnCompletion && !(yield* Deferred.await(input.notifyOnCompletion))) return
+            yield* withNotificationTarget(notificationTarget, Effect.gen(function* () {
+              const quiet = input.execution.groupAbort || input.generation.groupAbort
+              yield* inbox.accept({
+                receiverSessionID: input.parentSessionID,
+                receiverActorID: input.parentActorID ?? "main",
+                senderSessionID: input.sessionID,
+                senderActorID: input.actorID,
+                type: "actor_notification",
+                content: renderActorNotification({ actorID: input.actorID, description, status, ...extra }),
+              }, { deferKick: quiet, expectedEpoch: quiet ? undefined : input.expectedEpoch })
+              if (quiet) return
+              yield* bus.publish(TuiEvent.ToastShow, {
+                message: `Child "${description}" ${status}`,
+                variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
+              })
+            }), source).pipe(Effect.ignoreCause({ log: "Warn", message: "actor terminal notification failed" }))
           })
         // Delivery carriers, shared by the success and failure terminal writes.
         // A failed turn still publishes whatever it produced, so a later wait can
@@ -643,6 +630,9 @@ export const layer = Layer.effect(
                   ...(resultMessageID ? { resultMessageID } : {}),
                 })
                 .pipe(Effect.ignoreCause)
+              if (input.notifyOnCompletion) yield* Deferred.succeed(outcome, cancelled
+                ? { status: "cancelled" as const }
+                : { status: "failure" as const, error, ...(failure ? { failure } : {}), ...lastResult })
               yield* notify(cancelled ? "cancelled" : "failed", cancelled ? {} : { error })
               yield* Deferred.succeed(
                 outcome,
@@ -653,8 +643,7 @@ export const layer = Layer.effect(
             }).pipe(Effect.ensuring(lifecycleState.settleTerminal(input.generation)))
           })
 
-        // Derive actor mode from spawn shape: peer creates a new session, subagent shares parent's
-        const actorMode: "peer" | "subagent" = input.parentSessionID === input.sessionID ? "subagent" : "peer"
+        const actorMode = input.actorMode
 
         // Writability of THIS agent, derived from the same predicate the runtime uses to
         // strip the Write tool (llm.ts resolveTools → Permission.disabled). Read-only agents
@@ -900,6 +889,11 @@ export const layer = Layer.effect(
                       })
                       .pipe(Effect.ignoreCause)
                     yield* lifecycleState.markDelivered(key, input.generation)
+                    if (input.notifyOnCompletion) yield* Deferred.succeed(outcome, {
+                      status: "success" as const, finalText: deliveredText, structured,
+                      reportedStatus: parsed.status, reportedSummary: parsed.summary,
+                      ...(warnings.length ? { warnings } : {}),
+                    })
                     yield* notify("completed", {
                       result: deliveryText,
                       ...(warnings.length ? { warnings } : {}),
@@ -934,7 +928,14 @@ export const layer = Layer.effect(
         const fork = Effect.gen(function* () {
           // The claim spans hooks and terminal publication, so inbox continuations
           // cannot consume queued messages during postStop housekeeping.
-          const fiber = yield* executions.fork(input.execution, boundWork, scope)
+          const fiber = yield* executions.fork(input.execution, boundWork, scope, (cause) => Effect.gen(function* () {
+            // Ownership moved before work began; settle local resources without
+            // writing the new owner's actor status or publishing a notification.
+            if ((yield* lifecycleState.currentGeneration(key)) === input.generation) yield* lifecycleState.retire(key)
+            yield* lifecycleState.settleTerminal(input.generation)
+            yield* lifecycleState.finishFork(key, input.generation)
+            yield* Deferred.succeed(outcome, { status: "failure", error: Cause.pretty(cause) })
+          }))
           return { fiber, outcome }
         }).pipe(state.withRunDisposal)
         return yield* (input.instanceRef ? fork.pipe(Effect.provideService(InstanceRef, input.instanceRef)) : fork)
@@ -983,7 +984,11 @@ export const layer = Layer.effect(
         // registers the actor; interruption cannot strand a pre-acquire token.
         // A cancellation barrier can reject reservation; do not create a
         // lifecycle generation until execution admission succeeds.
-        const execution = yield* executions.reserve(sessionID, actorID, directory)
+        const execution = yield* (directory
+          ? Effect.promise(() => Instance.provide({ directory, fn: () => Instance.current })).pipe(
+              Effect.flatMap((instance) => executions.reserve(sessionID, actorID, directory).pipe(Effect.provideService(InstanceRef, instance))),
+            )
+          : executions.reserve(sessionID, actorID))
         if (lifecycle === "persistent") yield* lifecycleState.retainPersistent(key)
         const generation = yield* lifecycleState.startFork(key)
         const work = yield* setup(generation, execution).pipe(
@@ -997,26 +1002,25 @@ export const layer = Layer.effect(
         return { generation, execution, ...work }
       })
       const cleanup = ({ generation, execution, fiber, outcome }: Effect.Success<typeof acquire>) =>
-        Effect.uninterruptible(
-          // The fork may be interrupted before its first instruction installs
-          // finishForkWork. Always settle this exact admission's generation
-          // and outcome; an existing delivered result remains authoritative.
-          Effect.all([cancel(sessionID, actorID, "forced", undefined, generation), Fiber.interrupt(fiber)], {
+        Effect.gen(function* () {
+          if (input.notifyOnCompletion) yield* Deferred.succeed(input.notifyOnCompletion, false)
+          // A never-started fiber still owns its admitted generation and outcome.
+          yield* Effect.all([cancel(sessionID, actorID, "forced", undefined, generation), Fiber.interrupt(fiber)], {
             concurrency: "unbounded",
             discard: true,
           }).pipe(
             Effect.ensuring(lifecycleState.finishFork(actorKey(sessionID, actorID), generation)),
             Effect.ensuring(executions.release(execution)),
             Effect.ensuring(Deferred.succeed(outcome, { status: "cancelled" }).pipe(Effect.asVoid)),
-          ),
-        )
+          )
+        }).pipe(Effect.uninterruptible)
       return Effect.acquireUseRelease(
         acquire,
         (resource) =>
           Effect.gen(function* () {
             if (input.mode === "subagent" && input.onReady) yield* Effect.ignore(input.onReady({ actorID, sessionID }))
             if (!input.background && input.awaitCompletion !== false) yield* Fiber.join(resource.fiber).pipe(Effect.ignore)
-            const result = { actorID, sessionID, outcome: resource.outcome, cancel: cleanup(resource) }
+            const result = { actorID, sessionID, outcome: resource.outcome, cancel: cleanup(resource), awaitExit: Deferred.await(resource.execution.done) }
             input.onAdmitted?.(result)
             return result
           }),
@@ -1024,7 +1028,7 @@ export const layer = Layer.effect(
       )
     }
 
-    const spawnPeer = Effect.fn("Actor.spawnPeer")(function* (input: SpawnInput) {
+    const spawnPeer = Effect.fn("Actor.spawnPeer")(function* (input: SpawnInput, expectedEpoch?: number) {
       // When the caller gives the child its own directory (e.g. a worktree the
       // session tool created), bind the child's work fiber to that directory's
       // Instance so its file tools / write boundary are isolated there. A
@@ -1040,7 +1044,7 @@ export const layer = Layer.effect(
         parentID: input.sessionID,
         contextFrom: input.context === "full" ? input.sessionID : undefined,
         title: `${input.agentType}: ${input.task.slice(0, 40)}`,
-        ...(input.cwd ? { directory: input.cwd } : {}),
+        ...(input.cwd ? { directory: instanceRef?.directory ?? input.cwd } : {}),
         ...(input.worktreeOwnership ? { worktreeOwnership: input.worktreeOwnership } : {}),
       })
       if (input.onActorID) yield* Effect.sync(() => input.onActorID!(child.id)).pipe(Effect.ignore)
@@ -1050,7 +1054,7 @@ export const layer = Layer.effect(
       // actor_id === child.id, mode "peer") SYNCHRONOUSLY here — before spawn
       // resolves and before the child's first turn. This is the single
       // spawn-time registration that makes a child addressable the instant
-      // spawn returns: Inbox.send's ESRCH pre-check (reg.get) and
+      // spawn returns: Inbox.accept's ESRCH pre-check (reg.get) and
       // any later relay both resolve against this row without waiting for the
       // child to arm anything on its first turn. turn_count/status start at 0/
       // "pending"; the per-step turn heartbeat (registry.updateTurn) advances
@@ -1083,6 +1087,9 @@ export const layer = Layer.effect(
             task: input.task,
             description: input.description,
             background: input.background,
+            notifyOnCompletion: input.notifyOnCompletion,
+            expectedEpoch,
+            actorMode: "peer",
             model: input.model,
             lifecycle,
             generation,
@@ -1096,7 +1103,7 @@ export const layer = Layer.effect(
       )
     })
 
-    const spawnSubagent = Effect.fn("Actor.spawnSubagent")(function* (input: SpawnInput) {
+    const spawnSubagent = Effect.fn("Actor.spawnSubagent")(function* (input: SpawnInput, expectedEpoch?: number) {
       const actorID = yield* actorReg.allocateActorID(input.sessionID, input.agentType)
       const key = actorKey(input.sessionID, actorID)
       const lifecycle = input.lifecycle ?? "ephemeral"
@@ -1141,6 +1148,9 @@ export const layer = Layer.effect(
             task: gateEligible ? input.task + RETURN_FORMAT_INSTRUCTION : input.task,
             description: input.description,
             background: input.background,
+            notifyOnCompletion: input.notifyOnCompletion,
+            expectedEpoch,
+            actorMode: "subagent",
             model: input.model,
             lifecycle,
             generation,
@@ -1153,8 +1163,10 @@ export const layer = Layer.effect(
     })
 
     const spawnImpl = Effect.fn("Actor.spawn.impl")(function* (input: SpawnInput) {
-      if (input.mode === "peer") return yield* spawnPeer(input)
-      return yield* spawnSubagent(input)
+      const tq = inboxControllerRef.current
+      const expectedEpoch = tq ? yield* tq.getEpoch(input.parentSessionID ?? input.sessionID) : undefined
+      if (input.mode === "peer") return yield* spawnPeer(input, expectedEpoch)
+      return yield* spawnSubagent(input, expectedEpoch)
     })
 
     const spawn = Effect.fn("Actor.spawn")(function* (input: SpawnInput) {
@@ -1225,20 +1237,19 @@ export const layer = Layer.effect(
         if (!notificationTarget) return
         yield* withNotificationTarget(
           notificationTarget,
-          inbox.send({
+          inbox.accept({
             receiverSessionID: parentSessionID,
             receiverActorID: actor.parentActorID ?? "main",
             senderSessionID: sessionID,
             senderActorID: actorID,
             type: "actor_notification",
-            ...(!wake ? { wake: false } : {}),
             content: renderActorNotification({
               actorID,
               description: actor.description,
               status,
               ...extra,
             }),
-          }),
+          }, { deferKick: !wake }),
           origin,
         )
         if (!wake) return
@@ -1526,6 +1537,11 @@ export const layer = Layer.effect(
       )
     })
 
+    const pendingLane = (sessionID: SessionID, actorID: string) =>
+      inboxControllerRef.current?.listAccepted({ sessionID, agentID: actorID }).pipe(Effect.map((rows) => rows.length > 0)) ?? Effect.succeed(false)
+    const cancelLane = (sessionID: SessionID, actorID: string) =>
+      inboxControllerRef.current?.cancelLane({ sessionID, agentID: actorID }) ?? Effect.succeed(0)
+
     const coordinateCancellation = (work: Effect.Effect<void>) =>
       Effect.gen(function* () {
         // A model tool runs in its processor's tool scope, which the execution
@@ -1675,7 +1691,7 @@ export const layer = Layer.effect(
                             lastError: undefined,
                           })
                           .pipe(inReceiver, Effect.ignoreCause)
-                        yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+                        yield* cancelLane(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
                         yield* retire
                         return
                       }
@@ -1698,7 +1714,7 @@ export const layer = Layer.effect(
                               lastError: undefined,
                             })
                             .pipe(inReceiver, Effect.ignoreCause)
-                          yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+                          yield* cancelLane(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
                           yield* notifyTerminal(sessionID, actorID, actor, "cancelled", {}, receiver?.disposal, options?.wake !== false && !ownership.episode.groupAbort)
                           yield* retire
                         })
@@ -1718,7 +1734,7 @@ export const layer = Layer.effect(
                         actor.status === "idle" &&
                         actor.lastOutcome === "cancelled"
                       ) {
-                        yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+                        yield* cancelLane(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
                         yield* retire
                         return
                       }
@@ -1729,23 +1745,10 @@ export const layer = Layer.effect(
                           lastError: undefined,
                         })
                         .pipe(inReceiver, Effect.ignoreCause)
-                      // Asked before the drain, not counted after it: this cancel has
-                      // already written the cancelled tombstone above, so `Inbox.drain`
-                      // takes its retired-persistent branch, deletes every queued row and
-                      // still returns 0. A count cannot see the rows it was meant to
-                      // notice. The head can, and it covers both ways work is consumed —
-                      // rendered into a turn for an ephemeral actor, dropped for a retired
-                      // persistent one.
-                      //
-                      // Work this cancel consumes can no longer be settled by the turn that
-                      // would have run it: that wake finds nothing and returns without
-                      // publishing. The mark records that the *previous* settlement reached
-                      // the parent, which says nothing about the one just discarded, so it
-                      // stops covering this publish.
-                      const pending = yield* inbox
-                        .head(sessionID, actorID)
-                        .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-                      yield* inbox.drain(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
+                      // Undelivered accepted inputs belong to a new settlement;
+                      // a receipt for the preceding execution cannot cover their cancellation.
+                      const pending = yield* pendingLane(sessionID, actorID)
+                      yield* cancelLane(sessionID, actorID).pipe(inReceiver, Effect.ignoreCause)
                       if (pending) yield* Effect.sync(() => notifiedSettlements.delete(key))
                       // Report only what the parent has not already been told. The fork
                       // publishes an actor's terminal envelope from whichever turn settles
@@ -1794,7 +1797,6 @@ export const layer = Layer.effect(
       })
     const impl = Service.of({ spawn, recovery, resume, markGroupAbort, cancel, getForkContext, markTerminalNotified })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
-    const restoreInboxPrompt = inbox.bindPrompt?.({ loop: sessionPrompt.loop })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it
     // without forming a layer cycle. See spawn-ref.ts for rationale.
     // Save the previous binding so the finalizer can restore it: when the same
@@ -1806,8 +1808,7 @@ export const layer = Layer.effect(
     spawnRef.current = impl
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
-        restoreInboxPrompt?.()
-        restorePromptActor?.()
+          restorePromptActor?.()
         if (spawnRef.current === impl) spawnRef.current = prevSpawnRef
       }),
     )

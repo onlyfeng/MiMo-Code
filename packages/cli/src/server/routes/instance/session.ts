@@ -31,6 +31,8 @@ import { ModelID, ProviderID } from "@/provider/schema"
 import { Provider } from "@/provider"
 import { forkQuery } from "@/tool/session"
 import { spawnRef } from "@/actor/spawn-ref"
+import { inboxControllerRef, toPublicReceipt, PublicReceipt } from "@/inbox"
+import { AppRuntime } from "@/effect/app-runtime"
 import { errors } from "../../error"
 import { lazy } from "@/util/lazy"
 import { Bus } from "@/bus"
@@ -508,7 +510,7 @@ export const SessionRoutes = lazy(() =>
             description: "Aborted session",
             content: {
               "application/json": {
-                schema: resolver(z.boolean()),
+                schema: resolver(z.object({ ok: z.boolean(), epoch: z.number() })),
               },
             },
           },
@@ -521,12 +523,15 @@ export const SessionRoutes = lazy(() =>
           sessionID: SessionID.zod,
         }),
       ),
-      async (c) =>
-        jsonRequest("SessionRoutes.abort", c, function* () {
-          const svc = yield* SessionPrompt.Service
-          yield* svc.cancel(c.req.valid("param").sessionID)
-          return true
-        }),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        const epoch = await runRequest(
+          "SessionRoutes.abort",
+          c,
+          SessionPrompt.Service.use((svc) => svc.cancel(sessionID)),
+        )
+        return c.json({ ok: true, epoch })
+      },
     )
     .post(
       "/:sessionID/share",
@@ -976,7 +981,7 @@ export const SessionRoutes = lazy(() =>
         const body = c.req.valid("json")
         if (body.id !== params.partID || body.messageID !== params.messageID || body.sessionID !== params.sessionID) {
           throw new Error(
-            `Part mismatch: body.id='${body.id}' vs partID='${params.partID}', body.messageID='${body.messageID}' vs messageID='${params.messageID}', body.sessionID='${body.sessionID}' vs sessionID='${params.sessionID}'`,
+            `Part mismatch: body.id='${body.id}' vs partID='${params.partID}', body.messageID='${body.messageID}' vs messageID='${params.messageID}', body.sessionID='${params.sessionID}' vs sessionID='${params.sessionID}'`,
           )
         }
         return jsonRequest("SessionRoutes.updatePart", c, function* () {
@@ -1192,11 +1197,6 @@ export const SessionRoutes = lazy(() =>
           }))
           return c.body(null, 202)
         }
-        await runRequest(
-          "SessionRoutes.resumeUser.assertNotBusy",
-          c,
-          SessionRunState.Service.use((svc) => svc.assertNotBusy(params.sessionID, query.agentID)),
-        )
         // [TP-SR-R21-10] 202 = admission complete (plan + exclusive start), not fire-and-forget.
         // Main agent also cascades subagent recovery (same as /turn/:id/resume).
         const admitted = await runRequest(
@@ -1254,7 +1254,8 @@ export const SessionRoutes = lazy(() =>
       "/:sessionID/message",
       describeRoute({
         summary: "Send message",
-        description: "Create and send a new message to a session, streaming the AI response.",
+        description:
+          "Create and send a new message to a session. Busy never 409: admit queues with 202+receiptId; idle streams 200.",
         operationId: "session.prompt",
         responses: {
           200: {
@@ -1270,7 +1271,24 @@ export const SessionRoutes = lazy(() =>
               },
             },
           },
-          ...errors(400, 404, 409),
+          202: {
+            description: "Queued (busy) — durable receipt; poll GET /receipt/:id",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    info: MessageV2.User,
+                    parts: MessageV2.Part.array(),
+                    receiptId: z.string(),
+                  }),
+                ),
+              },
+            },
+          },
+          204: {
+            description: "No user turn admitted",
+          },
+          ...errors(400, 404),
         },
       }),
       validator(
@@ -1282,50 +1300,54 @@ export const SessionRoutes = lazy(() =>
       validator("json", SessionPrompt.PromptInput.omit({ sessionID: true })),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
-        const completion = await runRequest(
-          "SessionRoutes.prompt.start",
+        const body = c.req.valid("json")
+
+        // C-08: no assertNotBusy TOCTOU. Controller-atomic: persist + admit always;
+        // 202 when the runner is busy (or claim did not start in-request), 200 stream when idle.
+        const busy = await runRequest(
+          "SessionRoutes.prompt.assertNotBusy",
           c,
-          SessionPrompt.Service.use((svc) => svc.startPrompt({ ...c.req.valid("json"), sessionID })).pipe(
-            Effect.provideService(RunApproval.RequestSignal, c.req.raw.signal),
+          SessionRunState.Service.use((svc) =>
+            svc
+              .assertNotBusy(sessionID)
+              .pipe(
+                Effect.as(false as const),
+                Effect.catch((e) => (e instanceof Session.BusyError ? Effect.succeed(true as const) : Effect.fail(e))),
+              ),
           ),
         )
+        const queue = async () => {
+          const queued = await runRequest(
+            "SessionRoutes.prompt.queue",
+            c,
+            SessionPrompt.Service.use((svc) => svc.promptAsync({ ...body, sessionID })),
+          )
+          if (!queued.receiptId) return c.body(null, 204)
+          return c.json({
+            info: queued.message.info,
+            parts: queued.message.parts,
+            receiptId: queued.receiptId,
+          }, 202)
+        }
 
+        if (busy) return queue()
+        const started = await runRequest(
+          "SessionRoutes.prompt.start",
+          c,
+          SessionPrompt.Service.use((svc) => svc.startPrompt({ ...body, sessionID })).pipe(
+            Effect.provideService(RunApproval.RequestSignal, c.req.raw.signal),
+          ),
+        ).then((completion) => ({ type: "started" as const, completion })).catch((error: unknown) => {
+          if (error instanceof Session.BusyError) return { type: "busy" as const }
+          throw error
+        })
+        if (started.type === "busy") return queue()
+        const completion = started.completion
         c.status(200)
         c.header("Content-Type", "application/json")
         return stream(c, async (stream) => {
-          // If the HTTP client gives up (TUI exits, driver kills its `mimo run`
-          // client on its own per-turn timeout, network drop), we have to drive
-          // the server-side runner to Idle ourselves. Otherwise the prompt
-          // fiber keeps running with no consumer, and any next POST attaches
-          // to the same dead Deferred via SessionRunState.ensureRunning's
-          // `Running` branch — every subsequent turn then hangs waiting on a
-          // result that will never arrive. SessionPrompt.cancel interrupts
-          // the fiber, which lets the runner transition Running -> Idle
-          // through Runner.cancel, freeing the next POST to start a fresh run.
+          // Disconnect detaches the HTTP stream; admitted work stays in the runner scope.
           const signal = c.req.raw.signal
-          const onClientDisconnect = () => {
-            void runRequest(
-              "SessionRoutes.prompt.disconnect",
-              c,
-              SessionPrompt.Service.use((svc) => svc.cancel(sessionID)),
-            ).catch(() => {})
-          }
-          if (signal.aborted) {
-            onClientDisconnect()
-            return
-          }
-          signal.addEventListener("abort", onClientDisconnect, { once: true })
-          // Keep the response alive while the turn is in flight. A turn can sit
-          // silent for a long time — most notably while the `question` tool
-          // blocks on an un-timed Deferred waiting for a human reply (the Bun
-          // server itself never times out: adapter.bun.ts idleTimeout:0). A
-          // client with its own request timeout (e.g. the external `mimo run`
-          // driver's per-turn budget) would otherwise see a dead connection and
-          // abort with "error sending request for url". Periodic whitespace
-          // resets the client's idle timer; whitespace is JSON-insignificant,
-          // so the trailing JSON.stringify(msg) still parses as the whole body
-          // (clients JSON.parse the full body, which tolerates leading
-          // whitespace). Mirrors the 10s SSE heartbeat in event.ts/global.ts.
           const heartbeat = setInterval(() => {
             void stream.write(" ")
           }, promptHeartbeatIntervalMs())
@@ -1339,7 +1361,7 @@ export const SessionRoutes = lazy(() =>
             void stream.write(JSON.stringify(msg))
           } finally {
             clearInterval(heartbeat)
-            signal.removeEventListener("abort", onClientDisconnect)
+            void signal
           }
         })
       },
@@ -1350,11 +1372,19 @@ export const SessionRoutes = lazy(() =>
       describeRoute({
         summary: "Send async message",
         description:
-          "Create and send a new message to a session asynchronously, starting the session if needed and returning immediately.",
+          "Create and send a message asynchronously. Returns 202 with a durable receiptId, or 204 when no user turn is admitted.",
         operationId: "session.prompt_async",
         responses: {
+          202: {
+            description: "Accepted — durable receipt",
+            content: {
+              "application/json": {
+                schema: resolver(z.object({ receiptId: z.string() })),
+              },
+            },
+          },
           204: {
-            description: "Prompt accepted",
+            description: "No user turn admitted",
           },
           ...errors(400, 404),
         },
@@ -1382,19 +1412,59 @@ export const SessionRoutes = lazy(() =>
         // making it visible to an eligible loop boundary. Draining during the
         // runner's final transition is a separate run-loop invariant.
         const releaseInstance = Instance.claim(Instance.directory)
-        void runRequest(
+        const accepted = await runRequest(
           "SessionRoutes.prompt_async",
           c,
-          SessionPrompt.Service.use((svc) => svc.prompt({ ...body, sessionID })),
-        ).catch((err) => {
+          SessionPrompt.Service.use((svc) => svc.promptAsync({ ...body, sessionID })),
+        ).catch(async (err) => {
           log.error("prompt_async failed", { sessionID, error: err })
-          void Bus.publish(Session.Event.Error, {
+          await Bus.publish(Session.Event.Error, {
             sessionID,
             error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
           })
+          throw err
         }).finally(releaseInstance)
-
-        return c.body(null, 204)
+        if (!accepted.receiptId) return c.body(null, 204)
+        return c.json({ receiptId: accepted.receiptId }, 202)
+      },
+    )
+    .get(
+      "/:sessionID/receipt/:receiptId",
+      describeRoute({
+        summary: "Get turn receipt",
+        description: "Durable receipt for an admitted prompt/resume/wake. Source of truth after HTTP 202.",
+        operationId: "session.receipt",
+        responses: {
+          200: {
+            description: "Receipt",
+            content: {
+              "application/json": {
+                schema: resolver(PublicReceipt),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+          receiptId: z.string().min(1),
+        }),
+      ),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        const receiptId = c.req.valid("param").receiptId
+        const tq = inboxControllerRef.current
+        if (!tq) return c.json({ error: "turn queue unavailable" }, 404)
+        try {
+          const receipt = await AppRuntime.runPromise(tq.getReceipt(receiptId))
+          if (receipt.lane.sessionID !== sessionID) return c.json({ error: "not found" }, 404)
+          return c.json(toPublicReceipt(receipt))
+        } catch {
+          return c.json({ error: "not found" }, 404)
+        }
       },
     )
     .post(

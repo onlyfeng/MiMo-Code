@@ -39,6 +39,7 @@ import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionCompaction } from "../../src/session/compaction"
 import { SessionPrompt } from "../../src/session/prompt"
+import { defaultLayer as CronBridgeDefaultLayer } from "../../src/session/cron-bridge"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
@@ -72,7 +73,6 @@ import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
 import { inboxServiceRef } from "../../src/inbox/inbox-ref"
-import { InboxTable } from "../../src/inbox/inbox.sql"
 import { Metrics } from "../../src/metrics"
 import { SessionPrefixSnapshotTable, SessionTable } from "../../src/session/session.sql"
 import { Database, eq, NotFoundError } from "../../src/storage"
@@ -84,6 +84,10 @@ import {
   hintFirePostBarrier,
   hintGitProbeBarrier,
 } from "../../src/session/prompt/uncommitted-hint"
+import * as InboxController from "../../src/inbox/controller"
+import { inboxControllerRef } from "../../src/inbox/controller-ref"
+import { InboxTable } from "../../src/inbox/inbox.sql"
+import { observeAcceptedInbox } from "../fixture/accepted-inbox"
 
 void Log.init({ print: false })
 
@@ -430,34 +434,40 @@ let droppedStartGate:
     }
   | undefined
 
+// Observe durable admission rather than a Runner join: queued lane callers
+// wait in laneKick before they ever reach SessionRunState.ensureRunning.
+const nextAcceptedPrompt = Effect.fnUntraced(function* (sessionID: SessionID, actorID = "main", skip = 0) {
+  const accepted = yield* Deferred.make<void>()
+  const off = yield* observeAcceptedInbox(yield* Bus.Service, (event) => {
+    if (event.properties.receiverSessionID !== sessionID || event.properties.receiverActorID !== actorID) return
+    if (event.properties.type !== "prompt" && event.properties.type !== "user") return
+    if (skip > 0) {
+      skip--
+      return
+    }
+    Deferred.doneUnsafe(accepted, Effect.void)
+  })
+  yield* Effect.addFinalizer(() => Effect.sync(off))
+  return accepted
+})
+
 const holdNextRunAtExit = Effect.fnUntraced(function* (sessionID: SessionID, actorID = "main") {
   const gate = {
     sessionID,
     actorID,
     ownerArmed: true,
-    followerArmed: true,
+    followerArmed: false,
     ownerExit: yield* Deferred.make<void>(),
     releaseOwner: yield* Deferred.make<void>(),
-    followerAttached: yield* Deferred.make<void>(),
+    // The first acceptance owns the run whose finalizer we hold below.
+    followerAttached: yield* nextAcceptedPrompt(sessionID, actorID, 1),
   }
   lateRunGate = gate
   yield* Effect.addFinalizer(() => Deferred.succeed(gate.releaseOwner, undefined).pipe(Effect.ignore))
   return gate
 })
 
-const armNextRunFollower = Effect.fnUntraced(function* (sessionID: SessionID, actorID = "main") {
-  const followerAttached = yield* Deferred.make<void>()
-  lateRunGate = {
-    sessionID,
-    actorID,
-    ownerArmed: false,
-    followerArmed: true,
-    ownerExit: yield* Deferred.make<void>(),
-    releaseOwner: yield* Deferred.make<void>(),
-    followerAttached,
-  }
-  return followerAttached
-})
+const armNextRunFollower = nextAcceptedPrompt
 
 const holdNextSessionPre = Effect.fnUntraced(function* (fail = false) {
   const gate = {
@@ -611,6 +621,7 @@ function makeHttp(
   )
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
+    Layer.provide(CronBridgeDefaultLayer),
     Layer.provide(Goal.defaultLayer),
     Layer.provide(TaskRegistry.defaultLayer),
     Layer.provide(SchedulerDefaultLayer),
@@ -3794,6 +3805,77 @@ for (const disabled of [false, true]) {
   )
 }
 
+const frozenMcpIt = testEffect(makeHttp(mcpLayer(() => ({
+  mcp_frozen: dynamicTool({
+    description: "Frozen MCP execution fixture",
+    inputSchema: jsonSchema({ type: "object", properties: { value: { type: "string" } }, required: ["value"] }),
+    execute: async () => ({ content: [{ type: "text", text: "FROZEN_MCP_RESULT" }] }),
+  }),
+})), { actor: true }))
+
+for (const snapshot of ["dispatcher", "legacy loaded", "legacy direct"] as const) {
+for (const changed of [false, true]) {
+  frozenMcpIt.live(`full-context MCP ${snapshot} ${changed ? "rejects changed" : "executes matching"} frozen schemas`, () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const actors = yield* Effect.serviceOption(Actor.Service)
+        if (actors._tag === "None") throw new Error("real Actor service was not provided")
+        const parent = yield* sessions.create({ permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+        yield* prompt.prompt({
+          sessionID: parent.id, model: ref, harness: "default", noReply: true,
+          parts: [{ type: "text", text: "capture deferred MCP authority" }],
+        })
+        const capture = prefixCaptureRef.current
+        if (!capture) throw new Error("real prefix capture was not bound")
+        const messages = yield* sessions.messages({ sessionID: parent.id })
+        const prefix = yield* capture({
+          sessionID: parent.id, agentName: "build", providerID: ref.providerID, modelID: ref.modelID, msgs: messages,
+        })
+        expect(prefix.activeTools).toContain("mcp_tool_use")
+        expect(prefix.activeTools).not.toContain("mcp_frozen")
+        expect(prefix.tools.mcp_frozen).toBeDefined()
+        expect(prefix.loadedMcpTools).toEqual([])
+        const tools = changed ? {
+          ...prefix.tools,
+          mcp_frozen: { ...prefix.tools.mcp_frozen, inputSchema: jsonSchema({ type: "object", properties: {} }) },
+        } : prefix.tools
+        const selectedTool = snapshot === "dispatcher" ? "mcp_tool_use" : "mcp_frozen"
+        const frozenTools = snapshot === "dispatcher" ? tools : Object.fromEntries(
+          Object.entries(tools).filter(([name]) => name !== "mcp_tool_use"),
+        )
+        const activeTools = snapshot === "dispatcher" ? prefix.activeTools : [
+          ...(prefix.activeTools ?? []).filter(name => name !== "mcp_tool_use"), "mcp_frozen",
+        ]
+        yield* llm.tool(selectedTool, snapshot === "dispatcher"
+          ? { name: "mcp_frozen", arguments: { value: "test" } }
+          : { value: "test" })
+        yield* llm.text("done")
+        const spawned = yield* actors.value.spawn({
+          mode: "subagent", sessionID: parent.id, agentType: "build", task: "exercise frozen MCP dispatch",
+          context: "full", tools: ["mcp_frozen"], background: false, model: ref,
+          forkContext: {
+            ...prefix, tools: frozenTools, activeTools,
+            loadedMcpTools: snapshot === "legacy loaded" ? ["mcp_frozen"] : [],
+            model: ref, watermarkMsgID: messages.at(-1)!.info.id,
+          },
+        })
+        expect((yield* Deferred.await(spawned.outcome)).status).toBe("success")
+        const parts = (yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })).flatMap(message => message.parts)
+        const dispatched = parts.find(part => part.type === "tool" && part.tool === selectedTool)
+        expect(dispatched?.type === "tool" && dispatched.state.status).toBe(changed ? "error" : "completed")
+        const requests = yield* llm.inputs
+        expect(requests.map(request => (request.tools as Array<Record<string, unknown>>).map(wireToolName))).toContainEqual(expect.arrayContaining(snapshot === "dispatcher" || !changed ? [selectedTool] : []))
+        expect(JSON.stringify(requests).includes("FROZEN_MCP_RESULT")).toBe(!changed)
+      }),
+      { git: true, config: providerCfg },
+    ).pipe(withMcpToolSearch),
+  )
+}
+
+}
+
 itActor.live("full-context structured output remains advertised outside the captured parent tool subset", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
@@ -4277,18 +4359,18 @@ for (const isError of [false, true]) {
         yield* prompt.prompt({
           sessionID: session.id,
           agent: "build",
-          model: mcpRef,
+          model: ref,
           noReply: true,
           parts: [{ type: "text", text: "Capture screenshots" }],
         })
         yield* llm.tool("mcp_tool_search", { query: "screenshots" })
-        yield* llm.tool("mcp_screenshots", {})
+        yield* llm.tool("mcp_tool_use", { name: "mcp_screenshots" })
         yield* llm.text("Screenshots received")
         yield* prompt.loop({ sessionID: session.id })
 
         const part = (yield* MessageV2.filterCompactedEffect(session.id))
           .flatMap((message) => message.parts)
-          .find((part) => part.type === "tool" && part.tool === "mcp_screenshots")
+          .find((part) => part.type === "tool" && part.tool === "mcp_tool_use")
         if (part?.type !== "tool") throw new Error("Expected screenshot tool result")
         expect(part.state.status).toBe(isError ? "error" : "completed")
         const assertImages = (request: Record<string, unknown>) => {
@@ -4415,7 +4497,7 @@ mcpIt.live("MCP isError becomes a tool error without losing standard result fiel
         parts: [{ type: "text", text: "send the message" }],
       })
       yield* llm.tool("mcp_tool_search", { query: "execution error" })
-      yield* llm.tool("mcp_result", {})
+      yield* llm.tool("mcp_tool_use", { name: "mcp_result", arguments: {} })
       yield* llm.text("I saw that sending failed")
 
       const result = yield* prompt.loop({ sessionID: session.id })
@@ -4426,7 +4508,7 @@ mcpIt.live("MCP isError becomes a tool error without losing standard result fiel
         .flatMap((message) => message.parts)
         .find(
           (part): part is ErrorToolPart =>
-            part.type === "tool" && part.tool === "mcp_result" && part.state.status === "error",
+            part.type === "tool" && part.tool === "mcp_tool_use" && part.state.status === "error",
         )
       expect(tool).toBeDefined()
       if (!tool) return
@@ -4471,7 +4553,7 @@ mcpIt.live("MCP isError becomes a tool error without losing standard result fiel
       expect(followup).toContain("Message was not sent")
       expect(followup).toContain("Resource diagnostic")
       expect(followup).toContain("composer rejected the request")
-      expect(followup).toContain('Tool \\"mcp_result\\" call')
+      expect(followup).toContain('Tool \\"mcp_tool_use\\" call')
       expect(followup).toContain("failed:")
       expect(followup).toContain("diagnostic.bin")
       expect(followup).not.toContain("mcp://diagnostic.bin")
@@ -4576,7 +4658,7 @@ mcpIt.live("MCP structuredContent is persisted and reaches the model alongside t
         parts: [{ type: "text", text: "inspect the window" }],
       })
       yield* llm.tool("mcp_tool_search", { query: "structured success" })
-      yield* llm.tool("mcp_success", {})
+      yield* llm.tool("mcp_tool_use", { name: "mcp_success", arguments: {} })
       yield* llm.text("The window changed")
 
       yield* prompt.loop({ sessionID: session.id })
@@ -4587,7 +4669,7 @@ mcpIt.live("MCP structuredContent is persisted and reaches the model alongside t
         .flatMap((message) => message.parts)
         .find(
           (part): part is CompletedToolPart =>
-            part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed",
+            part.type === "tool" && part.tool === "mcp_tool_use" && part.state.status === "completed",
         )
       expect(tool).toBeDefined()
       if (!tool) return
@@ -4612,8 +4694,8 @@ mcpIt.live("MCP structuredContent is persisted and reaches the model alongside t
       expect(reminder).not.toContain("private_error_code")
       expect(reminder).not.toContain("Secret nested MCP window selector")
       expect(JSON.stringify(initialTools)).not.toContain("private_window_id")
-      expect(loadedTools.map(wireToolName)).toContain("mcp_success")
-      expect(loadedTools.map(wireToolName)).not.toContain("mcp_result")
+      expect(initialTools.map(wireToolName)).toContain("mcp_tool_use")
+      expect(JSON.stringify(loadedTools)).toBe(JSON.stringify(initialTools))
 
       const followup = JSON.stringify(requests[2])
       expect(followup).toContain("Window updated")
@@ -4666,7 +4748,7 @@ mcpIt.live("exec can call a catalogued MCP tool without loading its outer schema
   ),
 )
 
-mcpIt.live("rejects an MCP call that was not loaded by search", () =>
+mcpIt.live("rejects a direct call to a deferred MCP tool", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
       const prompt = yield* SessionPrompt.Service
@@ -4694,7 +4776,8 @@ mcpIt.live("rejects an MCP call that was not loaded by search", () =>
           (item): item is ErrorToolPart =>
             item.type === "tool" && item.tool === "mcp_success" && item.state.status === "error",
         )
-      expect(part?.state.error).toContain("mcp_tool_search")
+      expect(part?.state.error).toContain("deferred and cannot be called directly")
+      expect(part?.state.error).toContain("mcp_tool_use")
       expect(part?.state.metadata?.recoverable).toBe(true)
       const tools = (yield* llm.inputs)[0].tools as Array<Record<string, unknown>>
       expect(tools.map(wireToolName)).not.toContain("mcp_success")
@@ -4703,13 +4786,13 @@ mcpIt.live("rejects an MCP call that was not loaded by search", () =>
   ).pipe(withMcpToolSearch),
 )
 
-mcpIt.live("keeps searched MCP tools loaded for a later user request", () =>
+mcpIt.live("rejects direct deferred calls and returns recoverable mcp_tool_use errors for unknown tools and invalid arguments", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
       const prompt = yield* SessionPrompt.Service
       const sessions = yield* Session.Service
       const session = yield* sessions.create({
-        title: "Request scoped MCP",
+        title: "mcp_tool_use errors",
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
 
@@ -4719,64 +4802,35 @@ mcpIt.live("keeps searched MCP tools loaded for a later user request", () =>
         model: mcpRef,
         harness: "default",
         noReply: true,
-        parts: [{ type: "text", text: "inspect the window" }],
+        parts: [{ type: "text", text: "call deferred tools" }],
       })
-      yield* llm.tool("mcp_tool_search", { query: "structured success" })
       yield* llm.tool("mcp_success", {})
+      yield* llm.tool("mcp_tool_use", { name: "mcp_missing", arguments: {} })
+      yield* llm.tool("mcp_tool_use", { name: "mcp_success", arguments: [] })
       yield* llm.text("done")
       yield* prompt.loop({ sessionID: session.id })
 
-      yield* prompt.prompt({
-        sessionID: session.id,
-        agent: "build",
-        model: mcpRef,
-        harness: "default",
-        noReply: true,
-        parts: [{ type: "text", text: "new request" }],
-      })
-      yield* llm.text("done again")
-      yield* prompt.loop({ sessionID: session.id })
-
-      const requests = yield* llm.inputs
-      expect((requests[1].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("mcp_success")
-      expect((requests[3].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("mcp_success")
-      expect((requests[3].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("mcp_tool_search")
-      expect((requests[3].tools as Array<Record<string, unknown>>).map(wireToolName)).not.toContain("mcp_result")
-      // The catalog was announced once; the later request carries no new delta.
-      expect(lastUserText(requests[3])).not.toContain("deferred MCP tools")
+      const parts = (yield* MessageV2.filterCompactedEffect(session.id)).flatMap((message) => message.parts)
+      const direct = parts.find(
+        (item): item is ErrorToolPart =>
+          item.type === "tool" && item.tool === "mcp_success" && item.state.status === "error",
+      )
+      expect(direct?.state.error).toContain(`"name": "mcp_success"`)
+      expect(direct?.state.metadata?.recoverable).toBe(true)
+      const errors = parts
+        .filter(
+          (item): item is ErrorToolPart =>
+            item.type === "tool" && item.tool === "mcp_tool_use" && item.state.status === "error",
+        )
+      expect(errors).toHaveLength(2)
+      expect(errors[0].state.error).toContain("mcp_tool_search")
+      expect(errors[0].state.metadata?.recoverable).toBe(true)
+      expect(errors[1].state.error).toContain("must be an object")
+      expect(errors[1].state.error).toContain("<functions>")
+      expect(errors[1].state.metadata?.recoverable).toBe(true)
     }),
     { git: true, config: providerCfg },
-  ).pipe(withMcpToolSearch),
-)
-
-mcpIt.live("accumulates MCP matches across searches in one user request", () =>
-  provideTmpdirServer(
-    Effect.fnUntraced(function* ({ llm }) {
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const session = yield* sessions.create({ title: "Accumulated MCP" })
-
-      yield* prompt.prompt({
-        sessionID: session.id,
-        agent: "build",
-        model: mcpRef,
-        harness: "default",
-        noReply: true,
-        parts: [{ type: "text", text: "use two MCP capabilities" }],
-      })
-      yield* llm.tool("mcp_tool_search", { query: "execution error" })
-      yield* llm.tool("mcp_tool_search", { query: "structured success" })
-      yield* llm.text("ready")
-      yield* prompt.loop({ sessionID: session.id })
-
-      const requests = yield* llm.inputs
-      expect((requests[1].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("mcp_result")
-      expect((requests[1].tools as Array<Record<string, unknown>>).map(wireToolName)).not.toContain("mcp_success")
-      expect((requests[2].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("mcp_result")
-      expect((requests[2].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("mcp_success")
-    }),
-    { git: true, config: providerCfg },
-  ).pipe(withMcpToolSearch),
+  ),
 )
 
 mcpIt.live("keeps discovery reachable when permissions allow only an MCP tool", () =>
@@ -4802,16 +4856,19 @@ mcpIt.live("keeps discovery reachable when permissions allow only an MCP tool", 
       })
       yield* llm.tool("mcp_tool_search", { query: "structured success" })
       yield* llm.text("ready")
-      yield* prompt.loop({ sessionID: session.id })
+      const result = yield* prompt.loop({ sessionID: session.id })
+      if (result.info.role === "assistant") expect(result.info.error).toBeUndefined()
 
       const requests = yield* llm.inputs
+      expect(requests).toHaveLength(2)
       const initialTools = requests[0].tools as Array<Record<string, unknown>>
       const reminder = lastUserText(requests[0])
       expect(initialTools.map(wireToolName)).toContain("mcp_tool_search")
       expect(reminder).toContain("- mcp_success: Return a standard structured MCP success result")
       expect(reminder).not.toContain("mcp_result")
       expect(reminder).not.toContain("standard MCP tool execution error")
-      expect((requests[1].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("mcp_success")
+      expect((requests[1].tools as Array<Record<string, unknown>>).map(wireToolName)).toContain("mcp_tool_use")
+      expect((requests[1].tools as Array<Record<string, unknown>>).map(wireToolName)).not.toContain("mcp_success")
       expect((requests[1].tools as Array<Record<string, unknown>>).map(wireToolName)).not.toContain("mcp_result")
     }),
     { git: true, config: providerCfg },
@@ -4885,12 +4942,12 @@ mcpIt.live("searches only MCP tools allowed by the configured agent", () =>
       const requests = yield* llm.inputs
       const initialTools = requests[0].tools as Array<Record<string, unknown>>
       const reminder = lastUserText(requests[0])
-      expect(initialTools.map(wireToolName)).toEqual(["mcp_tool_search"])
+      expect(initialTools.map(wireToolName)).toEqual(["mcp_tool_search", "mcp_tool_use"])
       expect(reminder).toContain("- mcp_success: Return a standard structured MCP success result")
       expect(reminder).not.toContain("mcp_result")
       expect((requests[1].tools as Array<Record<string, unknown>>).map(wireToolName)).toEqual([
         "mcp_tool_search",
-        "mcp_success",
+        "mcp_tool_use",
       ])
     }),
     { git: true, config: restrictedAgentProviderCfg },
@@ -5046,7 +5103,7 @@ mcpIt.live(
 )
 
 mcpIt.live(
-  "defers MCP tools behind search for non-GPT models by default and keeps searched tools loaded across turns",
+  "defers MCP tools behind search for non-GPT models by default and calls them through mcp_tool_use with a stable tool list",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -5065,11 +5122,11 @@ mcpIt.live(
           parts: [{ type: "text", text: "inspect the window" }],
         })
         yield* llm.tool("mcp_tool_search", { query: "select:mcp_success" })
-        yield* llm.tool("mcp_success", {})
+        yield* llm.tool("mcp_tool_use", { name: "mcp_success", arguments: {} })
         yield* llm.text("done")
         yield* prompt.loop({ sessionID: session.id })
 
-        yield* llm.text("still loaded")
+        yield* llm.text("still stable")
         yield* prompt.prompt({
           sessionID: session.id,
           agent: "build",
@@ -5080,6 +5137,7 @@ mcpIt.live(
         const requests = yield* llm.inputs
         const names = (index: number) => (requests[index].tools as Array<Record<string, unknown>>).map(wireToolName)
         expect(names(0)).toContain("mcp_tool_search")
+        expect(names(0)).toContain("mcp_tool_use")
         expect(names(0)).not.toContain("mcp_success")
         expect(names(0)).not.toContain("mcp_result")
         expect(JSON.stringify(requests[0].tools)).not.toContain("mcp_success")
@@ -5105,9 +5163,9 @@ mcpIt.live(
         )
         expect(JSON.stringify(secondUser?.content)).toContain("inspect it again")
         expect(JSON.stringify(secondUser?.content)).not.toContain("deferred MCP tools")
-        expect(names(1)).toContain("mcp_success")
-        expect(names(1)).not.toContain("mcp_result")
-        expect(names(3)).toContain("mcp_success")
+        // Searching never changes the provider-facing tool definitions.
+        for (const index of [1, 2, 3]) expect(JSON.stringify(requests[index].tools)).toBe(JSON.stringify(requests[0].tools))
+        expect(names(1)).not.toContain("mcp_success")
 
         const parts = (yield* MessageV2.filterCompactedEffect(session.id)).flatMap((message) => message.parts)
         const search = parts.find(
@@ -5116,16 +5174,200 @@ mcpIt.live(
         )
         expect(search?.state.output).toContain("<functions>")
         expect(search?.state.output).toContain("private_window_id")
-        expect(
-          parts.some(
-            (part) => part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed",
-          ),
-        ).toBe(true)
+        expect(search?.state.output).toContain("mcp_tool_use")
+        const use = parts.find(
+          (part): part is CompletedToolPart =>
+            part.type === "tool" && part.tool === "mcp_tool_use" && part.state.status === "completed",
+        )
+        expect(use?.state.input).toEqual({ name: "mcp_success", arguments: {} })
+        expect(use?.state.output.length).toBeGreaterThan(0)
       }),
       { git: true, config: providerCfg },
     ),
   30_000,
 )
+
+// `flappingConnected(call)` decides, per resolveTools pass (one per loop step),
+// whether the configured server is connected.
+let flappingCalls = 0
+let flappingConnected: (call: number) => boolean = () => true
+const flappingMcpIt = testEffect(
+  makeHttp(
+    mcpLayer(
+      (): Record<string, AITool> =>
+        flappingConnected(flappingCalls++)
+          ? {
+              mcp_flappy: dynamicTool({
+                description: "Return a value from a server that disconnects",
+                inputSchema: jsonSchema({ type: "object", properties: {}, additionalProperties: false }),
+                execute: async () => ({ content: [{ type: "text", text: "flappy" }] }),
+              }),
+            }
+          : {},
+    ),
+  ),
+)
+
+const resetFlapping = Effect.sync(() => {
+  flappingCalls = 0
+  flappingConnected = () => true
+})
+
+const flappingSession = Effect.fnUntraced(function* (
+  llm: TestLLMServer["Service"],
+  between: (turn: number) => void,
+) {
+  const prompt = yield* SessionPrompt.Service
+  const sessions = yield* Session.Service
+  const session = yield* sessions.create({
+    title: "Flapping MCP",
+    permission: [{ permission: "*", pattern: "*", action: "allow" }],
+  })
+  for (const turn of [0, 1, 2]) {
+    between(turn)
+    yield* llm.text(`turn ${turn}`)
+    yield* prompt.prompt({
+      sessionID: session.id,
+      agent: "build",
+      model: ref,
+      parts: [{ type: "text", text: `turn ${turn}` }],
+    })
+  }
+  const requests = yield* llm.inputs
+  expect(requests).toHaveLength(3)
+  return requests
+})
+
+flappingMcpIt.live("keeps the tool list byte-stable while every MCP server disconnects and reconnects", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const requests = yield* flappingSession(llm, (turn) => {
+        flappingConnected = () => turn !== 1
+      })
+      const tools = requests.map((request) => JSON.stringify(request.tools))
+      expect(tools[0]).toContain("mcp_tool_search")
+      expect(tools[0]).toContain("mcp_tool_use")
+      expect(tools[1]).toBe(tools[0])
+      expect(tools[2]).toBe(tools[0])
+    }),
+    { git: true, config: providerCfg },
+  ).pipe(Effect.ensuring(resetFlapping)),
+)
+
+flappingMcpIt.live("exposes search and use before any MCP server connects", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const requests = yield* flappingSession(llm, (turn) => {
+        flappingConnected = () => turn !== 0
+      })
+      const tools = requests.map((request) => JSON.stringify(request.tools))
+      expect(tools[0]).toContain("mcp_tool_search")
+      expect(tools[0]).toContain("mcp_tool_use")
+      expect(tools[1]).toBe(tools[0])
+      expect(tools[2]).toBe(tools[0])
+      expect(lastUserText(requests[0])).not.toContain("deferred MCP tools")
+      expect(lastUserText(requests[1])).toContain("- mcp_flappy")
+    }),
+    { git: true, config: providerCfg },
+  ).pipe(Effect.ensuring(resetFlapping)),
+)
+
+flappingMcpIt.live("defers a mid-turn MCP arrival to the next turn instead of rewriting the user message", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      // Disconnected for the first step only; connects before the second step.
+      flappingConnected = (call) => call > 0
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Mid-turn MCP arrival",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* llm.tool("mcp_tool_search", { query: "flappy" })
+      yield* llm.text("first turn done")
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: ref,
+        parts: [{ type: "text", text: "first turn" }],
+      })
+      yield* llm.text("second turn done")
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: ref,
+        parts: [{ type: "text", text: "second turn" }],
+      })
+
+      const requests = yield* llm.inputs
+      expect(requests).toHaveLength(3)
+      const firstUser = (request: Record<string, unknown>) =>
+        JSON.stringify(
+          (request.messages as Array<{ role: string; content: unknown }>).find((message) => message.role === "user")
+            ?.content,
+        )
+      // Step 2 of turn 1 and turn 2 replay the first user message byte-for-byte.
+      expect(firstUser(requests[1])).toBe(firstUser(requests[0]))
+      expect(firstUser(requests[2])).toBe(firstUser(requests[0]))
+      expect(firstUser(requests[0])).not.toContain("mcp_flappy")
+      expect(lastUserText(requests[2])).toContain("second turn")
+      expect(lastUserText(requests[2])).toContain("- mcp_flappy")
+    }),
+    { git: true, config: providerCfg },
+  ).pipe(Effect.ensuring(resetFlapping)),
+)
+
+flappingMcpIt.live("keeps auto mode deferred when MCP tools first arrive under the threshold", () => {
+  const previous = process.env.MIMOCODE_MCP_TOOL_SEARCH
+  return provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const requests = yield* flappingSession(llm, (turn) => {
+        process.env.MIMOCODE_MCP_TOOL_SEARCH = "auto:100"
+        flappingConnected = () => turn !== 0
+      })
+      const tools = requests.map((request) => JSON.stringify(request.tools))
+      expect(tools[0]).toContain("mcp_tool_search")
+      expect(lastUserText(requests[0])).toContain("No deferred MCP tools are available yet")
+      expect(tools[1]).toBe(tools[0])
+      expect(tools[2]).toBe(tools[0])
+      expect(tools[1]).not.toContain("mcp_flappy")
+    }),
+    { git: true, config: providerCfg },
+  ).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env.MIMOCODE_MCP_TOOL_SEARCH
+        else process.env.MIMOCODE_MCP_TOOL_SEARCH = previous
+      }),
+    ),
+    Effect.ensuring(resetFlapping),
+  )
+})
+
+flappingMcpIt.live("keeps auto mode deferred after the MCP schemas drop back under the threshold", () => {
+  const previous = process.env.MIMOCODE_MCP_TOOL_SEARCH
+  return provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const requests = yield* flappingSession(llm, (turn) => {
+        process.env.MIMOCODE_MCP_TOOL_SEARCH = turn === 0 ? "auto:0" : "auto:100"
+      })
+      const tools = requests.map((request) => JSON.stringify(request.tools))
+      expect(tools[0]).toContain("mcp_tool_search")
+      expect(tools[0]).not.toContain("mcp_flappy")
+      expect(tools[1]).toBe(tools[0])
+      expect(tools[2]).toBe(tools[0])
+    }),
+    { git: true, config: providerCfg },
+  ).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env.MIMOCODE_MCP_TOOL_SEARCH
+        else process.env.MIMOCODE_MCP_TOOL_SEARCH = previous
+      }),
+    ),
+    Effect.ensuring(resetFlapping),
+  )
+})
 
 mcpIt.live("rejects direct MCP calls disabled for the request", () =>
   provideTmpdirServer(
@@ -5221,7 +5463,7 @@ mcpIt.live("omits MCP discovery for models without tool calling", () =>
 )
 
 it.live(
-  "omits MCP Tool Search when no MCP tools are available",
+  "exposes MCP Tool Search and Use without a reminder when no MCP tools are available",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -5239,8 +5481,12 @@ it.live(
         yield* llm.text("done")
         yield* prompt.loop({ sessionID: session.id })
 
-        const tools = (yield* llm.inputs)[0].tools as Array<Record<string, unknown>>
-        expect(tools.map(wireToolName)).not.toContain("mcp_tool_search")
+        const request = (yield* llm.inputs)[0]
+        const tools = request.tools as Array<Record<string, unknown>>
+        // Exposed up front so the first MCP server to connect never changes the tool list.
+        expect(tools.map(wireToolName)).toContain("mcp_tool_search")
+        expect(tools.map(wireToolName)).toContain("mcp_tool_use")
+        expect(JSON.stringify(request.messages)).not.toContain("deferred MCP tools")
       }),
       { git: true, config: providerCfg },
     ),
@@ -5740,6 +5986,10 @@ it.live(
         if (Exit.isSuccess(exitA) && Exit.isSuccess(exitB)) {
           expect(exitA.value.info.id).toBe(exitB.value.info.id)
         }
+        expect(yield* llm.calls).toBe(1)
+        const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
+        expect(messages.filter((message) => message.info.role === "assistant")).toHaveLength(1)
+        yield* (yield* SessionRunState.Service).assertNotBusy(chat.id)
       }),
       { git: true, config: providerCfg },
     ),
@@ -5788,7 +6038,7 @@ itActor.live(
           return true
         }, "main inbox wake completed")
         const sent = yield* inbox
-          .send({
+          .accept({
             receiverSessionID: chat.id,
             receiverActorID: "main",
             content: "main-inbox-after-cancel",
@@ -5831,38 +6081,34 @@ itActor.live(
         yield* Effect.addFinalizer(() => Deferred.succeed(releaseOwner, undefined).pipe(Effect.ignore))
 
         yield* llm.text("first wake complete")
-        const insert = (id: string, text: string) =>
-          Effect.sync(() =>
-            Database.use((db) =>
-              db
-                .insert(InboxTable)
-                .values({
-                  id,
-                  receiver_session_id: chat.id,
-                  receiver_actor_id: "main",
-                  sender_session_id: null,
-                  sender_actor_id: null,
-                  type: "text",
-                  content: { text },
-                  created_at: Date.now(),
-                })
-                .run(),
-            ),
-          )
-        yield* insert("first-main-row", "first-main-row")
+        const queue = inboxControllerRef.current
+        if (!queue) return yield* Effect.die("inbox controller was not initialized")
+        const insert = (id: string, text: string) => {
+          const messageID = MessageID.ascending()
+          return queue.accept({
+            lane: { sessionID: chat.id, agentID: "main" },
+            idempotencyKey: id, type: "text",
+            message: {
+              id: messageID, sessionID: chat.id, agentID: "main", role: "user", source: "spawn",
+              agent: "build", model: ref, time: { created: Date.now() },
+            },
+            parts: [{ id: PartID.ascending(), messageID, sessionID: chat.id, type: "text", text, synthetic: true }],
+          }, { deferKick: true })
+        }
+        const firstReceipt = yield* insert("first-main-row", "first-main-row")
         const owner = yield* prompt
-          .loop({ sessionID: chat.id, agentID: "main", inboxID: "first-main-row" })
+          .loop({ sessionID: chat.id, agentID: "main" })
           .pipe(Effect.forkChild)
         yield* llm.wait(1).pipe(Effect.timeout("5 seconds"))
         yield* Deferred.await(ownerExit).pipe(Effect.timeout("5 seconds"))
 
         yield* llm.text("second wake complete")
-        yield* insert("late-main-row", "late-main-row")
+        const lateReceipt = yield* insert("late-main-row", "late-main-row")
         const follower = yield* prompt
-          .loop({ sessionID: chat.id, agentID: "main", inboxID: "late-main-row" })
+          .loop({ sessionID: chat.id, agentID: "main" })
           .pipe(Effect.forkChild)
         yield* Deferred.await(followerAttached).pipe(Effect.timeout("5 seconds"))
-        expect(yield* inbox.has("late-main-row")).toBe(true)
+        expect((yield* queue.getReceipt(lateReceipt.id)).state === "accepted").toBe(true)
 
         yield* Deferred.succeed(releaseOwner, undefined)
         const reachedSecond = yield* llm
@@ -5871,12 +6117,12 @@ itActor.live(
         yield* Fiber.join(owner).pipe(Effect.timeout("5 seconds"))
         yield* Fiber.join(follower).pipe(Effect.timeout("5 seconds"))
 
-        expect({ reachedSecond, calls: yield* llm.calls, lateExists: yield* inbox.has("late-main-row") }).toEqual({
+        expect({ reachedSecond, calls: yield* llm.calls, lateExists: (yield* queue.getReceipt(lateReceipt.id)).state === "accepted" }).toEqual({
           reachedSecond: true,
           calls: 2,
           lateExists: false,
         })
-        expect(yield* inbox.has("first-main-row")).toBe(false)
+        expect((yield* queue.getReceipt(firstReceipt.id)).state === "accepted").toBe(false)
       }),
       { git: true, config: providerCfg },
     ),
@@ -5884,7 +6130,7 @@ itActor.live(
 )
 
 itActor.live(
-  "a main inbox follower does not retry a joined failure without progress",
+  "an explicit main inbox join observer preserves a queued receipt when the owner fails without progress",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -5894,18 +6140,17 @@ itActor.live(
         const chat = yield* sessions.create({ title: "joined inbox failure" })
         yield* seed(chat.id)
         const inboxID = crypto.randomUUID()
-        Database.use((db) =>
-          db
-            .insert(InboxTable)
-            .values({
-              id: inboxID,
-              receiver_session_id: chat.id,
-              receiver_actor_id: "main",
-              content: { text: "must remain queued" },
-              created_at: Date.now(),
-            })
-            .run(),
-        )
+        const queue = inboxControllerRef.current
+        if (!queue) return yield* Effect.die("inbox controller was not initialized")
+        const messageID = MessageID.ascending()
+        const receipt = yield* queue.accept({
+          lane: { sessionID: chat.id, agentID: "main" }, idempotencyKey: inboxID, type: "text",
+          message: {
+            id: messageID, sessionID: chat.id, agentID: "main", role: "user", source: "spawn",
+            agent: "build", model: ref, time: { created: Date.now() },
+          },
+          parts: [{ id: PartID.ascending(), messageID, sessionID: chat.id, type: "text", text: "must remain queued", synthetic: true }],
+        }, { deferKick: true })
         const release = yield* Deferred.make<void>()
         const attached = yield* Deferred.make<void>()
         yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
@@ -5925,14 +6170,17 @@ itActor.live(
           Deferred.await(release).pipe(Effect.andThen(Effect.die(new Error("failure before drain")))),
         )
         yield* llm.text("unexpected follower retry")
-        const follower = yield* prompt.loop({ sessionID: chat.id, inboxID }).pipe(Effect.forkChild)
+        const follower = yield* state.ensureRunning(
+          chat.id, "main", Effect.die("unexpected observer interrupt"),
+          prompt.loop({ sessionID: chat.id }), true,
+        ).pipe(Effect.forkChild)
         yield* Deferred.await(attached)
         yield* Deferred.succeed(release, undefined)
         const result = yield* Fiber.await(follower).pipe(Effect.timeout("5 seconds"))
         yield* owner.pipe(Effect.exit)
-        expect(result._tag).toBe("Failure")
         expect(yield* llm.calls).toBe(0)
-        expect(yield* inboxServiceRef.current!.has(inboxID)).toBe(true)
+        expect((yield* queue.getReceipt(receipt.id)).state === "accepted").toBe(true)
+        expect(result._tag).toBe("Failure")
       }),
       { git: true, config: providerCfg },
     ),
@@ -6259,74 +6507,86 @@ taskMetadataIt.live(
   20_000,
 )
 
-taskMetadataIt.live(
-  "a queued prompt preserves structured output from the superseded step",
-  () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
-        const sessions = yield* Session.Service
-        const chat = yield* sessions.create({ title: "Structured prompt handoff" })
-        const gate = yield* holdNextUserQueryPost()
-        const firstID = MessageID.ascending()
+for (const nextFails of [false, true]) {
+  taskMetadataIt.live(
+    `a queued prompt preserves structured output from the superseded step${nextFails ? " when the next request fails" : ""}`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const prompt = yield* SessionPrompt.Service
+          const sessions = yield* Session.Service
+          const chat = yield* sessions.create({ title: "Structured prompt handoff" })
+          const gate = yield* holdNextUserQueryPost()
+          const firstID = MessageID.ascending()
 
-        yield* llm.tool("StructuredOutput", { answer: 4 })
-        yield* llm.text("latest answer")
-        const first = yield* prompt
-          .prompt({
-            sessionID: chat.id,
-            messageID: firstID,
-            agent: "build",
-            task_id: "T1",
-            format: {
-              type: "json_schema",
-              retryCount: 0,
-              schema: {
-                type: "object",
-                properties: { answer: { type: "number" } },
-                required: ["answer"],
+          yield* llm.tool("StructuredOutput", { answer: 4 })
+          yield* nextFails
+            ? llm.error(400, { error: { message: "The later request failed" } })
+            : llm.text("latest answer")
+          const first = yield* prompt
+            .prompt({
+              sessionID: chat.id,
+              messageID: firstID,
+              agent: "build",
+              task_id: "T1",
+              format: {
+                type: "json_schema",
+                retryCount: 0,
+                schema: {
+                  type: "object",
+                  properties: { answer: { type: "number" } },
+                  required: ["answer"],
+                },
               },
-            },
-            parts: [{ type: "text", text: "return structured output" }],
-          })
-          .pipe(Effect.forkChild)
-        yield* Deferred.await(gate.entered).pipe(Effect.timeout("10 seconds"))
+              parts: [{ type: "text", text: "return structured output" }],
+            })
+            .pipe(Effect.forkChild)
+          yield* Deferred.await(gate.entered).pipe(Effect.timeout("10 seconds"))
 
-        const followerAttached = yield* armNextRunFollower(chat.id)
-        const lateID = MessageID.ascending()
-        const late = yield* prompt
-          .prompt({
-            sessionID: chat.id,
-            messageID: lateID,
-            agent: "build",
-            task_id: "T2",
-            parts: [{ type: "text", text: "new task after structured output" }],
-          })
-          .pipe(Effect.forkChild)
-        yield* Deferred.await(followerAttached).pipe(Effect.timeout("10 seconds"))
-        yield* Deferred.succeed(gate.release, undefined)
-        const results = yield* Effect.all([Fiber.join(first), Fiber.join(late)], { concurrency: "unbounded" }).pipe(
-          Effect.timeout("10 seconds"),
-        )
-        const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
-        const firstAssistant = messages.find((item) => item.info.role === "assistant" && item.info.parentID === firstID)
-        const lateAssistant = messages.find((item) => item.info.role === "assistant" && item.info.parentID === lateID)
+          const followerAttached = yield* armNextRunFollower(chat.id)
+          const lateID = MessageID.ascending()
+          const late = yield* prompt
+            .prompt({
+              sessionID: chat.id,
+              messageID: lateID,
+              agent: "build",
+              task_id: "T2",
+              parts: [{ type: "text", text: "new task after structured output" }],
+            })
+            .pipe(Effect.forkChild)
+          yield* Deferred.await(followerAttached).pipe(Effect.timeout("10 seconds"))
+          yield* Deferred.succeed(gate.release, undefined)
+          const results = yield* Effect.all([Fiber.join(first), Fiber.join(late)], { concurrency: "unbounded" }).pipe(
+            Effect.timeout("10 seconds"),
+          )
+          const messages = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
+          const firstAssistant = messages.find((item) => item.info.role === "assistant" && item.info.parentID === firstID)
+          const lateAssistant = messages.find((item) => item.info.role === "assistant" && item.info.parentID === lateID)
 
-        expect(yield* llm.calls).toBe(2)
-        expect(firstAssistant?.info.role === "assistant" ? firstAssistant.info.structured : undefined).toEqual({
-          answer: 4,
-        })
-        expect(lateAssistant?.info.role === "assistant" ? lateAssistant.info.structured : undefined).toBeUndefined()
-        expect(results[0].info.role === "assistant" ? results[0].info.parentID : undefined).toBe(firstID)
-        expect(results[1].info.role === "assistant" ? results[1].info.parentID : undefined).toBe(lateID)
-      }),
-      { git: true, config: providerCfg },
-    ),
-  20_000,
-)
+          expect(yield* llm.calls).toBe(2)
+          expect(firstAssistant?.info.role === "assistant" ? firstAssistant.info.structured : undefined).toEqual({
+            answer: 4,
+          })
+          expect(lateAssistant?.info.role === "assistant" ? lateAssistant.info.structured : undefined).toBeUndefined()
+          expect(results[0].info.role === "assistant" ? results[0].info.parentID : undefined).toBe(firstID)
+          expect(results[1].info.role === "assistant" ? results[1].info.parentID : undefined).toBe(lateID)
+          const receipts = Database.use(db => db.select().from(InboxTable)
+            .where(eq(InboxTable.receiver_session_id, chat.id)).all())
+          expect(receipts.find(receipt => receipt.input_message_id === firstID)).toMatchObject({
+            state: "settled", outcome: "success", error: null,
+          })
+          expect(receipts.find(receipt => receipt.input_message_id === lateID)).toMatchObject({
+            state: "settled", outcome: nextFails ? "assistant_error" : "success",
+          })
+        }),
+        { git: true, config: providerCfg },
+      ),
+    20_000,
+  )
+}
 
 taskMetadataIt.live(
-  "closing handoff binds task metadata to the latest persisted prompt",
+  "closing handoff keeps admitted task metadata when a newer prompt is persisted with noReply",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -6359,11 +6619,13 @@ taskMetadataIt.live(
 
         yield* llm.tool("plan_exit", {})
         yield* llm.text("latest answer")
+        const queuedID = MessageID.ascending()
         const queued = yield* prompt
           .prompt({
             sessionID: chat.id,
             agent: "build",
             task_id: "T1",
+            messageID: queuedID,
             parts: [{ type: "text", text: "queued while closing" }],
           })
           .pipe(Effect.forkChild)
@@ -6387,10 +6649,11 @@ taskMetadataIt.live(
         const successorInput = (yield* llm.inputs)[1]
         expect(JSON.stringify(successorInput?.messages)).toContain("queued while closing")
         expect(JSON.stringify(successorInput?.messages)).toContain("latest persisted prompt")
-        expect(result.info.role === "assistant" ? result.info.parentID : undefined).toBe(latestID)
-        expect(toolTaskIDs).toEqual(["T2"])
-        expect(sessionTaskIDs.pre).toEqual(["T0", "T2"])
-        expect(sessionTaskIDs.post).toEqual(["T0", "T2"])
+        expect(result.info.role === "assistant" ? result.info.parentID : undefined).toBe(queuedID)
+        expect(Database.use(db => db.select().from(InboxTable).where(eq(InboxTable.input_message_id, latestID)).get())).toBeUndefined()
+        expect(toolTaskIDs).toEqual(["T1"])
+        expect(sessionTaskIDs.pre).toEqual(["T0", "T1"])
+        expect(sessionTaskIDs.post).toEqual(["T0", "T1"])
       }),
       { git: true, config: providerCfg },
     ),
@@ -6455,7 +6718,7 @@ it.live(
 )
 
 it.live(
-  "a shared MessageAbortedError does not restart handoff for a queued prompt",
+  "a cancelled queued prompt preserves the first MessageAbortedError and never runs",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -6489,11 +6752,15 @@ it.live(
         yield* Deferred.await(followerAttached).pipe(Effect.timeout("10 seconds"))
 
         yield* prompt.cancel(chat.id)
-        yield* Fiber.join(first).pipe(Effect.timeout("10 seconds"))
+        const firstResult = yield* Fiber.join(first).pipe(Effect.timeout("10 seconds"))
         const result = yield* Fiber.join(late).pipe(Effect.timeout("10 seconds"))
 
         expect(yield* llm.calls).toBe(1)
-        expect(result.info.role === "assistant" ? result.info.error?.name : undefined).toBe("MessageAbortedError")
+        expect(firstResult.info.role === "assistant" ? firstResult.info.error?.name : undefined).toBe("MessageAbortedError")
+        expect(result.info.role).toBe("user")
+        expect(result.info.id).toBe(lateID)
+        const receipt = Database.use(db => db.select().from(InboxTable).where(eq(InboxTable.input_message_id, lateID)).get())
+        expect(receipt).toMatchObject({ state: "cancelled", outcome: "never_ran", consumed: false, delivery_message_id: null })
         expect(
           (yield* sessions.messages({ sessionID: chat.id })).some(
             (item) => item.info.role === "assistant" && item.info.parentID === lateID,
@@ -6602,6 +6869,27 @@ unix("shell captures stdout and stderr in completed tool output", () =>
         expect(tool.state.metadata.output).toContain("err")
         yield* run.assertNotBusy(chat.id)
       }),
+    { git: true, config: cfg },
+  ),
+)
+
+unix("shell keeps exclusive ownership with a mounted queue and repeated commands", () =>
+  provideTmpdirInstance(
+    () => Effect.gen(function* () {
+      const queue = yield* InboxController.Service
+      const { prompt, run, chat } = yield* boot()
+      const first = yield* prompt.shell({ sessionID: chat.id, agent: "build", command: "printf once" })
+      const second = yield* prompt.shell({ sessionID: chat.id, agent: "build", command: "printf once" })
+      expect(first.info.id).not.toBe(second.info.id)
+      expect(completedTool(first.parts)?.state.output).toContain("once")
+      expect(completedTool(second.parts)?.state.output).toContain("once")
+      expect(yield* queue.listAccepted({ sessionID: chat.id, agentID: "main" })).toEqual([])
+      expect(Database.use((db) => db.select().from(InboxTable)
+        .where(eq(InboxTable.receiver_session_id, chat.id)).all())).toEqual([])
+      const messages = yield* (yield* Session.Service).messages({ sessionID: chat.id, agentID: "main" })
+      expect(messages.filter((message) => message.info.role === "assistant")).toHaveLength(2)
+      yield* run.assertNotBusy(chat.id)
+    }).pipe(Effect.provide(InboxController.defaultLayer)),
     { git: true, config: cfg },
   ),
 )
@@ -9866,9 +10154,51 @@ describe("trailing-user resume integration", () => {
     20_000,
   )
 
+  it.live("recovery checks only its target Runner and restores candidates after ownership release", () =>
+    provideTmpdirInstance(() => Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const runs = yield* SessionRunState.Service
+      const chat = yield* sessions.create({ title: "slice recovery ownership" })
+      const users = yield* Effect.forEach(["main", "child-1"], (agentID) => sessions.updateMessage({
+        id: MessageID.ascending(), role: "user", sessionID: chat.id, agentID, agent: "build", model: ref,
+        time: { created: Date.now() },
+      }))
+      const mainCandidates = yield* prompt.recovery({ sessionID: chat.id })
+      const childCandidates = yield* prompt.recovery({ sessionID: chat.id, agentID: "child-1" }).pipe(Effect.exit)
+      expect(mainCandidates).toHaveLength(1)
+      expect(Exit.isFailure(childCandidates)).toBe(true)
+      if (Exit.isFailure(childCandidates)) expect(Cause.squash(childCandidates.cause)).toBeInstanceOf(NotFoundError)
+      const release = yield* Deferred.make<void>()
+      yield* runs.start(chat.id, "child-1", Effect.interrupt,
+        Deferred.await(release).pipe(Effect.as({ info: users[1]!, parts: [] })))
+      const owned = yield* runs.executionSnapshot(chat.id, "child-1")
+      if (!owned.fiber) throw new Error("child Runner did not start")
+      try {
+        expect((yield* (yield* SessionStatus.Service).get(chat.id)).type).toBe("idle")
+        expect(yield* prompt.recovery({ sessionID: chat.id, agentID: "child-1" })).toEqual([])
+        const childBusy = yield* runs.assertNotBusy(chat.id, "child-1").pipe(Effect.exit)
+        expect(Exit.isFailure(childBusy)).toBe(true)
+        if (Exit.isFailure(childBusy)) expect(Cause.squash(childBusy.cause)).toBeInstanceOf(Session.BusyError)
+        expect(yield* prompt.recovery({ sessionID: chat.id })).toEqual(mainCandidates)
+        yield* runs.assertNotBusy(chat.id)
+        const resumed = yield* prompt.resumeBackground({ sessionID: chat.id, agentID: "child-1" }).pipe(Effect.exit)
+        expect(Exit.isFailure(resumed)).toBe(true)
+        if (Exit.isFailure(resumed)) expect(Cause.squash(resumed.cause)).toBeInstanceOf(NotFoundError)
+      } finally {
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.await(owned.fiber)
+      }
+      const afterChild = yield* prompt.recovery({ sessionID: chat.id, agentID: "child-1" }).pipe(Effect.exit)
+      expect(Exit.isFailure(afterChild)).toBe(true)
+      if (Exit.isFailure(afterChild)) expect(Cause.squash(afterChild.cause)).toBeInstanceOf(NotFoundError)
+      expect(yield* prompt.recovery({ sessionID: chat.id })).toEqual(mainCandidates)
+    }), { git: true, config: cfg }),
+  )
+
   it.live("concurrent double resume: BusyError or consumed-target NotFoundError; only one execution", () =>
     provideTmpdirServer(
-      Effect.fnUntraced(function* ({ llm, dir }) {
+      ({ llm, dir }) => Effect.gen(function* () {
         const prompt = yield* SessionPrompt.Service
         const sessions = yield* Session.Service
         const chat = yield* sessions.create({
@@ -9909,7 +10239,43 @@ describe("trailing-user resume integration", () => {
           before.flatMap((m) => m.parts).filter((p) => p.type === "tool"),
         )
         expect(yield* llm.calls).toBe(1)
-      }),
+        expect(Database.use((db) => db.select().from(InboxTable)
+          .where(eq(InboxTable.receiver_session_id, chat.id)).all())).toEqual([])
+      }).pipe(Effect.provide(InboxController.defaultLayer)),
+      { git: true, config: providerCfg },
+    ),
+  )
+
+  it.live("resume planned before an epoch change cannot acquire a new execution", () =>
+    provideTmpdirServer(
+      ({ llm, dir }) => Effect.gen(function* () {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const queue = yield* InboxController.Service
+        const chat = yield* sessions.create({ title: "resume-epoch-fence" })
+        const { user2 } = yield* seedTail(chat.id, dir, {})
+        const before = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
+        const reached = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const previous = ResumeTestHooks.beforeExclusiveOccupy
+        ResumeTestHooks.beforeExclusiveOccupy = () => Deferred.succeed(reached, undefined)
+          .pipe(Effect.andThen(Deferred.await(release)))
+        yield* Effect.addFinalizer(() => Effect.sync(() => {
+          ResumeTestHooks.beforeExclusiveOccupy = previous
+        }))
+        yield* llm.text("MUST_NOT_EXECUTE")
+        const fiber = yield* prompt.resume({ sessionID: chat.id, userMessageID: user2.id, model: ref })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(reached)
+        yield* queue.abortSession(chat.id)
+        yield* Deferred.succeed(release, undefined)
+        const exit = yield* Fiber.await(fiber)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+        expect(yield* llm.calls).toBe(0)
+        expect(yield* sessions.messages({ sessionID: chat.id, agentID: "main" })).toEqual(before)
+        yield* (yield* SessionRunState.Service).assertNotBusy(chat.id)
+      }).pipe(Effect.provide(InboxController.defaultLayer)),
       { git: true, config: providerCfg },
     ),
   )
