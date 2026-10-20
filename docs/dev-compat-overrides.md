@@ -14,10 +14,41 @@ registry/history commit does not advance either behavior reference below.
 - Last reviewed: 2026-10-20, full upstream synchronization over `bf0563ddc201b44e3f59c35b18dba17c4386564d..4e58a80184794d52d913d4b886b96f496f2c7020`.
 - Starting compat: `97fce708b8dc9353d274b83f718e1a3c7d27416a`; initial inherited main runtime: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`; initial reviewed compat runtime/tests: `ac2b653cde97fb3046e6510ff4e5183b59186bd5`. The completed intermediate compat tip `00f40d329cf26e19dbaff131158494aec8b19e82` integrates main `f6632fb8085b4005df4abeb36933b30ee9d74811`. C13 inherits main runtime `b18a1207cd66c312216698c175441b8c49778907` at compat runtime/tests `a10363fe376ad2e4d405c27b6d84128918f6c1e3`, with main review `3d9527fd667de159110f594ea79c25dfbf2c5401`; final publication references are recorded in [the synchronization report](upstream-sync-2026-10-20.md).
 - Scope: all thirteen shared capability rows C01–C13, including cleanly merged DC surfaces and the newer DC-ACTOR-002, DC-PROVIDER-001, DC-WEBSEARCH-001 and DC-WEBFETCH-001 entries. The prior eight-owner and 120-path records below are historical snapshots.
-- Latest shared correction: main `d2f22b8d293dfb16d28e609c8f6d58047a5ee369` is inherited by compat `dcc13401331125450c1cdf39308bdefa5994e86f`. It makes repeated OpenAPI generation safe without adding a DC owner or changing the eleven-owner, 52-source-overlay set. Its exact-SHA CI evidence is recorded below.
+- Latest shared correction: main `5e366d0923c5570c5097ae1a9c5deffb86e5a79d` is inherited by compat `e92151b7c473c1f350c334b083a96a7c60127fd4`. CronBridge now stops the scheduler owned by a disposed instance generation; this shared FC-007 correction adds no DC owner. The prior OpenAPI correction at main `d2f22b8d293dfb16d28e609c8f6d58047a5ee369` / compat `dcc13401331125450c1cdf39308bdefa5994e86f` remains inherited. Final publication evidence is recorded in the shared synchronization report.
 - Resolution: adopt the shared durable queue, receipt lifecycle, actor waits, execution ownership, fixed `mcp_tool_use` dispatcher, readiness hints, empty-output retries, thinking-signature fix and UI/release changes while preserving the eleven contracts below. Silent auto-mode without a real reminder/call may re-evaluate; no auxiliary cache-mode state is persisted. Schema generation uses the resolved compat source, including checkpoint coverage and model selection.
 - Validation: default-path commands remove ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and `MIMOCODE_CODEX_MODE`, retaining package preload and each test's scoped opt-ins. `bun ci` completes without a lockfile change; SDK regeneration exits 0 with no additional generated diff, CLI/SDK typechecks pass, and lint reports zero errors. The completed local groups and incomplete full-file runs are distinguished below; exact-SHA CI remains the publication gate.
 - Shared ownership: FD/FC registries and the shared report inherit main unchanged; only this compat registry owns the overlay decisions below.
+
+### 2026-10-20 specified post-sync convergence
+
+Compat `6ec7fcda7d09eec541054b02a08c401cd6aca2ad` inherits main
+`8cbf76bc725b93f65561868b515213d45ff72380` without conflicts. The shared
+queue-interface cleanup, fork-history reuse, main-only retry diagnostics and
+MCP contract correction are owned by main; no DC owner is added or retired.
+The prompt/processor overlay against main is unchanged by this inheritance,
+and all compat-only prompt cases remain.
+
+The subsequent shared cron correction at main `5e366d0923c5570c5097ae1a9c5deffb86e5a79d`
+is inherited through compat `e92151b7c473c1f350c334b083a96a7c60127fd4`.
+Its source and tests match main exactly; no compat-specific cron variant is
+introduced. The lifecycle regressions use the shared Effect test harness.
+
+Layout snapshot `79f210072d52a66bcd79be1b0cbec348a4e53cfa` moves the unchanged
+`blankTo` comment and function below `renderInboxRow`, matching upstream, and
+restores its two-line structural-subset comment. Removing that moved block and
+the restored comment leaves the rest of the file byte-identical. DC-CONTEXT-001
+retains UTF-8 caps, the closed notification wrapper and blank-body fallback;
+the redundant content casts remain absent.
+
+The four render/empty-part/notification suites pass 42 tests with zero failures
+and 84 assertions. The inherited queue/lifecycle group passes 106 tests and CLI
+typecheck exits 0. A separate local 25-file integration run finishes with
+203 pass and nine deadline-related failures; it is not full passing evidence.
+A targeted recheck with CI-matching Bun 1.3.14 yielded 5 pass and four
+deadline-related failures; these local results do not establish their cause.
+The layout is published through PR #166, based on the shared cron correction.
+Final merge SHA and exact-SHA CI are recorded in the shared synchronization
+report after the integration checks complete.
 
 ### 2026-10-20 owner impact review
 

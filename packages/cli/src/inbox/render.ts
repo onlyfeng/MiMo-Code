@@ -15,16 +15,8 @@ function capActorNotificationText(text: string) {
   return capInboxText(text)
 }
 
-// A blank body must fall back to the placeholder, not just a missing one.
-// `?? placeholder` only catches null/undefined, but a blank body is stored as
-// "" (or whitespace) — and for actor_notification the body is passed through
-// RAW, so "" would become a user text part with text:"". The AI SDK's user
-// branch filters empty text parts out with no backfill, leaving `content: []`
-// and a provider 400 ("user messages must have non-empty content").
-function blankTo(text: string | undefined, placeholder: string) {
-  return text !== undefined && text.trim().length > 0 ? text : placeholder
-}
-
+// Structural subset of InboxRow — render only reads these fields, so callers
+// (including tests) need not construct a full queue row.
 export function renderInboxRow(row: {
   type: string
   content: { text?: string } | null
@@ -45,6 +37,16 @@ export function renderInboxRow(row: {
   const sender = row.sender_session_id ? `${row.sender_session_id}:${row.sender_actor_id ?? "?"}` : "system"
   const sentAt = new Date(row.created_at).toISOString()
   return `<inbox from="${sender}" sent_at="${sentAt}">\n${capInboxText(blankTo(content?.text, "(empty)"))}\n</inbox>`
+}
+
+// A blank body must fall back to the placeholder, not just a missing one.
+// `?? placeholder` only catches null/undefined, but a blank body is stored as
+// "" (or whitespace) — and for actor_notification the body is passed through
+// RAW, so "" would become a user text part with text:"". The AI SDK's user
+// branch filters empty text parts out with no backfill, leaving `content: []`
+// and a provider 400 ("user messages must have non-empty content").
+function blankTo(text: string | undefined, placeholder: string) {
+  return text !== undefined && text.trim().length > 0 ? text : placeholder
 }
 
 // Display-only decoding; keep the persisted synthetic part unchanged for model context.
