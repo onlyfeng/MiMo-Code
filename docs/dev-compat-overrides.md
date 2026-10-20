@@ -19,6 +19,29 @@ registry/history commit does not advance either behavior reference below.
 - Validation: default-path commands remove ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and `MIMOCODE_CODEX_MODE`, retaining package preload and each test's scoped opt-ins. `bun ci` completes without a lockfile change; SDK regeneration exits 0 with no additional generated diff, CLI/SDK typechecks pass, and lint reports zero errors. The completed local groups and incomplete full-file runs are distinguished below; exact-SHA CI remains the publication gate.
 - Shared ownership: FD/FC registries and the shared report inherit main unchanged; only this compat registry owns the overlay decisions below.
 
+### 2026-10-20 specified post-sync convergence
+
+Compat `6ec7fcda7d09eec541054b02a08c401cd6aca2ad` inherits main
+`8cbf76bc725b93f65561868b515213d45ff72380` without conflicts. The shared
+queue-interface cleanup, fork-history reuse, main-only retry diagnostics and
+MCP contract correction are owned by main; no DC owner is added or retired.
+The prompt/processor overlay against main is unchanged by this inheritance,
+and all 26 compat-only prompt cases remain.
+
+Layout snapshot `79f210072d52a66bcd79be1b0cbec348a4e53cfa` moves the unchanged
+`blankTo` comment and function below `renderInboxRow`, matching upstream, and
+restores its two-line structural-subset comment. Removing that moved block and
+the restored comment leaves the rest of the file byte-identical. DC-CONTEXT-001
+retains UTF-8 caps, the closed notification wrapper and blank-body fallback;
+the redundant content casts remain absent.
+
+The four render/empty-part/notification suites pass 42 tests with zero failures
+and 84 assertions. The inherited queue/lifecycle group passes 106 tests and CLI
+typecheck exits 0. A separate local 25-file integration run finishes with
+203 pass and nine deadline-related failures; it is not full passing evidence.
+Publication and exact-SHA CI are recorded in the shared synchronization report
+after the integration checks complete.
+
 ### 2026-10-20 owner impact review
 
 | Owner | Incoming relationship and retained contract | Decisive surfaces and validation |
