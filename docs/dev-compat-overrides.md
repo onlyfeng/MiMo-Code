@@ -26,7 +26,7 @@ Compat `6ec7fcda7d09eec541054b02a08c401cd6aca2ad` inherits main
 queue-interface cleanup, fork-history reuse, main-only retry diagnostics and
 MCP contract correction are owned by main; no DC owner is added or retired.
 The prompt/processor overlay against main is unchanged by this inheritance,
-and all 26 compat-only prompt cases remain.
+and all compat-only prompt cases remain.
 
 Layout snapshot `79f210072d52a66bcd79be1b0cbec348a4e53cfa` moves the unchanged
 `blankTo` comment and function below `renderInboxRow`, matching upstream, and
