@@ -10,6 +10,73 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
+- Status: active; all eleven DC owners remain compat-owned. No override is retired or promoted to shared `main`.
+- Last reviewed: 2026-10-20, full upstream synchronization over `bf0563ddc201b44e3f59c35b18dba17c4386564d..113e3192568a342076e68c70d55b99bd67869dcf`.
+- Starting compat: `97fce708b8dc9353d274b83f718e1a3c7d27416a`; inherited main runtime: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`; reviewed compat runtime/tests: `ac2b653cde97fb3046e6510ff4e5183b59186bd5`. Integrated main review/test tip: `f6632fb8085b4005df4abeb36933b30ee9d74811`. Final publication evidence is recorded in [the synchronization report](upstream-sync-2026-10-20.md).
+- Scope: all twelve shared capability rows C01–C12, including cleanly merged DC surfaces and the newer DC-ACTOR-002, DC-PROVIDER-001, DC-WEBSEARCH-001 and DC-WEBFETCH-001 entries. The prior eight-owner and 120-path records below are historical snapshots.
+- Resolution: adopt the shared durable queue, receipt lifecycle, actor waits, execution ownership, fixed `mcp_tool_use` dispatcher, empty-output retries, thinking-signature fix and UI/release changes while preserving the eleven contracts below. Schema generation uses the resolved compat source, including checkpoint coverage and model selection.
+- Validation: default-path commands remove ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and `MIMOCODE_CODEX_MODE`, retaining package preload and each test's scoped opt-ins. `bun ci` completes without a lockfile change; SDK regeneration exits 0 with no additional generated diff, CLI/SDK typechecks pass, and lint reports zero errors. The completed local groups and incomplete full-file runs are distinguished below; exact-SHA CI remains the publication gate.
+- Shared ownership: FD/FC registries and the shared report inherit main unchanged; only this compat registry owns the overlay decisions below.
+
+### 2026-10-20 owner impact review
+
+| Owner | Incoming relationship and retained contract | Decisive surfaces and validation |
+| --- | --- | --- |
+| DC-NET-001 | Queue and hosted-search changes do not replace explicit approval for private-network WebFetch. Private destinations remain direct-only under hosted fetch. | `tool/webfetch.ts`, hosted destination routing; WebFetch and hosted-fetch default/permission/private-bypass tests. |
+| DC-NET-002 | MCP catalog deferral changes wire tool exposure, not remote HTTP(S) admission. Retain the RFC1918 reachability guarantee without adding a production fork. | MCP lifecycle suite, including the private-address admission sentinel; this is not a new real-private-subnet transport claim. |
+| DC-PLATFORM-001 | Inherit exact instance/workspace identity and fixed cwd while keeping restricted-network and Windows ripgrep/archive fallbacks. | `file/ripgrep.ts`, `util/archive.ts`; ripgrep/archive tests. Windows runtime remains an independently executed platform check. |
+| DC-MODEL-001 | New receipt scheduling and empty-output retry policy retain per-agent MaxMode, final-step bounds, title isolation and main-only status ownership. | Agent config, `session/max-mode.ts`, prompt model selection; MaxMode/retry-status suites and full prompt matrix. |
+| DC-CONTEXT-001 | Queue-rendered input replaces raw inbox draining. Preserve UTF-8 caps, current-turn preflight, legacy active masks/toolsHash, checkpoint coverage and chronology; noReply storage cannot reset an admitted request's recovery budget. | `inbox/render.ts`, `message-v2.ts`, prefix/compaction/preflight, TUI coverage and HTTP schema; message/context/catalog, prefix, recovery-budget, coverage/OpenAPI and full prompt suites. |
+| DC-ACTOR-001 | Shared actor wait/cancel and durable notifications retain frozen full-context membership/system/cwd/turnContext, bounded recovery and refusal of an unrecoverable static prefix. Notification rendering retains its cap and closed wrapper. | `actor/spawn.ts`, `tool/actor.ts`, checkpoint/prompt capture; actor/inbox/tool ownership, frozen-prefix and full-context compaction tests. |
+| DC-ACTOR-002 | New background-handle and wait behavior retains provider-aware model/variant validation, explicit precedence, no accidental parent inheritance and actor-lifetime persistence. | Actor tool schema/models listing and spawn-to-prompt propagation; variant-guidance, spawn, tool-model and ownership tests. |
+| DC-TUI-001 | Inherit actor send/footer/login UI changes while retaining request provider/model/variant truth and title locale. Receipt acceptance does not alter the preview or selected variant store. | Prompt/subagent metadata, server model-selection endpoint; model metadata/preview, model-selection and checkpoint-coverage synchronization tests. |
+| DC-PROVIDER-001 | Thinking-signature preservation does not replace SDK-based Responses routing or declared reasoning capability. Retain custom xAI routing and explicit OpenAI `forceReasoning` opt-out. | `provider/provider.ts`, `provider/transform.ts`; provider, transform and real-SDK Responses reasoning serialization suites. |
+| DC-WEBSEARCH-001 | Fixed MCP dispatch and sticky catalog coexist with opt-in provider-native search. Preserve native permission gating, search-specific in-turn fallback, replay downgrade, raw server output and identical `LLM.wireTools` preflight. | `llm.ts`, prompt preflight, processor/transform, websearch chain and TUI native-search display; native-search wire, replay, fallback, registry and provider tests. |
+| DC-WEBFETCH-001 | Main has no hosted-fetch replacement. Keep direct-first default, private-target bypass, requested-URL proof, caller timeout, permission rejection propagation and chained route errors. | Hosted fetch/destination/config/SDK surfaces; WebFetch hosted/destination/direct tests. |
+
+### Local validation and publication boundary
+
+The groups below overlap and are not an aggregate test count. All use the
+three-selector default environment described above and the package preload.
+`bun ci` installs 1059 packages without changing `bun.lock`. The resolved
+runtime retains 52 differing CLI-source/SDK paths against the inherited main
+runtime; shared fixture corrections are not additional DC capabilities.
+
+| Scope | Observed result |
+| --- | --- |
+| Ripgrep/archive and UTF-8/serialization helpers | 63 pass across four files. |
+| MCP lifecycle | 34 pass, including the RFC1918 admission sentinel. |
+| WebFetch, hosted routing/destinations, native WebSearch and tool registry | 141 pass across seven files. |
+| Provider/transform/Responses reasoning | 370 pass with a 45-second command budget. The earlier 15-second run timed out only on the two oversized-image recompression cases; no production image policy was changed. |
+| Native-search wire behavior and per-agent MaxMode | 34 pass across four files. |
+| Model metadata/preview/selection and checkpoint coverage/OpenAPI | 50 pass before the old prompt-async response assertion was corrected to include 202; the complete OpenAPI file then passes 6/6. |
+| Message replay, classification, instructions, overflow, checkpoint tail and TUI context selection | 290 pass and one existing todo across eight files. |
+| Frozen skill catalogs and compat projection | 49 pass across seven files. |
+| MCP/prefix/full-context/compaction subset | 57 pass. |
+| Recovery receipt/renderer/task integration | 45 pass across three files. |
+| Inbox directory | 131 pass across 21 files. |
+| Actor ownership/tool run | 63 pass; explicit-variant timeout handoff additionally passes its real-server lifecycle regression, preserving the live child and its variant metadata. |
+| Recovery-budget authority | Two accepted-input cases pass; a stored noReply user cannot reset the exhausted budget and its counterexample passes. |
+| Processor and writer-first overflow adaptation | 33 pass and two existing skips. |
+
+The bare full-prompt command was stopped after 95 passes and one five-second
+budget timeout; it is not a complete passing file. The timed-out frozen-hidden
+tool case has no explicit five-second test budget and starts real exec/Bash
+children. Both matching/changed-schema cases pass under the package's normal
+30-second command budget, with 20 assertions. The combined actor directory
+also is not reported as fully green: an AppRuntime/local-layer prefix-captor
+reference collision precedes eight negative recovery cases; those eight pass
+in their dedicated process without weakening their assertions. Final complete
+coverage is the branch's exact-SHA CI gate, whose owning jobs use their declared
+process isolation and 120-second test budget.
+
+SDK regeneration and CLI/SDK typechecks pass; repository lint reports zero
+errors and 3720 warnings. Remote-tip CI/ancestry evidence is recorded at
+publication. No local subset or stopped process substitutes for
+that final gate.
+
+## Previous review record — 2026-10-16
+
 - Status: active; all eight DC owners remain compat-owned.
 - Last reviewed: 2026-10-16, full upstream synchronization through `bf0563ddc201b44e3f59c35b18dba17c4386564d`.
 - Prior upstream: `496bb8cbe614aecea27623457d143600cc12c275`.

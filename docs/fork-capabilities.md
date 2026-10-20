@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-16
-- Upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
-- Prior reviewed upstream: `496bb8cbe614aecea27623457d143600cc12c275`
-- Main behavior (runtime/tests): `92f5f6a5adeade500f0def7555dd43e14b083545`
-- Bundled guidance content: `848c635c1eb57d326f0d135f1c20caafc9c5f17f` (unchanged by this range)
-- Prior fork `main` tip: `40f69640279b27ce94d9bbadfa1dd750222710e2`
+- Last reviewed: 2026-10-20
+- Upstream: `113e3192568a342076e68c70d55b99bd67869dcf`
+- Prior reviewed upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
+- Main behavior (runtime/tests): `aa625ef0bf685b58ce4644f7700c7f4cc53d462c`
+- Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
+- Prior fork `main` tip: `aaa53f4e56136ee1bf845b02ff080716ea2a0c66`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-16 sync through `bf0563dd`](upstream-sync-2026-10-16.md), one capability. Adopt verbatim media replay after overflow compaction into FC-001's atomic replay commit, extend FC-009's attachment envelope with file-URL local paths and stable `[Image: <name>]`/`[PDF: <name>]` marker identity, keep the caller `system` on attachment-only messages, and adopt unique `mimo-paste-*` paste names.
+Latest reviewed synchronization: [2026-10-20 full sync through `113e3192`](upstream-sync-2026-10-20.md), twelve capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. Final branch propagation, validation and publication evidence remain pending in the linked record.
+
+Previous synchronization: [2026-10-16 sync through `bf0563dd`](upstream-sync-2026-10-16.md), one capability. Adopt verbatim media replay after overflow compaction into FC-001's atomic replay commit, extend FC-009's attachment envelope with file-URL local paths and stable `[Image: <name>]`/`[PDF: <name>]` marker identity, keep the caller `system` on attachment-only messages, and adopt unique `mimo-paste-*` paste names.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
@@ -91,7 +93,7 @@ not change their implementation. The preceding review is retained in the
 
 | ID     | Watch surfaces                                                                                            | Upstream relationship                                            | Required decision                                                                        |
 | ------ | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| FC-001 | actor, inbox, runner, session state, recovery/resume                                                      | Typed upstream admission plus stronger fork lifecycle            | Preserve synchronous admission and async queue persistence                               |
+| FC-001 | actor, inbox, runner, session state, recovery/resume                                                      | Typed upstream admission plus stronger fork lifecycle            | Preserve atomic acceptance, lane ownership, settlement and recovery                               |
 | FC-002 | checkpoint writer and frozen request prefix                                                               | Extension plus adaptation                                        | Preserve writer-mode semantics                                                           |
 | FC-004 | MCP configuration, connection state, and local exit diagnostics                                           | Explicit imported-server auto-connect plus fork hardening        | Preserve validation, redaction, and isolation                                            |
 | FC-005 | skill discovery and invocation                                                                            | Stronger shared gates                                            | Preserve permission parity                                                               |
@@ -110,6 +112,11 @@ not change their implementation. The preceding review is retained in the
 | FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-10-20 synchronization: adopt upstream `949a3bcc`'s durable input receipts and lane scheduler, replacing the old `Inbox.send`/drain/wake implementation and the async-only queue contract. `Controller.accept` commits the complete user message and parts with its receipt, preserving fork generated-part replay checks, provenance, task binding and ownership validation. Receipt states are `accepted`, `claimed`, `settled`, `cancelled` and `rejected`; outcomes distinguish success, assistant error, interruption and never-ran input. First delivery fixes input placement, while terminal receipt retention and GC replace destructive drain deletion. `session.receipt.updated` replaces `InboxArrived`; accepted-only consumers inspect the committed user input, not legacy row content. The API retains the `inboxID` result field for actor callers as a receipt identifier. Earlier dated send/drain/wake and async-only descriptions below are historical where superseded by this review.
+- The scheduler owns each `(sessionID, actorID)` lane, claim extension and idle re-kicks. The synchronous `/message` route streams 200 when admitted idle and returns 202 plus the persisted user and `receiptId` when busy; `/prompt_async` returns 202 with `receiptId`, or 204 when no turn is admitted. Receipt lookup is session-scoped. Strict internal `startPrompt`/command/shell/summarize/recovery occupation remains independently guarded; the HTTP queue fallback does not weaken those atomic entry points. `noReply` persists history without accepting, claiming or scheduling a turn, and cannot replace a queued task's authority. Cancellation advances the persisted queue epoch before signalling execution, settles accepted unclaimed input as `never_ran`, and cannot restart an old-epoch wake. Such a queued prompt returns its original user rather than manufacturing an aborted assistant. Resume checks queue epoch as well as the retained actor/runner generation before occupation.
+- Main completion automatically waits for owned subagent executions and legacy live runners. New input wakes the wait without cancelling the child; a receipt-only wake cannot move the current input frontier backward. Explicit actor wait observes execution and input revisions; timeout preserves a discoverable running child and returns structured state. Generation handoff, persistent-peer retirement, frozen context, exactly one terminal notice and close-abort-join remain fork-owned. Seedless main input can remain accepted without spinning or inventing a model; a later valid prompt may consume it. Only a positively known peer uses the configured-model fallback.
+- Queue rendering is shared by model requests, checkpoint context, post-hook trajectories, goal judging and fork/export/import projections. Accepted but unconsumed input remains hidden; consumed inputs retain first-delivery order, including caller IDs older than a current frontier. A checkpoint boundary must not have its continuation authority displaced by reconstructing an older consumed input. Structured completion stays attached to its original caller even if a later prompt is consumed in the same lane run. A newly admitted user may settle an older unfinished error while preserving that error. Atomic replay, task inheritance, fail-closed public actor recovery, invocation approval and generation ownership remain active. Evidence and pending publication gates: [twelve-capability record](upstream-sync-2026-10-20.md).
 
 - 2026-10-15 follow-up (closes the pre-admission cancel gap): `SessionRunState.cancel` first advances a per-session `CancelEpoch` (`packages/cli/src/session/cancel-epoch.ts`) synchronously. `Inbox.wake` records that epoch before its first suspension and passes it as the loop input's `cancelEpoch`; the main-agent inbox loop hands it to `SessionRunState.ensureRunning`, which gives `Runner.ensureRunning` an `admit` predicate evaluated inside the same atomic transition as `canStart`, both on entry and after `onBusy`. A wake whose epoch moved is refused with an interrupt before it starts or joins a run, so no model request is made and its inbox row stays durable for the next ordinary run; a wake scheduled after the cancel records the new epoch and runs normally. Non-main receivers keep their `ActorExecution` path (`exec.cancelled`), and `LoopInput` stays internal (no HTTP/SDK change). Upstream's "abort immediately after send cannot let a queued wake restart the receiver" case is now carried verbatim; removing the admission predicate makes it fail again. `Session.remove` releases the removed session's epoch beside its other process-wide session state, deferred while a scheduled wake still holds it: `Inbox.wake` records the epoch and takes a `CancelEpoch.hold` together with its instance claim and releases both when the wake exits, because dropping the entry earlier would read as the initial epoch and admit a wake recorded before a cancel (`test/session/cancel-epoch.test.ts`).
 
@@ -169,21 +176,19 @@ not change their implementation. The preceding review is retained in the
 - Status: active
 - Canonical owner: fork `main` actor/inbox runtime
 - Observable contract: generation ownership, terminal claims, cancellation
-  episodes, main prompt/command/init/shell/summarize/recovery/resume admission,
-  busy/idle publication, persistent wake owner/follower behavior,
-  execution-aware cancellation, inbox retirement tombstones, and parent notification
-  are linearized per session and actor. `SessionPrompt.startPrompt`,
-  `startCommand`, `startSummarize`, and `startResume` share
-  `SessionRunState.startRunning` atomic admission; outer entry points report a
-  typed `Session.BusyError`. That admission covers the synchronous entry points
-  only. `POST /session/:sessionID/prompt_async` is deliberately outside it: the
-  route is fire-and-forget, so it persists the user message through
-  `SessionPrompt.prompt` before joining any in-flight run, never reports
-  `Session.BusyError`, and declares no 409. A busy session queues the message
-  for the running loop rather than dropping it. If that prompt joins a runner
-  which had already taken its final snapshot, the caller checks whether the
-  returned assistant covers its user row in the same actor transcript and
-  starts or joins the successor run when it does not.
+  episodes, durable input acceptance, lane claim/settlement, main prompt and
+  exclusive command/init/shell/summarize/recovery/resume admission, busy/idle
+  publication, execution-aware cancellation, receiver retirement and parent
+  notification are linearized per session and actor. Every queue producer uses
+  the same atomic message/parts/receipt acceptance; the queue is not specific
+  to the asynchronous HTTP route. HTTP `/message` has an idle 200 / busy 202
+  contract rather than dropping a busy user's message with 409, while the
+  explicitly exclusive runtime entry points keep typed busy refusal. The
+  asynchronous route acknowledges durable acceptance with a receipt before
+  execution, and receipt state remains queryable after terminal settlement.
+  A queued lane caller waits for lane ownership; entering Runner is not evidence
+  that it was accepted. First-delivery ordering and per-caller terminal results
+  replace the old final-snapshot follower/retry workaround.
   CLI permission correlation is owned inside that admitted runner work, never
   by a waiter that merely joins it. A live in-memory run scope follows its
   initial user, successfully committed atomic continuations, and current
@@ -224,8 +229,8 @@ not change their implementation. The preceding review is retained in the
   only through its own successful conditional-write receipt, preserving the
   original session, actor, agent, task and model source. A hook label alone
   grants no authority; failed conditional writes never advance the receipt.
-  Inbox messages remain queued throughout recovery and use the existing wake
-  path afterwards. Cancellation before successful admission withdraws the
+  Accepted inbox receipts remain durable throughout recovery and are scheduled
+  afterwards through the same lane scheduler. Cancellation before successful admission withdraws the
   request without settling the old assistant; cancellation of an accepted
   caller cannot release the running actor's generation early. FD-009 owns the
   frozen-context and resolved-model/harness identity checks.
@@ -272,8 +277,9 @@ not change their implementation. The preceding review is retained in the
   and TUI `routes/session/{plan-switch.ts,index.tsx}` under `packages/cli`.
   Tests include actor-owned-lifecycle, actor-exec-lifecycle, plan-approval,
   exec-interaction and real TUI plan-switch events.
-- Upstream relationship: selectively adopts upstream typed Runner admission and
-  busy failures plus actor-scoped `replace-agent`, while retaining the stronger
+- Upstream relationship: adopts upstream durable receipts, lane scheduling and
+  automatic subagent waiting, plus typed exclusive Runner admission and
+  actor-scoped `replace-agent`, while retaining the stronger
   fork generation, cancellation, disposal, persistent-peer, fail-closed identity
   evidence. Public actor recovery adapts upstream's `agentID` selector through
   the existing constrained actor lifecycle, without caller-supplied task
@@ -288,7 +294,8 @@ not change their implementation. The preceding review is retained in the
 - Watch surfaces: `packages/cli/src/actor/`,
   `packages/cli/src/agent/config.ts` (`hasActorTool` fails closed for an
   unresolvable caller, PR #53),
-  `packages/cli/src/effect/runner.ts`, `packages/cli/src/inbox/`, `packages/cli/src/session/cancel-epoch.ts`,
+  `packages/cli/src/effect/runner.ts`, `packages/cli/src/inbox/`,
+  `packages/cli/src/session/cancel-epoch.ts`, `packages/cli/src/session/execution-ownership.ts`,
   `packages/cli/src/server/routes/instance/session.ts`,
   `packages/cli/src/session/checkpoint.ts`,
   `packages/cli/src/session/compaction.ts`,
@@ -348,7 +355,7 @@ not change their implementation. The preceding review is retained in the
   route is now the upstream `prompt` path again; the synchronous `/message`,
   `/init`, `/summarize`, `/command`, and resume routes keep `startRunning`,
   which is what the zombie-runner hardening in `1cfe7efc` was for.
-- 2026-09-04 closing-window correction: a persisted prompt that joins an older
+- 2026-09-04 closing-window correction (historical follower implementation, replaced by durable lane receipts on 2026-10-20): a persisted prompt that joins an older
   successful, failed, or non-assistant runner result hands off through the
   existing `run` path until an assistant covers it. Pure interruption and a
   shared `MessageAbortedError` stop handoff; a joined failure is retried once,
@@ -426,7 +433,7 @@ not change their implementation. The preceding review is retained in the
   deleted testing entry's notification policy. See F09 in
   [the implementation report](audit-followups-2026-09-15.md).
 
-- 2026-09-15 shared chronology/admission: caller IDs are identity keys, not
+- 2026-09-15 shared chronology/admission (message identity/atomic replay retained; the drain/deletion implementation below was replaced on 2026-10-20): caller IDs are identity keys, not
   admission order. `createMessage` allocates an actor-local monotonic committed
   timestamp; metadata updates preserve creation time and completion cannot
   precede it. User and derived-user message/parts submitted through
@@ -456,6 +463,8 @@ not change their implementation. The preceding review is retained in the
   [the implementation report](audit-followups-2026-09-15.md).
 
 ## FC-002 — canonical checkpoint writer and mode-specific frozen context
+
+- 2026-10-20 synchronization: checkpoint writer context uses `MessageV2.renderedOrder` with consumed receipts, so unclaimed inputs do not enter a writer snapshot and first-delivery order survives queue reconstruction. The same queue-aware view feeds post-hook trajectories and goal judging; context-boundary continuation identity and run-approval ownership remain distinct from historical input reconstruction. Frozen new MCP captures carry a fixed dispatcher and complete authorized hidden pool; legacy active/loaded masks remain readable under FD-005/FD-006. Canonical writer modes and fail-closed admission do not retire.
 
 - Status: active
 - Canonical owner: fork `main` checkpoint/session runtime
@@ -529,6 +538,8 @@ not change their implementation. The preceding review is retained in the
   history. Reintroducing a gate would require a new explicit behavior decision.
 
 ## FC-004 — MCP configuration and connection lifecycle
+
+- 2026-10-20 synchronization: adopt sticky MCP deferral and fixed search/use entries through connection churn and an initially empty catalog. Search always sees the live authorized catalog, while changed catalog announcements wait for the next user-turn boundary. This does not auto-connect pending Claude imports or broaden connection authority. FD-005/FD-006 own resolved harness, dispatch and frozen implementation authority; the old conversation-loaded membership is now only a legacy snapshot compatibility carrier.
 
 - 2026-10-13 upstream PR record: `XiaomiMiMo/MiMo-Code#1269` (keep Claude imports pending until connect, opened 2026-06-24) is withdrawn. Upstream still has no `auto_connect` and has since rewritten `mcp/index.ts`; the fork keeps the pending-import contract here, with `test/mcp/lifecycle.test.ts` and `test/mcp/claude-auto-connect.test.ts` as its evidence, and does not resubmit. Its head branch `codex/upstream-mcp-claude-pending-connect` is deleted from the fork.
 
@@ -1246,6 +1257,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
 
+- 2026-10-20 synchronization: inbox acceptance persists complete synthetic agent input and provenance with a durable receipt; later rendering hides unconsumed rows and places consumed input at its first delivery. Import/export/sync/fork preserve referenced message identity and queue visibility without cloning runnable receipts into a fork. Mid-turn direct user text is sent verbatim rather than wrapped against a moving last-finished assistant, preserving byte identity around signed thinking. This does not claim to repair every other history rewrite or an already poisoned signature. Pure empty, tool-free replay uses the scoped retry policy; reasoning-only and settled-tool continuation retain their existing bounded, atomic provenance paths.
+
 - 2026-10-16 synchronization: upstream `bf0563dd` extends the user image attachment envelope and replay provenance. The envelope's local path now derives from an absolute `source.path` or, when absent, a `file:` URL; a new sentence names `[Image: <file name>]` / `[PDF: <file name>]` markers as session-stable attachment identity, matched by the same file name. An attachment-only all-synthetic prompt keeps the caller `system` on the persisted user message (`prompt.system ?? input.system`) while still skipping the `resolvePrompt` fallback, so `session.prompt` is not pinned. The overflow replay copies media `file` parts verbatim (the `[Attached <mime>: <filename>]` substitution is gone) under FC-001's atomic `commitUserMessageIfLatest`, retaining `source: "hook"` and `task_id`. The fork's `userImageAttachment` metadata and hook/spawn provenance rules are unchanged. Evidence: `test/session/prompt.test.ts` envelope and attachment-only-system cases, `test/session/prompt-effect.test.ts` keeps-replayed-media case.
 
 - 2026-10-14 synchronization: upstream `002cb4c9` records a tool's execution boundary (`ToolPart.execution`, `ToolStateError.inputComplete`) through transactional `Session.mutateToolPart`, closes a per-attempt tool scope on cleanup instead of waiting 250 ms for unsettled calls, and lets `ToolSettlement` persist a tool's real result after an interruption; projectors and imports refuse tool identity changes and never downgrade `started`. Adopted with the side-effect replay boundary unchanged; completed tools still merge running metadata and failed tools keep the record guard. Evidence: `test/session/processor-effect.test.ts`, `test/session/tool-gate-cancel.test.ts`, `test/history/import.test.ts`.
@@ -1459,6 +1472,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-012 — fork publication, contribution, and security routing
 
+- 2026-10-20 synchronization: adopt trusted-publisher `--allow-publish` and a preflight stage before npm/GitHub publication. The preflight checks SDK/plugin/CLI tarball name and version and proves an FDS signed canary write. Keep `GH_REPO` mandatory and scoped to the fork; the upstream-owned npm trust configuration is not authority to publish fork work there. A passing preflight is neither a release rollback transaction nor proof that every later publication stage succeeded. No publishing stage is invoked during synchronization validation.
+
 - 2026-10-13 synchronization: upstream `4a5e2140` replaces the maintainer release scripts with CI stages in `script/release.ts` run by `release.yml` on a pushed tag. The fork adopts the stages and keeps `GH_REPO` required: the `github` stage throws before any `gh` call when it is unset, so a fork release can never fall back to the `upstream` remote. `release.yml` itself sets `GH_REPO` from `github.repository`. The npm trusted-publisher setup still names upstream's repository and applies only to upstream's packages.
 
 - 2026-10-02 synchronization: upstream `327f5b63` makes `script/release.ts` default `GH_REPO` to `XiaomiMiMo/MiMo-Code`, which would aim an unconfigured fork release at the read-only upstream. The fork keeps `GH_REPO` required, with no default, and adopts the rest of the `.env` release flow. Upstream `698f0f29` removes the `CLAUDE.md` → `AGENTS.md` symlink; the fork keeps it so Claude Code sessions load the same routing conventions as other agents.
@@ -1486,6 +1501,8 @@ logged`, and the peer `success`/`failure` variants of
   an explicit governance decision and every repository-facing route is updated.
 
 ## FC-013 — retry budget resolution and MaxMode final-step enforcement
+
+- 2026-10-20 synchronization: classify `InvalidOutputError` as retryable unknown and let `SessionRetry.policy` own a genuinely empty conversation attempt only when it is replay-safe, tool-free, non-structured and not a length finish. Remove the empty attempt and recreate its assistant shell before retry; exhaustion persists the terminal error, and no repair user is injected for this clean case. Reasoning-only output, incomplete checkpoint completion and tool/settlement residue retain fork bounded continuation and atomic source/task ownership rather than losing useful history or replaying side effects. Candidate/judge budgets, main-only retry publication and the MaxMode tool-free final step remain. Summary assistants remain under FD-010/FD-011/FD-012 and the separate compaction retry bound.
 
 - 2026-10-14 synchronization: upstream `002cb4c9` lets request-phase retries publish `session.status{retry}` through the processor's `setRetry`, and runner, loop and stream busy writes no longer replace a retry row. Adopted for durable main requests only, keeping the fork's main-only `RetryAttempt` guard and status lock. The visible attempt now continues across phases (request 1, stream 2) while `phaseAttempt` restarts; subagent and ensemble retries stay out of session status. Evidence: `test/session/processor-effect.test.ts`, `status-retry-map.test.ts`, `retry-density-invalid-baseurl.test.ts`.
 

@@ -14,12 +14,12 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-16
-- Upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
-- Prior reviewed upstream: `496bb8cbe614aecea27623457d143600cc12c275`
-- Main behavior (runtime/tests): `92f5f6a5adeade500f0def7555dd43e14b083545`
-- Bundled guidance content: `848c635c1eb57d326f0d135f1c20caafc9c5f17f` (unchanged by this range)
-- Prior fork `main` tip: `40f69640279b27ce94d9bbadfa1dd750222710e2`
+- Last reviewed: 2026-10-20
+- Upstream: `113e3192568a342076e68c70d55b99bd67869dcf`
+- Prior reviewed upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
+- Main behavior (runtime/tests): `aa625ef0bf685b58ce4644f7700c7f4cc53d462c`
+- Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
+- Prior fork `main` tip: `aaa53f4e56136ee1bf845b02ff080716ea2a0c66`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -29,7 +29,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-16 sync through `bf0563dd`](upstream-sync-2026-10-16.md), one capability. Adopt verbatim media replay after overflow compaction into FC-001's atomic replay commit, extend FC-009's attachment envelope with file-URL local paths and stable `[Image: <name>]`/`[PDF: <name>]` marker identity, keep the caller `system` on attachment-only messages, and adopt unique `mimo-paste-*` paste names.
+Latest reviewed synchronization: [2026-10-20 full sync through `113e3192`](upstream-sync-2026-10-20.md), twelve capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. Final branch propagation, validation and publication evidence remain pending in the linked record.
+
+Previous synchronization: [2026-10-16 sync through `bf0563dd`](upstream-sync-2026-10-16.md), one capability. Adopt verbatim media replay after overflow compaction into FC-001's atomic replay commit, extend FC-009's attachment envelope with file-URL local paths and stable `[Image: <name>]`/`[PDF: <name>]` marker identity, keep the caller `system` on attachment-only messages, and adopt unique `mimo-paste-*` paste names.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
@@ -101,6 +103,8 @@ not change their implementation. The preceding review is retained in the
 | FD-012 | compaction retry on an empty step                                                     | Extends upstream: retries a genuinely empty step, once by default                                                                               | Preserve the configurable non-negative limit (default 1, 0 disables) and empty-step scope                                                                                 |
 
 ## FD-001 — run approval must not toggle shared delete state
+
+- 2026-10-20 synchronization: durable queue acceptance grants no run approval. A received input becomes the request source only when its lane owns and consumes it; an unrelated accepted user closes the previous approval scope when selected. Checkpoint, compaction and bounded continuations retain authority only through the existing owned commit path. Queue scheduling and long-lived MCP bridges cannot lend a former caller's scope. The checkpoint and compaction real-tool permission regressions retain both correlation assertions and distinct continuation parents.
 
 - 2026-10-04 synchronization: upstream `6babeb0b` makes server-initiated MCP sampling hold an execution claim on its owning instance and rejects a callback whose owner is closing, absent or replaced. The fork keeps `RunApproval.provide(undefined)` around the whole claimed request, so a long-lived connection bridge still cannot lend a CLI run's approval scope to sampling. `test/mcp/sampling.test.ts`, `test/mcp/sampling-e2e.test.ts` and upstream's `test/provider/refresh-boundaries.test.ts` pass.
 
@@ -436,6 +440,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
 
+- 2026-10-20 synchronization: adopt `cd72e855`'s fixed `mcp_tool_use` dispatcher, sticky deferral (including an empty catalog) and turn-boundary catalog announcements. Both live resolution and `buildLLMRequestPrefix` use the same resolved harness and history evidence; fetched schemas no longer enter the provider-facing active tool set. Search is a schema/context optimization, not authorization. Keep MCP output tag neutralization and full request/frozen schema gates. New snapshots record the fixed dispatcher plus the authorized hidden implementation pool, with empty loaded membership. Legacy snapshots without the dispatcher may use only the captured active/loaded MCP names intersected with frozen membership and matching live schemas. FD-006 retains authorized hidden Codex direct execution. Evidence: `test/session/llm-request-prefix.test.ts`, MCP cases in `test/session/prompt-effect.test.ts`, `test/session/codex-compact.test.ts` and `test/tool/mcp-tool-search.test.ts`.
+
 - 2026-10-14 synchronization: upstream `002cb4c9` moves MCP result normalization into a settlement-aware `normalizeResult` and drops its `neutralizeHarnessTags` call, while `prompt.ts` still imports the helper and no upstream test covers MCP output escaping. The fork keeps escaping MCP text output inside the same `normalizeResult`, as adopted with lazy loading on 2026-10-13, so a server cannot forge `<system-reminder>`-style harness tags through a tool result. Retire this difference when upstream restores the call.
 
 - 2026-10-13 synchronization: upstream `463cbb28` replaces `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH` with `MIMOCODE_MCP_TOOL_SEARCH` deferral modes and forces deferral through `mcpToolSearchMode` when its own GPT-name shortcut sees a GPT identity. The fork's `mcpToolSearchMode` instead asks `resolveHarnessMode`, so explicit session modes, the process selector, trusted `harness_model` aliases and the MiMo/GPT-4/OSS vetoes decide Codex deferral exactly as they decide prompt and toolset. Prefix capture passes the same resolved mode to `buildLLMRequestPrefix`, which now applies the same deferral threshold and conversation-scoped loading as the live request. Evidence: `test/tool/gpt.test.ts`, `test/tool/harness-alias.test.ts`, `test/session/llm-request-prefix.test.ts` and the GPT default-harness cases in `test/session/prompt-effect.test.ts`.
@@ -462,6 +468,11 @@ not change their implementation. The preceding review is retained in the
   `MIMOCODE_MCP_TOOL_SEARCH` (`true` default, `auto`, `auto:N`, `false`) is the
   configured MCP deferral mode for the default harness; the resolved Codex
   harness always defers, and that decision uses this same resolved identity.
+  Ordinary deferred calls use the fixed `mcp_tool_use` entry; searched schemas
+  never expand the active tool list. Auto deferral remains sticky while its
+  conversation evidence survives, and an empty catalog initially defers.
+  Catalog deltas are appended only at a user-turn boundary, not to earlier
+  user content after assistant execution has begun.
   Process environment selectors are startup configuration; mutating them during
   an active session is outside this contract.
   An explicitly configured `provider.<id>.models.<id>.harness_model` may name
@@ -579,6 +590,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
 
 ## FD-006 — `exec` is a composition tool, not an authority gateway
 
+- 2026-10-20 synchronization: deferred non-Codex MCP calls use `mcp_tool_use`; its request-local dispatch map runs the underlying permission, hook, settlement, truncation and metrics pipeline. Argument checks run after the before-hook; the processor gate/part stays `mcp_tool_use`, while permission and metrics identify the actual MCP tool. The dispatcher is explicitly captured despite being built outside the registry. It cannot expand a full-context actor's frozen implementation pool or schemas. Codex keeps its authorized hidden direct calls and `exec` path; only non-Codex deferred direct calls are rejected. Older direct snapshots keep their captured active/loaded intersection rather than gaining the new gateway. Tests cover new and legacy snapshots with both matching and changed schemas.
+
 - 2026-10-14 synchronization: upstream `002cb4c9` settles exec through `ToolSettlement`, tracks host calls and passes an abort signal to `evalScript`. The fork's nested lifecycle (closed intake, abort, `withSlot.close`, joined admitted calls and VM disposal) stays authoritative; the script now settles through `ToolSettlement`, records a `cancelled` exec result for the processor, and a nested guest interrupted by Stop that had already settled reports its real result through its own settlement reference instead of an interruption error. `workflow/sandbox.ts` returns to upstream bytes because its signal abort is equivalent to the fork's earlier implementation. Evidence: `test/tool/tool-script.test.ts`, `test/workflow/sandbox.test.ts` and the exec cases of `test/session/tool-gate-cancel.test.ts`.
 
 - Status: active
@@ -591,7 +604,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
   skill/search, enabled cron, data and MCP calls use the pinned request pool,
   effective permissions, user toggles and agent/actor/frozen allowlists. Hidden
   direct calls retain the same gates. Codex MCP calls need no redundant search
-  load; non-Codex explicit search retains its load-before-direct contract.
+  load; non-Codex deferred calls use the fixed dispatcher. Schema search is
+  guidance, not a load-before-call authorization gate.
   Nested execution may compose all currently authorized canonical Actor
   operations, question and plan_exit; their direct entries remain available.
   JSON and shell declarations, entry validation and post-hook validation use
@@ -870,6 +884,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
 
 ## FD-010 — a think-only compaction step is recovered, not discarded
 
+- 2026-10-20 synchronization: conversation pure-empty retries move to `SessionRetry.policy`; summary assistants remain owned here and by FD-011/FD-012. Keep reasoning-summary acceptance, content-filter/error rejection and the compaction-specific empty retry bound. No compaction owner retires.
+
 - Status: active
 - Canonical owner: fork `main` compaction summary acceptance boundary
 - Observable contract: when the compaction step finishes with no text part but
@@ -988,7 +1004,7 @@ the complete resolved model identity` case. FD-005 keeps only identity
   [FD-010](#fd-010--a-think-only-compaction-step-is-recovered-not-discarded) —
   or deterministic: a content filter refilters, an over-cap request is still
   over, a blocked or errored step stays blocked. The default bound is deliberately
-  tighter than the conversation path's two, because a compaction retry re-sends
+  independent of the conversation unknown-error budget, because a compaction retry re-sends
   the ENTIRE transcript: one attempt separates a one-off from a systematic
   cause, and a second only buys the same answer at another full-transcript cost.
 - Relationship to FD-010: adjacent but independent. FD-010 decides what counts
