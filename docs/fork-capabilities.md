@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-10-20
 - Upstream: `4e58a80184794d52d913d4b886b96f496f2c7020`
 - Prior reviewed upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
-- Main behavior (runtime/tests): `d2f22b8d293dfb16d28e609c8f6d58047a5ee369` (OpenAPI response-resolver isolation)
+- Main behavior (runtime/tests): `a53165b4f0584a487c5090962bdf5d9123b9c1cd` (specified post-sync queue/fork convergence and retry diagnostic correction)
 - Inherited compat behavior: `dcc13401331125450c1cdf39308bdefa5994e86f` (shared OpenAPI follow-up inherited)
 - Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
 - Prior fork `main` tip: `aaa53f4e56136ee1bf845b02ff080716ea2a0c66`
@@ -113,6 +113,14 @@ not change their implementation. The preceding review is retained in the
 | FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-10-20 post-sync convergence: remove the retired inbox wake's optional
+  Runner join/admission arguments, `runLoop` inbox-deferral argument and
+  `CancelEpoch` wake holds. The durable scheduler now owns that work; the
+  synchronous session cancellation epoch, per-run generation, acquisition
+  checks and owned cleanup remain. Session fork reuses its source-message
+  snapshot for cutoff existence and busy-agent inspection before destination
+  creation, while retaining the transaction's fresh rendered-order copy.
 
 - 2026-10-20 synchronization: adopt upstream `949a3bcc`'s durable input receipts and lane scheduler, replacing the old `Inbox.send`/drain/wake implementation and the async-only queue contract. `Controller.accept` commits the complete user message and parts with its receipt, preserving fork generated-part replay checks, provenance, task binding and ownership validation. Receipt states are `accepted`, `claimed`, `settled`, `cancelled` and `rejected`; outcomes distinguish success, assistant error, interruption and never-ran input. First delivery fixes input placement, while terminal receipt retention and GC replace destructive drain deletion. `session.receipt.updated` replaces `InboxArrived`; accepted-only consumers inspect the committed user input, not legacy row content. The API retains the `inboxID` result field for actor callers as a receipt identifier. Earlier dated send/drain/wake and async-only descriptions below are historical where superseded by this review.
 - The scheduler owns each `(sessionID, actorID)` lane, claim extension and idle re-kicks. The synchronous `/message` route streams 200 when admitted idle and returns 202 plus the persisted user and `receiptId` when busy; `/prompt_async` returns 202 with `receiptId`, or 204 when no turn is admitted. Receipt lookup is session-scoped. Strict internal `startPrompt`/command/shell/summarize/recovery occupation remains independently guarded; the HTTP queue fallback does not weaken those atomic entry points. `noReply` persists history without accepting, claiming or scheduling a turn, and cannot replace a queued task's authority. Cancellation advances the persisted queue epoch before signalling execution, settles accepted unclaimed input as `never_ran`, and cannot restart an old-epoch wake. Such a queued prompt returns its original user rather than manufacturing an aborted assistant. Resume checks queue epoch as well as the retained actor/runner generation before occupation.
@@ -559,14 +567,18 @@ not change their implementation. The preceding review is retained in the
   `enabled: false` takes precedence; `auto_connect: false` keeps an enabled
   entry pending. Imported command/URL provenance and MiMoCode control overrides
   are preserved separately; a Claude file cannot grant its own auto-connect.
-  Request-local discovery/loaded-tool membership stays isolated across sessions
-  and frozen forks. Local stdio servers retain bounded exit and stderr
+  Deferred MCP discovery and fixed `mcp_tool_use` dispatch use the request-authorized catalog;
+  searching does not grant execution authority or add active tool schemas.
+  New deferred-MCP frozen captures use the fixed dispatcher with empty loaded-tool membership.
+  Legacy loaded membership remains only a frozen-snapshot compatibility input,
+  constrained by captured schemas and current request authorization.
+  Local stdio servers retain bounded exit and stderr
   diagnostics across fast natural exits and host shutdown; secrets are redacted
   before either logs or failed status details expose the diagnostic. In Codex
   compact mode, authorized MCP wrappers remain available through exec and
   compatible hidden direct calls, without requiring an invisible search call.
-  Request-disabled tools never enter a warm frozen executable pool. Other
-  harnesses retain explicit search/load gating when that feature is enabled.
+  Request-disabled tools never enter a warm frozen executable pool. Deferred
+  harnesses retain the fixed search/use entries across catalog changes.
 - POLICY-01 carrier review: request-pinned MCP membership remains unchanged;
   same-named MCP tools cannot acquire canonical Actor/plan control identity or
   its commit callback. Imported-server and transport policies are unchanged.
@@ -1504,6 +1516,13 @@ logged`, and the peer `success`/`failure` variants of
   an explicit governance decision and every repository-facing route is updated.
 
 ## FC-013 — retry budget resolution and MaxMode final-step enforcement
+
+- 2026-10-20 post-sync correction: the processor's stream retry callback now
+  applies the main-agent boundary to both retry status and `RetryAttempt`
+  publication. The earlier code guarded only status, so ordinary actor
+  pure-empty retries could emit session-global events despite this contract.
+  HTTP/SSE fixture regressions check successful main and actor retries,
+  main status/event publication and the absence of both for the actor.
 
 - 2026-10-20 synchronization: classify `InvalidOutputError` as retryable unknown and let `SessionRetry.policy` own a genuinely empty conversation attempt only when it is replay-safe, tool-free, non-structured and not a length finish. Remove the empty attempt and recreate its assistant shell before retry; exhaustion persists the terminal error, and no repair user is injected for this clean case. Reasoning-only output, incomplete checkpoint completion and tool/settlement residue retain fork bounded continuation and atomic source/task ownership rather than losing useful history or replaying side effects. Candidate/judge budgets, main-only retry publication and the MaxMode tool-free final step remain. Summary assistants remain under FD-010/FD-011/FD-012 and the separate compaction retry bound.
 

@@ -17,7 +17,7 @@ renumbered to close gaps.
 - Last reviewed: 2026-10-20
 - Upstream: `4e58a80184794d52d913d4b886b96f496f2c7020`
 - Prior reviewed upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
-- Main behavior (runtime/tests): `d2f22b8d293dfb16d28e609c8f6d58047a5ee369` (OpenAPI response-resolver isolation)
+- Main behavior (runtime/tests): `a53165b4f0584a487c5090962bdf5d9123b9c1cd` (specified post-sync queue/fork convergence and retry diagnostic correction)
 - Inherited compat behavior: `dcc13401331125450c1cdf39308bdefa5994e86f` (shared OpenAPI follow-up inherited)
 - Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
 - Prior fork `main` tip: `aaa53f4e56136ee1bf845b02ff080716ea2a0c66`
