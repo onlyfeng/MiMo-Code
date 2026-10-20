@@ -106,12 +106,24 @@ describe("Actor tool fromExec guard", () => {
             metadata: () => Effect.void,
             ask: () => Effect.void,
           },
-        ).pipe(Effect.provide(Inbox.defaultLayer))
+        )
 
         expect(result.title).toBe("Sent to main")
-        expect(result.metadata.inboxID).toBeTruthy()
-        expect(result.metadata.receiver_actor_id).toBe("main")
-      }),
+        expect(result.metadata.inboxID).toBeString()
+        expect(result.metadata).toMatchObject({
+          receiver_actor_id: "main",
+          receiver_session_id: chat.id,
+        })
+        const message = MessageV2.get({ sessionID: chat.id, messageID: result.metadata.inputMessageID })
+        expect(message.info).toMatchObject({
+          role: "user",
+          agentID: "main",
+          provenance: { source: "agent", senderSessionID: chat.id, senderActorID: "general-1" },
+        })
+        expect(message.parts).toEqual([
+          expect.objectContaining({ type: "text", synthetic: true, text: expect.stringContaining("hello") }),
+        ])
+      }).pipe(Effect.provide(Inbox.defaultLayer)),
     ),
   )
 

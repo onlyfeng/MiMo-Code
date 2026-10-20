@@ -174,6 +174,41 @@ describe("buildLLMRequestPrefix", () => {
   })
 
   test.each([
+    { evidence: "silent", metadata: undefined, deferred: false },
+    { evidence: "readiness reminder", metadata: { mcpReminder: { kind: "entry", servers: ["example"] } }, deferred: true },
+    { evidence: "legacy reminder", metadata: { mcpDeferredTools: { added: ["mcp_visible"], removed: [] } }, deferred: true },
+  ])("auto capture uses $evidence evidence without adding history markers", async ({ metadata, deferred }) => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.create({})))
+        const userID = MessageID.ascending()
+        await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.commitUserMessage({
+          id: userID, sessionID: session.id, role: "user", agent: "build", harness: "default",
+          model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test") },
+          time: { created: Date.now() },
+        }, [{ id: PartID.ascending(), sessionID: session.id, messageID: userID, type: "text", text: "hello" },
+          ...(metadata ? [{ id: PartID.ascending(), sessionID: session.id, messageID: userID,
+            type: "text" as const, synthetic: true, text: "MCP server example is connected", metadata }] : []),
+        ])))
+        const messages = await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.messages({ sessionID: session.id })))
+        const before = structuredClone(messages)
+        const prefix = await AppRuntime.runPromise(buildLLMRequestPrefix({
+          sessionID: session.id, agent: makeAgent(), model: ProviderTest.model(), msgs: messages, additions: [],
+          mcpToolSearch: { type: "auto", percent: 100 },
+          mcpTools: { mcp_visible: dynamicTool({ description: "Find a record",
+            inputSchema: jsonSchema({ type: "object" }), execute: async () => "ok" }) },
+        }))
+        expect(prefix.activeTools.includes("mcp_tool_search")).toBe(deferred)
+        expect(prefix.activeTools.includes("mcp_tool_use")).toBe(deferred)
+        expect(prefix.activeTools.includes("mcp_visible")).toBe(!deferred)
+        expect(messages).toEqual(before)
+      },
+    })
+  })
+
+  test.each([
     { harness: "default", mode: "always" },
     { harness: "codex", mode: "always" },
     { harness: "default", mode: "auto" },
