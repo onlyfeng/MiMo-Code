@@ -11,6 +11,18 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eleven DC owners remain compat-owned. No override is retired or promoted to shared `main`.
+- Last reviewed: 2026-10-21; full live synchronization begun on 2026-10-20 over `4e58a80184794d52d913d4b886b96f496f2c7020..c1527b9185bba6ea217b265e26bb17870f371461`.
+- Starting compat: `61f0f9169133674b2a9f67c0586b89d74cd226a3`; inherited main runtime/tests: `03b3dfffa9a61d368ec67a550c3481aad911cbad`; reviewed compat runtime/tests: `646975a29693ec04e09d1fa35f6e135d6098989d`.
+- Scope: C01–C03 in [the shared synchronization record](upstream-sync-2026-10-20-c1527b91.md). Main owns capture defect containment, Deferred snapshot drain accounting, scoped capture fixture isolation and the writer-registration test barrier.
+- Direct adaptation: DC-CONTEXT-001 and DC-ACTOR-001 retain `turnContext`, `currentTurnMessages`, current-user projection, frozen model/catalog/tool/permission identity, loaded MCP membership and legacy active masks. The complete prior capture body is unchanged inside the new interrupt-preserving boundary; empty capture still rejects child creation.
+- Adjacent review: DC-MODEL-001, DC-TUI-001 and DC-WEBSEARCH-001 share `prompt.ts` without changed selection, display or search behavior. DC-ACTOR-002 and DC-PROVIDER-001 keep variant admission and Responses routing; adapter interrupts propagate. DC-NET-001, DC-NET-002, DC-PLATFORM-001 and DC-WEBFETCH-001 have no changed admission, transport or fallback boundary.
+- Validation: Bun 1.3.14 `bun ci` completes without a lockfile diff. Corrected capture/drain focused tests pass 9/9 with 33 assertions; CLI typecheck exits 0 after using the existing `const empty` assertion pattern. The 19-file affected matrix is running; publication, complete CI and final remote proofs are pending.
+- Failure history: the first focused run passed 8 and failed F40 because spawn preceded writer registration. Main's first matrix reproduced the same shared test race. The inherited fix waits for the public running state within the original budget; it changes no production behavior. The initial fresh-object assertion type error and its narrow correction are retained in the shared record.
+- Shared ownership: FD/FC registries, history and the shared report inherit main unchanged. Only this file owns compat review details; pure documentation commits do not advance source/test snapshots.
+
+## Previous review record: first 2026-10-20 synchronization
+
+- Status: active; all eleven DC owners remain compat-owned. No override is retired or promoted to shared `main`.
 - Last reviewed: 2026-10-20, full upstream synchronization over `bf0563ddc201b44e3f59c35b18dba17c4386564d..4e58a80184794d52d913d4b886b96f496f2c7020`.
 - Starting compat: `97fce708b8dc9353d274b83f718e1a3c7d27416a`; initial inherited main runtime: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`; initial reviewed compat runtime/tests: `ac2b653cde97fb3046e6510ff4e5183b59186bd5`. The completed intermediate compat tip `00f40d329cf26e19dbaff131158494aec8b19e82` integrates main `f6632fb8085b4005df4abeb36933b30ee9d74811`. C13 inherits main runtime `b18a1207cd66c312216698c175441b8c49778907` at compat runtime/tests `a10363fe376ad2e4d405c27b6d84128918f6c1e3`, with main review `3d9527fd667de159110f594ea79c25dfbf2c5401`; final publication references are recorded in [the synchronization report](upstream-sync-2026-10-20.md).
 - Scope: all thirteen shared capability rows C01–C13, including cleanly merged DC surfaces and the newer DC-ACTOR-002, DC-PROVIDER-001, DC-WEBSEARCH-001 and DC-WEBFETCH-001 entries. The prior eight-owner and 120-path records below are historical snapshots.
