@@ -390,6 +390,18 @@ for (const teardown of ["stop", "scope close"] as const) {
       ),
     }
     const mounts: StartOpts[] = []
+    const trace: unknown[] = []
+    const record = (phase: string, taskId?: string) =>
+      trace.push({
+        phase,
+        time: Date.now(),
+        taskId,
+        attempts,
+        finalized,
+        captured: captured.value.length,
+        pool: getSessionCronTasks().map((task) => ({ id: task.id, prompt: task.prompt, createdAt: task.createdAt })),
+        mounts: mounts.map((opts) => ({ sessionID: opts.sessionID, loading: opts.isLoading(), killed: opts.isKilled() })),
+      })
     const dir = freshDir()
     try {
       const escaped = await harness(
@@ -406,7 +418,8 @@ for (const teardown of ["stop", "scope close"] as const) {
               yield* bridge.stop()
               expect(finalized).toBe(1)
               yield* Deferred.succeed(release, undefined)
-              yield* addDueTask(scheduler, "after stop")
+              const afterStop = yield* addDueTask(scheduler, "after stop")
+              record("after-stop-task-added", afterStop.id)
               yield* scheduler.tickOnce()
               mounts[0]!.onFire(task)
               yield* Effect.sleep("30 millis")
@@ -414,12 +427,22 @@ for (const teardown of ["stop", "scope close"] as const) {
               expect(captured.value).toHaveLength(0)
               const nextSession = SessionID.make("ses_cronbridge_restarted")
               yield* bridge.start(nextSession, dir, inject)
+              record("restarted", afterStop.id)
               mounts[0]!.onFire(task)
               yield* Effect.sleep("30 millis")
               expect(attempts).toBe(1)
               expect(captured.value).toHaveLength(0)
+              record("before-final-tick", afterStop.id)
               yield* scheduler.tickOnce()
-              yield* waitFor(() => captured.value.length === 1)
+              record("after-final-tick", afterStop.id)
+              yield* waitFor(() => captured.value.length === 1).pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    record("wait-finished", afterStop.id)
+                    console.error("CRON_DIAGNOSTIC", JSON.stringify(trace))
+                  }),
+                ),
+              )
               // Session affinity: the task was created under `sid`, so a fire
               // after restart still targets the creating session even though
               // the bridge is remounted for `nextSession`.
@@ -429,7 +452,15 @@ for (const teardown of ["stop", "scope close"] as const) {
             }
             return { scheduler, task }
           }),
-        (opts) => mounts.push(opts),
+        (opts) => {
+          const mount = mounts.length
+          mounts.push(opts)
+          const fire = opts.onFire
+          opts.onFire = (task) => {
+            record(`onFire-${mount}`, task.id)
+            fire(task)
+          }
+        },
       )
       if (teardown === "scope close") {
         expect(finalized).toBe(1)
