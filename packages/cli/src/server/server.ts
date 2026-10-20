@@ -1,4 +1,4 @@
-import { generateSpecs } from "hono-openapi"
+import { describeRoute, generateSpecs, uniqueSymbol, type HandlerUniqueProperty } from "hono-openapi"
 import { Hono } from "hono"
 import { adapter } from "#hono"
 import { lazy } from "@/util/lazy"
@@ -80,6 +80,28 @@ export async function openapi() {
   // handlers when the sub-app has a custom errorHandler, which
   // strips the metadata symbol).
   const { app } = create({})
+  // hono-openapi replaces response resolvers with resolved schemas in place.
+  // Cached route modules share these descriptors, so isolate the response
+  // objects on this generation's app before resolving them.
+  for (const route of app.routes) {
+    const handler: typeof route.handler & { [uniqueSymbol]?: HandlerUniqueProperty } = route.handler
+    const metadata = handler[uniqueSymbol]
+    if (!metadata || !("spec" in metadata) || !metadata.spec.responses) continue
+    const responses = Object.fromEntries(
+      Object.entries(metadata.spec.responses).map(([status, response]) => [
+        status,
+        !response || !("content" in response)
+          ? response
+          : {
+              ...response,
+              content: Object.fromEntries(
+                Object.entries(response.content ?? {}).map(([mediaType, media]) => [mediaType, { ...media }]),
+              ),
+            },
+      ]),
+    )
+    route.handler = describeRoute({ ...metadata.spec, responses })
+  }
   const result = await generateSpecs(app, {
     documentation: {
       info: {

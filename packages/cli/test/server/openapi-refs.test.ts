@@ -30,9 +30,7 @@ function schema(doc: unknown, name: string) {
 // where openapi-ts dies with `Missing $ref pointer`. That is how the spec stayed
 // broken for four days after `fc74c539` shipped `providerOutput: z.json()`.
 // Resolving every pointer here turns that into a test failure instead.
-test("every $ref in the generated OpenAPI document resolves", async () => {
-  const doc = await Server.openapi()
-
+function expectResolvedRefs(doc: unknown) {
   const refs = new Set<string>()
   const collect = (node: unknown) => {
     if (Array.isArray(node)) return node.forEach(collect)
@@ -56,6 +54,16 @@ test("every $ref in the generated OpenAPI document resolves", async () => {
     (ref) => !ref.startsWith("#/") || resolve(doc, ref.slice(2).split("/")) === undefined,
   )
   expect(dangling).toEqual([])
+}
+
+test("every $ref in the generated OpenAPI document resolves", async () => {
+  const first = await Server.openapi()
+  expectResolvedRefs(first)
+  const second = await Server.openapi()
+  expectResolvedRefs(second)
+  expect(Object.keys(second.components?.schemas ?? {}).sort()).toEqual(
+    Object.keys(first.components?.schemas ?? {}).sort(),
+  )
 })
 
 test("OpenAPI exposes controlled actor recovery and validated task binding", async () => {
@@ -96,4 +104,9 @@ test("OpenAPI keeps the compaction projection contract", async () => {
 test("prompt_async publishes its accepted and validation responses", async () => {
   const promptAsync = operation(await Server.openapi(), "/session/{sessionID}/prompt_async", "post")
   expect(Object.keys(isRecord(promptAsync?.responses) ? promptAsync.responses : {})).toEqual(["202", "204", "400", "404"])
+})
+
+test("concurrent OpenAPI generation resolves every reference", async () => {
+  const docs = await Promise.all([Server.openapi(), Server.openapi()])
+  for (const doc of docs) expectResolvedRefs(doc)
 })
