@@ -2289,10 +2289,17 @@ files remain byte-identical to the accepted main correction.
     other HTTP status is the page's own answer and fails without a hosted call.
   - Destinations (`tool/webfetch-hosted/destination.ts`, compat-only; the
     main-owned `util/ssrf.ts` is unchanged and still unused by WebFetch):
-    `private` covers literal loopback, RFC1918, CGN, link-local, ULA and
-    unspecified addresses, single-label and local-suffix names, and names with
-    any private DNS answer. Names that fail to resolve are `unresolved` and may
-    go hosted, because a host without public DNS is the case this exists for.
+    `private` covers every address that is not globally reachable unicast:
+    loopback, RFC1918, CGN, link-local, ULA, unspecified, IETF protocol
+    assignments, the three documentation TEST-NETs and `2001:db8::/32`,
+    benchmarking `198.18.0.0/15`, multicast, reserved and broadcast; plus
+    single-label and local-suffix names, and names with any such DNS answer.
+    A fake-IP DNS proxy answers every name from `198.18.0.0/15`, so on such a
+    host every target is direct-only. Names that fail to resolve, or that the
+    resolver has not answered within the call's `timeout`, are `unresolved`
+    and may go hosted, because a host without public DNS (or with a stalled
+    resolver) is the case this exists for; the lookup itself cannot be
+    cancelled and is only ignored past that limit.
     Classification never throws: an unparseable URL is `private`, so the
     direct fetch reports it as before. `assertSafeUrl` cannot be reused for routing:
     it passes loopback and throws on every unresolvable public name.
@@ -2344,13 +2351,14 @@ files remain byte-identical to the accepted main correction.
   the chained error (the processor then kept the turn running), and
   `classify` threw on an unparseable URL despite its never-throws contract.
   PR review then moved the empty-list check ahead of the DNS lookup, bounded
-  hosted entries by the caller's `timeout`, required the result's URL, and
-  moved the hosted tests onto `testEffect`. With ambient `MIMOCODE_*` flags
-  unset: `webfetch-hosted`, `webfetch-destination`, `webfetch`, `websearch`,
-  `websearch-native`, `registry`, `registry-toolset`, `config` and
-  `permission/next` pass 275/275; the private-bypass, URL-proof,
-  missing-URL, caller-timeout and rejection-propagation mutants are each
-  killed; package typecheck exits 0; root lint 0 errors; SDK regeneration
+  hosted entries and the destination lookup by the caller's `timeout`,
+  required the result's URL, widened `private` to every non-global address,
+  and moved the hosted tests onto `testEffect`. With ambient `MIMOCODE_*`
+  flags unset: `webfetch-hosted`, `webfetch-destination`, `webfetch`,
+  `websearch`, `websearch-native`, `registry`, `registry-toolset`, `config`
+  and `permission/next` pass 290/290; the private-bypass, URL-proof,
+  missing-URL, caller-timeout, lookup-limit and rejection-propagation mutants
+  are each killed; package typecheck exits 0; root lint 0 errors; SDK regeneration
   matches the committed `types.gen.ts`.
 - Exit condition: retire when shared `main` offers an equivalent hosted fetch
   with direct-first routing and private-target protection, or when the user

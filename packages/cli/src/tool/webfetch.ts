@@ -120,7 +120,7 @@ export const WebFetchTool = Tool.define(
             // An empty list and a private target keep today's direct-only behavior;
             // the list is checked first so it costs no DNS lookup.
             if (entries.length === 0) return yield* direct()
-            const destination = yield* Effect.promise(() => Destination.classify(params.url))
+            const destination = yield* Effect.promise(() => Destination.classify(params.url, undefined, timeout))
             if (destination === "private") return yield* direct()
 
             const failures: string[] = []

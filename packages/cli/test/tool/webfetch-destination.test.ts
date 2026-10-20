@@ -21,11 +21,23 @@ describe("webfetch.destination", () => {
     "http://[fd00::1]/",
     "http://[fe80::1]/",
     "http://[::ffff:192.168.1.1]/",
+    // Not globally reachable: benchmarking, documentation, IETF, multicast, reserved, broadcast.
+    "http://198.18.0.1/",
+    "http://198.19.255.254/",
+    "http://192.0.0.8/",
+    "http://192.0.2.10/",
+    "http://198.51.100.7/",
+    "http://203.0.113.5/",
+    "http://224.0.0.1/",
+    "http://240.0.0.1/",
+    "http://255.255.255.255/",
+    "http://[ff02::1]/",
+    "http://[2001:db8::1]/",
   ])("literal private address %s stays private", async (url) => {
     expect(await Destination.classify(url, failing)).toBe("private")
   })
 
-  test.each(["http://8.8.8.8/", "http://[2606:4700::1111]/"])("literal public address %s", async (url) => {
+  test.each(["http://8.8.8.8/", "http://[2606:4700::1111]/", "http://198.20.0.1/", "http://192.0.3.1/", "http://223.1.1.1/"])("literal public address %s", async (url) => {
     expect(await Destination.classify(url, failing)).toBe("public")
   })
 
@@ -60,6 +72,15 @@ describe("webfetch.destination", () => {
   test("a name the resolver cannot answer is unresolved, never thrown", async () => {
     expect(await Destination.classify("https://example.com/", failing)).toBe("unresolved")
     expect(await Destination.classify("https://example.com/", answer())).toBe("unresolved")
+  })
+
+  test("a lookup slower than the time limit is unresolved", async () => {
+    const slow: Destination.Lookup = async () => {
+      await Bun.sleep(300)
+      return [{ address: "10.1.2.3", family: 4 }]
+    }
+    expect(await Destination.classify("https://wiki.example.com/", slow, 20)).toBe("unresolved")
+    expect(await Destination.classify("https://wiki.example.com/", slow, 2000)).toBe("private")
   })
 
   test("an unparseable URL stays on the direct fetch, never thrown", async () => {

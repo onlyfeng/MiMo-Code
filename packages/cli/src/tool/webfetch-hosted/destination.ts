@@ -21,10 +21,11 @@ function ip4(address: string) {
     : undefined
 }
 
+/** Any IPv4 address that is not globally reachable unicast. */
 export function isPrivateIPv4(address: string): boolean {
   const parts = ip4(address)
   if (!parts) return false
-  const [a, b] = parts
+  const [a, b, c] = parts
   return (
     a === 0 || // current network
     a === 10 || // private class A
@@ -32,7 +33,12 @@ export function isPrivateIPv4(address: string): boolean {
     (a === 100 && b >= 64 && b <= 127) || // shared address (CGN)
     (a === 169 && b === 254) || // link-local
     (a === 172 && b >= 16 && b <= 31) || // private class B
-    (a === 192 && b === 168) // private class C
+    (a === 192 && b === 168) || // private class C
+    (a === 192 && b === 0 && (c === 0 || c === 2)) || // IETF protocol assignments, TEST-NET-1
+    (a === 198 && (b === 18 || b === 19)) || // benchmarking, also fake-IP DNS proxies
+    (a === 198 && b === 51 && c === 100) || // TEST-NET-2
+    (a === 203 && b === 0 && c === 113) || // TEST-NET-3
+    a >= 224 // multicast, reserved, broadcast
   )
 }
 
@@ -41,6 +47,8 @@ export function isPrivateIPv6(address: string): boolean {
   if (normalized === "::" || normalized === "::1") return true // unspecified, loopback
   if ((parseInt(normalized.split(":")[0] ?? "", 16) & 0xffc0) === 0xfe80) return true // link-local fe80::/10
   if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true // ULA
+  if (normalized.startsWith("ff")) return true // multicast
+  if (/^2001:0?db8:/.test(normalized)) return true // documentation
   const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1]
   if (mapped) return isPrivateIPv4(mapped)
   const hexMapped = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
@@ -60,17 +68,29 @@ function isPrivateAddress(address: string, family: number) {
  * Classifies a URL's host. Literal private addresses, single-label and
  * local-suffix names, and names with any private DNS answer are `private`.
  * Names that resolve only to public addresses are `public`; names the resolver
- * cannot answer are `unresolved`. An unparseable URL is `private`, leaving it
- * to the direct fetch to report as before.
+ * cannot answer are `unresolved`, as are names it has not answered within
+ * `timeout` ms: a stalled resolver is the same host as one without public DNS.
+ * An unparseable URL is `private`, leaving it to the direct fetch to report as before.
  */
-export async function classify(url: string, lookupImpl: Lookup = lookup): Promise<Destination> {
+export async function classify(url: string, lookupImpl: Lookup = lookup, timeout?: number): Promise<Destination> {
   if (!URL.canParse(url)) return "private"
   const hostname = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.$/, "")
   const family = isIP(hostname)
   if (family) return isPrivateAddress(hostname, family) ? "private" : "public"
   if (!hostname.includes(".")) return "private"
   if (LOCAL_HOSTNAMES.has(hostname) || LOCAL_SUFFIXES.some((suffix) => hostname.endsWith(suffix))) return "private"
-  const resolved = await lookupImpl(hostname, { all: true }).catch(() => undefined)
+  // getaddrinfo cannot be cancelled; past the limit its answer is just ignored.
+  const answer = lookupImpl(hostname, { all: true }).catch(() => undefined)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const resolved =
+    timeout === undefined
+      ? await answer
+      : await Promise.race([
+          answer,
+          new Promise<undefined>((resolve) => {
+            timer = setTimeout(() => resolve(undefined), timeout)
+          }),
+        ]).finally(() => clearTimeout(timer))
   if (!resolved || resolved.length === 0) return "unresolved"
   return resolved.some((item) => isPrivateAddress(item.address, item.family)) ? "private" : "public"
 }
