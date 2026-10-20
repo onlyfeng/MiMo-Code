@@ -78,14 +78,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
-// Scheme, host case, default port and a trailing slash differ between a request
-// and the gateway's echo of it without naming another page.
-function sameUrl(a: string, b: string) {
-  if (!URL.canParse(a) || !URL.canParse(b)) return false
-  const left = new URL(a)
-  const right = new URL(b)
-  const path = (url: URL) => url.pathname.replace(/\/+$/, "")
-  return left.host === right.host && path(left) === path(right) && left.search === right.search
+// Only differences proven not to name another resource pass: URL normalization
+// (host case, default port, an empty path) and an http request opened over
+// https, which Responses open_page was observed doing. Web fetch and Grok
+// open_page echo the request verbatim. The fragment never reaches the server.
+function sameUrl(requested: string, echoed: string) {
+  if (!URL.canParse(requested) || !URL.canParse(echoed)) return false
+  const want = new URL(requested)
+  const got = new URL(echoed)
+  const scheme = want.protocol === got.protocol || (want.protocol === "http:" && got.protocol === "https:")
+  return (
+    scheme &&
+    want.username === got.username &&
+    want.password === got.password &&
+    want.host === got.host &&
+    want.pathname === got.pathname &&
+    want.search === got.search
+  )
 }
 
 const PROMPT = (url: string) => `Use the web_fetch tool once to fetch exactly this URL: ${url}\nAfter the fetch, reply with: done`
@@ -114,7 +123,7 @@ export function extract(kind: Kind, url: string, content: ContentPart<ToolSet>[]
         return { reason: `web_fetch ${typeof output.errorCode === "string" ? output.errorCode : "error"}` }
       if (output.type !== "web_fetch_result") continue
       if (typeof output.url !== "string") return { reason: "web_fetch returned no URL" }
-      if (!sameUrl(output.url, url)) return { reason: `web_fetch returned another URL: ${output.url}` }
+      if (!sameUrl(url, output.url)) return { reason: `web_fetch returned another URL: ${output.url}` }
       const document = isRecord(output.content) ? output.content : undefined
       const source = document && isRecord(document.source) ? document.source : undefined
       if (!source || typeof source.data !== "string") return { reason: "web_fetch returned no content" }
@@ -131,7 +140,7 @@ export function extract(kind: Kind, url: string, content: ContentPart<ToolSet>[]
       isRecord(part.output.action) &&
       part.output.action.type === "openPage" &&
       typeof part.output.action.url === "string" &&
-      sameUrl(part.output.action.url, url),
+      sameUrl(url, part.output.action.url),
   )
   if (!opened) return { reason: "no open_page result for the URL" }
   const text = content

@@ -2322,6 +2322,12 @@ files remain byte-identical to the accepted main correction.
     server result, a result for another URL or naming none, a `web_fetch_tool_result_error`
     (delivered by `ai` as a `tool-error` part), a PDF/base64 source, an
     unresolvable entry, an undeclared variant or any other SDK fails the entry.
+    "Another URL" compares scheme, credentials, host, path and query; only URL
+    normalization (host case, default port, an empty path) and an `http`
+    request echoed as `https` pass. Probes on 2026-10-20: relay-claude
+    `web_fetch` and relay-grok `open_page` echoed every request verbatim
+    (`http`, trailing slash, bare host); relay-codex `open_page` added the
+    root slash and opened an `http` URL over `https`.
     Hosted fetch is never injected into the session request.
   - Output: the tool's normal truncation applies. `metadata.servedBy` is
     `direct` or the entry ref; `metadata.hosted` is `text` or `digest`. When
@@ -2357,14 +2363,14 @@ files remain byte-identical to the accepted main correction.
   `classify` threw on an unparseable URL despite its never-throws contract.
   PR review then moved the empty-list check ahead of the DNS lookup, bounded
   hosted entries and the destination lookup by the caller's `timeout`,
-  required the result's URL, widened `private` to every non-global IPv4 and
+  required the result's URL and its exact identity, widened `private` to every non-global IPv4 and
   IPv6 address (IPv6 as a global-unicast allowlist),
   and moved the hosted tests onto `testEffect`. With ambient `MIMOCODE_*`
   flags unset: `webfetch-hosted`, `webfetch-destination`, `webfetch`,
   `websearch`, `websearch-native`, `registry`, `registry-toolset`, `config`
-  and `permission/next` pass 300/300; the private-bypass, URL-proof,
-  missing-URL, caller-timeout, lookup-limit and rejection-propagation mutants
-  are each killed; package typecheck exits 0; root lint 0 errors; SDK regeneration
+  and `permission/next` pass 301/301; the private-bypass, URL-proof,
+  missing-URL, caller-timeout, lookup-limit, scheme-downgrade, scheme-upgrade
+  and rejection-propagation mutants are each killed; package typecheck exits 0; root lint 0 errors; SDK regeneration
   matches the committed `types.gen.ts`.
 - Exit condition: retire when shared `main` offers an equivalent hosted fetch
   with direct-first routing and private-target protection, or when the user

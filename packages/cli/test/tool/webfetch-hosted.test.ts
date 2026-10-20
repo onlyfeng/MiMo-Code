@@ -317,6 +317,49 @@ describe("tool.webfetch.hosted config", () => {
       expect(result).toEqual({ reason: "web_fetch returned no URL" })
     }),
   )
+
+  it.effect("the URL proof tolerates only normalization and an https upgrade", () =>
+    Effect.sync(() => {
+      const fetched = (echo: string) =>
+        ({
+          type: "tool-result",
+          toolCallId: "srvtoolu_1",
+          toolName: "web_fetch",
+          input: { url: echo },
+          output: {
+            type: "web_fetch_result",
+            url: echo,
+            content: { type: "document", title: null, source: { type: "text", mediaType: "text/plain", data: PAGE } },
+          },
+          providerExecuted: true,
+        }) as never
+      const opened = (echo: string) => [
+        {
+          type: "tool-result",
+          toolCallId: "ws_1",
+          toolName: "web_search",
+          input: {},
+          output: { action: { type: "openPage", url: echo } },
+          providerExecuted: true,
+        } as never,
+        { type: "text", text: "digest" } as never,
+      ]
+      const accepted = (result: unknown) => expect(result).toMatchObject({ output: expect.any(String) })
+      const rejected = (result: unknown) => expect(result).toMatchObject({ reason: expect.stringContaining("") })
+
+      // Host case, default port and an empty path name the same resource.
+      accepted(HostedFetch.extract("text", "https://example.com", [fetched("https://EXAMPLE.com:443/")]))
+      // Responses open_page was observed opening an http request over https.
+      accepted(HostedFetch.extract("digest", "http://example.com/doc", opened("https://example.com/doc")))
+      accepted(HostedFetch.extract("text", "https://example.com/doc#part", [fetched("https://example.com/doc")]))
+
+      rejected(HostedFetch.extract("text", "https://example.com/account", [fetched("http://example.com/account")]))
+      rejected(HostedFetch.extract("text", "https://example.com/account", [fetched("https://example.com/account/")]))
+      rejected(HostedFetch.extract("text", "https://user@example.com/doc", [fetched("https://example.com/doc")]))
+      rejected(HostedFetch.extract("text", "https://example.com/doc?a=1", [fetched("https://example.com/doc?a=2")]))
+      rejected(HostedFetch.extract("digest", "https://example.com/account", opened("http://example.com/account/")))
+    }),
+  )
 })
 
 describe("tool.webfetch.hosted chain", () => {
