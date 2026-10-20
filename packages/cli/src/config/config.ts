@@ -422,6 +422,33 @@ const InfoSchema = Schema.Struct({
       }),
     }),
   ).annotate({ description: "Web search: provider-native search and the websearch tool's fallback models." }),
+  webfetch: Schema.optional(
+    Schema.Struct({
+      hosted: Schema.optional(
+        Schema.mutable(
+          Schema.Array(
+            Schema.Union([
+              Schema.String,
+              Schema.Struct({
+                model: Schema.String,
+                variant: Schema.optional(Schema.String),
+                max_content_tokens: Schema.optional(PositiveInt).annotate({
+                  description: "Upper bound on the page tokens an @ai-sdk/anthropic web_fetch returns.",
+                }),
+              }),
+            ]),
+          ),
+        ),
+      ).annotate({
+        description:
+          "Models (provider/model) that fetch a public URL on the gateway, in order. @ai-sdk/anthropic models return the page text; @ai-sdk/openai models return a model-written digest.",
+      }),
+      first: Schema.optional(Schema.Literals(["local", "hosted"])).annotate({
+        description:
+          "Which route webfetch tries first for a public URL: 'local' (default) fetches directly and falls back to hosted models; 'hosted' asks the hosted models first.",
+      }),
+    }),
+  ).annotate({ description: "Web fetch: gateway-hosted fetch models tried around the direct fetch." }),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),

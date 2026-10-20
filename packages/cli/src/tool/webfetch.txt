@@ -11,3 +11,4 @@ Usage notes:
   - Format options: "markdown" (default), "text", or "html"
   - This tool is read-only and does not modify any files
   - Results may be summarized if the content is very large
+  - When a direct fetch is not possible, a configured gateway model may fetch the page instead; its text is plain text, and a result marked as a model digest is that model's account of the page rather than the page itself
