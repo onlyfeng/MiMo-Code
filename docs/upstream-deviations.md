@@ -17,8 +17,8 @@ renumbered to close gaps.
 - Last reviewed: 2026-10-20
 - Upstream: `4e58a80184794d52d913d4b886b96f496f2c7020`
 - Prior reviewed upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
-- Main behavior (runtime/tests): `a53165b4f0584a487c5090962bdf5d9123b9c1cd` (specified post-sync queue/fork convergence and retry diagnostic correction)
-- Inherited compat behavior: `dcc13401331125450c1cdf39308bdefa5994e86f` (shared OpenAPI follow-up inherited)
+- Main behavior (runtime/tests): `92fee50dd618ed25f212aba0a17f3334635451c8` (specified post-sync convergence and instance-owned cron lifecycle correction)
+- Inherited compat behavior: `bef8617265af72c8dc457498f6c14f504391ba38` (shared convergence and cron lifecycle correction inherited; compat render layout aligned)
 - Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
 - Prior fork `main` tip: `aaa53f4e56136ee1bf845b02ff080716ea2a0c66`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
