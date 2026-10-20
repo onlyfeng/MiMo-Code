@@ -20,6 +20,10 @@ registry/history commit does not advance either behavior reference below.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-10-19 DC-WEBFETCH-001 added
+
+New compat owner, no inherited change: an opt-in `webfetch` config block lists gateway models that fetch a public URL when the direct fetch cannot (a host without public DNS or egress), with private targets kept direct-only. It adds two new source files, `tool/webfetch-hosted/destination.ts` and `tool/webfetch-hosted/hosted.ts`, and overlays on `tool/webfetch.ts`, `tool/webfetch.txt`, `config/config.ts` and the generated SDK `types.gen.ts`, plus two test files. Without a `webfetch` config block, WebFetch routing is unchanged; the only always-on change is the tool description's added line about hosted results.
+
 ## 2026-10-18 DC-WEBSEARCH-001 added
 
 New compat owner, no inherited change: provider-native web search with in-turn fallback and a configurable Codex search layer for the `websearch` tool (design `docs/superpowers/specs/2026-10-18-compat-native-websearch-design.md`). It adds the tenth owner to the sync index (the current review record above still counts eight; DC-ACTOR-002 and DC-PROVIDER-001 were added after it). The compat-different set grows from 120 paths (42 under `packages/cli/src` and `packages/sdk/src`) to 135 (49): two new source files, `tool/websearch/native.ts` and `tool/websearch/codex.ts`, and overlays on `config/config.ts`, `session/llm.ts`, `session/prompt.ts`, `session/processor.ts`, `provider/transform.ts`, `tool/registry.ts`, `tool/websearch/index.ts`, the TUI session route, the generated SDK `types.gen.ts`, tests and the design/plan documents. `session/llm.ts`, `session/prompt.ts`, `provider/transform.ts` and the SDK types were already compat-different. Without a `websearch` config block, request payloads, tool lists and websearch results are unchanged.
@@ -1061,6 +1065,7 @@ files remain byte-identical to the accepted main correction.
 | DC-TUI-001      | Prompt/footer model metadata and title locale                                                                                              | Request-metadata display override alongside shared locale propagation        | Preserve provider/model/variant truth, locale submission, and known-limit disclosure                                      |
 | DC-PROVIDER-001 | `Provider.getLanguage` loader fallback and `ProviderTransform` SDK-key/options mapping                                                     | Config-provider routing and declared reasoning capability                    | Preserve xAI Responses routing and declared reasoning for OpenAI-compatible models                                      |
 | DC-WEBSEARCH-001 | `websearch` config, `LLM.stream` tool injection/retry/replay, preflight `LLM.wireTools`, Anthropic tool-call reorder, websearch tool chain, registry exposure | Compat-only extension; main has no native search and no `websearch` config | Preserve opt-in native search, search-specific in-turn fallback, text replay downgrade, and the fallback chain order |
+| DC-WEBFETCH-001 | `webfetch` config, WebFetch route chain, destination classification, hosted fetch models | Compat-only extension; main has no hosted fetch and no `webfetch` config | Preserve direct-first default, private targets direct-only, result-block proof, digest labelling and chained failure reasons |
 
 ## DC-NET-001 — approved private-network WebFetch
 
@@ -2255,4 +2260,123 @@ files remain byte-identical to the accepted main correction.
 - Exit condition: retire when shared `main` offers provider-native search with
   an equivalent opt-in, failure fallback and replay safety, or when the user
   drops the `websearch` config. If propagated to `main`, move the contract to
+  the shared registry.
+
+## DC-WEBFETCH-001 — gateway-hosted fetch around the direct fetch
+
+- Status: active
+- Canonical owner: `dev/compat` WebFetch routing
+- Added: 2026-10-19 (eleventh owner).
+- Base: inherited WebFetch (with DC-NET-001's approved private targets) fetches
+  only directly from this host. On a host without public DNS or egress it
+  cannot fetch any public page, although `websearch` still works there through
+  the gateway.
+- Contract:
+  - Config: top-level `webfetch.hosted` (ordered `provider/model` strings or
+    `{ model, variant, max_content_tokens }`) and `webfetch.first`
+    (`"local"`, the default, or `"hosted"`). Without the block, routing is
+    unchanged. The list does not depend on the session model.
+  - Routes: the permission ask for the requested URL always runs first, and a
+    rejection ends the call. A `private` destination, or an empty list, uses
+    only the direct fetch; the list is checked first, so an empty one costs
+    no DNS lookup. Otherwise `first: "local"` tries direct, then each
+    hosted entry; `first: "hosted"` tries each hosted entry, then direct.
+    A permission rejection, correction or denial raised by the direct route
+    (a redirect hop's ask) propagates unchanged under either order, never
+    folded into the chained error, so the processor still blocks the turn.
+  - Direct-to-hosted switch: only on a transport failure (DNS, connection, TLS),
+    a timeout, or a blocking status (403, 407, 429, 451, 502, 503, 504). Any
+    other HTTP status is the page's own answer and fails without a hosted call.
+  - Destinations (`tool/webfetch-hosted/destination.ts`, compat-only; the
+    main-owned `util/ssrf.ts` is unchanged and still unused by WebFetch):
+    `private` covers every address that is not globally reachable unicast,
+    checked against the IANA IPv4 and IPv6 special-purpose registries (their
+    few globally reachable anycast exceptions inside `192.0.0.0/24` and
+    `2001::/23` are private too: they serve no pages, and private only means
+    direct-only). IPv4: loopback, RFC1918, CGN, link-local, unspecified, IETF
+    protocol assignments, the three documentation TEST-NETs, deprecated 6to4
+    relay `192.88.99.0/24`, benchmarking `198.18.0.0/15`, multicast, reserved
+    and broadcast. IPv6: everything outside global unicast `2000::/3`, plus
+    IETF protocol assignments `2001::/23` (Teredo, ORCHID, benchmarking) and
+    documentation `2001:db8::/32` and `3fff::/20`; IPv4-mapped, NAT64
+    (`64:ff9b::/96`, so DNS64 answers for public names stay public) and 6to4
+    addresses are judged by their embedded IPv4 address, and a malformed
+    address is private. Plus single-label and local-suffix names, and names
+    with any such DNS answer.
+    A fake-IP DNS proxy answers every name from `198.18.0.0/15`, so on such a
+    host every target is direct-only. Names that fail to resolve, or that the
+    resolver has not answered within the call's `timeout`, are `unresolved`
+    and may go hosted, because a host without public DNS (or with a stalled
+    resolver) is the case this exists for; the lookup itself cannot be
+    cancelled and is only ignored past that limit.
+    Classification never throws: an unparseable URL is `private`, so the
+    direct fetch reports it as before. `assertSafeUrl` cannot be reused for routing:
+    it passes loopback and throws on every unresolvable public name.
+  - Hosted fetch (`tool/webfetch-hosted/hosted.ts`): one non-streaming request
+    per entry with `toolChoice: "auto"` (gateways reject forced choice on some
+    models) and no retries, each bounded by the caller's `timeout` when it
+    gave a positive one (rounded up to whole milliseconds), else 90 s to allow
+    for a model turn. The protocol follows the entry's SDK, not its
+    provider name. `@ai-sdk/anthropic` sends `web_fetch_20250910`
+    (`max_uses: 1`, `max_content_tokens`, default 30000) and returns the
+    `web_fetch_result` text; `@ai-sdk/openai` sends Responses `web_search`
+    (`external_web_access` only: a Grok Responses gateway rejects
+    `search_context_size`) and returns the answer only when an `open_page`
+    action names the URL, prefixed as a model digest. A reply without that
+    server result, a result for another URL or naming none, a `web_fetch_tool_result_error`
+    (delivered by `ai` as a `tool-error` part), a PDF/base64 source, an
+    unresolvable entry, an undeclared variant or any other SDK fails the entry.
+    "Another URL" compares scheme, credentials, host, path and query; only URL
+    normalization (host case, default port, an empty path) and an `http`
+    request echoed as `https` pass. Probes on 2026-10-20: relay-claude
+    `web_fetch` and relay-grok `open_page` echoed every request verbatim
+    (`http`, trailing slash, bare host); relay-codex `open_page` added the
+    root slash and opened an `http` URL over `https`.
+    Hosted fetch is never injected into the session request.
+  - Output: the tool's normal truncation applies. `metadata.servedBy` is
+    `direct` or the entry ref; `metadata.hosted` is `text` or `digest`. When
+    every route fails, the error is the first route's own error followed by
+    one `- <route>: <reason>` line per later route.
+- Delta: hosted entries are billed per fetch, and the page counts again as
+  session input. The server follows redirects, so only the requested URL is
+  asked; `format` is not honored by hosted results (plain text or digest).
+  Gateway results may be cached: a `web_fetch_result.retrieved_at` two days
+  old was observed, so a live page is current only through the direct fetch.
+- Source surfaces: `packages/cli/src/tool/webfetch.ts`,
+  `packages/cli/src/tool/webfetch.txt`,
+  `packages/cli/src/tool/webfetch-hosted/{destination,hosted}.ts`,
+  `packages/cli/src/config/config.ts`, `packages/sdk/src/v2/gen/types.gen.ts`.
+- Test surfaces: `test/tool/webfetch-hosted.test.ts` (config, switch rules,
+  route order, result proof, digest label, private bypass, chained errors,
+  against a local mock gateway), `test/tool/webfetch-destination.test.ts`,
+  plus unchanged `test/tool/webfetch.test.ts` for the no-block path.
+- Evidence (2026-10-19, on this compat base): 217 pass, 0 fail across 9
+  related files; ten mutants of the routing, classification and proof rules
+  are each killed; CLI and SDK typechecks and root lint (0 errors) pass.
+  Live relay-gateway probes the same day: Anthropic `web_fetch` returns page
+  text on relay-claude models; Responses `open_page` reads the page on
+  relay-codex and relay-grok models; relay-glm swaps in a non-standard reader,
+  relay-kimi has no server fetch and answers from memory, and relay-deepseek
+  and relay-macaron return the call to the client. An end-to-end local build
+  on a host without public DNS fetched through the text route, the Grok digest
+  route after an unresolvable first entry, and the chain from a Codex session.
+- Adoption review (2026-10-20): two corrections on top of the imported change,
+  each with a test that fails on the imported code at its assertion:
+  `first: "hosted"` had folded a direct redirect's permission rejection into
+  the chained error (the processor then kept the turn running), and
+  `classify` threw on an unparseable URL despite its never-throws contract.
+  PR review then moved the empty-list check ahead of the DNS lookup, bounded
+  hosted entries and the destination lookup by the caller's `timeout`,
+  required the result's URL and its exact identity, widened `private` to every non-global IPv4 and
+  IPv6 address (IPv6 as a global-unicast allowlist),
+  and moved the hosted tests onto `testEffect`. With ambient `MIMOCODE_*`
+  flags unset: `webfetch-hosted`, `webfetch-destination`, `webfetch`,
+  `websearch`, `websearch-native`, `registry`, `registry-toolset`, `config`
+  and `permission/next` pass 309/309; the private-bypass, URL-proof,
+  missing-URL, caller-timeout, lookup-limit, scheme-downgrade, scheme-upgrade
+  and rejection-propagation mutants are each killed; package typecheck exits 0; root lint 0 errors; SDK regeneration
+  matches the committed `types.gen.ts`.
+- Exit condition: retire when shared `main` offers an equivalent hosted fetch
+  with direct-first routing and private-target protection, or when the user
+  drops the `webfetch` config. If propagated to `main`, move the contract to
   the shared registry.

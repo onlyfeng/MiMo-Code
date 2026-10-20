@@ -2853,6 +2853,29 @@ export type Config = {
         }
     >
   }
+  /**
+   * Web fetch: gateway-hosted fetch models tried around the direct fetch.
+   */
+  webfetch?: {
+    /**
+     * Models (provider/model) that fetch a public URL on the gateway, in order. @ai-sdk/anthropic models return the page text; @ai-sdk/openai models return a model-written digest.
+     */
+    hosted?: Array<
+      | string
+      | {
+          model: string
+          variant?: string
+          /**
+           * Upper bound on the page tokens an @ai-sdk/anthropic web_fetch returns.
+           */
+          max_content_tokens?: number
+        }
+    >
+    /**
+     * Which route webfetch tries first for a public URL: 'local' (default) fetches directly and falls back to hosted models; 'hosted' asks the hosted models first.
+     */
+    first?: "local" | "hosted"
+  }
   experimental?: {
     disable_paste_summary?: boolean
     /**
