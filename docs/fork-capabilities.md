@@ -15,12 +15,12 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-20
-- Upstream: `c1527b9185bba6ea217b265e26bb17870f371461`
+- Last reviewed: 2026-10-21
+- Upstream: `cf8c09d5315ea04a5af613f392ff17a8832b33c1`
 - Prior reviewed upstream: `4e58a80184794d52d913d4b886b96f496f2c7020`
 - Main behavior (runtime/tests): `03b3dfffa9a61d368ec67a550c3481aad911cbad` (checkpoint capture defect containment, Deferred snapshot drain accounting and writer-registration test synchronization)
-- Prior inherited compat behavior: `bef8617265af72c8dc457498f6c14f504391ba38` (shared convergence and cron lifecycle correction inherited; compat render layout aligned)
-- Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
+- Inherited compat behavior: `646975a29693ec04e09d1fa35f6e135d6098989d` (checkpoint fixes and shared registration test barrier inherited; compat capture fields retained)
+- Bundled guidance content: `6e37642aa9a77165b2e83182aa61e66038d195dc` (Compose Next unavailable-input, spec source and finish contract)
 - Prior fork `main` tip: `f7b7520fdac83f450f52bb3c35842ee853ee1b44`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
@@ -31,7 +31,7 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-20 full sync through `c1527b91`](upstream-sync-2026-10-20-c1527b91.md), three capabilities. Contain non-interrupt prefix-capture defects around the complete frozen capture, count settled writer Deferreds from the drain snapshot, and retain the fork's scoped non-empty capture fixture. FD-009 still rejects empty captures before child creation; no shared owner retires. Compat propagation and exact-SHA publication gates remain pending in the linked execution record.
+Latest reviewed synchronization: [2026-10-20/21 full sync through `cf8c09d5`](upstream-sync-2026-10-20-c1527b91.md), four capabilities. Contain non-interrupt prefix-capture defects around the complete frozen capture, count settled writer Deferreds from the drain snapshot, and retain the fork's scoped non-empty capture fixture. FD-009 still rejects empty captures before child creation; no shared owner retires. All four decisions are propagated to the compat candidate; the live addition also adopts Compose Next unavailable-input, spec source and finish guidance unchanged. Exact-SHA publication gates remain pending in the linked execution record.
 
 Previous synchronization: [2026-10-20 full sync through `4e58a801`](upstream-sync-2026-10-20.md), thirteen capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. All thirteen decisions have propagated into compat, preserving eleven DC owners and fifty-two production overlay paths. The linked record retains the failed compat OpenAPI CI and the successful corrected-source lint/typecheck/test runs on both branches, including compat Windows. Final docs-only descendant equivalence and scoped cleanup are checked in the execution receipt.
 
@@ -1396,6 +1396,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
 
+- 2026-10-21 live synchronization: adopt `cf8c09d5` Compose Next unavailable-input handling, spec `source` tracking and Finish confirmation unchanged. The explicit invocation entry and discovery/permission boundaries remain; this is shipped content, not a runtime schema or bulk spec migration. Content loading/discovery and permission/search tests cover the integration, while behavioral wording is reviewed as guidance.
+
 - 2026-10-13 MiniMax reminder removal: the shipped `session/prompt/minimax.txt` no longer carries "The default branch in this repo is `main`. CI triggers on …". Upstream `25b7bac3` pasted that repository-specific sentence into a prompt every MiniMax user receives, twice; fork PR #43 kept it and updated the branch list to `dev/compat`, which made it current for this repository and still a fabricated fact for every other project. The sentence is deleted, so the file differs from upstream by two removed lines and nothing added, and this repository's branch guidance reaches the model through `AGENTS.md` like every other instruction. `test/session/system.test.ts` now asserts the absence of any repository-specific CI reminder (mutation-checked against upstream's text). The TUI skill i18n keys stay corrected: `skill/localized-alias.ts` reads `tui.skill.<name>.slash`, so upstream's `tui.skill.mimocode.*` keys have been dead since `5bf07b7e` renamed the bundle to `mimocode-docs`.
 
 - 2026-10-13 synchronization: upstream `3c6e6bb0` retires the compose agent and `compose:*` skills from bundled `mimocode-docs` content, the TUI tips and `gpt.txt`; upstream `463cbb28` documents harness-injected `<system-reminder>` content in the provider prompts. Both are adopted unchanged; the fork's harness, compaction and `auto_worktree` additions to `config.md` are untouched, and `test/skill/` suites pass.
@@ -1442,6 +1444,7 @@ logged`, and the peer `success`/`failure` variants of
   `packages/cli/src/tool/actor.txt`,
   `packages/cli/src/tool/actor.shell.txt`,
   `packages/cli/src/skill/builtin/.bundle/mimocode-docs/`,
+  `packages/cli/src/skill/builtin/.bundle/compose-next/SKILL.md`,
   MiniMax/GPT prompt text, actor shell tokenizer/help, TUI skill i18n, and
   bundled `pdf-official` and `mimocode-docs` content.
 - POLICY-01 content carriers: `docs/codex-compact-tools.md`,
