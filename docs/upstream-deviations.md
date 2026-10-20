@@ -17,7 +17,8 @@ renumbered to close gaps.
 - Last reviewed: 2026-10-20
 - Upstream: `4e58a80184794d52d913d4b886b96f496f2c7020`
 - Prior reviewed upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
-- Main behavior (runtime/tests): `b18a1207cd66c312216698c175441b8c49778907`
+- Main behavior (runtime/tests): `d2f22b8d293dfb16d28e609c8f6d58047a5ee369` (OpenAPI response-resolver isolation)
+- Inherited compat behavior: `dcc13401331125450c1cdf39308bdefa5994e86f` (shared OpenAPI follow-up inherited)
 - Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
 - Prior fork `main` tip: `aaa53f4e56136ee1bf845b02ff080716ea2a0c66`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
@@ -29,7 +30,7 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-20 full sync through `4e58a801`](upstream-sync-2026-10-20.md), thirteen capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. Final branch propagation, validation and publication evidence remain pending in the linked record.
+Latest reviewed synchronization: [2026-10-20 full sync through `4e58a801`](upstream-sync-2026-10-20.md), thirteen capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. All thirteen decisions have propagated into compat, preserving eleven DC owners and fifty-two production overlay paths. The linked record retains the failed compat OpenAPI CI and the successful corrected-source lint/typecheck/test runs on both branches, including compat Windows. Final docs-only descendant equivalence and scoped cleanup are checked in the execution receipt.
 
 Previous synchronization: [2026-10-16 sync through `bf0563dd`](upstream-sync-2026-10-16.md), one capability. Adopt verbatim media replay after overflow compaction into FC-001's atomic replay commit, extend FC-009's attachment envelope with file-URL local paths and stable `[Image: <name>]`/`[PDF: <name>]` marker identity, keep the caller `system` on attachment-only messages, and adopt unique `mimo-paste-*` paste names.
 
@@ -716,7 +717,7 @@ the complete resolved model identity` case. FD-005 keeps only identity
   `test/tool/actor-owned-lifecycle.test.ts`, `actor-exec-lifecycle.test.ts`,
   `control-origin.test.ts`, `plan-approval.test.ts`, real
   `test/session/exec-interaction.test.ts`, and TUI plan-switch event tests
-  cover the new boundaries. Local evidence and pending publication gates are
+  cover the new boundaries. Local evidence and accepted-source CI are
   recorded in [the history](fork-registry-history.md#2026-09-08-policy-01-full-authorized-exec-composition).
 - 2026-09-08 actor composition (earlier narrowed policy): `test/tool/actor-exec.test.ts` exercises
   real inbox/status calls in JSON and shell invocation modes, trusted sender

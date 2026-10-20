@@ -4,32 +4,31 @@
 
 本轮为完整同步，流向为只读 `upstream/main` → fork `main` → fork `dev/compat`。选定审计范围为 `bf0563ddc201b44e3f59c35b18dba17c4386564d..4e58a80184794d52d913d4b886b96f496f2c7020`：12 个提交（11 个非 merge 提交），178 个变更路径、18,008 行增加、3,875 行删除。起始 fork tips 为 `main=aaa53f4e56136ee1bf845b02ff080716ea2a0c66`、`dev/compat=97fce708b8dc9353d274b83f718e1a3c7d27416a`。
 
-首批 runtime 与 bundled MCP prompt 提交为 `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`，测试适配为 `aa625ef0bf685b58ce4644f7700c7f4cc53d462c`。实时补审后的当前 runtime/tests 提交为 `b18a1207cd66c312216698c175441b8c49778907`，bundled prompt 文件没有新增修改。下列本地验证与发布证明分开记录；compat 传播、远端 tip、精确 SHA CI 和重新刷新后的 upstream 选择仍待收尾补证，当前记录只覆盖上述选定 upstream。
+首批 runtime 与 bundled MCP prompt 提交为 `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`，测试适配为 `aa625ef0bf685b58ce4644f7700c7f4cc53d462c`。C13 实时补审的 runtime/tests 提交为 `b18a1207cd66c312216698c175441b8c49778907`，bundled prompt 文件没有新增修改。十三项能力已全部传播到 compat，保留 11 个 DC owner 与 52 个生产 overlay 路径。下列本地验证与精确 SHA CI 分开记录；OpenAPI follow-up 后的最终源码引用为 `d2f22b8d293dfb16d28e609c8f6d58047a5ee369` / `dcc13401331125450c1cdf39308bdefa5994e86f`，两支的新 SHA CI 均已成功。当前记录覆盖上述完整选定 upstream。
 
-操作使用独立临时分支和工作树，保留原工作区已有修改及无关资源。文档路径示例统一使用 `/tmp/example`；它不是实际操作路径。最终资源清单、原工作区状态及本轮临时资源清理证明仍为 pending。
+操作使用独立临时分支和工作树，保留原工作区已有修改及无关资源。文档路径示例统一使用 `/tmp/example`；它不是实际操作路径。资源清理只覆盖本轮创建的两个临时分支和工作树；原 `.omo/`、无关分支和既有工作树受保护，实际清理回执与最终 tips 由任务执行回报给出。
 
 ## Capability inventory (N=13)
 
-下表是唯一的处置表，每项能力恰好一行；本次实时补审仍在收尾。共享 owner 均在 `main`，compat 只保留已有 DC overlay；没有把 compat 独有能力提升为共享能力。
+下表是唯一的处置表，每项能力恰好一行；能力传播、OpenAPI 修正与两支新 SHA CI 已完成。共享 owner 均在 `main`，compat 只保留已有 DC overlay；没有把 compat 独有能力提升为共享能力。
 
 | ID | 选定行为、生产者与 owner | main 结果 | dev/compat 结果 | 决定性路径与测试 |
 | --- | --- | --- | --- | --- |
-| C01 | Durable inbox input receipts、迁移、受理/认领/结算/GC；FC-001、FC-009 | 采用并适配。完整 user/parts 与 receipt 原子提交；保留重放身份、task、provenance、permission 和 ownership 检查。`accepted/claimed/settled/cancelled/rejected` 替代取走即删除的 send/drain。 | 待传播；继承共享 receipt/迁移合同，保留 compat task/context 限制。 | `src/inbox/{controller,schema,inbox,sync}.ts`、`inbox.sql.ts`；queue-controller、queue-spec-points、queue-migration-contracts。 |
-| C02 | Unified lane scheduling、取消 epoch、执行所有权、main 自动等待子任务；FC-001、FC-008、FD-001 | 适配。busy HTTP prompt 返回持久 202 receipt；严格 exclusive entry 仍原子拒绝占用。取消先隔离旧 epoch，未运行输入为 never-ran；保留 admission/approval/task/recovery 边界。 | 待传播；继承共享 lane/cancel/wait，不削弱 DC-MODEL-001 的 final-step/status 隔离。 | `src/session/{prompt,run-state,execution-ownership}.ts`、`src/effect/runner.ts`；turn-queue-admission、main-wait、wake-instance-handoff、server/session-prompt-busy。 |
-| C03 | Actor 显式 wait、input revision observation、terminal notification；FC-001、FD-006、FD-009 | 适配。保持 generation、retired peer、frozen schema、owned cancellation 和 terminal join；timeout 返回可发现的执行状态，观察者取消不终止 child。accepted-only receipt 事件替代 InboxArrived 观测。 | 待传播；保留 DC-ACTOR-001 full-context 与 DC-ACTOR-002 variant 合同。 | `src/actor/{spawn,execution,notification,waiter,registry}.ts`、`src/tool/actor.ts`；actor wait/send/spawn/ownership/cancel、actor-owned-lifecycle、plugin/actor-hooks。 |
-| C04 | Queue-aware sync/export/import/fork/history projection；FC-001、FC-002、FC-009、FC-017 | 采用并适配。保持 first-delivery order、消息引用、未消费输入隐藏和完整 history；fork 不复制可执行 receipt。checkpoint、session.post 与 goal judge 使用相同 queue view。 | 待传播；保留 DC-CONTEXT-001 的 chronology/coverage/caps 和 DC-ACTOR-001 frozen 视图。 | `src/session/{session,message-v2,checkpoint,prompt}.ts`、sync/restore 与 CLI import/export；fork-queue、external-import-queue、sync-restore、restore-order。 |
-| C05 | Workspace/project identity、scoped refs、Runner acquisition ownership；FC-001、FC-005、FC-007、FC-008 | 采用并适配。保持 exact roots、fixed cwd、可选 ref owner、generation 和有界 workflow teardown；夹具使用隔离实例。 | 待传播；保留 DC-PLATFORM-001 fallback 和现有 context/workspace 边界。 | `src/project/`、`src/effect/{runner,scoped-ref}.ts`、workflow/runtime、skill discovery、Bash；project/workspace/scoped-ref/runtime suites。 |
-| C06 | Sticky deferred MCP catalog 与固定 mcp_tool_use；FD-005、FD-006、FC-004 | 适配。live 与 prefix capture 共用 resolved harness/sticky evidence；不把搜索结果加入 active schemas。保留 escaping、post-hook 参数检查、real-tool权限/metrics、settlement；新快照 fixed dispatcher/loaded=[]，旧 direct 快照仅在 captured membership/schema 交集内执行；Codex hidden direct/exec 保持既有授权合同。 | 待传播；保留 current-turn projection、active mask/toolsHash 与动态 wire preflight，不能将 dispatcher 变成 frozen pool 扩权入口。 | `src/session/{prompt,llm,llm-request-prefix}.ts`、`src/tool/mcp-tool-search.ts`、三种 harness prompt；mcp-tool-search、prefix、prompt-effect、codex-compact、tool-script。 |
-| C07 | InvalidOutputError 与真正空输出重试；FC-009、FC-013，FD-010/FD-011/FD-012 仍独立 | 适配。仅 replay-safe、无 tool residue 的纯空会删除空 attempt 后由 bounded unknown policy 重试，无 repair user；reasoning-only、checkpoint 未完成和已结算工具保留 bounded continuation/atomic source。summary 的接受、no-tool 与独立空重试界限不退役。 | 待传播；保留 per-agent MaxMode、bounded scopes 和 main-only retry status。 | `src/session/{retry,processor,prompt,compaction}.ts`；retry、invalid-output-continuation、processor-effect、compaction-reasoning-fallback/tool-choice。 |
-| C08 | Mid-turn user text 原样传递以保留 thinking signature binding；FC-009、FC-011 | 采用。删除依赖 moving lastFinished 的 user wrap；保留 stored source/attachment/system 与 summary 合同。其他 history rewrite 和已损坏签名不在此修复声明内。 | 待传播；保留 content caps 与 current-turn边界，不能恢复每轮变化的 wrapper。 | `src/session/prompt.ts`、message-v2/LLM消费者；steer-message-render-stable。 |
-| C09 | TUI actor send 不再固定 Delegating pending；FC-001 | 采用。按 action 显示 pending/body/terminal，send 不挂接 receiver 的 live tool stream；保留失败/timeout显示、title/plan恢复。 | 待传播；保留 request metadata 与 Actor variant 的事实来源。 | `src/cli/cmd/tui/routes/session/actor-tool-state.ts`、`index.tsx` 及 actor/workflow projection；actor-tool-state、session-recover-flow。 |
-| C10 | finish=tool-calls 时 completion footer 保持挂载 | 采用。统一 final-finish predicate，保留 recovering/aborted footer 和现有字段。 | 待传播；DC-TUI-001 的 provider/model/variant显示保持。 | `src/cli/cmd/tui/util/assistant-footer.ts`、session UI；assistant-footer。 |
-| C11 | Login tips 根据已计算 provider 的 credentials 判断 | 采用。检查 key、env source 或 options.apiKey，provider存在本身不等于具备凭据。 | 待传播；provider路由及 DC-PROVIDER-001 不变。 | home/tips-view；tips-view。 |
-| C12 | npm trusted publish permission、FDS canary、完整 tarball preflight；FC-012 | 采用。发布前检查 SDK/plugin/CLI tarball身份/版本及 FDS signed write；保留 mandatory GH_REPO/fork routing。未调用 trust、preflight上传或任何发布 stage。 | 待传播；共享发布治理保持，不因继承 workflow 获得 upstream 发布授权。 | `.github/workflows/release.yml`、`script/release.ts`、registry sync/launcher；root script/release.test.ts、launcher tests。 |
+| C01 | Durable inbox input receipts、迁移、受理/认领/结算/GC；FC-001、FC-009 | 采用并适配。完整 user/parts 与 receipt 原子提交；保留重放身份、task、provenance、permission 和 ownership 检查。`accepted/claimed/settled/cancelled/rejected` 替代取走即删除的 send/drain。 | 已继承并适配；继承共享 receipt/迁移合同，保留 compat task/context 限制。 | `src/inbox/{controller,schema,inbox,sync}.ts`、`inbox.sql.ts`；queue-controller、queue-spec-points、queue-migration-contracts。 |
+| C02 | Unified lane scheduling、取消 epoch、执行所有权、main 自动等待子任务；FC-001、FC-008、FD-001 | 适配。busy HTTP prompt 返回持久 202 receipt；严格 exclusive entry 仍原子拒绝占用。取消先隔离旧 epoch，未运行输入为 never-ran；保留 admission/approval/task/recovery 边界。 | 已继承并适配；继承共享 lane/cancel/wait，不削弱 DC-MODEL-001 的 final-step/status 隔离。 | `src/session/{prompt,run-state,execution-ownership}.ts`、`src/effect/runner.ts`；turn-queue-admission、main-wait、wake-instance-handoff、server/session-prompt-busy。 |
+| C03 | Actor 显式 wait、input revision observation、terminal notification；FC-001、FD-006、FD-009 | 适配。保持 generation、retired peer、frozen schema、owned cancellation 和 terminal join；timeout 返回可发现的执行状态，观察者取消不终止 child。accepted-only receipt 事件替代 InboxArrived 观测。 | 已继承并适配；保留 DC-ACTOR-001 full-context 与 DC-ACTOR-002 variant 合同。 | `src/actor/{spawn,execution,notification,waiter,registry}.ts`、`src/tool/actor.ts`；actor wait/send/spawn/ownership/cancel、actor-owned-lifecycle、plugin/actor-hooks。 |
+| C04 | Queue-aware sync/export/import/fork/history projection；FC-001、FC-002、FC-009、FC-017 | 采用并适配。保持 first-delivery order、消息引用、未消费输入隐藏和完整 history；fork 不复制可执行 receipt。checkpoint、session.post 与 goal judge 使用相同 queue view。 | 已继承并适配；保留 DC-CONTEXT-001 的 chronology/coverage/caps 和 DC-ACTOR-001 frozen 视图。 | `src/session/{session,message-v2,checkpoint,prompt}.ts`、sync/restore 与 CLI import/export；fork-queue、external-import-queue、sync-restore、restore-order。 |
+| C05 | Workspace/project identity、scoped refs、Runner acquisition ownership；FC-001、FC-005、FC-007、FC-008 | 采用并适配。保持 exact roots、fixed cwd、可选 ref owner、generation 和有界 workflow teardown；夹具使用隔离实例。 | 已继承并适配；保留 DC-PLATFORM-001 fallback 和现有 context/workspace 边界。 | `src/project/`、`src/effect/{runner,scoped-ref}.ts`、workflow/runtime、skill discovery、Bash；project/workspace/scoped-ref/runtime suites。 |
+| C06 | Sticky deferred MCP catalog 与固定 mcp_tool_use；FD-005、FD-006、FC-004 | 适配。live 与 prefix capture 共用 resolved harness 和真实 reminder/call evidence；silent auto 无此证据时可重判，不写辅助标记，不把搜索结果加入 active schemas。保留 escaping、post-hook 参数检查、real-tool权限/metrics、settlement；新快照 fixed dispatcher/loaded=[]，旧 direct 快照仅在 captured membership/schema 交集内执行；Codex hidden direct/exec 保持既有授权合同。 | 已继承并适配；保留 current-turn projection、active mask/toolsHash 与动态 wire preflight，不能将 dispatcher 变成 frozen pool 扩权入口。 | `src/session/{prompt,llm,llm-request-prefix}.ts`、`src/tool/mcp-tool-search.ts`、三种 harness prompt；mcp-tool-search、prefix、prompt-effect、codex-compact、tool-script。 |
+| C07 | InvalidOutputError 与真正空输出重试；FC-009、FC-013，FD-010/FD-011/FD-012 仍独立 | 适配。仅 replay-safe、无 tool residue 的纯空会删除空 attempt 后由 bounded unknown policy 重试，无 repair user；reasoning-only、checkpoint 未完成和已结算工具保留 bounded continuation/atomic source。summary 的接受、no-tool 与独立空重试界限不退役。 | 已继承并适配；保留 per-agent MaxMode、bounded scopes 和 main-only retry status。 | `src/session/{retry,processor,prompt,compaction}.ts`；retry、invalid-output-continuation、processor-effect、compaction-reasoning-fallback/tool-choice。 |
+| C08 | Mid-turn user text 原样传递以保留 thinking signature binding；FC-009、FC-011 | 采用。删除依赖 moving lastFinished 的 user wrap；保留 stored source/attachment/system 与 summary 合同。其他 history rewrite 和已损坏签名不在此修复声明内。 | 已继承并适配；保留 content caps 与 current-turn边界，不能恢复每轮变化的 wrapper。 | `src/session/prompt.ts`、message-v2/LLM消费者；steer-message-render-stable。 |
+| C09 | TUI actor send 不再固定 Delegating pending；FC-001 | 采用。按 action 显示 pending/body/terminal，send 不挂接 receiver 的 live tool stream；保留失败/timeout显示、title/plan恢复。 | 已继承并适配；保留 request metadata 与 Actor variant 的事实来源。 | `src/cli/cmd/tui/routes/session/actor-tool-state.ts`、`index.tsx` 及 actor/workflow projection；actor-tool-state、session-recover-flow。 |
+| C10 | finish=tool-calls 时 completion footer 保持挂载 | 采用。统一 final-finish predicate，保留 recovering/aborted footer 和现有字段。 | 已继承并适配；DC-TUI-001 的 provider/model/variant显示保持。 | `src/cli/cmd/tui/util/assistant-footer.ts`、session UI；assistant-footer。 |
+| C11 | Login tips 根据已计算 provider 的 credentials 判断 | 采用。检查 key、env source 或 options.apiKey，provider存在本身不等于具备凭据。 | 已继承并适配；provider路由及 DC-PROVIDER-001 不变。 | home/tips-view；tips-view。 |
+| C12 | npm trusted publish permission、FDS canary、完整 tarball preflight；FC-012 | 采用。发布前检查 SDK/plugin/CLI tarball身份/版本及 FDS signed write；保留 mandatory GH_REPO/fork routing。未调用 trust、preflight上传或任何发布 stage。 | 已继承并适配；共享发布治理保持，不因继承 workflow 获得 upstream 发布授权。 | `.github/workflows/release.yml`、`script/release.ts`、registry sync/launcher；root script/release.test.ts、launcher tests。 |
+| C13 | Deferred MCP readiness 与 request-visible server/tool outcomes；FD-005、FD-006、FD-009、FC-004 | 采用并适配实时新增 `4e58a801`：non-blocking readiness、entry/server 最新状态、恢复/移除/工具集回归、共享 reminder 预算与安全 search-miss diagnostics；保留 live/capture identity 和 frozen authority。 | 已继承并适配；保留 current-turn caps、active mask/hash、native wire 和 frozen membership，保持 DC-NET-002 与 pending-import lifecycle。 | `src/mcp/index.ts`、`src/session/{prompt,llm-request-prefix}.ts`、`src/tool/mcp-tool-search.ts`；readiness/prompt/search/lifecycle/frozen-prefix suites。 |
 
-| C13 | Deferred MCP readiness 与 request-visible server/tool outcomes；FD-005、FD-006、FD-009、FC-004 | 采用并适配实时新增 `4e58a801`：non-blocking readiness、entry/server 最新状态、恢复/移除/工具集回归、共享 reminder 预算与安全 search-miss diagnostics；保留 live/capture identity 和 frozen authority。 | 待传播；需保 current-turn caps、active mask/hash、native wire 和 frozen membership，保持 DC-NET-002 与 pending-import lifecycle。 | `src/mcp/index.ts`、`src/session/{prompt,llm-request-prefix}.ts`、`src/tool/mcp-tool-search.ts`；readiness/prompt/search/lifecycle/frozen-prefix suites。 |
-
-结果行数：13。Active owners 保持 9 FD、17 FC；没有 owner 退役或重新编号。表中 `src/` 与 `test/` 路径均相对于 `packages/cli/`，明确标为 root 的脚本除外。
+结果行数：13。compat 已全部继承并适配，保留 11 个 DC owner、52 个生产 overlay 路径。Active owners 保持 9 FD、17 FC；没有 owner 退役或重新编号。表中 `src/` 与 `test/` 路径均相对于 `packages/cli/`，明确标为 root 的脚本除外。
 
 ## 保留与替换的合同
 
@@ -37,13 +36,13 @@
 
 持久化不等于受理：`noReply` 只保存消息，不能凭“比 queued user 更新”替代其任务、format、权限或运行归属。未运行而被 Stop 取消的 receipt 保留原 user、`never_ran` 和无 delivery；不会伪造 assistant。严格 resume/recovery 仍在原子入场后才结算精确候选；actor frozen identity、task namespace、外部 pending-question/permission 检查以及执行取消 epoch 同时生效。
 
-新 MCP 快照分别保留完整授权实现池和固定 wire subset。`mcp_tool_use` 自身的通用参数 schema 不授予任意名字调用权；底层工具仍须通过 request/frozen/permission/schema 检查。旧无 dispatcher 快照只兼容原 active/loaded 名字与 membership 的交集。连接变化不会把搜索结果 schema 添到前缀；空 catalog 初始 defer、auto sticky 和回合边界公告保持 live/capture一致。
+新 MCP 快照分别保留完整授权实现池和固定 wire subset。`mcp_tool_use` 自身的通用参数 schema 不授予任意名字调用权；底层工具仍须通过 request/frozen/permission/schema 检查。旧无 dispatcher 快照只兼容原 active/loaded 名字与 membership 的交集。连接变化不会把搜索结果 schema 添到前缀；空 catalog 初始 defer，真实 reminder/search/use call（含 legacy announcement）使 auto sticky，silent auto 无此证据时允许重判。回合边界公告与证据识别保持 live/capture 一致，不为缓存选择写辅助 user part。
 
 checkpoint、post-hook、goal judge、fork/history 的消费视图需要隐藏未消费receipt并保留已消费输入的位置，同时不能让回补的旧输入覆盖 checkpoint continuation 的父消息/approval authority。前台结构化完成和后续queued用户可同属一个lane run，但各自caller仍读取自己的完成结果。工作区generation、scoped reference和Runner退出所有权继续防止旧清理释放新generation。
 
 ## 已核查的本地验证
 
-下表主要记录首批 `113e3192` 的源码/测试快照；新增 C13 的定向验证单独记录。它们是本轮执行过程中已查看完成的子矩阵；并非所有数字均来自同一最终源树，不能相加为一个全量通过数。最终 runtime 的收口矩阵单独列出；compat 仍需独立验证。默认路径清除 ambient `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_MCP_TOOL_SEARCH`、`MIMOCODE_CODEX_MODE`，保留 package-owned preload；opt-in用例只在自身scope启用selector。CLI测试从 `packages/cli` 执行，root script测试从repo root执行；依赖只用 `bun ci`。
+下表主要记录首批 `113e3192` 的源码/测试快照；新增 C13 的定向验证单独记录。它们是本轮执行过程中已查看完成的子矩阵；并非所有数字均来自同一最终源树，不能相加为一个全量通过数。各源码快照的收口矩阵单独列出；compat 的独立结果和最终 OpenAPI 验收门槛见后文。默认路径清除 ambient `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_MCP_TOOL_SEARCH`、`MIMOCODE_CODEX_MODE`，保留 package-owned preload；opt-in用例只在自身scope启用selector。CLI测试从 `packages/cli` 执行，root script测试从repo root执行；依赖只用 `bun ci`。
 
 | 验证范围 | 实际已见结果 | 证据记录标识与界限 |
 | --- | --- | --- |
@@ -87,14 +86,32 @@ env -u MIMOCODE_EXPERIMENTAL -u MIMOCODE_MCP_TOOL_SEARCH -u MIMOCODE_CODEX_MODE 
 
 初次选定 `113e3192568a342076e68c70d55b99bd67869dcf` 后，发布期间 live `upstream/main` 推进至 `4e58a80184794d52d913d4b886b96f496f2c7020`（单个 readiness-hint 提交，七个路径）。这不是冻结基线；因此范围扩大为上述完整区间并新增 C13，不把对旧 SHA 的 CI 当作当前 upstream 对齐证明。前批 main `f6632fb8085b4005df4abeb36933b30ee9d74811` 和 compat `00f40d329cf26e19dbaff131158494aec8b19e82` 的发布与 CI 仅属于中间快照。main 的 lint/typecheck/test 已全部成功，分别绑定运行 `39409072280`、`39409071997`、`39409071967`；compat 的 lint/typecheck/test（`39409350318`、`39409350296`、`39409350305`）也全部成功，包括 Windows runtime。两支旧 SHA 的成功不替代 C13 后的新 SHA 验收。
 
-新增 readiness 与授权 catalog 分开：连接状态不推断调用权限；展示工具须与当前 search/dispatch catalog 取交集。entry 和 server outcomes 共用预算，只在 user-turn boundary 追加真实 reminder。按最新语义状态比较，支持失败后恢复、缩小后恢复、disabled/removed；错误文案变化不重复通知。没有真实 reminder、search/use call 或 legacy announcement 时，silent auto 允许重新判定 deferral；不为缓存选择持久化辅助 user part。这更新了 C06 的 silent-auto 边界，固定 dispatcher 和 frozen implementation authority 保持。当前 main 新增合并已完成；compat 传播与最终 CI 仍在进行。
+新增 readiness 与授权 catalog 分开：连接状态不推断调用权限；展示工具须与当前 search/dispatch catalog 取交集。entry 和 server outcomes 共用预算，只在 user-turn boundary 追加真实 reminder。按最新语义状态比较，支持失败后恢复、缩小后恢复、disabled/removed；错误文案变化不重复通知。没有真实 reminder、search/use call 或 legacy announcement 时，silent auto 允许重新判定 deferral；不为缓存选择持久化辅助 user part。这更新了 C06 的 silent-auto 边界，固定 dispatcher 和 frozen implementation authority 保持。main 与 compat 已完成该能力传播；最终 OpenAPI follow-up 和新 SHA CI 已成功，分别记录于下节。
 
-C13 main 稳定提交 `b18a1207cd66c312216698c175441b8c49778907`：MCP/prompt/prefix 专项 95 pass、0 fail（587 assertions，三个文件）；工具完整文件 34/34、prefix 完整文件 12/12、Actor 完整文件 31/31、MCP lifecycle/Claude pending 34/34；owning-package typecheck exit 0；root lint 为 3,639 warnings、0 errors。新增真实 malformed-history 回归覆盖十类无效 metadata，忽略坏记录但保留先前有效状态；live/capture 共用 deferral evidence helper。没有 lockfile、manifest、公开 HTTP schema 或 SDK 输入变化，因此无需重复依赖安装和 SDK 生成。最终完整 CI 必须绑定 C13 后的新提交。
+C13 main 稳定提交 `b18a1207cd66c312216698c175441b8c49778907`：MCP/prompt/prefix 专项 95 pass、0 fail（587 assertions，三个文件）；工具完整文件 34/34、prefix 完整文件 12/12、Actor 完整文件 31/31、MCP lifecycle/Claude pending 34/34；owning-package typecheck exit 0；root lint 为 3,639 warnings、0 errors。新增真实 malformed-history 回归覆盖十类无效 metadata，忽略坏记录但保留先前有效状态；live/capture 共用 deferral evidence helper。C13 本身没有 lockfile、manifest、公开 HTTP schema 或 SDK 输入变化，因此当时无需重复依赖安装和 SDK 生成。后续 OpenAPI CI 暴露的生成器缺陷属于独立共享修正，见下节；不能继续用此前的 SDK 零 diff 代替该修正的验证。
 
-## 最终验收与发布：pending
+## Compat 传播与精确 SHA CI 历史
 
-- 首批 runtime 的 owning-package typecheck、lint、完整 prompt 与 queue 收口矩阵已通过，C13 的追加定向验证见补审节。早轮 workflow Reference/typecheck 问题已修正；SDK最终重生成 exit 0 且 SDK diff 为空；bun.lock 无本地安装变更。
-- 当前 `main` runtime/tests：`b18a1207cd66c312216698c175441b8c49778907`；首批 runtime 与测试快照保留于上文；最终main/compat tips及compat验证 pending。共享registry在compat应保持逐字一致，DC差异由compat登记拥有。
-- 最终远端branch-tip相等、选定upstream→main→dev/compat ancestry、各精确最终SHA的lint/typecheck/test CI URL/headSha/conclusion均 pending。只改docs导致workflow跳过时，需证明所引用已绿ancestor在docs之外tree一致。
-- 发布前若新刷upstream推进，须扩大清单审查并完成后续传播/验证；此文当前不能宣称跟随未审计的新upstream tip。
-- 最终资源清理与原工作区保留证明 pending。未验证的Windows/远端执行和实际npm/FDS发布不由本地测试结果推断。
+compat 已完成 C01–C13 的继承和语义适配，保留 11 个 DC owner 与 52 个生产 overlay 路径。共享 registry 保持 main 所有并传播；DC 差异仍由 compat 登记拥有。C13 的 compat MCP/prompt/prefix 矩阵为 102 pass、0 fail、630 assertions（223.82 秒）；关键 frozen/readiness/capture 回归 10/10，native search/wire preflight 两文件 39/39。上述目标执行均清除三个 ambient selector 并使用 30 秒预算，没有辅助 MCP history marker。
+
+| 已验收或失败的源码快照 | 精确 SHA CI | 已知结论与边界 |
+| --- | --- | --- |
+| main `3d9527fd667de159110f594ea79c25dfbf2c5401` | [lint 39410487995](https://github.com/onlyfeng/MiMo-Code/actions/runs/39410487995)、[typecheck 39410488054](https://github.com/onlyfeng/MiMo-Code/actions/runs/39410488054)、[test 39410488082](https://github.com/onlyfeng/MiMo-Code/actions/runs/39410488082) | 三个 workflow 均 completed/success，headSha 均为该 SHA。这是 OpenAPI follow-up 前的已绿快照。 |
+| compat `dcb6160f59e09031a9e21bb562bed328b40ba7c5` | [lint 39410900761](https://github.com/onlyfeng/MiMo-Code/actions/runs/39410900761)、[typecheck 39410900748](https://github.com/onlyfeng/MiMo-Code/actions/runs/39410900748)、[test 39410900737](https://github.com/onlyfeng/MiMo-Code/actions/runs/39410900737) | lint/typecheck 成功；test 为 failure：九个 test jobs 成功，unit shard 1 因两条 OpenAPI 断言失败。该 SHA 不能标为全绿。 |
+
+compat 的失败没有通过跳过断言或重跑同 SHA 抹去。进一步本地复现表明 OpenAPI 生成器会修改 lazy route 的 metadata；同进程连续生成时，第二次结果出现 22 个 dangling schema references。main 的连续生成回归已先复现失败；最终合入 `every $ref in the generated OpenAPI document resolves`，对每份文档检查所有引用及相同组件集合，说明它是共享生产缺陷，不能当作 compat 的平台问题或测试噪声。修正只在 `Server.openapi()` 的 fresh app 上复制 response/content/media 对象，保留 resolver 函数与 lazy route 原数据，不缓存文档输出、不改变运行中的路由。修正已落 main 并合并到 compat；两支均启动新 SHA CI。它不增加 upstream capability inventory 项，也不退役 FD/FC/DC owner。
+
+## 最终源码与发布证据
+
+| 分支与已绿源码 SHA | lint | typecheck | test |
+| --- | --- | --- | --- |
+| main `d2f22b8d293dfb16d28e609c8f6d58047a5ee369` | [39412986868](https://github.com/onlyfeng/MiMo-Code/actions/runs/39412986868) | [39412986931](https://github.com/onlyfeng/MiMo-Code/actions/runs/39412986931) | [39412987052](https://github.com/onlyfeng/MiMo-Code/actions/runs/39412987052) |
+| dev/compat `dcc13401331125450c1cdf39308bdefa5994e86f` | [39413089967](https://github.com/onlyfeng/MiMo-Code/actions/runs/39413089967) | [39413089966](https://github.com/onlyfeng/MiMo-Code/actions/runs/39413089966) | [39413089981](https://github.com/onlyfeng/MiMo-Code/actions/runs/39413089981) |
+
+六个 workflow 均 completed/success，headSha 与各行完整 SHA 一致；main 的九个适用 test jobs 成功，Windows 按 workflow 跳过；compat 的十个 test jobs 全部成功，包括实际 Windows runtime。此前失败 SHA 保留在历史节，没有同 SHA 盲目重跑或删除断言。
+
+OpenAPI 修正的本地证据：main 完整 5/5、相邻六文件 49/49；compat OpenAPI 与 model-selection 组合 17/17、完整八文件邻接组合 63/63（948 assertions，72.01 秒），均零失败。两支 owning-package typecheck exit 0，分别重生成 SDK exit 0，`packages/sdk` 与 `bun.lock` 均无额外 diff。新增并发生成检查也对每份文档解析全部引用；保留 compat checkpoint coverage 与真实 SDK 方法断言。
+
+发布收口使用新取的 upstream/fork refs：选定 upstream `4e58a801` 是 main 的 ancestor，main 是 compat 的 ancestor，远端源码 tips 与上述 SHA 相等。验收后只提交 `docs/` 记录；这类 push 由 workflow paths-ignore 跳过，不借用历史源码结果：最终执行检查必须以 `git diff --quiet <green-source> <final-tip> -- . ':(exclude)docs'` 对每支证明 docs 之外 tree 完全一致，并验证新的远端 tips、完整 ancestry 与四份共享文档逐字相同。最终提交号和该检查的实际结果在任务执行回报中提供。
+
+资源边界为仅移除本轮两个临时分支和工作树，检查其无用户修改并已集成；保留原 `.omo/` 与无关分支 `docs/instance-generation-producer-inventory`。实际清理后的 worktree/branch 清单由执行回报核实。没有执行 npm/FDS 发布。
