@@ -880,18 +880,18 @@ export const layer = Layer.effect(
     // (ToolRegistry → SessionCheckpoint → ToolRegistry). See prefix-capture-ref.ts.
     // The closure resolves Agent.Info and Provider.Model internally so checkpoint.ts
     // only needs to pass string IDs.
-    const capture: typeof prefixCaptureRef.current = (input) =>
-      Effect.gen(function* () {
-        const empty = {
-          system: [] as string[],
-          turnContext: undefined as string | undefined,
-          tools: {} as Record<string, AITool>,
-          activeTools: [] as string[],
-          loadedMcpTools: [] as string[],
-          inheritedMessages: [] as ModelMessage[],
-          currentTurnMessages: [] as ModelMessage[],
-          parentPermission: [] as Permission.Ruleset,
-        }
+    const capture: typeof prefixCaptureRef.current = (input) => {
+      const empty = {
+        system: [] as string[],
+        turnContext: undefined as string | undefined,
+        tools: {} as Record<string, AITool>,
+        activeTools: [] as string[],
+        loadedMcpTools: [] as string[],
+        inheritedMessages: [] as ModelMessage[],
+        currentTurnMessages: [] as ModelMessage[],
+        parentPermission: [] as Permission.Ruleset,
+      }
+      return Effect.gen(function* () {
         // The watermark message stores the agent name; resolve it as the run loop
         // does, so a retired name captures the same default agent that runs.
         const ag = yield* resolveStoredAgent(agents, input.agentName).pipe(
@@ -1034,7 +1034,18 @@ export const layer = Layer.effect(
           turnContext: capturePrompt.system,
           parentPermission: capturePermission,
         }
-      })
+      }).pipe(
+        // getModel / Session.get throw inside Effect.fn (defects), which
+        // Effect.catch above cannot see. Contain every non-interrupt cause here
+        // so a capture miss degrades to the empty prefix instead of failing
+        // tryStartCheckpointWriter and, through it, the foreground turn.
+        Effect.catchCause((cause) =>
+          Cause.hasInterrupts(cause)
+            ? Effect.failCause(cause)
+            : elog.warn("checkpoint prefix capture failed", { cause }).pipe(Effect.as(empty)),
+        ),
+      )
+    }
     prefixCaptureRef.current = capture
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
