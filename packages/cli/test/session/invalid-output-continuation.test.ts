@@ -12,12 +12,14 @@
 import path from "path"
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { Effect, Fiber, Layer } from "effect"
+import { Bus } from "../../src/bus"
 import { SessionPrefixSnapshot } from "../../src/session/prefix-snapshot"
 import { Server } from "../../src/server/server"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionPrompt } from "../../src/session/prompt"
+import { SessionStatus } from "../../src/session/status"
 import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
 import {
@@ -40,9 +42,9 @@ afterEach(async () => {
   await Instance.disposeAll()
 })
 
-function run<A, E>(fx: Effect.Effect<A, E, SessionPrompt.Service | Session.Service>) {
+function run<A, E>(fx: Effect.Effect<A, E, SessionPrompt.Service | Session.Service | Bus.Service>) {
   return Effect.runPromise(
-    fx.pipe(Effect.scoped, Effect.provide(Layer.mergeAll(SessionPrompt.defaultLayer, Session.defaultLayer))),
+    fx.pipe(Effect.scoped, Effect.provide(Layer.mergeAll(SessionPrompt.defaultLayer, Session.defaultLayer, Bus.defaultLayer))),
   )
 }
 
@@ -155,7 +157,7 @@ describe("invalid-output continuation — integration", () => {
     }
   }, 30_000)
 
-  test("empty stop step is deleted and retried, second call produces a non-empty final assistant", async () => {
+  test("main empty stop retries with global notifications and retains only the final assistant", async () => {
     await using tmp = await tmpdir({ git: true })
     const stub = startScriptedLLMServer([{ lines: emptyStopResponse() }, { lines: textStopResponse("final answer") }])
     try {
@@ -168,11 +170,25 @@ describe("invalid-output continuation — integration", () => {
               const sessions = yield* Session.Service
               const prompt = yield* SessionPrompt.Service
               const session = yield* sessions.create({ title: "invalid-empty" })
+              const bus = yield* Bus.Service
+              const statuses: number[] = []
+              const attempts: number[] = []
+              const offStatus = yield* bus.subscribeCallback(SessionStatus.Event.Status, (event) => {
+                if (event.properties.sessionID !== session.id || event.properties.status.type !== "retry") return
+                statuses.push(event.properties.status.attempt)
+              })
+              const offAttempt = yield* bus.subscribeCallback(Session.Event.RetryAttempt, (event) => {
+                if (event.properties.sessionID !== session.id) return
+                attempts.push(event.properties.attempt)
+              })
               const result = yield* prompt.prompt({
                 sessionID: session.id,
                 agent: "build",
                 parts: [{ type: "text", text: "Answer my question." }],
-              })
+              }).pipe(Effect.ensuring(Effect.sync(() => {
+                offStatus()
+                offAttempt()
+              })))
               // First empty stop => delete + retry; second call => final text.
               expect(stub.captures.length).toBe(2)
               expect(result.info.role).toBe("assistant")
@@ -187,6 +203,7 @@ describe("invalid-output continuation — integration", () => {
               expect(nonSystem.length).toBe(1)
               expect(nonSystem.some((m) => JSON.stringify(m.content).includes("no usable"))).toBe(false)
               expect(nonSystem.some((m) => JSON.stringify(m.content).includes("system-reminder"))).toBe(false)
+              expect({ statuses, attempts }).toEqual({ statuses: [1], attempts: [1] })
             }),
           ),
       })
@@ -228,7 +245,7 @@ describe("invalid-output continuation — integration", () => {
     }
   })
 
-  test("ordinary actor retry deletes the empty turn and injects no reminder", async () => {
+  test("ordinary actor retries empty output without global notifications or a reminder", async () => {
     await using tmp = await tmpdir({ git: true })
     const stub = startScriptedLLMServer([{ lines: emptyStopResponse() }, { lines: textStopResponse("actor result") }])
     try {
@@ -241,12 +258,28 @@ describe("invalid-output continuation — integration", () => {
               const sessions = yield* Session.Service
               const prompt = yield* SessionPrompt.Service
               const session = yield* sessions.create({ title: "invalid-actor" })
-              yield* prompt.prompt({
+              const bus = yield* Bus.Service
+              const statuses: number[] = []
+              const attempts: number[] = []
+              const offStatus = yield* bus.subscribeCallback(SessionStatus.Event.Status, (event) => {
+                if (event.properties.sessionID !== session.id || event.properties.status.type !== "retry") return
+                statuses.push(event.properties.status.attempt)
+              })
+              const offAttempt = yield* bus.subscribeCallback(Session.Event.RetryAttempt, (event) => {
+                if (event.properties.sessionID !== session.id) return
+                attempts.push(event.properties.attempt)
+              })
+              const result = yield* prompt.prompt({
                 sessionID: session.id,
                 agent: "build",
                 agentID: "general-1",
                 parts: [{ type: "text", text: "Do delegated work." }],
-              })
+              }).pipe(Effect.ensuring(Effect.sync(() => {
+                offStatus()
+                offAttempt()
+              })))
+              expect(stub.captures.length).toBe(2)
+              expect(result.parts.some((part) => part.type === "text" && part.text === "actor result")).toBe(true)
               const retry = stub.captures[1].messages as { role: string; content: unknown }[]
               const nonSystem = retry.filter((m) => m.role !== "system")
               expect(nonSystem.length).toBe(1)
@@ -255,7 +288,9 @@ describe("invalid-output continuation — integration", () => {
               const msgs = yield* sessions.messages({ sessionID: session.id, agentID: "general-1" })
               const assistants = assistantOnly(msgs)
               expect(assistants.length).toBe(1)
+              expect(assistants[0]?.info.id).toBe(result.info.id)
               expect(assistants.some((m) => m.info.error)).toBe(false)
+              expect({ statuses, attempts }).toEqual({ statuses: [], attempts: [] })
             }),
           ),
       })

@@ -10,9 +10,7 @@ describe("Runner acquisition guard", () => {
       let ran = false
       const work = Effect.sync(() => { ran = true })
       const guard = Effect.die(new Error("revoked"))
-      const admission = entry === "ensureRunning"
-        ? runner.ensureRunning(work, undefined, false, undefined, guard).pipe(Effect.asVoid)
-        : runner[entry](work, undefined, guard).pipe(Effect.asVoid)
+      const admission = runner[entry](work, undefined, guard).pipe(Effect.asVoid)
       const denied = yield* admission.pipe(Effect.exit)
       expect(Exit.isFailure(denied)).toBe(true)
       expect(ran).toBe(false)
@@ -46,7 +44,7 @@ describe("Runner acquisition guard", () => {
         if (revoked) throw new Error("revoked")
         Deferred.doneUnsafe(checked, Effect.void)
       })
-      const delayed = yield* runner.ensureRunning(Effect.sync(() => { ran = true }), undefined, false, undefined, guard).pipe(Effect.forkChild)
+      const delayed = yield* runner.ensureRunning(Effect.sync(() => { ran = true }), undefined, guard).pipe(Effect.forkChild)
       yield* Deferred.await(checked)
       yield* Effect.yieldNow
       revoked = true

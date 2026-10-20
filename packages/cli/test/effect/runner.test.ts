@@ -142,9 +142,7 @@ describe("Runner", () => {
         onShellStart: lease,
       })
       const check = Effect.suspend(() => ++checks === 2 ? Effect.die("ownership moved") : Effect.void)
-      const admission = mode === "ensureRunning"
-        ? runner.ensureRunning(Effect.never, undefined, false, undefined, check).pipe(Effect.asVoid)
-        : runner[mode](Effect.never, undefined, check).pipe(Effect.asVoid)
+      const admission = runner[mode](Effect.never, undefined, check).pipe(Effect.asVoid)
       const exit = yield* admission.pipe(Effect.exit)
       expect(Exit.isFailure(exit) && Cause.pretty(exit.cause).includes("ownership moved")).toBe(true)
       expect(events).toEqual(["busy", "idle"])
@@ -159,7 +157,7 @@ describe("Runner", () => {
     yield* old.interruptOwned
     const replacement = yield* runner.startOwned(Effect.never)
     const waiting = yield* Deferred.make<void>()
-    const waiter = yield* runner.ensureRunning(Effect.succeed("next"), undefined, false, undefined,
+    const waiter = yield* runner.ensureRunning(Effect.succeed("next"), undefined,
       Deferred.succeed(waiting, undefined).pipe(Effect.asVoid)).pipe(Effect.forkChild)
     yield* Deferred.await(waiting)
     yield* old.interruptOwned
@@ -988,11 +986,11 @@ describe("Runner", () => {
       while (state()._tag !== "Shell") yield* Effect.yieldNow
 
       const first = yield* runner
-        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")), undefined, false, undefined, Deferred.succeed(firstWaiting, undefined).pipe(Effect.asVoid))
+        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")), undefined, Deferred.succeed(firstWaiting, undefined).pipe(Effect.asVoid))
         .pipe(Effect.forkChild)
       yield* Deferred.await(firstWaiting)
       const second = yield* runner
-        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")), undefined, false, undefined, Deferred.succeed(secondWaiting, undefined).pipe(Effect.asVoid))
+        .ensureRunning(Ref.set(started, true).pipe(Effect.as("unexpected")), undefined, Deferred.succeed(secondWaiting, undefined).pipe(Effect.asVoid))
         .pipe(Effect.forkChild)
       yield* Deferred.await(secondWaiting)
 
@@ -1081,7 +1079,7 @@ describe("Runner", () => {
       while (state()._tag !== "Shell") yield* Effect.yieldNow
       const waiting = yield* Deferred.make<void>()
       const queued = yield* runner
-        .ensureRunning(Effect.never, Effect.succeed("queued interrupted"), false, undefined, Deferred.succeed(waiting, undefined).pipe(Effect.asVoid))
+        .ensureRunning(Effect.never, Effect.succeed("queued interrupted"), Deferred.succeed(waiting, undefined).pipe(Effect.asVoid))
         .pipe(Effect.forkChild)
       yield* Deferred.await(waiting)
 

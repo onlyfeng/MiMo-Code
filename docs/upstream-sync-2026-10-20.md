@@ -115,3 +115,50 @@ OpenAPI 修正的本地证据：main 完整 5/5、相邻六文件 49/49；compat
 发布收口使用新取的 upstream/fork refs：选定 upstream `4e58a801` 是 main 的 ancestor，main 是 compat 的 ancestor，远端源码 tips 与上述 SHA 相等。验收后只提交 `docs/` 记录；这类 push 由 workflow paths-ignore 跳过，不借用历史源码结果：最终执行检查必须以 `git diff --quiet <green-source> <final-tip> -- . ':(exclude)docs'` 对每支证明 docs 之外 tree 完全一致，并验证新的远端 tips、完整 ancestry 与四份共享文档逐字相同。最终提交号和该检查的实际结果在任务执行回报中提供。
 
 资源边界为仅移除本轮两个临时分支和工作树，检查其无用户修改并已集成；保留原 `.omo/` 与无关分支 `docs/instance-generation-producer-inventory`。实际清理后的 worktree/branch 清单由执行回报核实。没有执行 npm/FDS 发布。
+
+## 2026-10-20 复审后的指定收敛
+
+本节是用户批准的五项复审处理，不是新一轮 upstream 同步。选定 upstream
+仍为 `4e58a80184794d52d913d4b886b96f496f2c7020`，没有 fetch 或合入更新的
+upstream。起点 main 为 `a9da5e1e53bcc5b7e17eb1e26de6b8e81053faa9`，
+compat 为 `13fba6a1eb12a430f080d82836d857fdb985be74`。保留现有
+FD/FC/DC 能力、OpenAPI 修复和无关工作区状态。
+
+指定变更清单 N=5；下表与前面的 C01–C13 同步清单分别计数。
+
+| ID | 行为与归属 | main 结果 | dev/compat 结果 | 决定性证据 |
+| --- | --- | --- | --- | --- |
+| S01 | 退役的 inbox wake 接口；FC-001、FC-008、FD-001 | 删除无生产消费者的 join/admit、deferInbox、epoch hold；保留同步取消和执行所有权 | 待继承 | `runner.ts`、`run-state.ts`、`cancel-epoch.ts`、`prompt.ts`；六处 runLoop 调用仅移除原来 false/undefined 的参数 |
+| S02 | Session.fork 历史读取；FC-001、FC-017 | 复用 sourceMsgs，保留建目标前拒绝无效 cutoff 和事务内 rendered-order 读取 | 待继承 | `session.ts`、`fork-queue.test.ts` 的 absent/foreign cutoff、processor fork freshness |
+| S03 | MCP 当前合同；FC-004、FD-005、FD-006 | 文档改为请求授权目录和固定 dispatcher，旧 loaded membership 仅用于历史冻结快照 | 待继承相同文档 | FC-004 Observable contract；没有 MCP 产品源码改动 |
+| S04 | 会话级重试诊断；FC-013 | processor 通知回调仅由 main 发布状态和 RetryAttempt，actor 仍实际重试 | 待继承 | `processor.ts`、`invalid-output-continuation.test.ts` 的真实 HTTP/SSE 与 Bus 对照 |
+| S05 | Inbox 渲染布局；DC-CONTEXT-001 | 不适用，保持上游布局 | 待独立 compat PR | 恢复 blankTo 位置与结构注释，保留 UTF-8 caps、完整通知标签及空内容回退 |
+
+共享代码/测试提交依次为 `a2d1cded3db6d2bd8881252c465767748bab7b63`
+（S01）、`17260db2e9a8ef4b35e66e0521ef25f4af10b0b3`（S02）和
+`a53165b4f0584a487c5090962bdf5d9123b9c1cd`（S04）。S03 及本节属于
+文档提交，不改变 runtime/test 快照。PR、集成分支精确 SHA CI、compat
+继承和最终资源清理仍待发布验收，不能由下列本地结果替代。
+
+本地使用 `bun ci`，lockfile 不变；Bun 为 1.4.3。测试从 `packages/cli`
+运行，移除环境中的 `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_MCP_TOOL_SEARCH`、
+`MIMOCODE_CODEX_MODE`，保留包 preload 的隔离 HOME/XDG、内存数据库和禁用
+默认插件。CLI `bun run typecheck` exit 0；root `bun run lint` 为
+3,638 warnings、0 errors。
+
+- Runner/生命周期八文件：修改前 107 pass，修改后 106 pass；仅删除已经没有
+  生产调用的 epoch hold 用例。prompt 定向组从 11 pass 到 10 pass，仅删除
+  显式 joinRunning=true 的旧接口专属用例，保留迟到输入、取消和 ownership 用例。
+- fork 验证共 8 pass：fork-queue 五例、processor fork 两例及 chronological
+  cutoff 一例。新增 absent/foreign cutoff 断言在重构前也通过，证明保留已有拒绝边界。
+- 重试通知先 RED：main 通过，ordinary actor 因收到不应发布的事件失败。
+  修正后 invalid-output 全部十例通过。相邻五文件组为 159 pass、2 个原有
+  skip、1 个 30 秒超时；后者是既有八次 request 退避用例，按 CI 的
+  `--timeout 120000` 定点复测通过（48.35 秒），没有修改退避策略或测试时限。
+- 并行重型检查期间，late-row 和 cancel-hook 两条时序用例超时；降低本地并行度后
+  同一源码独立复测 2 pass，保持原测试内置时限。主动终止的宽文件运行不计为
+  完整通过，完整验证以最终源码 CI 为准。
+
+复审中的终态 receipt 重放挂起假设没有成为修复项：两次真实入口探针均先被
+完整内容校验拒绝，观察到持久化 user 已增加 summary 元数据，未进入假设中的
+Deferred 等待。这里不宣称已证明用户可达挂起，也不放松重放一致性校验。
