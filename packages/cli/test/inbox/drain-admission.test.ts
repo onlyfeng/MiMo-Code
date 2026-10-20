@@ -1,272 +1,90 @@
 import { describe, expect } from "bun:test"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { ActorRegistry } from "../../src/actor/registry"
-import { Bus } from "../../src/bus"
-import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
-import { Inbox } from "../../src/inbox"
-import { gcInboxRows } from "../../src/inbox/inbox"
+import { Inbox, InboxController } from "../../src/inbox"
 import { defaultModelRef } from "../../src/inbox/inbox-ref"
+import { gcInboxRows } from "../../src/inbox/inbox"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Session } from "../../src/session"
-import { Database, eq, inArray } from "../../src/storage"
+import { Database, eq } from "../../src/storage"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
-const base = Layer.mergeAll(
-  Session.defaultLayer,
-  ActorRegistry.defaultLayer,
-  Bus.defaultLayer,
-  CrossSpawnSpawner.defaultLayer,
-)
-const it = testEffect(Inbox.layer.pipe(Layer.provideMerge(base)))
+const it = testEffect(Layer.mergeAll(Inbox.defaultLayer, InboxController.defaultLayer, Session.defaultLayer,
+  ActorRegistry.defaultLayer, CrossSpawnSpawner.defaultLayer))
 const model = { providerID: ProviderID.make("test"), modelID: ModelID.make("model") }
 
-const seed = Effect.fn(function* (readers = 1) {
+const seed = Effect.fn(function* () {
   const sessions = yield* Session.Service
   const actors = yield* ActorRegistry.Service
   const inbox = yield* Inbox.Service
+  const controller = yield* InboxController.Service
   const session = yield* sessions.create({ title: "Inbox admission" })
-  yield* actors.register({
-    sessionID: session.id,
-    actorID: "receiver",
-    mode: "subagent",
-    parentActorID: undefined,
-    agent: "general",
-    description: "Inbox admission receiver",
-    contextMode: "none",
-    contextWatermark: undefined,
-    background: false,
-    lifecycle: "persistent",
-  })
-  const sent = yield* Effect.all(
-    ["first notification", "second notification"].map((content) =>
-      inbox.send({ receiverSessionID: session.id, receiverActorID: "receiver", type: "actor_notification", content, wake: false }),
-    ),
-  )
-  // Keep real send admission, but give the fixture a deterministic queue order
-  // without relying on same-millisecond ULIDs sorting in call order.
-  const rows = sent.map((row, index) => {
-    const inboxID = `${session.id}_inbox_${index}`
-    Database.use((db) => db.update(InboxTable).set({ id: inboxID }).where(eq(InboxTable.id, row.inboxID)).run())
-    return { inboxID }
-  })
-  const entered = yield* Effect.all(Array.from({ length: readers }, () => Deferred.make<void>()))
+  yield* actors.register({ sessionID: session.id, actorID: "receiver", mode: "peer", agent: "general",
+    description: "Admission receiver", contextMode: "none", background: false, lifecycle: "persistent" })
+  const entered = yield* Deferred.make<void>()
   const release = yield* Deferred.make<void>()
   const previous = defaultModelRef.current
-  let reader = 0
-  // No prior model-bearing message exists. Pause the real tier-2 resolver,
-  // after drain has read the queue but before it can commit that batch.
-  defaultModelRef.current = {
-    defaultModel: () =>
-      Effect.gen(function* () {
-        const waiting = entered[reader++]
-        if (waiting) yield* Deferred.succeed(waiting, undefined)
-        yield* Deferred.await(release)
-        return model
-      }),
-  }
-  yield* Effect.addFinalizer(() =>
-    Deferred.succeed(release, undefined).pipe(
-      Effect.andThen(
-        Effect.sync(() => {
-          defaultModelRef.current = previous
-        }),
-      ),
-    ),
-  )
-  return {
-    actors,
-    inbox,
-    session,
-    rows,
-    entered,
-    release,
-    pending: () =>
-      Database.use((db) =>
-        db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, session.id)).orderBy(InboxTable.id).all(),
-      ),
-    messages: () => sessions.messages({ sessionID: session.id, agentID: "receiver" }),
-  }
+  defaultModelRef.current = { defaultModel: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as(model)) }
+  yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.andThen(Effect.sync(() => {
+    defaultModelRef.current = previous
+  }))))
+  const input = { receiverSessionID: session.id, receiverActorID: "receiver", type: "actor_notification", content: "notification" }
+  const rows = () => Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, session.id)).all())
+  return { sessions, actors, inbox, controller, session, entered, release, input, rows }
 })
 
-describe("Inbox.drain admission after asynchronous model resolution", () => {
-  it.live("two drains that read the same queue commit one complete spawn user", () =>
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const f = yield* seed(2)
-        const first = yield* f.inbox.drain(f.session.id, "receiver").pipe(Effect.forkChild)
-        const second = yield* f.inbox.drain(f.session.id, "receiver").pipe(Effect.forkChild)
-        yield* Effect.all(f.entered.map((entered) => Deferred.await(entered)))
-        expect(f.pending().map((row) => row.id)).toEqual(f.rows.map((row) => row.inboxID))
-        expect(yield* f.messages()).toEqual([])
-
-        yield* Deferred.succeed(f.release, undefined)
-        const counts = yield* Effect.all([Fiber.join(first), Fiber.join(second)])
-        const messages = yield* f.messages()
-        expect(counts.sort((a, b) => a - b)).toEqual([0, 2])
-        expect(messages).toHaveLength(1)
-        expect(messages[0].info).toMatchObject({
-          sessionID: f.session.id,
-          agentID: "receiver",
-          role: "user",
-          source: "spawn",
-          agent: "general",
-          model,
-        })
-        expect(
-          messages[0].parts.map((part) => ({
-            sessionID: part.sessionID,
-            messageID: part.messageID,
-            type: part.type,
-            text: part.type === "text" ? part.text : undefined,
-            synthetic: part.type === "text" ? part.synthetic : undefined,
-          })),
-        ).toEqual(
-          ["first notification", "second notification"].map((text) => ({
-            sessionID: f.session.id,
-            messageID: messages[0].info.id,
-            type: "text",
-            text,
-            synthetic: true,
-          })),
-        )
-        expect(new Set(messages[0].parts.map((part) => part.id)).size).toBe(2)
-        expect(f.pending()).toEqual([])
-        expect(yield* f.inbox.drain(f.session.id, "receiver")).toBe(0)
-      }),
-    ),
-  )
-
-  it.live("retirement while the seed is pending discards the queue without creating a spawn user", () =>
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const f = yield* seed()
-        const draining = yield* f.inbox.drain(f.session.id, "receiver").pipe(Effect.forkChild)
-        yield* Deferred.await(f.entered[0])
-        yield* f.actors.updateStatus(f.session.id, "receiver", { status: "idle", lastOutcome: "cancelled" })
-        yield* Deferred.succeed(f.release, undefined)
-
-        expect(yield* Fiber.join(draining)).toBe(0)
-        expect(yield* f.messages()).toEqual([])
-        expect(f.pending()).toEqual([])
-      }),
-    ),
-  )
-
-  it.live("cancellation while the seed is pending leaves the batch for a later drain", () =>
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const f = yield* seed()
-        const before = f.pending()
-        let cancelled = false
-        const draining = yield* f.inbox.drain(f.session.id, "receiver", () => cancelled).pipe(Effect.forkChild)
-        yield* Deferred.await(f.entered[0])
-        cancelled = true
-        yield* Deferred.succeed(f.release, undefined)
-
-        expect(yield* Fiber.join(draining)).toBe(0)
-        expect(yield* f.messages()).toEqual([])
-        expect(f.pending()).toEqual(before)
-        expect(yield* f.inbox.drain(f.session.id, "receiver")).toBe(2)
-        expect(
-          (yield* f.messages()).flatMap((message) => message.parts).map((part) => part.type === "text" && part.text),
-        ).toEqual(["first notification", "second notification"])
-        expect(f.pending()).toEqual([])
-      }),
-    ),
-  )
-
-  it.live("interrupting the pending seed leaves no transcript and does not claim the queue", () =>
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const f = yield* seed()
-        const before = f.pending()
-        const draining = yield* f.inbox.drain(f.session.id, "receiver").pipe(Effect.forkChild)
-        yield* Deferred.await(f.entered[0])
-        yield* Fiber.interrupt(draining)
-        const result = yield* Fiber.await(draining)
-
-        expect(Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)).toBe(true)
-        expect(yield* f.messages()).toEqual([])
-        expect(f.pending()).toEqual(before)
-        yield* Deferred.succeed(f.release, undefined)
-        expect(yield* f.inbox.drain(f.session.id, "receiver")).toBe(2)
-        expect(
-          (yield* f.messages()).flatMap((message) => message.parts).map((part) => part.type === "text" && part.text),
-        ).toEqual(["first notification", "second notification"])
-        expect(f.pending()).toEqual([])
-      }),
-    ),
-  )
-
-  it.live("interruption requested by a postcommit observer remains cancellation without replaying the batch", () =>
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const f = yield* seed()
-        const interrupted = yield* Deferred.make<void>()
-        const draining = yield* f.inbox.drain(f.session.id, "receiver").pipe(Effect.forkChild)
-        yield* Deferred.await(f.entered[0])
-        const listener = (event: GlobalEvent) => {
-          if (event.payload.type !== "sync" || event.payload.syncEvent.aggregateID !== f.session.id) return
-          GlobalBus.off("event", listener)
-          Effect.runFork(Fiber.interrupt(draining).pipe(Effect.andThen(Deferred.succeed(interrupted, undefined))))
-        }
-        GlobalBus.on("event", listener)
-        yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
-        yield* Deferred.succeed(f.release, undefined)
-        const result = yield* Fiber.await(draining)
-        yield* Deferred.await(interrupted)
-
-        expect(Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)).toBe(true)
-        const messages = yield* f.messages()
-        expect(messages).toHaveLength(1)
-        expect(messages[0].parts.map((part) => part.type === "text" && part.text)).toEqual([
-          "first notification",
-          "second notification",
-        ])
-        expect(f.pending()).toEqual([])
-        expect(yield* f.inbox.drain(f.session.id, "receiver")).toBe(0)
-        expect(yield* f.messages()).toEqual(messages)
-      }),
-    ),
-  )
-
-  for (const expired of [1, 2]) {
-    it.live(`GC of ${expired} pre-read rows during seed resolution never replays deleted content`, () =>
-      provideTmpdirInstance(() =>
-        Effect.gen(function* () {
-          const f = yield* seed()
-          // Age only fixture rows; the real GC consumer performs the deletion.
-          Database.use((db) =>
-            db
-              .update(InboxTable)
-              .set({ created_at: 0 })
-              .where(
-                inArray(
-                  InboxTable.id,
-                  f.rows.slice(0, expired).map((row) => row.inboxID),
-                ),
-              )
-              .run(),
-          )
-          const draining = yield* f.inbox.drain(f.session.id, "receiver").pipe(Effect.forkChild)
-          yield* Deferred.await(f.entered[0])
-          yield* gcInboxRows(0)
-          expect(f.pending().map((row) => row.id)).toEqual(f.rows.slice(expired).map((row) => row.inboxID))
-          yield* Deferred.succeed(f.release, undefined)
-
-          expect(yield* Fiber.join(draining)).toBe(2 - expired)
-          const messages = yield* f.messages()
-          expect(messages).toHaveLength(expired === 1 ? 1 : 0)
-          expect(messages.flatMap((message) => message.parts).map((part) => part.type === "text" && part.text)).toEqual(
-            expired === 1 ? ["second notification"] : [],
-          )
-          expect(f.pending()).toEqual([])
-          expect(yield* f.inbox.drain(f.session.id, "receiver")).toBe(0)
-        }),
-      ),
-    )
+describe("Inbox admission after asynchronous model resolution", () => {
+  for (const boundary of ["cancelled", "epoch", "retired"] as const) {
+    it.live(`${boundary} during seed resolution writes no transcript or receipt`, provideTmpdirInstance(() => Effect.gen(function* () {
+      const f = yield* seed()
+      let cancelled = false
+      const epoch = yield* f.controller.getEpoch(f.session.id)
+      const accepting = yield* f.inbox.accept(f.input, { deferKick: true, isCancelled: () => cancelled, expectedEpoch: epoch }).pipe(Effect.forkChild)
+      yield* Deferred.await(f.entered)
+      expect(f.rows()).toEqual([])
+      expect(yield* f.sessions.messages({ sessionID: f.session.id, agentID: "receiver" })).toEqual([])
+      if (boundary === "cancelled") cancelled = true
+      if (boundary === "epoch") yield* f.controller.abortSession(f.session.id)
+      if (boundary === "retired") yield* f.actors.updateStatus(f.session.id, "receiver", { status: "idle", lastOutcome: "cancelled" })
+      yield* Deferred.succeed(f.release, undefined)
+      const exit = yield* Fiber.await(accepting)
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(f.rows()).toEqual([])
+      expect(yield* f.sessions.messages({ sessionID: f.session.id, agentID: "receiver" })).toEqual([])
+    })))
   }
+
+  it.live("interrupting seed resolution writes nothing and a fresh admission remains possible", provideTmpdirInstance(() => Effect.gen(function* () {
+    const f = yield* seed()
+    const accepting = yield* f.inbox.accept(f.input, { deferKick: true }).pipe(Effect.forkChild)
+    yield* Deferred.await(f.entered)
+    yield* Fiber.interrupt(accepting)
+    const exit = yield* Fiber.await(accepting)
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+    expect(f.rows()).toEqual([])
+    yield* Deferred.succeed(f.release, undefined)
+    const receipt = yield* f.inbox.accept(f.input, { deferKick: true })
+    expect(f.rows().map((row) => row.id)).toEqual([receipt.inboxID])
+  })))
+
+  it.live("concurrent claims cannot consume the same input and terminal-only GC preserves accepted work", provideTmpdirInstance(() => Effect.gen(function* () {
+    const f = yield* seed()
+    yield* Deferred.succeed(f.release, undefined)
+    const receipt = yield* f.inbox.accept(f.input, { deferKick: true })
+    Database.use((db) => db.update(InboxTable).set({ time_updated: 0 }).where(eq(InboxTable.id, receipt.inboxID)).run())
+    yield* gcInboxRows(0)
+    expect(f.rows()).toHaveLength(1)
+    const lane = { sessionID: f.session.id, agentID: "receiver" }
+    const claims = yield* Effect.all([f.controller.claimNext(lane, 1), f.controller.claimNext(lane, 2)], { concurrency: "unbounded" })
+    expect(claims.filter(Boolean)).toHaveLength(1)
+    expect(claims.find(Boolean)?.receipts.map((item) => item.id)).toEqual([receipt.inboxID])
+    yield* f.controller.cancelLane(lane)
+    expect(f.rows()[0].state).toBe("cancelled")
+    expect(f.rows()[0].outcome).toBe("never_ran")
+    expect(yield* f.controller.claimNext(lane, 3)).toBeUndefined()
+    expect((yield* f.sessions.messages({ sessionID: f.session.id, agentID: "receiver" }))[0].parts).toHaveLength(1)
+  })))
 })

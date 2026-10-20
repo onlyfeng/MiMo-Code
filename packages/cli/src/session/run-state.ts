@@ -1,12 +1,14 @@
 import { EffectLogger, InstanceState } from "@/effect"
 import { Instance } from "@/project/instance"
 import { Runner } from "@/effect"
-import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect"
+import { Context, Effect, Exit, Fiber, Layer, Scope, Semaphore } from "effect"
 import * as Session from "./session"
 import { MessageV2 } from "./message-v2"
 import { isRunDisposing, RunDisposal } from "./run-disposal"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
+import { Database } from "@/storage"
+import { ExecutionOwnership } from "./execution-ownership"
 import * as CancelEpoch from "./cancel-epoch"
 import { orphanToolIdleSweepRef, assistantMessageIdsSnapshotRef } from "./orphan-tool-idle-hook"
 
@@ -28,12 +30,16 @@ const release = (entry: RunnerEntry) =>
   })
 
 export interface Interface {
+  readonly sessionExecutionSnapshot: (sessionID: SessionID, agentID?: string) => Effect.Effect<{ readonly isIdle: () => boolean; readonly isCancelled: () => boolean }>
+  readonly executionSnapshot: (sessionID: SessionID, agentID: string) => Effect.Effect<{ readonly fiber: Fiber.Fiber<MessageV2.WithParts> | undefined; readonly isCurrent: () => boolean }>
+
   readonly assertNotBusy: (sessionID: SessionID, agentID?: string) => Effect.Effect<void, Session.BusyError>
   readonly start: (
     sessionID: SessionID,
     agentID: string,
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
+    admit?: Effect.Effect<void>,
   ) => Effect.Effect<void, Session.BusyError>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly cancelActor: (sessionID: SessionID, agentID: string) => Effect.Effect<void>
@@ -90,6 +96,7 @@ export const layer = Layer.effect(
           scope: yield* Scope.make("parallel"),
           runners: new Map<SessionID, Map<string, RunnerEntry>>(),
           disposing: false,
+          actorCancellations: new Map<SessionID, Map<string, number>>(),
         }
         yield* Effect.addFinalizer(
           Effect.fnUntraced(function* () {
@@ -196,6 +203,36 @@ export const layer = Layer.effect(
       return { data, entry }
     })
 
+    const ownership = Effect.fn("SessionRunState.ownership")(function* (sessionID: SessionID) {
+      const identity = yield* ExecutionOwnership.captureIdentity
+      const check = Effect.sync(() => Database.use((db) => ExecutionOwnership.assertOwnership(db, sessionID, identity)))
+      yield* check
+      return check
+    })
+
+    const sessionExecutionSnapshot: Interface["sessionExecutionSnapshot"] = Effect.fn("SessionRunState.sessionExecutionSnapshot")(function* (sessionID, agentID) {
+      const data = yield* currentState()
+      const generation = CancelEpoch.current(sessionID)
+      const actorGeneration = agentID == null ? undefined : data.actorCancellations.get(sessionID)?.get(agentID) ?? 0
+      return {
+        isIdle: () => ![...(data.runners.get(sessionID)?.values() ?? [])].some((entry) => entry.control.active || entry.runner.busy),
+        isCancelled: () => data.disposing || CancelEpoch.current(sessionID) !== generation ||
+          (agentID != null && (data.actorCancellations.get(sessionID)?.get(agentID) ?? 0) !== actorGeneration),
+      }
+    })
+
+    const executionSnapshot: Interface["executionSnapshot"] = Effect.fn("SessionRunState.executionSnapshot")(function* (sessionID, agentID) {
+      const data = yield* currentState()
+      const current = () => {
+        const entry = data.runners.get(sessionID)?.get(agentID)?.runner.state
+        if (!entry || entry._tag === "Idle") return undefined
+        const active = entry._tag === "Cancelling" ? entry.cancellation.active : entry
+        return active._tag === "Shell" ? active.shell.fiber : active.run.fiber
+      }
+      const fiber = current()
+      return { fiber, isCurrent: () => !data.disposing && current() === fiber }
+    })
+
     const assertNotBusy = Effect.fn("SessionRunState.assertNotBusy")(function* (
       sessionID: SessionID,
       agentID = "main",
@@ -240,10 +277,12 @@ export const layer = Layer.effect(
       agentID: string,
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
+      admit?: Effect.Effect<void>,
     ) {
+      const check = yield* ownership(sessionID)
       const current = yield* runner(sessionID, agentID)
       yield* current.entry.runner
-        .start(withOrphanSweep(sessionID, agentID, work), interruptFor(agentID, onInterrupt))
+        .start(check.pipe(Effect.andThen(admit ?? Effect.void), Effect.andThen(withOrphanSweep(sessionID, agentID, work))), interruptFor(agentID, onInterrupt), check)
         .pipe(
           Effect.provideService(RunDisposal, current.data),
           Effect.ensuring(release(current.entry)),
@@ -279,6 +318,9 @@ export const layer = Layer.effect(
       agentID: string,
     ) {
       const data = yield* currentState()
+      const cancellations = data.actorCancellations.get(sessionID) ?? new Map<string, number>()
+      cancellations.set(agentID, (cancellations.get(agentID) ?? 0) + 1)
+      data.actorCancellations.set(sessionID, cancellations)
       const existing = data.runners.get(sessionID)?.get(agentID)
       if (!existing) return
       existing.control.leases++
@@ -292,6 +334,9 @@ export const layer = Layer.effect(
       agentID: string,
     ) {
       const data = yield* currentState()
+      const cancellations = data.actorCancellations.get(sessionID) ?? new Map<string, number>()
+      cancellations.set(agentID, (cancellations.get(agentID) ?? 0) + 1)
+      data.actorCancellations.set(sessionID, cancellations)
       const existing = data.runners.get(sessionID)?.get(agentID)
       if (!existing) return
       existing.control.leases++
@@ -308,13 +353,15 @@ export const layer = Layer.effect(
       joinRunning = false,
       cancelEpoch?: number,
     ) {
+      const check = yield* ownership(sessionID)
       const current = yield* runner(sessionID, agentID)
       return yield* current.entry.runner
         .ensureRunning(
-          withOrphanSweep(sessionID, agentID, work),
+          check.pipe(Effect.andThen(withOrphanSweep(sessionID, agentID, work))),
           interruptFor(agentID, onInterrupt),
           joinRunning,
           cancelEpoch == null ? undefined : () => CancelEpoch.current(sessionID) === cancelEpoch,
+          check,
         )
         .pipe(
           Effect.provideService(RunDisposal, current.data),
@@ -327,9 +374,10 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
     ) {
+      const check = yield* ownership(sessionID)
       const current = yield* runner(sessionID, "main")
       return yield* current.entry.runner
-        .startShell(work, onInterrupt)
+        .startShell(check.pipe(Effect.andThen(work)), onInterrupt, check)
         .pipe(
           Effect.provideService(RunDisposal, current.data),
           Effect.ensuring(release(current.entry)),
@@ -342,9 +390,10 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
     ) {
+      const check = yield* ownership(sessionID)
       const current = yield* runner(sessionID, agentID)
       const completion = yield* current.entry.runner
-        .startRunning(withOrphanSweep(sessionID, agentID, work), interruptFor(agentID, onInterrupt))
+        .startRunning(check.pipe(Effect.andThen(withOrphanSweep(sessionID, agentID, work))), interruptFor(agentID, onInterrupt), check)
         .pipe(
           Effect.provideService(RunDisposal, current.data),
           Effect.ensuring(release(current.entry)),
@@ -353,23 +402,27 @@ export const layer = Layer.effect(
     })
 
     const startOwned: Interface["startOwned"] = Effect.fn("SessionRunState.startOwned")(function* (sessionID, agentID, onInterrupt, work, admit) {
+      const check = yield* ownership(sessionID)
       const current = yield* runner(sessionID, agentID)
       // An unadmitted run owns no history to settle, even on cancellation.
-      const admitted = (admit ?? Effect.void).pipe(Effect.andThen(withOrphanSweep(sessionID, agentID, work)))
-      return yield* current.entry.runner.startOwned(admitted, interruptFor(agentID, onInterrupt)).pipe(
+      const admitted = check.pipe(Effect.andThen(admit ?? Effect.void), Effect.andThen(withOrphanSweep(sessionID, agentID, work)))
+      return yield* current.entry.runner.startOwned(admitted, interruptFor(agentID, onInterrupt), check).pipe(
         Effect.provideService(RunDisposal, current.data),
         Effect.ensuring(release(current.entry)),
       )
     })
     const ensureExclusive: Interface["ensureExclusive"] = Effect.fn("SessionRunState.ensureExclusive")(function* (sessionID, agentID, onInterrupt, work) {
+      const check = yield* ownership(sessionID)
       const current = yield* runner(sessionID, agentID)
-      return yield* current.entry.runner.ensureExclusive(withOrphanSweep(sessionID, agentID, work), interruptFor(agentID, onInterrupt)).pipe(
+      return yield* current.entry.runner.ensureExclusive(check.pipe(Effect.andThen(withOrphanSweep(sessionID, agentID, work))), interruptFor(agentID, onInterrupt), check).pipe(
         Effect.provideService(RunDisposal, current.data),
         Effect.ensuring(release(current.entry)),
       )
     })
 
     return Service.of({
+      sessionExecutionSnapshot,
+      executionSnapshot,
       assertNotBusy,
       cancel,
       cancelActor,

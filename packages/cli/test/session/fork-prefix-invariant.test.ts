@@ -37,28 +37,44 @@ describe("fork prefix invariant", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const session = await AppRuntime.runPromise(
-          SessionNs.Service.use((svc) => svc.create({})),
-        )
+        const session = await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.create({})))
 
         // Build a session with three messages: user → assistant → user.
+        let previousUser: MessageID | undefined
         for (let i = 0; i < 3; i++) {
           const id = MessageID.ascending()
           const role = i % 2 === 0 ? "user" : "assistant"
-          await AppRuntime.runPromise(
-            SessionNs.Service.use((svc) =>
-              svc.updateMessage({
-                id,
-                sessionID: session.id,
-                role,
-                time: { created: Date.now() + i },
-                agent: "build",
-                model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test") },
-                tools: {},
-                mode: "",
-              } as unknown as MessageV2.Info),
-            ),
-          )
+          const created = Date.now() + i
+          let message: MessageV2.Info
+          if (role === "user") {
+            previousUser = id
+            message = {
+              id,
+              sessionID: session.id,
+              role,
+              agent: "build",
+              time: { created },
+              model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test") },
+            }
+          } else {
+            if (!previousUser) throw new Error("Missing parent user")
+            message = {
+              id,
+              sessionID: session.id,
+              role,
+              agent: "build",
+              mode: "build",
+              parentID: previousUser,
+              time: { created, completed: created },
+              finish: "stop",
+              providerID: ProviderID.make("test"),
+              modelID: ModelID.make("test"),
+              path: { cwd: "/tmp/example", root: "/tmp/example" },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            }
+          }
+          await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.updateMessage(message)))
           await AppRuntime.runPromise(
             SessionNs.Service.use((svc) =>
               svc.updatePart({

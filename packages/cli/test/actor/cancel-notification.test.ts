@@ -1,3 +1,5 @@
+import { inboxControllerRef, schedulerRef } from "../../src/inbox"
+import { observeAcceptedInbox, acceptedInboxEvent, receiptText } from "../fixture/accepted-inbox"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, describe, expect } from "bun:test"
@@ -6,6 +8,7 @@ import { eq, and } from "drizzle-orm"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
+import { TuiEvent } from "../../src/cli/cmd/tui/event"
 import { Command } from "../../src/command"
 import { Config } from "../../src/config"
 import { LSP } from "../../src/lsp"
@@ -27,6 +30,7 @@ import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
+import { defaultLayer as CronBridgeDefaultLayer } from "../../src/session/cron-bridge"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
@@ -36,7 +40,8 @@ import { SystemPrompt } from "../../src/session/system"
 import { Snapshot } from "../../src/snapshot"
 import { ToolRegistry } from "../../src/tool"
 import { Truncate } from "../../src/tool"
-import { ActorStatusChanged, InboxArrived } from "../../src/actor/events"
+import { ActorStatusChanged } from "../../src/actor/events"
+import { ReceiptUpdated } from "../../src/inbox/events"
 import { ActorExecution, type Execution } from "../../src/actor/execution"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
@@ -376,6 +381,7 @@ function makeLayer() {
   const proc = SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps))
   const prune = SessionPrune.layer.pipe(Layer.provide(checkpoint), Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
+    Layer.provide(CronBridgeDefaultLayer),
     Layer.provide(Goal.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(summary),
@@ -488,18 +494,23 @@ const parentInboxRows = (parentID: SessionID, parentActorID = "main") =>
     ),
   )
 
+const notificationText = (row: InboxRow) => {
+  if (!row.input_message_id) throw new Error("Notification missing input message")
+  return MessageV2.get({ sessionID: row.receiver_session_id, messageID: row.input_message_id }).parts
+    .flatMap((part) => part.type === "text" ? [part.text] : []).join("\n")
+}
+
 const captureParentInbox = (parentID: SessionID, parentActorID = "main") =>
   Effect.gen(function* () {
     const instance = Instance.current
     const arrivals: { inboxID: string; senderActorID: string | undefined; row: InboxRow | undefined }[] = []
     const onArrival = (event: GlobalEvent) => {
-      if (event.directory !== instance.directory || event.project !== instance.project.id || event.payload.type !== InboxArrived.type) return
-      const properties = InboxArrived.properties.parse(event.payload.properties)
-      if (properties.receiverSessionID !== parentID || properties.receiverActorID !== parentActorID) return
-      // GlobalBus emits synchronously inside publish, unlike Bus.subscribeCallback's
-      // queued fiber. Capture the persisted row before send forks auto-wake.
-      const row = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, properties.inboxID)).get())
-      arrivals.push({ inboxID: properties.inboxID, senderActorID: properties.senderActorID, row })
+      if (event.directory !== instance.directory || event.project !== instance.project.id || event.payload.type !== ReceiptUpdated.type) return
+      const properties = ReceiptUpdated.properties.parse(event.payload.properties)
+      if (properties.sessionID !== parentID || properties.agentID !== parentActorID || properties.state !== "accepted") return
+      const row = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, properties.receiptId)).get())
+      if (row?.type !== "actor_notification") return
+      arrivals.push({ inboxID: properties.receiptId, senderActorID: row.sender_actor_id ?? undefined, row })
     }
     yield* Effect.acquireRelease(
       Effect.sync(() => GlobalBus.on("event", onArrival)),
@@ -565,7 +576,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
       expect(result.lastOutcome).toBe("failure")
       expect(result.error).toBeDefined()
       expect(rows).toHaveLength(1)
-      expect((rows[0].content as { text: string }).text).toContain("failed.")
+      expect(notificationText(rows[0])).toContain("failed.")
     }), { git: true, config: providerCfg },
   ))
   it.live("[TP-R14-12] undeliverable terminal notification is logged", () => {
@@ -595,6 +606,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           const prompt = yield* SessionPrompt.Service
           const parent = yield* sessions.create({ title: "continued child", permission: [{ permission: "*", pattern: "*", action: "allow" }] })
           yield* registry.register({ sessionID: parent.id, actorID: "owner", mode: "subagent", agent: "build", description: "creating parent", contextMode: "none", background: true, lifecycle: "ephemeral" })
+          yield* prompt.prompt({ sessionID: parent.id, agentID: "owner", agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "Coordinate the child task." }] })
           const notifications = yield* captureParentInbox(parent.id, "owner")
           const mainNotifications = yield* captureParentInbox(parent.id)
           const firstWake = yield* observeWake(parent.id, "owner")
@@ -602,8 +614,8 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           const spawned = yield* actor.spawn({ mode, sessionID: parent.id, parentActorID: "owner", agentType: "build", task: "first", context: "none", tools: ["read"], background: true, model: ref })
           yield* Deferred.await(spawned.outcome)
           const first = yield* notifications(1)
-          expect(first[0].content).toHaveProperty("text", expect.stringContaining("first result"))
-          expect(first[0].content).toHaveProperty("text", expect.stringContaining("completed"))
+          expect(notificationText(first[0])).toContain("first result")
+          expect(notificationText(first[0])).toContain("completed")
           yield* firstWake
           const continuedWake = yield* observeWake(parent.id, "owner")
           const before = yield* llm.calls
@@ -646,9 +658,9 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           expect(added).toHaveLength(1)
           // owner may notify main after its own wake; only child misrouting is forbidden.
           yield* mainNotifications(0, spawned.actorID)
-          const content = added[0].content as { text?: string }
-          expect(content.text).toContain(terminal === "success" ? "completed" : terminal === "failure" ? "failed" : "cancelled")
-          if (terminal === "success") expect(content.text).toContain("second result")
+          const text = notificationText(added[0])
+          expect(text).toContain(terminal === "success" ? "completed" : terminal === "failure" ? "failed" : "cancelled")
+          if (terminal === "success") expect(text).toContain("second result")
           yield* continuedWake
           if (terminal === "cancelled") {
             const resumedWake = yield* observeWake(parent.id, "owner")
@@ -659,8 +671,8 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
             expect(next.slice(0, rows.length)).toEqual(rows)
             const resumed = next.filter((row) => !rows.some((previous) => previous.id === row.id))
             expect(resumed).toHaveLength(1)
-            expect(resumed[0].content).toHaveProperty("text", expect.stringContaining("completed"))
-            expect(resumed[0].content).toHaveProperty("text", expect.stringContaining("after cancellation"))
+            expect(notificationText(resumed[0])).toContain("completed")
+            expect(notificationText(resumed[0])).toContain("after cancellation")
             yield* resumedWake
             yield* mainNotifications(0, spawned.actorID)
           }
@@ -696,10 +708,12 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         const release = yield* Deferred.make<void>()
         const cancelled = yield* Deferred.make<void>()
         const notices: string[] = []
-        const unsubscribe = yield* bus.subscribeCallback(InboxArrived, (event) => {
+        const noticed = yield* Deferred.make<void>()
+        const unsubscribe = yield* observeAcceptedInbox(bus, (event) => {
           if (event.properties.senderSessionID !== child.sessionID || event.properties.senderActorID !== child.actorID) return
           const row = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, event.properties.inboxID)).get())
-          notices.push((row?.content as { text?: string } | undefined)?.text ?? "")
+          notices.push(receiptText(row))
+          if (notices.length === (queued ? 2 : 1)) Deferred.doneUnsafe(noticed, Effect.void)
         })
         const restore = prompt.bindActor?.({
           ...actor,
@@ -727,7 +741,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           return body.includes('"content":"first"') && !body.includes("You are a title generator")
         }).length))
         const calls = yield* childCalls
-        const pending = queued ? yield* inbox.send({
+        const pending = queued ? yield* inbox.accept({
           receiverSessionID: child.sessionID,
           receiverActorID: child.actorID,
           senderSessionID: parent.id,
@@ -748,10 +762,11 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         yield* Fiber.await(running)
         yield* Fiber.join(cancelling).pipe(Effect.timeout("5 seconds"))
         expect(yield* childCalls).toBe(calls)
-        if (pending) expect(yield* inbox.has(pending.inboxID)).toBe(false)
+        if (pending) expect(["accepted", "claimed"].includes((yield* inboxControllerRef.current!.getReceipt(pending.inboxID)).state)).toBe(false)
         expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
         // Queued work is a new settlement: cancelling it must not be hidden by
         // the preceding successful turn's receipt, and must not call the model.
+        yield* Deferred.await(noticed).pipe(Effect.timeout("5 seconds"))
         expect(notices).toHaveLength(queued ? 2 : 1)
         expect(notices.filter((text) => text.includes("completed"))).toHaveLength(1)
         expect(notices.filter((text) => text.includes("cancelled"))).toHaveLength(queued ? 1 : 0)
@@ -797,17 +812,20 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         yield* Deferred.await(result.outcome)
 
         const rows = yield* notifications(1)
-        const content = rows[0].content as { text?: string }
-        expect(content.text).toContain("completed")
-        expect(content.text).toContain("**Summary**: done")
+        const text = notificationText(rows[0])
+        expect(text).toContain("completed")
+        expect(text).toContain("**Summary**: done")
 
-        // main's ensureRunning joins auto-wake instead of racing a second drain.
         yield* prompt.loop({ sessionID: parent.id, agentID: "main" })
-        expect(yield* parentInboxRows(parent.id)).toHaveLength(0)
+        const settled = yield* parentInboxRows(parent.id)
+        expect(settled).toHaveLength(1)
+        expect(settled[0].state).toBe("settled")
+        expect(settled[0].consumed).toBe(true)
+        expect(settled[0].delivery_message_id).toBeTruthy()
         expect(yield* notifications(1)).toEqual(rows)
         const messages = yield* session.messages({ sessionID: parent.id, agentID: "main" })
         const consumed = messages.flatMap((message) => message.parts
-          .filter((part) => part.type === "text" && part.synthetic && part.text === content.text)
+          .filter((part) => part.type === "text" && part.synthetic && part.text === text)
           .map((part) => ({ info: message.info, part })))
         expect(consumed).toHaveLength(1)
         expect(consumed[0].info).toMatchObject({ role: "user", agent: "build", model: ref })
@@ -900,8 +918,8 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         const rows = yield* notifications(1)
         expect(rows.length).toBe(1)
         expect(rows[0].type).toBe("actor_notification")
-        const content = rows[0].content as { text?: string }
-        expect(content.text).toContain("failed")
+        const text = notificationText(rows[0])
+        expect(text).toContain("failed")
       }),
       { git: true, config: providerCfg },
     ),
@@ -933,13 +951,15 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         })
         yield* llm.wait(1)
 
+        const noticed = yield* Deferred.make<void>()
         let notifications = 0
-        const off = yield* bus.subscribeCallback(InboxArrived, (event) => {
+        const off = yield* observeAcceptedInbox(bus, (event) => {
           if (event.properties.receiverSessionID !== parent.id) return
           if (event.properties.receiverActorID !== "main") return
           if (event.properties.senderSessionID !== result.sessionID) return
           if (event.properties.senderActorID !== result.actorID) return
           notifications++
+          Deferred.doneUnsafe(noticed, Effect.void)
         })
         yield* Effect.addFinalizer(() => Effect.sync(off))
 
@@ -974,10 +994,11 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         expect(outcome.status).toBe("cancelled")
 
         expect((yield* actorReg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("cancelled")
+        yield* Deferred.await(noticed).pipe(Effect.timeout("5 seconds"))
         expect(notifications).toBe(1)
         const rows = yield* parentInboxRows(parent.id)
         expect(rows.length).toBeLessThanOrEqual(1)
-        const content = rows[0].content as { text?: string }
+        const content = { text: receiptText(rows[0]) }
         expect(content.text).toContain("cancelled")
       }),
       { git: true, config: providerCfg },
@@ -1105,6 +1126,43 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
     15_000,
   )
 
+  it.live("group stop notifies a queued settlement after the preceding turn already notified", () =>
+    provideTmpdirServer(Effect.fnUntraced(function* ({ llm, dir }) {
+      const actor = yield* Actor.Service
+      const sessions = yield* Session.Service
+      const registry = yield* ActorRegistry.Service
+      const prompt = yield* SessionPrompt.Service
+      const inbox = yield* Inbox.Service
+      const parent = yield* sessions.create({ title: "queued group stop" })
+      const actorID = "queued-child"
+      yield* registry.register({
+        sessionID: parent.id, actorID, mode: "subagent", agent: "build",
+        description: "queued child", contextMode: "none", parentActorID: "main",
+        background: true, lifecycle: "persistent",
+      })
+      yield* registry.updateStatus(parent.id, actorID, { status: "idle", lastOutcome: "success" })
+      yield* actor.markTerminalNotified!(parent.id, actorID, true)
+      const queued = yield* inbox.accept({ receiverSessionID: parent.id, receiverActorID: actorID,
+        content: "new queued work" }, { deferKick: true })
+      let toasts = 0
+      const onEvent = (event: GlobalEvent) => {
+        if (event.directory === dir && event.payload.type === TuiEvent.ToastShow.type) toasts++
+      }
+      yield* Effect.acquireRelease(Effect.sync(() => GlobalBus.on("event", onEvent)),
+        () => Effect.sync(() => { GlobalBus.off("event", onEvent) }))
+      yield* prompt.cancel(parent.id)
+      expect((yield* inboxControllerRef.current!.getReceipt(queued.inboxID)).state).toBe("cancelled")
+      const notices = yield* parentInboxRows(parent.id)
+      expect(notices).toHaveLength(1)
+      expect(notificationText(notices[0])).toContain("cancelled")
+      expect((yield* registry.get(parent.id, actorID))?.lastOutcome).toBe("cancelled")
+      yield* prompt.cancel(parent.id)
+      expect(yield* parentInboxRows(parent.id)).toHaveLength(1)
+      expect(yield* llm.calls).toBe(0)
+      expect(toasts).toBe(0)
+    }), { git: true, config: providerCfg }),
+  )
+
   it.live("quiet cancel follower suppresses the registry-only owner wake", () =>
     provideTmpdirServer(Effect.fnUntraced(function* () {
       const actor = yield* Actor.Service
@@ -1122,7 +1180,10 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
       const release = yield* Deferred.make<void>()
       firstCancelListGate = { sessionID: parent.id, actorID, entered, release, armed: true }
       let wakes = 0
-      const restore = inbox.bindPrompt!({ loop: () => Effect.sync(() => { wakes++ }).pipe(Effect.andThen(Effect.interrupt)) })
+      const previousScheduler = schedulerRef.current
+      const scheduler = { kick: () => Effect.sync(() => { wakes++ }).pipe(Effect.andThen(Effect.interrupt)) }
+      schedulerRef.current = scheduler
+      const restore = () => { if (schedulerRef.current === scheduler) schedulerRef.current = previousScheduler }
       yield* Effect.addFinalizer(() => Effect.sync(restore))
       yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
       const owner = yield* actor.cancel(parent.id, actorID, "forced").pipe(Effect.forkChild)
@@ -1138,7 +1199,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
       expect(wakes).toBe(0)
       const rows = yield* parentInboxRows(parent.id)
       expect(rows).toHaveLength(1)
-      expect((rows[0].content as { text: string }).text).toContain("cancelled")
+      expect(receiptText(rows[0])).toContain("cancelled")
       expect((yield* registry.get(parent.id, actorID))?.lastOutcome).toBe("cancelled")
     }), { git: true, config: providerCfg }),
   )
@@ -1244,7 +1305,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         expect((yield* actorReg.get(result.sessionID, result.actorID))?.lastOutcome).toBe("failure")
         const rows = yield* parentInboxRows(parent.id)
         expect(rows).toHaveLength(1)
-        const content = rows[0].content as { text?: string }
+        const content = { text: receiptText(rows[0]) }
         expect(content.text).toContain("failed")
         expect(content.text).not.toContain("cancelled")
 
@@ -1295,7 +1356,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         }, reply().hang())
 
         yield* inbox
-          .send({
+          .accept({
             receiverSessionID: result.sessionID,
             receiverActorID: result.actorID,
             senderSessionID: parent.id,
@@ -1313,11 +1374,11 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         expect(terminal?.lastOutcome).toBe("cancelled")
         const rows = yield* parentInboxRows(parent.id)
         expect(rows).toHaveLength(1)
-        const content = rows[0].content as { text?: string }
+        const content = { text: receiptText(rows[0]) }
         expect(content.text).toContain("cancelled")
 
         const rejected = yield* inbox
-          .send({
+          .accept({
             receiverSessionID: result.sessionID,
             receiverActorID: result.actorID,
             senderSessionID: parent.id,
@@ -1385,7 +1446,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
             release: releaseFailureWrite,
           }
           yield* Effect.addFinalizer(() => Deferred.succeed(releaseFailureWrite, undefined).pipe(Effect.ignore))
-          yield* inbox.send({
+          yield* inbox.accept({
             receiverSessionID: result.sessionID,
             receiverActorID: result.actorID,
             senderSessionID: parent.id,
@@ -1411,7 +1472,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           expect(final?.info.role === "assistant" ? final.info.error?.name : undefined).toBe("APIError")
           const notifications = yield* parentInboxRows(parent.id)
           expect(notifications).toHaveLength(1)
-          const content = notifications[0].content as { text?: string }
+          const content = { text: receiptText(notifications[0]) }
           expect(content.text).toContain("failed")
           expect(content.text).not.toContain("cancelled")
 
@@ -1450,7 +1511,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           // bind the hang to the child request and observe only child requests.
           const carries = (text: string) => (hit: { body: unknown }) => JSON.stringify(hit.body).includes(text)
           yield* llm.pushMatch(({ body }) => carries("start continuation")({ body }), reply().hang())
-          yield* inbox.send({
+          yield* inbox.accept({
             receiverSessionID: child.sessionID,
             receiverActorID: child.actorID,
             senderSessionID: parent.id,
@@ -1467,7 +1528,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
           const cancelling = yield* actor.cancel(child.sessionID, child.actorID, "forced").pipe(Effect.forkChild)
           yield* Deferred.await(entered).pipe(Effect.timeout("5 seconds"))
-          const queued = yield* inbox.send({
+          const queued = yield* inbox.accept({
             receiverSessionID: child.sessionID,
             receiverActorID: child.actorID,
             senderSessionID: parent.id,
@@ -1477,13 +1538,13 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           yield* Deferred.succeed(release, undefined)
           yield* Fiber.join(cancelling).pipe(Effect.timeout("5 seconds"))
           yield* Deferred.await(owner.done)
-          expect(yield* inbox.has(queued.inboxID)).toBe(false)
+          expect(["accepted", "claimed"].includes((yield* inboxControllerRef.current!.getReceipt(queued.inboxID)).state)).toBe(false)
           expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
           expect(yield* executions.current(child.sessionID, child.actorID)).toBeUndefined()
           expect((yield* llm.hits).filter(carries("start continuation"))).toHaveLength(1)
           expect((yield* llm.hits).filter(carries("must not execute"))).toEqual([])
           const rejected = yield* inbox
-            .send({ receiverSessionID: child.sessionID, receiverActorID: child.actorID, content: "must remain retired" })
+            .accept({ receiverSessionID: child.sessionID, receiverActorID: child.actorID, content: "must remain retired" })
             .pipe(Effect.exit)
           expect(Exit.isFailure(rejected)).toBe(true)
         }),
@@ -1646,7 +1707,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
             // The parent's auto-wake may already have drained the row; capture it
             // at InboxArrived, before send schedules that wake.
             const [row] = yield* notifications(1, result.actorID)
-            expect((row.content as { text?: string }).text).toContain("cancelled")
+            expect(receiptText(row)).toContain("cancelled")
           })
 
           yield* runScenario("list")
@@ -1687,7 +1748,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           runningWriteGate = { sessionID: child.sessionID, actorID: child.actorID, entered, release }
           yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
           yield* llm.text("must not execute")
-          yield* inbox.send({
+          yield* inbox.accept({
             receiverSessionID: child.sessionID,
             receiverActorID: child.actorID,
             senderSessionID: parent.id,
@@ -1744,23 +1805,8 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         expect((yield* actor.getForkContext(succeeded.sessionID, succeeded.actorID))?.system).toEqual([
           "success-context",
         ])
-        yield* Effect.sync(() =>
-          Database.use((db) =>
-            db
-              .insert(InboxTable)
-              .values({
-                id: "queued-before-retire",
-                receiver_session_id: succeeded.sessionID,
-                receiver_actor_id: succeeded.actorID,
-                sender_session_id: parent.id,
-                sender_actor_id: "main",
-                type: "text",
-                content: { text: "queued before retire" },
-                created_at: Date.now(),
-              })
-              .run(),
-          ),
-        )
+        yield* (yield* Inbox.Service).accept({ receiverSessionID: succeeded.sessionID, receiverActorID: succeeded.actorID,
+          senderSessionID: parent.id, senderActorID: "main", content: "queued before retire" }, { deferKick: true })
         yield* actor.cancel(succeeded.sessionID, succeeded.actorID, "forced")
         expect((yield* actorReg.get(succeeded.sessionID, succeeded.actorID))?.lastOutcome).toBe("success")
         expect((yield* actor.getForkContext(succeeded.sessionID, succeeded.actorID))?.system).toEqual([
@@ -1785,14 +1831,14 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
                     eq(InboxTable.receiver_actor_id, succeeded.actorID),
                   ),
                 )
-                .all(),
+                .all().filter((row) => row.state === "accepted" || row.state === "claimed"),
             ),
           )
         expect(yield* childInboxRows()).toHaveLength(0)
 
         const inbox = yield* Inbox.Service
         const before = yield* llm.calls
-        const rejected = yield* inbox.send({
+        const rejected = yield* inbox.accept({
           receiverSessionID: succeeded.sessionID,
           receiverActorID: succeeded.actorID,
           senderSessionID: parent.id,
@@ -1800,7 +1846,7 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
           content: "retired work must not run",
         }).pipe(Effect.exit)
         expect(Exit.isFailure(rejected)).toBe(true)
-        yield* inbox.wakePending(succeeded.sessionID, succeeded.actorID)
+        yield* (schedulerRef.current?.kick({ sessionID: succeeded.sessionID, agentID: succeeded.actorID }) ?? Effect.void)
         expect(yield* llm.calls).toBe(before)
         expect(yield* childInboxRows()).toHaveLength(0)
       }),
@@ -1908,10 +1954,10 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
         const rows = yield* notifications(1)
         expect(rows.length).toBe(1)
         expect(rows[0].type).toBe("actor_notification")
-        const content = rows[0].content as { text?: string }
-        expect(content.text).toContain("<actor-notification>")
-        expect(content.text).toContain("cancellable peer task")
-        expect(content.text).toContain("cancelled")
+        const text = notificationText(rows[0])
+        expect(text).toContain("<actor-notification>")
+        expect(text).toContain("cancellable peer task")
+        expect(text).toContain("cancelled")
       }),
       { git: true, config: providerCfg },
     ),
@@ -1952,6 +1998,7 @@ for (const mode of ["graceful", "forced"] as const) {
           const interruptEntered = yield* Deferred.make<void>()
           const wakeDecision = yield* Deferred.make<"blocked" | "model">()
           const escapedPublished = yield* Deferred.make<void>()
+          const resumedPublished = yield* Deferred.make<void>()
           const response = Promise.withResolvers<void>()
           const notices: string[] = []
           let receiptPaused = false
@@ -1967,7 +2014,7 @@ for (const mode of ["graceful", "forced"] as const) {
                 yield* actor.markTerminalNotified!(sessionID, actorID, notified)
               }),
           })
-          const unsubscribe = yield* bus.subscribeCallback(InboxArrived, (event) => {
+          const unsubscribe = yield* observeAcceptedInbox(bus, (event) => {
             if (
               event.properties.senderSessionID !== child.sessionID ||
               event.properties.senderActorID !== child.actorID
@@ -1976,15 +2023,21 @@ for (const mode of ["graceful", "forced"] as const) {
             const row = Database.use((db) =>
               db.select().from(InboxTable).where(eq(InboxTable.id, event.properties.inboxID)).get(),
             )
-            const text = (row?.content as { text?: string } | undefined)?.text ?? ""
+            const text = receiptText(row)
             notices.push(text)
             if (text.includes("escaped queued result")) Deferred.doneUnsafe(escapedPublished, Effect.void)
+            if (text.includes("new valid generation")) Deferred.doneUnsafe(resumedPublished, Effect.void)
           })
           // Bind the actual wake path to this fixture's prompt; parent notification
           // delivery stays observable without starting an unrelated parent model.
-          const restoreInbox = inbox.bindPrompt?.({
-            loop: (input) => (input.agentID === child.actorID ? prompt.loop(input) : Effect.interrupt),
-          })
+          const previousScheduler = schedulerRef.current
+          const scheduler = { ...previousScheduler, kick: (lane: { sessionID: SessionID; agentID: string }, guard?: Effect.Effect<void>) =>
+            lane.agentID === child.actorID && previousScheduler
+              ? Deferred.succeed(waiterEntered, undefined).pipe(Effect.andThen(previousScheduler.kick(lane, guard)),
+                  Effect.onExit((exit) => Exit.isFailure(exit) ? Deferred.succeed(wakeDecision, "blocked").pipe(Effect.asVoid) : Effect.void))
+              : Effect.interrupt }
+          schedulerRef.current = scheduler
+          const restoreInbox = () => { if (schedulerRef.current === scheduler) schedulerRef.current = previousScheduler }
           const originalAcquire = executions.acquire
           const originalInterrupt = executions.interrupt
           yield* Effect.addFinalizer(() =>
@@ -2037,12 +2090,14 @@ for (const mode of ["graceful", "forced"] as const) {
               }),
           })
           yield* llm.pushMatch((hit) => {
-            if (!JSON.stringify(hit.body).includes("queued before cancellation")) return false
+            const body = JSON.stringify(hit.body)
+            // Cancelled accepted inputs remain durable context on a later authorized turn.
+            if (body.includes("explicit new generation") || !body.includes("queued before cancellation")) return false
             Deferred.doneUnsafe(wakeDecision, Effect.succeed("model"))
             return true
           }, reply().wait(response.promise).text("escaped queued result").stop())
           const calls = yield* llm.calls
-          const pending = yield* inbox.send({
+          const pending = yield* inbox.accept({
             receiverSessionID: child.sessionID,
             receiverActorID: child.actorID,
             senderSessionID: parent.id,
@@ -2063,7 +2118,7 @@ for (const mode of ["graceful", "forced"] as const) {
           yield* Fiber.await(running)
           expect(decision).toBe("blocked")
           expect(yield* llm.calls).toBe(calls)
-          expect(yield* inbox.has(pending.inboxID)).toBe(false)
+          expect(["accepted", "claimed"].includes((yield* inboxControllerRef.current!.getReceipt(pending.inboxID)).state)).toBe(false)
           expect(yield* executions.current(child.sessionID, child.actorID)).toBeUndefined()
           expect((yield* registry.get(child.sessionID, child.actorID))?.lastOutcome).toBe("cancelled")
           expect(notices.some((text) => text.includes("escaped queued result"))).toBe(false)
@@ -2091,6 +2146,7 @@ for (const mode of ["graceful", "forced"] as const) {
               .slice(calls)
               .filter((input) => JSON.stringify(input).includes("explicit new generation")),
           ).toHaveLength(1)
+          yield* Deferred.await(resumedPublished).pipe(Effect.timeout("5 seconds"))
           expect(notices.some((text) => text.includes("new valid generation"))).toBe(true)
         }),
         { git: true, config: providerCfg },

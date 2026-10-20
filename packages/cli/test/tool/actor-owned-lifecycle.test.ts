@@ -3,8 +3,10 @@ import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Actor } from "../../src/actor/spawn"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import { ActorRegistry } from "../../src/actor/registry"
-import { ActorRegistered, InboxArrived } from "../../src/actor/events"
+import { ActorWaiter } from "../../src/actor/waiter"
+import { ActorRegistered } from "../../src/actor/events"
 import { Bus } from "../../src/bus"
+import { observeAcceptedInbox } from "../fixture/accepted-inbox"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { AppLayer } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -342,8 +344,7 @@ it.live(
           const actorID = yield* Deferred.await(ready)
           try {
             const result = yield* Fiber.join(fiber).pipe(Effect.timeout("2 seconds"))
-            expect(result.output).toContain('<actor_result status="timeout">')
-            expect(result.output).toContain(`actor_id: ${actorID}`)
+            expect(JSON.parse(result.output)).toMatchObject({ status: "timeout", executionActive: true, actor_id: actorID })
             expect((yield* fixture.registry.get(fixture.session.id, actorID))?.status).toBe("running")
           } finally {
             yield* fixture.actor.cancel(fixture.session.id, actorID, "forced")
@@ -383,11 +384,11 @@ it.live(
           )
           const actorID = String(result.metadata.actorId)
           // Observe the envelope on the bus, not the inbox row it lands in.
-          // InboxArrived is published after the row is committed and before
-          // wake(), so a drain cannot take it away. Subscribed before the child
+          // Accepted receipts are published after their input is committed.
+          // Subscribed before the child
           // is released, so no envelope can be missed.
           const envelopes: { receiverSessionID: string; receiverActorID: string }[] = []
-          const off = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
+          const off = yield* observeAcceptedInbox(yield* Bus.Service, (event) => {
             if (event.properties.senderSessionID !== fixture.session.id) return
             if (event.properties.senderActorID !== actorID) return
             envelopes.push({
@@ -424,4 +425,36 @@ it.live(
       { git: true, config },
     ),
   30000,
+)
+
+
+it.live(
+  "ActorTool run timeout preserves variant metadata while the child keeps running",
+  () => provideTmpdirServer(({ llm, dir }) => Effect.gen(function* () {
+    const fixture = yield* setup(dir)
+    yield* llm.hang
+    const waiter = yield* ActorWaiter.Service
+    // Start the real wait deadline only after the child has reached the server.
+    const tool = yield* (yield* ActorTool.pipe(Effect.provideService(ActorWaiter.Service, {
+      ...waiter,
+      wait: (input) => llm.wait(1).pipe(Effect.timeout("5 seconds"), Effect.orDie, Effect.andThen(waiter.wait(input))),
+    }))).init()
+    const result = yield* tool.execute({ operation: {
+      ...operation, model: "test/test-model", variant: "high", timeout_ms: 20,
+    } }, fixture.context)
+    const actorID = result.metadata.actorId
+    yield* Effect.addFinalizer(() => fixture.actor.cancel(fixture.session.id, actorID, "forced", { wake: false }))
+    expect(result.metadata.status).toBe("timeout")
+    expect(result.metadata.variant).toBe("high")
+    expect(yield* llm.calls).toBe(1)
+    expect((yield* fixture.registry.get(fixture.session.id, actorID))?.status).toBe("running")
+    yield* fixture.actor.cancel(fixture.session.id, actorID, "forced", { wake: false })
+    expect((yield* fixture.registry.get(fixture.session.id, actorID))?.lastOutcome).toBe("cancelled")
+  }), { git: true, config: (url) => {
+    const base = config(url)
+    return { ...base, provider: { test: { ...base.provider.test, models: {
+      "test-model": { ...base.provider.test.models["test-model"], variants: { high: { reasoningEffort: "high" } } },
+    } } } }
+  } }),
+  15000,
 )

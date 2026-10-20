@@ -1,4 +1,3 @@
-import type { InboxRow } from "./inbox.sql"
 import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "../util/text-truncate"
 
 const ACTOR_NOTIFICATION_OPEN = "<actor-notification>\n"
@@ -26,20 +25,26 @@ function blankTo(text: string | undefined, placeholder: string) {
   return text !== undefined && text.trim().length > 0 ? text : placeholder
 }
 
-export function renderInboxRow(row: InboxRow): string {
+export function renderInboxRow(row: {
+  type: string
+  content: { text?: string } | null
+  sender_session_id?: string | null
+  sender_actor_id?: string | null
+  created_at: number
+}): string {
   if (row.type === "actor_notification") {
     // Pre-rendered notification text — sender produced the full
     // <actor-notification>...</actor-notification> wrapper.
-    const content = row.content as { text?: string }
-    return capActorNotificationText(blankTo(content.text, "(no notification body)"))
+    const content = row.content
+    return capActorNotificationText(blankTo(content?.text, "(no notification body)"))
   }
   // Default: type === "text" or unknown — wrap as <inbox> element so
   // the LLM can route by sender; the wrapper format mirrors the
   // <actor-notification> convention from the legacy completion.ts.
-  const content = row.content as { text?: string }
+  const content = row.content
   const sender = row.sender_session_id ? `${row.sender_session_id}:${row.sender_actor_id ?? "?"}` : "system"
   const sentAt = new Date(row.created_at).toISOString()
-  return `<inbox from="${sender}" sent_at="${sentAt}">\n${capInboxText(blankTo(content.text, "(empty)"))}\n</inbox>`
+  return `<inbox from="${sender}" sent_at="${sentAt}">\n${capInboxText(blankTo(content?.text, "(empty)"))}\n</inbox>`
 }
 
 // Display-only decoding; keep the persisted synthetic part unchanged for model context.

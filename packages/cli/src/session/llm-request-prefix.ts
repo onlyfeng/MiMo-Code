@@ -13,8 +13,10 @@ import type { JSONObject } from "@ai-sdk/provider"
 import {
   createMcpToolSearchCatalog,
   MCP_TOOL_SEARCH_ID,
-  mcpToolSearchHistory,
-  restoreMcpToolSearchMatches,
+  MCP_TOOL_USE_ID,
+  MCP_TOOL_USE_DESCRIPTION,
+  McpToolUseParameters,
+  MCP_DEFERRED_TOOLS_METADATA_KEY,
   shouldDeferMcpTools,
   type McpToolSearchEntry,
   type McpToolSearchMode,
@@ -156,7 +158,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   const mcpSearchEntries: McpToolSearchEntry[] = []
   const agentToolAllowlist = input.agent.toolAllowlist ? new Set(input.agent.toolAllowlist) : undefined
   for (const [id, item] of Object.entries(input.mcpTools ?? {})) {
-    if (!item.execute || localToolNames.has(id) || (agentToolAllowlist && !agentToolAllowlist.has(id))) continue
+    if (!item.execute || id === MCP_TOOL_USE_ID || localToolNames.has(id) || (agentToolAllowlist && !agentToolAllowlist.has(id))) continue
     const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
     const transformed = ProviderTransform.schema(input.model, schema)
     rawTools[id] = tool({
@@ -182,7 +184,13 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   const catalog = createMcpToolSearchCatalog(
     mcpSearchEntries.filter((entry) => candidates[entry.name]).toSorted((a, b) => a.name.localeCompare(b.name)),
   )
-  if (!shouldDeferMcpTools(mode, catalog.entries, input.model.limit.context)) {
+  const deferredEarlier = input.msgs.some((message) =>
+    message.parts.some((part) =>
+      (part.type === "tool" && (part.tool === MCP_TOOL_SEARCH_ID || part.tool === MCP_TOOL_USE_ID)) ||
+      (part.type === "text" && !!part.synthetic && !!part.metadata?.[MCP_DEFERRED_TOOLS_METADATA_KEY]),
+    ),
+  )
+  if (!shouldDeferMcpTools(mode, catalog.entries, input.model.limit.context, deferredEarlier)) {
     const resolved = resolve()
     return {
       system,
@@ -196,12 +204,19 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     }
   }
 
-  const loadedMcpTools = restoreMcpToolSearchMatches(
-    new Set(catalog.entries.map((entry) => entry.name)),
-    mcpToolSearchHistory(input.msgs),
-  )
   const searchActive = input.model.capabilities.toolcall && candidates[MCP_TOOL_SEARCH_ID] !== undefined
-  const tools = Object.fromEntries(Object.entries(candidates).filter(([id]) => id !== MCP_TOOL_SEARCH_ID || searchActive))
+  if (searchActive && !compact) {
+    rawTools[MCP_TOOL_USE_ID] = tool({
+      description: MCP_TOOL_USE_DESCRIPTION,
+      inputSchema: jsonSchema(ProviderTransform.schema(input.model, z.toJSONSchema(McpToolUseParameters))),
+    })
+    localToolNames.add(MCP_TOOL_USE_ID)
+  }
+  const tools = Object.fromEntries(
+    Object.entries(resolve(searchActive ? [MCP_TOOL_SEARCH_ID, ...(!compact ? [MCP_TOOL_USE_ID] : [])] : [])).filter(
+      ([id]) => id !== MCP_TOOL_SEARCH_ID || searchActive,
+    ),
+  )
 
   return {
     system,
@@ -209,10 +224,10 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     activeTools: Object.keys(tools).filter((id) =>
       compact
         ? localToolNames.has(id) && GPT_TOP_LEVEL_TOOLS.has(id)
-        : localToolNames.has(id) || loadedMcpTools.has(id),
+        : localToolNames.has(id),
     ),
     inheritedMessages,
     currentTurnMessages: converted.currentTurnMessages,
-    loadedMcpTools: [...loadedMcpTools],
+    loadedMcpTools: [],
   }
 })

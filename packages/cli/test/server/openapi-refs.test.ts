@@ -144,5 +144,5 @@ test("OpenAPI keeps the compaction projection contract", async () => {
 
 test("prompt_async publishes its accepted and validation responses", async () => {
   const promptAsync = operation(await generatedOpenapi, "/session/{sessionID}/prompt_async", "post")
-  expect(Object.keys(isRecord(promptAsync?.responses) ? promptAsync.responses : {})).toEqual(["204", "400", "404"])
+  expect(Object.keys(isRecord(promptAsync?.responses) ? promptAsync.responses : {})).toEqual(["202", "204", "400", "404"])
 })

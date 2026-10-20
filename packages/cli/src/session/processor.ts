@@ -9,6 +9,7 @@ import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
 import { Snapshot } from "@/snapshot"
 import * as Session from "./session"
+import { classifyAssistantStep } from "./classify"
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
 import { isOverflow } from "./overflow"
@@ -29,11 +30,19 @@ import { Log } from "@/util"
 import { isRecord } from "@/util/record"
 import { createTextNgramMonitor, type TextNgramMonitor } from "./prompt/text-ngram-detection"
 import { Flag } from "@/flag/flag"
+import { MCP_TOOL_USE_ID } from "@/tool/mcp-tool-search"
 import { monitor as tryBestMonitor, type TryBestIncident } from "./try-best-detector"
 import * as NativeWebSearch from "@/tool/websearch/native"
 
 const DOOM_LOOP_THRESHOLD = 3
 const log = Log.create({ service: "session.processor" })
+
+// A dispatched MCP call reports under the MCP tool it ran, matching the
+// success metric published by the MCP execution pipeline.
+function metricToolName(toolName: string, input: unknown) {
+  if (toolName !== MCP_TOOL_USE_ID || !isRecord(input) || typeof input.name !== "string") return toolName
+  return input.name
+}
 
 function isToolExecutionResult(output: unknown): output is {
   title: string
@@ -662,7 +671,7 @@ export const layer: Layer.Layer<
             yield* bus
               .publish(Metrics.ToolCall, {
                 sessionID: ctx.sessionID,
-                tool_name: value.toolName,
+                tool_name: metricToolName(value.toolName, value.input),
                 input_bytes: Metrics.jsonByteLength(value.input),
                 output_bytes: 0,
                 tool_call_id: value.toolCallId,
@@ -984,6 +993,42 @@ export const layer: Layer.Layer<
               Stream.runDrain,
               Effect.ensuring(closeTools()),
             )
+
+            // Retry a pure empty output through the bounded unknown budget.
+            // Reasoning-only output keeps the run loop's scoped continuation;
+            // settled tool records and side effects must never be dropped or replayed.
+            // Length and structured-output recovery remain owned by the run loop.
+            if (!ctx.needsOverflowHandling && !ctx.textNgramRepeat && !ctx.blocked && !ctx.assistantMessage.error) {
+              const parts = MessageV2.parts(ctx.assistantMessage.id)
+              const classification = classifyAssistantStep({
+                phase: "after-process",
+                lastUser: streamInput.user,
+                assistant: ctx.assistantMessage,
+                parts,
+                processResult: "stop",
+              })
+              const hasToolParts = parts.some((part) => part.type === "tool")
+              if (
+                classification.type === "invalid" &&
+                ctx.assistantMessage.finish !== "length" &&
+                streamInput.user.format?.type !== "json_schema" &&
+                ctx.retrySafe &&
+                !hasToolParts
+              ) {
+                const reason = classification.reason
+                slog.info("invalid output, dropping empty turn", { reason, finish: ctx.assistantMessage.finish })
+                yield* session.removeMessage({
+                  sessionID: ctx.sessionID,
+                  messageID: ctx.assistantMessage.id,
+                })
+                ctx.assistantMessage.finish = undefined
+                ctx.assistantMessage.error = undefined
+                ctx.assistantMessage.time.completed = undefined
+                ctx.stepPartIds = []
+                yield* session.updateMessage(ctx.assistantMessage)
+                return yield* Effect.fail(new MessageV2.InvalidOutputError({ message: reason }))
+              }
+            }
           }).pipe(
             Effect.onInterrupt(() =>
               Effect.gen(function* () {

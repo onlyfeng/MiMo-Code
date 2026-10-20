@@ -6,6 +6,8 @@ import { Bus } from "../../src/bus"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Inbox } from "../../src/inbox"
 import { InboxTable } from "../../src/inbox/inbox.sql"
+import { parseAgentInboxPart } from "../../src/inbox/render"
+import { MessageV2 } from "../../src/session/message-v2"
 import { Plugin } from "../../src/plugin"
 import { Session } from "../../src/session"
 import { MessageID } from "../../src/session/schema"
@@ -85,7 +87,14 @@ return { sent: JSON.parse(sent.output), status: JSON.parse(status.output) }`,
           Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, fixture.session.id)).all()),
         )
         expect(rows).toHaveLength(1)
-        expect(rows[0].content).toEqual({ text: "nested hello" })
+        expect(rows[0].content).toBeNull()
+      const message = MessageV2.get({ sessionID: fixture.session.id, messageID: rows[0].input_message_id! })
+      expect(message.parts.flatMap((part) => {
+        const parsed = parseAgentInboxPart(part)
+        return parsed ? [parsed.text] : []
+      })).toEqual(["nested hello"])
+      expect(message.info).toMatchObject({ role: "user", source: "spawn",
+        provenance: { source: "agent", senderSessionID: fixture.session.id, senderActorID: "main" } })
         expect(rows[0].sender_actor_id).toBe("main")
         const parts = viewExecSubtools(result.metadata)
         expect(parts.map((part) => part.state.status)).toEqual(["completed", "completed"])
@@ -198,7 +207,14 @@ catch (error) { return error.message; }` },
       expect(rows).toHaveLength(1)
       expect(rows[0].sender_actor_id).toBe("general-1")
       expect(rows[0].receiver_actor_id).toBe("main")
-      expect(rows[0].content).toEqual({ text: "parent update" })
+      expect(rows[0].content).toBeNull()
+      const message = MessageV2.get({ sessionID: fixture.session.id, messageID: rows[0].input_message_id! })
+      expect(message.parts.flatMap((part) => {
+        const parsed = parseAgentInboxPart(part)
+        return parsed ? [parsed.text] : []
+      })).toEqual(["parent update"])
+      expect(message.info).toMatchObject({ role: "user", source: "spawn",
+        provenance: { source: "agent", senderSessionID: fixture.session.id, senderActorID: "general-1" } })
     }),
   ),
 )

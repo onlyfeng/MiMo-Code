@@ -1,3 +1,5 @@
+import { MessageV2 } from "../../src/session/message-v2"
+import { observeAcceptedInbox, acceptedInboxEvent, receiptText } from "../fixture/accepted-inbox"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { mkdir } from "node:fs/promises"
@@ -28,6 +30,7 @@ import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
+import { defaultLayer as CronBridgeDefaultLayer } from "../../src/session/cron-bridge"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
@@ -63,7 +66,7 @@ import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
 import { InboxTable } from "../../src/inbox/inbox.sql"
-import { ActorStatusChanged, InboxArrived } from "../../src/actor/events"
+import { ActorStatusChanged } from "../../src/actor/events"
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -171,6 +174,7 @@ function makeLayer() {
   const proc = SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps))
   const prune = SessionPrune.layer.pipe(Layer.provide(checkpoint), Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
+    Layer.provide(CronBridgeDefaultLayer),
     Layer.provide(Goal.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(summary),
@@ -302,10 +306,10 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
 
         expect(rows.length).toBe(1)
         expect(rows[0].type).toBe("actor_notification")
-        const content = rows[0].content as { text?: string }
-        expect(content.text).toContain("<actor-notification>")
-        expect(content.text).toContain("background build task")
-        expect(content.text).toContain("completed")
+        const text = MessageV2.get({ sessionID: rows[0].receiver_session_id, messageID: rows[0].input_message_id! }).parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n")
+        expect(text).toContain("<actor-notification>")
+        expect(text).toContain("background build task")
+        expect(text).toContain("completed")
       }),
       { git: true, config: providerCfg },
     ),
@@ -344,7 +348,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
             db
               .select()
               .from(InboxTable)
-              .where(eq(InboxTable.receiver_session_id, parent.id))
+              .where(and(eq(InboxTable.receiver_session_id, parent.id), eq(InboxTable.type, "actor_notification")))
               .all(),
           ),
         )
@@ -390,13 +394,13 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
         // outcome Deferred is also resolved; await it for safety.
         yield* Deferred.await(result.outcome)
 
-        // No inbox row should exist — foreground path skips inbox.send.
+        // 前台 spawn 由调用方直接取得结果，不额外受理终止通知。
         const rows = yield* Effect.sync(() =>
           Database.use((db) =>
             db
               .select()
               .from(InboxTable)
-              .where(eq(InboxTable.receiver_session_id, parent.id))
+              .where(and(eq(InboxTable.receiver_session_id, parent.id), eq(InboxTable.type, "actor_notification")))
               .all(),
           ),
         )
@@ -522,7 +526,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
 
         const notified = yield* Deferred.make<void>()
         let notifications = 0
-        const off = yield* bus.subscribeCallback(InboxArrived, (event) => {
+        const off = yield* observeAcceptedInbox(bus, (event) => {
           if (event.properties.receiverSessionID !== parent.id) return
           if (event.properties.receiverActorID !== "main") return
           if (event.properties.senderSessionID !== result.sessionID) return
@@ -540,7 +544,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
         yield* Effect.addFinalizer(() => Effect.sync(offStatus))
 
         yield* inbox
-          .send({
+          .accept({
             receiverSessionID: result.sessionID,
             receiverActorID: result.actorID,
             senderSessionID: parent.id,
@@ -556,7 +560,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
         expect(notifications).toBe(1)
         expect(rows).toHaveLength(1)
         expect(rows[0].type).toBe("actor_notification")
-        const content = rows[0].content as { text?: string }
+        const content = { text: receiptText(rows[0]) }
         expect(content.text).toContain("<actor-notification>")
         expect(content.text).toContain("woken peer task")
         expect(content.text).toContain("completed")
@@ -604,9 +608,8 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
           const onGlobal = (event: GlobalEvent) => {
             if (event.payload?.type === TuiEvent.ToastShow.type && event.payload.properties?.message === 'Child "woken routed peer" completed')
               toasts.push(event)
-            if (event.payload?.type !== InboxArrived.type) return
-            if (event.payload.properties?.senderSessionID !== result.sessionID) return
-            if (event.payload.properties?.senderActorID !== result.actorID) return
+            const arrival = acceptedInboxEvent(event)
+            if (arrival?.senderSessionID !== result.sessionID || arrival.senderActorID !== result.actorID) return
             Effect.runFork(Deferred.succeed(delivered, event))
           }
           GlobalBus.on("event", onGlobal)
@@ -621,7 +624,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
           const inbox = yield* Inbox.Service
           yield* llm.text("woken turn complete")
           yield* Effect.promise(() =>
-            senderBridge.promise(inbox.send({
+            senderBridge.promise(inbox.accept({
               receiverSessionID: result.sessionID,
               receiverActorID: result.actorID,
               senderSessionID: parent.id,
@@ -631,10 +634,10 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
           )
 
           const event = yield* Deferred.await(delivered).pipe(Effect.timeout("5 seconds"))
-          expect(event.payload?.properties?.receiverSessionID).toBe(parent.id)
+          expect(acceptedInboxEvent(event)?.receiverSessionID).toBe(parent.id)
           const rows = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).all())
           expect(rows).toHaveLength(1)
-          expect((rows[0].content as { text: string }).text).toContain("woken turn complete")
+          expect(receiptText(rows[0])).toContain("woken turn complete")
           // The shared continuation notifier intentionally omits spawn toasts.
           expect(toasts).toEqual([])
         }),
@@ -689,8 +692,8 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
             ),
           )
           expect(rows).toHaveLength(1)
-          expect((rows[0]?.content as { text?: string } | undefined)?.text).toContain("failed")
-          expect((rows[0]?.content as { text?: string } | undefined)?.text).not.toContain("completed")
+          expect(receiptText(rows[0])).toContain("failed")
+          expect(receiptText(rows[0])).not.toContain("completed")
         }),
         { git: true, config: providerCfg },
       ),
@@ -731,7 +734,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
 
           const notified = yield* Deferred.make<void>()
           let notifications = 0
-          const off = yield* bus.subscribeCallback(InboxArrived, (event) => {
+          const off = yield* observeAcceptedInbox(bus, (event) => {
             if (event.properties.receiverSessionID !== parent.id) return
             if (event.properties.senderSessionID !== child.id) return
             if (event.properties.senderActorID !== child.id) return
@@ -741,7 +744,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
           yield* Effect.addFinalizer(() => Effect.sync(off))
 
           yield* inbox
-            .send({
+            .accept({
               receiverSessionID: child.id,
               receiverActorID: child.id,
               senderSessionID: parent.id,
@@ -770,8 +773,8 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
                 .all(),
             ),
           )
-          expect((rows[0]?.content as { text?: string } | undefined)?.text).toContain("failed")
-          expect((rows[0]?.content as { text?: string } | undefined)?.text).not.toContain("completed")
+          expect(receiptText(rows[0])).toContain("failed")
+          expect(receiptText(rows[0])).not.toContain("completed")
         }),
         { git: true, config: providerCfg },
       ),
@@ -816,7 +819,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
         )
 
         yield* inbox
-          .send({
+          .accept({
             receiverSessionID: result.sessionID,
             receiverActorID: result.actorID,
             senderSessionID: parent.id,
@@ -833,7 +836,7 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
             db
               .select()
               .from(InboxTable)
-              .where(eq(InboxTable.receiver_session_id, parent.id))
+              .where(and(eq(InboxTable.receiver_session_id, parent.id), eq(InboxTable.type, "actor_notification")))
               .all(),
           ),
         )

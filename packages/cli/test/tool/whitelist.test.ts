@@ -31,6 +31,7 @@ import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionCompaction } from "../../src/session/compaction"
 import { SessionPrompt } from "../../src/session/prompt"
+import { defaultLayer as CronBridgeDefaultLayer } from "../../src/session/cron-bridge"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
@@ -204,6 +205,7 @@ function makeLayer() {
   )
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
+    Layer.provide(CronBridgeDefaultLayer),
     Layer.provide(Goal.defaultLayer),
     Layer.provide(TaskRegistry.defaultLayer),
     Layer.provide(SchedulerDefaultLayer),

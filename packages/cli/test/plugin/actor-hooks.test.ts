@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { eq } from "drizzle-orm"
 import { Database } from "../../src/storage"
 import { InboxTable } from "../../src/inbox/inbox.sql"
-import { InboxArrived } from "../../src/actor/events"
+import { observeAcceptedInbox, receiptText } from "../fixture/accepted-inbox"
 import { ActorRegistry } from "../../src/actor/registry"
 import { Deferred, Effect, Layer, Stream } from "effect"
 import path from "path"
@@ -679,11 +679,12 @@ describe("actor.postStop ReAct loop", () => {
               const session = yield* Session.Service
               const sess = yield* session.create({ title: "postStop-fail" })
               const notices: unknown[] = []
-              const unsubscribe = yield* (yield* Bus.Service).subscribeCallback(InboxArrived, (event) => {
+              const noticed = Promise.withResolvers<void>()
+              const unsubscribe = yield* observeAcceptedInbox(yield* Bus.Service, (event) => {
                 if (event.properties.receiverSessionID !== sess.id || event.properties.type !== "actor_notification") return
-                // InboxArrived precedes wake/drain, so capture the committed
-                // envelope while it is still available rather than polling it.
-                notices.push(Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, event.properties.inboxID)).get()?.content))
+                // Accepted receipts already own their durable input message.
+                notices.push(receiptText(Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, event.properties.inboxID)).get())))
+                noticed.resolve()
               })
               yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
               const result = yield* actor.spawn({
@@ -710,6 +711,7 @@ describe("actor.postStop ReAct loop", () => {
                 expect(persisted.info.actorResult?.finalText).toBe("delivered")
                 expect(persisted.info.actorResult?.warnings?.join(" ")).toContain("postStop")
               }
+              if (background) yield* Effect.promise(() => noticed.promise).pipe(Effect.timeout("5 seconds"))
               expect(notices).toHaveLength(background ? 1 : 0)
               if (background) {
                 expect(JSON.stringify(notices[0])).toContain("delivered")

@@ -38,9 +38,10 @@ import { canSearchSkills } from "@/skill/search-access"
 import { Memory } from "@/memory"
 import { isRetryableTransientError } from "./retry"
 import * as SessionRetry from "./retry"
-import { MCP_TOOL_SEARCH_ID } from "@/tool/mcp-tool-search"
+import { MCP_TOOL_SEARCH_ID, MCP_TOOL_USE_ID } from "@/tool/mcp-tool-search"
 import * as NativeWebSearch from "@/tool/websearch/native"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
+import { TOOL_SCRIPT_EXCLUDED } from "@/tool/tool-script-ref"
 import { Flag } from "@/flag/flag"
 import { CURRENT_SESSION_ID_PLACEHOLDER } from "./memory-path-template"
 
@@ -1127,11 +1128,19 @@ export function resolveTools(
 ) {
   const permission = Agent.runtimePermission(input.agent, input.permission)
   const disabled = Permission.disabled(Object.keys(input.tools), permission)
+  const allowExecGateway =
+    input.activeTools?.includes("exec") === true &&
+    Object.keys(input.tools).some(
+      (key) => !TOOL_SCRIPT_EXCLUDED.has(key) && input.user.tools?.[key] !== false && !disabled.has(key) &&
+        (key !== "skill_search" || canSearchSkills({ permission, toolAllowlist: input.agent.toolAllowlist, tools: input.user.tools })),
+    )
   return Record.filter(
     input.tools,
     (_, key) =>
       input.user.tools?.[key] !== false &&
-      (!disabled.has(key) || (key === MCP_TOOL_SEARCH_ID && input.activeTools?.includes(key) === true)) &&
+      (!disabled.has(key) ||
+        ((key === MCP_TOOL_SEARCH_ID || key === MCP_TOOL_USE_ID) && input.activeTools?.includes(key) === true) ||
+        (key === "exec" && allowExecGateway)) &&
       (key !== "skill_search" ||
         canSearchSkills({ permission, toolAllowlist: input.agent.toolAllowlist, tools: input.user.tools })),
   )

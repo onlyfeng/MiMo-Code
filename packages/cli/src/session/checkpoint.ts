@@ -23,6 +23,7 @@ import { MessageTable, PartTable, SessionTable } from "./session.sql"
 import * as Session from "./session"
 import { SessionStatus } from "./status"
 import { MessageV2 } from "./message-v2"
+import { InboxTable } from "@/inbox/inbox.sql"
 import { SessionID, MessageID, PartID } from "./schema"
 import { Log, Token } from "../util"
 import { Effect, Layer, Deferred, Context, Scope } from "effect"
@@ -727,11 +728,26 @@ export const layer: Layer.Layer<
       // unfiltered session stream would let computeBoundary land on a
       // subagent/prior-writer assistant turn and misalign the prefix cache.
       const sessionInfo = yield* session.get(input.sessionID)
-      const msgs = yield* MessageV2.filterCompactedEffect(input.sessionID, {
+      const compacted = yield* MessageV2.filterCompactedEffect(input.sessionID, {
         contextFrom: sessionInfo.contextFrom,
         contextWatermark: sessionInfo.contextWatermark,
         agentID: "main",
       })
+      const receipts = yield* Effect.sync(() =>
+        Database.use((db) =>
+          db.select().from(InboxTable).where(and(
+            eq(InboxTable.receiver_session_id, input.sessionID),
+            eq(InboxTable.receiver_actor_id, "main"),
+          )).all(),
+        ),
+      )
+      const msgs = MessageV2.renderedOrder(
+        compacted,
+        receipts,
+        input.sessionID,
+        new Set(receipts.filter((receipt) => receipt.consumed).map((receipt) => receipt.id)),
+        (messageID) => MessageV2.get({ sessionID: input.sessionID, messageID }),
+      )
       if (msgs.length === 0) {
         log.info("no messages, skipping checkpoint", { sessionID: input.sessionID })
         return "skipped" as const
