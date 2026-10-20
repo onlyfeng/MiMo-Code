@@ -174,6 +174,7 @@ describe("SessionCheckpoint.drainWriters", () => {
     "F40 queue-1 writer: bursty triggers queue, settling writer1 fires the newest pending",
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
+        const svc = yield* SessionCheckpoint.Service
         const info = yield* seedSession()
 
         // writer1 starts and hangs; writer2 queues; writer3 evicts writer2
@@ -185,11 +186,18 @@ describe("SessionCheckpoint.drainWriters", () => {
 
         // Settling writer1 drains the single pending slot as a fresh writer.
         yield* Deferred.succeed(spawned[0], { status: "success" })
-        for (let i = 0; i < 200 && spawned.length < 2; i++) yield* Effect.sleep("10 millis")
+        // spawn returns before the checkpoint-file read and writer registration.
+        // Wait for the public running state before submitting another request.
+        for (let i = 0; i < 200; i++) {
+          if (spawned.length === 2 && (yield* svc.isWriterRunning(info.id))) break
+          yield* Effect.sleep("10 millis")
+        }
         expect(spawned).toHaveLength(2)
+        expect(yield* svc.isWriterRunning(info.id)).toBe(true)
 
         // The drained writer now owns the slot, so the next trigger queues.
         expect(yield* start(info.id)).toBe("queued")
+        expect(spawned).toHaveLength(2)
       }),
     ),
   )
