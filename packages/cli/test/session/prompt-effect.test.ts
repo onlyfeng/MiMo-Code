@@ -510,10 +510,10 @@ const run = Layer.effect(
         gate.armed = false
         return Effect.succeed({ runId: 0, interruptOwned: Effect.void, awaitExit: Effect.void, completion: onInterrupt })
       },
-      ensureRunning: (sessionID, actorID, onInterrupt, work, joinRunning) => {
+      ensureRunning: (sessionID, actorID, onInterrupt, work) => {
         const gate = lateRunGate
         if (!gate || gate.sessionID !== sessionID || gate.actorID !== actorID) {
-          return state.ensureRunning(sessionID, actorID, onInterrupt, work, joinRunning)
+          return state.ensureRunning(sessionID, actorID, onInterrupt, work)
         }
         if (gate.ownerArmed) {
           gate.ownerArmed = false
@@ -531,14 +531,14 @@ const run = Layer.effect(
         if (gate.followerArmed) {
           gate.followerArmed = false
           return Effect.gen(function* () {
-            const fiber = yield* Effect.forkChild(state.ensureRunning(sessionID, actorID, onInterrupt, work, joinRunning), {
+            const fiber = yield* Effect.forkChild(state.ensureRunning(sessionID, actorID, onInterrupt, work), {
               startImmediately: true,
             })
             yield* Deferred.succeed(gate.followerAttached, undefined)
             return yield* Fiber.join(fiber)
           })
         }
-        return state.ensureRunning(sessionID, actorID, onInterrupt, work, joinRunning)
+        return state.ensureRunning(sessionID, actorID, onInterrupt, work)
       },
     })
   }),
@@ -6521,64 +6521,6 @@ itActor.live(
           lateExists: false,
         })
         expect((yield* queue.getReceipt(firstReceipt.id)).state === "accepted").toBe(false)
-      }),
-      { git: true, config: providerCfg },
-    ),
-  15_000,
-)
-
-itActor.live(
-  "an explicit main inbox join observer preserves a queued receipt when the owner fails without progress",
-  () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
-        const state = yield* SessionRunState.Service
-        const sessions = yield* Session.Service
-        const chat = yield* sessions.create({ title: "joined inbox failure" })
-        yield* seed(chat.id)
-        const inboxID = crypto.randomUUID()
-        const queue = inboxControllerRef.current
-        if (!queue) return yield* Effect.die("inbox controller was not initialized")
-        const messageID = MessageID.ascending()
-        const receipt = yield* queue.accept({
-          lane: { sessionID: chat.id, agentID: "main" }, idempotencyKey: inboxID, type: "text",
-          message: {
-            id: messageID, sessionID: chat.id, agentID: "main", role: "user", source: "spawn",
-            agent: "build", model: ref, time: { created: Date.now() },
-          },
-          parts: [{ id: PartID.ascending(), messageID, sessionID: chat.id, type: "text", text: "must remain queued", synthetic: true }],
-        }, { deferKick: true })
-        const release = yield* Deferred.make<void>()
-        const attached = yield* Deferred.make<void>()
-        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
-        lateRunGate = {
-          sessionID: chat.id,
-          actorID: "main",
-          ownerArmed: false,
-          followerArmed: true,
-          ownerExit: yield* Deferred.make<void>(),
-          releaseOwner: release,
-          followerAttached: attached,
-        }
-        const owner = yield* state.startRunning(
-          chat.id,
-          "main",
-          Effect.die("unexpected interrupt"),
-          Deferred.await(release).pipe(Effect.andThen(Effect.die(new Error("failure before drain")))),
-        )
-        yield* llm.text("unexpected follower retry")
-        const follower = yield* state.ensureRunning(
-          chat.id, "main", Effect.die("unexpected observer interrupt"),
-          prompt.loop({ sessionID: chat.id }), true,
-        ).pipe(Effect.forkChild)
-        yield* Deferred.await(attached)
-        yield* Deferred.succeed(release, undefined)
-        const result = yield* Fiber.await(follower).pipe(Effect.timeout("5 seconds"))
-        yield* owner.pipe(Effect.exit)
-        expect(yield* llm.calls).toBe(0)
-        expect((yield* queue.getReceipt(receipt.id)).state === "accepted").toBe(true)
-        expect(result._tag).toBe("Failure")
       }),
       { git: true, config: providerCfg },
     ),

@@ -1,5 +1,5 @@
 import { describe, expect, spyOn } from "bun:test"
-import { Effect, Exit, Layer } from "effect"
+import { Cause, Effect, Exit, Layer } from "effect"
 import { AppLayer } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Session } from "../../src/session"
@@ -10,7 +10,7 @@ import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { MessageTable, PartTable, SessionTable } from "../../src/session/session.sql"
 import { InboxController } from "../../src/inbox"
 import { InboxTable, InboxLaneStateTable, InboxSessionEpochTable } from "../../src/inbox/inbox.sql"
-import { Database, eq } from "../../src/storage"
+import { Database, NotFoundError, eq } from "../../src/storage"
 import { SyncEvent } from "../../src/sync"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -83,6 +83,36 @@ function byText(messages: MessageV2.WithParts[], text: string) {
 }
 
 describe("Session.fork queue history", () => {
+  it.live(
+    "rejects absent and foreign cutoffs before creating a session",
+    provideTmpdirServer(() => Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const source = yield* sessions.create({ title: "cutoff source" })
+      yield* user(source.id, "SOURCE-INPUT", false)
+      const other = yield* sessions.create({ title: "other source" })
+      const foreign = yield* user(other.id, "OTHER-INPUT", false)
+      const before = yield* Effect.sync(() => Database.use((db) => db.select({ id: SessionTable.id })
+        .from(SessionTable).orderBy(SessionTable.id).all()))
+      const created: SessionID[] = []
+      const listener = (event: GlobalEvent) => {
+        const sync = event.payload.syncEvent
+        if (sync?.type === "session.created.1") created.push(sync.aggregateID)
+      }
+      GlobalBus.on("event", listener)
+      yield* Effect.addFinalizer(() => Effect.sync(() => {
+        GlobalBus.off("event", listener)
+      }))
+      for (const messageID of [MessageID.ascending(), foreign.id]) {
+        const result = yield* sessions.fork({ sessionID: source.id, messageID }).pipe(Effect.exit)
+        expect(Exit.isFailure(result) && Cause.squash(result.cause)).toBeInstanceOf(NotFoundError)
+        expect(created).toEqual([])
+        expect(yield* Effect.sync(() => Database.use((db) => db.select({ id: SessionTable.id })
+          .from(SessionTable).orderBy(SessionTable.id).all()))).toEqual(before)
+      }
+    }), { git: true, config }),
+    20000,
+  )
+
   it.live(
     "copies no inbox records, keeps queued input hidden until the next run, and never auto-executes it",
     provideTmpdirServer(({ llm }) => Effect.gen(function* () {

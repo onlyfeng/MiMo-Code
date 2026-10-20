@@ -6,8 +6,6 @@ export interface Runner<A, E = never, B = never> {
   readonly ensureRunning: (
     work: Effect.Effect<A, E>,
     onInterrupt?: Effect.Effect<A, E>,
-    joinRunning?: boolean,
-    admit?: () => boolean,
     beforeAcquire?: Effect.Effect<void>,
   ) => Effect.Effect<A, E>
   readonly startRunning: (
@@ -164,32 +162,27 @@ export const make = <A, E = never, B = never>(
   const ensureRunning = (
     work: Effect.Effect<A, E>,
     onInterrupt = defaultOnInterrupt,
-    joinRunning = false,
-    admit?: () => boolean,
     beforeAcquire = Effect.void,
   ): Effect.Effect<A, E> =>
-    Effect.suspend(() => ensureRunningAt(work, cancelGeneration, onInterrupt, joinRunning, admit, beforeAcquire))
+    Effect.suspend(() => ensureRunningAt(work, cancelGeneration, onInterrupt, beforeAcquire))
 
   const ensureRunningAt = (
     work: Effect.Effect<A, E>,
     generation: number,
     onInterrupt: Effect.Effect<A, E> | undefined,
-    joinRunning: boolean,
-    admit: (() => boolean) | undefined,
     beforeAcquire: Effect.Effect<void>,
   ): Effect.Effect<A, E> =>
     Effect.uninterruptibleMask((restore) =>
       SynchronizedRef.modifyEffect(ref, Effect.fnUntraced(function* (st) {
-        if (generation !== cancelGeneration || opts?.canStart?.() === false || admit?.() === false)
+        if (generation !== cancelGeneration || opts?.canStart?.() === false)
           return [restore(Effect.interrupt), st] as const
         yield* beforeAcquire
-        const retry = () => ensureRunningAt(work, generation, onInterrupt, joinRunning, admit, beforeAcquire)
+        const retry = () => ensureRunningAt(work, generation, onInterrupt, beforeAcquire)
         switch (st._tag) {
           case "Running": {
             const exit = st.run.fiber.pollUnsafe()
             if (exit === undefined) {
               if (opts?.onReentryWarn) yield* opts.onReentryWarn({ label: opts.label ?? "(unlabeled)", existingRunId: st.run.id })
-              if (joinRunning) return [restore(awaitRun(st.run.done, st.run.onInterrupt)), st] as const
               // Inbox owns pending input; each execution waiter retains only its work.
               return [restore(Deferred.await(st.run.done).pipe(Effect.exit, Effect.andThen(Effect.suspend(retry)))), st] as const
             }
@@ -208,7 +201,7 @@ export const make = <A, E = never, B = never>(
           Effect.andThen(beforeAcquire),
           Effect.onExit((exit) => Exit.isFailure(exit) ? idle(id) : Effect.void),
         )
-        if (generation !== cancelGeneration || opts?.canStart?.() === false || admit?.() === false)
+        if (generation !== cancelGeneration || opts?.canStart?.() === false)
           return [idle(id).pipe(Effect.andThen(restore(Effect.interrupt))), st] as const
         const done = yield* Deferred.make<A, E | Cancelled>()
         const run = yield* startRun(work, done, onInterrupt, id).pipe(

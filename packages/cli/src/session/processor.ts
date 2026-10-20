@@ -1062,19 +1062,17 @@ export const layer: Layer.Layer<
                     : Effect.void,
                 set: (info) =>
                   Effect.gen(function* () {
-                    let attempt = info.attempt
-                    if (isMain) {
-                      attempt = yield* status.setRetry(ctx.sessionID, {
-                        type: "retry",
-                        attempt: info.attempt,
-                        phaseAttempt: info.attempt,
-                        message: info.message,
-                        next: info.next,
-                        phase: info.phase,
-                        scope: info.scope,
-                        hostCode: info.hostCode,
-                      })
-                    }
+                    if (!isMain) return
+                    const attempt = yield* status.setRetry(ctx.sessionID, {
+                      type: "retry",
+                      attempt: info.attempt,
+                      phaseAttempt: info.attempt,
+                      message: info.message,
+                      next: info.next,
+                      phase: info.phase,
+                      scope: info.scope,
+                      hostCode: info.hostCode,
+                    })
                     yield* bus
                       .publish(Session.Event.RetryAttempt, {
                         sessionID: ctx.sessionID,

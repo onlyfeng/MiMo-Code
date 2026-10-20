@@ -1302,9 +1302,10 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       const directory = yield* InstanceState.directory
       const original = yield* get(input.sessionID)
       const title = input.title === undefined ? getForkedTitle(original.title) : ManualTitle.parse(input.title)
-      const msgs = yield* messages({ sessionID: input.sessionID, agentID: "*" })
-      const boundary = input.messageID ? msgs.findIndex((msg) => msg.info.id === input.messageID) : msgs.length
-      if (boundary < 0) throw new NotFoundError({ message: `Message not found: ${input.messageID}` })
+      const sourceMsgs = Array.from(MessageV2.stream(input.sessionID, { agentID: "*" }))
+      if (input.messageID && !sourceMsgs.some((msg) => msg.info.id === input.messageID)) {
+        throw new NotFoundError({ message: `Message not found: ${input.messageID}` })
+      }
       const session = yield* createNext({
         directory,
         workspaceID: original.workspaceID,
@@ -1312,7 +1313,6 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         prompt: original.prompt,
       })
       const idleByAgent = new Map<string, boolean>()
-      const sourceMsgs = Array.from(MessageV2.stream(input.sessionID, { agentID: "*" }))
       for (const agentID of new Set(sourceMsgs.map((msg) => msg.info.agentID ?? "main"))) {
         const idle = yield* runs.assertNotBusy(input.sessionID, agentID).pipe(
           Effect.match({ onFailure: () => false, onSuccess: () => true }),

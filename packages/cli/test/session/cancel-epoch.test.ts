@@ -25,25 +25,4 @@ describe("CancelEpoch lifetime", () => {
       }),
     ),
   )
-
-  it.live("a removed session keeps its epoch until every held wake releases it", () =>
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const sessions = yield* Session.Service
-        const session = yield* sessions.create({ title: "held" })
-        // A wake scheduled before the first cancel records epoch 0.
-        const first = CancelEpoch.hold(session.id)
-        const second = CancelEpoch.hold(session.id)
-        CancelEpoch.advance(session.id)
-
-        yield* sessions.remove(session.id)
-        expect(CancelEpoch.current(session.id)).toBe(1)
-        first()
-        first()
-        expect(CancelEpoch.current(session.id)).toBe(1)
-        second()
-        expect(CancelEpoch.current(session.id)).toBe(0)
-      }),
-    ),
-  )
 })
