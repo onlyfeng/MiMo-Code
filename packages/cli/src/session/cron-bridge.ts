@@ -75,6 +75,14 @@ export const layer = Layer.effect(
       armedThisTurn: Set<string>
     }
     let started: Handle | null = null
+    const owners = yield* InstanceState.make(() => Effect.gen(function* () {
+      const owner: { closed: boolean; handle?: Handle } = { closed: false }
+      yield* Effect.addFinalizer(() => Effect.gen(function* () {
+        owner.closed = true
+        if (owner.handle) yield* stopHandle(owner.handle)
+      }))
+      return owner
+    }))
 
     // Spec [S8] keepalive algorithm. Runs once per busy→idle edge. Iterates
     // every live LoopState, resets strikes for prompts the model re-armed
@@ -135,12 +143,12 @@ export const layer = Layer.effect(
 
     const start: Interface["start"] = (sessionID, workspaceRoot, inject) =>
       Effect.suspend(() => {
+        if (!Flag.MIMOCODE_EXPERIMENTAL_CRON)
+          return Effect.sync(() => log.info("cron disabled by flag — bridge inert", { sessionID }))
         let mounted: Handle | undefined
-        return Effect.gen(function* () {
-          if (!Flag.MIMOCODE_EXPERIMENTAL_CRON) {
-            yield* Effect.sync(() => log.info("cron disabled by flag — bridge inert", { sessionID }))
-            return
-          }
+        // Register ownership before acquiring the lifecycle lock: an already
+        // disposed instance must never run its stop finalizer under that lock.
+        return Effect.flatMap(InstanceState.get(owners), (owner) => Effect.gen(function* () {
           if (started) {
             yield* Effect.sync(() => log.warn("bridge already started — ignoring", { sessionID }))
             return
@@ -165,6 +173,13 @@ export const layer = Layer.effect(
             gotFirstEvent: false,
             armedThisTurn: new Set(),
           }
+          // Scope.fork yields. Disposal may have completed while it ran, so
+          // check again immediately before publishing the mount without a yield.
+          if (owner.closed) {
+            yield* Scope.close(handle.scope, Exit.void)
+            return
+          }
+          owner.handle = handle
           started = handle
           mounted = handle
 
@@ -300,8 +315,7 @@ export const layer = Layer.effect(
           })
 
           yield* Effect.sync(() => log.info("bridge started", { sessionID, workspaceRoot }))
-        }).pipe(
-          lifecycle.withPermits(1),
+        }).pipe(lifecycle.withPermits(1))).pipe(
           Effect.onExit((exit) => (Exit.isFailure(exit) && mounted ? stopHandle(mounted) : Effect.void)),
           Effect.uninterruptible,
         )

@@ -1,11 +1,12 @@
 import { test, expect, beforeEach, afterEach } from "bun:test"
-import { Context, Deferred, Effect, Fiber, Layer } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, ManagedRuntime } from "effect"
 import { InstanceRef } from "@/effect/instance-ref"
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 import { provideInstance, tmpdirScoped } from "../fixture/fixture"
 import { InstanceState } from "@/effect"
+import { Instance } from "@/project/instance"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { testEffect } from "../lib/effect"
 import { Flag } from "@/flag/flag"
@@ -390,18 +391,6 @@ for (const teardown of ["stop", "scope close"] as const) {
       ),
     }
     const mounts: StartOpts[] = []
-    const trace: unknown[] = []
-    const record = (phase: string, taskId?: string) =>
-      trace.push({
-        phase,
-        time: Date.now(),
-        taskId,
-        attempts,
-        finalized,
-        captured: captured.value.length,
-        pool: getSessionCronTasks().map((task) => ({ id: task.id, prompt: task.prompt, createdAt: task.createdAt })),
-        mounts: mounts.map((opts) => ({ sessionID: opts.sessionID, loading: opts.isLoading(), killed: opts.isKilled() })),
-      })
     const dir = freshDir()
     try {
       const escaped = await harness(
@@ -418,8 +407,7 @@ for (const teardown of ["stop", "scope close"] as const) {
               yield* bridge.stop()
               expect(finalized).toBe(1)
               yield* Deferred.succeed(release, undefined)
-              const afterStop = yield* addDueTask(scheduler, "after stop")
-              record("after-stop-task-added", afterStop.id)
+              yield* addDueTask(scheduler, "after stop")
               yield* scheduler.tickOnce()
               mounts[0]!.onFire(task)
               yield* Effect.sleep("30 millis")
@@ -427,22 +415,12 @@ for (const teardown of ["stop", "scope close"] as const) {
               expect(captured.value).toHaveLength(0)
               const nextSession = SessionID.make("ses_cronbridge_restarted")
               yield* bridge.start(nextSession, dir, inject)
-              record("restarted", afterStop.id)
               mounts[0]!.onFire(task)
               yield* Effect.sleep("30 millis")
               expect(attempts).toBe(1)
               expect(captured.value).toHaveLength(0)
-              record("before-final-tick", afterStop.id)
               yield* scheduler.tickOnce()
-              record("after-final-tick", afterStop.id)
-              yield* waitFor(() => captured.value.length === 1).pipe(
-                Effect.ensuring(
-                  Effect.sync(() => {
-                    record("wait-finished", afterStop.id)
-                    console.error("CRON_DIAGNOSTIC", JSON.stringify(trace))
-                  }),
-                ),
-              )
+              yield* waitFor(() => captured.value.length === 1)
               // Session affinity: the task was created under `sid`, so a fire
               // after restart still targets the creating session even though
               // the bridge is remounted for `nextSession`.
@@ -452,15 +430,7 @@ for (const teardown of ["stop", "scope close"] as const) {
             }
             return { scheduler, task }
           }),
-        (opts) => {
-          const mount = mounts.length
-          mounts.push(opts)
-          const fire = opts.onFire
-          opts.onFire = (task) => {
-            record(`onFire-${mount}`, task.id)
-            fire(task)
-          }
-        },
+        (opts) => mounts.push(opts),
       )
       if (teardown === "scope close") {
         expect(finalized).toBe(1)
@@ -481,6 +451,167 @@ for (const teardown of ["stop", "scope close"] as const) {
     }
   })
 }
+
+const instanceRuntime = (captured: Capture, schedulerLayer = SchedulerDefaultLayer) => {
+  const base = Layer.mergeAll(schedulerLayer, SessionStatus.defaultLayer, Bus.layer, makeCaptureLayer(captured))
+  return ManagedRuntime.make(Layer.mergeAll(base, cronBridgeLayer.pipe(Layer.provide(base))))
+}
+
+test("instance disposal interrupts delivery and permits the same directory to restart", async () => {
+  const entered = Deferred.makeUnsafe<void>()
+  const release = Deferred.makeUnsafe<void>()
+  let finalized = 0
+  const captured: Capture = {
+    value: [],
+    beforePrompt: Deferred.succeed(entered, undefined).pipe(
+      Effect.andThen(Deferred.await(release)),
+      Effect.ensuring(Effect.sync(() => finalized++)),
+    ),
+  }
+  const mounts: StartOpts[] = []
+  const observedScheduler = Layer.effect(
+    Scheduler,
+    Scheduler.use((scheduler) => Effect.succeed(Scheduler.of({
+      ...scheduler,
+      start: (opts) => {
+        mounts.push(opts)
+        return scheduler.start(opts)
+      },
+    }))),
+  ).pipe(Layer.provide(SchedulerDefaultLayer))
+  const runtime = instanceRuntime(captured, observedScheduler)
+  const dir = freshDir()
+  try {
+    const first = await runtime.runPromise(provideInstance(dir)(Effect.gen(function* () {
+      const bridge = yield* CronBridge
+      const scheduler = yield* Scheduler
+      const inject = yield* captureInject
+      const instance = yield* InstanceState.context
+      yield* bridge.start(sid, dir, inject)
+      const task = yield* addDueTask(scheduler, "pending instance delivery")
+      yield* scheduler.tickOnce()
+      yield* Deferred.await(entered).pipe(Effect.timeout("2 seconds"))
+      return { instance, task }
+    })))
+
+    await Instance.disposeDirectory(dir)
+    expect(Instance.refreshStatus(dir).state).toBe("applied")
+    expect(first.instance.disposing).toBe(true)
+    expect(finalized).toBe(1)
+    expect(existsSync(getLockFilePath(dir))).toBe(false)
+
+    await runtime.runPromise(Effect.gen(function* () {
+      yield* Deferred.succeed(release, undefined)
+      const scheduler = yield* Scheduler
+      const task = yield* addDueTask(scheduler, "after instance disposal")
+      yield* scheduler.tickOnce()
+      expect(getSessionCronTasks().some((row) => row.id === task.id)).toBe(true)
+      mounts[0]!.onFire(first.task)
+      yield* Effect.sleep("30 millis")
+      expect(captured.value).toHaveLength(0)
+    }))
+
+    await runtime.runPromise(provideInstance(dir)(Effect.gen(function* () {
+      const instance = yield* InstanceState.context
+      expect(instance.generation).not.toBe(first.instance.generation)
+      const bridge = yield* CronBridge
+      const scheduler = yield* Scheduler
+      const inject = yield* captureInject
+      yield* bridge.start(sid, dir, inject)
+      expect(mounts).toHaveLength(2)
+      mounts[0]!.onFire(first.task)
+      yield* scheduler.tickOnce()
+      yield* waitFor(() => captured.value.length === 1)
+      expect(captured.value[0]!.sessionID).toBe(sid)
+      expect(finalized).toBe(2)
+    })))
+  } finally {
+    await runtime.dispose()
+    await Instance.disposeDirectory(dir)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("instance disposal waits for an in-flight start and leaves no late scheduler", async () => {
+  const entered = Deferred.makeUnsafe<void>()
+  const release = Deferred.makeUnsafe<void>()
+  const captured: Capture = { value: [] }
+  const delayedScheduler = Layer.effect(
+    Scheduler,
+    Scheduler.use((scheduler) => Effect.succeed(Scheduler.of({
+      ...scheduler,
+      start: (opts) => Deferred.succeed(entered, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+        Effect.andThen(scheduler.start(opts)),
+      ),
+    }))),
+  ).pipe(Layer.provide(SchedulerDefaultLayer))
+  const runtime = instanceRuntime(captured, delayedScheduler)
+  const dir = freshDir()
+  try {
+    const instance = await runtime.runPromise(provideInstance(dir)(InstanceState.context))
+    const start = runtime.runFork(Effect.gen(function* () {
+      const bridge = yield* CronBridge
+      const inject = yield* captureInject
+      yield* bridge.start(sid, dir, inject)
+    }).pipe(Effect.provideService(InstanceRef, instance)))
+    await Effect.runPromise(Deferred.await(entered).pipe(Effect.timeout("2 seconds")))
+    let disposed = false
+    const disposing = Instance.disposeDirectory(dir).then(() => { disposed = true })
+    await Bun.sleep(30)
+    try {
+      expect(disposed).toBe(false)
+    } finally {
+      await Effect.runPromise(Deferred.succeed(release, undefined))
+      await Effect.runPromise(Fiber.join(start))
+      await disposing
+    }
+    expect(Instance.refreshStatus(dir).state).toBe("applied")
+    expect(existsSync(getLockFilePath(dir))).toBe(false)
+    await runtime.runPromise(Effect.gen(function* () {
+      const scheduler = yield* Scheduler
+      const task = yield* addDueTask(scheduler, "after concurrent disposal")
+      yield* scheduler.tickOnce()
+      expect(getSessionCronTasks().some((row) => row.id === task.id)).toBe(true)
+      expect(captured.value).toHaveLength(0)
+    }))
+  } finally {
+    await runtime.dispose()
+    await Instance.disposeDirectory(dir)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("disposing a previous instance mount does not stop its replacement", async () => {
+  const captured: Capture = { value: [] }
+  const runtime = instanceRuntime(captured)
+  const previousDir = freshDir()
+  const nextDir = freshDir()
+  const mount = (directory: string) => runtime.runPromise(provideInstance(directory)(Effect.gen(function* () {
+    const bridge = yield* CronBridge
+    const inject = yield* captureInject
+    yield* bridge.start(sid, directory, inject)
+  })))
+  try {
+    await mount(previousDir)
+    await runtime.runPromise(CronBridge.use((bridge) => bridge.stop()))
+    await mount(nextDir)
+    await Instance.disposeDirectory(previousDir)
+    await runtime.runPromise(Effect.gen(function* () {
+      const scheduler = yield* Scheduler
+      yield* addDueTask(scheduler, "replacement instance")
+      yield* scheduler.tickOnce()
+      yield* waitFor(() => captured.value.length === 1)
+    }))
+    expect(existsSync(getLockFilePath(nextDir))).toBe(true)
+  } finally {
+    await runtime.dispose()
+    await Instance.disposeDirectory(previousDir)
+    await Instance.disposeDirectory(nextDir)
+    rmSync(previousDir, { recursive: true, force: true })
+    rmSync(nextDir, { recursive: true, force: true })
+  }
+})
 
 test("cron-bridge start wires Scheduler with isLoading + isKilled + onFire", async () => {
   const captured: { value: CapturedPrompt[] } = { value: [] }
