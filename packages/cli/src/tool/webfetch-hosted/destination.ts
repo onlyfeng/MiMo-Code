@@ -42,22 +42,42 @@ export function isPrivateIPv4(address: string): boolean {
   )
 }
 
-export function isPrivateIPv6(address: string): boolean {
-  const normalized = address.toLowerCase()
-  if (normalized === "::" || normalized === "::1") return true // unspecified, loopback
-  if ((parseInt(normalized.split(":")[0] ?? "", 16) & 0xffc0) === 0xfe80) return true // link-local fe80::/10
-  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true // ULA
-  if (normalized.startsWith("ff")) return true // multicast
-  if (/^2001:0?db8:/.test(normalized)) return true // documentation
-  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1]
-  if (mapped) return isPrivateIPv4(mapped)
-  const hexMapped = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
-  if (hexMapped?.[1] && hexMapped[2]) {
-    const hi = parseInt(hexMapped[1], 16)
-    const lo = parseInt(hexMapped[2], 16)
-    return isPrivateIPv4(`${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`)
+/** The eight 16-bit groups of an IPv6 address, or undefined when it is malformed. */
+function ip6(address: string): number[] | undefined {
+  let text = address.toLowerCase().split("%")[0] ?? ""
+  const dotted = text.match(/(\d+\.\d+\.\d+\.\d+)$/)?.[1]
+  if (dotted) {
+    const parts = ip4(dotted)
+    if (!parts) return undefined
+    text = `${text.slice(0, -dotted.length)}${((parts[0] << 8) | parts[1]).toString(16)}:${((parts[2] << 8) | parts[3]).toString(16)}`
   }
-  return false
+  const halves = text.split("::")
+  if (halves.length > 2) return undefined
+  const groups = (part: string | undefined) => (part ? part.split(":").map((group) => parseInt(group, 16)) : [])
+  const head = groups(halves[0])
+  const tail = groups(halves[1])
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0
+  if (fill < 0) return undefined
+  const result = [...head, ...Array<number>(fill).fill(0), ...tail]
+  return result.length === 8 && result.every((group) => Number.isInteger(group) && group >= 0 && group <= 0xffff)
+    ? result
+    : undefined
+}
+
+/** Any IPv6 address that is not globally reachable unicast; embedded IPv4 is judged as IPv4. */
+export function isPrivateIPv6(address: string): boolean {
+  const groups = ip6(address)
+  if (!groups) return true
+  const [a, b, c] = groups
+  const embedded = () =>
+    isPrivateIPv4(`${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}`)
+  if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) return embedded() // IPv4-mapped
+  // NAT64: a DNS64 resolver answers public names with these.
+  if (a === 0x64 && b === 0xff9b && groups.slice(2, 6).every((group) => group === 0)) return embedded()
+  if (a === 0x2002) return isPrivateIPv4(`${b >> 8}.${b & 0xff}.${c >> 8}.${c & 0xff}`) // 6to4
+  if ((a & 0xe000) !== 0x2000) return true // outside global unicast 2000::/3
+  if (a === 0x2001 && (b === 0x0db8 || (b === 0x0002 && c === 0))) return true // documentation, benchmarking
+  return a === 0x3fff && (b & 0xf000) === 0 // documentation 3fff::/20
 }
 
 function isPrivateAddress(address: string, family: number) {

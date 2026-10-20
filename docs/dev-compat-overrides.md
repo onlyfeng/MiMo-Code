@@ -2289,11 +2289,16 @@ files remain byte-identical to the accepted main correction.
     other HTTP status is the page's own answer and fails without a hosted call.
   - Destinations (`tool/webfetch-hosted/destination.ts`, compat-only; the
     main-owned `util/ssrf.ts` is unchanged and still unused by WebFetch):
-    `private` covers every address that is not globally reachable unicast:
-    loopback, RFC1918, CGN, link-local, ULA, unspecified, IETF protocol
-    assignments, the three documentation TEST-NETs and `2001:db8::/32`,
-    benchmarking `198.18.0.0/15`, multicast, reserved and broadcast; plus
-    single-label and local-suffix names, and names with any such DNS answer.
+    `private` covers every address that is not globally reachable unicast.
+    IPv4: loopback, RFC1918, CGN, link-local, unspecified, IETF protocol
+    assignments, the three documentation TEST-NETs, benchmarking
+    `198.18.0.0/15`, multicast, reserved and broadcast. IPv6: everything
+    outside global unicast `2000::/3`, plus documentation `2001:db8::/32` and
+    `3fff::/20` and benchmarking `2001:2::/48`; IPv4-mapped, NAT64
+    (`64:ff9b::/96`, so DNS64 answers for public names stay public) and 6to4
+    addresses are judged by their embedded IPv4 address, and a malformed
+    address is private. Plus single-label and local-suffix names, and names
+    with any such DNS answer.
     A fake-IP DNS proxy answers every name from `198.18.0.0/15`, so on such a
     host every target is direct-only. Names that fail to resolve, or that the
     resolver has not answered within the call's `timeout`, are `unresolved`
@@ -2352,11 +2357,12 @@ files remain byte-identical to the accepted main correction.
   `classify` threw on an unparseable URL despite its never-throws contract.
   PR review then moved the empty-list check ahead of the DNS lookup, bounded
   hosted entries and the destination lookup by the caller's `timeout`,
-  required the result's URL, widened `private` to every non-global address,
+  required the result's URL, widened `private` to every non-global IPv4 and
+  IPv6 address (IPv6 as a global-unicast allowlist),
   and moved the hosted tests onto `testEffect`. With ambient `MIMOCODE_*`
   flags unset: `webfetch-hosted`, `webfetch-destination`, `webfetch`,
   `websearch`, `websearch-native`, `registry`, `registry-toolset`, `config`
-  and `permission/next` pass 290/290; the private-bypass, URL-proof,
+  and `permission/next` pass 300/300; the private-bypass, URL-proof,
   missing-URL, caller-timeout, lookup-limit and rejection-propagation mutants
   are each killed; package typecheck exits 0; root lint 0 errors; SDK regeneration
   matches the committed `types.gen.ts`.

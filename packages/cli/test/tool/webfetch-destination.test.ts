@@ -33,11 +33,30 @@ describe("webfetch.destination", () => {
     "http://255.255.255.255/",
     "http://[ff02::1]/",
     "http://[2001:db8::1]/",
+    // IPv6 outside global unicast, and the special ranges inside it.
+    "http://[::]/",
+    "http://[fec0::1]/",
+    "http://[100::1]/",
+    "http://[2001:2::1]/",
+    "http://[3fff::1]/",
+    // Embedded IPv4: NAT64 and 6to4 of a private address.
+    "http://[64:ff9b::10.0.0.1]/",
+    "http://[2002:c0a8:101::1]/",
   ])("literal private address %s stays private", async (url) => {
     expect(await Destination.classify(url, failing)).toBe("private")
   })
 
-  test.each(["http://8.8.8.8/", "http://[2606:4700::1111]/", "http://198.20.0.1/", "http://192.0.3.1/", "http://223.1.1.1/"])("literal public address %s", async (url) => {
+  test.each([
+    "http://8.8.8.8/",
+    "http://[2606:4700::1111]/",
+    "http://198.20.0.1/",
+    "http://192.0.3.1/",
+    "http://223.1.1.1/",
+    "http://[2a00:1450::1]/",
+    // A DNS64 network answers public names with NAT64 addresses.
+    "http://[64:ff9b::8.8.8.8]/",
+    "http://[2002:808:808::1]/",
+  ])("literal public address %s", async (url) => {
     expect(await Destination.classify(url, failing)).toBe("public")
   })
 
