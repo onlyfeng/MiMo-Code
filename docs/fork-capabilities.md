@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-10-20
 - Upstream: `c1527b9185bba6ea217b265e26bb17870f371461`
 - Prior reviewed upstream: `4e58a80184794d52d913d4b886b96f496f2c7020`
-- Main behavior (runtime/tests): `e32404cd035cfd3bb0c4a855de2e3c9f0689646c` (checkpoint capture defect containment and Deferred snapshot drain accounting)
+- Main behavior (runtime/tests): `03b3dfffa9a61d368ec67a550c3481aad911cbad` (checkpoint capture defect containment, Deferred snapshot drain accounting and writer-registration test synchronization)
 - Prior inherited compat behavior: `bef8617265af72c8dc457498f6c14f504391ba38` (shared convergence and cron lifecycle correction inherited; compat render layout aligned)
 - Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
 - Prior fork `main` tip: `f7b7520fdac83f450f52bb3c35842ee853ee1b44`
