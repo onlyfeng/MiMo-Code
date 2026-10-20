@@ -354,7 +354,8 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
                 expect(
                   MessageV2.filterCompacted(after).some((message) => message.info.id === first.id),
                 ).toBe(true)
-                expect(llm.calls).toBe(1)
+                // Compaction retries an empty summary once before rolling its boundary back.
+                expect(llm.calls).toBe(2)
               }),
             ),
         })

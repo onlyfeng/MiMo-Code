@@ -517,8 +517,13 @@ scripted.live("session.processor does not persist empty streamed text parts", ()
       Effect.gen(function* () {
         processorLLM.enqueue(textReply(""))
         expect((yield* processTextStream(dir, "empty")).filter((part) => part.type === "text")).toEqual([])
+        expect(processorLLM.calls).toBe(1)
       }),
-    { git: true, config: (url) => providerCfg(url) },
+    {
+      git: true,
+      // Inspect cleanup of this attempt without retrying into the mock's default reply.
+      config: (url) => ({ ...providerCfg(url), retry: { unknown: { maxRetries: 0 } } }),
+    },
   ),
 )
 
@@ -529,8 +534,13 @@ scripted.live("session.processor removes text cleared by a completion hook", () 
         yield* writeTextHook(dir, 'output.text = ""')
         processorLLM.enqueue(textReply("drop me"))
         expect((yield* processTextStream(dir, "strip")).filter((part) => part.type === "text")).toEqual([])
+        expect(processorLLM.calls).toBe(1)
       }),
-    { git: true, config: (url) => providerCfg(url) },
+    {
+      git: true,
+      // Inspect cleanup of this attempt without retrying into the mock's default reply.
+      config: (url) => ({ ...providerCfg(url), retry: { unknown: { maxRetries: 0 } } }),
+    },
   ),
 )
 

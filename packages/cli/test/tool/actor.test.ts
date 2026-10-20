@@ -760,7 +760,7 @@ describe("Actor run result contract", () => {
           expect(exit.value.metadata.actorId).toBe("general-1")
           expect(exit.value.metadata.sessionId).toBe(chat.id)
           expect(exit.value.output).toBe([
-            "actor_id: general-1 (to give this subagent more work, `send` it another message)", "",
+            "actor_id: general-1 (use `send` for follow-up while reusable)", "",
             '<actor_result status="partial" summary="More work remains">',
             structured ? JSON.stringify(payload) : "CHILD-TEXT", "</actor_result>", "Warning: CHILD-WARNING",
           ].join("\n"))

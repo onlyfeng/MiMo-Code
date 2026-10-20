@@ -1,16 +1,15 @@
 import { expect, test } from "bun:test"
-import { Deferred, Effect, Exit, Fiber } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { ActorExecution } from "../../src/actor/execution"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
-import { SessionID } from "../../src/session/schema"
+import { Session } from "../../src/session"
 import { provideTmpdirInstance } from "../fixture/fixture"
-
-const sessionID = SessionID.make("ses_execution_test")
-const otherSessionID = SessionID.make("ses_execution_other")
 
 test("cancellation invalidates late wake tickets while preserving other sessions and fresh main generations", async () => {
   await Effect.runPromise(
     provideTmpdirInstance(() => Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const sessionID = (yield* sessions.create({})).id
       const execution = yield* ActorExecution.Service
       const old = yield* execution.reserve(sessionID, "main")
       const waiting = yield* execution.acquire(sessionID, "main").pipe(Effect.forkChild)
@@ -21,6 +20,7 @@ test("cancellation invalidates late wake tickets while preserving other sessions
         Effect.gen(function* () {
           expect(Exit.isFailure(yield* execution.acquire(sessionID, "main").pipe(Effect.exit))).toBe(true)
           expect(Exit.isFailure(yield* execution.reserve(sessionID, "main").pipe(Effect.exit))).toBe(true)
+          const otherSessionID = (yield* sessions.create({})).id
           const other = yield* execution.acquire(otherSessionID, "main")
           expect(yield* execution.current(sessionID, "main")).toBe(old)
           expect(yield* execution.current(otherSessionID, "main")).toBe(other)
@@ -38,13 +38,15 @@ test("cancellation invalidates late wake tickets while preserving other sessions
       yield* execution.release(old)
       expect(yield* execution.current(sessionID, "main")).toBe(next)
       yield* execution.release(next)
-    }).pipe(Effect.provide(ActorExecution.layer))).pipe(Effect.scoped, Effect.provide(CrossSpawnSpawner.defaultLayer)),
+    }).pipe(Effect.provide(Layer.mergeAll(ActorExecution.layer, Session.defaultLayer)))).pipe(Effect.scoped, Effect.provide(CrossSpawnSpawner.defaultLayer)),
   )
 })
 
 test("interrupted cancellation and waiting scopes release their admission bookkeeping", async () => {
   await Effect.runPromise(
     provideTmpdirInstance(() => Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const sessionID = (yield* sessions.create({})).id
       const execution = yield* ActorExecution.Service
       const old = yield* execution.reserve(sessionID, "actor")
       const waiting = yield* execution.acquire(sessionID, "actor").pipe(Effect.forkChild)
@@ -63,13 +65,15 @@ test("interrupted cancellation and waiting scopes release their admission bookke
       const next = yield* execution.reserve(sessionID, "actor")
       expect(next.cancelled).toBe(false)
       yield* execution.release(next)
-    }).pipe(Effect.provide(ActorExecution.layer))).pipe(Effect.scoped, Effect.provide(CrossSpawnSpawner.defaultLayer)),
+    }).pipe(Effect.provide(Layer.mergeAll(ActorExecution.layer, Session.defaultLayer)))).pipe(Effect.scoped, Effect.provide(CrossSpawnSpawner.defaultLayer)),
   )
 })
 
 test("nested cancellation scopes keep admission closed until the last owner exits", async () => {
   await Effect.runPromise(
     provideTmpdirInstance(() => Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const sessionID = (yield* sessions.create({})).id
       const execution = yield* ActorExecution.Service
       yield* execution.withCancellation(
         sessionID,
@@ -82,6 +86,6 @@ test("nested cancellation scopes keep admission closed until the last owner exit
       const next = yield* execution.reserve(sessionID, "actor")
       expect(yield* execution.current(sessionID, "actor")).toBe(next)
       yield* execution.release(next)
-    }).pipe(Effect.provide(ActorExecution.layer))).pipe(Effect.scoped, Effect.provide(CrossSpawnSpawner.defaultLayer)),
+    }).pipe(Effect.provide(Layer.mergeAll(ActorExecution.layer, Session.defaultLayer)))).pipe(Effect.scoped, Effect.provide(CrossSpawnSpawner.defaultLayer)),
   )
 })

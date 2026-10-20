@@ -219,7 +219,7 @@ describe("ActorWaiter.status — actual execution and fresh registry projection"
   )
 
   it.live(
-    "a legacy Runner interrupted before work starts is inactive despite its stale busy ledger",
+    "a legacy Runner interrupted before work starts releases its busy ledger",
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const { entry, waiter, executions } = yield* statusFixture
@@ -241,7 +241,7 @@ describe("ActorWaiter.status — actual execution and fresh registry projection"
         }).pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true))
         expect(Exit.isFailure(yield* Fiber.await(fiber))).toBe(true)
         expect(started).toBe(false)
-        expect(Exit.isFailure(yield* runs.assertNotBusy(entry.sessionID, entry.actorID).pipe(Effect.exit))).toBe(true)
+        expect(Exit.isSuccess(yield* runs.assertNotBusy(entry.sessionID, entry.actorID).pipe(Effect.exit))).toBe(true)
         expect(yield* executions.current(entry.sessionID, entry.actorID)).toBeUndefined()
         const current = yield* waiter.status(entry)
         expect(current.executionActive).toBe(false)

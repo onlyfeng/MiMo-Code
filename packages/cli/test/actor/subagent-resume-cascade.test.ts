@@ -206,7 +206,7 @@ describe("cascadeSubagentResume", () => {
     // running is never auto-takeover (ownership stays with claimed row)
     expect(byId["explore-orphan-run"]?.status).toBe("skipped")
     expect(byId["explore-orphan-run"]?.reason).toBe("live")
-    expect(byId["explore-cancelled"]).toEqual({ actorID: "explore-cancelled", status: "skipped", reason: "cancelled" })
+    expect(byId["explore-cancelled"]).toEqual({ actorID: "explore-cancelled", status: "skipped", reason: "no-recovery-candidate" })
     expect(result.cancelledAfter?.lastOutcome).toBe("cancelled")
     expect(result.cancelledAfter?.turnCount).toBe(0)
     expect(byId["explore-1"]).toBeDefined()
