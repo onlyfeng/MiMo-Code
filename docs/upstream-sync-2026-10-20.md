@@ -4,7 +4,7 @@
 
 本轮为完整同步，流向为只读 `upstream/main` → fork `main` → fork `dev/compat`。选定审计范围为 `bf0563ddc201b44e3f59c35b18dba17c4386564d..113e3192568a342076e68c70d55b99bd67869dcf`：11 个提交（10 个非 merge 提交），176 个变更路径、16,826 行增加、3,727 行删除。起始 fork tips 为 `main=aaa53f4e56136ee1bf845b02ff080716ea2a0c66`、`dev/compat=97fce708b8dc9353d274b83f718e1a3c7d27416a`。
 
-共享 runtime/tests 与已改 MCP prompt 的行为提交为 `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`。下列本地验证与发布证明分开记录；compat 传播、远端 tip、精确 SHA CI 和重新刷新后的 upstream 选择仍待收尾补证，当前记录只覆盖上述选定 upstream。
+共享 runtime 与已改 MCP prompt 的行为提交为 `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`；测试适配提交为 `aa625ef0bf685b58ce4644f7700c7f4cc53d462c`，产品源码与前者相同。下列本地验证与发布证明分开记录；compat 传播、远端 tip、精确 SHA CI 和重新刷新后的 upstream 选择仍待收尾补证，当前记录只覆盖上述选定 upstream。
 
 操作使用独立临时分支和工作树，保留原工作区已有修改及无关资源。文档路径示例统一使用 `/tmp/example`；它不是实际操作路径。最终资源清单、原工作区状态及本轮临时资源清理证明仍为 pending。
 
@@ -73,10 +73,18 @@ env -u MIMOCODE_EXPERIMENTAL -u MIMOCODE_MCP_TOOL_SEARCH -u MIMOCODE_CODEX_MODE 
 
 初轮验证曾暴露旧Inbox测试接口、已移除的Runner-follower屏障、noReply任务语义、per-caller structured结果、旧error completion、checkpoint父消息重排及epoch fence等问题。fixture改为真实accepted receipt观测，保留Runner owner退出边界；noReply/cancel断言按新的受理状态精确迁移。结果回传、上下文和epoch问题通过产品修正及上述窄回归处理，不以跳过或删除原语义断言掩盖。一次默认五秒预算的MCP子集在并行负载下超时，随后使用矩阵的30秒测试预算完成47例；这不证明所有早轮失败都是环境flake。
 
+## 首轮 CI 与测试适配
+
+[首轮精确 SHA 测试运行](https://github.com/onlyfeng/MiMo-Code/actions/runs/39407392419) 绑定 `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`：lint 与 typecheck 成功，test 失败。失败来自迁移测试仍使用旧 Inbox content、busy ledger、Runner 全局序号、结果文案、缺失的 HTTP 202 和不完整消息夹具，以及纯空输出/摘要独立重试的旧调用次数假设。取消 Actor 的两个测试期望不一致；保留原运行行为与既有 negatives 合同，统一新增断言，未改变恢复权限。
+
+测试提交 `aa625ef0bf685b58ce4644f7700c7f4cc53d462c` 保留正文、sender/provenance、ownership、取消、原 context 与空 text 删除断言。Actor execution 改用真实 session；prefix 夹具直接按 `MessageV2.Info` 构造完整消息，不再用 cast 绕过 schema。两条 processor cleanup 测试显式配置 `retry.unknown.maxRetries=0` 并断言仅调用一次，以隔离单次清理；默认重试由独立 InvalidOutputError 测试验证。空 compaction 摘要仍执行 FD-012 的一次独立重试，精确调用两次。
+
+修正后的本地整组结果：四文件 HTTP/Actor recovery 23/23、waiter 32/32、execution ownership 与 Actor tool 42/42、Actor exec 11/11、execution cancellation 3/3、OpenAPI 4/4、prefix invariant 1/1、overflow/processor 32 pass 与两个原有 skip，均零失败。owning-package typecheck 通过；产品源码与 SDK 没有额外修改。下一最终 SHA 仍须获得独立 CI，首轮失败没有通过同 SHA 重跑抹去。
+
 ## 最终验收与发布：pending
 
 - 最终 runtime 的 owning-package typecheck、lint、完整 prompt 与 queue 收口矩阵已通过，结果见上表。早轮 workflow Reference/typecheck 问题已修正；SDK最终重生成 exit 0 且 SDK diff 为空；bun.lock 无本地安装变更。
-- `main` runtime commit：`1b2bb10c930997c6c58da89fe7720e2e1c71db5d`；最终main/compat tips及compat验证 pending。共享registry在compat应保持逐字一致，DC差异由compat登记拥有。
+- `main` runtime commit：`1b2bb10c930997c6c58da89fe7720e2e1c71db5d`；测试快照：`aa625ef0bf685b58ce4644f7700c7f4cc53d462c`；最终main/compat tips及compat验证 pending。共享registry在compat应保持逐字一致，DC差异由compat登记拥有。
 - 最终远端branch-tip相等、选定upstream→main→dev/compat ancestry、各精确最终SHA的lint/typecheck/test CI URL/headSha/conclusion均 pending。只改docs导致workflow跳过时，需证明所引用已绿ancestor在docs之外tree一致。
 - 发布前若新刷upstream推进，须扩大清单审查并完成后续传播/验证；此文当前不能宣称跟随未审计的新upstream tip。
 - 最终资源清理与原工作区保留证明 pending。未验证的Windows/远端执行和实际npm/FDS发布不由本地测试结果推断。
