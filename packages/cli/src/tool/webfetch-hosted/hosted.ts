@@ -113,8 +113,8 @@ export function extract(kind: Kind, url: string, content: ContentPart<ToolSet>[]
       if (output.type === "web_fetch_tool_result_error")
         return { reason: `web_fetch ${typeof output.errorCode === "string" ? output.errorCode : "error"}` }
       if (output.type !== "web_fetch_result") continue
-      if (typeof output.url === "string" && !sameUrl(output.url, url))
-        return { reason: `web_fetch returned another URL: ${output.url}` }
+      if (typeof output.url !== "string") return { reason: "web_fetch returned no URL" }
+      if (!sameUrl(output.url, url)) return { reason: `web_fetch returned another URL: ${output.url}` }
       const document = isRecord(output.content) ? output.content : undefined
       const source = document && isRecord(document.source) ? document.source : undefined
       if (!source || typeof source.data !== "string") return { reason: "web_fetch returned no content" }

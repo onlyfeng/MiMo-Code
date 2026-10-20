@@ -2298,14 +2298,16 @@ files remain byte-identical to the accepted main correction.
     it passes loopback and throws on every unresolvable public name.
   - Hosted fetch (`tool/webfetch-hosted/hosted.ts`): one non-streaming request
     per entry with `toolChoice: "auto"` (gateways reject forced choice on some
-    models) and no retries. The protocol follows the entry's SDK, not its
+    models) and no retries, each bounded by the caller's `timeout` when it
+    gave a positive one (rounded up to whole milliseconds), else 90 s to allow
+    for a model turn. The protocol follows the entry's SDK, not its
     provider name. `@ai-sdk/anthropic` sends `web_fetch_20250910`
     (`max_uses: 1`, `max_content_tokens`, default 30000) and returns the
     `web_fetch_result` text; `@ai-sdk/openai` sends Responses `web_search`
     (`external_web_access` only: a Grok Responses gateway rejects
     `search_context_size`) and returns the answer only when an `open_page`
     action names the URL, prefixed as a model digest. A reply without that
-    server result, a result for another URL, a `web_fetch_tool_result_error`
+    server result, a result for another URL or naming none, a `web_fetch_tool_result_error`
     (delivered by `ai` as a `tool-error` part), a PDF/base64 source, an
     unresolvable entry, an undeclared variant or any other SDK fails the entry.
     Hosted fetch is never injected into the session request.
@@ -2341,10 +2343,13 @@ files remain byte-identical to the accepted main correction.
   `first: "hosted"` had folded a direct redirect's permission rejection into
   the chained error (the processor then kept the turn running), and
   `classify` threw on an unparseable URL despite its never-throws contract.
-  With ambient `MIMOCODE_*` flags unset: `webfetch-hosted`,
-  `webfetch-destination`, `webfetch`, `websearch`, `websearch-native`,
-  `registry`, `registry-toolset`, `config` and `permission/next` pass 272/272;
-  the private-bypass, URL-proof and rejection-propagation mutants are each
+  PR review then moved the empty-list check ahead of the DNS lookup, bounded
+  hosted entries by the caller's `timeout`, required the result's URL, and
+  moved the hosted tests onto `testEffect`. With ambient `MIMOCODE_*` flags
+  unset: `webfetch-hosted`, `webfetch-destination`, `webfetch`, `websearch`,
+  `websearch-native`, `registry`, `registry-toolset`, `config` and
+  `permission/next` pass 275/275; the private-bypass, URL-proof,
+  missing-URL, caller-timeout and rejection-propagation mutants are each
   killed; package typecheck exits 0; root lint 0 errors; SDK regeneration
   matches the committed `types.gen.ts`.
 - Exit condition: retire when shared `main` offers an equivalent hosted fetch

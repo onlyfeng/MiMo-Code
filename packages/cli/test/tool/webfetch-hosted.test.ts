@@ -8,7 +8,7 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Permission } from "../../src/permission"
 import { Provider } from "../../src/provider"
 import { Truncate } from "../../src/tool"
-import { WebFetchTool, retriesHosted } from "../../src/tool/webfetch"
+import { WebFetchTool, hostedTimeout, retriesHosted } from "../../src/tool/webfetch"
 import * as HostedFetch from "../../src/tool/webfetch-hosted/hosted"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -150,7 +150,7 @@ const serveGateway = (gateway: Gateway, url: string) =>
           calls.push({ path: pathname, model, body, beta: req.headers.get("anthropic-beta") ?? undefined })
           const handler = pathname.endsWith("/messages") ? gateway.messages?.[model] : gateway.responses?.[model]
           if (!handler) return json({ error: { message: "unknown model" } }, 404)
-          const result = handler(url)
+          const result = await handler(url)
           return result instanceof Response ? result : json(result)
         },
       })
@@ -193,6 +193,8 @@ const run = (input: {
   webfetch?: Config.Info["webfetch"]
   direct: HttpClient.HttpClient
   url?: string
+  // The caller's timeout in seconds.
+  timeout?: number
   asks?: string[]
   // A pattern the user rejects when asked.
   reject?: string
@@ -207,7 +209,7 @@ const run = (input: {
           const tool = yield* info.init()
           return yield* Effect.exit(
             tool.execute(
-              { url, format: "markdown" },
+              { url, format: "markdown", timeout: input.timeout },
               {
                 sessionID: SessionID.make("ses_webfetch_hosted"),
                 messageID: MessageID.make("message"),
@@ -284,6 +286,35 @@ describe("tool.webfetch.hosted config", () => {
       for (const code of [404, 410, 400, 401]) expect(retriesHosted(yield* statusError(code))).toBe(false)
       expect(retriesHosted(new Error("Request timed out"))).toBe(true)
       expect(retriesHosted(new Error("Response too large (exceeds 5MB limit)"))).toBe(false)
+    }),
+  )
+
+  it.effect("hostedTimeout takes the caller's timeout, else the hosted default", () =>
+    Effect.sync(() => {
+      expect(hostedTimeout(undefined)).toBe(90_000)
+      expect(hostedTimeout(0)).toBe(90_000)
+      expect(hostedTimeout(-5000)).toBe(90_000)
+      expect(hostedTimeout(1500.2)).toBe(1501)
+      expect(hostedTimeout(5000)).toBe(5000)
+    }),
+  )
+
+  it.effect("a fetch result naming no URL is a failure", () =>
+    Effect.sync(() => {
+      const result = HostedFetch.extract("text", TARGET, [
+        {
+          type: "tool-result",
+          toolCallId: "srvtoolu_1",
+          toolName: "web_fetch",
+          input: { url: TARGET },
+          output: {
+            type: "web_fetch_result",
+            content: { type: "document", title: null, source: { type: "text", mediaType: "text/plain", data: PAGE } },
+          },
+          providerExecuted: true,
+        } as never,
+      ])
+      expect(result).toEqual({ reason: "web_fetch returned no URL" })
     }),
   )
 })
@@ -478,6 +509,24 @@ describe("tool.webfetch.hosted chain", () => {
       const lines = (error ?? "").split("\n")
       expect(lines[0]).toBe("hosted test-claude/test-claude: web_fetch url_not_accessible")
       expect(lines[1]).toStartWith("- direct: Transport error")
+    }),
+  )
+
+  it.live("the caller's timeout bounds each hosted entry", () =>
+    Effect.gen(function* () {
+      const slow = async (url: string) => {
+        await Bun.sleep(3000)
+        return anthropicFetched(url)
+      }
+      const { value } = yield* run({
+        gateway: { messages: { "test-claude": slow } },
+        webfetch: { first: "hosted", hosted: ["test-claude/test-claude"] },
+        direct: ok("direct page"),
+        url: "https://93.184.215.14/doc",
+        timeout: 1,
+      })
+      // The 1s limit aborts the 3s gateway reply, so the direct fetch serves.
+      expect(value?.metadata).toMatchObject({ servedBy: "direct" })
     }),
   )
 

@@ -47,6 +47,7 @@ export const WebFetchTool = Tool.define(
       entry: HostedFetch.Entry,
       url: string,
       ctx: Tool.Context,
+      timeout: number,
     ) {
       const ref = `${entry.providerID}/${entry.modelID}`
       if (!provider) return { ref, reason: "no provider service" }
@@ -78,7 +79,7 @@ export const WebFetchTool = Tool.define(
           headers: model.headers,
           url,
           maxContentTokens: entry.maxContentTokens,
-          abort: AbortSignal.any([ctx.abort, AbortSignal.timeout(HOSTED_TIMEOUT)]),
+          abort: AbortSignal.any([ctx.abort, AbortSignal.timeout(timeout)]),
         }),
       )
       if ("reason" in result) log.warn("webfetch hosted entry failed", { ref, reason: result.reason })
@@ -123,9 +124,10 @@ export const WebFetchTool = Tool.define(
             if (destination === "private") return yield* direct()
 
             const failures: string[] = []
+            const limit = hostedTimeout(params.timeout === undefined ? undefined : timeout)
             const hosted = Effect.gen(function* () {
               for (const entry of entries) {
-                const result = yield* hostedFetch(entry, params.url, ctx)
+                const result = yield* hostedFetch(entry, params.url, ctx, limit)
                 if ("kind" in result) return result
                 failures.push(`hosted ${result.ref}: ${result.reason}`)
               }
@@ -308,6 +310,15 @@ export function retriesHosted(error: unknown): boolean {
     return false
   }
   return error instanceof Error && error.message === "Request timed out"
+}
+
+/**
+ * Each hosted entry's limit: the caller's own timeout when it gave one, else a
+ * default that allows for a model turn. AbortSignal.timeout needs a
+ * non-negative integer, and a non-positive model-supplied timeout means the default.
+ */
+export function hostedTimeout(ms: number | undefined) {
+  return ms !== undefined && ms > 0 ? Math.ceil(ms) : HOSTED_TIMEOUT
 }
 
 function isPermissionError(error: unknown) {
