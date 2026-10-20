@@ -4006,3 +4006,39 @@ record-only commit and are verified separately.
 - Live upstream selection extends to `4e58a80184794d52d913d4b886b96f496f2c7020`; inherit main runtime `b18a1207cd66c312216698c175441b8c49778907` through compat runtime/tests `a10363fe376ad2e4d405c27b6d84128918f6c1e3`, followed by main review `3d9527fd667de159110f594ea79c25dfbf2c5401`. Inventory expands to thirteen with C13. The previous `00f40d32` tip has successful exact-SHA lint/typecheck/test, including all ten test jobs and Windows; it proves only the preceding selection.
 - Resolve prompt imports and fixture signatures while keeping current-turn projection, caps, legacy masks/hash, native `LLM.wireTools` preflight and frozen membership/schema authority. Optional readiness and malformed-metadata guards inherit main unchanged; silent auto gains no auxiliary history marker. All eleven owners and the same 52 production overlay paths remain.
 - C13 critical 10/10, native-wire 39/39, Actor/send 55/55 and typecheck pass; root lint reports 3,724 warnings and zero errors. SDK and lockfile have no additional changes. Independent complete MCP subset and the new published-SHA CI remain separately recorded publication evidence.
+
+## 2026-10-20 shared OpenAPI repeatability correction
+
+- Completed C13 local evidence: the full MCP affected subset passes 102 tests,
+  zero failures and 630 assertions in 223.82 seconds. The previously recorded
+  critical 10/10, native-wire 39/39, Actor/send 55/55, typecheck and lint results
+  remain valid local evidence. These overlapping groups are not an aggregate
+  test count or a substitute for final exact-SHA CI.
+- Failed candidate: `dcb6160f59e09031a9e21bb562bed328b40ba7c5` has two
+  OpenAPI assertion failures in
+  [test run 39410900737](https://github.com/onlyfeng/MiMo-Code/actions/runs/39410900737),
+  while the other nine jobs pass. This SHA was not rerun. The original
+  assertions are retained; the correction fixes a production generator defect:
+  a second generation loses 22 references because cached route response
+  metadata was mutated by the first resolution.
+- Shared main source/tests: `d2f22b8d293dfb16d28e609c8f6d58047a5ee369`.
+  Compat inheritance: `dcc13401331125450c1cdf39308bdefa5994e86f`.
+  `Server.openapi()` now isolates response metadata on each fresh app before
+  generation. New consecutive and concurrent generation regressions preserve
+  the existing checkpoint coverage, model-selection and SDK assertions.
+  All eleven DC owners and the same 52 CLI-source/SDK overlay paths remain;
+  this correction is inherited shared behavior, not a new compat capability.
+- Local correction checks: the complete OpenAPI/model-selection pair passes
+  17 tests with zero failures; CLI typecheck and SDK generation exit 0.
+  Generated SDK files and `bun.lock` have no additional diff. The complete
+  eight-file server adjacency group passes 63 tests, zero failures and 948
+  assertions in 72.01 seconds.
+- **Accepted exact-SHA evidence:** workflows for
+  `dcc13401331125450c1cdf39308bdefa5994e86f` are
+  [lint 39413089967](https://github.com/onlyfeng/MiMo-Code/actions/runs/39413089967),
+  [typecheck 39413089966](https://github.com/onlyfeng/MiMo-Code/actions/runs/39413089966)
+  and [test 39413089981](https://github.com/onlyfeng/MiMo-Code/actions/runs/39413089981).
+  All three workflows completed successfully with the exact headSha, including
+  all ten test jobs and actual Windows runtime. Final docs-only descendant
+  equivalence, remote tips, ancestry and scoped cleanup are checked in the
+  execution receipt. This registry-only update advances no runtime behavior reference.

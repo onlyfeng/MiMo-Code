@@ -14,6 +14,7 @@ registry/history commit does not advance either behavior reference below.
 - Last reviewed: 2026-10-20, full upstream synchronization over `bf0563ddc201b44e3f59c35b18dba17c4386564d..4e58a80184794d52d913d4b886b96f496f2c7020`.
 - Starting compat: `97fce708b8dc9353d274b83f718e1a3c7d27416a`; initial inherited main runtime: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`; initial reviewed compat runtime/tests: `ac2b653cde97fb3046e6510ff4e5183b59186bd5`. The completed intermediate compat tip `00f40d329cf26e19dbaff131158494aec8b19e82` integrates main `f6632fb8085b4005df4abeb36933b30ee9d74811`. C13 inherits main runtime `b18a1207cd66c312216698c175441b8c49778907` at compat runtime/tests `a10363fe376ad2e4d405c27b6d84128918f6c1e3`, with main review `3d9527fd667de159110f594ea79c25dfbf2c5401`; final publication references are recorded in [the synchronization report](upstream-sync-2026-10-20.md).
 - Scope: all thirteen shared capability rows C01–C13, including cleanly merged DC surfaces and the newer DC-ACTOR-002, DC-PROVIDER-001, DC-WEBSEARCH-001 and DC-WEBFETCH-001 entries. The prior eight-owner and 120-path records below are historical snapshots.
+- Latest shared correction: main `d2f22b8d293dfb16d28e609c8f6d58047a5ee369` is inherited by compat `dcc13401331125450c1cdf39308bdefa5994e86f`. It makes repeated OpenAPI generation safe without adding a DC owner or changing the eleven-owner, 52-source-overlay set. Its exact-SHA CI evidence is recorded below.
 - Resolution: adopt the shared durable queue, receipt lifecycle, actor waits, execution ownership, fixed `mcp_tool_use` dispatcher, readiness hints, empty-output retries, thinking-signature fix and UI/release changes while preserving the eleven contracts below. Silent auto-mode without a real reminder/call may re-evaluate; no auxiliary cache-mode state is persisted. Schema generation uses the resolved compat source, including checkpoint coverage and model selection.
 - Validation: default-path commands remove ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and `MIMOCODE_CODEX_MODE`, retaining package preload and each test's scoped opt-ins. `bun ci` completes without a lockfile change; SDK regeneration exits 0 with no additional generated diff, CLI/SDK typechecks pass, and lint reports zero errors. The completed local groups and incomplete full-file runs are distinguished below; exact-SHA CI remains the publication gate.
 - Shared ownership: FD/FC registries and the shared report inherit main unchanged; only this compat registry owns the overlay decisions below.
@@ -57,8 +58,49 @@ metadata is ignored by the shared parser rather than becoming a compat fork.
 
 No lockfile, manifest, public schema or SDK input changes in C13. SDK files are
 unchanged against the completed intermediate compat tip; no regeneration is
-needed. The C13 affected matrices and final CLI/lint checks are recorded once
-the resolved candidate completes; new exact-SHA CI remains required.
+needed for that readiness amendment. Its completed local groups are:
+
+| C13 scope | Observed result |
+| --- | --- |
+| Critical readiness/evidence cases | 10 pass, 0 fail. |
+| Native-search wire and current-turn integration | 39 pass, 0 fail. |
+| Actor tool and real Inbox send | 55 pass, 0 fail. |
+| Complete MCP affected subset | 102 pass, 0 fail; 630 assertions; 223.82 seconds. |
+| CLI typecheck and repository lint | Exit 0; lint reports zero errors and 3,724 warnings. |
+
+These groups overlap and are not a unique-suite total. They establish local
+C13 behavior; the final published-SHA workflows remain a separate gate.
+
+### Shared OpenAPI correction and accepted-source evidence
+
+The C13 candidate `dcb6160f59e09031a9e21bb562bed328b40ba7c5`
+failed two OpenAPI assertions in
+[test run 39410900737](https://github.com/onlyfeng/MiMo-Code/actions/runs/39410900737);
+the other nine jobs passed. That SHA was not rerun. The failure exposed a
+production generator defect: resolving a document mutated response metadata
+shared by cached route modules, leaving 22 dangling references on the second
+generation.
+
+The inherited main correction `d2f22b8d` copies response metadata onto each
+fresh generation app before resolution. Consecutive and concurrent generation
+regressions retain the existing checkpoint coverage, model-selection and SDK
+contract assertions. Compat `dcc13401` inherits this shared implementation;
+the eleven DC owners and the same 52 CLI-source/SDK overlay paths remain.
+The complete OpenAPI/model-selection pair passes 17 tests with zero failures.
+CLI typecheck and SDK generation exit 0, with no additional SDK or `bun.lock`
+diff. The complete eight-file server adjacency group passes 63 tests with
+zero failures and 948 assertions in 72.01 seconds.
+
+**Accepted exact-SHA evidence:** the new workflows
+for `dcc13401331125450c1cdf39308bdefa5994e86f` are
+[lint 39413089967](https://github.com/onlyfeng/MiMo-Code/actions/runs/39413089967),
+[typecheck 39413089966](https://github.com/onlyfeng/MiMo-Code/actions/runs/39413089966)
+and [test 39413089981](https://github.com/onlyfeng/MiMo-Code/actions/runs/39413089981).
+All three workflows are completed/success with this exact headSha; all ten
+test jobs pass, including Windows runtime. The earlier successful `00f40d32`
+runs and the failed `dcb6160f` run are historical. Final docs-only descendant
+equivalence, remote tips, ancestry and scoped cleanup are checked separately
+in the execution receipt.
 
 ### Initial C01–C12 validation and publication boundary
 
@@ -2480,4 +2522,4 @@ files remain byte-identical to the accepted main correction.
 
 ### C13 stable candidate verification
 
-Runtime/tests `a10363fe376ad2e4d405c27b6d84128918f6c1e3` passes owning-package typecheck and root lint (3,724 warnings, zero errors). Frozen dispatcher/capture, capped resources, pinned full-context/compaction masks and actual reminder evidence pass ten critical cases; native-search wire integration passes 39 cases, Actor/send passes 55. These overlapping subsets are not a combined total. The full MCP/prompt/prefix subset continues independently; exact-SHA CI, including Windows, remains required after publication. No SDK, lockfile or public schema changed in C13; the 52 production overlay paths remain the same set as at the initial baseline.
+Runtime/tests `a10363fe376ad2e4d405c27b6d84128918f6c1e3` passes owning-package typecheck and root lint (3,724 warnings, zero errors). Frozen dispatcher/capture, capped resources, pinned full-context/compaction masks and actual reminder evidence pass ten critical cases; native-search wire integration passes 39 cases, Actor/send passes 55. These overlapping subsets are not a combined total. The full MCP/prompt/prefix subset completes with 102 pass, zero failures and 630 assertions in 223.82 seconds; final exact-SHA CI is recorded above. No SDK, lockfile or public schema changed in C13; the 52 production overlay paths remain the same set as at the initial baseline.
