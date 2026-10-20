@@ -2278,7 +2278,8 @@ files remain byte-identical to the accepted main correction.
     unchanged. The list does not depend on the session model.
   - Routes: the permission ask for the requested URL always runs first, and a
     rejection ends the call. A `private` destination, or an empty list, uses
-    only the direct fetch. Otherwise `first: "local"` tries direct, then each
+    only the direct fetch; the list is checked first, so an empty one costs
+    no DNS lookup. Otherwise `first: "local"` tries direct, then each
     hosted entry; `first: "hosted"` tries each hosted entry, then direct.
     A permission rejection, correction or denial raised by the direct route
     (a redirect hop's ask) propagates unchanged under either order, never

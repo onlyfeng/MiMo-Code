@@ -112,13 +112,15 @@ export const WebFetchTool = Tool.define(
           // DC-WEBFETCH-001: a configured block adds hosted fetch models around the direct fetch.
           if (settings) {
             const entries = HostedFetch.entries(settings)
-            const destination = yield* Effect.promise(() => Destination.classify(params.url))
             const direct = () =>
               directFetch(params, timeout, http, ask).pipe(
                 Effect.map((result) => ({ ...result, metadata: { ...result.metadata, servedBy: "direct" } })),
               )
-            // A private target and an empty list keep today's direct-only behavior.
-            if (destination === "private" || entries.length === 0) return yield* direct()
+            // An empty list and a private target keep today's direct-only behavior;
+            // the list is checked first so it costs no DNS lookup.
+            if (entries.length === 0) return yield* direct()
+            const destination = yield* Effect.promise(() => Destination.classify(params.url))
+            if (destination === "private") return yield* direct()
 
             const failures: string[] = []
             const hosted = Effect.gen(function* () {
