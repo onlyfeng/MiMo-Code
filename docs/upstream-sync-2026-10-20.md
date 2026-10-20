@@ -128,17 +128,21 @@ FD/FC/DC 能力、OpenAPI 修复和无关工作区状态。
 
 | ID | 行为与归属 | main 结果 | dev/compat 结果 | 决定性证据 |
 | --- | --- | --- | --- | --- |
-| S01 | 退役的 inbox wake 接口；FC-001、FC-008、FD-001 | 删除无生产消费者的 join/admit、deferInbox、epoch hold；保留同步取消和执行所有权 | 待继承 | `runner.ts`、`run-state.ts`、`cancel-epoch.ts`、`prompt.ts`；六处 runLoop 调用仅移除原来 false/undefined 的参数 |
-| S02 | Session.fork 历史读取；FC-001、FC-017 | 复用 sourceMsgs，保留建目标前拒绝无效 cutoff 和事务内 rendered-order 读取 | 待继承 | `session.ts`、`fork-queue.test.ts` 的 absent/foreign cutoff、processor fork freshness |
-| S03 | MCP 当前合同；FC-004、FD-005、FD-006 | 文档改为请求授权目录和固定 dispatcher，旧 loaded membership 仅用于历史冻结快照 | 待继承相同文档 | FC-004 Observable contract；没有 MCP 产品源码改动 |
-| S04 | 会话级重试诊断；FC-013 | processor 通知回调仅由 main 发布状态和 RetryAttempt，actor 仍实际重试 | 待继承 | `processor.ts`、`invalid-output-continuation.test.ts` 的真实 HTTP/SSE 与 Bus 对照 |
-| S05 | Inbox 渲染布局；DC-CONTEXT-001 | 不适用，保持上游布局 | 待独立 compat PR | 恢复 blankTo 位置与结构注释，保留 UTF-8 caps、完整通知标签及空内容回退 |
+| S01 | 退役的 inbox wake 接口；FC-001、FC-008、FD-001 | 删除无生产消费者的 join/admit、deferInbox、epoch hold；保留同步取消和执行所有权 | 已由 `6ec7fcda` 继承 | `runner.ts`、`run-state.ts`、`cancel-epoch.ts`、`prompt.ts`；六处 runLoop 调用仅移除原来 false/undefined 的参数 |
+| S02 | Session.fork 历史读取；FC-001、FC-017 | 复用 sourceMsgs，保留建目标前拒绝无效 cutoff 和事务内 rendered-order 读取 | 已由 `6ec7fcda` 继承 | `session.ts`、`fork-queue.test.ts` 的 absent/foreign cutoff、processor fork freshness |
+| S03 | MCP 当前合同；FC-004、FD-005、FD-006 | 文档改为请求授权目录和固定 dispatcher，旧 loaded membership 仅用于历史冻结快照 | 已由 `6ec7fcda` 继承相同文档 | FC-004 Observable contract；没有 MCP 产品源码改动 |
+| S04 | 会话级重试诊断；FC-013 | processor 通知回调仅由 main 发布状态和 RetryAttempt，actor 仍实际重试 | 已由 `6ec7fcda` 继承 | `processor.ts`、`invalid-output-continuation.test.ts` 的真实 HTTP/SSE 与 Bus 对照 |
+| S05 | Inbox 渲染布局；DC-CONTEXT-001 | 不适用，保持上游布局 | 布局提交 `79f21007` 已通过 PR #166 合入；最终源码 `bef86172` | 恢复 blankTo 位置与结构注释，保留 UTF-8 caps、完整通知标签及空内容回退 |
 
 共享代码/测试提交依次为 `a2d1cded3db6d2bd8881252c465767748bab7b63`
 （S01）、`17260db2e9a8ef4b35e66e0521ef25f4af10b0b3`（S02）和
 `a53165b4f0584a487c5090962bdf5d9123b9c1cd`（S04）。S03 及本节属于
-文档提交，不改变 runtime/test 快照。PR、集成分支精确 SHA CI、compat
-继承和最终资源清理仍待发布验收，不能由下列本地结果替代。
+文档提交，不改变 runtime/test 快照。[PR #165](https://github.com/onlyfeng/MiMo-Code/pull/165)
+合入 main `8cbf76bc725b93f65561868b515213d45ff72380`，compat 由
+`6ec7fcda7d09eec541054b02a08c401cd6aca2ad` 继承。S05 通过
+[PR #166](https://github.com/onlyfeng/MiMo-Code/pull/166) 独立处理。
+随后 CI 暴露的共享 cron 生命周期问题通过
+[PR #167](https://github.com/onlyfeng/MiMo-Code/pull/167) 修正并传播，证据见下。
 
 本地使用 `bun ci`，lockfile 不变；Bun 为 1.4.3。测试从 `packages/cli`
 运行，移除环境中的 `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_MCP_TOOL_SEARCH`、
@@ -162,3 +166,78 @@ FD/FC/DC 能力、OpenAPI 修复和无关工作区状态。
 复审中的终态 receipt 重放挂起假设没有成为修复项：两次真实入口探针均先被
 完整内容校验拒绝，观察到持久化 user 已增加 summary 元数据，未进入假设中的
 Deferred 等待。这里不宣称已证明用户可达挂起，也不放松重放一致性校验。
+
+
+### 指定收敛的 CI 失败与修正记录
+
+| 精确源码快照 | lint / typecheck / test | 结论 |
+| --- | --- | --- |
+| PR #165 `51c044a2173f83557bcc03de4884a147097c2572` | [39421484967](https://github.com/onlyfeng/MiMo-Code/actions/runs/39421484967) / [39421484954](https://github.com/onlyfeng/MiMo-Code/actions/runs/39421484954) / [39421567504](https://github.com/onlyfeng/MiMo-Code/actions/runs/39421567504) | PR head 全部成功；不替代后续集成提交结果。 |
+| main `8cbf76bc725b93f65561868b515213d45ff72380` | [39422883503](https://github.com/onlyfeng/MiMo-Code/actions/runs/39422883503) / [39422883528](https://github.com/onlyfeng/MiMo-Code/actions/runs/39422883528) / [39422883504](https://github.com/onlyfeng/MiMo-Code/actions/runs/39422883504) | lint/typecheck 成功；test 首次 cron restart 等待失败，失败分片只重跑一次，仍在同点失败。该 SHA 未验收为全绿。 |
+| compat `6ec7fcda7d09eec541054b02a08c401cd6aca2ad` | [39424836174](https://github.com/onlyfeng/MiMo-Code/actions/runs/39424836174) / [39424836055](https://github.com/onlyfeng/MiMo-Code/actions/runs/39424836055) / [39424836108](https://github.com/onlyfeng/MiMo-Code/actions/runs/39424836108) | 全部成功，十个 test jobs 包括 Windows。 |
+| PR #166 原 head `cf914505c5c27893eac8eb93299b00211f323f81` | [39425282589](https://github.com/onlyfeng/MiMo-Code/actions/runs/39425282589) / [39425282630](https://github.com/onlyfeng/MiMo-Code/actions/runs/39425282630) / [39425283335](https://github.com/onlyfeng/MiMo-Code/actions/runs/39425283335) | lint/typecheck 成功；test 的 cron busy-to-idle 等待失败，其余任务成功。后续共享修正继承后重新验收最终 compat 提交。 |
+
+仅观察诊断提交 `876a761355d414d081c247d58fdc6017f11a842c` 的
+[39426004659](https://github.com/onlyfeng/MiMo-Code/actions/runs/39426004659) 成功，但当时并未修复问题。随后确定性实验先运行真实
+resume，再触发仍存活的旧 scheduler：它消费当前 bridge 的 session task，
+当前 capture 保持 0，分别复现 restart 和 busy-to-idle 的原等待失败。
+因此修正生产生命周期，而非调整 deadline、删除断言或改 CI 分片。
+
+共享修正源码 `92fee50dd618ed25f212aba0a17f3334635451c8` 通过 InstanceState 绑定 mount 所属代际，
+关闭时先禁止迟到启动，再停止该代拥有的 scheduler，旧代不能误停新 mount。
+保留已有 Layer 清理和 stop 重入行为；临时诊断代码全部移除。
+初版修正 `d60fc85e2748646a4fcd8288a26713fa8951acb4` 的三个真实生命周期回归
+先得到 1 pass / 2 fail，修正后 3 pass / 0 fail；十二文件矩阵为
+139 pass、0 fail、483 assertions（48.78 秒），包级 typecheck exit 0，
+完整测试 [39428470403](https://github.com/onlyfeng/MiMo-Code/actions/runs/39428470403) 成功。审查随后要求新增测试使用仓库统一的
+`testEffect(...).live` 生命周期夹具；最终测试形式及复核结果：
+新版回归在旧生产代码上为 1 pass / 2 fail，修正后 3 pass / 0 fail、18 assertions；cron 与 resume 两文件 25 pass / 0 fail、129 assertions（26.02 秒），包级 typecheck exit 0，定向 lint 为 16 warnings / 0 errors。
+这些检查使用 Bun 1.3.14、移除三个 ambient selectors，并保留包 preload
+和 cron 测试原有的作用域内启用。PR #167 在 `92fee50d` 的自动复审完成且
+无新发现；[原夹具讨论](https://github.com/onlyfeng/MiMo-Code/pull/167#discussion_r4325368739)
+已由该提交修正，验收时 UI 仍为 outdated、未标记 resolved，未代发回复或更改讨论状态。
+
+补充本地证据分开保留，不相加为唯一用例总数：
+
+- S05 四个 render/empty-part/notification 文件为 42 pass、0 fail、
+  84 assertions；除完整函数块移动及恢复的两行注释外，既有内容逐字不变。
+  继承 cron 修正后的最终 PR head `aead9534ea96710ff35e73e4da730343cc6ba590`
+  再以 Bun 1.3.14 运行同组，42 pass、0 fail、84 assertions（7.74 秒）。
+- compat 继承的 queue/lifecycle 八文件为 106 pass、0 fail、
+  341 assertions，CLI typecheck exit 0。另一个 25 文件本地矩阵为
+  203 pass、9 fail、1,513 assertions（782 秒），未记为全绿。
+- 对上述九个本地失败项以 CI 同版本 Bun 1.3.14 定向复核，结果为
+  5 pass、4 个时限相关失败、73 filtered、72 assertions（142.93 秒）。
+  宿主同时有外部编译负载，但这些日志不能单独确认负载为根因，
+  也不能宣称本地宽矩阵已通过；完整集成验收以下列远端运行为准。
+
+### 指定收敛的最终源码验收
+
+| 分支与源码 SHA | lint | typecheck | test |
+| --- | --- | --- | --- |
+| main `5e366d0923c5570c5097ae1a9c5deffb86e5a79d` | [39431260956](https://github.com/onlyfeng/MiMo-Code/actions/runs/39431260956) | [39431261219](https://github.com/onlyfeng/MiMo-Code/actions/runs/39431261219) | [39431261130](https://github.com/onlyfeng/MiMo-Code/actions/runs/39431261130) |
+| dev/compat `bef8617265af72c8dc457498f6c14f504391ba38` | [39431822724](https://github.com/onlyfeng/MiMo-Code/actions/runs/39431822724) | [39431822814](https://github.com/onlyfeng/MiMo-Code/actions/runs/39431822814) | [39431822872](https://github.com/onlyfeng/MiMo-Code/actions/runs/39431822872) |
+
+六个 workflow 均 completed/success，headSha 与各行完整 SHA 一致。
+main 九个适用 test jobs 成功，Windows 按原 workflow 跳过；
+compat 十个 test jobs 全部成功，包括 Windows runtime。
+这五项收敛及 cron 生命周期修正均不修改 lockfile、migration、公开
+HTTP schema 或 SDK 输入，因此没有额外 SDK 生成改动。
+
+### 文档提交时的发布状态：pending
+
+上表只验收两支源码快照。此文档提交在记录时尚未合入 main，也尚未传播
+到 compat，最终文档 tips 的远端一致性、docs-only 等价和祖先链验收均待执行；
+不能将源码 CI 的成功直接表述为本提交及最终发布 tips 已验收。
+共享 FD/FC/report 仍由 main 维护，compat 继承相同内容；compat 专属布局
+记录留在 DC registry，十一项 DC owner 均保留。
+
+合并和传播后，执行回报须列出实际 main/compat 完整 tip SHA，以及两条
+`git diff --quiet <green-source> <final-tip> -- . ':(exclude)docs'` 的退出结果，
+分别以本表的 `5e366d09` / `bef86172` 为源码祖先；另记录远端 tip 一致、
+`4e58a80184794d52d913d4b886b96f496f2c7020 → main → dev/compat` 祖先链及
+四份共享文档一致性的实际结果。此处 upstream 是选定基线，不是新获取的 tip。
+
+最终执行回报承担发布后的验收记录，不通过再新增一个自指的文档提交来
+宣称验收该提交自身。临时资源清理也待执行：仅处理本次创建且已集成、
+无用户工作的资源，保留原 `.omo/` 和无关文档分支。
