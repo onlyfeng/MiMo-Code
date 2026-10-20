@@ -224,13 +224,20 @@ compat 十个 test jobs 全部成功，包括 Windows runtime。
 这五项收敛及 cron 生命周期修正均不修改 lockfile、migration、公开
 HTTP schema 或 SDK 输入，因此没有额外 SDK 生成改动。
 
-共享 FD/FC/report 仍由 main 维护，compat 逐字继承；compat 专属布局记录
-留在 DC registry，十一项 DC owner 均保留。最后只提交 `docs/` 记录时，
-对两支分别执行 `git diff --quiet <green-source> <final-tip> -- . ':(exclude)docs'`，
-证明 docs 之外 tree 与本表精确 SHA 完全相同，并检查
-`4e58a80184794d52d913d4b886b96f496f2c7020 → main → dev/compat` 祖先链、
-远端 tips 和四份共享文档一致性。此处的 upstream 是本轮选定基线，
-不是重新获取的最新 upstream。
+### 文档提交时的发布状态：pending
 
-最终执行回报记录 docs tips、实际清理结果和保留项；只清理本次创建且
-已集成、无用户工作的临时资源，保留原 `.omo/` 和无关文档分支。
+上表只验收两支源码快照。此文档提交在记录时尚未合入 main，也尚未传播
+到 compat，最终文档 tips 的远端一致性、docs-only 等价和祖先链验收均待执行；
+不能将源码 CI 的成功直接表述为本提交及最终发布 tips 已验收。
+共享 FD/FC/report 仍由 main 维护，compat 继承相同内容；compat 专属布局
+记录留在 DC registry，十一项 DC owner 均保留。
+
+合并和传播后，执行回报须列出实际 main/compat 完整 tip SHA，以及两条
+`git diff --quiet <green-source> <final-tip> -- . ':(exclude)docs'` 的退出结果，
+分别以本表的 `5e366d09` / `bef86172` 为源码祖先；另记录远端 tip 一致、
+`4e58a80184794d52d913d4b886b96f496f2c7020 → main → dev/compat` 祖先链及
+四份共享文档一致性的实际结果。此处 upstream 是选定基线，不是新获取的 tip。
+
+最终执行回报承担发布后的验收记录，不通过再新增一个自指的文档提交来
+宣称验收该提交自身。临时资源清理也待执行：仅处理本次创建且已集成、
+无用户工作的资源，保留原 `.omo/` 和无关文档分支。
