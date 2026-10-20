@@ -1,16 +1,16 @@
-# 2026-10-20 upstream synchronization through 113e3192
+# 2026-10-20 upstream synchronization through 4e58a801
 
 ## 范围与不可变基线
 
-本轮为完整同步，流向为只读 `upstream/main` → fork `main` → fork `dev/compat`。选定审计范围为 `bf0563ddc201b44e3f59c35b18dba17c4386564d..113e3192568a342076e68c70d55b99bd67869dcf`：11 个提交（10 个非 merge 提交），176 个变更路径、16,826 行增加、3,727 行删除。起始 fork tips 为 `main=aaa53f4e56136ee1bf845b02ff080716ea2a0c66`、`dev/compat=97fce708b8dc9353d274b83f718e1a3c7d27416a`。
+本轮为完整同步，流向为只读 `upstream/main` → fork `main` → fork `dev/compat`。选定审计范围为 `bf0563ddc201b44e3f59c35b18dba17c4386564d..4e58a80184794d52d913d4b886b96f496f2c7020`：12 个提交（11 个非 merge 提交），178 个变更路径、18,008 行增加、3,875 行删除。起始 fork tips 为 `main=aaa53f4e56136ee1bf845b02ff080716ea2a0c66`、`dev/compat=97fce708b8dc9353d274b83f718e1a3c7d27416a`。
 
-共享 runtime 与已改 MCP prompt 的行为提交为 `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`；测试适配提交为 `aa625ef0bf685b58ce4644f7700c7f4cc53d462c`，产品源码与前者相同。下列本地验证与发布证明分开记录；compat 传播、远端 tip、精确 SHA CI 和重新刷新后的 upstream 选择仍待收尾补证，当前记录只覆盖上述选定 upstream。
+首批 runtime 与 bundled MCP prompt 提交为 `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`，测试适配为 `aa625ef0bf685b58ce4644f7700c7f4cc53d462c`。实时补审后的当前 runtime/tests 提交为 `b18a1207cd66c312216698c175441b8c49778907`，bundled prompt 文件没有新增修改。下列本地验证与发布证明分开记录；compat 传播、远端 tip、精确 SHA CI 和重新刷新后的 upstream 选择仍待收尾补证，当前记录只覆盖上述选定 upstream。
 
 操作使用独立临时分支和工作树，保留原工作区已有修改及无关资源。文档路径示例统一使用 `/tmp/example`；它不是实际操作路径。最终资源清单、原工作区状态及本轮临时资源清理证明仍为 pending。
 
-## Capability inventory (N=12)
+## Capability inventory (N=13)
 
-下表是唯一的最终处置表，每项能力恰好一行。共享 owner 均在 `main`，compat 只保留已有 DC overlay；没有把 compat 独有能力提升为共享能力。
+下表是唯一的处置表，每项能力恰好一行；本次实时补审仍在收尾。共享 owner 均在 `main`，compat 只保留已有 DC overlay；没有把 compat 独有能力提升为共享能力。
 
 | ID | 选定行为、生产者与 owner | main 结果 | dev/compat 结果 | 决定性路径与测试 |
 | --- | --- | --- | --- | --- |
@@ -27,7 +27,9 @@
 | C11 | Login tips 根据已计算 provider 的 credentials 判断 | 采用。检查 key、env source 或 options.apiKey，provider存在本身不等于具备凭据。 | 待传播；provider路由及 DC-PROVIDER-001 不变。 | home/tips-view；tips-view。 |
 | C12 | npm trusted publish permission、FDS canary、完整 tarball preflight；FC-012 | 采用。发布前检查 SDK/plugin/CLI tarball身份/版本及 FDS signed write；保留 mandatory GH_REPO/fork routing。未调用 trust、preflight上传或任何发布 stage。 | 待传播；共享发布治理保持，不因继承 workflow 获得 upstream 发布授权。 | `.github/workflows/release.yml`、`script/release.ts`、registry sync/launcher；root script/release.test.ts、launcher tests。 |
 
-结果行数：12。Active owners 保持 9 FD、17 FC；没有 owner 退役或重新编号。表中 `src/` 与 `test/` 路径均相对于 `packages/cli/`，明确标为 root 的脚本除外。
+| C13 | Deferred MCP readiness 与 request-visible server/tool outcomes；FD-005、FD-006、FD-009、FC-004 | 采用并适配实时新增 `4e58a801`：non-blocking readiness、entry/server 最新状态、恢复/移除/工具集回归、共享 reminder 预算与安全 search-miss diagnostics；保留 live/capture identity 和 frozen authority。 | 待传播；需保 current-turn caps、active mask/hash、native wire 和 frozen membership，保持 DC-NET-002 与 pending-import lifecycle。 | `src/mcp/index.ts`、`src/session/{prompt,llm-request-prefix}.ts`、`src/tool/mcp-tool-search.ts`；readiness/prompt/search/lifecycle/frozen-prefix suites。 |
+
+结果行数：13。Active owners 保持 9 FD、17 FC；没有 owner 退役或重新编号。表中 `src/` 与 `test/` 路径均相对于 `packages/cli/`，明确标为 root 的脚本除外。
 
 ## 保留与替换的合同
 
@@ -41,7 +43,7 @@ checkpoint、post-hook、goal judge、fork/history 的消费视图需要隐藏�
 
 ## 已核查的本地验证
 
-这些是本轮执行过程中已查看完成的子矩阵；并非所有数字均来自同一最终源树，不能相加为一个全量通过数。最终 runtime 的收口矩阵单独列出；compat 仍需独立验证。默认路径清除 ambient `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_MCP_TOOL_SEARCH`、`MIMOCODE_CODEX_MODE`，保留 package-owned preload；opt-in用例只在自身scope启用selector。CLI测试从 `packages/cli` 执行，root script测试从repo root执行；依赖只用 `bun ci`。
+下表主要记录首批 `113e3192` 的源码/测试快照；新增 C13 的定向验证单独记录。它们是本轮执行过程中已查看完成的子矩阵；并非所有数字均来自同一最终源树，不能相加为一个全量通过数。最终 runtime 的收口矩阵单独列出；compat 仍需独立验证。默认路径清除 ambient `MIMOCODE_EXPERIMENTAL`、`MIMOCODE_MCP_TOOL_SEARCH`、`MIMOCODE_CODEX_MODE`，保留 package-owned preload；opt-in用例只在自身scope启用selector。CLI测试从 `packages/cli` 执行，root script测试从repo root执行；依赖只用 `bun ci`。
 
 | 验证范围 | 实际已见结果 | 证据记录标识与界限 |
 | --- | --- | --- |
@@ -81,10 +83,18 @@ env -u MIMOCODE_EXPERIMENTAL -u MIMOCODE_MCP_TOOL_SEARCH -u MIMOCODE_CODEX_MODE 
 
 修正后的本地整组结果：四文件 HTTP/Actor recovery 23/23、waiter 32/32、execution ownership 与 Actor tool 42/42、Actor exec 11/11、execution cancellation 3/3、OpenAPI 4/4、prefix invariant 1/1、overflow/processor 32 pass 与两个原有 skip，均零失败。owning-package typecheck 通过；产品源码与 SDK 没有额外修改。下一最终 SHA 仍须获得独立 CI，首轮失败没有通过同 SHA 重跑抹去。
 
+## 实时 upstream 推进补审
+
+初次选定 `113e3192568a342076e68c70d55b99bd67869dcf` 后，发布期间 live `upstream/main` 推进至 `4e58a80184794d52d913d4b886b96f496f2c7020`（单个 readiness-hint 提交，七个路径）。这不是冻结基线；因此范围扩大为上述完整区间并新增 C13，不把对旧 SHA 的 CI 当作当前 upstream 对齐证明。前批 main `f6632fb8085b4005df4abeb36933b30ee9d74811` 和 compat `00f40d329cf26e19dbaff131158494aec8b19e82` 的发布与 CI 仅属于中间快照。main 的 lint/typecheck/test 已全部成功，分别绑定运行 `39409072280`、`39409071997`、`39409071967`；compat 的 lint/typecheck/test（`39409350318`、`39409350296`、`39409350305`）也全部成功，包括 Windows runtime。两支旧 SHA 的成功不替代 C13 后的新 SHA 验收。
+
+新增 readiness 与授权 catalog 分开：连接状态不推断调用权限；展示工具须与当前 search/dispatch catalog 取交集。entry 和 server outcomes 共用预算，只在 user-turn boundary 追加真实 reminder。按最新语义状态比较，支持失败后恢复、缩小后恢复、disabled/removed；错误文案变化不重复通知。没有真实 reminder、search/use call 或 legacy announcement 时，silent auto 允许重新判定 deferral；不为缓存选择持久化辅助 user part。这更新了 C06 的 silent-auto 边界，固定 dispatcher 和 frozen implementation authority 保持。当前 main 新增合并已完成；compat 传播与最终 CI 仍在进行。
+
+C13 main 稳定提交 `b18a1207cd66c312216698c175441b8c49778907`：MCP/prompt/prefix 专项 95 pass、0 fail（587 assertions，三个文件）；工具完整文件 34/34、prefix 完整文件 12/12、Actor 完整文件 31/31、MCP lifecycle/Claude pending 34/34；owning-package typecheck exit 0；root lint 为 3,639 warnings、0 errors。新增真实 malformed-history 回归覆盖十类无效 metadata，忽略坏记录但保留先前有效状态；live/capture 共用 deferral evidence helper。没有 lockfile、manifest、公开 HTTP schema 或 SDK 输入变化，因此无需重复依赖安装和 SDK 生成。最终完整 CI 必须绑定 C13 后的新提交。
+
 ## 最终验收与发布：pending
 
-- 最终 runtime 的 owning-package typecheck、lint、完整 prompt 与 queue 收口矩阵已通过，结果见上表。早轮 workflow Reference/typecheck 问题已修正；SDK最终重生成 exit 0 且 SDK diff 为空；bun.lock 无本地安装变更。
-- `main` runtime commit：`1b2bb10c930997c6c58da89fe7720e2e1c71db5d`；测试快照：`aa625ef0bf685b58ce4644f7700c7f4cc53d462c`；最终main/compat tips及compat验证 pending。共享registry在compat应保持逐字一致，DC差异由compat登记拥有。
+- 首批 runtime 的 owning-package typecheck、lint、完整 prompt 与 queue 收口矩阵已通过，C13 的追加定向验证见补审节。早轮 workflow Reference/typecheck 问题已修正；SDK最终重生成 exit 0 且 SDK diff 为空；bun.lock 无本地安装变更。
+- 当前 `main` runtime/tests：`b18a1207cd66c312216698c175441b8c49778907`；首批 runtime 与测试快照保留于上文；最终main/compat tips及compat验证 pending。共享registry在compat应保持逐字一致，DC差异由compat登记拥有。
 - 最终远端branch-tip相等、选定upstream→main→dev/compat ancestry、各精确最终SHA的lint/typecheck/test CI URL/headSha/conclusion均 pending。只改docs导致workflow跳过时，需证明所引用已绿ancestor在docs之外tree一致。
 - 发布前若新刷upstream推进，须扩大清单审查并完成后续传播/验证；此文当前不能宣称跟随未审计的新upstream tip。
 - 最终资源清理与原工作区保留证明 pending。未验证的Windows/远端执行和实际npm/FDS发布不由本地测试结果推断。

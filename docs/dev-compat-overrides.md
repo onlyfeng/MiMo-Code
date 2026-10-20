@@ -11,10 +11,10 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eleven DC owners remain compat-owned. No override is retired or promoted to shared `main`.
-- Last reviewed: 2026-10-20, full upstream synchronization over `bf0563ddc201b44e3f59c35b18dba17c4386564d..113e3192568a342076e68c70d55b99bd67869dcf`.
-- Starting compat: `97fce708b8dc9353d274b83f718e1a3c7d27416a`; inherited main runtime: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`; reviewed compat runtime/tests: `ac2b653cde97fb3046e6510ff4e5183b59186bd5`. Integrated main review/test tip: `f6632fb8085b4005df4abeb36933b30ee9d74811`. Final publication evidence is recorded in [the synchronization report](upstream-sync-2026-10-20.md).
-- Scope: all twelve shared capability rows C01–C12, including cleanly merged DC surfaces and the newer DC-ACTOR-002, DC-PROVIDER-001, DC-WEBSEARCH-001 and DC-WEBFETCH-001 entries. The prior eight-owner and 120-path records below are historical snapshots.
-- Resolution: adopt the shared durable queue, receipt lifecycle, actor waits, execution ownership, fixed `mcp_tool_use` dispatcher, empty-output retries, thinking-signature fix and UI/release changes while preserving the eleven contracts below. Schema generation uses the resolved compat source, including checkpoint coverage and model selection.
+- Last reviewed: 2026-10-20, full upstream synchronization over `bf0563ddc201b44e3f59c35b18dba17c4386564d..4e58a80184794d52d913d4b886b96f496f2c7020`.
+- Starting compat: `97fce708b8dc9353d274b83f718e1a3c7d27416a`; initial inherited main runtime: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d`; initial reviewed compat runtime/tests: `ac2b653cde97fb3046e6510ff4e5183b59186bd5`. The completed intermediate compat tip `00f40d329cf26e19dbaff131158494aec8b19e82` integrates main `f6632fb8085b4005df4abeb36933b30ee9d74811`. C13 inherits main runtime `b18a1207cd66c312216698c175441b8c49778907` at compat runtime/tests `a10363fe376ad2e4d405c27b6d84128918f6c1e3`, with main review `3d9527fd667de159110f594ea79c25dfbf2c5401`; final publication references are recorded in [the synchronization report](upstream-sync-2026-10-20.md).
+- Scope: all thirteen shared capability rows C01–C13, including cleanly merged DC surfaces and the newer DC-ACTOR-002, DC-PROVIDER-001, DC-WEBSEARCH-001 and DC-WEBFETCH-001 entries. The prior eight-owner and 120-path records below are historical snapshots.
+- Resolution: adopt the shared durable queue, receipt lifecycle, actor waits, execution ownership, fixed `mcp_tool_use` dispatcher, readiness hints, empty-output retries, thinking-signature fix and UI/release changes while preserving the eleven contracts below. Silent auto-mode without a real reminder/call may re-evaluate; no auxiliary cache-mode state is persisted. Schema generation uses the resolved compat source, including checkpoint coverage and model selection.
 - Validation: default-path commands remove ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and `MIMOCODE_CODEX_MODE`, retaining package preload and each test's scoped opt-ins. `bun ci` completes without a lockfile change; SDK regeneration exits 0 with no additional generated diff, CLI/SDK typechecks pass, and lint reports zero errors. The completed local groups and incomplete full-file runs are distinguished below; exact-SHA CI remains the publication gate.
 - Shared ownership: FD/FC registries and the shared report inherit main unchanged; only this compat registry owns the overlay decisions below.
 
@@ -23,18 +23,44 @@ registry/history commit does not advance either behavior reference below.
 | Owner | Incoming relationship and retained contract | Decisive surfaces and validation |
 | --- | --- | --- |
 | DC-NET-001 | Queue and hosted-search changes do not replace explicit approval for private-network WebFetch. Private destinations remain direct-only under hosted fetch. | `tool/webfetch.ts`, hosted destination routing; WebFetch and hosted-fetch default/permission/private-bypass tests. |
-| DC-NET-002 | MCP catalog deferral changes wire tool exposure, not remote HTTP(S) admission. Retain the RFC1918 reachability guarantee without adding a production fork. | MCP lifecycle suite, including the private-address admission sentinel; this is not a new real-private-subnet transport claim. |
+| DC-NET-002 | MCP catalog deferral and readiness reporting change discovery, not remote HTTP(S) admission or connection waits. Retain the RFC1918 reachability guarantee without adding a production fork. | MCP lifecycle suite, including the private-address admission sentinel; this is not a new real-private-subnet transport claim. |
 | DC-PLATFORM-001 | Inherit exact instance/workspace identity and fixed cwd while keeping restricted-network and Windows ripgrep/archive fallbacks. | `file/ripgrep.ts`, `util/archive.ts`; ripgrep/archive tests. Windows runtime remains an independently executed platform check. |
 | DC-MODEL-001 | New receipt scheduling and empty-output retry policy retain per-agent MaxMode, final-step bounds, title isolation and main-only status ownership. | Agent config, `session/max-mode.ts`, prompt model selection; MaxMode/retry-status suites and full prompt matrix. |
-| DC-CONTEXT-001 | Queue-rendered input replaces raw inbox draining. Preserve UTF-8 caps, current-turn preflight, legacy active masks/toolsHash, checkpoint coverage and chronology; noReply storage cannot reset an admitted request's recovery budget. | `inbox/render.ts`, `message-v2.ts`, prefix/compaction/preflight, TUI coverage and HTTP schema; message/context/catalog, prefix, recovery-budget, coverage/OpenAPI and full prompt suites. |
-| DC-ACTOR-001 | Shared actor wait/cancel and durable notifications retain frozen full-context membership/system/cwd/turnContext, bounded recovery and refusal of an unrecoverable static prefix. Notification rendering retains its cap and closed wrapper. | `actor/spawn.ts`, `tool/actor.ts`, checkpoint/prompt capture; actor/inbox/tool ownership, frozen-prefix and full-context compaction tests. |
+| DC-CONTEXT-001 | Queue-rendered input replaces raw inbox draining. Preserve UTF-8 caps, current-turn preflight, legacy active masks/toolsHash, checkpoint coverage and chronology; noReply storage cannot reset an admitted request's recovery budget. C13 real reminders enter the same current-user conversion and preflight while readiness stays outside schema hashes. | `inbox/render.ts`, `message-v2.ts`, prefix/compaction/preflight, TUI coverage and HTTP schema; message/context/catalog, prefix, recovery-budget, coverage/OpenAPI and prompt suites. |
+| DC-ACTOR-001 | Shared actor wait/cancel and durable notifications retain frozen full-context membership/system/cwd/turnContext, bounded recovery and refusal of an unrecoverable static prefix. Notification rendering retains its cap and closed wrapper. Readiness lists only names surviving the frozen request catalog; it cannot expand the executable pool. | `actor/spawn.ts`, `tool/actor.ts`, checkpoint/prompt capture; actor/inbox/tool ownership, frozen-prefix and full-context compaction tests. |
 | DC-ACTOR-002 | New background-handle and wait behavior retains provider-aware model/variant validation, explicit precedence, no accidental parent inheritance and actor-lifetime persistence. | Actor tool schema/models listing and spawn-to-prompt propagation; variant-guidance, spawn, tool-model and ownership tests. |
 | DC-TUI-001 | Inherit actor send/footer/login UI changes while retaining request provider/model/variant truth and title locale. Receipt acceptance does not alter the preview or selected variant store. | Prompt/subagent metadata, server model-selection endpoint; model metadata/preview, model-selection and checkpoint-coverage synchronization tests. |
 | DC-PROVIDER-001 | Thinking-signature preservation does not replace SDK-based Responses routing or declared reasoning capability. Retain custom xAI routing and explicit OpenAI `forceReasoning` opt-out. | `provider/provider.ts`, `provider/transform.ts`; provider, transform and real-SDK Responses reasoning serialization suites. |
-| DC-WEBSEARCH-001 | Fixed MCP dispatch and sticky catalog coexist with opt-in provider-native search. Preserve native permission gating, search-specific in-turn fallback, replay downgrade, raw server output and identical `LLM.wireTools` preflight. | `llm.ts`, prompt preflight, processor/transform, websearch chain and TUI native-search display; native-search wire, replay, fallback, registry and provider tests. |
+| DC-WEBSEARCH-001 | Fixed MCP dispatch, evidence-based sticky deferral and readiness hints coexist with opt-in provider-native search. Preserve native permission gating, search-specific in-turn fallback, replay downgrade, raw server output and identical `LLM.wireTools` preflight. | `llm.ts`, prompt preflight, processor/transform, websearch chain and TUI native-search display; native-search wire, replay, fallback, registry and provider tests. |
 | DC-WEBFETCH-001 | Main has no hosted-fetch replacement. Keep direct-first default, private-target bypass, requested-URL proof, caller timeout, permission rejection propagation and chained route errors. | Hosted fetch/destination/config/SDK surfaces; WebFetch hosted/destination/direct tests. |
 
-### Local validation and publication boundary
+### C13 readiness propagation
+
+The live increment `113e3192..4e58a801` adds the shared readiness amendment
+without introducing a DC owner. Live resolution and prefix capture use
+`hasMcpDeferralEvidence`: new `mcpReminder` parts, actual search/use calls and
+legacy `mcpDeferredTools` announcements retain deferral. Without real evidence,
+silent auto may choose a different mode when tools arrive. Capture must retain
+`currentUserID` and both `inheritedMessages` and `currentTurnMessages`; it must
+not manufacture a bookkeeping part to stabilize that choice.
+
+Connection status comes from the non-blocking MCP getter. Connected names and
+descriptions are intersected with the existing request-authorized catalog after
+permission, request-disable, agent/frozen membership, executable/schema and
+local-collision checks. The active mask still selects wire schemas separately;
+readiness neither grants hidden implementations nor changes `toolsHash` or
+legacy `active_tools`. The actual native-search wire subset remains the input
+to compat preflight. Real entry/server reminders share the upstream token
+budget and remain subject to the existing current-turn and request-window
+checks; earlier sent history is not rewritten. Invalid historical reminder
+metadata is ignored by the shared parser rather than becoming a compat fork.
+
+No lockfile, manifest, public schema or SDK input changes in C13. SDK files are
+unchanged against the completed intermediate compat tip; no regeneration is
+needed. The C13 affected matrices and final CLI/lint checks are recorded once
+the resolved candidate completes; new exact-SHA CI remains required.
+
+### Initial C01–C12 validation and publication boundary
 
 The groups below overlap and are not an aggregate test count. All use the
 three-selector default environment described above and the package preload.
@@ -73,7 +99,11 @@ process isolation and 120-second test budget.
 SDK regeneration and CLI/SDK typechecks pass; repository lint reports zero
 errors and 3720 warnings. Remote-tip CI/ancestry evidence is recorded at
 publication. No local subset or stopped process substitutes for
-that final gate.
+that final gate. This intermediate phase subsequently passed all ten jobs of
+[the exact-tip test run](https://github.com/onlyfeng/MiMo-Code/actions/runs/39409350305)
+for `00f40d329cf26e19dbaff131158494aec8b19e82`, including all four shards,
+Windows runtime, recovery and MCP isolation jobs. That successful older tip
+does not substitute for C13's final branch-tip validation.
 
 ## Previous review record — 2026-10-16
 
@@ -2447,3 +2477,7 @@ files remain byte-identical to the accepted main correction.
   with direct-first routing and private-target protection, or when the user
   drops the `webfetch` config. If propagated to `main`, move the contract to
   the shared registry.
+
+### C13 stable candidate verification
+
+Runtime/tests `a10363fe376ad2e4d405c27b6d84128918f6c1e3` passes owning-package typecheck and root lint (3,724 warnings, zero errors). Frozen dispatcher/capture, capped resources, pinned full-context/compaction masks and actual reminder evidence pass ten critical cases; native-search wire integration passes 39 cases, Actor/send passes 55. These overlapping subsets are not a combined total. The full MCP/prompt/prefix subset continues independently; exact-SHA CI, including Windows, remains required after publication. No SDK, lockfile or public schema changed in C13; the 52 production overlay paths remain the same set as at the initial baseline.

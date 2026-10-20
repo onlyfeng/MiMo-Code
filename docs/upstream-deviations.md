@@ -15,9 +15,9 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-10-20
-- Upstream: `113e3192568a342076e68c70d55b99bd67869dcf`
+- Upstream: `4e58a80184794d52d913d4b886b96f496f2c7020`
 - Prior reviewed upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
-- Main behavior (runtime/tests): `aa625ef0bf685b58ce4644f7700c7f4cc53d462c`
+- Main behavior (runtime/tests): `b18a1207cd66c312216698c175441b8c49778907`
 - Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
 - Prior fork `main` tip: `aaa53f4e56136ee1bf845b02ff080716ea2a0c66`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
@@ -29,7 +29,7 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-20 full sync through `113e3192`](upstream-sync-2026-10-20.md), twelve capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. Final branch propagation, validation and publication evidence remain pending in the linked record.
+Latest reviewed synchronization: [2026-10-20 full sync through `4e58a801`](upstream-sync-2026-10-20.md), thirteen capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. Final branch propagation, validation and publication evidence remain pending in the linked record.
 
 Previous synchronization: [2026-10-16 sync through `bf0563dd`](upstream-sync-2026-10-16.md), one capability. Adopt verbatim media replay after overflow compaction into FC-001's atomic replay commit, extend FC-009's attachment envelope with file-URL local paths and stable `[Image: <name>]`/`[PDF: <name>]` marker identity, keep the caller `system` on attachment-only messages, and adopt unique `mimo-paste-*` paste names.
 
@@ -439,6 +439,8 @@ not change their implementation. The preceding review is retained in the
 - Upstream relationship: the fork tracks upstream on this surface.
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
+
+- 2026-10-20 live catch-up through `4e58a801`: readiness is a non-blocking connection snapshot, not an authorization catalog. Live and prefix capture share actual reminder/search/use evidence, including legacy announcements. Silent `auto` may re-evaluate without that evidence; no auxiliary user-history marker preserves a cache choice. Entry and latest per-server outcomes share one budget and show only request-visible tools. Keep resolved harness identity, frozen membership/schema gates, output/diagnostic escaping and the fixed dispatcher. This narrows the initial empty-catalog sticky description below.
 
 - 2026-10-20 synchronization: adopt `cd72e855`'s fixed `mcp_tool_use` dispatcher, sticky deferral (including an empty catalog) and turn-boundary catalog announcements. Both live resolution and `buildLLMRequestPrefix` use the same resolved harness and history evidence; fetched schemas no longer enter the provider-facing active tool set. Search is a schema/context optimization, not authorization. Keep MCP output tag neutralization and full request/frozen schema gates. New snapshots record the fixed dispatcher plus the authorized hidden implementation pool, with empty loaded membership. Legacy snapshots without the dispatcher may use only the captured active/loaded MCP names intersected with frozen membership and matching live schemas. FD-006 retains authorized hidden Codex direct execution. Evidence: `test/session/llm-request-prefix.test.ts`, MCP cases in `test/session/prompt-effect.test.ts`, `test/session/codex-compact.test.ts` and `test/tool/mcp-tool-search.test.ts`.
 
