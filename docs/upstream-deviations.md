@@ -15,12 +15,12 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-10-20
-- Upstream: `4e58a80184794d52d913d4b886b96f496f2c7020`
-- Prior reviewed upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
-- Main behavior (runtime/tests): `92fee50dd618ed25f212aba0a17f3334635451c8` (specified post-sync convergence and instance-owned cron lifecycle correction)
-- Inherited compat behavior: `bef8617265af72c8dc457498f6c14f504391ba38` (shared convergence and cron lifecycle correction inherited; compat render layout aligned)
+- Upstream: `c1527b9185bba6ea217b265e26bb17870f371461`
+- Prior reviewed upstream: `4e58a80184794d52d913d4b886b96f496f2c7020`
+- Main behavior (runtime/tests): `03b3dfffa9a61d368ec67a550c3481aad911cbad` (checkpoint capture defect containment, Deferred snapshot drain accounting and writer-registration test synchronization)
+- Prior inherited compat behavior: `bef8617265af72c8dc457498f6c14f504391ba38` (shared convergence and cron lifecycle correction inherited; compat render layout aligned)
 - Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
-- Prior fork `main` tip: `aaa53f4e56136ee1bf845b02ff080716ea2a0c66`
+- Prior fork `main` tip: `f7b7520fdac83f450f52bb3c35842ee853ee1b44`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-20 full sync through `4e58a801`](upstream-sync-2026-10-20.md), thirteen capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. All thirteen decisions have propagated into compat, preserving eleven DC owners and fifty-two production overlay paths. The linked record retains the failed compat OpenAPI CI and the successful corrected-source lint/typecheck/test runs on both branches, including compat Windows. Final docs-only descendant equivalence and scoped cleanup are checked in the execution receipt.
+Latest reviewed synchronization: [2026-10-20 full sync through `c1527b91`](upstream-sync-2026-10-20-c1527b91.md), three capabilities. Contain non-interrupt prefix-capture defects around the complete frozen capture, count settled writer Deferreds from the drain snapshot, and retain the fork's scoped non-empty capture fixture. FD-009 still rejects empty captures before child creation; no shared owner retires. Compat propagation and exact-SHA publication gates remain pending in the linked execution record.
+
+Previous synchronization: [2026-10-20 full sync through `4e58a801`](upstream-sync-2026-10-20.md), thirteen capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. All thirteen decisions have propagated into compat, preserving eleven DC owners and fifty-two production overlay paths. The linked record retains the failed compat OpenAPI CI and the successful corrected-source lint/typecheck/test runs on both branches, including compat Windows. Final docs-only descendant equivalence and scoped cleanup are checked in the execution receipt.
 
 Previous synchronization: [2026-10-16 sync through `bf0563dd`](upstream-sync-2026-10-16.md), one capability. Adopt verbatim media replay after overflow compaction into FC-001's atomic replay commit, extend FC-009's attachment envelope with file-URL local paths and stable `[Image: <name>]`/`[PDF: <name>]` marker identity, keep the caller `system` on attachment-only messages, and adopt unique `mimo-paste-*` paste names.
 
