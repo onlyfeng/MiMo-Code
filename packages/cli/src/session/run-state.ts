@@ -49,8 +49,6 @@ export interface Interface {
     agentID: string,
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
-    joinRunning?: boolean,
-    cancelEpoch?: number,
   ) => Effect.Effect<MessageV2.WithParts>
   readonly startRunning: (
     sessionID: SessionID,
@@ -350,8 +348,6 @@ export const layer = Layer.effect(
       agentID: string,
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
-      joinRunning = false,
-      cancelEpoch?: number,
     ) {
       const check = yield* ownership(sessionID)
       const current = yield* runner(sessionID, agentID)
@@ -359,8 +355,6 @@ export const layer = Layer.effect(
         .ensureRunning(
           check.pipe(Effect.andThen(withOrphanSweep(sessionID, agentID, work))),
           interruptFor(agentID, onInterrupt),
-          joinRunning,
-          cancelEpoch == null ? undefined : () => CancelEpoch.current(sessionID) === cancelEpoch,
           check,
         )
         .pipe(

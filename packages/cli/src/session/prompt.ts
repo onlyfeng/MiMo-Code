@@ -4339,7 +4339,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           return claim ? { runId, receipts: claim.receipts, frontier: claim.claimFrontier } satisfies ClaimOwner : undefined
         }),
         (owner) => runLoop(input.sessionID, lane.agentID, input.titleLocale,
-          undefined, undefined, undefined, undefined, false, false, input.source ?? "user", undefined, false, owner?.frontier, owner),
+          undefined, undefined, undefined, undefined, false, input.source ?? "user", undefined, false, owner?.frontier, owner),
         (owner, exit) => owner ? settleClaims(lane, owner, exit) : Effect.void,
       ).pipe(Effect.ensuring(Effect.sync(() => {
         if (!prepared.receiptId) return
@@ -4529,7 +4529,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       recoveryParentID?: MessageID,
       resumeFrom?: MessageID,
       modelOverride?: { providerID: string; modelID: string },
-      deferInbox?: boolean,
       userRedispatch?: boolean,
       turnSource?: "user" | "spawn" | "hook",
       parentUserID?: MessageID,
@@ -4544,7 +4543,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       recoveryParentID?: MessageID,
       resumeFrom?: MessageID,
       modelOverride?: { providerID: string; modelID: string },
-      deferInbox?: boolean,
       userRedispatch = false,
       turnSource?: "user" | "spawn" | "hook",
       parentUserID?: MessageID,
@@ -4865,7 +4863,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   // Diagnostic counter only — does not cap re-hint. Product: later dirty
                   // USER turns may inject again; hook/spawn never re-enter.
                   recordHintOutcome(sessionID, { dirty: true, injected: true, consecutiveHints })
-                  const result = yield* runLoop(sessionID, resolvedAgentID, titleLocale, undefined, undefined, undefined, undefined, false, false, "hook")
+                  const result = yield* runLoop(sessionID, resolvedAgentID, titleLocale, undefined, undefined, undefined, undefined, false, "hook")
                   return result
                 }).pipe(Effect.catch(() => Effect.succeed(undefined as never)))
                 yield* state
@@ -5634,7 +5632,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // design would see the parent's full conversation here and drift
           // off-task. agentID === "main" => main agent slice (agent_id = 'main'
           // in DB), agentID === "explore-1" => only explore-1's slice.
-          if (!recovery && !deferInbox && inboxControllerRef.current) {
+          if (!recovery && inboxControllerRef.current) {
             const controller = inboxControllerRef.current
             const lane = { sessionID, agentID: resolvedAgentID }
             const extended = claimOwner.receipts.length === 0
@@ -7312,7 +7310,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     const loop: Interface["loop"] = (input) => executeLoop(input, Effect.succeed({ work: runLoop(
       input.sessionID, input.agentID, input.titleLocale,
-      undefined, undefined, undefined, undefined, false, false, input.source,
+      undefined, undefined, undefined, undefined, false, input.source,
     ) }))
 
     const leaseGuard = Effect.fn("SessionPrompt.leaseGuard")(function* (sessionID: SessionID) {
@@ -7883,7 +7881,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // resume selects the latest candidate itself.
               recovered.redispatch ? undefined : recovered.id,
               input.model,
-              undefined,
               recovered.redispatch,
               recovered.redispatch ? "user" : "hook",
               recovered.redispatch ? recovered.parentID : undefined,
@@ -8119,7 +8116,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 const receipt = claim.receipts.find((receipt) => receiptPrompts.get(receipt.id) === prompt)
                 if (receipt) RunApproval.register(approval, receipt.inputMessageID)
                 return yield* runLoop(lane.sessionID, lane.agentID, prompt?.titleLocale,
-                  undefined, undefined, undefined, undefined, false, false, source, undefined, false, claim.claimFrontier, claimOwner)
+                  undefined, undefined, undefined, undefined, false, source, undefined, false, claim.claimFrontier, claimOwner)
               })
               return { claimOwner, work: prompt?.runID ? runWork.pipe(RunApproval.own(prompt.runID)) : runWork }
             })).pipe(Effect.asVoid)
