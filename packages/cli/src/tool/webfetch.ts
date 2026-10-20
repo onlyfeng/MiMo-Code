@@ -8,6 +8,7 @@ import * as Destination from "./webfetch-hosted/destination"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 import { Config } from "@/config"
+import { Permission } from "@/permission"
 import { Provider, ProviderTransform } from "@/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Log } from "@/util"
@@ -142,7 +143,10 @@ export const WebFetchTool = Tool.define(
               if (result) return served(result)
               const exit = yield* Effect.exit(direct())
               if (Exit.isSuccess(exit)) return exit.value
-              return yield* Effect.die(chainError(Cause.squash(exit.cause), failures, "direct"))
+              const error = Cause.squash(exit.cause)
+              // A redirect the user refused is their answer, not a route failure.
+              if (isPermissionError(error)) return yield* Effect.failCause(exit.cause)
+              return yield* Effect.die(chainError(error, failures, "direct"))
             }
 
             const exit = yield* Effect.exit(direct())
@@ -302,6 +306,14 @@ export function retriesHosted(error: unknown): boolean {
     return false
   }
   return error instanceof Error && error.message === "Request timed out"
+}
+
+function isPermissionError(error: unknown) {
+  return (
+    error instanceof Permission.RejectedError ||
+    error instanceof Permission.CorrectedError ||
+    error instanceof Permission.DeniedError
+  )
 }
 
 function errorText(error: unknown) {

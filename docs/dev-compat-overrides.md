@@ -2280,6 +2280,9 @@ files remain byte-identical to the accepted main correction.
     rejection ends the call. A `private` destination, or an empty list, uses
     only the direct fetch. Otherwise `first: "local"` tries direct, then each
     hosted entry; `first: "hosted"` tries each hosted entry, then direct.
+    A permission rejection, correction or denial raised by the direct route
+    (a redirect hop's ask) propagates unchanged under either order, never
+    folded into the chained error, so the processor still blocks the turn.
   - Direct-to-hosted switch: only on a transport failure (DNS, connection, TLS),
     a timeout, or a blocking status (403, 407, 429, 451, 502, 503, 504). Any
     other HTTP status is the page's own answer and fails without a hosted call.
@@ -2289,7 +2292,8 @@ files remain byte-identical to the accepted main correction.
     unspecified addresses, single-label and local-suffix names, and names with
     any private DNS answer. Names that fail to resolve are `unresolved` and may
     go hosted, because a host without public DNS is the case this exists for.
-    Classification never throws. `assertSafeUrl` cannot be reused for routing:
+    Classification never throws: an unparseable URL is `private`, so the
+    direct fetch reports it as before. `assertSafeUrl` cannot be reused for routing:
     it passes loopback and throws on every unresolvable public name.
   - Hosted fetch (`tool/webfetch-hosted/hosted.ts`): one non-streaming request
     per entry with `toolChoice: "auto"` (gateways reject forced choice on some
@@ -2331,6 +2335,17 @@ files remain byte-identical to the accepted main correction.
   and relay-macaron return the call to the client. An end-to-end local build
   on a host without public DNS fetched through the text route, the Grok digest
   route after an unresolvable first entry, and the chain from a Codex session.
+- Adoption review (2026-10-20): two corrections on top of the imported change,
+  each with a test that fails on the imported code at its assertion:
+  `first: "hosted"` had folded a direct redirect's permission rejection into
+  the chained error (the processor then kept the turn running), and
+  `classify` threw on an unparseable URL despite its never-throws contract.
+  With ambient `MIMOCODE_*` flags unset: `webfetch-hosted`,
+  `webfetch-destination`, `webfetch`, `websearch`, `websearch-native`,
+  `registry`, `registry-toolset`, `config` and `permission/next` pass 272/272;
+  the private-bypass, URL-proof and rejection-propagation mutants are each
+  killed; package typecheck exits 0; root lint 0 errors; SDK regeneration
+  matches the committed `types.gen.ts`.
 - Exit condition: retire when shared `main` offers an equivalent hosted fetch
   with direct-first routing and private-target protection, or when the user
   drops the `webfetch` config. If propagated to `main`, move the contract to

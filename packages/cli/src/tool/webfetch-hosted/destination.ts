@@ -60,9 +60,11 @@ function isPrivateAddress(address: string, family: number) {
  * Classifies a URL's host. Literal private addresses, single-label and
  * local-suffix names, and names with any private DNS answer are `private`.
  * Names that resolve only to public addresses are `public`; names the resolver
- * cannot answer are `unresolved`.
+ * cannot answer are `unresolved`. An unparseable URL is `private`, leaving it
+ * to the direct fetch to report as before.
  */
 export async function classify(url: string, lookupImpl: Lookup = lookup): Promise<Destination> {
+  if (!URL.canParse(url)) return "private"
   const hostname = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.$/, "")
   const family = isIP(hostname)
   if (family) return isPrivateAddress(hostname, family) ? "private" : "public"

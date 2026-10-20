@@ -5,6 +5,7 @@ import path from "path"
 import { Agent } from "../../src/agent/agent"
 import { Auth } from "../../src/auth"
 import { Config } from "../../src/config"
+import { Permission } from "../../src/permission"
 import { Provider } from "../../src/provider"
 import { Truncate } from "../../src/tool"
 import { Instance } from "../../src/project/instance"
@@ -128,6 +129,8 @@ async function run(input: {
   direct: HttpClient.HttpClient
   url?: string
   asks?: string[]
+  // A pattern the user rejects when asked.
+  reject?: string
 }) {
   const calls: Array<{ path: string; model: string; body: Record<string, unknown>; beta?: string }> = []
   using server = Bun.serve({
@@ -201,9 +204,11 @@ async function run(input: {
               messages: [],
               metadata: () => Effect.void,
               ask: (request) =>
-                Effect.sync(() => {
-                  input.asks?.push(...request.patterns)
-                }),
+                request.patterns.includes(input.reject ?? "")
+                  ? Effect.die(new Permission.RejectedError())
+                  : Effect.sync(() => {
+                      input.asks?.push(...request.patterns)
+                    }),
             },
           ),
         ),
@@ -220,8 +225,12 @@ async function run(input: {
         ),
         Effect.runPromise,
       ).then(
-        (value) => ({ value, error: undefined }),
-        (error: unknown) => ({ value: undefined, error: error instanceof Error ? error.message : String(error) }),
+        (value) => ({ value, error: undefined, raw: undefined }),
+        (error: unknown) => ({
+          value: undefined,
+          error: error instanceof Error ? error.message : String(error),
+          raw: error,
+        }),
       )
       return { ...result, calls }
     },
@@ -431,5 +440,22 @@ describe("tool.webfetch.hosted chain", () => {
     const lines = (error ?? "").split("\n")
     expect(lines[0]).toBe("hosted test-claude/test-claude: web_fetch url_not_accessible")
     expect(lines[1]).toStartWith("- direct: Transport error")
+  })
+
+  test("first: hosted keeps the user's rejection of a direct redirect", async () => {
+    const next = "https://93.184.215.14/next"
+    const redirect = HttpClient.make((request) =>
+      Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status: 302, headers: { location: next } }))),
+    )
+    const { raw, calls } = await run({
+      gateway: { messages: { "test-claude": anthropicError } },
+      webfetch: { first: "hosted", hosted: ["test-claude/test-claude"] },
+      direct: redirect,
+      url: "https://93.184.215.14/doc",
+      reject: next,
+    })
+    expect(calls).toHaveLength(1)
+    // The processor blocks the turn only on this error type.
+    expect(raw).toBeInstanceOf(Permission.RejectedError)
   })
 })

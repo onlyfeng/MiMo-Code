@@ -61,4 +61,8 @@ describe("webfetch.destination", () => {
     expect(await Destination.classify("https://example.com/", failing)).toBe("unresolved")
     expect(await Destination.classify("https://example.com/", answer())).toBe("unresolved")
   })
+
+  test("an unparseable URL stays on the direct fetch, never thrown", async () => {
+    expect(await Destination.classify("https://exa mple.com/", failing)).toBe("private")
+  })
 })
