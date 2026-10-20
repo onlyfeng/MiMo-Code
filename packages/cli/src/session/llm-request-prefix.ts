@@ -16,7 +16,7 @@ import {
   MCP_TOOL_USE_ID,
   MCP_TOOL_USE_DESCRIPTION,
   McpToolUseParameters,
-  MCP_DEFERRED_TOOLS_METADATA_KEY,
+  hasMcpDeferralEvidence,
   shouldDeferMcpTools,
   type McpToolSearchEntry,
   type McpToolSearchMode,
@@ -177,12 +177,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   const catalog = createMcpToolSearchCatalog(
     mcpSearchEntries.filter((entry) => candidates[entry.name]).toSorted((a, b) => a.name.localeCompare(b.name)),
   )
-  const deferredEarlier = input.msgs.some((message) =>
-    message.parts.some((part) =>
-      (part.type === "tool" && (part.tool === MCP_TOOL_SEARCH_ID || part.tool === MCP_TOOL_USE_ID)) ||
-      (part.type === "text" && !!part.synthetic && !!part.metadata?.[MCP_DEFERRED_TOOLS_METADATA_KEY]),
-    ),
-  )
+  const deferredEarlier = hasMcpDeferralEvidence(input.msgs)
   if (!shouldDeferMcpTools(mode, catalog.entries, input.model.limit.context, deferredEarlier)) {
     const resolved = resolve()
     return {
