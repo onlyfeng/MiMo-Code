@@ -18,8 +18,8 @@ authority.
 - Last reviewed: 2026-10-20
 - Upstream: `4e58a80184794d52d913d4b886b96f496f2c7020`
 - Prior reviewed upstream: `bf0563ddc201b44e3f59c35b18dba17c4386564d`
-- Main behavior (runtime/tests): `a53165b4f0584a487c5090962bdf5d9123b9c1cd` (specified post-sync queue/fork convergence and retry diagnostic correction)
-- Inherited compat behavior: `dcc13401331125450c1cdf39308bdefa5994e86f` (shared OpenAPI follow-up inherited)
+- Main behavior (runtime/tests): `92fee50dd618ed25f212aba0a17f3334635451c8` (specified post-sync convergence and instance-owned cron lifecycle correction)
+- Inherited compat behavior: `bef8617265af72c8dc457498f6c14f504391ba38` (shared convergence and cron lifecycle correction inherited; compat render layout aligned)
 - Bundled guidance content: `1b2bb10c930997c6c58da89fe7720e2e1c71db5d` (MCP harness guidance updated)
 - Prior fork `main` tip: `aaa53f4e56136ee1bf845b02ff080716ea2a0c66`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
@@ -118,9 +118,11 @@ not change their implementation. The preceding review is retained in the
   Runner join/admission arguments, `runLoop` inbox-deferral argument and
   `CancelEpoch` wake holds. The durable scheduler now owns that work; the
   synchronous session cancellation epoch, per-run generation, acquisition
-  checks and owned cleanup remain. Session fork reuses its source-message
-  snapshot for cutoff existence and busy-agent inspection before destination
-  creation, while retaining the transaction's fresh rendered-order copy.
+  checks and owned cleanup remain. Session fork reads its source-message
+  snapshot before destination creation and reuses it for cutoff validation
+  and subsequent busy-agent inspection, while retaining the transaction's
+  fresh rendered-order copy. Instance-owned cron cleanup discovered during
+  final CI is recorded under FC-007.
 
 - 2026-10-20 synchronization: adopt upstream `949a3bcc`'s durable input receipts and lane scheduler, replacing the old `Inbox.send`/drain/wake implementation and the async-only queue contract. `Controller.accept` commits the complete user message and parts with its receipt, preserving fork generated-part replay checks, provenance, task binding and ownership validation. Receipt states are `accepted`, `claimed`, `settled`, `cancelled` and `rejected`; outcomes distinguish success, assistant error, interruption and never-ran input. First delivery fixes input placement, while terminal receipt retention and GC replace destructive drain deletion. `session.receipt.updated` replaces `InboxArrived`; accepted-only consumers inspect the committed user input, not legacy row content. The API retains the `inboxID` result field for actor callers as a receipt identifier. Earlier dated send/drain/wake and async-only descriptions below are historical where superseded by this review.
 - The scheduler owns each `(sessionID, actorID)` lane, claim extension and idle re-kicks. The synchronous `/message` route streams 200 when admitted idle and returns 202 plus the persisted user and `receiptId` when busy; `/prompt_async` returns 202 with `receiptId`, or 204 when no turn is admitted. Receipt lookup is session-scoped. Strict internal `startPrompt`/command/shell/summarize/recovery occupation remains independently guarded; the HTTP queue fallback does not weaken those atomic entry points. `noReply` persists history without accepting, claiming or scheduling a turn, and cannot replace a queued task's authority. Cancellation advances the persisted queue epoch before signalling execution, settles accepted unclaimed input as `never_ran`, and cannot restart an old-epoch wake. Such a queued prompt returns its original user rather than manufacturing an aborted assistant. Resume checks queue epoch as well as the retained actor/runner generation before occupation.
@@ -738,6 +740,19 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-007 — protected roots, fixed instance cwd, inert SDK event, deletion boundaries, and optional context
 
+- 2026-10-20 post-sync CI correction: CronBridge mounts now belong to the
+  InstanceState generation that started them. A long-lived application Layer
+  previously retained its scheduler after instance disposal, allowing it to
+  consume later session tasks from the process-wide pool. Disposal marks its
+  owner closed and stops that owner's exact handle; an old generation cannot
+  stop a replacement mount. Ownership is registered outside the lifecycle
+  lock and rechecked immediately before publishing a mount, so concurrent
+  start/dispose cannot leave a late scheduler. Existing Layer cleanup,
+  reentrant stop behavior, scheduling policy and test deadlines remain.
+  This does not add a stronger join guarantee for every concurrent stop
+  finalizer. Real disposal/reopen, in-flight start/dispose and replacement
+  ownership regressions cover the boundary.
+
 - 2026-10-14 synchronization: upstream `002cb4c9` forks `InstanceState` initialization into the cache entry's scope behind a `Deferred`, so cancelling one caller cannot interrupt a shared initialization and invalidation waits for it to exit. Adapted onto the fork's generation-keyed cache: the lookup resolves its context by generation and provides `InstanceRef` and `WorkspaceRef` explicitly, and a disposed generation still refuses new entries (upstream's dispose case asserts that refusal). Disposal can now interrupt a Bus state that is still initializing, so the detached `Bus.publish` helper (used fire-and-forget by sync events) treats an interrupt-only exit as a no-op instead of an unhandled rejection that ended the process (`test/inbox/drain-crash-reopen.test.ts`). Registry correction: `packages/cli/src/effect/instance-state.ts` was already fork-different (generation keys, per-directory context sets, disposed-instance refusal) but unlisted, and joins the watch surfaces. Evidence: `test/effect/instance-state.test.ts`.
 
 - 2026-10-04 synchronization: upstream `6babeb0b` adds `Instance.updateIdle`, the `updating` admission barrier and an `expected` owner for `Instance.provide`. Protected-root and filesystem-root rejection, instance generations, `peek` and the stale-context `dispose()` path are unchanged; an `expected` owner that is closing, absent or not the cached context is rejected by identity.
@@ -782,6 +797,7 @@ not change their implementation. The preceding review is retained in the
   residual prohibition on run-driven shared approval mutation.
 - Watch surfaces: `packages/cli/src/project/instance.ts`,
   `packages/cli/src/effect/instance-state.ts`,
+  `packages/cli/src/session/cron-bridge.ts`,
   `packages/cli/src/util/local-context.ts`,
   `packages/cli/src/tool/bash.ts`,
   `packages/cli/src/tool/read.ts`,
@@ -797,6 +813,7 @@ not change their implementation. The preceding review is retained in the
   `packages/cli/src/tool/registry.ts`; TUI cwd context/sidebar/plugin API;
   and generated SDK/OpenAPI event surfaces.
 - Tests/evidence: project path/worktree/instance-disposal suites,
+  `packages/cli/test/session/cron-bridge.integration.test.ts`,
   `packages/cli/test/installation/no-instance.test.ts`, and
   `packages/cli/test/tool/bash.test.ts` cover exact-path, prefix, and
   missing-context behavior; Edit/MultiEdit regressions cover relative resolution
