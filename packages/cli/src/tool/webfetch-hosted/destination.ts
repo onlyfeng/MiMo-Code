@@ -35,6 +35,7 @@ export function isPrivateIPv4(address: string): boolean {
     (a === 172 && b >= 16 && b <= 31) || // private class B
     (a === 192 && b === 168) || // private class C
     (a === 192 && b === 0 && (c === 0 || c === 2)) || // IETF protocol assignments, TEST-NET-1
+    (a === 192 && b === 88 && c === 99) || // deprecated 6to4 relay anycast
     (a === 198 && (b === 18 || b === 19)) || // benchmarking, also fake-IP DNS proxies
     (a === 198 && b === 51 && c === 100) || // TEST-NET-2
     (a === 203 && b === 0 && c === 113) || // TEST-NET-3
@@ -76,7 +77,9 @@ export function isPrivateIPv6(address: string): boolean {
   if (a === 0x64 && b === 0xff9b && groups.slice(2, 6).every((group) => group === 0)) return embedded()
   if (a === 0x2002) return isPrivateIPv4(`${b >> 8}.${b & 0xff}.${c >> 8}.${c & 0xff}`) // 6to4
   if ((a & 0xe000) !== 0x2000) return true // outside global unicast 2000::/3
-  if (a === 0x2001 && (b === 0x0db8 || (b === 0x0002 && c === 0))) return true // documentation, benchmarking
+  // IETF protocol assignments 2001::/23 (Teredo, ORCHID, benchmarking; its few
+  // anycast exceptions serve no pages) and documentation 2001:db8::/32.
+  if (a === 0x2001 && (b < 0x0200 || b === 0x0db8)) return true
   return a === 0x3fff && (b & 0xf000) === 0 // documentation 3fff::/20
 }
 

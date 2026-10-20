@@ -39,6 +39,13 @@ describe("webfetch.destination", () => {
     "http://[100::1]/",
     "http://[2001:2::1]/",
     "http://[3fff::1]/",
+    // IETF protocol assignments 2001::/23: Teredo, ORCHID, the block's end.
+    "http://[2001::1]/",
+    "http://[2001:10::1]/",
+    "http://[2001:1ff::1]/",
+    "http://[64:ff9b:1::1]/",
+    "http://[5f00::1]/",
+    "http://192.88.99.1/",
     // Embedded IPv4: NAT64 and 6to4 of a private address.
     "http://[64:ff9b::10.0.0.1]/",
     "http://[2002:c0a8:101::1]/",
@@ -53,6 +60,8 @@ describe("webfetch.destination", () => {
     "http://192.0.3.1/",
     "http://223.1.1.1/",
     "http://[2a00:1450::1]/",
+    "http://[2001:200::1]/",
+    "http://192.88.100.1/",
     // A DNS64 network answers public names with NAT64 addresses.
     "http://[64:ff9b::8.8.8.8]/",
     "http://[2002:808:808::1]/",

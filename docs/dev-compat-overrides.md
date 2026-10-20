@@ -2289,12 +2289,16 @@ files remain byte-identical to the accepted main correction.
     other HTTP status is the page's own answer and fails without a hosted call.
   - Destinations (`tool/webfetch-hosted/destination.ts`, compat-only; the
     main-owned `util/ssrf.ts` is unchanged and still unused by WebFetch):
-    `private` covers every address that is not globally reachable unicast.
-    IPv4: loopback, RFC1918, CGN, link-local, unspecified, IETF protocol
-    assignments, the three documentation TEST-NETs, benchmarking
-    `198.18.0.0/15`, multicast, reserved and broadcast. IPv6: everything
-    outside global unicast `2000::/3`, plus documentation `2001:db8::/32` and
-    `3fff::/20` and benchmarking `2001:2::/48`; IPv4-mapped, NAT64
+    `private` covers every address that is not globally reachable unicast,
+    checked against the IANA IPv4 and IPv6 special-purpose registries (their
+    few globally reachable anycast exceptions inside `192.0.0.0/24` and
+    `2001::/23` are private too: they serve no pages, and private only means
+    direct-only). IPv4: loopback, RFC1918, CGN, link-local, unspecified, IETF
+    protocol assignments, the three documentation TEST-NETs, deprecated 6to4
+    relay `192.88.99.0/24`, benchmarking `198.18.0.0/15`, multicast, reserved
+    and broadcast. IPv6: everything outside global unicast `2000::/3`, plus
+    IETF protocol assignments `2001::/23` (Teredo, ORCHID, benchmarking) and
+    documentation `2001:db8::/32` and `3fff::/20`; IPv4-mapped, NAT64
     (`64:ff9b::/96`, so DNS64 answers for public names stay public) and 6to4
     addresses are judged by their embedded IPv4 address, and a malformed
     address is private. Plus single-label and local-suffix names, and names
@@ -2368,7 +2372,7 @@ files remain byte-identical to the accepted main correction.
   and moved the hosted tests onto `testEffect`. With ambient `MIMOCODE_*`
   flags unset: `webfetch-hosted`, `webfetch-destination`, `webfetch`,
   `websearch`, `websearch-native`, `registry`, `registry-toolset`, `config`
-  and `permission/next` pass 301/301; the private-bypass, URL-proof,
+  and `permission/next` pass 309/309; the private-bypass, URL-proof,
   missing-URL, caller-timeout, lookup-limit, scheme-downgrade, scheme-upgrade
   and rejection-propagation mutants are each killed; package typecheck exits 0; root lint 0 errors; SDK regeneration
   matches the committed `types.gen.ts`.
