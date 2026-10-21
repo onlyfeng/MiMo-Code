@@ -214,7 +214,6 @@ function checkpointStub(latest: string | undefined) {
     waitForWriterSettlement: () => Effect.succeed({ outcome: "no-writer" as const }),
     drainWriters: () => Effect.succeed({ drained: 0, timedOut: 0 }),
     hasCheckpoint: () => Effect.succeed(latest !== undefined),
-    hasMemoryOrTasks: () => Effect.succeed(latest !== undefined),
     loadLatest: () => Effect.succeed(latest),
     loadCheckpoints: () => Effect.succeed(latest ? [latest] : []),
     renderIndex: () => Effect.succeed(""),

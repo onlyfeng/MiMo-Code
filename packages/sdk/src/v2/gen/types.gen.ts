@@ -2872,10 +2872,6 @@ export type Config = {
      */
     auto?: boolean
     /**
-     * Enable pruning of old tool outputs (default: true)
-     */
-    prune?: boolean
-    /**
      * Deprecated compatibility setting. Projected compaction now keeps only whole API rounds that arrive while compaction is running.
      */
     tail_turns?: number
@@ -3019,7 +3015,7 @@ export type Config = {
      */
     asr_model?: string
     /**
-     * Model to use for voice control (multimodal) in provider/model format. Defaults to xiaomi/mimo-v2.5.
+     * Model to use for voice control (multimodal) in provider/model format. Defaults to xiaomi/mimo-v2.6-flash.
      */
     control_model?: string
   }

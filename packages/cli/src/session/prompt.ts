@@ -9,6 +9,7 @@ import os from "os"
 import z from "zod"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2, COMPOSE_REMINDER_MARKER } from "./message-v2"
+import { memoryPath, metaDir } from "./checkpoint-paths"
 export { COMPOSE_REMINDER_MARKER }
 import {
   base64ByteSize,
@@ -26,7 +27,7 @@ import { Log, Token } from "../util"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Agent, resolveStoredAgent } from "../agent/agent"
-import { decideAskRouting, hasActorTool, resolveInvalidOutputPolicy, SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
+import { decideAskRouting, resolveInvalidOutputPolicy, SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 import { makeTerminalNotifier } from "@/actor/notification"
 import { inboxControllerRef, schedulerRef, type Lane } from "@/inbox"
 import { MAX_CLAIM_PER_STEP, type Receipt } from "@/inbox/schema"
@@ -57,7 +58,6 @@ import { computeLastMessageInfo } from "./last-message-info"
 import { classifyRequestOverflow, usable, isOverflow as overflowCheck } from "./overflow"
 import { Config } from "@/config"
 import { isMemoryWriteEnabled } from "@/memory/write-gate"
-import { Global } from "@/global"
 import { NotFoundError, Database, eq, and, inArray, isNull } from "@/storage"
 import { InboxTable } from "@/inbox/inbox.sql"
 import * as QueueSync from "@/inbox/sync"
@@ -233,45 +233,53 @@ function capSyntheticText(text: string, label: string) {
   return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, label)
 }
 
-// Recall-reminder hints, using each tool's JSON invocation shape. `hasActor`
-// false drops the actor line for an agent the tool is masked out for. Exported
-// for unit testing.
-export function recallHintLines(hasActor = true): string[] {
-  return [
-    `- memory({ operation: "search", query: "<keyword>" })`,
-    `- task({ operation: "list" })`,
-    ...(hasActor ? [`- actor({ operation: "status", actor_id: "<id>" })`] : []),
-  ]
-}
-
-export function shouldInjectActiveRecallReminder(input: { format?: MessageV2.User["format"] } | undefined) {
-  return input?.format?.type !== "json_schema"
-}
-
 // Stable substring markers for user-side synthetic reminders that must be
 // persisted once per message (runLoop reloads msgs from DB every step; bare
 // parts.push re-attaches a new PartID and reorders the user tail → prompt-cache miss).
 // COMPOSE_REMINDER_MARKER re-exported from message-v2 (hydrate promotes it to head).
-export const RECALL_REMINDER_MARKER = "This session has memory at"
 export const LOOP_STREAK_REMINDER_MARKER = "repeating the same action without making progress"
+export const SESSION_MEMORY_DIR_MARKER = "Current session memory directory:"
 
 /** True when `parts` already carries a non-ignored synthetic text reminder containing `marker`. */
 export function hasSyntheticReminder(parts: readonly MessageV2.Part[], marker: string): boolean {
   return parts.some((p) => p.type === "text" && p.synthetic === true && !p.ignored && p.text.includes(marker))
 }
 
-export function buildRecallReminderText(input: { sessMemDir: string; hints: string[] }): string {
+export function buildMemoryPathsReminderText(input: { projectMemoryFile: string; sessionDir: string }): string {
   return [
     "<system-reminder>",
-    `${RECALL_REMINDER_MARKER} ${input.sessMemDir}/. Recall content`,
-    "not in your context with:",
-    input.hints[0],
-    `- read(file_path="${input.sessMemDir}/...")`,
-    ...input.hints.slice(1),
-    "",
-    "Don't ask the user about something memory may already record.",
+    "Memory paths for this conversation — the real values of `<project_id>` and `<session_id>` in the Memory system instructions:",
+    `- Project memory: ${input.projectMemoryFile}`,
+    `- ${SESSION_MEMORY_DIR_MARKER} ${input.sessionDir}/`,
     "</system-reminder>",
   ].join("\n")
+}
+
+// The system prompt keeps `<project_id>` / `<session_id>` literal so it stays
+// byte-identical across projects and sessions; the real paths ride on one user
+// message per context window, deduped by the session directory line.
+// `msgs` starts at the latest checkpoint/compaction boundary, so the
+// first own user message is the session's first message or the boundary.
+// A user message followed by any model reply (compaction summaries excluded)
+// was already sent without the reminder — batched or mid-turn inputs never
+// become a reply's parentID, so position is the test. Rewriting sent history
+// would invalidate the cached prefix, so copied fork history and sessions
+// predating the reminder get it on the newest own user message instead.
+export function memoryPathsReminderTarget(input: {
+  msgs: readonly MessageV2.WithParts[]
+  sessionID: SessionID
+  dir: string
+}): MessageV2.WithParts | undefined {
+  const users = input.msgs.filter((m) => m.info.role === "user" && m.info.sessionID === input.sessionID)
+  if (users.some((m) => hasSyntheticReminder(m.parts, `${SESSION_MEMORY_DIR_MARKER} ${input.dir}/`))) return undefined
+  const unsent = (target: MessageV2.WithParts | undefined) =>
+    target &&
+    !input.msgs
+      .slice(input.msgs.indexOf(target) + 1)
+      .some((m) => m.info.role === "assistant" && !m.info.summary)
+      ? target
+      : undefined
+  return unsent(users.at(0)) ?? unsent(users.at(-1))
 }
 
 export function buildLoopStreakReminderText(threshold: number): string {
@@ -4602,8 +4610,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       let step = 0
       const sessionPrompt = yield* sessions.resolvePrompt({ sessionID })
       const session = yield* sessions.get(sessionID)
-      let lastFinishedForPrune: MessageV2.Assistant | undefined
-      let lastModelForPrune: Provider.Model | undefined
       let outputLengthContinuations = 0
       // Shared local counter for "model finished but produced nothing usable"
       // (think-only / empty). T04's generic-invalid retries reuse this same
@@ -5890,30 +5896,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
           const usageRecovered = !!lastFinished && MessageV2.usageRecovered(msgs, lastFinished)
 
-          // Per-user-message active recall reminder. Once the session has
-          // any memory artifacts (memory dir populated OR tasks recorded),
-          // append a brief recall protocol so the agent's reflex to query
-          // memory.search / task / actor / Read stays warm across many
-          // post-rebuild turns. Cost ~120 tokens per turn, conditional on
-          // hasMemoryOrTasks. Persist once per user to keep reload order stable.
-          const lastUserMsgForRecall = msgs.findLast(
-            (m): m is MessageV2.WithParts & { info: MessageV2.User } => m.info.role === "user",
-          )
-          if (
-            lastUserMsgForRecall &&
-            shouldInjectActiveRecallReminder(lastUserMsgForRecall.info) &&
-            !hasSyntheticReminder(lastUserMsgForRecall.parts, RECALL_REMINDER_MARKER)
-          ) {
-            const hasRecallTarget = yield* checkpoint
-              .hasMemoryOrTasks(sessionID)
-              .pipe(Effect.catch(() => Effect.succeed(false)))
-            if (hasRecallTarget) {
-              const sessMemDir = path.join(Global.Path.data, "memory", "sessions", sessionID)
-              const hints = recallHintLines(hasActorTool(yield* resolveStoredAgent(agents, lastUser.agent)))
+          if (yield* actorRegistry.servesCheckpoint(sessionID, lastUser.agentID)) {
+            const sessionMemoryDir = metaDir(sessionID)
+            const target = memoryPathsReminderTarget({ msgs, sessionID, dir: sessionMemoryDir })
+            if (target) {
               yield* ensurePersistedUserSynthetic({
-                message: lastUserMsgForRecall,
-                marker: RECALL_REMINDER_MARKER,
-                text: buildRecallReminderText({ sessMemDir, hints }),
+                message: target,
+                marker: `${SESSION_MEMORY_DIR_MARKER} ${sessionMemoryDir}/`,
+                text: buildMemoryPathsReminderText({
+                  projectMemoryFile: memoryPath((yield* InstanceState.context).project.id),
+                  sessionDir: sessionMemoryDir,
+                }),
               })
             }
           }
@@ -6064,8 +6057,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // that changed it fails closed here as well as at the HTTP boundary.
           if (resumeIdentity && prefixModelIdentity(model, sessionPrompt.harness) !== resumeIdentity)
             return yield* Effect.die(new Error("Actor model identity changed during recovery"))
-          lastModelForPrune = model
-          lastFinishedForPrune = usageRecovered ? undefined : lastFinished
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
@@ -7447,18 +7438,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           continue
         }
 
-        const promptOps = yield* ops()
-        if (lastModelForPrune && lastFinishedForPrune) {
-          yield* prune
-            .prune({
-              sessionID,
-              model: lastModelForPrune,
-              tokens: lastFinishedForPrune.tokens,
-              lastAssistantTime: lastFinishedForPrune.time.completed,
-              promptOps,
-            })
-            .pipe(Effect.ignore, Effect.forkIn(scope))
-        }
         const final = yield* lastAssistant(sessionID, agentID)
         const finalIsError = final.info.role === "assistant" && !!final.info.error
         const lastUserForMetrics = yield* sessions.findMessage(

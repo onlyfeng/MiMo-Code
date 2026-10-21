@@ -161,7 +161,7 @@ Invariants:
 - A budget at or above the provider cap is a no-op; it never raises the window.
 - Invalid budgets and budgets at or below `reserved + outputReserve` are ignored with a model-specific warning. The TUI writer refuses such values. They do not create a zero trigger by subtracting reserves from a valid window.
 - The reserve helper retains its existing configured/default buffer and independent-input-cap handling **only for budget validation**. Ratio headroom does not cap actual SDK output tokens.
-- Checkpoint, pruning and recovery consumers continue to use the shared `usable` value; no second checkpoint-percentage rebuild boundary is introduced.
+- Checkpoint and recovery consumers continue to use the shared `usable` value (`fireCheckpoints` in `prune.ts` resolves checkpoint thresholds against it); no second checkpoint-percentage rebuild boundary is introduced.
 
 The exported `contextWindow()` result is `{ hard, effective, usable, source }`, with `source: "model" | "config"`. No session/plugin source or new `window()` API is introduced by this update.
 

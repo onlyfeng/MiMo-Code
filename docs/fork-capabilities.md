@@ -116,6 +116,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
+- 2026-10-21 synchronization: upstream `88673c41` deletes `recall-reminder.test.ts`, its only consumer of the `actor` hint, and moves the `hasActorTool` predicate cases into `test/tool/actor-subagent-gating.test.ts` with upstream's "an unresolvable agent keeps the tool" case. The fork keeps PR #53's fail-closed result: that moved case asserts `hasActorTool(undefined) === false`, and `ToolRegistry.available` remains the only production caller.
+
 - 2026-10-20 post-sync convergence: remove the retired inbox wake's optional
   Runner join/admission arguments, `runLoop` inbox-deferral argument and
   `CancelEpoch` wake holds. The durable scheduler now owns that work; the
@@ -477,6 +479,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-002 — canonical checkpoint writer and mode-specific frozen context
 
+- 2026-10-21 synchronization: upstream `88673c41` replaces the per-message recall reminder and `SessionCheckpoint.hasMemoryOrTasks` with one memory paths reminder per context window, and names the project and session segments `<project_id>`/`<session_id>` in the memory instructions. Adopted unchanged in the system text, which therefore no longer names the real project ID or tells the model to keep `{current_session_id}` verbatim. Read/Write/Edit/Glob/Grep and `apply_patch` still resolve `{current_session_id}`: system prompts frozen in an existing session's prefix snapshot keep that sentence, and the runLoop reuses the frozen system instead of rebuilding it. Writer modes, frozen prefix ownership and FD-009 admission are unchanged.
+
 - 2026-10-20 synchronization: checkpoint writer context uses `MessageV2.renderedOrder` with consumed receipts, so unclaimed inputs do not enter a writer snapshot and first-delivery order survives queue reconstruction. The same queue-aware view feeds post-hook trajectories and goal judging; context-boundary continuation identity and run-approval ownership remain distinct from historical input reconstruction. Frozen new MCP captures carry a fixed dispatcher and complete authorized hidden pool; legacy active/loaded masks remain readable under FD-005/FD-006. Canonical writer modes and fail-closed admission do not retire.
 
 - Status: active
@@ -485,9 +489,12 @@ not change their implementation. The preceding review is retained in the
   an isolated child session. Forked mode is the default and uses the parent
   agent's frozen prefix; explicit `checkpoint.fork: false` uses the checkpoint
   writer's own frozen system, tools, MCP membership, and permission with the
-  aligned message delta. Stable per-session memory instructions retain the
-  literal `{current_session_id}` placeholder in frozen history and resolve it
-  only at filesystem-tool boundaries. Disabling checkpoint generation removes
+  aligned message delta. Memory instructions name the project and session as
+  the literals `<project_id>`/`<session_id>`, so the system prompt is identical
+  across projects and sessions; the first unsent own user message of each
+  context window persists one memory paths reminder with both real paths.
+  File tools still resolve the legacy `{current_session_id}` placeholder that
+  system prompts frozen before this contract carry. Disabling checkpoint generation removes
   checkpoint-only clauses while retaining durable project/global memory and
   notes guidance. FD-009 exclusively owns the fail-closed capture admission
   decision. Complete authorized definitions and advertised names are captured
@@ -500,6 +507,7 @@ not change their implementation. The preceding review is retained in the
   catalog or expanding frozen native-tool authority. FC-005 owns migration.
 - Upstream relationship: fork extension plus adapted request construction.
 - Watch surfaces: `packages/cli/src/session/checkpoint.ts`,
+  `packages/cli/src/session/checkpoint-paths.ts`,
   `packages/cli/src/session/llm-request-prefix.ts`,
   `packages/cli/src/session/memory-path-template.ts`,
   `packages/cli/src/session/prefix-capture-ref.ts`,
@@ -508,14 +516,18 @@ not change their implementation. The preceding review is retained in the
   `apply_patch` filesystem boundaries.
 - Tests/evidence: checkpoint child-session, fork-mode, main-slice,
   prefix-capture, rebuild, watermark, writer-timeout, memory-write, and
-  system-prompt suites plus `memory-path-template.test.ts` at the reviewed main
-  behavior.
+  system-prompt suites plus `memory-path-template.test.ts`,
+  `synthetic-reminder.test.ts` and `session-memory-dir-reminder-persist.test.ts`
+  at the reviewed main behavior. The system-prompt stability case runs in a git
+  fixture, because the fork's non-git fixture resolves the project ID to
+  `global`, a word the global memory path also contains.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `0b665c7e681e44cac6f1a6acf18732015fb2bf86`.
 - Retirement condition: upstream exposes the same canonical writer, isolated
-  child, mode-specific prefix ownership, aligned delta, disabled-checkpoint
-  guidance behavior, and stable placeholder resolution only at filesystem-tool
-  boundaries; FD-009 remains separately satisfied or retired.
+  child, mode-specific prefix ownership, aligned delta, and disabled-checkpoint
+  guidance behavior; FD-009 remains separately satisfied or retired. The legacy
+  `{current_session_id}` resolution retires only when frozen system prompts that
+  carry it are rewritten or invalidated, or upstream resolves it.
 
 - 2026-09-11 history-escalation copy review: the verbatim elision marker and its
   doc comment now point at `history around` followed by `get(part_id)` instead of
@@ -1291,6 +1303,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
 
+- 2026-10-21 synchronization: upstream `a7440d13` resets a dropped empty step by removing its parts instead of deleting and rebuilding the assistant under the same ID, so no `message.removed` is published for a turn that still delivers content. Adopted into the fork's pure-empty branch only: reasoning-only output keeps the run loop's scoped continuation, so upstream's think-only identity case is adapted to a pure-empty stop in `invalid-output-continuation.test.ts`. Upstream `88673c41` retires the persisted recall reminder; the memory paths reminder is persisted through the same marker-deduplicated `ensurePersistedUserSynthetic`, at most once per context window on an unsent own user message.
+
 - 2026-10-20 synchronization: inbox acceptance persists complete synthetic agent input and provenance with a durable receipt; later rendering hides unconsumed rows and places consumed input at its first delivery. Import/export/sync/fork preserve referenced message identity and queue visibility without cloning runnable receipts into a fork. Mid-turn direct user text is sent verbatim rather than wrapped against a moving last-finished assistant, preserving byte identity around signed thinking. This does not claim to repair every other history rewrite or an already poisoned signature. Pure empty, tool-free replay uses the scoped retry policy; reasoning-only and settled-tool continuation retain their existing bounded, atomic provenance paths.
 
 - 2026-10-16 synchronization: upstream `bf0563dd` extends the user image attachment envelope and replay provenance. The envelope's local path now derives from an absolute `source.path` or, when absent, a `file:` URL; a new sentence names `[Image: <file name>]` / `[PDF: <file name>]` markers as session-stable attachment identity, matched by the same file name. An attachment-only all-synthetic prompt keeps the caller `system` on the persisted user message (`prompt.system ?? input.system`) while still skipping the `resolvePrompt` fallback, so `session.prompt` is not pinned. The overflow replay copies media `file` parts verbatim (the `[Attached <mime>: <filename>]` substitution is gone) under FC-001's atomic `commitUserMessageIfLatest`, retaining `source: "hook"` and `task_id`. The fork's `userImageAttachment` metadata and hook/spawn provenance rules are unchanged. Evidence: `test/session/prompt.test.ts` envelope and attachment-only-system cases, `test/session/prompt-effect.test.ts` keeps-replayed-media case.
@@ -1395,6 +1409,8 @@ logged`, and the peer `success`/`failure` variants of
   behavior-focused tests.
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
+
+- 2026-10-21 synchronization: adopt upstream `12a59e90` unchanged. Compose Next spec `source` takes a branch name, PR URL or MR URL, so the frontmatter stays valid YAML; fill-ins use `{{}}`, S labels move onto Design H3s, `covers` and the Journey log are optional, and any merge needs its own confirmation. Bundled `mimocode-docs` drops `compaction.prune` and names `xiaomi/mimo-v2.6-flash` as the voice control default; the fork's compaction-row wording and `auto_worktree` entry in `config.md` are kept.
 
 - 2026-10-21 live synchronization: adopt `cf8c09d5` Compose Next unavailable-input handling, spec `source` tracking and Finish confirmation unchanged. The explicit invocation entry and discovery/permission boundaries remain; this is shipped content, not a runtime schema or bulk spec migration. Content loading/discovery and permission/search tests cover the integration, while behavioral wording is reviewed as guidance.
 
@@ -1654,6 +1670,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-015 — bounded compaction context and upstream ratio trigger
 
+- 2026-10-21 synchronization: upstream `6f83cd0e` stops rewriting persisted parts to shrink context. Turn-end prune and `stripNonEssential`, `SessionCompaction.prune`, rebuild-time microcompact, `Overflow.pressureLevel`/`contextPressureLevel`, the `compaction.prune` key and `MIMOCODE_DISABLE_PRUNE` are removed; a config that still sets `compaction.prune` loads with one warning. Adopted unchanged; the fork's `observedToolParts` protection inside `SessionCompaction.prune` retires with that function. Rows already marked `time.compacted` still project the cleared placeholder. Checkpoint thresholds keep resolving against `usable()`, and the ratio trigger, bounded projection, frozen prefix and `toolChoice: "none"` are unchanged. The fork keeps `auto_worktree` in `normalizeLoadedConfig`; only the prune hunk is taken from that conflict. Evidence: `test/session/turn-end-lossless.test.ts`, `rebuild-boundary-lossless.test.ts`, `legacy-compacted-row.test.ts`, `overflow.test.ts`, `test/config/config.test.ts`.
+
 - 2026-10-16 synchronization: upstream `bf0563dd` copies every non-`compaction` part verbatim in the overflow replay, including media `file` parts, so the replayed user message and the next model turn keep the image; the summarization request still strips media under overflow. Adopted into the fork's atomic replay commit without touching the bounded projection, ratio trigger, frozen prefix reuse or FD-011's `toolChoice: "none"`. Evidence: `test/session/prompt-effect.test.ts` (keeps replayed media), `test/session/compaction-projection.test.ts`, `test/session/compaction-reasoning-fallback.test.ts`, `test/session/compaction-tool-choice.test.ts`.
 
 - Status: active
@@ -1776,6 +1794,8 @@ logged`, and the peer `success`/`failure` variants of
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-016 — owned voice results and grapheme-safe Prompt editing
+
+- 2026-10-21 synchronization: upstream `786151b3` changes the default voice control model to `xiaomi/mimo-v2.6-flash` (request fallback `mimo-v2.6-flash`); ASR stays on `mimo-v2.5-asr`. Adopted with the schema description and generated SDK text. Prompt ownership, stop/drain and grapheme offsets are unchanged; `test/cli/tui/voice.test.ts` covers the new default.
 
 - Status: active
 - Canonical owner: shared `main` TUI voice/editor boundary

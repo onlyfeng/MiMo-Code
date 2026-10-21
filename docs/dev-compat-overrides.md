@@ -1586,6 +1586,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
 
+- 2026-10-21 full sync: upstream `6f83cd0e` removes turn-end prune, the last caller of `pressureLevel`, so `pressureLevel` and `contextPressureLevel` leave `overflow.ts`. Compat keeps `estimateRequestTokens`, `isRequestOverflow` and `classifyRequestOverflow`. Request preflight never read the pressure bands, so its gates and the `overflow`/`overflow-static` classification are unchanged. Upstream `88673c41` deletes the per-message recall reminder. Compat's `shouldInjectActiveRecallReminder` JSON-schema suppression retires with it. The memory paths reminder that replaces it is not format-gated: it only fills in the real paths for the placeholders in the memory instructions, which JSON-schema requests also receive. It is also aimed at one message per context window rather than at the current request. The compat checkpoint stub in `test/tool/actor.test.ts` drops `hasMemoryOrTasks`. The marker-chronology assertion that compat had added to the deleted `rebuild-microcompact.test.ts` stays covered by the shared `checkpoint-rebuild-unify.test.ts`.
+
 - 2026-10-13 full sync: upstream `463cbb28` defers MCP schemas behind `mcp_tool_search` by default and drops the pressure-degraded catalog in the search description. The active and auto-disabled `request preflight handles a large ... MCP schema` cases now opt out of deferral so their preflight still sees the directly exposed 1 MiB schema; the inactive case keeps search on. `contextPressureLevel` stays in `overflow.ts` behind `pressureLevel`, which `prune.ts` still calls; the compat-only catalog-pressure test retires with the description catalog. Run-loop agent resolution uses `resolveStoredAgent`, so a retired stored agent name keeps preflight and bounded-computation policy on the default agent.
 
 - 2026-10-02 full sync: with the committed OpenAPI snapshot deleted upstream, the checkpoint-coverage operation and `CheckpointCoverage` schema are asserted on the runtime OpenAPI document and carried by the generated v2 SDK; every runtime operation's code sample must resolve to a callable client method.
@@ -1666,8 +1668,9 @@ files remain byte-identical to the accepted main correction.
   the `commitUserMessage*` transaction. The Inbox guarantee does not extend to
   exactly-once model execution or crash-durable event publication.
   `currentUserID` feeds the current-turn projection through `llm-request-prefix`.
-  JSON-schema requests suppress the active recall reminder and can recover the
-  structured result from a completed StructuredOutput part. These local prompt
+  JSON-schema requests can recover the structured result from a completed
+  StructuredOutput part; their former recall-reminder suppression retired with
+  the reminder on 2026-10-21. These local prompt
   corrections were previously under-specified; they are candidates for shared
   correctness review rather than a new compat product feature.
   Request preflight is heuristic and applies only when its runtime gates allow
@@ -2003,7 +2006,6 @@ files remain byte-identical to the accepted main correction.
   `packages/cli/test/session/checkpoint-main-slice.test.ts`,
   `packages/cli/test/session/checkpoint-prefix-capture-fixture.ts`,
   `packages/cli/test/session/classify-integration.test.ts`,
-  `packages/cli/test/session/recall-reminder.test.ts`,
   `packages/cli/test/session/overflow.test.ts`,
   `packages/cli/test/session/prompt-effect.test.ts`, and actor-state cases
   in `packages/cli/test/util/text-truncate.test.ts`.

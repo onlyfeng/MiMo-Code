@@ -43,7 +43,6 @@ import * as NativeWebSearch from "@/tool/websearch/native"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 import { TOOL_SCRIPT_EXCLUDED } from "@/tool/tool-script-ref"
 import { Flag } from "@/flag/flag"
-import { CURRENT_SESSION_ID_PLACEHOLDER } from "./memory-path-template"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
@@ -84,11 +83,14 @@ export function isTransientCapacityError(error: unknown): boolean {
  *   writer-as-curator ownership, Active recall protocol after rebuild dumps.
  *
  * `memoryRoot` is the same absolute root returned by Memory.root(), so these
- * paths match the files used by checkpoint restore and memory/task detection.
+ * paths match the files used by checkpoint restore. The project and session
+ * segments stay the literals `<project_id>` / `<session_id>` so the system
+ * prompt is byte-identical across projects and sessions; the real paths reach
+ * the model through the memory paths reminder (session/prompt.ts).
  */
-function buildMemoryInstructions(projectID: ProjectID, memoryRoot: string): string {
-  const memoryFile = path.join(memoryRoot, "projects", projectID, "MEMORY.md")
-  const sessionMemoryDir = path.join(memoryRoot, "sessions", CURRENT_SESSION_ID_PLACEHOLDER)
+function buildMemoryInstructions(memoryRoot: string): string {
+  const memoryFile = path.join(memoryRoot, "projects", "<project_id>", "MEMORY.md")
+  const sessionMemoryDir = path.join(memoryRoot, "sessions", "<session_id>")
   const globalMemoryFile = path.join(memoryRoot, "global", "MEMORY.md")
   const notesFile = path.join(sessionMemoryDir, "notes.md")
   const checkpointEnabled = !Flag.MIMOCODE_DISABLE_CHECKPOINT
@@ -109,12 +111,9 @@ function buildMemoryInstructions(projectID: ProjectID, memoryRoot: string): stri
 
 You have a persistent file-based memory system. ${checkpointEnabled ? "Four" : "Two"} file types:
 
-${files.join("\n")}`,
-    ...(checkpointEnabled
-      ? [
-          `The path segment \`${CURRENT_SESSION_ID_PLACEHOLDER}\` is a stable placeholder for the current session. Keep it verbatim when calling Read, Write, Edit, Glob, Grep, or apply_patch; the runtime resolves it from the tool context.`,
-        ]
-      : []),
+${files.join("\n")}
+
+\`<project_id>\` and \`<session_id>\` in these paths stand for the current project and session. Their real paths are given in a system reminder in the conversation history; use those real paths in tool calls.`,
     ...(checkpointEnabled
       ? [
           "The checkpoint writer is the sole curator of the structured files. You don't maintain them mid-task — the writer extracts everything from the conversation at checkpoint events.",
@@ -372,9 +371,9 @@ const live: Layer.Layer<
       // flag only narrows which subsections buildMemoryInstructions emits
       // (writer/ckpt/Active-recall extras). Project ID is resolved from the
       // ALS-bound Instance with a safe fallback to `ProjectID.global`
-      // (mirrors session/checkpoint.ts so advertised paths match writer
-      // paths). system-spawned actors (checkpoint-writer et al.) stay out via
-      // servesCheckpoint.
+      // (mirrors session/checkpoint.ts) for the MEMORY.md migration only; the
+      // block itself names no project. system-spawned actors
+      // (checkpoint-writer et al.) stay out via servesCheckpoint.
       if (servesCheckpoint) {
         const projectID =
           (yield* Effect.try({
@@ -388,7 +387,7 @@ const live: Layer.Layer<
         // checkpoint-flow call sites cover the writer/rebuild paths; this covers
         // the "agent edits MEMORY.md before any checkpoint" path. Idempotent.
         yield* Effect.promise(() => migrateProjectMemory(projectID)).pipe(Effect.ignore)
-        system.push(buildMemoryInstructions(projectID, yield* memory.root()))
+        system.push(buildMemoryInstructions(yield* memory.root()))
       }
 
       // Plugins transform the stable base before the caller-controlled tail.
